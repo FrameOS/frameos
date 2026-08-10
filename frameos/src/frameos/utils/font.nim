@@ -5,6 +5,7 @@ import algorithm
 import tables
 import strutils
 import assets/fonts as fontAssets
+import frameos/utils/paths
 when defined(frameosEmbedded) or defined(frameosWasm):
   import zippy
 
@@ -110,7 +111,9 @@ proc getAvailableFonts*(assetsPath: string): seq[string] =
   if not dirExists(assetsPath & "/fonts"):
     return fonts
   for kind, path in walkDir(assetsPath & "/fonts"):
-    if path.endsWith(".ttf") and kind == pcFile:
+    # `._Font.ttf` AppleDouble sidecars end in .ttf but are metadata blobs
+    # that blow up parseTtf; they must never be offered as a font.
+    if path.endsWith(".ttf") and kind == pcFile and not isHiddenOrJunkFile(extractFilename(path)):
       fonts.add(path[assetsPath.len + 7..^1])
   fonts.sort()
   return fonts

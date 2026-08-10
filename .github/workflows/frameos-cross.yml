@@ -24,6 +24,12 @@ on:
       - backend/tools/cross-toolchain.Dockerfile
       - .github/workflows/frameos-cross.yml
 
+# Superseded runs on the same PR are cancelled; manual dispatches always run
+# to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   determine-matrix:
     runs-on: ubuntu-24.04
@@ -127,13 +133,28 @@ jobs:
       - name: Install backend dependencies
         run: |
           pip install -r backend/requirements.txt
-      - name: Install Nim
+      - name: Install Nim (prebuilt)
         env:
-          CHOOSENIM_NO_ANALYTICS: 1
+          NIM_VERSION: 2.2.4
         run: |
-          curl https://nim-lang.org/choosenim/init.sh -sSf | sh -s -- -y
-          echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.nimble/bin:$PATH"
+          set -euo pipefail
+          distro=$(lsb_release -si | tr '[:upper:]' '[:lower:]')
+          version=$(lsb_release -sr)
+          case "$(uname -m)" in
+            aarch64) host_arch=arm64 ;;
+            armv7l|armv6l) host_arch=armhf ;;
+            x86_64) host_arch=amd64 ;;
+            *) echo "Unsupported runner architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          nim_slug="${distro}-${version}-${host_arch}"
+          echo "$nim_slug"
+          mkdir -p "$HOME/.nim"
+          curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
+          rm -rf "$HOME/.nim/nim-${NIM_VERSION}/nim/bin"
+          mv "$HOME/.nim/nim-${NIM_VERSION}/nim/"* "$HOME/.nim/nim-${NIM_VERSION}/"
+          echo "$HOME/.nim/nim-${NIM_VERSION}/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.nim/nim-${NIM_VERSION}/bin:$PATH"
           nim --version
       - name: "Configure frame device (driver: ${{ matrix.label }})"
         run: |

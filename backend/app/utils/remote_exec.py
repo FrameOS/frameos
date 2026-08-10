@@ -29,6 +29,7 @@ from app.utils.ssh_utils import (
 
 __all__ = [
     "RemoteTransport",
+    "ssh_is_configured",
     "run_commands",
     "run_command",
     "upload_file",
@@ -62,6 +63,16 @@ def normalize_remote_transport(transport: str) -> RemoteTransport:
 # ---------------------------------------------------------------------------#
 
 
+def ssh_is_configured(frame: Frame) -> bool:
+    """
+    Whether we have enough to even attempt SSH: a host to dial and a user to
+    dial it as. Credentials themselves may be a password or a stored key, so
+    this deliberately does not require ssh_pass.
+    """
+    return bool(str(getattr(frame, "frame_host", "") or "").strip()
+                and str(getattr(frame, "ssh_user", "") or "").strip())
+
+
 async def _use_remote(frame: Frame, redis: Redis, transport: str = "auto") -> bool:
     """
     Returns True if we can use the WebSocket Remote for this frame.
@@ -75,6 +86,12 @@ async def _use_remote(frame: Frame, redis: Redis, transport: str = "auto") -> bo
         if transport == "auto" and agent.get("deployWithAgent") is False:
             return False
         if (await number_of_connections_for_frame(redis, frame.id)) <= 0:
+            # "auto" means "pick a transport that works", so a disconnected
+            # remote is a reason to try SSH, not a reason to fail. Only an
+            # explicit "remote" request — or a frame we have no way to SSH
+            # into — turns a missing connection into an error.
+            if transport == "auto" and ssh_is_configured(frame):
+                return False
             raise RuntimeError(f"Frame {frame.id} remote disconnected, can't run commands. Try running over SSH instead.")
         return True
     if transport == "remote":

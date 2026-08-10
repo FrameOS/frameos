@@ -100,6 +100,97 @@ async def test_render_returns_spectra6_fosb_bitmap(async_client, no_auth_client,
 
 
 @pytest.mark.asyncio
+async def test_render_uses_wasm_scene_render_when_available(async_client, no_auth_client, db, monkeypatch):
+    frame = await device_frame(async_client, db)
+    frame.scenes = [{'id': 'scene-1', 'name': 'Black', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    async def fake_render(frame_arg, width, height, **kwargs):
+        # Solid black RGBA → the 1bpp packing must come out all zeros,
+        # which the (mostly white) diagnostic card never does.
+        return bytes([0, 0, 0, 255]) * (width * height)
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba', fake_render)
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    body = response.content
+    assert body[:4] == b'FOSB'
+    payload = body[12:]
+    assert payload == b'\x00' * len(payload)
+
+
+@pytest.mark.asyncio
+async def test_render_falls_back_to_diagnostic_when_scene_render_fails(
+    async_client, no_auth_client, db, monkeypatch
+):
+    frame = await device_frame(async_client, db)
+    frame.scenes = [{'id': 'scene-1', 'name': 'Broken', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    async def failing_render(frame_arg, width, height, **kwargs):
+        return None
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba', failing_render)
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    body = response.content
+    assert body[:4] == b'FOSB'
+    # The diagnostic card has a white background: 1bpp packing is mostly 0xFF.
+    payload = body[12:]
+    assert payload.count(0xFF) > len(payload) // 2
+
+
+@pytest.mark.asyncio
+async def test_render_end_to_end_wasm_scene(async_client, no_auth_client, db):
+    """Full path: real Node subprocess hosting the wasm scene runtime.
+
+    Runs only where the toolchain exists (node on PATH + the emscripten
+    bundle built by frameos/tools/build_wasm.sh) — CI's docker images and
+    dev checkouts that ran build_wasm.sh.
+    """
+    import json as jsonlib
+    from pathlib import Path
+
+    from app.utils.embedded_render import thin_client_renderer_available
+
+    if not thin_client_renderer_available():
+        pytest.skip('node + wasm bundle not available')
+    fixture = Path(__file__).resolve().parents[4] / 'e2e' / 'generated' / 'scenes.json'
+    if not fixture.is_file():
+        pytest.skip('e2e scenes fixture not available')
+
+    scenes = jsonlib.loads(fixture.read_text())
+    gradient = [scene for scene in scenes if scene.get('id') == 'dataGradient_interpreted']
+    assert gradient, 'expected dataGradient_interpreted in the e2e fixture'
+
+    frame = await device_frame(async_client, db)
+    frame.scenes = gradient
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    body = response.content
+    assert body[:4] == b'FOSB'
+    version, pixel_format, width, height, _ = struct.unpack('<BBHHH', body[4:12])
+    assert (width, height) == (800, 480)
+    payload = body[12:]
+    assert len(payload) == (width // 8) * height
+    # A gradient dithers to a genuine mix of black and white — nothing like
+    # the diagnostic card's near-uniform white field.
+    ones = sum(bin(byte).count('1') for byte in payload[:4800])
+    total_bits = 4800 * 8
+    assert 0.05 < ones / total_bits < 0.95
+
+
+@pytest.mark.asyncio
 async def test_scenes_requires_device_auth(async_client, no_auth_client, db):
     frame = await device_frame(async_client, db)
     response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes')
@@ -172,11 +263,130 @@ async def test_settings_returns_scene_required_service_settings(async_client, no
         f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
 
     assert response.status_code == 200, response.text
-    assert response.json() == {
+    payload = response.json()
+    frame_object = payload.pop('frame')
+    payload.pop('schedule')  # covered by test_settings_includes_schedule_and_utc_offset
+    assert payload == {
         'homeAssistant': {'accessToken': 'not-for-esp'},
         'openAI': {'apiKey': 'sk-frame', 'backendApiKey': 'sk-backend'},
         'unsplash': {'accessKey': 'unsplash-key'},
     }
+    assert frame_object['name'] == 'ESP32 Frame'
+
+
+@pytest.mark.asyncio
+async def test_settings_includes_live_frame_settings(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    frame.name = 'Kitchen'
+    frame.interval = 61.5
+    frame.timezone = None  # deterministic utcOffsetMinutes
+    frame.device_config = {
+        **(frame.device_config or {}),
+        'renderMode': 'remote',
+        'deepSleep': True,
+        'wakeSchedule': False,
+    }
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert response.json()['frame'] == {
+        'interval': 61.5,
+        'name': 'Kitchen',
+        'renderMode': 'remote',  # thin client — string form fos_settings.c parses
+        'deepSleep': True,
+        'wakeSchedule': False,
+        'utcOffsetMinutes': 0,  # no timezone set on the frame
+        'rotate': 0,
+    }
+
+    # Defaults: local render on PSRAM boards, power flags off
+    frame.device_config = {
+        key: value
+        for key, value in (frame.device_config or {}).items()
+        if key not in ('renderMode', 'deepSleep', 'wakeSchedule')
+    }
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame'] == {
+        'interval': 61.5,
+        'name': 'Kitchen',
+        'renderMode': 'local',
+        'deepSleep': False,
+        'wakeSchedule': False,
+        'utcOffsetMinutes': 0,
+        'rotate': 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_settings_includes_schedule_and_utc_offset(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+    frame.schedule = {
+        'events': [
+            {'id': 'a', 'minute': 0, 'hour': 7, 'weekday': 8,
+             'event': 'setCurrentScene', 'payload': {'sceneId': 'morning'}},
+        ]
+    }
+    frame.timezone = 'UTC'
+    db.add(frame)
+    db.commit()
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body['schedule'] == frame.schedule
+    assert body['frame']['utcOffsetMinutes'] == 0
+
+    # A real zone produces its current offset; UTC+ zones are positive.
+    frame.timezone = 'Etc/GMT-2'  # POSIX sign convention: this is UTC+2
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame']['utcOffsetMinutes'] == 120
+
+    # No schedule → explicit null, so the device clears a stored one.
+    frame.schedule = None
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['schedule'] is None
+
+
+@pytest.mark.asyncio
+async def test_settings_etag_supports_cheap_polling(async_client, no_auth_client, db):
+    frame = await device_frame(async_client, db)
+
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    etag = response.headers['etag']
+    assert etag.startswith('"') and etag.endswith('"')
+
+    # Unchanged payload + If-None-Match → 304 (device polls between renders)
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings',
+        headers={**auth(frame), 'If-None-Match': etag})
+    assert response.status_code == 304
+    assert response.headers['etag'] == etag
+
+    # A settings change → new ETag + fresh payload
+    frame.interval = 999
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings',
+        headers={**auth(frame), 'If-None-Match': etag})
+    assert response.status_code == 200
+    assert response.headers['etag'] != etag
+    assert response.json()['frame']['interval'] == 999.0
 
 
 @pytest.mark.asyncio

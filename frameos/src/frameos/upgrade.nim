@@ -1,7 +1,10 @@
-import std/[httpclient, json, os, strutils, tables, times]
+import std/[base64, httpclient, json, os, strutils, tables, times]
 import zippy
 
+import frameos/cloud/identity
 import frameos/config
+import frameos/ota_pubkey
+import frameos/utils/blake2b
 import frameos/device_setup
 from frameos/setup import frameosServiceContents, frameosServiceUser
 import frameos/utils/http_client
@@ -20,7 +23,8 @@ const
     "ubuntu-24.04",
     "ubuntu-26.04",
   ]
-  SupportedArches = ["arm64", "armhf", "amd64"]
+  SupportedArches = ["arm64", "armhf", "armv6", "amd64"]
+  MaxReleaseArchiveBytes = 512 * 1024 * 1024
 
 type
   FrameOSReleaseInfo* = object
@@ -125,22 +129,30 @@ proc parseOsRelease(path = "/etc/os-release"): Table[string, string] =
       value = value[1 .. ^2]
     result[parts[0]] = value
 
-proc detectArch(): string =
-  let overrideArch = getEnv("FRAMEOS_ARCH_OVERRIDE").strip()
-  if overrideArch.len > 0:
-    return overrideArch
-  let uname = runShellCapture("uname -m", timeoutMs = 5000, maxOutputBytes = 4096).output.strip().splitLines()[0]
+proc archForUname*(uname: string): string =
   case uname
   of "aarch64", "arm64", "armv8":
     "arm64"
-  of "armv8l", "armv7l", "armv6l", "armhf":
+  of "armv8l", "armv7l", "armhf":
     "armhf"
+  # ARMv6 (Pi Zero W / Pi 1) must never fall back to armhf: those release
+  # artifacts are built for ARMv7 and SIGILL on the ARM1176. Mirrors the
+  # mapping in backend app/tasks/prebuilt_deps.py:resolve_prebuilt_target.
+  of "armv6l", "armv6":
+    "armv6"
   of "x86_64", "amd64":
     "amd64"
   else:
     raise newException(ValueError, "Unsupported CPU architecture: " & uname & ". Supported architectures: " & SupportedArches.join(", "))
 
-proc normalizeDistroRelease(values: Table[string, string]): tuple[distro, release: string] =
+proc detectArch(): string =
+  let overrideArch = getEnv("FRAMEOS_ARCH_OVERRIDE").strip()
+  if overrideArch.len > 0:
+    return overrideArch
+  let uname = runShellCapture("uname -m", timeoutMs = 5000, maxOutputBytes = 4096).output.strip().splitLines()[0]
+  archForUname(uname)
+
+proc normalizeDistroRelease*(values: Table[string, string]): tuple[distro, release: string] =
   result.distro = getEnv("FRAMEOS_DISTRO_OVERRIDE", values.getOrDefault("ID", "")).strip()
   result.release = getEnv("FRAMEOS_OS_RELEASE_OVERRIDE", "").strip()
   if result.release.len == 0:
@@ -152,6 +164,11 @@ proc normalizeDistroRelease(values: Table[string, string]): tuple[distro, releas
 
   if result.distro in ["raspbian", "raspios"]:
     result.distro = "debian"
+  elif result.distro == "buildroot":
+    # Buildroot images ship the Debian Bookworm precompiled FrameOS artifact;
+    # the os-release VERSION_ID is the Buildroot version, not a binary target.
+    result.distro = "debian"
+    result.release = "bookworm"
   elif result.distro notin ["debian", "ubuntu"] and "debian" in values.getOrDefault("ID_LIKE", ""):
     result.distro = "debian"
 
@@ -194,6 +211,62 @@ proc validateGithubReleaseAssetUrl*(url, version: string) =
     raise newException(ValueError, "Refusing non-FrameOS GitHub release asset URL: " & url)
   if not url.endsWith(".tar.gz"):
     raise newException(ValueError, "Refusing release asset that is not a .tar.gz archive: " & url)
+
+proc releaseSignatureUrl*(assetUrl: string): string =
+  assetUrl & ".minisig"
+
+proc parseMinisigSignature*(minisig: string): string =
+  ## The first non-comment line of a .minisig is base64(ED + keyid8 + sig64).
+  ## Returns the 64-byte signature, base64 encoded for the Ed25519 verifier.
+  ##
+  ## The trusted-comment line and its global signature are ignored on purpose:
+  ## the device trusts a KEY, not a comment, and minisign's global signature
+  ## only binds the comment to the signature — it adds nothing once the key
+  ## check below has passed. Same reasoning as parse_minisig in
+  ## embedded/esp32/main/fos_ota.c, which this mirrors deliberately: two
+  ## implementations of one format should be readable side by side.
+  for rawLine in minisig.splitLines():
+    let line = rawLine.strip()
+    if line.len == 0 or line.startsWith("untrusted comment:") or
+        line.startsWith("trusted comment:"):
+      continue
+    var blob: string
+    try:
+      blob = decode(line)
+    except CatchableError:
+      raise newException(ValueError, "Release signature is not valid base64")
+    if blob.len != 74:
+      raise newException(ValueError,
+        "Release signature blob has the wrong length (" & $blob.len & ", expected 74)")
+    if blob[0] != 'E' or blob[1] != 'D':
+      raise newException(ValueError,
+        "Release signature is not the prehashed Ed25519 form this build accepts")
+    var keyIdHex = ""
+    for i in 2 ..< 10:
+      keyIdHex.add(toHex(ord(blob[i]), 2).toLowerAscii)
+    if keyIdHex != OtaSigningKeyIdHex:
+      raise newException(ValueError,
+        "Release is signed by key " & keyIdHex & ", not the key this build trusts (" &
+        OtaSigningKeyIdHex & ")")
+    return encode(blob[10 ..< 74])
+  raise newException(ValueError, "Release signature file contained no signature line")
+
+proc verifyReleaseArchiveSignature*(archivePath, minisig: string) =
+  ## Refuses to go further unless the archive was signed by the release key
+  ## baked into this build (ota_pubkey.nim).
+  ##
+  ## This is the whole point of signed OTA: the update channel must not become
+  ## remote code execution if the control plane is compromised. The provider
+  ## says which version exists and where to get it; only this check decides
+  ## whether the bytes are run, and it depends on nothing the provider
+  ## controls. minisign prehashes with BLAKE2b-512 and signs the digest, so
+  ## that digest is the message verified here.
+  let signatureBase64 = parseMinisigSignature(minisig)
+  let digest = blake2b512File(archivePath)
+  if not verifySignatureBase64(OtaSigningPublicKeyBase64, digest, signatureBase64):
+    raise newException(ValueError,
+      "Release signature does not verify against the FrameOS signing key — refusing to install " &
+      archivePath)
 
 proc releaseInfoFromPayload*(payload: JsonNode, target: string): FrameOSReleaseInfo =
   if payload == nil or payload.kind != JObject:
@@ -319,14 +392,12 @@ proc ensureCompatibleInstalledLayout(release: FrameOSReleaseInfo) =
     raise newException(ValueError, "FrameOS upgrade requires " & currentDir & " to point at a release under " & frameosInstallDir() / "releases")
   let config = currentFrameConfig()
   let mode = config{"mode"}.getStr("rpios")
-  if mode != "rpios":
-    raise newException(ValueError, "FrameOS upgrade supports installed Raspberry Pi OS frames only; current mode is " & mode)
+  if mode notin ["rpios", "buildroot"]:
+    raise newException(ValueError, "FrameOS upgrade supports installed Raspberry Pi OS and Buildroot frames only; current mode is " & mode)
   if not commandExists("systemctl"):
     raise newException(ValueError, "FrameOS upgrade requires systemd/systemctl")
   if not commandExists("tar"):
     raise newException(ValueError, "FrameOS upgrade requires tar")
-  if not commandExists("curl") and not commandExists("wget"):
-    raise newException(ValueError, "FrameOS upgrade requires curl or wget")
   if not commandSucceeds("test \"$(id -u)\" = 0 || sudo -n true >/dev/null 2>&1"):
     raise newException(ValueError, "FrameOS upgrade must run as root or with passwordless sudo")
   discard release
@@ -340,7 +411,28 @@ proc downloadReleaseArchive(release: FrameOSReleaseInfo, destination: string) =
   elif commandExists("wget"):
     discard runSetupCommand("wget -qO " & shellQuote(destination) & " " & shellQuote(release.assetUrl))
   else:
-    raise newException(ValueError, "Missing required command: curl or wget")
+    # Buildroot images ship neither curl nor wget; use the bounded HTTP client.
+    setupLog("FrameOS upgrade: downloading with built-in HTTP client")
+    var headers = newHttpHeaders()
+    headers["User-Agent"] = "FrameOS/" & compiledFrameOSVersion()
+    let body = boundedGetContent(
+      release.assetUrl,
+      headers = headers,
+      timeoutMs = 60_000,
+      maxBytes = MaxReleaseArchiveBytes,
+      maxSeconds = 1800,
+    )
+    writeFile(destination, body)
+
+proc downloadReleaseSignature(release: FrameOSReleaseInfo): string =
+  ## The .minisig beside the asset. Small (a few hundred bytes), so it is
+  ## fetched into memory rather than staged on disk.
+  let url = releaseSignatureUrl(release.assetUrl)
+  validateGithubReleaseAssetUrl(release.assetUrl, release.version)
+  var headers = newHttpHeaders()
+  headers["User-Agent"] = "FrameOS/" & compiledFrameOSVersion()
+  boundedGetContent(url, headers = headers, timeoutMs = 30_000,
+                    maxBytes = 8 * 1024, maxSeconds = 60)
 
 proc findFileNamed(root, name: string): string =
   for path in walkDirRec(root):
@@ -411,6 +503,12 @@ proc copyDirIfExists(source, destination: string) =
   if dirExists(source):
     copyDir(source, destination)
 
+proc copyFirstExistingFile(sources: openArray[string], destination: string) =
+  for source in sources:
+    if fileExists(source):
+      copyFile(source, destination)
+      return
+
 proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
   let timestamp = format(now(), "yyyyMMddHHmmss")
   result.name = "release_upgrade_" & timestamp & "_" & release.version.replace(".", "_")
@@ -419,7 +517,11 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
   if dirExists(result.frameosReleaseDir) or dirExists(result.remoteReleaseDir):
     raise newException(ValueError, "Release directory already exists: " & result.name)
 
-  let workDir = getTempDir() / ("frameos-upgrade-" & $getCurrentProcessId() & "-" & timestamp)
+  let mode = currentFrameConfig(){"mode"}.getStr("rpios")
+  # /tmp is a small tmpfs on Buildroot; stage the download and extraction on
+  # the SD-backed data partition instead of RAM.
+  let workBase = if mode == "buildroot": frameosInstallDir() / "tmp" else: getTempDir()
+  let workDir = workBase / ("frameos-upgrade-" & $getCurrentProcessId() & "-" & timestamp)
   try:
     createDir(workDir)
     createDir(workDir / "extract")
@@ -432,6 +534,17 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
 
     setupLog("FrameOS upgrade: downloading " & release.assetName)
     downloadReleaseArchive(release, workDir / "frameos.tar.gz")
+
+    # Verify BEFORE unpacking: `tar -xzf` on an unverified archive is already
+    # letting an attacker choose file contents and paths on this device. The
+    # signature is checked against the key compiled into this binary, so a
+    # compromised provider (or a hijacked download) cannot get code executed
+    # here — it can only offer bytes that fail this check.
+    setupLog("FrameOS upgrade: verifying the release signature")
+    verifyReleaseArchiveSignature(workDir / "frameos.tar.gz",
+                                  downloadReleaseSignature(release))
+    setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & ")")
+
     discard runSetupCommand("tar -xzf " & shellQuote(workDir / "frameos.tar.gz") & " -C " & shellQuote(workDir / "extract"))
 
     let frameosBinary = findFileNamed(workDir / "extract", "frameos")
@@ -454,6 +567,7 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
       discard runSetupCommand("cp -R " & shellQuote(artifactRoot / "vendor" / ".") & " " & shellQuote(frameosInstallDir() / "vendor" / ""))
 
     let oldReleaseDir = realPath(frameosInstallDir() / "current")
+    let oldRemoteReleaseDir = realPath(frameosRemoteInstallDir() / "current")
     writeFrameConfigForUpgrade(currentFrameConfigPath(), result.frameosReleaseDir / "frame.json", release.version)
     copyFile(result.frameosReleaseDir / "frame.json", result.remoteReleaseDir / "frame.json")
     copyScenePayloads(result.frameosReleaseDir, oldReleaseDir)
@@ -462,11 +576,25 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
 
     let serviceUser = serviceUserFromFile("/etc/systemd/system/frameos.service")
     result.serviceUser = serviceUser
-    writeFile(
-      result.frameosReleaseDir / "frameos.service",
-      frameosServiceContents(serviceUser, framebufferConsole = currentFrameConfig(){"device"}.getStr("") == "framebuffer"),
-    )
-    writeFile(result.remoteReleaseDir / "frameos-remote.service", remoteServiceContents(serviceUser))
+    if mode == "buildroot":
+      # Buildroot service files carry image-specific settings (User=root,
+      # FRAMEOS_HOME and LD_LIBRARY_PATH pointing into the release); carry them
+      # over instead of generating the Raspberry Pi OS variants.
+      copyFirstExistingFile(
+        [oldReleaseDir / "frameos.service", "/etc/systemd/system/frameos.service"],
+        result.frameosReleaseDir / "frameos.service",
+      )
+      copyFirstExistingFile(
+        [oldRemoteReleaseDir / "frameos-remote.service", "/etc/systemd/system/frameos-remote.service"],
+        result.remoteReleaseDir / "frameos-remote.service",
+      )
+    if not fileExists(result.frameosReleaseDir / "frameos.service"):
+      writeFile(
+        result.frameosReleaseDir / "frameos.service",
+        frameosServiceContents(serviceUser, framebufferConsole = currentFrameConfig(){"device"}.getStr("") == "framebuffer"),
+      )
+    if not fileExists(result.remoteReleaseDir / "frameos-remote.service"):
+      writeFile(result.remoteReleaseDir / "frameos-remote.service", remoteServiceContents(serviceUser))
 
     discard runSetupCommand(
       privilegedCommand(

@@ -137,6 +137,12 @@ proc render*(self: App, context: ExecutionContext, image: var Image) =
       let renderer: NodeId = if row >= 0 and row < renderFunctions.len and column >= 0 and column < renderFunctions[
           row].len and renderFunctions[row][column] == 0: renderFunction else: renderFunctions[row][column]
       if renderer != 0:
+        # Cells already render at cell size, not canvas size: the child sees a
+        # cellWidth x cellHeight context and everything downstream (JS apps,
+        # render/image, nested splits) sizes itself from context.image. The
+        # copy is what carries the parent's pixels under a cell that draws
+        # with alpha; pixie has no image view, so a real sub-region render
+        # would need one buffer per cell either way.
         let img = image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
         var cellContext = ExecutionContext(
             scene: context.scene,

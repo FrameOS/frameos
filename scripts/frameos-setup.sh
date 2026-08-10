@@ -1,19 +1,63 @@
 #!/bin/sh
 set -eu
 
-FRAMEOS_RELEASE_VERSION="${FRAMEOS_RELEASE_VERSION:-2026.6.8}"
+# The release the installer downloads. A provider serving this script stamps
+# the marked line with the newest published release at request time
+# (cloud/apps/auth-web/app/install.sh/route.ts), so fresh installs track
+# releases without anyone editing this pin — it went stale once already and
+# installed a months-old build. An explicit FRAMEOS_RELEASE_VERSION always
+# wins; the pin is only the fallback for running this script straight from
+# the repo. Keep the marker comment: the route refuses to serve the script
+# without it.
+FRAMEOS_RELEASE_VERSION_DEFAULT="2026.8.0" # __FRAMEOS_RELEASE_VERSION_DEFAULT__
+FRAMEOS_RELEASE_VERSION="${FRAMEOS_RELEASE_VERSION:-$FRAMEOS_RELEASE_VERSION_DEFAULT}"
 FRAMEOS_RELEASE_BASE_URL="${FRAMEOS_RELEASE_BASE_URL:-https://github.com/FrameOS/frameos/releases/download/}"
 FRAMEOS_DIR="${FRAMEOS_DIR:-/srv/frameos}"
 FRAMEOS_REMOTE_DIR="${FRAMEOS_REMOTE_DIR:-${FRAMEOS_AGENT_DIR:-/srv/frameos/remote}}"
 FRAMEOS_ASSETS_DIR="${FRAMEOS_ASSETS_DIR:-/srv/assets}"
+# Cloud-managed enrollment (docs/cloud-frames.md, flow "install script"):
+# a single-use claim token from the account's "Add frame" panel. When set,
+# the frame enrolls with the cloud on first start and the self-hosted
+# backend connection is disabled — a frame has exactly one control plane.
+FRAMEOS_CLAIM_TOKEN="${FRAMEOS_CLAIM_TOKEN:-}"
+# A provider serving this script rewrites the marked line below to its own
+# origin (cloud/apps/auth-web/app/install.sh/route.ts), so its install command
+# does not have to repeat the URL the script was just downloaded from. An
+# explicit FRAMEOS_CLOUD_URL always wins. Keep the marker comment: the route
+# refuses to serve the script without it rather than silently pointing a frame
+# at the wrong provider.
+FRAMEOS_CLOUD_URL_DEFAULT="https://cloud.frameos.net" # __FRAMEOS_CLOUD_URL_DEFAULT__
+FRAMEOS_CLOUD_URL="${FRAMEOS_CLOUD_URL:-$FRAMEOS_CLOUD_URL_DEFAULT}"
 SUPPORTED_RELEASES="debian:buster debian:bullseye debian:bookworm debian:trixie ubuntu:22.04 ubuntu:24.04 ubuntu:26.04"
-SUPPORTED_ARCHES="arm64 armhf amd64"
+SUPPORTED_ARCHES="arm64 armhf armv6 amd64"
 TTY="/dev/tty"
 GENERATED_ADMIN_PASSWORD=""
 
 if [ ! -r "$TTY" ] || [ ! -w "$TTY" ] || ! ( : <"$TTY" ) 2>/dev/null; then
   TTY=""
 fi
+
+# Where prompts read from and print to. Ubuntu ships sudo with
+# `Defaults use_pty`: the command runs on a freshly created pty, and
+# depending on how the terminal session was set up (seen with `sudo sh
+# install.sh` inside an OrbStack VM terminal), /dev/tty there can be a
+# device the relay never feeds — the first question then hangs with nothing
+# on screen. When stdin IS a terminal, use stdin/stderr for the dialogue:
+# they are the streams sudo's relay demonstrably serves (all the apt output
+# arrived through them). /dev/tty remains for `curl | sudo sh`, where stdin
+# is the script pipe. Empty TTY still means "unattended" below.
+TTY_READ="$TTY"
+if [ -t 0 ]; then
+  TTY_READ=""
+fi
+
+# Unattended installs answer nothing: every question takes its default. This is
+# opt-in, NOT implied by a claim token — a cloud install is still a person at a
+# terminal who wants to pick the display and set an admin password, and reading
+# from /dev/tty works fine there even though stdin is the curl pipe.
+case "$(printf '%s' "${FRAMEOS_UNATTENDED:-}" | tr '[:upper:]' '[:lower:]')" in
+  1|y|yes|true|on) TTY="" ;;
+esac
 
 say() {
   printf '%s\n' "$*"
@@ -34,17 +78,47 @@ need_cmd() {
   fi
 }
 
+# The device's reachable IPv4, so the closing message can print an admin URL
+# someone can actually click instead of "http://<frame-ip>:8787/". Empty when
+# nothing is routable yet (e.g. WiFi comes up after a reboot).
+frame_lan_ip() {
+  lan_ip=""
+  if command -v hostname >/dev/null 2>&1; then
+    # hostname -I is Debian/Ubuntu-specific but present on every supported OS;
+    # the first entry is the primary interface address.
+    lan_ip="$(hostname -I 2>/dev/null | awk '{print $1}')" || lan_ip=""
+  fi
+  if [ -z "$lan_ip" ] && command -v ip >/dev/null 2>&1; then
+    lan_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}')" || lan_ip=""
+  fi
+  printf '%s' "$lan_ip"
+}
+
+say_admin_panel_url() {
+  panel_ip="$(frame_lan_ip)"
+  if [ -n "$panel_ip" ]; then
+    say "Open the local admin panel at http://$panel_ip:$FRAMEOS_FRAME_PORT/"
+    # mDNS usually resolves on home networks; offer it as the stable name.
+    panel_host="$(hostname 2>/dev/null || true)"
+    if [ -n "$panel_host" ]; then
+      say "  (or http://$panel_host.local:$FRAMEOS_FRAME_PORT/ if your network resolves mDNS)"
+    fi
+  else
+    say "Open the local admin panel at http://<frame-ip>:$FRAMEOS_FRAME_PORT/ once the device is on the network."
+  fi
+}
+
 prompt_out() {
-  if [ -n "$TTY" ]; then
-    printf '%s' "$*" >"$TTY"
+  if [ -n "$TTY" ] && [ -n "$TTY_READ" ]; then
+    printf '%s' "$*" >"$TTY_READ"
   else
     printf '%s' "$*" >&2
   fi
 }
 
 prompt_line() {
-  if [ -n "$TTY" ]; then
-    printf '%s\n' "$*" >"$TTY"
+  if [ -n "$TTY" ] && [ -n "$TTY_READ" ]; then
+    printf '%s\n' "$*" >"$TTY_READ"
   else
     printf '%s\n' "$*" >&2
   fi
@@ -60,7 +134,11 @@ ask() {
     prompt_out "$prompt: "
   fi
   if [ -n "$TTY" ]; then
-    IFS= read -r answer <"$TTY" || answer=""
+    if [ -n "$TTY_READ" ]; then
+      IFS= read -r answer <"$TTY_READ" || answer=""
+    else
+      IFS= read -r answer || answer=""
+    fi
   fi
   if [ -z "$answer" ]; then
     answer="$default"
@@ -114,13 +192,24 @@ ask_secret() {
     prompt_out "$prompt: "
   fi
   if [ -n "$TTY" ]; then
-    old_stty="$(stty -g <"$TTY" 2>/dev/null || true)"
-    stty -echo <"$TTY" 2>/dev/null || true
-    IFS= read -r answer <"$TTY" || answer=""
-    if [ -n "$old_stty" ]; then
-      stty "$old_stty" <"$TTY" 2>/dev/null || true
+    if [ -n "$TTY_READ" ]; then
+      old_stty="$(stty -g <"$TTY_READ" 2>/dev/null || true)"
+      stty -echo <"$TTY_READ" 2>/dev/null || true
+      IFS= read -r answer <"$TTY_READ" || answer=""
+      if [ -n "$old_stty" ]; then
+        stty "$old_stty" <"$TTY_READ" 2>/dev/null || true
+      else
+        stty echo <"$TTY_READ" 2>/dev/null || true
+      fi
     else
-      stty echo <"$TTY" 2>/dev/null || true
+      old_stty="$(stty -g 2>/dev/null || true)"
+      stty -echo 2>/dev/null || true
+      IFS= read -r answer || answer=""
+      if [ -n "$old_stty" ]; then
+        stty "$old_stty" 2>/dev/null || true
+      else
+        stty echo 2>/dev/null || true
+      fi
     fi
     prompt_line ""
   fi
@@ -207,7 +296,11 @@ download_file() {
 detect_arch() {
   case "$(uname -m)" in
     aarch64|arm64|armv8) echo arm64 ;;
-    armv8l|armv7l|armv6l|armhf) echo armhf ;;
+    armv8l|armv7l|armhf) echo armhf ;;
+    # ARMv6 (Pi Zero W / Pi 1) must never fall back to armhf: those release
+    # artifacts are built for ARMv7 and SIGILL on the ARM1176. Mirrors the
+    # mapping in backend app/tasks/prebuilt_deps.py:resolve_prebuilt_target.
+    armv6l|armv6) echo armv6 ;;
     x86_64|amd64) echo amd64 ;;
     *) die "Unsupported CPU architecture: $(uname -m). Supported architectures: $SUPPORTED_ARCHES" ;;
   esac
@@ -784,6 +877,36 @@ Path(env("FRAMEOS_CONFIG_DESTINATION")).write_text(json.dumps(data, indent=2, so
 PY
 }
 
+# Hand the claim token to the runtime: frameos reads
+# ./state/cloud_enroll_pending.json on start and exchanges it for a cloud
+# link (see frameos/src/frameos/cloud/enrollment.nim). 0600 in a 0700 dir —
+# the token is a secret until redeemed.
+write_cloud_enrollment() {
+  release_dir="$1"
+  install -d -m 0700 "$release_dir/state"
+  FRAMEOS_CLAIM_TOKEN="$FRAMEOS_CLAIM_TOKEN" \
+  FRAMEOS_CLOUD_URL="$FRAMEOS_CLOUD_URL" \
+  FRAMEOS_NAME="$FRAMEOS_NAME" \
+  python3 - "$release_dir/state/cloud_enroll_pending.json" <<'PY'
+import json
+import os
+import sys
+
+path = sys.argv[1]
+data = {
+    "claim_token": os.environ["FRAMEOS_CLAIM_TOKEN"],
+    "provider_url": os.environ["FRAMEOS_CLOUD_URL"].rstrip("/"),
+}
+name = os.environ.get("FRAMEOS_NAME", "")
+if name:
+    data["name"] = name
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as fh:
+    json.dump(data, fh)
+    fh.write("\n")
+PY
+}
+
 if [ "$(id -u)" -ne 0 ]; then
   die "Run this setup script as root, for example: curl -fsSL https://frameos.net/setup.sh | sudo sh"
 fi
@@ -847,6 +970,23 @@ default_wifi_ssid="$(json_get "$existing_config" network.wifiHotspotSsid "FrameO
 default_wifi_password="$(json_get "$existing_config" network.wifiHotspotPassword "frame1234")"
 default_log_to_file="$(json_get "$existing_config" logToFile "")"
 default_save_assets="$(json_get "$existing_config" saveAssets "true")"
+
+# `curl … | sudo sh` and interactive prompts do not mix on every distribution.
+# With sudo's stdin a pipe, a sudo built with `Defaults use_pty` (Ubuntu ships
+# it on) does not relay the terminal into the pty it creates for the command:
+# the read below blocks forever, keystrokes echo on the real terminal and reach
+# nobody, and the install looks frozen. Warn before the first question rather
+# than let someone sit there — we cannot detect sudo's pty setting reliably,
+# and on hosts without use_pty the pipe works fine.
+if [ -n "$TTY" ] && [ ! -t 0 ]; then
+  warn "Note: this script is being piped into a shell, so questions below may"
+  warn "not receive your typing on some systems (sudo's use_pty). If a prompt"
+  warn "does not respond, press Ctrl-C and run it from a file instead:"
+  warn "  curl -fsSL '${FRAMEOS_CLOUD_URL%/}/install.sh' -o /tmp/frameos-install.sh"
+  warn "  sudo sh /tmp/frameos-install.sh"
+  warn "Or set FRAMEOS_UNATTENDED=1 to accept every default without asking."
+  warn ""
+fi
 
 FRAMEOS_NAME="${FRAMEOS_NAME:-$(ask_required "Frame name" "$default_name")}"
 FRAMEOS_DEVICE="${FRAMEOS_DEVICE:-$(choose_device "$default_device")}"
@@ -913,6 +1053,30 @@ case "$FRAMEOS_DEVICE" in
     FRAMEOS_DEVICE_VCOM="${FRAMEOS_DEVICE_VCOM:-}"
     ;;
 esac
+
+if [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
+  # One control plane at a time: a cloud-managed frame never also connects
+  # to a self-hosted backend. Refuse loudly instead of silently ignoring one.
+  # Case-folded so every truthy spelling ("True", "ON", "Yes") dies here
+  # rather than being quietly coerced to "false" a few lines down.
+  case "$(printf '%s' "${FRAMEOS_BACKEND_ENABLED:-}" | tr '[:upper:]' '[:lower:]')" in
+    y|yes|true|on|1)
+      die "FRAMEOS_CLAIM_TOKEN and FRAMEOS_BACKEND_ENABLED=true are mutually exclusive: a frame has exactly one control plane. Drop one of them."
+      ;;
+  esac
+  FRAMEOS_BACKEND_ENABLED="false"
+  case "$FRAMEOS_CLOUD_URL" in
+    https://*) ;;
+    http://*)
+      warn "FRAMEOS_CLOUD_URL uses plain http; only do this for local development providers."
+      ;;
+    *) die "FRAMEOS_CLOUD_URL must be an http(s) origin, got: $FRAMEOS_CLOUD_URL" ;;
+  esac
+  case "$FRAMEOS_CLAIM_TOKEN" in
+    FRCT_*) ;;
+    *) warn "Claim token does not start with FRCT_ — continuing, but double-check it was copied correctly." ;;
+  esac
+fi
 
 backend_default="n"
 if [ "$default_remote_enabled" = "true" ] || { [ -n "$default_server_host" ] && [ "$default_server_host" != "localhost" ]; }; then
@@ -1021,6 +1185,9 @@ fi
 write_frame_config "$existing_config" "$frameos_release_dir/frame.json"
 cp "$frameos_release_dir/frame.json" "$remote_release_dir/frame.json"
 copy_scene_payloads "$frameos_release_dir" "$existing_release_dir"
+if [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
+  write_cloud_enrollment "$frameos_release_dir"
+fi
 
 remote_user="${SUDO_USER:-}"
 if [ -z "$remote_user" ] || [ "$remote_user" = "root" ]; then
@@ -1044,6 +1211,21 @@ if [ "$FRAMEOS_DEVICE" = "framebuffer" ]; then
 StandardInput=tty-force
 TTYReset=yes
 ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 /bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | /bin/grep -xq -e active -e activating -e reloading && exit 0; /bin/systemctl reset-failed getty@tty1.service; /bin/systemctl start getty@tty1.service'"
+fi
+
+# Type=notify only when the downloaded binary can actually send READY=1
+# (releases before 2026.6.14 predate the sd_notify code). Probe the binary,
+# not the version string: with Type=notify and a mute binary, systemd times
+# the start out after five minutes and kills a perfectly healthy frame —
+# then does it again after every restart, forever.
+if LC_ALL=C grep -aq NOTIFY_SOCKET "$frameos_release_dir/frameos" 2>/dev/null; then
+  frameos_service_startup="Type=notify
+TimeoutStartSec=300
+# Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes
+# tolerates the slowest legitimate renders (chromium retries, e-ink refresh).
+WatchdogSec=900"
+else
+  frameos_service_startup="Type=simple"
 fi
 
 # Memory caps for frameos.service: everything except a small OS reserve, so a
@@ -1071,11 +1253,7 @@ WorkingDirectory=$FRAMEOS_DIR/current
 ExecStart=$FRAMEOS_DIR/current/frameos
 Restart=always
 RestartSec=5
-Type=notify
-TimeoutStartSec=300
-# Restart if the runner loop stops sending WATCHDOG=1 heartbeats. 15 minutes
-# tolerates the slowest legitimate renders (chromium retries, e-ink refresh).
-WatchdogSec=900
+$frameos_service_startup
 # If FrameOS leaks memory, OOM-kill and restart it instead of letting the
 # device swap itself into an unreachable state.
 MemoryHigh=${mem_high_kb}K
@@ -1147,15 +1325,49 @@ fi
 if [ "$setup_status" -eq 2 ]; then
   say ""
   say "FrameOS is installed, but hardware setup requested a reboot before the service starts."
-  say "Reboot this device, then open the local admin panel at http://<frame-ip>:$FRAMEOS_FRAME_PORT/"
+  say "Reboot this device, then:"
+  say_admin_panel_url
 else
+  # --no-block, then poll: frameos.service is Type=notify with
+  # TimeoutStartSec=300, so a plain `systemctl restart` blocks until the new
+  # instance signals readiness — up to five minutes with no output, which reads
+  # as a hung installer. It is worst on a box that already runs FrameOS, where
+  # the outgoing instance may still hold the admin port while the new one waits
+  # for it. Kick the job off, watch briefly, and always hand the terminal back.
   if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
-    systemctl restart frameos-remote.service
+    systemctl restart --no-block frameos-remote.service
   fi
-  systemctl restart frameos.service
+  systemctl restart --no-block frameos.service
+  frameos_started=""
+  waited=0
+  # Twenty silent seconds reads as a hung installer — narrate the wait.
   say ""
-  say "FrameOS is installed and started."
-  say "Open the local admin panel at http://<frame-ip>:$FRAMEOS_FRAME_PORT/"
+  prompt_out "Waiting for the FrameOS service to start (up to 20s) "
+  while [ "$waited" -lt 20 ]; do
+    if [ "$(systemctl is-active frameos.service 2>/dev/null || true)" = "active" ]; then
+      frameos_started="yes"
+      break
+    fi
+    if [ "$(systemctl is-failed frameos.service 2>/dev/null || true)" = "failed" ]; then
+      break
+    fi
+    prompt_out "."
+    sleep 1
+    waited=$((waited + 1))
+  done
+  prompt_out "
+"
+  say ""
+  if [ -n "$frameos_started" ]; then
+    say "FrameOS is installed and started."
+  else
+    # Not an error: a first render can take a while. Say what is true and how
+    # to look, instead of waiting in silence or claiming success.
+    say "FrameOS is installed. The service is still starting — check it with:"
+    say "  systemctl status frameos"
+    say "  journalctl -u frameos -f"
+  fi
+  say_admin_panel_url
 fi
 
 say ""
@@ -1170,6 +1382,15 @@ if [ -n "$GENERATED_ADMIN_PASSWORD" ]; then
 fi
 if [ "$FRAMEOS_BACKEND_ENABLED" = "true" ]; then
   say "  Backend: $FRAMEOS_SERVER_HOST:$FRAMEOS_SERVER_PORT"
+elif [ -n "$FRAMEOS_CLAIM_TOKEN" ]; then
+  # %/ strips a trailing slash: the URL is user-supplied and "https://x/" would
+  # otherwise print "https://x//frames". The pending-enrollment file normalizes
+  # the same way.
+  say "  Cloud: enrolling with ${FRAMEOS_CLOUD_URL%/}"
+  say "         The frame appears as PENDING in your account once it enrolls,"
+  say "         which happens when the service starts. Confirm it there to"
+  say "         finish — nothing is pushed to the frame until you do:"
+  say "         ${FRAMEOS_CLOUD_URL%/}/frames"
 else
   say "  Backend: not configured; FrameOS will run standalone."
 fi

@@ -79,14 +79,16 @@ suite "config helper loaders":
     check cfg.httpUploadHeaders[0].value == "Bearer abc"
     check loadDeviceConfig(%*{}).partial == false
 
-  test "loadNetwork keeps hotspot disabled when network checks are disabled":
-    let disabled = loadNetwork(%*{"networkCheck": false, "wifiHotspot": "enabled"})
+  test "loadNetwork keeps hotspot setting independent of network checks":
+    let disabled = loadNetwork(%*{"networkCheck": false, "wifiHotspot": "bootOnly"})
     check disabled.networkCheck == false
-    check disabled.wifiHotspot == "disabled"
+    check disabled.wifiHotspot == "bootOnly"
 
     let enabled = loadNetwork(%*{"networkCheck": true, "wifiHotspot": "enabled"})
     check enabled.networkCheck == true
     check enabled.wifiHotspot == "enabled"
+
+    check loadNetwork(%*{"networkCheck": true}).wifiHotspot == "disabled"
 
   test "loadPalette returns empty palette on invalid color":
     let valid = loadPalette(%*{"colors": ["#ffffff", "#000000"]})

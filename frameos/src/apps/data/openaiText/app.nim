@@ -24,7 +24,6 @@ proc get*(self: App, context: ExecutionContext): string =
   if self.appConfig.user == "" and self.appConfig.system == "":
     self.error("No system or user prompt provided in app config.")
     return
-  self.ensureEmbeddedServiceSettings()
   let apiKey = self.frameConfig.settings{"openAI"}{"apiKey"}.getStr
   if apiKey == "":
     self.error("Please provide an OpenAI API key in the settings.")

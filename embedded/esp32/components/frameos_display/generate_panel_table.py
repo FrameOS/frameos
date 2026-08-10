@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""Generate the runtime Waveshare panel table for the ESP32 display component.
+
+Every supported panel driver is compiled into one firmware image; the active
+panel is chosen at runtime from NVS ("panel" key: `set panel <key>` on the
+serial console, or the setup portal dropdown). This script emits:
+
+  frameos_panel_table.h  - fos_panel_entry_t and the table declaration
+  frameos_panel_table.c  - per-panel init/clear/display/sleep wrappers + table
+  panel_sources.cmake    - FRAMEOS_PANEL_SOURCES / FRAMEOS_PANEL_HEADERS lists
+
+Panel metadata (dimensions, color format, driver function names/arguments)
+comes from backend/app/drivers/waveshare.py, the same source of truth the
+Linux builds use.
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+
+PIXEL_FORMAT_BY_COLOR = {
+    "Black": 1,
+    "BlackWhiteRed": 2,
+    "BlackWhiteYellow": 3,
+    "FourGray": 4,
+    "BlackWhiteYellowRed": 5,
+    "SevenColor": 6,
+    "SpectraSixColor": 7,
+    "SixteenGray": 8,
+}
+
+# Mirrored by EMBEDDED_UNSUPPORTED_PANELS in backend/app/tasks/embedded_firmware.py.
+UNSUPPORTED_PANELS = {
+    # Different controller stacks: IT8951 and the 12.48" multi-controller family.
+    "EPD_10in3",
+    "EPD_12in48",
+    "EPD_12in48b",
+    "EPD_12in48b_V2",
+    # Legacy vendor-resync variants whose public symbols collide with their
+    # successors (EPD_7in5_V2, EPD_4in2b_V2, EPD_7in5b_V2). One binary links
+    # every driver, so only the current variant of each family is included.
+    "EPD_7in5_V2_gray",
+    "EPD_4in2b_V2_old",
+    "EPD_7in5b_V2_old",
+}
+
+# These variants have native Nim wrappers in the root tree; the ESP32 C display
+# component still uses the root C fallback until the hardware DEV_Config layer is
+# shared by the Nim driver path too.
+SOURCE_OVERRIDES = {
+    "EPD_4in01f": ("ePaper/migrated", "EPD_4in01f.c"),
+    "EPD_4in0e": ("ePaper/migrated", "EPD_4in0e.c"),
+    "EPD_7in3e": ("ePaper/migrated", "EPD_7in3e.c"),
+    "EPD_13in3e": ("epd13in3e", "EPD_13in3e.c"),
+}
+
+
+def c_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def cmake_string(value: str) -> str:
+    return '"' + value.replace("\\", "/").replace('"', '\\"') + '"'
+
+
+def c_args(nim_args: str) -> str:
+    if not nim_args:
+        return ""
+    args = []
+    for arg in nim_args.split(","):
+        value = arg.strip()
+        value = re.sub(r"\.(u?int(8|16|32)|cint)$", "", value)
+        value = value.replace("nil", "NULL")
+        if value == "self":
+            raise ValueError("IT8951/self-style init arguments are not supported on ESP32")
+        args.append(value)
+    return ", ".join(args)
+
+
+def compile_source_from_nim(nim_path: Path) -> str | None:
+    text = nim_path.read_text()
+    match = re.search(r'\{\.compile:\s*"([^"]+)"\.\}', text)
+    return match.group(1) if match else None
+
+
+def panel_source(repo_root: Path, key: str, get_variant_folder) -> Path:
+    waveshare_root = repo_root / "frameos" / "src" / "drivers" / "waveshare"
+    if key in SOURCE_OVERRIDES:
+        folder, source = SOURCE_OVERRIDES[key]
+        path = waveshare_root / folder / source
+        if path.is_file():
+            return path
+        raise FileNotFoundError(f"Root Waveshare source missing for {key}: {path}")
+
+    folder = get_variant_folder(key)
+    source_dir = waveshare_root / folder
+    nim_path = source_dir / f"{key}.nim"
+    compile_source = compile_source_from_nim(nim_path)
+    if compile_source:
+        candidates = [source_dir / compile_source, source_dir / "migrated" / compile_source]
+    else:
+        candidates = [source_dir / f"{key}.c"]
+    for path in candidates:
+        if path.is_file():
+            return path
+    raise FileNotFoundError(f"Root Waveshare source missing for {key}: {', '.join(str(p) for p in candidates)}")
+
+
+def panel_wrappers(panel: str, variant) -> str:
+    init_args = c_args(variant.init_args)
+    clear_args = c_args(variant.clear_args)
+    init_call = f"{variant.init_function}({init_args})"
+    clear_call = f"{variant.clear_function}({clear_args})"
+    if variant.init_returns_zero:
+        init_body = f"    return (int){init_call};"
+    else:
+        init_body = f"    {init_call};\n    return 0;"
+    display_args = variant.display_arguments or []
+    if display_args in (["Black", "Red"], ["Black", "Yellow"]):
+        display_body = (
+            f"    size_t plane = (((size_t){variant.width} + 7u) / 8u) * (size_t){variant.height};\n"
+            f"    {variant.display_function}((UBYTE *)buf, (UBYTE *)buf + plane);"
+        )
+    else:
+        display_body = f"    {variant.display_function}((UBYTE *)buf);"
+    if variant.sleep_function:
+        sleep_body = f"    {variant.sleep_function}();"
+    else:
+        sleep_body = "    /* driver has no sleep function */"
+    return f"""static int fos_init_{panel}(void)
+{{
+{init_body}
+}}
+static void fos_clear_{panel}(void)
+{{
+    {clear_call};
+}}
+static void fos_show_{panel}(uint8_t *buf)
+{{
+{display_body}
+}}
+static void fos_sleep_{panel}(void)
+{{
+{sleep_body}
+}}
+"""
+
+
+HEADER_TEXT = """/* Generated by generate_panel_table.py - do not edit. */
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct {
+    const char *name;   /* Waveshare variant key, e.g. "EPD_7in5_V2" */
+    int width;
+    int height;
+    int format;         /* fos_pixel_format_t */
+    int requires_cs2;   /* dual chip-select panels (EPD_13in3e) */
+    int (*driver_init)(void);
+    void (*clear)(void);
+    void (*display)(uint8_t *buf);
+    void (*sleep)(void);
+} fos_panel_entry_t;
+
+extern const fos_panel_entry_t fos_panel_table[];
+extern const size_t fos_panel_table_count;
+"""
+
+
+def generate(repo_root: Path, out_dir: Path) -> None:
+    sys.path.insert(0, str(repo_root / "backend"))
+    from app.drivers.waveshare import (
+        convert_waveshare_source,
+        get_variant_folder,
+        get_variant_keys,
+        key_to_float,
+    )
+
+    keys = [
+        key
+        for key in get_variant_keys()
+        if key not in UNSUPPORTED_PANELS
+        and (get_variant_folder(key) == "ePaper" or key == "EPD_13in3e")
+    ]
+    # Sorted by physical size then name, so the portal <select> reads naturally.
+    keys.sort(key=lambda key: (key_to_float(key)[0] or 0.0, key))
+
+    variants = {}
+    sources: dict[Path, None] = {}
+    headers: dict[Path, None] = {}
+    for key in keys:
+        variant = convert_waveshare_source(key)
+        if variant.color_option not in PIXEL_FORMAT_BY_COLOR:
+            raise ValueError(f"{key} has unsupported color option {variant.color_option}")
+        if not variant.width or not variant.height:
+            raise ValueError(f"{key} is missing dimensions")
+        if not variant.init_function or not variant.clear_function or not variant.display_function:
+            raise ValueError(f"{key} is missing init/clear/display metadata")
+        source = panel_source(repo_root, key, get_variant_folder)
+        header = source.with_suffix(".h")
+        if not header.is_file():
+            raise FileNotFoundError(f"Root Waveshare header missing for {key}: {header}")
+        variants[key] = variant
+        sources[source] = None  # several b/bc/c keys share one compile unit
+        headers[header] = None
+
+    parts = [
+        "/* Generated by generate_panel_table.py - do not edit.",
+        " *",
+        " * Every supported Waveshare panel driver is linked into the firmware;",
+        " * frameos_display.c picks the active entry at runtime from the",
+        ' * configured panel name (NVS "panel" key).',
+        " */",
+        "#include <stddef.h>",
+        "#include <stdint.h>",
+        "",
+        '#include "DEV_Config.h"',
+        '#include "frameos_panel_table.h"',
+        "",
+    ]
+    parts.extend(f'#include "{header.name}"' for header in headers)
+    parts.append("")
+    for key in keys:
+        parts.append(f"/* {key} */")
+        parts.append(panel_wrappers(key, variants[key]))
+    parts.append("const fos_panel_entry_t fos_panel_table[] = {")
+    for key in keys:
+        variant = variants[key]
+        parts.append(
+            "    { %s, %d, %d, %d, %d, fos_init_%s, fos_clear_%s, fos_show_%s, fos_sleep_%s },"
+            % (
+                c_string(key),
+                int(variant.width),
+                int(variant.height),
+                PIXEL_FORMAT_BY_COLOR[variant.color_option],
+                1 if key == "EPD_13in3e" else 0,
+                key, key, key, key,
+            )
+        )
+    parts.append("};")
+    parts.append("const size_t fos_panel_table_count = sizeof(fos_panel_table) / sizeof(fos_panel_table[0]);")
+    parts.append("")
+
+    (out_dir / "frameos_panel_table.h").write_text(HEADER_TEXT)
+    (out_dir / "frameos_panel_table.c").write_text("\n".join(parts))
+
+    cmake_lines = ["set(FRAMEOS_PANEL_SOURCES"]
+    cmake_lines.extend(f"    {cmake_string(str(source))}" for source in sources)
+    cmake_lines.append(")")
+    cmake_lines.append("set(FRAMEOS_PANEL_HEADERS")
+    cmake_lines.extend(f"    {cmake_string(str(header))}" for header in headers)
+    cmake_lines.append(")")
+    cmake_lines.append("")
+    (out_dir / "panel_sources.cmake").write_text("\n".join(cmake_lines))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo-root", required=True)
+    parser.add_argument("--out-dir", required=True)
+    args = parser.parse_args()
+
+    repo_root = Path(args.repo_root).resolve()
+    out_dir = Path(args.out_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    generate(repo_root, out_dir)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

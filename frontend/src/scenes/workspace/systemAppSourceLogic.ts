@@ -2,8 +2,8 @@ import { actions, afterMount, kea, key, path, props, propsChanged, reducers, sel
 import { loaders } from 'kea-loaders'
 
 import type { systemAppSourceLogicType } from './systemAppSourceLogicType'
-import { apiFetch } from '../../utils/apiFetch'
 import { buildAppTypeDeclarations } from '../../utils/appTypeDeclarations'
+import { loadAppSources } from '../../utils/sceneApps'
 
 export interface SystemAppSourceLogicProps {
   keyword: string | null
@@ -47,11 +47,10 @@ export const systemAppSourceLogic = kea<systemAppSourceLogicType>([
           }
 
           try {
-            const response = await apiFetch(`/api/apps/source?keyword=${encodeURIComponent(props.keyword)}`)
-            if (!response.ok) {
-              throw new Error('Failed to fetch app sources')
-            }
-            const sources = withoutGeneratedSources((await response.json()) as Record<string, string>)
+            // Embedded catalogs first, the backend API second (loadAppSources)
+            // — on control planes without /api/apps/source (the cloud, the
+            // on-device admin) the embedded sources are the only copy.
+            const sources = withoutGeneratedSources(await loadAppSources(props.keyword))
             actions.setActiveFile(firstSourceFile(sources))
             return sources
           } catch (error) {

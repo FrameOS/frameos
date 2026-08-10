@@ -157,7 +157,12 @@ async def test_real_buildroot_sd_image_generation_from_precompiled_release(
 
     logs = "\n".join(_log_lines(db, frame))
     if metadata.get("precompiledSdImage"):
-        assert "Customizing full precompiled Buildroot SD image" in logs
+        # Release images since 2026.8.6 carry a setup-blob placeholder and are
+        # personalized in place; older ones go through full customization.
+        assert (
+            "Personalizing precompiled SD image" in logs
+            or "Customizing full precompiled Buildroot SD image" in logs
+        )
         assert "Building FrameOS binary for Raspberry Pi Zero 2 W" not in logs
         assert "Building FrameOS Remote for Raspberry Pi Zero 2 W" not in logs
     else:

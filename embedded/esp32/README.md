@@ -22,6 +22,7 @@ main/                     boot orchestration + platform modules
   fos_http.c              esp_http_server route layer (portal + /status + actions)
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
   fos_ota.c               OTA manifest check + esp_https_ota when an OTA partition exists
+  fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
   fos_console.c           USB-serial REPL: status / set / wifi / render / ota / ...
   fos_defaults.h          compile-time defaults; generated_config.h (from the
                           backend's per-frame build) overrides them
@@ -46,7 +47,7 @@ Requires [ESP-IDF](https://docs.espressif.com/projects/esp-idf/) v5.5.x:
 mkdir -p ~/esp && cd ~/esp
 git clone --depth 1 --branch v5.5.4 --recursive --shallow-submodules \
   https://github.com/espressif/esp-idf.git
-cd esp-idf && ./install.sh esp32s3
+cd esp-idf && ./install.sh esp32s3,esp32c3
 ```
 
 The backend finds the toolchain via the `IDF_PATH` env var, falling back to
@@ -65,7 +66,9 @@ separate host toolchain.
 ./build_nim.sh             # compile the Nim runtime to C (optional but recommended)
 idf.py set-target esp32s3
 FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
-# reconfigure picks up new nimcache/generated_config.h and the selected panel
+# reconfigure picks up new nimcache/generated_config.h. Every supported panel
+# driver is compiled in; FRAMEOS_SELECTED_PANEL only sets the boot-time
+# default panel (optional — `set panel <key>` switches at runtime).
 idf.py -p /dev/tty.usbmodem* flash monitor
 ```
 
@@ -89,6 +92,53 @@ logs to UART0 and avoid QEMU's PSRAM path; the default build profile remains
 USB Serial/JTAG with octal PSRAM enabled. The QEMU smoke verifies that the
 bootloader selects `ota_0` and ESP-IDF starts the `frameos_esp32` app image;
 when QEMU reaches `app_main`, the script reports that stronger signal too.
+
+## Chip targets and supported boards
+
+Two chip targets build from this project:
+
+- **ESP32-S3** (default): the full firmware, including the on-device Nim/pixie
+  renderer and QuickJS. Needs a module with PSRAM for local rendering.
+- **ESP32-C3**: thin-client-only firmware for PSRAM-less boards
+  (`FRAMEOS_ESP32_PLATFORM=esp32-c3 ./ci_build_image.sh`, or backend builds
+  for a frame whose platform is `esp32-c3`). ~380 KB of usable SRAM rules out
+  the local renderer; the backend renders the frame's scenes server-side in
+  the wasm scene runtime (`backend/app/utils/embedded_render.py`) and the
+  device blits the packed bitmap.
+  Built with the 4 MB no-OTA layout so one image fits every supported C3 board.
+
+Known boards ship as hardware presets (`set hardware <preset>` on the console,
+or the preset dropdown in the frontends — the authoritative table is
+`EMBEDDED_HARDWARE_PRESETS` in `backend/app/tasks/embedded_firmware.py`):
+
+| Preset | Chip | Panel | Notes |
+| --- | --- | --- | --- |
+| `waveshare_esp32_s3_photopainter` | S3 | EPD_7in3e 7.3" Spectra | PMIC power-up, TF socket |
+| `waveshare_esp32_s3_epaper_13_3e6` | S3 | EPD_13in3e 13.3" Spectra | dual CS, TF socket |
+| `trmnl_og` | C3 | EPD_7in5_V2 7.5" mono | TRMNL OG |
+| `trmnl_bwry` | C3 | EPD_7in5yr 7.5" BWRY | TRMNL BWRY |
+| `trmnl_og_diy_kit` | S3 | EPD_7in5_V2 | Seeed XIAO ePaper Driver Board |
+| `trmnl_4in26_diy_kit` | S3 | EPD_4in26 4.26" | Seeed XIAO ePaper Driver Board |
+| `xteink_x4` | C3 | EPD_4in26 4.26" | XTEINK X4 reader; TF shares EPD SPI, SD assets off |
+
+Board facts worth knowing before reading a schematic (from the Waveshare docs),
+for the two Spectra boards most of the bench work runs on:
+
+- **13.3E6** — 32 MB flash, 16 MB PSRAM, TF slot on SPI3, MX1.25 battery
+  header. The charge IC is an ETA6098, *not* an I2C PMIC, so there is no
+  battery telemetry unless the schematic turns out to expose a voltage-divider
+  ADC pin. No RTC chip. No user buttons: BOOT and Reset only, which is why
+  GPIO wake has nothing to wake on.
+- **PhotoPainter 7.3"** — 8 MB PSRAM, PMIC power-up, TF socket, and a KEY
+  button next to BOOT (`0:BOOT`, `4:KEY1` in the preset's `gpio_buttons`).
+| `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" | reTerminal Sticky, 32MB flash |
+| `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash |
+| `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash |
+| `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
+
+The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet
+supported — it needs a parallel display driver class this component does not
+have.
 
 ## First boot and provisioning
 
@@ -116,6 +166,90 @@ frameos> ota                             # check for an OTA update now
 frameos> factory-reset
 ```
 
+## Cloud enrollment (cloud-managed frames)
+
+Generic firmware can enroll directly with a cloud provider (enrollment flow A
+in `docs/cloud-frames.md`) instead of — or before — being paired with a
+self-hosted backend. The browser flasher provisions `cloud_url` and
+`claim_token` into NVS over the USB serial API after flashing; by hand it is:
+
+```
+frameos> set cloud_url https://cloud.frameos.net
+frameos> set claim_token FRCT_...        # single use, never echoed back
+frameos> wifi MySSID MyPassword          # saves and reboots
+frameos> status                          # cloud: pending → enrolled
+```
+
+Once Wi-Fi is up, the device generates an Ed25519 keypair (vendored
+Monocypher; the 32-byte seed lives in NVS key `cloud_sk` and is never
+printed), POSTs `{cloud_url}/api/frames/enroll`, and on success persists the
+access token / frame id / WS path (NVS `cloud_token` / `cloud_fid` /
+`cloud_ws`) and erases the claim token. A `400` response (invalid, expired,
+or already-used token) also erases the claim token — it is dead after one
+use — and `status` shows `cloud: error` plus a `cloud_error:` detail line
+until a fresh token is set. Transient failures retry with exponential backoff
+(10 s → 15 min).
+
+Expected `status` line while waiting for enrollment:
+
+```
+cloud:       pending url=https://cloud.frameos.net claim_token=(set) ws=off
+```
+
+and after enrollment (`GET /status` carries the same data under `"cloud"`):
+
+```
+cloud:       enrolled url=https://cloud.frameos.net claim_token=(none) frame=… ws=connected
+```
+
+`cloud_url` must be `https://`; plain `http://` is accepted only for
+localhost, `.local`/`.localhost` names and private-network literals, so a
+typo cannot silently ship the claim token and bearer token in the clear.
+`set cloud_url` rejects anything else outright, and the enrollment/WS paths
+refuse to dial it.
+
+When enrolled, the firmware dials the management WebSocket
+(`esp_websocket_client` managed component) and runs the
+hello/challenge/auth/ready handshake, signing the base64-**decoded** nonce
+bytes with the device key. Implemented verbs: `get_state`, `render`,
+`reboot`, `restart_runtime` (same as reboot on ESP32), `set_current_scene`,
+`set_scenes` (stored through the same interpreted-scene path as
+`usb_api upload-scenes`; `scene_ack` is sent only after the render task has
+actually hot-loaded the payload), `set_settings` (the `interval`/`name`
+subset), `image_get`, and the full asset verb set — `assets_list`,
+`asset_get`, `asset_put`, `asset_mkdir`, `asset_delete`, `asset_rename` —
+against the mounted SD card (shared implementation in `main/fos_assets.c`,
+also behind the local HTTP asset API and the `usb_api` asset commands).
+Write-verb acks are sent after the SD write finishes. Log shipping is
+implemented behind the `telemetry:logs` scope, with `get_logs` replaying the
+on-device ring (last 128 lines); `get_metrics` returns the newest metrics
+sample and the device pushes a `metrics` message after each render pass when
+`telemetry:metrics` is granted. `set_schedule` stores the schedule to
+`/state/schedule.json` and `main/fos_schedule.c` evaluates it once per
+wall-clock minute on the render task (same event model as the Pi
+scheduler: minute/hour/weekday 0=daily 1-7 8=weekdays 9=weekends), in
+frame-local time via a backend-supplied UTC offset. The one documented
+verb outside this profile — `notify_update_available` — is acked
+`unsupported_verb`; anything not in the protocol is acked `unknown_verb`.
+Both are logged.
+
+Redials use jittered exponential backoff (5 s → 5 min), and three consecutive
+authentication rejections (HTTP 401 on the upgrade, or a 4401 close) demote
+the device back to standalone: the access token, frame id and WS path are
+dropped from NVS, the device key is kept, and the last pushed scenes keep
+rendering. `factory-reset` erases all cloud state, including the device key.
+
+A single management WebSocket message is capped at **512 KiB** (the same
+ceiling as the on-device scene store); larger frames are dropped and acked
+`message_too_large`.
+
+Secrets at rest: `cloud_sk` (the Ed25519 seed), `cloud_token`, the unspent
+claim token and the WiFi PSK live in NVS in plaintext unless the board is
+provisioned with ESP-IDF flash encryption. The firmware never prints or
+echoes them, but physical access to an unencrypted module means physical
+access to the link — see the "Secrets at rest on ESP32" note in
+`docs/cloud-frames.md`.
+
 ## Power management (M4)
 
 `deep_sleep` powers the chip down between refreshes; with a panel attached the
@@ -135,6 +269,40 @@ Wi-Fi). The reading is divider-corrected (`battery_divider`, default 2.0 for a
 the device sleeps 6h to keep a low cell from being cycled down to damage. The
 backend can bake these in per-frame via `device_config`:
 `deepSleep`, `wakeSchedule`, `batteryPin`, `batteryDivider`.
+
+## Scene storage and memory (2026.8.13)
+
+Scenes arrive as one combined `scenes.json` — from the USB upload, the
+backend sync or the cloud's `set_scenes` — and that stays the wire format.
+The device does **not** keep them that way. On apply the payload is split
+into `/state/scene-<slot>.json` plus `/state/scene-index.json`, the combined
+file is deleted (the `state` partition is 1M and a payload may be 512K, so
+both do not fit), and only the **active** scene is parsed and resident. The
+index carries ids, names and refresh intervals, so the frame can list and
+switch scenes without holding them.
+
+Slot numbers rather than scene ids, because `CONFIG_SPIFFS_OBJ_NAME_LEN` is
+32 and a scene id is a 36-character uuid: `/<uuid>.json` cannot be opened at
+all. The id ↔ slot mapping lives in the index. Every failure path (an
+unsplittable payload, more than 32 scenes, a full partition) falls back to
+loading the combined file whole, so a frame cannot lose its scenes to a
+failed optimization.
+
+Two allocation facts worth knowing before profiling anything here:
+
+- The Nim heap allocates from PSRAM explicitly (`fos_nim_heap_malloc` in the
+  glue). Plain `malloc` would not: `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` is
+  16384, so everything smaller than 16K comes from the ~300K internal pool,
+  which is also where Wi-Fi, lwIP and TLS allocate. That is why a frame with
+  many scenes could render happily and still be unable to open a TLS
+  connection.
+- QuickJS and cJSON still use libc `malloc`, so they still land in internal
+  RAM. The scene splitter deliberately avoids cJSON on the large payload for
+  that reason, scanning bracket depth over the raw bytes instead.
+
+The cloud link refuses to dial below 48K free internal with a 16K contiguous
+block (`FOS_CLOUD_WS_MIN_INTERNAL_*`) and says so in `status` and the logs,
+rather than failing inside esp-tls as a connection reset.
 
 ## Memory guardrails (M4)
 
@@ -183,13 +351,13 @@ For other flash sizes, append the matching defaults file:
 
 ```bash
 SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota" \
-  FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
+  idf.py reconfigure build
 
 SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.16mb-ota" \
-  FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
+  idf.py reconfigure build
 
 SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.32mb-ota" \
-  FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 idf.py reconfigure build
+  idf.py reconfigure build
 ```
 
 OTA profiles boot new images as "pending verify" (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`);
@@ -202,14 +370,24 @@ has no OTA partition, so firmware updates must be flashed over USB.
 
 1. Add or update the root Waveshare driver wrapper under
    `frameos/src/drivers/waveshare/...`. The ESP32 generator reads that metadata
-   (`init`, `clear`, `display`, dimensions, color option) and symlinks only the
-   selected root C source/header into the IDF build tree.
+   (`init`, `clear`, `display`, dimensions, color option) and symlinks every
+   supported root C source/header into the IDF build tree.
 2. If the wrapper is a native Nim port with a separate C fallback, add the source
-   mapping to `components/frameos_display/generate_selected_panel.py`.
+   mapping to `components/frameos_display/generate_panel_table.py`.
 3. If it introduces a new packed pixel layout, add the matching
    `fos_pixel_format_t`, backend FOSB packer, and Nim dither/pack path.
 4. Bump `EMBEDDED_FIRMWARE_VERSION`.
 
-The ESP32 component intentionally compiles only one selected display driver per
-firmware image. Backend builds set `FRAMEOS_SELECTED_PANEL` from the frame's
-device, so changing panel families means rebuilding firmware for that frame.
+Every supported panel driver is compiled into each firmware image
+(`generate_panel_table.py` emits a runtime table of name, dimensions, format
+and driver function pointers; ~75 KB of flash for all of them — the 4MB
+no-OTA profile still has ~430 KB free). The active
+panel is picked at runtime from the configured panel name, so switching panels
+is `set panel EPD_13in3e` on the serial console (or the setup portal dropdown,
+which lists the whole table) followed by a restart — no rebuild. Panels whose
+symbols collide with a newer variant of the same family are excluded
+(`EPD_7in5_V2_gray`, `EPD_4in2b_V2_old`, `EPD_7in5b_V2_old`), as are the
+IT8951 and 12.48" controller stacks. `FRAMEOS_SELECTED_PANEL` (backend builds
+set it from the frame's device) only chooses the boot-time default panel.
+Published release images remain per flash-size profile, but one generic image
+now covers all panels.

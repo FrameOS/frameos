@@ -13,7 +13,15 @@ FRAMEOS_VERSION ?= $(shell python3 tools/frameos_version.py ../versions.json)
 NIM_BUILD_FLAGS = --out:build/frameos --nimcache:"$(NIMCACHE)" --lineTrace:on --stackTrace:on -d:useMalloc --define:frameosVersion:"$(FRAMEOS_VERSION)"
 
 run: build
-	./build/frameos --verbose
+	@# Nim's std/net dlopens libssl by bare name; inside a Flox env on macOS
+	@# dyld otherwise resolves a mismatched system dylib and the startup
+	@# network check segfaults. SIP strips DYLD_* from protected shells, so
+	@# the variable must be set here, right before the (unprotected) binary.
+	@if [ -n "$$FLOX_ENV" ]; then \
+		DYLD_FALLBACK_LIBRARY_PATH="$$FLOX_ENV/lib$${DYLD_FALLBACK_LIBRARY_PATH:+:$$DYLD_FALLBACK_LIBRARY_PATH}" ./build/frameos --verbose; \
+	else \
+		./build/frameos --verbose; \
+	fi
 
 build: apploaders drivers maybe-driver-libraries maybe-scene-libraries
 	python3 tools/prepare_assets.py

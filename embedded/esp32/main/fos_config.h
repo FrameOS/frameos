@@ -44,6 +44,12 @@ typedef struct {
 
 typedef struct {
     bool enabled;
+    /* Format a card at boot when — and only when — the probe in fos_sd_probe.c
+     * can prove it holds nothing (no filesystem at all, or an exFAT volume with
+     * an empty root directory). Anything it cannot prove empty is left
+     * untouched. On by default so a brand-new card just works; turn it off with
+     * `set assets_sd_autoformat 0` to require the explicit `sd format`. */
+    bool autoformat;
     int8_t cs;
     int8_t sck;
     int8_t miso;
@@ -56,13 +62,24 @@ typedef struct {
     char wifi_pass[FOS_STR_LEN];
     char backend_url[FOS_URL_LEN]; /* e.g. http://192.168.1.10:8989 */
     char api_key[FOS_STR_LEN];     /* frame server_api_key */
+    /* Cloud-managed frames (docs/cloud-frames.md): provider base URL and the
+     * single-use enrollment claim token. The claim token lives in NVS only
+     * until enrollment succeeds or permanently fails, then it is erased.
+     * Long-lived cloud credentials (Ed25519 seed, access token) are NVS-only
+     * and managed by fos_cloud.c — they never enter this struct. */
+    char cloud_url[FOS_URL_LEN];   /* e.g. https://cloud.frameos.net */
+    char claim_token[FOS_STR_LEN]; /* FRCT_…, single use, short lived */
     uint32_t frame_id;
     char hostname[FOS_STR_LEN];    /* DHCP hostname, e.g. "kitchen" */
     char hardware_preset[FOS_STR_LEN]; /* e.g. waveshare_esp32_s3_photopainter */
     char panel[FOS_STR_LEN];       /* e.g. EPD_7in5_V2, or "none" */
     fos_render_mode_t render_mode;
     uint32_t interval_sec;         /* refresh interval */
+    uint16_t rotate;               /* 0/90/180/270 — scenes render rotated, packers map to panel */
     uint32_t max_http_response_bytes;
+    uint32_t http_spill_force_bytes; /* debug: HTTP bodies over this many buffered
+                                      * bytes spill to storage even with PSRAM
+                                      * free (0 = off, spill on pressure only) */
     bool server_send_logs;         /* upload runtime/render logs to backend */
     bool tls_enable;               /* serve the frame HTTP API over HTTPS too */
     uint16_t tls_port;             /* HTTPS port, default mirrors Pi Caddy proxy */
@@ -88,6 +105,12 @@ fos_config_t *fos_config(void);
 esp_err_t fos_config_save(void);
 esp_err_t fos_config_erase(void);
 bool fos_config_wifi_ready(void);
+/* Normalize a rotation onto the four the renderer supports. Any equivalent
+ * angle is accepted (mod 360, negatives included); anything that is not a
+ * right angle is refused. Every writer of `rotate` — the USB console, the
+ * backend settings poll and the cloud set_settings verb — goes through this
+ * so they cannot drift apart. */
+bool fos_config_normalize_rotate(double value, uint16_t *out);
 /* "rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1" (any subset) */
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins);
 void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len);

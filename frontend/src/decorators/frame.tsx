@@ -1,4 +1,5 @@
 import { FrameConnectionDot } from '../components/FrameConnectionDot'
+import { isCloudMode } from '../utils/cloudMode'
 import { Spinner } from '../components/Spinner'
 import { FrameType, LogType } from '../types'
 import { frameAdminPath } from '../utils/frameAdmin'
@@ -9,10 +10,13 @@ export function logUpdatesFrameActivity(log: Pick<LogType, 'type' | 'line'>): bo
 }
 
 export function frameHost(frame: FrameType): string {
+  // Cloud frames have no host at all — never hand back undefined, or every
+  // `frame.name || frameHost(frame)` fallback turns into a crash downstream.
+  const host = frame.frame_host ?? ''
   if (!frame.ssh_user || frame.ssh_user === 'pi') {
-    return frame.frame_host
+    return host
   }
-  return `${frame.ssh_user}@${frame.frame_host}`
+  return `${frame.ssh_user}@${host}`
 }
 
 export const frameStatusWithSpinner = ['deploying', 'preparing', 'rendering', 'restarting', 'starting']
@@ -117,6 +121,16 @@ export function frameStatusLabel(frame: FrameType): string {
 }
 
 export function frameNeedsInitialDeploy(frame: FrameType): boolean {
+  // Cloud-managed frames are judged by what the DEVICE acked, not by a
+  // deploy record. `last_successful_deploy_at` and `mode` are backend-only
+  // columns that frameSummary does not return, so the rule below read
+  // undefined for both and called every cloud frame "waiting for first
+  // deploy" — permanently, including frames that were rendering and shipping
+  // logs. The cloud's equivalent of a deploy is a set_scenes the device
+  // acknowledged, which is exactly what scenes_checksum records.
+  if (isCloudMode() || frame.managed_by === 'cloud') {
+    return !frame.scenes_checksum && !frameHasActivityLog(frame)
+  }
   if ((frame.mode ?? 'rpios') === 'embedded' && frameHasActivityLog(frame)) {
     return false
   }
@@ -152,6 +166,9 @@ export function frameRootUrl(frame: FrameType): string {
 }
 
 export function frameUrl(frame: FrameType): string | null {
+  if (!frame.frame_host) {
+    return null
+  }
   const url = frameRootUrl(frame)
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url
@@ -165,6 +182,9 @@ function frameControlPath(frame: FrameType): string {
 }
 
 export function frameControlUrl(frame: FrameType): string | null {
+  if (!frame.frame_host) {
+    return null
+  }
   const url = frameRootUrl(frame) + frameControlPath(frame)
   if (frame.frame_access === 'public' || !frame.frame_access_key) {
     return url
@@ -174,14 +194,22 @@ export function frameControlUrl(frame: FrameType): string | null {
 }
 
 export function frameAdminUrl(frame: FrameType): string | null {
-  if (!frame.frame_admin_auth?.enabled) {
+  // Virtual frames have no host at all; nothing to link to.
+  if (!frame.frame_admin_auth?.enabled || !frame.frame_host) {
     return null
   }
   const url = frameRootUrl(frame) + frameAdminPath()
-  return withFrameAdminLoginParams(url, frame.frame_admin_auth.user || '', frame.frame_admin_auth.pass || '')
+  try {
+    return withFrameAdminLoginParams(url, frame.frame_admin_auth.user || '', frame.frame_admin_auth.pass || '')
+  } catch {
+    return null
+  }
 }
 
 export function frameImageUrl(frame: FrameType): string | null {
+  if (!frame.frame_host) {
+    return null
+  }
   const url = frameRootUrl(frame) + `/image`
   if (frame.frame_access === 'public' || frame.frame_access === 'protected') {
     return url

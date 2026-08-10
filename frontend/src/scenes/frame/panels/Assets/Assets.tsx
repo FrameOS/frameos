@@ -1,6 +1,7 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import { frameLogic } from '../../frameLogic'
+import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import {
   assetsLogic,
   isInThumbsFolder,
@@ -9,7 +10,14 @@ import {
   type AssetStats,
   type DiskStats,
 } from './assetsLogic'
-import { DocumentIcon, EyeIcon, EyeSlashIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/outline'
+import {
+  DocumentIcon,
+  ExclamationTriangleIcon,
+  EyeIcon,
+  EyeSlashIcon,
+  FolderIcon,
+  FolderOpenIcon,
+} from '@heroicons/react/24/outline'
 import {
   CloudArrowDownIcon,
   DocumentArrowUpIcon,
@@ -25,9 +33,10 @@ import { DropdownMenu, DropdownMenuItem } from '../../../../components/DropdownM
 import { DeferredImage } from '../../../../components/DeferredImage'
 import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/sceneShortcuts'
 import { v4 as uuidv4 } from 'uuid'
-import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { isEmbeddedHardwareFrame, isVirtualFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
 import { frameAssetFolderExpansionKey, workspaceLogic } from '../../../workspace/workspaceLogic'
+import type { FrameId } from '../../../../types'
 
 function humaniseSize(size: number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -60,7 +69,7 @@ function opensAsBrowserImage(name: string): boolean {
   return browserImagePattern.test(name)
 }
 
-function openFrameAsset(frameId: number, path: string, name: string): void {
+function openFrameAsset(frameId: FrameId, path: string, name: string): void {
   const openInline = opensAsBrowserImage(name)
   const url = frameAssetUrl(frameId, path, {
     filename: name,
@@ -94,9 +103,12 @@ function TreeNode({
   setFrameAssetFolderExpanded,
   showSystemFolders,
   toggleShowSystemFolders,
+  showHiddenFiles,
+  toggleShowHiddenFiles,
+  readOnly,
 }: {
   node: AssetNode
-  frameId: number
+  frameId: FrameId
   uploadAssets: (path: string) => void
   deleteAsset: (path: string) => void
   renameAsset: (oldPath: string, newPath: string) => void
@@ -105,10 +117,21 @@ function TreeNode({
   createImageFolderScene: (path: string) => void
   uploadDroppedFiles: (path: string, files: File[]) => void
   frameAssetFolderExpansion: Record<string, boolean>
-  setFrameAssetFolderExpanded: (frameId: number, path: string, expanded: boolean) => void
+  setFrameAssetFolderExpanded: (frameId: FrameId, path: string, expanded: boolean) => void
   showSystemFolders: boolean
   toggleShowSystemFolders: () => void
+  showHiddenFiles: boolean
+  toggleShowHiddenFiles: () => void
+  /** Cloud mode: the wire contract is read-only (assets_list/asset_get), so
+   * every mutation affordance disappears — browse, thumbs, download and the
+   * run-image-scene buttons stay. */
+  readOnly: boolean
 }): JSX.Element {
+  // An esp32 serves these thumbnails from the device itself — one small HTTP
+  // server on a microcontroller that also has a render loop to run. Asking for
+  // five at once makes the whole panel slower than asking for one.
+  const { frame } = useValues(frameLogic)
+  const thumbnailConcurrency = isEsp32Frame(frame) ? 1 : undefined
   const expansionKey = frameAssetFolderExpansionKey(frameId, node.path)
   const expanded = frameAssetFolderExpansion[expansionKey] ?? node.path === ''
   const [isDragOver, setIsDragOver] = useState(false)
@@ -119,6 +142,9 @@ function TreeNode({
     event.preventDefault()
     event.stopPropagation()
     setIsDragOver(false)
+    if (readOnly) {
+      return
+    }
     const files = Array.from(event.dataTransfer.files || [])
     if (!files.length) {
       return
@@ -127,7 +153,7 @@ function TreeNode({
   }
 
   const onDragOver = (event: DragEvent): void => {
-    if (!event.dataTransfer.types.includes('Files')) {
+    if (readOnly || !event.dataTransfer.types.includes('Files')) {
       return
     }
     event.preventDefault()
@@ -181,71 +207,80 @@ function TreeNode({
                 <PlayIcon className="h-4 w-4" />
               </button>
             ) : null}
-            <DropdownMenu
-              horizontal
-              className="w-fit"
-              buttonColor="tertiary"
-              items={
-                [
-                  {
-                    label: 'Upload files',
-                    icon: <DocumentArrowUpIcon className="w-5 h-5" />,
-                    onClick: () => uploadAssets(node.path),
-                  },
-                  {
-                    label: 'New folder',
-                    icon: <FolderPlusIcon className="w-5 h-5" />,
-                    onClick: () => {
-                      const name = window.prompt('Folder name')
-                      if (name) {
-                        const newPath = (node.path ? node.path + '/' : '') + name
-                        createFolder(newPath)
-                      }
+            {(() => {
+              const items = [
+                readOnly
+                  ? null
+                  : {
+                      label: 'Upload files',
+                      icon: <DocumentArrowUpIcon className="w-5 h-5" />,
+                      onClick: () => uploadAssets(node.path),
                     },
-                  },
-                  hasPlayableImages
-                    ? {
-                        label: 'Play all images in this folder',
-                        icon: <PlayIcon className="w-5 h-5" />,
-                        onClick: () => createImageFolderScene(node.path),
-                      }
-                    : null,
-                  !node.path
-                    ? {
-                        label: showSystemFolders ? 'Hide system folders' : 'Show system folders',
-                        icon: showSystemFolders ? (
-                          <EyeSlashIcon className="w-5 h-5" />
-                        ) : (
-                          <EyeIcon className="w-5 h-5" />
-                        ),
-                        onClick: toggleShowSystemFolders,
-                      }
-                    : null,
-                  node.path
-                    ? {
-                        label: 'Rename',
-                        icon: <PencilSquareIcon className="w-5 h-5" />,
-                        onClick: () => {
-                          const base = node.path.split('/').slice(0, -1).join('/')
-                          const newName = window.prompt('New name', node.name)
-                          if (newName) {
-                            const newPath = (base ? base + '/' : '') + newName
-                            renameAsset(node.path, newPath)
-                          }
-                        },
-                      }
-                    : null,
-                  node.path
-                    ? {
-                        label: 'Delete',
-                        confirm: 'Are you sure?',
-                        icon: <TrashIcon className="w-5 h-5" />,
-                        onClick: () => deleteAsset(node.path),
-                      }
-                    : null,
-                ].filter(Boolean) as DropdownMenuItem[]
-              }
-            />
+                readOnly
+                  ? null
+                  : {
+                      label: 'New folder',
+                      icon: <FolderPlusIcon className="w-5 h-5" />,
+                      onClick: () => {
+                        const name = window.prompt('Folder name')
+                        if (name) {
+                          const newPath = (node.path ? node.path + '/' : '') + name
+                          createFolder(newPath)
+                        }
+                      },
+                    },
+                hasPlayableImages
+                  ? {
+                      label: 'Play all images in this folder',
+                      icon: <PlayIcon className="w-5 h-5" />,
+                      onClick: () => createImageFolderScene(node.path),
+                    }
+                  : null,
+                !node.path
+                  ? {
+                      label: showSystemFolders
+                        ? 'Hide system folders (.frameos, .thumbs)'
+                        : 'Show system folders (.frameos, .thumbs)',
+                      icon: showSystemFolders ? <EyeSlashIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />,
+                      onClick: toggleShowSystemFolders,
+                    }
+                  : null,
+                !node.path
+                  ? {
+                      label: showHiddenFiles
+                        ? 'Hide hidden files (.DS_Store, Thumbs.db, …)'
+                        : 'Show hidden files (.DS_Store, Thumbs.db, …)',
+                      icon: showHiddenFiles ? <EyeSlashIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />,
+                      onClick: toggleShowHiddenFiles,
+                    }
+                  : null,
+                node.path && !readOnly
+                  ? {
+                      label: 'Rename',
+                      icon: <PencilSquareIcon className="w-5 h-5" />,
+                      onClick: () => {
+                        const base = node.path.split('/').slice(0, -1).join('/')
+                        const newName = window.prompt('New name', node.name)
+                        if (newName) {
+                          const newPath = (base ? base + '/' : '') + newName
+                          renameAsset(node.path, newPath)
+                        }
+                      },
+                    }
+                  : null,
+                node.path && !readOnly
+                  ? {
+                      label: 'Delete',
+                      confirm: 'Are you sure?',
+                      icon: <TrashIcon className="w-5 h-5" />,
+                      onClick: () => deleteAsset(node.path),
+                    }
+                  : null,
+              ].filter(Boolean) as DropdownMenuItem[]
+              return items.length > 0 ? (
+                <DropdownMenu horizontal className="w-fit" buttonColor="tertiary" items={items} />
+              ) : null
+            })()}
           </div>
         </div>
         {expanded && (
@@ -274,6 +309,9 @@ function TreeNode({
                 setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
                 showSystemFolders={showSystemFolders}
                 toggleShowSystemFolders={toggleShowSystemFolders}
+                showHiddenFiles={showHiddenFiles}
+                toggleShowHiddenFiles={toggleShowHiddenFiles}
+                readOnly={readOnly}
               />
             ))}
           </div>
@@ -365,24 +403,28 @@ function TreeNode({
                   icon: <CloudArrowDownIcon className="w-4 h-4 inline-block" />,
                   onClick: () => openFrameAsset(frameId, node.path, node.name),
                 },
-                {
-                  label: 'Rename',
-                  icon: <PencilSquareIcon className="w-4 h-4" />,
-                  onClick: () => {
-                    const base = node.path.split('/').slice(0, -1).join('/')
-                    const newName = window.prompt('New name', node.name)
-                    if (newName) {
-                      const newPath = (base ? base + '/' : '') + newName
-                      renameAsset(node.path, newPath)
-                    }
-                  },
-                },
-                {
-                  label: 'Delete',
-                  confirm: 'Are you sure?',
-                  icon: <TrashIcon className="w-4 h-4" />,
-                  onClick: () => deleteAsset(node.path),
-                },
+                readOnly
+                  ? null
+                  : {
+                      label: 'Rename',
+                      icon: <PencilSquareIcon className="w-4 h-4" />,
+                      onClick: () => {
+                        const base = node.path.split('/').slice(0, -1).join('/')
+                        const newName = window.prompt('New name', node.name)
+                        if (newName) {
+                          const newPath = (base ? base + '/' : '') + newName
+                          renameAsset(node.path, newPath)
+                        }
+                      },
+                    },
+                readOnly
+                  ? null
+                  : {
+                      label: 'Delete',
+                      confirm: 'Are you sure?',
+                      icon: <TrashIcon className="w-4 h-4" />,
+                      onClick: () => deleteAsset(node.path),
+                    },
               ].filter(Boolean) as DropdownMenuItem[]
             }
           />
@@ -533,7 +575,9 @@ function AssetsSummaryHeader({
           </div>
         ))}
         <div className="bg-[var(--tool-bg)] px-3 py-2 @3xl:px-4 @3xl:py-3">
-          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Disk</div>
+          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">
+            {diskStats?.isQuota ? 'Quota' : 'Disk'}
+          </div>
           {diskStats ? (
             <>
               <div className="mt-0.5 text-base font-semibold text-[color:var(--tool-strong)] @3xl:mt-1 @3xl:text-lg">
@@ -546,7 +590,9 @@ function AssetsSummaryHeader({
                 />
               </div>
               <div className="frame-tool-muted mt-1 truncate text-xs">
-                {humaniseSize(diskStats.availableBytes)} free / {humaniseSize(diskStats.totalBytes)}
+                {diskStats.isQuota
+                  ? `${humaniseSize(diskStats.usedBytes)} of ${humaniseSize(diskStats.totalBytes)} quota`
+                  : `${humaniseSize(diskStats.availableBytes)} free / ${humaniseSize(diskStats.totalBytes)}`}
               </div>
             </>
           ) : (
@@ -563,6 +609,21 @@ function AssetsSummaryHeader({
   )
 }
 
+/** Shown only when the frame explicitly reports an unmounted card. Without it
+ * an empty listing reads as "the card is empty", which it is not — the files
+ * are all still on the card the frame cannot see. */
+function StorageUnmountedNotice(): JSX.Element {
+  return (
+    <div className="mb-3 flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+      <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
+      <div>
+        SD card not mounted — files on the card are not visible to the frame. Nothing has been deleted: reseat the card
+        (or power cycle the frame), then hit Refresh.
+      </div>
+    </div>
+  )
+}
+
 interface AssetsProps {
   scrollContainer?: boolean
 }
@@ -572,15 +633,34 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const assetsLogicProps = { frameId: frame.id }
   useMountedLogic(assetsLogic(assetsLogicProps))
   const { sendEvent } = useActions(frameLogic)
-  const { assetsLoading, assetsRefreshing, assetStats, assetTree, diskStats, showSystemFolders } = useValues(
-    assetsLogic(assetsLogicProps)
-  )
+  const {
+    assetsLoading,
+    assetsRefreshing,
+    assetStats,
+    assetTree,
+    diskStats,
+    showSystemFolders,
+    showHiddenFiles,
+    storageUnmounted,
+  } = useValues(assetsLogic(assetsLogicProps))
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic(assetsLogicProps))
-  const { toggleShowSystemFolders } = useActions(assetsLogic(assetsLogicProps))
+  const { toggleShowSystemFolders, toggleShowHiddenFiles } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
-  const showSyncAction = !isInFrameAdminMode()
+  // Font sync pulls from the backend's own store; the on-device panel and the
+  // cloud have nothing to sync from. Everything else works on every control
+  // plane — the cloud speaks asset_put/asset_mkdir/asset_delete/asset_rename
+  // through /api/frames/{id}/assets/* since cloud-workspace-fixes.
+  //
+  // Embedded frames are excluded for the same reason the API refuses them
+  // (api_frame_assets_sync): their renderers ignore synced fonts. Embedded
+  // hardware reuses the compiled-in typeface for every custom font
+  // (utils/font.nim getTypeface under frameosEmbedded) and virtual frames
+  // render with the fonts bundled into the wasm renderer, so the button could
+  // only ever produce the backend's "not supported" error.
+  const readOnly = false
+  const showSyncAction = workspaceMode() === 'backend' && !isEmbeddedHardwareFrame(frame) && !isVirtualFrame(frame)
 
   // syncAssets registers a long-running task toast, so no need to open logs
   const handleSyncAssets = () => {
@@ -640,6 +720,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             onRefresh={refreshAssets}
             onSync={handleSyncAssets}
           />
+          {storageUnmounted ? <StorageUnmountedNotice /> : null}
           <TreeNode
             node={assetTree}
             frameId={frame.id}
@@ -654,6 +735,9 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
             showSystemFolders={showSystemFolders}
             toggleShowSystemFolders={toggleShowSystemFolders}
+            showHiddenFiles={showHiddenFiles}
+            toggleShowHiddenFiles={toggleShowHiddenFiles}
+            readOnly={readOnly}
           />
         </div>
       )}

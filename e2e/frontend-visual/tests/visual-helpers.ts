@@ -319,6 +319,132 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
   })
 }
 
+/** A connected FrameOS Cloud link with both backup switches on, as returned
+ * by /api/cloud/status. The real backend is never linked during visual runs,
+ * so the cloud endpoints are mocked at the network layer. */
+export function connectedCloudStatus({
+  backupScenesEnabled = true,
+  backupFramesEnabled = true,
+}: { backupScenesEnabled?: boolean; backupFramesEnabled?: boolean } = {}): Record<string, unknown> {
+  return {
+    enabled: true,
+    provider_url: 'https://cloud.frameos.net',
+    default_provider_url: 'https://cloud.frameos.net',
+    status: 'connected',
+    can_edit_provider: false,
+    poll_error: null,
+    local_fallback_enabled: true,
+    backup_scenes_enabled: backupScenesEnabled,
+    backup_frames_enabled: backupFramesEnabled,
+    backup_key_fingerprint: 'AB12-CD34',
+    connection: null,
+    identity: null,
+    link: {
+      linked_client_id: 'lc-visual-1',
+      scopes: ['backend:link', 'backend:read', 'backup:scenes', 'backup:frames', 'store:publish'],
+      account_id: 'acc-visual-1',
+      account_email: 'visual@example.com',
+      connected_at: '2026-05-20T09:00:00Z',
+      last_inventory_sync_at: '2026-05-23T11:45:00Z',
+    },
+  }
+}
+
+export const cloudBackupFixtures = [
+  {
+    id: 'backup-frame-1',
+    kind: 'frames',
+    item_key: 'frame-1',
+    name: 'Living room frame',
+    size_bytes: 18_432,
+    sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    content_type: 'application/json',
+    created_at: '2026-05-21T08:30:00Z',
+    updated_at: '2026-05-22T21:14:00Z',
+  },
+  {
+    id: 'backup-template-1',
+    kind: 'templates',
+    item_key: 'template-4f6d2b6e',
+    name: 'Morning dashboard scene',
+    size_bytes: 96_256,
+    sha256: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+    content_type: 'application/zip',
+    created_at: '2026-05-19T10:00:00Z',
+    updated_at: '2026-05-23T07:02:00Z',
+  },
+]
+
+export interface CloudBackupMockCalls {
+  frameBackups: unknown[]
+  templateBackups: unknown[]
+  restores: unknown[]
+  deletes: string[]
+  keyImports: unknown[]
+}
+
+/** Mock the /api/cloud/* surface with a linked account that has stored
+ * backups. Install BEFORE page.goto — cloudLogic loads status on mount. */
+export async function mockCloudBackupsApi(
+  page: Page,
+  {
+    backupScenesEnabled = true,
+    backupFramesEnabled = true,
+    backups = cloudBackupFixtures,
+  }: { backupScenesEnabled?: boolean; backupFramesEnabled?: boolean; backups?: typeof cloudBackupFixtures } = {}
+): Promise<CloudBackupMockCalls> {
+  const calls: CloudBackupMockCalls = { frameBackups: [], templateBackups: [], restores: [], deletes: [], keyImports: [] }
+  const status = connectedCloudStatus({ backupScenesEnabled, backupFramesEnabled })
+  await page.route(projectApiPathPattern('/cloud/status'), fulfillJson(status))
+  await page.route(projectApiPathPattern('/cloud/backup-features'), fulfillJson(status))
+  await page.route(projectApiPathPattern('/cloud/backups'), fulfillJson({ backups, missing_scope: false }))
+  await page.route(projectApiPathPattern('/cloud/backup-key'), async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        fingerprint: 'AB12-CD34',
+        recovery_code: 'FRBK1-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH-IIII-JJJJ-KKKK-LLLL-M',
+      }),
+    })
+  })
+  await page.route(projectApiPathPattern('/cloud/backup-key/import'), async (route) => {
+    calls.keyImports.push(route.request().postDataJSON())
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'imported', fingerprint: 'AB12-CD34' }),
+    })
+  })
+  // DELETE /api/cloud/backups/{id} — registered before the more specific
+  // routes below so restore/frames/templates POSTs still win.
+  await page.route(projectApiPathPattern('/cloud/backups/*'), async (route) => {
+    if (route.request().method() === 'DELETE') {
+      calls.deletes.push(route.request().url().split('/').pop() ?? '')
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'deleted' }) })
+      return
+    }
+    await route.fallback()
+  })
+  await page.route(projectApiPathPattern('/cloud/backups/frames'), async (route) => {
+    calls.frameBackups.push(route.request().postDataJSON())
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'saved' }) })
+  })
+  await page.route(projectApiPathPattern('/cloud/backups/templates'), async (route) => {
+    calls.templateBackups.push(route.request().postDataJSON())
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'saved' }) })
+  })
+  await page.route(projectApiPathPattern('/cloud/backups/restore'), async (route) => {
+    calls.restores.push(route.request().postDataJSON())
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'restored', kind: 'frame', id: 2 }),
+    })
+  })
+  return calls
+}
+
 export async function login(page: Page): Promise<void> {
   const response = await page.request.post('/api/login', {
     form: {

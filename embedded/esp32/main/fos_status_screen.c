@@ -1,4 +1,5 @@
 #include "fos_status_screen.h"
+#include "fos_mem.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -207,7 +208,7 @@ esp_err_t fos_status_screen_show_portal(const char *ssid, const char *ip)
     int height = fos_display_height();
     fos_pixel_format_t format = fos_display_format();
     size_t len = fos_display_buffer_size();
-    uint8_t *buf = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *buf = fos_big_malloc(len);
     if (!buf) {
         ESP_LOGE(TAG, "out of PSRAM for %u byte status screen", (unsigned)len);
         return ESP_ERR_NO_MEM;

@@ -2,12 +2,12 @@ import { actions, connect, kea, key, listeners, path, props, reducers, selectors
 
 import { frameLogic } from '../../frameLogic'
 
-import { FrameScene, StateField } from '../../../../types'
+import { FrameScene, StateField, FrameId } from '../../../../types'
 
 import type { sceneStateLogicType } from './sceneStateLogicType'
 
 export interface SceneStateLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string | null
 }
 

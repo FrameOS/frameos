@@ -163,6 +163,41 @@ proc valueFromJsonByType*(j: JsonNode; fieldType: string): Value =
     let s = if j.kind == JString: j.getStr() else: $j
     return VString(s)
 
+type DefaultedArg* = tuple[name: string, error: string]
+  ## A code-node argument whose producer raised, plus that producer's error
+  ## message, so the failure stays attributable further down the pipeline.
+
+proc zeroValueForCodeArgType*(fieldType: string): Value =
+  ## Zero value substituted for a code-node argument whose producer failed.
+  ##
+  ## The goal is "no data", not "undefined": one flaky data source must not take
+  ## down an entire scene. So these values are picked to be maximally
+  ## spread-safe and iterate-safe in JS:
+  ##
+  ## * string-ish types get `""` — `[...""]` yields nothing, `for (const x of "")`
+  ##   runs zero times, and `"" + x` still concatenates.
+  ## * `json` **and undeclared/unknown types** get an empty JSON *array*, never
+  ##   `null`: `[...null]` and `for (const x of null)` both throw, while
+  ##   `[...[]]` is a no-op and `Object.keys([])`/`[].map(...)` are all fine.
+  ##   Declared types are unreliable in the wild (real scenes declare
+  ##   `type: "string"` on args that carry JSON arrays), so when we are not sure
+  ##   we pick the value that survives the most downstream shapes.
+  ## * numbers/booleans/colors fall through to the existing
+  ##   `valueFromJsonByType(null, …)` zero values (0, 0.0, false, #000000).
+  ## * images have no spreadable zero; `fkNone` (JS `null`) is the honest answer.
+  case fieldType
+  of "integer", "float", "boolean", "color", "node", "scene":
+    valueFromJsonByType(newJNull(), fieldType)
+  of "text":
+    VText("")
+  of "string", "select":
+    VString("")
+  of "image":
+    VNone()
+  else:
+    # "json", "" (no declaration) and anything we do not recognise
+    VJson(newJArray())
+
 proc logCodeNodeOutput*(scene: FrameScene; nodeId: NodeId; value: Value) =
   ## Log the output of a code node if it's not an image.
   let value = if value.kind == fkImage:

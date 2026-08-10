@@ -1,0 +1,97 @@
+name: Publish npm packages
+
+# Builds and publishes frameos-wasm + frameos-editor at the versions already
+# committed in their package.json files. Never bumps versions — run the
+# "Release FrameOS" workflow for that. Versions that already exist on npm are
+# skipped, so re-running after a failed release publishes only what's missing.
+#
+# Auth uses npm trusted publishing (OIDC) — no NPM_TOKEN secret. Each package
+# must have a trusted publisher configured on npmjs.com pointing at this
+# repository and this workflow file (npm-publish.yml).
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref (branch, tag, or SHA) to build and publish from'
+        required: false
+        type: string
+        default: main
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish-npm:
+    name: Publish FrameOS npm packages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; Node 22 bundles npm 10.
+      - name: Update npm for trusted publishing
+        run: npm install -g npm@^11
+
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The runtime assets (frameos.js/frameos.wasm) are build outputs, not
+      # committed — compile them like the Dockerfile does.
+      - name: Build the wasm runtime
+        run: |
+          cd frameos
+          nimble install -d -y
+          ./tools/build_wasm.sh
+
+      - name: Build frameos-wasm
+        run: pnpm --dir frameos/wasm run build
+
+      # The embedded editor bundle needs the full frontend build (its build
+      # config lives in frontend/build.mjs).
+      - name: Build the frontend and frameos-editor
+        run: |
+          pnpm --dir frontend run build
+          pnpm --dir frameos/editor run build
+
+      - name: Publish frameos-wasm and frameos-editor
+        run: |
+          for package in frameos/wasm frameos/editor; do
+            name=$(node -p "require('./${package}/package.json').name")
+            version=$(node -p "require('./${package}/package.json').version")
+            # Each package version follows its own content-owning component;
+            # skip only when that exact component version already exists.
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "${name}@${version} already on npm — skipping."
+              continue
+            fi
+            (cd "$package" && npm publish --access public)
+          done

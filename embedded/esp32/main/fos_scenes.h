@@ -13,6 +13,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 /* Mount /state and mark any cached scenes.json for loading. */
@@ -21,6 +22,7 @@ esp_err_t fos_scenes_init(void);
 /* Pull scenes from the backend if they changed (sha256 ETag); apply on this
  * task. Call from the render task only. `force` refetches unconditionally. */
 esp_err_t fos_scenes_sync(bool force);
+bool fos_scenes_state_mounted(void);
 
 /* Persist a scenes JSON payload (local push, e.g. POST /api/scenes) and mark
  * it pending. Safe from any task; trigger a render to apply. */
@@ -44,6 +46,14 @@ bool fos_scenes_apply_pending_selection(void);
 
 /* Apply pending scenes (file → Nim). Render task only. True if applied. */
 bool fos_scenes_apply_pending(void);
+
+/* Monotonic count of apply attempts made by the render task, and whether the
+ * most recent one loaded into the runtime. A producer records the generation
+ * before calling fos_scenes_set_json() and polls until it changes, which is
+ * how the cloud client learns that a pushed payload actually went live before
+ * it reports `scene_ack`. Safe to read from any task. */
+uint32_t fos_scenes_apply_generation(void);
+bool fos_scenes_apply_succeeded(void);
 
 /* Number of scenes currently loaded into the Nim runtime. */
 int fos_scenes_loaded(void);

@@ -98,7 +98,9 @@ from app.utils.remote_exec import (
 from app.utils.frame_http import (
     _fetch_frame_http_bytes,
     _frame_scheme_port,
+    _is_embedded_frame,
 )
+from app.utils import embedded_assets, virtual_assets
 from app.api.frame_sync import (
     apply_frame_sync,
     get_frame_sync_status,
@@ -134,6 +136,8 @@ from app.tasks.embedded_firmware import (
     embedded_ota_supported_for_frame,
     embedded_toolchain_available,
     latest_embedded_firmware,
+    embedded_platform_spec_for_frame,
+    is_virtual_frame,
     normalize_embedded_platform,
     refresh_embedded_firmware_status,
     request_or_queue_embedded_firmware_ota,
@@ -141,6 +145,7 @@ from app.tasks.embedded_firmware import (
     with_embedded_firmware_layout,
 )
 from app.tasks.buildroot_image import (
+    buildroot_agent_defaults,
     buildroot_sd_image_no_build_environment_message,
     buildroot_sd_image_config_fingerprint,
     can_use_precompiled_buildroot_sd_image,
@@ -311,6 +316,16 @@ def _frame_image_refresh_lock_key(frame_id: int) -> str:
     return f"frame:{frame_id}:image:refreshing"
 
 
+def _as_asset_listing(
+    assets: "list[dict[str, Any]] | embedded_assets.AssetListing",
+) -> embedded_assets.AssetListing:
+    """Accept either a bare list (SSH/agent/virtual sources) or a listing that
+    also carries the device's storage state."""
+    if isinstance(assets, embedded_assets.AssetListing):
+        return assets
+    return embedded_assets.AssetListing(assets=list(assets or []))
+
+
 async def _read_frame_assets_cache(redis: Redis, cache_key: str) -> dict[str, Any] | None:
     cached = await redis.get(cache_key)
     if not cached:
@@ -327,14 +342,25 @@ async def _read_frame_assets_cache(redis: Redis, cache_key: str) -> dict[str, An
 async def _write_frame_assets_cache(
     redis: Redis,
     cache_key: str,
-    assets: list[dict[str, Any]],
+    assets: "list[dict[str, Any]] | embedded_assets.AssetListing",
     *,
     fetched_at: float | None = None,
 ) -> float:
+    listing = _as_asset_listing(assets)
     cache_time = fetched_at if fetched_at is not None else time.time()
+    if listing.mounted is False:
+        # An unmounted SD card is a transient fault, not an empty card. Caching
+        # its empty listing for 30 days is how "where did all my files go?!"
+        # happens — drop whatever is stored and re-ask the device next time, so
+        # a card that comes back shows up on the very next listing.
+        await redis.delete(cache_key)
+        return cache_time
+    payload: dict[str, Any] = {"assets": listing.assets, "fetched_at": cache_time}
+    if listing.storage is not None:
+        payload["storage"] = listing.storage
     await redis.set(
         cache_key,
-        json.dumps({"assets": assets, "fetched_at": cache_time}).encode(),
+        json.dumps(payload).encode(),
         ex=FRAME_ASSETS_CACHE_TTL_SECONDS,
     )
     return cache_time
@@ -910,6 +936,12 @@ async def _forward_frame_request(
 
 
 async def _load_frame_states(redis: Redis, frame: Frame) -> dict[str, Any]:
+    if is_virtual_frame(frame):
+        from .virtual_frame import virtual_frame_states_payload
+
+        return _normalise_frame_states_payload(
+            await virtual_frame_states_payload(redis, frame)
+        )
     try:
         return _normalise_frame_states_payload(
             await _forward_frame_request(frame, redis, path="/states")
@@ -1188,6 +1220,12 @@ async def api_frame_get_state(
     id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     frame = _project_frame(db, id) or _not_found()
+    if is_virtual_frame(frame):
+        from .virtual_frame import virtual_frame_states_payload
+
+        payload = await virtual_frame_states_payload(redis, frame)
+        scene_id = payload["sceneId"]
+        return {"sceneId": scene_id, "state": payload["states"].get(scene_id) or {}}
     state = await _forward_frame_request(
         frame,
         redis,
@@ -1207,6 +1245,18 @@ async def api_frame_get_states(
     redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id) or _not_found()
+    # Virtual frames answer from the backend's own state store — nothing to
+    # poll, so no cache/background-refresh dance.
+    if is_virtual_frame(frame):
+        state_record = await _load_frame_states(redis, frame)
+        return {
+            **state_record,
+            "cache": _frame_states_cache_meta(
+                cached=False,
+                refreshing=False,
+                fetched_at=time.time(),
+            ),
+        }
     cache_key = _frame_states_cache_key(frame.id)
     lock_key = _frame_states_cache_lock_key(frame.id)
     cached = await _read_frame_states_cache(redis, cache_key)
@@ -1364,10 +1414,36 @@ async def api_frame_event(
         if request.headers.get("content-type") == "application/json"
         else request.body()
     )
+    scenes = None
     if event == "uploadScenes":
         scenes, body = _normalize_upload_scenes_payload(body)
         scene_id = body.get("sceneId")
         _validate_upload_scenes_payload(scenes, scene_id)
+    # Virtual frames have no device to forward to: every event reduces to
+    # "note the scene choice and state, render the image, done".
+    if is_virtual_frame(frame):
+        from .virtual_frame import (
+            apply_virtual_scene_state,
+            refresh_virtual_frame_image,
+            resolve_virtual_scene_id,
+        )
+
+        scene_id = body.get("sceneId") if isinstance(body, dict) else None
+        scene_id = scene_id if isinstance(scene_id, str) else None
+        if event in {"setCurrentScene", "setSceneState"}:
+            state = body.get("state") if isinstance(body, dict) else None
+            if isinstance(state, dict) and state:
+                target_scene = await resolve_virtual_scene_id(redis, frame, scene_id)
+                await apply_virtual_scene_state(redis, frame, target_scene, state)
+        if event in {"setCurrentScene", "setSceneState", "uploadScenes"}:
+            await _mark_frame_states_cache_stale(redis, frame, scene_id=scene_id)
+        # uploadScenes = preview-on-frame: render the posted (possibly
+        # unsaved) scenes without persisting them.
+        upload = scenes if event == "uploadScenes" else None
+        await refresh_virtual_frame_image(
+            db, redis, frame, scenes_override=upload, scene_id=scene_id
+        )
+        return "OK"
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
@@ -1646,6 +1722,71 @@ async def api_frame_local_binary_zip(
     return StreamingResponse(sender(), headers=headers, media_type="application/zip")
 
 
+def _device_assets(frame: Frame):
+    """Asset backend for frames without SSH: virtual frames keep assets on the
+    backend disk, embedded frames proxy to the device HTTP API. Both modules
+    share the same function signatures."""
+    return virtual_assets if is_virtual_frame(frame) else embedded_assets
+
+
+async def _embedded_asset_file_response(
+    redis: Redis,
+    frame: Frame,
+    *,
+    full_path: str,
+    rel_path: str,
+    mode: str,
+    filename: str,
+    thumb: bool,
+) -> StreamingResponse:
+    """Serve one asset from an embedded frame by proxying the device HTTP API.
+
+    Thumbnails are generated on the backend (the device has no ImageMagick) and
+    cached in redis keyed by the md5 of the original bytes, mirroring the
+    SSH/agent code path's `asset:thumb:{md5}` cache."""
+    try:
+        data, _device_content_type = await _device_assets(frame).download_asset(frame, redis, full_path)
+    except HTTPException as exc:
+        if exc.status_code == HTTPStatus.NOT_FOUND:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
+        raise
+
+    if thumb:
+        full_md5 = hashlib.md5(data).hexdigest()
+        cache_key = f"asset:thumb:{full_md5}"
+        if cached := await redis.get(cache_key):
+            return StreamingResponse(io.BytesIO(cached), media_type="image/jpeg")
+        thumb_data = embedded_assets.thumbnail_jpeg(data)
+        if thumb_data is None:
+            # Undecodable image (or Pillow missing): serve the original bytes.
+            media_type = mimetypes.guess_type(filename or rel_path)[0] or "application/octet-stream"
+            return StreamingResponse(io.BytesIO(data), media_type=media_type)
+        await redis.set(cache_key, thumb_data, ex=86400 * 30)
+        return StreamingResponse(io.BytesIO(thumb_data), media_type="image/jpeg")
+
+    md5 = hashlib.md5(data).hexdigest()
+    await redis.set(f"asset:{md5}", data, ex=86400 * 30)
+
+    media_type = "application/octet-stream"
+    if mode == "image":
+        media_type = (
+            mimetypes.guess_type(filename or rel_path)[0]
+            or "application/octet-stream"
+        )
+
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": (
+                f"{'attachment' if mode == 'download' else 'inline'}; "
+                f'filename="{_ascii_safe(filename)}"; '
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            ),
+        },
+    )
+
+
 @api_open.get("/projects/{project_id}/frames/{id:int}/asset")
 async def api_frame_get_asset(
     project_id: int,
@@ -1680,17 +1821,28 @@ async def api_frame_get_asset(
     if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
-    if thumb:
-        if os.path.splitext(rel_path)[1].lower() not in {
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".bmp",
-            ".webp",
-        }:
-            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Not an image")
+    if thumb and os.path.splitext(rel_path)[1].lower() not in {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".bmp",
+        ".webp",
+    }:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Not an image")
 
+    if _is_embedded_frame(frame):
+        return await _embedded_asset_file_response(
+            redis,
+            frame,
+            full_path=full_path,
+            rel_path=rel_path,
+            mode=mode,
+            filename=filename,
+            thumb=thumb,
+        )
+
+    if thumb:
         md5_key = f"asset-md5:{full_path}"
         cached_md5 = await redis.get(md5_key)
         if cached_md5:
@@ -2021,6 +2173,30 @@ async def api_frame_get_image(
     cache_key = _frame_image_cache_key(frame.id)
     path = "/image"
 
+    # Virtual frames have no device to fetch from: render server-side (the
+    # same wasm path their public URLs use) instead of proxying to a
+    # nonexistent host.
+    if is_virtual_frame(frame):
+        # Serve the cached image; render only when there is none. Rendering
+        # on every poll made the preview flash "rendering" continuously —
+        # fresh frames come from deploy/activate/render events, which
+        # publish straight into this cache.
+        cached = await _get_cached_frame_image(redis, cache_key)
+        if cached is None:
+            from .virtual_frame import render_virtual_frame_png
+
+            cached = await render_virtual_frame_png(db, redis, frame)
+            active_scene = await _active_scene_id_from_cache(redis, frame.id)
+            await _store_frame_image(
+                db, redis, frame, cached,
+                scene_id=active_scene or None, publish_rendered=False,
+            )
+        return Response(
+            content=cached,
+            media_type="image/png",
+            headers=await read_frame_sync_hint_headers(redis, frame.id),
+        )
+
     if request.method == "HEAD":
         headers = await read_frame_sync_hint_headers(redis, frame.id)
         if not await _get_cached_frame_image(redis, cache_key):
@@ -2205,11 +2381,16 @@ async def _load_frame_assets(
     redis: Redis,
     frame: Frame,
     assets_path: str,
-) -> list[dict[str, Any]]:
+) -> embedded_assets.AssetListing:
+    if _is_embedded_frame(frame):
+        # Embedded devices report whether their SD card is mounted; virtual
+        # frames answer with a plain list (their store is always there).
+        return _as_asset_listing(await _device_assets(frame).list_assets(frame, redis))
+
     if await _use_remote(frame, redis):
         assets = await assets_list_on_frame(frame.id, assets_path, redis=redis)
         assets.sort(key=lambda a: a["path"])
-        return assets
+        return _as_asset_listing(assets)
 
     ssh = await get_ssh_connection(db, redis, frame)
     try:
@@ -2235,7 +2416,7 @@ async def _load_frame_assets(
                 "is_dir": ftype == "directory",
             })
     assets.sort(key=lambda a: a["path"])
-    return assets
+    return _as_asset_listing(assets)
 
 
 async def _refresh_frame_assets_cache(
@@ -2253,7 +2434,7 @@ async def _refresh_frame_assets_cache(
         frame = db.get(Frame, frame_id)
         if frame is None:
             return
-        assets = await _load_frame_assets(db, redis, frame, assets_path)
+        listing = await _load_frame_assets(db, redis, frame, assets_path)
         invalidated_at = await redis.get(invalidated_key)
         if invalidated_at:
             invalidated_at = (
@@ -2265,7 +2446,7 @@ async def _refresh_frame_assets_cache(
                 if float(invalidated_at) > started_at:
                     completed = True
                     return
-        await _write_frame_assets_cache(redis, cache_key, assets)
+        await _write_frame_assets_cache(redis, cache_key, listing)
         completed = True
     except Exception:
         # Keep serving the previous cached list. The lock TTL throttles retries.
@@ -2349,8 +2530,10 @@ async def api_frame_get_assets(
                 cache_key,
                 lock_key,
             )
+        cached_storage = cached.get("storage")
         return {
             "assets": cached["assets"],
+            "storage": cached_storage if isinstance(cached_storage, dict) else None,
             "cache": _frame_assets_cache_meta(
                 cached=True,
                 refreshing=refreshing,
@@ -2358,10 +2541,13 @@ async def api_frame_get_assets(
             ),
         }
 
-    assets = await _load_frame_assets(db, redis, frame, assets_path)
-    fetched_at = await _write_frame_assets_cache(redis, cache_key, assets)
+    listing = await _load_frame_assets(db, redis, frame, assets_path)
+    fetched_at = await _write_frame_assets_cache(redis, cache_key, listing)
     return {
-        "assets": assets,
+        "assets": listing.assets,
+        # None for every source that says nothing about its storage (SSH,
+        # agent, virtual, pre-flag firmware) — the UI only warns on False.
+        "storage": listing.storage,
         "cache": _frame_assets_cache_meta(
             cached=False,
             refreshing=False,
@@ -2377,6 +2563,13 @@ async def api_frame_assets_sync(
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    if _is_embedded_frame(frame):
+        detail = (
+            "Asset sync is not supported for virtual frames — fonts are bundled with the renderer"
+            if is_virtual_frame(frame)
+            else "Asset sync is not supported for embedded frames — fonts are compiled into the firmware"
+        )
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=detail)
     try:
         from app.models.assets import sync_assets
 
@@ -2414,20 +2607,26 @@ async def api_frame_assets_upload_image(
     if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
         _bad_request("Invalid asset path")
 
-    await make_dir(db, redis, frame, upload_dir)
-
-    exists_status, _, _ = await run_command(
-        db,
-        redis,
-        frame,
-        f"test -f {shlex.quote(combined_path)}",
-        log_output=False,
-        log_command=False,
-    )
-    uploaded = False
-    if exists_status != 0:
-        await upload_file(db, redis, frame, combined_path, data)
+    if _is_embedded_frame(frame):
+        # The device API creates parent dirs and replaces in place; the
+        # md5-derived filename keeps re-uploads of identical bytes idempotent.
+        await _device_assets(frame).upload_asset(frame, redis, combined_path, data)
         uploaded = True
+    else:
+        await make_dir(db, redis, frame, upload_dir)
+
+        exists_status, _, _ = await run_command(
+            db,
+            redis,
+            frame,
+            f"test -f {shlex.quote(combined_path)}",
+            log_output=False,
+            log_command=False,
+        )
+        uploaded = False
+        if exists_status != 0:
+            await upload_file(db, redis, frame, combined_path, data)
+            uploaded = True
 
     if uploaded:
         await _invalidate_frame_assets_cache(redis, frame, assets_path)
@@ -2441,33 +2640,177 @@ async def api_frame_assets_upload_image(
     }
 
 
-@api_project.post("/frames/{id:int}/assets/upload")
-async def api_frame_assets_upload(
-    id: int,
-    path: Optional[str] = Form(
-        None,
-        description="Sub-folder inside the frame's assets directory (optional)",
-    ),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis),
-):
-    frame = _project_frame(db, id) or _not_found()
-
-    subdir = (path or "").lstrip("/")
+def _asset_upload_combined_path(frame: Frame, subdir: str, filename: str) -> tuple[str, str]:
+    """Validate subdir + filename against the frame's assets root; returns
+    (assets_path, combined_path)."""
+    subdir = (subdir or "").lstrip("/")
     if "*" in subdir or ".." in subdir or os.path.isabs(subdir):
         _bad_request("Invalid character * in path")
-
     assets_path = frame.assets_path or "/srv/assets"
     combined_path = os.path.normpath(
-        os.path.join(assets_path, subdir, file.filename or "uploaded_file")
+        os.path.join(assets_path, subdir, filename or "uploaded_file")
     )
     if not combined_path.startswith(os.path.normpath(assets_path) + os.sep):
         _bad_request("Invalid asset path")
+    return assets_path, combined_path
 
-    data = await file.read()
 
-    await upload_file(db, redis, frame, combined_path, data)
+async def _asset_upload_store(
+    db: Session, redis: Redis, frame: Frame, combined_path: str, data: bytes
+) -> None:
+    if _is_embedded_frame(frame):
+        await _device_assets(frame).upload_asset(frame, redis, combined_path, data)
+    else:
+        await upload_file(db, redis, frame, combined_path, data)
+
+
+_UPLOAD_CHUNK_DIR = os.path.join(tempfile.gettempdir(), "frameos-upload-chunks")
+_UPLOAD_CHUNK_STALE_SECONDS = 24 * 3600
+
+
+def _upload_chunk_part_path(frame_id: int, upload_id: str) -> str:
+    return os.path.join(_UPLOAD_CHUNK_DIR, f"{frame_id}-{upload_id}.part")
+
+
+def _cleanup_stale_upload_parts() -> None:
+    try:
+        cutoff = time.time() - _UPLOAD_CHUNK_STALE_SECONDS
+        for name in os.listdir(_UPLOAD_CHUNK_DIR):
+            part = os.path.join(_UPLOAD_CHUNK_DIR, name)
+            try:
+                if os.path.getmtime(part) < cutoff:
+                    os.unlink(part)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
+async def _chunked_asset_upload(
+    request: Request, frame: Frame, db: Session, redis: Redis
+) -> dict[str, Any]:
+    """One chunk of a client-driven chunked upload (raw body + query params,
+    same protocol as the on-device admin API). Real embedded devices get each
+    chunk forwarded immediately — a completed chunk is on the device, so
+    client progress is device progress. Virtual/SSH frames (and embedded
+    devices on legacy firmware) accumulate locally and store on complete."""
+    qp = request.query_params
+    upload_id = qp.get("upload_id") or ""
+    if not embedded_assets.valid_upload_id(upload_id):
+        _bad_request("Invalid upload id")
+    filename = os.path.basename((qp.get("filename") or "").strip()) or "uploaded_file"
+    try:
+        chunk_index = int(qp.get("chunk_index") or "0")
+        offset = int(qp.get("offset") or "-1")
+    except ValueError:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid chunk parameters")
+    if chunk_index < 0:
+        _bad_request("Invalid chunk parameters")
+    if chunk_index == 0 and offset < 0:
+        offset = 0
+    complete = (qp.get("complete") or "1") == "1"
+    chunk = await request.body()
+    if not chunk and not complete:
+        _bad_request("Empty chunk")
+
+    assets_path, combined_path = _asset_upload_combined_path(frame, qp.get("path") or "", filename)
+
+    part_path = _upload_chunk_part_path(frame.id, upload_id)
+    accumulate = os.path.exists(part_path)
+
+    if _is_embedded_frame(frame) and not is_virtual_frame(frame) and not accumulate:
+        if offset < 0:
+            _bad_request("Missing offset")
+        payload = await embedded_assets.upload_asset_chunk(
+            frame,
+            redis,
+            combined_path,
+            chunk,
+            upload_id=upload_id,
+            chunk_index=chunk_index,
+            offset=offset,
+            complete=complete,
+        )
+        if payload is not None:
+            if not complete:
+                return {"pending": True, "received": payload.get("received", offset + len(chunk))}
+            await _invalidate_frame_assets_cache(redis, frame, assets_path)
+            rel = os.path.relpath(combined_path, assets_path)
+            return {
+                "path": rel,
+                "size": payload.get("size", offset + len(chunk)),
+                "mtime": payload.get("mtime", int(datetime.now().timestamp())),
+                "is_dir": False,
+            }
+        # Legacy firmware without chunk support: accumulate locally instead
+        # and deliver the whole file on the final chunk.
+        accumulate = True
+
+    if chunk_index > 0 and not accumulate:
+        # The part vanished (backend restart, stale cleanup): client restarts.
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="chunk_gap")
+
+    os.makedirs(_UPLOAD_CHUNK_DIR, exist_ok=True)
+    _cleanup_stale_upload_parts()
+    if chunk_index == 0:
+        with open(part_path, "wb") as fh:
+            fh.write(chunk)
+    else:
+        part_size = os.path.getsize(part_path)
+        seek_to = offset if offset >= 0 else part_size
+        if seek_to > part_size:
+            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="chunk_gap")
+        with open(part_path, "r+b") as fh:
+            fh.seek(seek_to)
+            fh.write(chunk)
+
+    if not complete:
+        return {"pending": True, "received": os.path.getsize(part_path)}
+
+    with open(part_path, "rb") as fh:
+        data = fh.read()
+    os.unlink(part_path)
+    await _asset_upload_store(db, redis, frame, combined_path, data)
+    await _invalidate_frame_assets_cache(redis, frame, assets_path)
+    rel = os.path.relpath(combined_path, assets_path)
+    return {
+        "path": rel,
+        "size": len(data),
+        "mtime": int(datetime.now().timestamp()),
+        "is_dir": False,
+    }
+
+
+@api_project.post("/frames/{id:int}/assets/upload")
+async def api_frame_assets_upload(
+    id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Upload an asset. Two request shapes share this route:
+
+    * multipart form (``file`` + optional ``path``) — the whole file at once;
+    * chunked (query params ``upload_id``/``filename``/``chunk_index``/
+      ``offset``/``complete`` + raw body) — the protocol the on-device admin
+      API already speaks; used by the frontend for embedded frames so a slow
+      device link never has to survive one giant request.
+    """
+    frame = _project_frame(db, id) or _not_found()
+
+    if "upload_id" in request.query_params:
+        return await _chunked_asset_upload(request, frame, db, redis)
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or isinstance(upload, str):
+        _bad_request("Missing file")
+    assets_path, combined_path = _asset_upload_combined_path(
+        frame, str(form.get("path") or ""), upload.filename or ""
+    )
+
+    data = await upload.read()
+    await _asset_upload_store(db, redis, frame, combined_path, data)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
 
     rel = os.path.relpath(combined_path, assets_path)
@@ -2500,7 +2843,10 @@ async def api_frame_assets_mkdir(
     if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
-    await make_dir(db, redis, frame, full_path)
+    if _is_embedded_frame(frame):
+        await _device_assets(frame).make_dir(frame, redis, full_path)
+    else:
+        await make_dir(db, redis, frame, full_path)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
     return {"message": "Created"}
 
@@ -2526,7 +2872,10 @@ async def api_frame_assets_delete(
     if full_path != normalized_assets_path and not full_path.startswith(normalized_assets_path + os.sep):
         _bad_request("Invalid asset path")
 
-    await delete_path(db, redis, frame, full_path)
+    if _is_embedded_frame(frame):
+        await _device_assets(frame).delete_path(frame, redis, full_path)
+    else:
+        await delete_path(db, redis, frame, full_path)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
     return {"message": "Deleted"}
 
@@ -2556,9 +2905,22 @@ async def api_frame_assets_rename(
     ) or not dst_full.startswith(os.path.normpath(assets_path)):
         _bad_request("Invalid asset path")
 
-    await rename_path(db, redis, frame, src_full, dst_full)
+    if _is_embedded_frame(frame):
+        await _device_assets(frame).rename_path(frame, redis, src_full, dst_full)
+    else:
+        await rename_path(db, redis, frame, src_full, dst_full)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
     return {"message": "Renamed"}
+
+
+def _reject_embedded_frame(frame: Frame, reason: str) -> None:
+    """400 for SSH/agent verbs that have no meaning on a microcontroller.
+
+    Embedded frames have no shell, no systemd service and no FrameOS Remote
+    agent; /restart and /reboot stay available through the device's HTTP API.
+    """
+    if _is_embedded_frame(frame):
+        _bad_request(reason)
 
 
 @api_project.post("/frames/{id:int}/clear_build_cache")
@@ -2568,6 +2930,7 @@ async def api_frame_clear_build_cache(
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    _reject_embedded_frame(frame, "Embedded frames have no on-device build cache to clear")
 
     if await _use_remote(frame, redis):
         try:
@@ -2608,6 +2971,7 @@ async def api_frame_reset_event(
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
+    _reject_embedded_frame(frame, "Reset over SSH is not available for embedded frames; reflash the firmware instead")
     try:
         from app.tasks import reset_frame
 
@@ -2658,6 +3022,7 @@ async def api_frame_deploy_remote_event(
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
+    _reject_embedded_frame(frame, "FrameOS Remote does not run on embedded frames")
     remote_transport = _remote_task_transport(transport)
     try:
         from app.tasks import deploy_remote
@@ -2676,6 +3041,7 @@ async def api_frame_restart_remote_event(
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
+    _reject_embedded_frame(frame, "FrameOS Remote does not run on embedded frames")
     remote_transport = _remote_task_transport(transport)
     try:
         from app.tasks import restart_remote
@@ -2693,6 +3059,10 @@ async def api_frame_stop_event(
     db: Session = Depends(get_db),
 ):
     frame = _project_frame(db, id) or _not_found()
+    _reject_embedded_frame(
+        frame,
+        "Stop is not available for embedded frames — the firmware is the runtime; use restart or reboot instead",
+    )
     try:
         from app.tasks import stop_frame
 
@@ -3217,8 +3587,22 @@ async def api_frame_update_endpoint(
 
     old_mode = frame.mode
     old_device = frame.device
+    previous_sd_image = (frame.buildroot or {}).get("sdImage") if isinstance(frame.buildroot, dict) else None
     for field, value in update_data.items():
         setattr(frame, field, value)
+
+    if "buildroot" in update_data:
+        # buildroot.sdImage is build output owned by the backend (written by the
+        # SD image worker), not frame configuration. Clients echo back whatever
+        # copy they loaded with the form, so accepting it here would revert the
+        # record to a stale image the moment anyone saves the frame after a
+        # rebuild. Keep the server-side record authoritative.
+        buildroot = dict(frame.buildroot or {})
+        if previous_sd_image is not None:
+            buildroot["sdImage"] = previous_sd_image
+        else:
+            buildroot.pop("sdImage", None)
+        frame.buildroot = buildroot
 
     if "timezone" in update_data:
         frame.timezone = stored_timezone(frame.timezone) or None
@@ -3349,6 +3733,14 @@ async def api_frame_new(
                 **(frame.network or {}),
                 **(data.network or {}),
             }
+            # Remote on by default for a flashed card, but the add-frame form
+            # can turn it off for an SSH-only frame. Applied here, at creation,
+            # so nothing later re-imposes it.
+            frame.agent = {
+                **(frame.agent or {}),
+                **buildroot_agent_defaults(),
+                **(data.agent or {}),
+            }
             ensure_buildroot_frame_defaults(frame, data.platform)
             validate_buildroot_wifi_credentials(frame)
             db.add(frame)
@@ -3478,7 +3870,9 @@ async def api_frame_import(
 async def api_frame_delete(
     frame_id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
-    _project_frame(db, frame_id)
+    frame = _project_frame(db, frame_id)
+    if frame is not None and is_virtual_frame(frame):
+        virtual_assets.delete_frame_assets(frame)
     success = await delete_frame(db, redis, frame_id, current_project_id())
     if success:
         return {"message": "Frame deleted successfully"}

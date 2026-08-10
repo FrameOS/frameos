@@ -50,6 +50,13 @@ suite "web route behavior":
     }
     configureServerState(config)
 
+    # A private frame with the admin panel enabled sends anonymous browsers to
+    # the login page — a bare 401 renders as a blank page and reads as "the
+    # frame serves nothing".
+    let rootNoSession = httpRequest(server.port, "GET", "/")
+    check rootNoSession.status == 302
+    check rootNoSession.header("location") == "/login"
+
     let adminNoSession = httpRequest(server.port, "GET", "/admin")
     check adminNoSession.status == 302
     check adminNoSession.header("location") == "/login"

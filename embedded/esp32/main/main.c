@@ -8,7 +8,10 @@
  * The serial console (USB) is always available: `help` for commands,
  * `wifi <ssid> [pass]` provisions a frame without the portal.
  */
+#include <dirent.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,15 +23,19 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 
+#include "fos_assets.h"
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
+#include "fos_defaults.h"
 #include "fos_buttons.h"
 #include "fos_client.h"
+#include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_console.h"
 #include "fos_http.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
+#include "fos_schedule.h"
 #include "fos_status_screen.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
@@ -39,10 +46,19 @@ static const char *TAG = "frameos";
 #define WIFI_CONNECT_TIMEOUT_MS 45000
 #define SNTP_TIMEOUT_MS 10000
 
-/* Heartbeat on the XIAO ESP32-S3 user LED (GPIO 21, active low). Driving an
- * unconnected GPIO on other boards is harmless. Slow blink = running,
- * fast blink = provisioning portal. */
-#define HEARTBEAT_GPIO 21
+/* Heartbeat on the XIAO ESP32-S3 user LED (GPIO 21, active low). Slow
+ * blink = running, fast blink = provisioning portal. Only the S3 gets a
+ * default: on the C3 boards GPIO 21 is display CS (XTEINK X4) or I2C
+ * (TRMNL), so "unconnected GPIO" no longer holds; boards without a plain
+ * LED disable the task with -1. generated_config.h may override. */
+#ifndef FRAMEOS_HEARTBEAT_GPIO
+#if CONFIG_IDF_TARGET_ESP32S3
+#define FRAMEOS_HEARTBEAT_GPIO 21
+#else
+#define FRAMEOS_HEARTBEAT_GPIO -1
+#endif
+#endif
+#define HEARTBEAT_GPIO FRAMEOS_HEARTBEAT_GPIO
 
 static volatile uint32_t s_blink_period_ms = 2000;
 
@@ -91,6 +107,19 @@ static void log_bootup_event(bool online)
     frameos_nim_flush_logs();
 }
 
+/* Boot-time memory attribution, the C-side companion to the Nim -d:memProbe.
+ * Off by default; build with -DFRAMEOS_BOOTMEM=1 to find out which init step
+ * is holding the PSRAM a render needs. This is how the 1.57 MB default-font
+ * parse was found: every other step on this list costs a couple of KB. */
+#if defined(FRAMEOS_BOOTMEM) && FRAMEOS_BOOTMEM
+#define BOOTMEM(stage) ESP_LOGW(TAG, "BOOTMEM %-24s psram_free=%u largest=%u internal=%u", \
+    stage, (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM), \
+    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM), \
+    (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL))
+#else
+#define BOOTMEM(stage) ((void)0)
+#endif
+
 void app_main(void)
 {
     const esp_app_desc_t *app = esp_app_get_description();
@@ -98,6 +127,7 @@ void app_main(void)
     ESP_LOGI(TAG, "FrameOS %s (idf %s) booting from %s",
              app->version, app->idf_ver, running ? running->label : "?");
 
+    BOOTMEM("start");
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
 
@@ -106,7 +136,9 @@ void app_main(void)
         ESP_LOGI(TAG, "battery: %d mV (%d%%)", fos_battery_millivolts(), fos_battery_percent());
     }
 
-    xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
+    if (HEARTBEAT_GPIO >= 0) {
+        xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
+    }
 
     fos_display_config_t display_config = {
         .panel = config->panel,
@@ -116,12 +148,22 @@ void app_main(void)
         .busy = config->pins.busy, .sck = config->pins.sck,
         .mosi = config->pins.mosi, .pwr = config->pins.pwr,
     };
+    BOOTMEM("after-config");
     if (fos_display_init(&display_config) != ESP_OK) {
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }
 
+    /* fos_assets_sd_mount emits its own structured "assets:sd" line into the
+     * log ring (and replays it to the backend/cloud once upload is enabled,
+     * below) — a mount failure must never be a serial-only event, or "why are
+     * my assets empty?" has no remote answer. */
+    BOOTMEM("after-display");
     if (fos_assets_sd_mount(config) != ESP_OK) {
-        ESP_LOGW(TAG, "SD assets unavailable, continuing without /srv/assets");
+        ESP_LOGW(TAG, "SD assets unavailable, continuing without %s: %s",
+                 config->assets_path[0] ? config->assets_path : "/srv/assets",
+                 fos_assets_sd_last_error());
+    } else {
+        fos_assets_cleanup_stale_uploads();
     }
 
     /* Memory guardrail (M4): refuse to render a panel on-device that can't fit
@@ -131,7 +173,16 @@ void app_main(void)
     if (fos_display_present()) {
         size_t need = fos_display_render_psram_bytes();
         size_t have = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
-        if (need > have) {
+        if (have == 0) {
+            /* PSRAM-less module (every supported ESP32-C3 board): thin-client
+             * is the design, not a degradation — keep the log calm. */
+            if (config->render_mode != FOS_RENDER_REMOTE) {
+                ESP_LOGI(TAG, "no PSRAM on this module; running as a thin client "
+                         "(the backend or cloud renders)");
+                config->render_mode = FOS_RENDER_REMOTE;
+            }
+            local_render_ok = false;
+        } else if (need > have) {
             ESP_LOGE(TAG, "panel %s needs ~%u KB PSRAM to render on-device but the module has "
                      "~%u KB; switching to thin-client mode", config->panel,
                      (unsigned)(need / 1024), (unsigned)(have / 1024));
@@ -140,6 +191,7 @@ void app_main(void)
         }
     }
 
+    BOOTMEM("after-sd");
     ESP_ERROR_CHECK(fos_wifi_init());
     fos_http_set_actions(action_render_now, action_ota_now);
 
@@ -169,16 +221,21 @@ void app_main(void)
      * consume internal RAM, but after early-boot OTA had a chance to run with
      * the leanest possible task set. The task waits until fos_client_resume()
      * below, so starting it here only claims the stack. */
+    /* Before any render: decides whether the previous boot was a memory
+     * rescue and whether rendering should stay paused this time. */
+    BOOTMEM("after-wifi");
+    fos_client_render_recovery_boot();
     fos_client_start();
 
+    BOOTMEM("after-client-start");
     if (frameos_nim_available() && local_render_ok) {
         int width = fos_display_present() ? fos_display_width() : 800;
         int height = fos_display_present() ? fos_display_height() : 480;
         char frame_name[64];
         snprintf(frame_name, sizeof(frame_name), "frame %lu", (unsigned long)config->frame_id);
         if (frameos_nim_init(width, height, frame_name, config->max_http_response_bytes,
-                             config->backend_url, config->frame_id, config->api_key,
-                             config->server_send_logs)) {
+                             config->backend_url, config->api_key,
+                             config->server_send_logs, config->rotate)) {
             ESP_LOGI(TAG, "nim runtime up: %s", frameos_nim_info());
         } else {
             ESP_LOGE(TAG, "nim runtime failed to initialize");
@@ -191,17 +248,67 @@ void app_main(void)
 
     /* Interpreted scenes: mount /state and queue any cached scenes.json;
      * the render task applies it and keeps it synced with the backend. */
+    BOOTMEM("after-nim-init");
     if (fos_scenes_init() != ESP_OK) {
         ESP_LOGW(TAG, "scene storage unavailable, continuing without");
     }
+    BOOTMEM("after-scenes-init");
+    fos_schedule_init();
 
+    /* Oversized HTTP bodies (multi-MB gallery images) spill to storage
+     * instead of failing on PSRAM pressure (cloud/docs/esp32-large-image-
+     * spill.md). Prefer the SD card — a dot-directory stays invisible to the
+     * asset API — over the /state SPIFFS partition. Sweep leftovers from a
+     * crash before registering. */
+    {
+        const char *spill_dir = NULL;
+        char sd_spill[160];
+        if (fos_assets_sd_mounted()) {
+            snprintf(sd_spill, sizeof(sd_spill), "%s/.cache",
+                     config->assets_path[0] ? config->assets_path : "/srv/assets");
+            mkdir(sd_spill, 0775);
+            spill_dir = sd_spill;
+        } else if (fos_scenes_state_mounted()) {
+            spill_dir = "/state";
+        }
+        if (spill_dir != NULL) {
+            DIR *dir = opendir(spill_dir);
+            if (dir != NULL) {
+                struct dirent *entry;
+                while ((entry = readdir(dir)) != NULL) {
+                    if (strncmp(entry->d_name, "http-spill-", 11) != 0) continue;
+                    char stale[448];
+                    snprintf(stale, sizeof(stale), "%s/%s", spill_dir, entry->d_name);
+                    unlink(stale);
+                    ESP_LOGW(TAG, "removed stale spill file %s", stale);
+                }
+                closedir(dir);
+            }
+            fos_nim_http_set_spill_dir(spill_dir, 8 * 1024 * 1024);
+            fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);
+            ESP_LOGI(TAG, "http spill dir: %s%s", spill_dir,
+                     config->http_spill_force_bytes ? " (forced)" : "");
+        }
+    }
+
+    BOOTMEM("after-spill");
     fos_console_start();
+
+    /* Cloud-managed frames (docs/cloud-frames.md): idles until cloud_url and
+     * a claim token are provisioned (USB `set`, flasher) and Wi-Fi is up,
+     * then enrolls and, when enrolled, runs the management WebSocket. */
+    BOOTMEM("after-console");
+    if (fos_cloud_start() != ESP_OK) {
+        ESP_LOGW(TAG, "cloud client unavailable");
+    }
 
     if (online) {
         frameos_nim_set_log_upload_enabled(true);
+        if (config->assets_sd.enabled) fos_assets_sd_log_status();
         log_bootup_event(true);
         fos_http_start(false);
         fos_ota_start_periodic_task(24);
+        BOOTMEM("after-http+ota");
     } else {
         frameos_nim_set_log_upload_enabled(false);
         if (!fos_config_wifi_ready()) {

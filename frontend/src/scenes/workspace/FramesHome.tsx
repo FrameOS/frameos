@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
 import {
   ArchiveBoxIcon,
@@ -33,10 +33,13 @@ import {
   frameStatusDescription,
 } from '../../decorators/frame'
 import { urls } from '../../urls'
-import { FrameScene, FrameType } from '../../types'
+import { FrameScene, FrameType, FrameId } from '../../types'
 import { FrameosShell } from './FrameosShell'
-import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
+import { isMobileWorkspaceViewport, sceneMatchesSearch, workspaceLogic } from './workspaceLogic'
 import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
+import { registeredAddFramePanel } from './addFramePanelRegistry'
+import { addFrameFlows, workspaceMode } from './workspaceSurfaces'
+import { sceneControlNoticeContent } from './sceneControlNotice'
 import { NewFrame } from '../frames/NewFrame'
 import { newFrameForm } from '../frames/newFrameForm'
 import { frameLogic } from '../frame/frameLogic'
@@ -128,7 +131,7 @@ function FrameTree(): JSX.Element {
   const { closeSecondarySidebar, focusFrame, openFrameChangeDrawer, openFrameTool, selectFrame } =
     useActions(workspaceLogic)
 
-  const focusFrameAfterDrawerUpdate = (frameId: number): void => {
+  const focusFrameAfterDrawerUpdate = (frameId: FrameId): void => {
     focusFrame(frameId)
     if (typeof window === 'undefined') {
       return
@@ -140,7 +143,7 @@ function FrameTree(): JSX.Element {
     })
   }
 
-  const handleFrameClick = (event: MouseEvent<HTMLButtonElement>, frameId: number): void => {
+  const handleFrameClick = (event: MouseEvent<HTMLButtonElement>, frameId: FrameId): void => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
       return
     }
@@ -158,7 +161,7 @@ function FrameTree(): JSX.Element {
     }
   }
 
-  const handleFrameDoubleClick = (event: MouseEvent<HTMLButtonElement>, frameId: number): void => {
+  const handleFrameDoubleClick = (event: MouseEvent<HTMLButtonElement>, frameId: FrameId): void => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
       return
     }
@@ -246,8 +249,8 @@ function FrameTreeRow({
   selected: boolean
   archived?: boolean
   inactive?: boolean
-  onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
-  onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
+  onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
+  onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
 }): JSX.Element {
   const frameName = frame.name || frameHost(frame)
 
@@ -318,9 +321,9 @@ function FrameTreeGroup({
 }: {
   title: string
   frames: FrameType[]
-  selectedFrameId: number | null
-  onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
-  onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: number) => void
+  selectedFrameId: FrameId | null
+  onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
+  onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
   expanded?: boolean
   onToggle?: () => void
   inactive?: boolean
@@ -561,11 +564,13 @@ function NewBlankSceneModal({
 
 function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
   const { createBlankScene } = useActions(frameLogic({ frameId: frame.id }))
+  const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
   const [newBlankSceneModalOpen, setNewBlankSceneModalOpen] = useState(false)
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
   const { applyFavouriteTemplatesToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const { favouriteTemplates, installableFavouriteTemplates } = useValues(templatesLogic({ frameId: frame.id }))
-  const hasScenes = (frame.scenes?.length ?? 0) > 0
+  // Live list, so "Split screen" unlocks as soon as the first scene is added.
+  const hasScenes = liveScenes.length > 0
   const favouriteTemplateCount = favouriteTemplates.length
   const installableFavouriteTemplateCount = installableFavouriteTemplates.length
 
@@ -718,13 +723,26 @@ function FrameSectionToolLinks({ frame }: { frame: FrameType }): JSX.Element {
 }
 
 function FrameSection({ section }: { section: OverviewFrameSection }): JSX.Element {
-  const { frame, scenes, archived, frameMatchesSearch } = section
+  const { frame, archived, frameMatchesSearch } = section
+  // `section.scenes` comes from framesModel's *saved* frame, so a scene added,
+  // renamed or deleted here (all of which only touch `frameForm.scenes`) would
+  // not show until "Save changes". A kea selector in workspaceLogic cannot read
+  // a keyed frameLogic reactively, so the live list is read here instead —
+  // frameLogic is already mounted for every rendered frame by
+  // FrameDashboardSurface, so this adds no extra logic mount.
+  const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
+  const { search } = useValues(workspaceLogic)
+  const normalizedSearch = search.trim().toLowerCase()
+  const visibleScenes = useMemo(
+    () => (normalizedSearch ? liveScenes.filter((scene) => sceneMatchesSearch(scene, normalizedSearch)) : liveScenes),
+    [liveScenes, normalizedSearch]
+  )
 
   return (
     <FrameDashboardSurface
       frame={frame}
-      scenes={scenes}
-      totalScenes={frame.scenes?.length ?? scenes.length}
+      scenes={visibleScenes}
+      totalScenes={liveScenes.length}
       archived={archived}
       frameMatchesSearch={frameMatchesSearch}
       sectionId={`workspace-frame-${frame.id}`}
@@ -821,7 +839,7 @@ function resolveSceneControlSelection(
 function SceneControlPanelContent({
   sceneControlSelection,
 }: {
-  sceneControlSelection: { frameId: number; sceneId: string }
+  sceneControlSelection: { frameId: FrameId; sceneId: string }
 }): JSX.Element | null {
   const { frames } = useValues(framesModel)
   const { closeSceneControl, openTemplateDrawer } = useActions(workspaceLogic)
@@ -832,7 +850,7 @@ function SceneControlPanelContent({
     uploadedScenesLoading,
   } = useValues(controlLogic({ frameId: sceneControlSelection.frameId }))
   const frameLogicProps = { frameId: sceneControlSelection.frameId }
-  const { frameForm, undeployedChanges, unsavedChanges } = useValues(frameLogic(frameLogicProps))
+  const { frameForm } = useValues(frameLogic(frameLogicProps))
   const { saveAndDeployFrame, saveFrame } = useActions(frameLogic(frameLogicProps))
   const { undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic(frameLogicProps))
   const { openGenerator } = useActions(splitScreenLayoutLogic(frameLogicProps))
@@ -940,12 +958,17 @@ function SceneControlPanelContent({
                   </div>
                 ) : null}
               </div>
-              {saved ? (
+              {saved || sceneIsEditable ? (
+                // `saved || sceneIsEditable`, not `saved` alone: a scene that
+                // only exists in the frame form (a fresh blank scene — and on
+                // the cloud EVERY edited scene, since the cloud's save is a
+                // settings push that never persists scene graphs) would
+                // otherwise have no way into the editor at all.
                 <div className="mb-4 flex flex-wrap gap-2">
                   <WorkspaceSceneDropDown
                     frame={frame}
                     scene={scene}
-                    scenes={frame.scenes ?? [scene]}
+                    scenes={editingFrame.scenes ?? frame.scenes ?? [scene]}
                     horizontal
                     buttonColor="none"
                     className="frameos-secondary-button flex h-8 w-8 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 text-slate-600 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
@@ -971,8 +994,6 @@ function SceneControlPanelContent({
               ) : null}
               <SceneControlPanelModeTitle />
               <SceneControlChangeNotice
-                frameUndeployedChanges={undeployedChanges}
-                frameUnsavedChanges={unsavedChanges}
                 sceneIsUndeployed={sceneIsUndeployed}
                 sceneIsUnsaved={sceneIsUnsaved}
                 onDeploy={saveAndDeployFrame}
@@ -1003,35 +1024,29 @@ function SceneControlPanelModeTitle(): JSX.Element {
 }
 
 function SceneControlChangeNotice({
-  frameUndeployedChanges,
-  frameUnsavedChanges,
   sceneIsUndeployed,
   sceneIsUnsaved,
   onDeploy,
   onSave,
 }: {
-  frameUndeployedChanges: boolean
-  frameUnsavedChanges: boolean
   sceneIsUndeployed: boolean
   sceneIsUnsaved: boolean
   onDeploy: () => void
   onSave: () => void
 }): JSX.Element | null {
-  if (!sceneIsUnsaved && !sceneIsUndeployed) {
+  // Copy and buttons per control plane live in sceneControlNotice.ts (pure,
+  // pinned by the cloud test suite): the cloud has no scene "save", only the
+  // set_scenes deploy push, so it shows one "Deploy to frame" action.
+  const content = sceneControlNoticeContent({ mode: workspaceMode(), sceneIsUnsaved, sceneIsUndeployed })
+  if (!content) {
     return null
   }
 
-  const statusText = sceneIsUnsaved
-    ? sceneIsUndeployed
-      ? 'This scene has unsaved changes that are not deployed to the frame.'
-      : 'This scene has unsaved changes.'
-    : 'This scene is saved but not deployed to the frame.'
-
   return (
     <div className="frameos-warning-button mb-4 rounded-xl border px-3 py-3 shadow-sm">
-      <div className="text-sm font-semibold">{statusText}</div>
+      <div className="text-sm font-semibold">{content.statusText}</div>
       <div className="mt-2 flex flex-wrap gap-2">
-        {sceneIsUnsaved ? (
+        {content.showSaveButton ? (
           <button
             type="button"
             onClick={onSave}
@@ -1040,26 +1055,40 @@ function SceneControlChangeNotice({
             Save changes
           </button>
         ) : null}
-        {sceneIsUnsaved || sceneIsUndeployed || frameUnsavedChanges || frameUndeployedChanges ? (
-          <button
-            type="button"
-            onClick={onDeploy}
-            className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <RocketLaunchIcon className="h-4 w-4" />
-            {sceneIsUnsaved ? 'Save & deploy' : 'Deploy changes'}
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onClick={onDeploy}
+          className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <RocketLaunchIcon className="h-4 w-4" />
+          {content.deployLabel}
+        </button>
       </div>
     </div>
   )
 }
 
+// The "Add frame" drawer for this control plane: the self-hosted creation
+// form, or — in the cloud bundle — the enrollment panel it registered at
+// startup (claim codes, SD images, ESP32 flashing). See workspaceSurfaces'
+// addFrameFlows and addFramePanelRegistry.
 function AddFramePanel(): JSX.Element | null {
   const { formVisible } = useValues(newFrameForm)
   const { hideForm } = useActions(newFrameForm)
+  const RegisteredPanel = addFrameFlows[workspaceMode()] === 'cloudPanel' ? registeredAddFramePanel() : null
 
   if (!formVisible) {
+    return null
+  }
+
+  if (RegisteredPanel) {
+    return <RegisteredPanel />
+  }
+
+  // A cloud bundle that somehow registered nothing shows no drawer at all:
+  // the backend form below posts to /api/frames/new, which the cloud does not
+  // implement (405 on submit).
+  if (addFrameFlows[workspaceMode()] !== 'backendForm') {
     return null
   }
 
@@ -1097,6 +1126,9 @@ export function FramesHome(): JSX.Element {
   const { toggleArchivedFramesExpanded, toggleInactiveFramesExpanded } = useActions(framesModel)
   const hasFrameSections =
     overviewActiveFrameSections.length + overviewInactiveFrameSections.length + overviewArchivedFrameSections.length > 0
+  // The self-hosted form is a narrow 390px drawer; the cloud enrollment panel
+  // is a full-width one, like the template and scene control drawers.
+  const addFramePanelIsCompact = formVisible && addFrameFlows[workspaceMode()] === 'backendForm'
 
   return (
     <FrameosShell
@@ -1119,7 +1151,7 @@ export function FramesHome(): JSX.Element {
           <SceneControlPanel />
         ) : null
       }
-      rightPanelSize={formVisible ? 'compact' : 'normal'}
+      rightPanelSize={addFramePanelIsCompact ? 'compact' : 'normal'}
     >
       <div className="space-y-12 pb-12">
         {hasFrameSections ? (

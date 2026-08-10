@@ -5,6 +5,39 @@ per-frame BOOT payloads, FRAMEOS, and ASSETS partition images. The slow Buildroo
 base image is built manually in CI or locally, uploaded to the `frameos-archive`
 R2 bucket, and referenced by this manifest.
 
+## Platforms
+
+Every supported board is described by one entry in the platform registry,
+`backend/app/tasks/buildroot_platforms.py`: Buildroot defconfig, binary
+cross-compile target, extra Buildroot config, boot config, and Wi-Fi firmware
+quirks all live there. Currently enabled:
+
+| Platform | Bits | Defconfig | Binary target |
+| --- | --- | --- | --- |
+| `raspberry-pi-zero-2-w` | 64 | `raspberrypizero2w_64_defconfig` | `debian-bookworm-arm64` |
+| `raspberry-pi-zero-w` | 32 | `raspberrypi0w_defconfig` | `debian-bookworm-armv6` |
+
+The Pi Zero W is ARMv6 hard-float. Debian has no ARMv6 port, so its FrameOS
+and Remote binaries are cross-compiled with the Bootlin `armv6-eabihf`
+toolchain inside an amd64 container (`backend/bin/cross` target
+`debian-bookworm-armv6`); the Debian armhf packages only provide headers and
+link-time stubs, and at runtime binaries resolve against the ARMv6 Buildroot
+rootfs libraries. Never ship `armhf` (ARMv7) binaries to a Pi Zero W — they
+SIGILL on its ARM1176 core.
+
+Base images for 32-bit ARM platforms are best built on x86_64 hosts, where the
+prebuilt Bootlin rootfs toolchain applies; on other hosts Buildroot silently
+falls back to building the toolchain from source (slower, same result).
+
+Registered but not yet implemented (`enabled=False`, see TODOs in the
+registry): `luckfox-pico` (Rockchip RV1103/RV1106) and `allwinner-t113`
+(T113-S3/S4). Both are ARMv7 and can reuse the `debian-bookworm-armhf` binary
+target, but need their own defconfig/BR2_EXTERNAL tree and a non-Raspberry-Pi
+boot layout in the post-image flow.
+
+The `manifest.json` in this directory holds one entry per platform; `upload`
+replaces only the entry for the platform being uploaded.
+
 ## CI publishing
 
 Use the manual GitHub workflow `.github/workflows/buildroot-base-image.yml` for
@@ -14,15 +47,20 @@ manifest commit:
 ```bash
 gh workflow run buildroot-base-image.yml --ref your-branch
 
+# Build the 32-bit Raspberry Pi Zero W base image:
+gh workflow run buildroot-base-image.yml --ref your-branch -f platform=raspberry-pi-zero-w
+
 # Use a custom runner label, for example a larger ARM runner:
 gh workflow run buildroot-base-image.yml --ref your-branch -f runner_label=your-arm-runner-label
 ```
 
-The workflow defaults to `ubuntu-24.04-arm` and can be dispatched with a custom
-runner label when a larger/self-hosted ARM runner is available. It builds the
-base image, uploads it to R2, verifies the refreshed manifest, and commits the
-resulting `tools/buildroot-images/manifest.json` change back to the selected
-branch.
+The workflow picks the platform's default runner (`ubuntu-24.04-arm` for the
+Zero 2 W, x86_64 `ubuntu-24.04` for 32-bit ARM platforms so the prebuilt
+Bootlin toolchain applies) and can be dispatched with a custom runner label
+when a larger/self-hosted runner is available. It builds the base image,
+uploads it to R2, verifies the refreshed manifest, and commits the resulting
+`tools/buildroot-images/manifest.json` change back to the selected branch.
+Run it once per platform; the manifest keeps one entry per platform.
 
 Repository secrets required by the upload step:
 
@@ -53,7 +91,13 @@ python tools/buildroot-images/buildroot_images.py download --force
 
 # Inspect remote entries.
 python tools/buildroot-images/buildroot_images.py list
+
+# Print the enabled platform matrix (used by CI).
+python tools/buildroot-images/buildroot_images.py platforms
 ```
+
+All commands accept `--platform raspberry-pi-zero-w` for the 32-bit Pi Zero W;
+`release-image` derives `--target` from the platform when omitted.
 
 The helper reads R2 credentials from the environment or a `.env` file:
 
@@ -78,6 +122,57 @@ first-boot setup service runs
 `/srv/frameos/current/frameos setup --with-setup=/boot/frameos-setup.json`. Other
 per-frame boot files include WiFi credentials, hostname, and authorized SSH keys.
 
+Secret handling on the FAT boot partition:
+
+- After a successful first boot the consumed `frameos-setup.json` is
+  **overwritten with zeros and deleted** (best effort on FAT). It used to be
+  renamed to `setup-done-<timestamp>.json`, which left WiFi credentials and
+  access keys readable on the boot partition; that rename no longer happens.
+  The persistent `/boot/frameos-setup-reset.log` keeps the debugging trail.
+- `/boot` is mounted `umask=077` (root-only). Everything touching it at
+  runtime already runs as root.
+- The same first-boot service also watches `/boot/frameos-cloud.txt`, the
+  cloud-enrollment personalization file (see `docs/cloud-frames.md`,
+  "Provisioning"). When it contains at least one recognized key
+  (`cloud_url`, `claim_token`, `name`, `wifi_ssid`, `wifi_password`), the
+  script installs the optional WiFi credentials as a NetworkManager keyfile,
+  writes `/srv/frameos/current/state/cloud_enroll_pending.json` (0600) with
+  `{"claim_token", "provider_url", "name"?}` for the FrameOS runtime to
+  enroll with, and shreds the personalization file the same way. A
+  `wifi_ssid` without a `wifi_password` is an open network: the keyfile then
+  carries no `[wifi-security]` section at all (`key-mgmt=wpa-psk` with an
+  empty `psk=` yields a connection NetworkManager can never activate). On
+  images without `python3` (busybox-only), double quotes, backslashes, and
+  control characters are stripped from `frameos-cloud.txt` values when
+  writing that JSON — avoid them in names and WiFi credentials there.
+- The file is only shredded once its secrets have actually been consumed:
+  a successful enrollment (the claim token is single-use) or a written WiFi
+  keyfile. If neither happened — e.g. a valid `cloud_url` next to a
+  misspelled `claim_tokn=` — the script warns and keeps the file, because it
+  is the user's only copy of what they typed. `/boot` is mounted root-only
+  (`umask=077`), so keeping it cannot leak the contents.
+- A `frameos-cloud.txt` with **no recognized keys** is treated as "not
+  personalized": no enrollment state, file left untouched, exit 0. Release
+  images rely on this — they ship the file as an all-comments 4096-byte
+  placeholder (first line `# FRAMEOS-CLOUD-CONFIG-V1`, generated by
+  `app.tasks.setup_json_reset.render_cloud_config_placeholder`, padded with
+  lines of 79 `#` characters) so the provider's in-browser download flow can
+  patch real `KEY=value` content into the image in place. The first-boot
+  unit keeps firing on every boot while the file exists, so the script
+  checks *before* doing anything whether the file holds any `KEY=value`
+  line: an untouched placeholder with no `frameos-setup.json` next to it
+  exits immediately, without remounting `/` read-write, without appending to
+  `/boot/frameos-setup-reset.log`, and without reinstalling
+  `/boot/frameos-hostname` or `/boot/frameos-wifi.nmconnection` over `/etc`.
+  If the file has `KEY=value` lines but none of them is a recognized key
+  (a typo'd manual edit), the script warns loudly on every boot, does
+  **not** shred, and does not enroll, so the user can fix the key names and
+  reboot.
+
+SD image composition re-stamps the current first-boot script, service unit,
+and `/etc/fstab` into the root partition, so images composed from older cached
+base images pick up these behaviors without a base image rebuild.
+
 On first boot from a larger SD card, the base rootfs also runs
 `frameos-expand-sd-card.service` before `/srv/frameos` and `/srv/assets` are
 mounted. It keeps the root partition unchanged, resizes the ext4 `FRAMEOS`
@@ -87,15 +182,35 @@ for `FRAMEOS`. The shipped `ASSETS` partition is expected to be empty or
 disposable.
 
 Release images are composed after all precompiled release binaries have been
-built. They use the cached base image plus the Debian Bookworm ARM64 precompiled
+built. They use the cached base image plus the platform's precompiled
 FrameOS/Remote artifacts, ship without WiFi credentials, and keep
-`wifiHotspot=bootOnly` so a Pi Zero 2 W starts the setup hotspot when it cannot
-reach the network. The first-boot setup service is present but dormant until a
-future SD card builder copies `frameos-setup.json` to the BOOT partition.
+`wifiHotspot=bootOnly` so the board starts the `FrameOS-Setup` hotspot when it
+cannot reach the network. The first-boot setup service is present but dormant:
+`frameos-setup.json` (self-hosted personalization) is absent, and
+`frameos-cloud.txt` ships as the 4096-byte all-comments placeholder described
+above, ignored on boot until it is personalized — edited manually after
+flashing, or patched byte-in-place into the downloaded image by a provider's
+in-browser flow. The boot-partition patch step copies the placeholder into
+the BOOT FAT before any other file so its clusters stay contiguous (the
+in-place patcher rewrites the 4096-byte region inside the raw image without
+touching FAT metadata). Backend-personalized (self-hosted) images never carry
+the placeholder: the boot patch deletes any stale `frameos-cloud.txt`, since
+those frames are backend-managed.
 
-Add future hardware targets by adding a platform alias/target in
-`backend/app/tasks/buildroot_image.py`, extending the CLI defaults, then building
-and uploading another manifest entry. The partition layout must stay:
+Release images exist only for platforms that have a published base image in
+the manifest. To enable `raspberry-pi-zero-w` release images, first run the
+manual base-image workflow for it once
+(`gh workflow run buildroot-base-image.yml --ref <branch> -f platform=raspberry-pi-zero-w`);
+release composition picks the platform up from the manifest after that.
+
+Add future hardware targets by adding a `BuildrootPlatform` entry in
+`backend/app/tasks/buildroot_platforms.py` (plus, for a new CPU target, a
+`TargetDefinition` in `backend/bin/cross` and a toolchain entry in
+`backend/app/utils/cross_toolchain_packages.py`), then building and uploading
+another manifest entry. Non-Raspberry-Pi families additionally need their own
+post-build/post-image flow in `backend/app/tasks/buildroot_image.py` — the
+Raspberry-Pi-only spots raise `NotImplementedError` with TODOs. The partition
+layout must stay:
 
 1. FAT boot
 2. ext4 root

@@ -33,6 +33,8 @@ export const loginLogic = kea([
     submitLogin: (credentials?: { username?: string; password?: string }) => ({ credentials }),
     setLoading: (loading: boolean) => ({ loading }),
     setError: (error: string | null) => ({ error }),
+    setCloudLoginAvailable: (available: boolean) => ({ available }),
+    startCloudLogin: true,
     bootstrapLoginPage: true,
     toggleTheme: true,
   }),
@@ -40,7 +42,8 @@ export const loginLogic = kea([
     username: ['', { setUsername: (_, { username }) => username }],
     password: ['', { setPassword: (_, { password }) => password }],
     loading: [false, { setLoading: (_, { loading }) => loading }],
-    error: [null as string | null, { setError: (_, { error }) => error }],
+    error: [null as string | null, { setError: (_, { error }) => error, startCloudLogin: () => null }],
+    cloudLoginAvailable: [false, { setCloudLoginAvailable: (_, { available }) => available }],
     theme: [getInitialTheme(), { toggleTheme: (theme) => (theme === 'dark' ? 'light' : 'dark') }],
   }),
   listeners(({ actions, values }) => ({
@@ -78,6 +81,40 @@ export const loginLogic = kea([
 
       if (username !== null && password !== null) {
         actions.submitLogin({ username, password })
+      }
+
+      // Offer "Continue with FrameOS Cloud" when this frame's cloud link has
+      // the auth:login permission. The callback redirects back with
+      // ?cloudError=… on failure.
+      try {
+        const optionsResponse = await fetch('/api/cloud/login/options')
+        if (optionsResponse.ok) {
+          const options = await optionsResponse.json()
+          actions.setCloudLoginAvailable(Boolean(options?.available))
+        }
+        const cloudError = new URLSearchParams(window.location.search).get('cloudError')
+        if (cloudError) {
+          actions.setError(`FrameOS Cloud login failed: ${cloudError}`)
+        }
+      } catch {
+        // No cloud link; password login only.
+      }
+    },
+    startCloudLogin: async () => {
+      try {
+        const response = await fetch('/api/cloud/login/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok || !payload.authorization_url) {
+          actions.setError(payload.detail || 'Could not start the FrameOS Cloud login')
+          return
+        }
+        window.location.href = payload.authorization_url
+      } catch {
+        actions.setError('Could not start the FrameOS Cloud login')
       }
     },
     submitLogin: async ({ credentials }) => {

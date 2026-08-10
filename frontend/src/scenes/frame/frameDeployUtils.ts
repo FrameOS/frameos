@@ -73,6 +73,17 @@ export interface FullDeployPlanResponse {
     current_version: string
     transport: 'remote' | 'ssh' | string
   } | null
+  /** Present for embedded (ESP32) frames: full deploy = firmware rebuild + OTA. */
+  embedded?: {
+    platform: string
+    idfTarget: string
+    flashSize: string
+    otaSupported: boolean
+    firmwareStatus: string
+    firmwareError?: string | null
+    needsFirmwareBuild: boolean
+    action: string
+  } | null
   post_deploy?: {
     i2c?: {
       needs_boot_config_line?: boolean
@@ -175,8 +186,8 @@ const INKY_NATIVE_DEVICES = new Set([
   'pimoroni.inky_what_ssd1683_yellow',
 ])
 const VIRTUAL_OUTPUT_DEVICES = new Set(['http.upload', 'web_only'])
-const WAVESHARE_NO_SPI_VARIANTS = new Set(['EPD_12in48', 'EPD_12in48b', 'EPD_12in48b_V2', 'EPD_13in3e'])
-const WAVESHARE_BOOT_CONFIG_SPI_VARIANTS = new Set(['EPD_10in3'])
+const WAVESHARE_NO_SPI_VARIANTS = new Set(['EPD_12in48', 'EPD_12in48b', 'EPD_12in48b_V2'])
+const WAVESHARE_BOOT_CONFIG_SPI_VARIANTS = new Set(['EPD_10in3', 'EPD_13in3e'])
 const WAVESHARE_BOOT_CONFIG_VARIANTS = new Set(['EPD_10in3', 'EPD_13in3e'])
 
 function stringifyList(values: unknown[]): string {

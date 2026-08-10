@@ -7,8 +7,13 @@ import frameos/channels
 import frameos/upgrade
 import ../auth
 import ../api
+import ../rate_limit
 import ./admin_api_assets_routes
 import ./common
+
+const
+  ADMIN_LOGIN_LIMIT = 10
+  ADMIN_LOGIN_WINDOW = 300.0
 
 proc addAdminApiRoutes*(router: var Router) =
   router.get("/api/admin/session", proc(request: Request) {.gcsafe.} =
@@ -20,7 +25,20 @@ proc addAdminApiRoutes*(router: var Router) =
     if not adminAuthEnabled():
       jsonResponse(request, Http401, %*{"detail": "Admin auth disabled"})
       return
-    let payload = parseJson(if request.body == "": "{}" else: request.body)
+    # The admin password is the only thing between the LAN and this frame, and
+    # sessions are stateless, so an unthrottled login is an offline-speed guess
+    # loop over the network.
+    if rateLimitExceeded(request, "admin:login", ADMIN_LOGIN_LIMIT, ADMIN_LOGIN_WINDOW):
+      var limited: mummy.HttpHeaders
+      limited["Retry-After"] = $retryAfterSeconds(request, "admin:login")
+      limited["Content-Type"] = "application/json"
+      request.respond(429, limited, $(%*{"detail": "Too many login attempts"}))
+      return
+    let payload = try:
+        parseJson(if request.body == "": "{}" else: request.body)
+      except CatchableError:
+        jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+        return
     let username = payload{"username"}.getStr("")
     let password = payload{"password"}.getStr("")
     if validateAdminCredentials(username, password):

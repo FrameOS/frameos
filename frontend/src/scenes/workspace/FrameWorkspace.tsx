@@ -16,7 +16,8 @@ import {
 } from '@heroicons/react/24/outline'
 import { frameHost, frameIsHealthy, frameIsStale, logUpdatesFrameActivity } from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
-import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent } from '../../types'
+import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent, FrameId } from '../../types'
+import { frameIdsEqual, parseRouteFrameId } from '../../utils/frameId'
 import { framesModel } from '../../models/framesModel'
 import { FrameosShell } from './FrameosShell'
 import { AddSceneTile, SceneControlPanel, TemplateDrawer } from './FramesHome'
@@ -58,6 +59,13 @@ import { groupFramesByStatus } from './frameStatusGroups'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import {
+  frameSettingsSectionIsAllowed,
+  frameToolPanelDisabledReason,
+  frameToolPanelIsAllowed,
+  workspaceMode,
+  type WorkspaceMode,
+} from './workspaceSurfaces'
 
 interface FrameWorkspaceProps {
   id?: string
@@ -68,6 +76,10 @@ interface FrameToolDefinition {
   label: string
   description: string
   icon: JSX.Element
+  // Non-null when the panel stays visible but this frame's device profile
+  // cannot serve it (e.g. Schedule on an esp32 cloud frame): the rail shows
+  // it disabled with this explanation instead of hiding it.
+  disabledReason?: string | null
 }
 
 const uploadedScenePrefix = 'uploaded/'
@@ -210,7 +222,7 @@ function restoreFrameToolScrollTop(scrollTop: number): () => void {
 
 function frameToolInitialScrollTop(
   positions: Record<string, number>,
-  frameId: number,
+  frameId: FrameId,
   panel: WorkspaceUtilityPanel
 ): number | null {
   const key = frameToolScrollKey(frameId, panel)
@@ -249,12 +261,23 @@ const frameToolDefinitions: FrameToolDefinition[] = [
   { panel: 'debug', label: 'Debug', description: 'Diagnostics', icon: <BoltIcon className="h-5 w-5" /> },
 ]
 
-const frameAdminUnsupportedToolPanels = new Set<WorkspaceUtilityPanel>(['terminal', 'ping'])
-
-function frameToolDefinitionsForMode(inFrameAdminMode: boolean): FrameToolDefinition[] {
-  return inFrameAdminMode
-    ? frameToolDefinitions.filter((definition) => !frameAdminUnsupportedToolPanels.has(definition.panel))
-    : frameToolDefinitions
+// Allow-list, not deny-list: see workspaceSurfaces.ts. A panel added above is
+// invisible in every mode until it is listed there. The frame's device
+// profile never hides a panel — it disables it with an explanation (e.g.
+// Schedule on an esp32 cloud frame, whose firmware refuses `set_schedule`),
+// so the workspace keeps its shape whatever the hardware. Virtual frames are
+// the one exception: panels whose concepts don't exist for them (terminal,
+// ping, metrics) are hidden outright — see workspaceSurfaces.ts.
+function frameToolDefinitionsForMode(
+  mode: WorkspaceMode = workspaceMode(),
+  frame?: FrameType | null
+): FrameToolDefinition[] {
+  return frameToolDefinitions
+    .filter((definition) => frameToolPanelIsAllowed(mode, definition.panel, frame))
+    .map((definition) => ({
+      ...definition,
+      disabledReason: frameToolPanelDisabledReason(mode, definition.panel, frame),
+    }))
 }
 
 function frameToolPanelFromSearchParams(
@@ -271,7 +294,7 @@ function frameToolPanelFromSearchParams(
     : 'overview'
 }
 
-const frameSettingsSections = [
+const allFrameSettingsSections = [
   { id: 'frame-settings-info', label: 'Info' },
   { id: 'frame-settings-device', label: 'Device' },
   { id: 'frame-settings-ssh', label: 'SSH' },
@@ -291,6 +314,13 @@ const frameSettingsSections = [
   { id: 'frame-settings-logs', label: 'Logs' },
   { id: 'frame-settings-reboot', label: 'Reboot' },
 ]
+
+function frameSettingsSectionsForFrame(
+  frame?: FrameType | null,
+  mode: WorkspaceMode = workspaceMode()
+): { id: string; label: string }[] {
+  return allFrameSettingsSections.filter((section) => frameSettingsSectionIsAllowed(mode, section.id, frame))
+}
 
 function scrollToFrameSettingsSection(sectionId: string, attempt = 0): void {
   if (typeof document === 'undefined' || typeof window === 'undefined') {
@@ -312,12 +342,8 @@ function scrollToFrameSettingsSection(sectionId: string, attempt = 0): void {
   })
 }
 
-function parseFrameId(frameId?: string): number | null {
-  if (!frameId) {
-    return null
-  }
-  const parsed = parseInt(frameId, 10)
-  return Number.isFinite(parsed) ? parsed : null
+function parseFrameId(frameId?: string): FrameId | null {
+  return parseRouteFrameId(frameId)
 }
 
 function FrameSelector({
@@ -367,7 +393,7 @@ function FrameSelector({
         <div className="relative min-w-0 flex-1">
           <select
             value={frame.id}
-            onChange={(event) => navigateToFrame(parseInt(event.target.value, 10))}
+            onChange={(event) => navigateToFrame(parseRouteFrameId(event.target.value) ?? frame.id)}
             className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
           >
             {frameGroups.map((group) => (
@@ -391,8 +417,13 @@ function FrameSelector({
   )
 }
 
-function FrameSettingsSectionLinks({ frameId }: { frameId: number }): JSX.Element {
+function FrameSettingsSectionLinks({ frame }: { frame: FrameType }): JSX.Element {
   const { openFrameTool } = useActions(workspaceLogic)
+  const frameId = frame.id
+  // Per frame, not per mode: which sections FrameSettings renders depends on
+  // the device (an esp32 cloud frame shows one), so this cannot be hoisted to
+  // module scope the way the global settings nav is.
+  const frameSettingsSections = frameSettingsSectionsForFrame(frame)
   const splitIndex = Math.ceil(frameSettingsSections.length / 2)
   const sectionColumns = [frameSettingsSections.slice(0, splitIndex), frameSettingsSections.slice(splitIndex)]
 
@@ -426,9 +457,31 @@ function FrameToolRow({
 }: {
   definition: FrameToolDefinition
   active: boolean
-  frameId: number
+  frameId: FrameId
 }): JSX.Element {
   const { closeSecondarySidebar } = useActions(workspaceLogic)
+
+  if (definition.disabledReason) {
+    // Visible but inert: the device profile cannot serve this panel, and a
+    // tooltip that says why beats a control that silently vanished.
+    return (
+      <div
+        aria-disabled
+        title={definition.disabledReason}
+        className="frameos-frame-tool-row flex w-full cursor-not-allowed items-center gap-3 rounded-xl px-3 py-2.5 text-left text-slate-700 opacity-50"
+      >
+        <span className="frameos-frame-tool-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+          {definition.icon}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold">{definition.label}</span>
+          <span className="frameos-frame-tool-description block truncate text-xs text-slate-400">
+            {definition.description}
+          </span>
+        </span>
+      </div>
+    )
+  }
 
   return (
     <A
@@ -501,7 +554,7 @@ function FrameTree({
             return (
               <div key={definition.panel} className="space-y-1">
                 <FrameToolRow definition={definition} active={active} frameId={frame.id} />
-                {definition.panel === 'settings' && active ? <FrameSettingsSectionLinks frameId={frame.id} /> : null}
+                {definition.panel === 'settings' && active ? <FrameSettingsSectionLinks frame={frame} /> : null}
               </div>
             )
           })}
@@ -1280,11 +1333,37 @@ function frameToolUsesPageScroll(activeTool: WorkspaceUtilityPanel): boolean {
   return activeTool !== 'preview'
 }
 
-function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
+// Page-scroll tools: backend and frameAdmin let the window scroll
+// (min-h-screen + overflow-visible), which the full-bleed tools (Logs) and
+// their floating toolbars are built around. The cloud shell pins the page
+// under the account header (#root is overflow:hidden, see
+// cloud-frontend/src/index.css), so the window can never scroll there —
+// <main> itself must scroll, as it does for every other cloud scene. Leaving
+// overflow-visible in the cloud hands scrolling to .frameos-app-shell by
+// accident (overflow-x:hidden computes overflow-y:auto), an element neither
+// the Logs Virtuoso nor frameWorkspaceMainScrollElement() ever looks at.
+function frameToolMainScrollClassName(pageScroll: boolean): string {
+  if (!pageScroll) {
+    return 'h-screen overflow-hidden'
+  }
+  return workspaceMode() === 'cloud' ? 'h-screen overflow-y-auto' : 'min-h-screen overflow-visible'
+}
+
+function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element {
   const frameLogicProps = { frameId }
   const inFrameAdminMode = isInFrameAdminMode()
-  const availableToolDefinitions = frameToolDefinitionsForMode(inFrameAdminMode)
-  useMountedLogic(terminalLogic(frameLogicProps))
+  const mode = workspaceMode()
+  if (frameToolPanelIsAllowed(mode, 'terminal')) {
+    // The cloud protocol has no shell, so terminalLogic must never mount
+    // there. The mode is constant for the app's lifetime, so this
+    // conditional hook is stable across renders. Deliberately mode-only: the
+    // frame loads asynchronously, so frame-aware gating (virtual frames hide
+    // the terminal) would flip this hook mid-life. For virtual frames the
+    // panel itself is hidden via frameToolDefinitionsForMode below, and the
+    // mounted logic sits inert until a session is opened.
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    useMountedLogic(terminalLogic(frameLogicProps))
+  }
   useMountedLogic(frameSettingsLogic(frameLogicProps))
   useMountedLogic(logsLogic(frameLogicProps))
 
@@ -1294,13 +1373,20 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
     useValues(workspaceLogic)
   const { searchParams } = useValues(router)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
-  const requestedPanel = frameToolPanelFromSearchParams(searchParams, availableToolDefinitions)
-  const fallbackPanel = availableToolDefinitions.some((definition) => definition.panel === utilityPanel)
+  // Computed with the frame in hand: the device profile can disable panels
+  // the mode alone would allow (an esp32 cloud frame has no schedule or
+  // settings verbs). Disabled panels stay in the rail — visible with a
+  // tooltip — but the ?tool= deep link and the fallback must not land the
+  // user inside one.
+  const availableToolDefinitions = frameToolDefinitionsForMode(mode, frame)
+  const enabledToolDefinitions = availableToolDefinitions.filter((definition) => !definition.disabledReason)
+  const requestedPanel = frameToolPanelFromSearchParams(searchParams, enabledToolDefinitions)
+  const fallbackPanel = enabledToolDefinitions.some((definition) => definition.panel === utilityPanel)
     ? utilityPanel
     : 'overview'
   const activeTool =
-    availableToolDefinitions.find((definition) => definition.panel === (requestedPanel ?? fallbackPanel)) ??
-    availableToolDefinitions[0]
+    enabledToolDefinitions.find((definition) => definition.panel === (requestedPanel ?? fallbackPanel)) ??
+    enabledToolDefinitions[0]
   const activeToolPanel = activeTool.panel
   const activeToolScrollKey = frameToolScrollKey(frameId, activeToolPanel)
   const frameToolScrollPositionsRef = useRef(frameToolScrollPositions)
@@ -1385,7 +1471,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
         topBar={null}
         showAiButton={false}
         mainClassName={clsx(
-          toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
+          frameToolMainScrollClassName(toolUsesPageScroll),
           'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
         )}
       >
@@ -1423,7 +1509,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: number }): JSX.Element {
           topBar={toolUsesSearch ? undefined : null}
           showAiButton={false}
           mainClassName={clsx(
-            toolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
+            frameToolMainScrollClassName(toolUsesPageScroll),
             'frame-workspace-main pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4',
             activeToolPanel === 'logs' ? 'pb-0 pt-6 max-lg:pb-0' : 'py-6 max-lg:pb-6'
           )}
@@ -1463,10 +1549,10 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesList, framesLoading } = useValues(framesModel)
   const { searchParams } = useValues(router)
-  const availableToolDefinitions = frameToolDefinitionsForMode(isInFrameAdminMode())
+  const availableToolDefinitions = frameToolDefinitionsForMode()
   const routeFrameId = parseFrameId(id)
   const firstFrame =
-    (routeFrameId ? framesList.find((frame) => frame.id === routeFrameId) : null) ??
+    (routeFrameId ? framesList.find((frame) => frameIdsEqual(frame.id, routeFrameId)) : null) ??
     selectedFrame ??
     activeFramesList[0] ??
     framesList[0] ??
@@ -1484,7 +1570,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
         topBar={null}
         showAiButton={false}
         mainClassName={clsx(
-          loadingToolUsesPageScroll ? 'min-h-screen overflow-visible' : 'h-screen overflow-hidden',
+          frameToolMainScrollClassName(loadingToolUsesPageScroll),
           'frame-workspace-main py-6 pr-8 max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
         )}
       >

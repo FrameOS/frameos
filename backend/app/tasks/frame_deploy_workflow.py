@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
@@ -7,6 +8,7 @@ import hashlib
 import json
 import os
 import shlex
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -32,6 +34,7 @@ from app.tasks.frame_deploy_helpers import (
     upload_binary,
 )
 from app.tasks.deploy_remote import RemoteDeployer
+from app.tasks.utils import get_fresh_frame
 from app.tasks.setup_json_reset import (
     SETUP_JSON_RESET_SCRIPT_NAME,
     SETUP_JSON_RESET_SCRIPT_PATH,
@@ -42,6 +45,7 @@ from app.tasks.setup_json_reset import (
     setup_json_reset_file_path,
 )
 from app.utils.build_environment import selected_build_environment_provider
+from app.utils import embedded_assets
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.remote_exec import upload_file
 from app.utils.ssh_authorized_keys import _install_authorized_keys
@@ -79,6 +83,16 @@ def _apply_frame_sync_deploy_revision(frame: Frame, frame_dict: dict[str, Any]) 
     frame_dict[FRAME_SYNC_CURRENT_REVISION_KEY] = revision
     frame_dict[FRAME_SYNC_DEPLOYED_REVISION_KEY] = revision
     setattr(frame, "_frame_sync_deploy_revision", revision)
+
+
+def _parse_embedded_utc(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _embedded_status_failure_context(body: bytes) -> str | None:
@@ -333,6 +347,67 @@ class FullDeployPlan:
 
 
 @dataclass(slots=True)
+class EmbeddedFullDeployPlan:
+    """Full deploy for an embedded (ESP32) frame: rebuild the firmware image
+    when it is stale or missing, deliver it over the air (the backend pokes
+    ``POST /api/action/ota`` and the device pulls manifest + image), wait for
+    the post-OTA bootup, then re-upload scenes like a fast deploy.
+
+    ``to_dict`` keeps the key shape the deploy drawer's FullDeployPlanResponse
+    consumer expects (target/binary/packages/...), with the embedded specifics
+    under an extra ``embedded`` key.
+    """
+
+    platform: str
+    idf_target: str
+    flash_size: str
+    psram_mb: int
+    ota_supported: bool
+    firmware_status: str
+    firmware_error: str | None
+    needs_firmware_build: bool
+    action: str = "build_firmware_ota_upload_scenes"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "target": {
+                "arch": self.platform,
+                "distro": "esp-idf",
+                "version": self.idf_target,
+                "total_memory_mb": self.psram_mb,
+            },
+            "low_memory": False,
+            "drivers": [],
+            "binary": {
+                "will_attempt_cross_compile": False,
+                "will_attempt_precompiled": False,
+                "cross_compile_supported": True,
+                "build_host_configured": False,
+            },
+            "packages": [],
+            "package_alternatives": [],
+            "quickjs": {
+                "required_if_remote_build": False,
+                "dirname": None,
+                "installed": False,
+            },
+            "ssh_keys_need_install": False,
+            "remote_upgrade": None,
+            "post_deploy": {},
+            "embedded": {
+                "platform": self.platform,
+                "idfTarget": self.idf_target,
+                "flashSize": self.flash_size,
+                "otaSupported": self.ota_supported,
+                "firmwareStatus": self.firmware_status,
+                "firmwareError": self.firmware_error,
+                "needsFirmwareBuild": self.needs_firmware_build,
+                "action": self.action,
+            },
+        }
+
+
+@dataclass(slots=True)
 class FrameDeployPlan:
     mode: str
     frame_id: int
@@ -340,7 +415,7 @@ class FrameDeployPlan:
     build_id: str
     frame_dict: dict[str, Any]
     previous_frameos_version: str | None
-    full_deploy: FullDeployPlan | None = None
+    full_deploy: FullDeployPlan | EmbeddedFullDeployPlan | None = None
     fast_deploy: FastDeployPlan | None = None
     notes: list[str] = field(default_factory=list)
 
@@ -465,6 +540,9 @@ class FrameDeployWorkflow:
                 await self._execute_fast(plan)
                 return
             if plan.mode == "full":
+                if (getattr(self.frame, "mode", None) or "rpios") == "embedded":
+                    await self._execute_embedded_full(plan)
+                    return
                 await self._execute_full(plan)
                 return
             raise ValueError(f"Unsupported deploy mode: {plan.mode}")
@@ -486,6 +564,21 @@ class FrameDeployWorkflow:
                 frame_dict=dict(frame_dict),
                 previous_frameos_version=previous_frameos_version,
             )
+            full_deploy: EmbeddedFullDeployPlan | None = None
+            full_notes: list[str] = []
+            try:
+                full_plan = await self._plan_full(
+                    frame_dict=dict(frame_dict),
+                    previous_frameos_version=previous_frameos_version,
+                )
+                if isinstance(full_plan.full_deploy, EmbeddedFullDeployPlan):
+                    full_deploy = full_plan.full_deploy
+                    full_notes = [note for note in full_plan.notes if note not in fast_plan.notes]
+            except ValueError as exc:
+                # Pico family (no backend build), virtual frames, and no-OTA
+                # flash profiles have no full-deploy story; the fast plan alone
+                # stays valid.
+                full_notes = [f"Full deploy unavailable: {exc}"]
             return FrameDeployPlan(
                 mode="combined",
                 frame_id=int(self.frame.id),
@@ -494,11 +587,16 @@ class FrameDeployWorkflow:
                 frame_dict=fast_plan.frame_dict,
                 previous_frameos_version=previous_frameos_version if isinstance(previous_frameos_version, str) else None,
                 fast_deploy=fast_plan.fast_deploy,
-                full_deploy=None,
+                full_deploy=full_deploy,
                 notes=[
                     "Embedded fast deploy uploads the interpreted scene payload over HTTP, then asks the frame to reload.",
-                    "Embedded firmware flashing is handled by the browser flasher instead of the Linux deploy workflow.",
+                    (
+                        "Embedded full deploy rebuilds the firmware image and updates the frame over the air (OTA)."
+                        if full_deploy
+                        else "Embedded firmware flashing is handled by the browser flasher instead of the Linux deploy workflow."
+                    ),
                     *fast_plan.notes,
+                    *full_notes,
                 ],
             )
 
@@ -591,6 +689,12 @@ class FrameDeployWorkflow:
         )
 
     async def _plan_full(self, *, frame_dict: dict[str, Any], previous_frameos_version: str | None) -> FrameDeployPlan:
+        if (getattr(self.frame, "mode", None) or "rpios") == "embedded":
+            return await self._plan_embedded_full(
+                frame_dict=frame_dict,
+                previous_frameos_version=previous_frameos_version,
+            )
+
         arch = await self.deployer.get_cpu_architecture()
         distro = await self.deployer.get_distro()
         distro_version = await self.deployer.get_distro_version()
@@ -829,6 +933,200 @@ class FrameDeployWorkflow:
             notes=notes,
         )
 
+    async def _plan_embedded_full(
+        self,
+        *,
+        frame_dict: dict[str, Any],
+        previous_frameos_version: str | None,
+    ) -> FrameDeployPlan:
+        from app.tasks.embedded_firmware import (
+            embedded_flash_size_for_frame,
+            embedded_module_psram_bytes,
+            embedded_ota_supported_for_frame,
+            embedded_platform_for_frame,
+            embedded_platform_spec_for_frame,
+            latest_embedded_firmware,
+        )
+
+        frame = self.frame
+        spec = embedded_platform_spec_for_frame(frame)
+        family = spec["family"]
+        if family == "virtual":
+            raise ValueError(
+                "Virtual frames have no firmware to deploy — deploying renders the frame on the backend."
+            )
+        if family == "pico":
+            raise ValueError(
+                "Full deploy is not available for Pico-family frames: they run the generic "
+                "prebuilt UF2 firmware, flashed over BOOTSEL."
+            )
+        if not embedded_ota_supported_for_frame(frame):
+            raise ValueError(
+                "Full deploy delivers new firmware over the air, but this flash profile has a "
+                "single app slot without OTA support. Flash the firmware over USB instead."
+            )
+
+        firmware = latest_embedded_firmware(frame) or {}
+        firmware_status = str(firmware.get("status") or "missing")
+        firmware_error = firmware.get("error") if isinstance(firmware.get("error"), str) else None
+        needs_firmware_build = firmware_status != "ready"
+
+        frame_dict["mode"] = "embedded"
+        frame_dict["frameos_version"] = current_frameos_version()
+
+        platform = embedded_platform_for_frame(frame)
+        full_deploy = EmbeddedFullDeployPlan(
+            platform=platform,
+            idf_target=str(spec.get("idfTarget") or ""),
+            flash_size=embedded_flash_size_for_frame(frame),
+            psram_mb=embedded_module_psram_bytes(frame) // (1024 * 1024),
+            ota_supported=True,
+            firmware_status=firmware_status,
+            firmware_error=firmware_error,
+            needs_firmware_build=needs_firmware_build,
+        )
+
+        notes = [
+            f"Embedded target: {platform} ({full_deploy.flash_size} flash).",
+            "Full deploy rebuilds the firmware image when it is stale, updates the frame over the air (OTA), "
+            "then re-uploads the interpreted scenes.",
+        ]
+        if needs_firmware_build:
+            detail = f": {firmware_error}" if firmware_error else ""
+            notes.append(f"Firmware image needs a rebuild ({firmware_status}{detail}).")
+        else:
+            notes.append("Firmware image is up to date; the device is asked to pull it only if it runs an older build.")
+
+        return FrameDeployPlan(
+            mode="full",
+            frame_id=int(self.frame.id),
+            frame_name=self.frame.name,
+            build_id=self.deployer.build_id,
+            frame_dict=frame_dict,
+            previous_frameos_version=previous_frameos_version if isinstance(previous_frameos_version, str) else None,
+            full_deploy=full_deploy,
+            notes=notes,
+        )
+
+    # Bounded waits for the embedded full deploy. Firmware builds stream their
+    # own progress into the frame log; the deploy job polls status. Class
+    # attributes so tests (and desperate operators) can shorten them.
+    EMBEDDED_BUILD_WAIT_TIMEOUT_SECONDS = 45 * 60
+    EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS = 10 * 60
+    EMBEDDED_POLL_INTERVAL_SECONDS = 5.0
+
+    def _refresh_frame(self) -> Frame:
+        if self.db is None:
+            return self.frame
+        fresh = get_fresh_frame(self.db, int(self.frame.id))
+        if fresh is not None:
+            self.frame = fresh
+        return self.frame
+
+    @staticmethod
+    def _embedded_last_boot_at(frame: Frame) -> datetime | None:
+        embedded = getattr(frame, "embedded", None)
+        last_boot = embedded.get("lastBoot") if isinstance(embedded, dict) else None
+        raw = last_boot.get("at") if isinstance(last_boot, dict) else None
+        if not isinstance(raw, str) or not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+    @classmethod
+    def _embedded_device_active_after(cls, frame: Frame, since: datetime) -> bool:
+        boot_at = cls._embedded_last_boot_at(frame)
+        if boot_at is not None and boot_at > since:
+            return True
+        last_log_at = getattr(frame, "last_log_at", None)
+        if isinstance(last_log_at, datetime):
+            aware = last_log_at if last_log_at.tzinfo else last_log_at.replace(tzinfo=timezone.utc)
+            if aware > since:
+                return True
+        return False
+
+    async def _await_embedded_firmware_build(self) -> dict[str, Any]:
+        from app.tasks.embedded_firmware import refresh_embedded_firmware_status
+
+        deadline = time.monotonic() + self.EMBEDDED_BUILD_WAIT_TIMEOUT_SECONDS
+        last_status: str | None = None
+        while True:
+            frame = self._refresh_frame()
+            firmware = await refresh_embedded_firmware_status(self.db, self.redis, frame) or {}
+            status = firmware.get("status")
+            if status != last_status:
+                await log(self.db, self.redis, int(frame.id), "stdout",
+                          f"{icon} Firmware build status: {status or 'unknown'}")
+                last_status = status
+            if status == "ready":
+                return firmware
+            if status == "error":
+                # The build task stores the idf.py output tail in the error.
+                raise RuntimeError(
+                    f"Embedded firmware build failed: {firmware.get('error') or 'unknown error'}"
+                )
+            if status not in {"queued", "building"}:
+                raise RuntimeError(
+                    f"Embedded firmware build ended in unexpected state '{status or 'missing'}'"
+                )
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "Timed out waiting for the embedded firmware build; "
+                    "check the frame logs and start the deploy again once it finishes."
+                )
+            await asyncio.sleep(self.EMBEDDED_POLL_INTERVAL_SECONDS)
+
+    async def _await_embedded_boot(self, since: datetime) -> bool:
+        deadline = time.monotonic() + self.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS
+        while True:
+            frame = self._refresh_frame()
+            if self._embedded_device_active_after(frame, since):
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(self.EMBEDDED_POLL_INTERVAL_SECONDS)
+
+    async def _upload_embedded_scenes_and_reload(self, frame: Frame) -> None:
+        scenes = frame.scenes if isinstance(frame.scenes, list) else []
+        payload = json.dumps(scenes, separators=(",", ":")).encode("utf-8")
+        await log(
+            self.db,
+            self.redis,
+            int(frame.id),
+            "stdinfo",
+            f"{icon} Uploading {len(scenes)} scene(s) to embedded frame over HTTP",
+        )
+        # Scene payloads reach a few hundred KB; on a weak link the default
+        # 20s frame timeout is not enough (observed 408s at ~114KB).
+        status, body, _headers = await _fetch_frame_http_bytes(
+            frame,
+            self.redis,
+            path="/uploadScenes",
+            method="POST",
+            body=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=embedded_assets.UPLOAD_TIMEOUT,
+        )
+        if status >= 300:
+            message = body.decode("utf-8", errors="replace").strip()
+            context = await _embedded_status_failure_context_for_frame(frame, self.redis)
+            if context:
+                message = f"{message} ({context})" if message else context
+            raise RuntimeError(f"Scene upload failed with status {status}: {message}")
+
+        status, body, _headers = await _fetch_frame_http_bytes(
+            frame,
+            self.redis,
+            path="/reload",
+            method="POST",
+        )
+        if status >= 300:
+            message = body.decode("utf-8", errors="replace")
+            raise RuntimeError(f"Reload failed with status {status}: {message}")
+
     async def _execute_embedded_fast(self, plan: FrameDeployPlan) -> None:
         frame = self.frame
         frame.status = "deploying"
@@ -842,39 +1140,7 @@ class FrameDeployWorkflow:
             if not plan.fast_deploy:
                 raise RuntimeError("Fast deploy plan missing")
 
-            scenes = frame.scenes if isinstance(frame.scenes, list) else []
-            payload = json.dumps(scenes, separators=(",", ":")).encode("utf-8")
-            await log(
-                self.db,
-                self.redis,
-                int(frame.id),
-                "stdinfo",
-                f"{icon} Uploading {len(scenes)} scene(s) to embedded frame over HTTP",
-            )
-            status, body, _headers = await _fetch_frame_http_bytes(
-                frame,
-                self.redis,
-                path="/uploadScenes",
-                method="POST",
-                body=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            if status >= 300:
-                message = body.decode("utf-8", errors="replace").strip()
-                context = await _embedded_status_failure_context_for_frame(frame, self.redis)
-                if context:
-                    message = f"{message} ({context})" if message else context
-                raise RuntimeError(f"Scene upload failed with status {status}: {message}")
-
-            status, body, _headers = await _fetch_frame_http_bytes(
-                frame,
-                self.redis,
-                path="/reload",
-                method="POST",
-            )
-            if status >= 300:
-                message = body.decode("utf-8", errors="replace")
-                raise RuntimeError(f"Reload failed with status {status}: {message}")
+            await self._upload_embedded_scenes_and_reload(frame)
 
             frame.status = "starting"
             frame.last_successful_deploy = plan.frame_dict
@@ -888,6 +1154,100 @@ class FrameDeployWorkflow:
                 f"{icon} Embedded fast deploy complete; reload queued",
             )
         except Exception:
+            frame.status = "uninitialized"
+            await update_frame(self.db, self.redis, frame)
+            raise
+
+    async def _execute_embedded_full(self, plan: FrameDeployPlan) -> None:
+        from app.tasks.embedded_firmware import (
+            refresh_embedded_firmware_status,
+            request_embedded_firmware_ota,
+            start_embedded_firmware,
+        )
+
+        if not isinstance(plan.full_deploy, EmbeddedFullDeployPlan):
+            raise RuntimeError("Embedded full deploy plan missing")
+
+        frame = self.frame
+        frame.status = "deploying"
+        await update_frame(self.db, self.redis, frame)
+
+        try:
+            if not getattr(frame, "last_log_at", None):
+                raise RuntimeError(
+                    "Embedded full deploy is available after the device has sent at least one boot or "
+                    "render log. Flash the first firmware over USB from the deploy drawer."
+                )
+
+            # 1. Firmware image: rebuild when stale/missing, reuse when ready.
+            firmware = await refresh_embedded_firmware_status(self.db, self.redis, frame) or {}
+            rebuilt = False
+            if firmware.get("status") != "ready":
+                reason = firmware.get("error") or firmware.get("status") or "missing"
+                await log(self.db, self.redis, int(frame.id), "stdinfo",
+                          f"{icon} Firmware image is not ready ({reason}); building a fresh image")
+                await start_embedded_firmware(self.db, self.redis, frame)
+                firmware = await self._await_embedded_firmware_build()
+                rebuilt = True
+            else:
+                await log(self.db, self.redis, int(frame.id), "stdout",
+                          f"{icon} Firmware image is up to date; skipping rebuild")
+            frame = self._refresh_frame()
+
+            # If nothing was rebuilt and the device already booted after this
+            # image finished building, it is running the current firmware: the
+            # OTA poke below is a no-op the device answers without rebooting,
+            # so a reboot must not be required.
+            firmware_completed_at = _parse_embedded_utc(firmware.get("completedAt"))
+            boot_required = rebuilt or firmware_completed_at is None or not self._embedded_device_active_after(
+                frame, firmware_completed_at
+            )
+
+            # 2. Deliver over the air: the device pulls manifest + image.
+            ota_requested_at = datetime.now(timezone.utc)
+            try:
+                await request_embedded_firmware_ota(self.db, self.redis, frame)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Could not start the OTA update: {exc}. "
+                    "Check that the frame is powered on and reachable on the network."
+                )
+            frame = self._refresh_frame()
+
+            # 3. Confirm via the device's post-OTA bootup.
+            if boot_required:
+                await log(self.db, self.redis, int(frame.id), "stdout",
+                          f"{icon} OTA update requested; waiting for the frame to boot the new firmware")
+                if not await self._await_embedded_boot(ota_requested_at):
+                    raise RuntimeError(
+                        "OTA update requested, but the frame did not report a new boot within "
+                        f"{int(self.EMBEDDED_OTA_BOOT_TIMEOUT_SECONDS // 60)} minutes. "
+                        "The device retries the OTA download on its own, so the update may still "
+                        "complete; check the frame logs and re-run the deploy to confirm."
+                    )
+                frame = self._refresh_frame()
+                await log(self.db, self.redis, int(frame.id), "stdout",
+                          f"{icon} Frame booted after the OTA update")
+            else:
+                await log(self.db, self.redis, int(frame.id), "stdout",
+                          f"{icon} Frame already runs the current firmware; not waiting for a reboot")
+
+            # 4. Leave scenes fresh, exactly like a fast deploy.
+            await self._upload_embedded_scenes_and_reload(frame)
+
+            frame.status = "starting"
+            frame.last_successful_deploy = plan.frame_dict
+            frame.last_successful_deploy_at = datetime.now(timezone.utc)
+            await update_frame(self.db, self.redis, frame)
+            await log(
+                self.db,
+                self.redis,
+                int(frame.id),
+                "stdinfo",
+                f"{icon} Embedded full deploy complete",
+            )
+        except Exception:
+            frame = self._refresh_frame()
             frame.status = "uninitialized"
             await update_frame(self.db, self.redis, frame)
             raise

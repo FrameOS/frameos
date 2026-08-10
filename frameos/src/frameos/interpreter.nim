@@ -1,6 +1,7 @@
 import frameos/types
 import frameos/values
 from frameos/utils/image import renderError, renderErrorInto
+when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 import frameos/channels
@@ -137,9 +138,15 @@ proc withCache(scene: InterpretedFrameScene,
                cacheEnabled, cacheInputEnabled, cacheDurationEnabled: bool, cacheDurationSec: float,
                builtAnyInput: bool, builtInputKey: JsonNode,
                cacheExprActive: bool, cacheExprValue: JsonNode,
+               allowStore: bool,
                extraLog: JsonNode,
                compute: proc (): Value): Value =
   ## Generic cache handler shared by app/code data nodes.
+  ##
+  ## `allowStore = false` still serves an existing cache entry, but refuses to
+  ## write the freshly computed value back. Used when the computation ran on
+  ## degraded inputs (a producer failed and was zero-filled): that result must
+  ## never be pinned in the cache as though it were real data.
   if not cacheEnabled:
     return compute()
 
@@ -192,6 +199,12 @@ proc withCache(scene: InterpretedFrameScene,
     scene.logger.log(payload)
 
   let fresh = compute()
+  if not allowStore:
+    # Degraded inputs: return the value for this pass only. Leaving the stored
+    # entry (and its key/time/expression) untouched means a later healthy pass
+    # can still hit it, and a stale-but-real value is never replaced by one
+    # computed from zero-filled data.
+    return fresh
   when defined(frameosEmbedded):
     # Never retain frame-sized images in the node cache on embedded: image
     # producers decode straight into the render canvas, so the cached value
@@ -312,6 +325,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
     let currentNode = self.nodes[currentNodeId]
     let nodeType = currentNode.nodeType
+    when defined(memProbe):
+      memProbe("node " & nodeType & "/" & diagnosticKeyword(currentNode) &
+        " #" & $currentNodeId.int)
     let debugRuntime = self.frameConfig.debug
     var checkpointKeyword = ""
     if debugRuntime:
@@ -346,11 +362,37 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       # the hint, that producer may decode straight into the canvas instead
       # of returning a full-size intermediate. Restricting to direct, known
       # producers keeps the hint away from transformer chains (resizeImage,
-      # rotateImage, code nodes) whose output is not the final canvas, and
-      # away from node caches that would otherwise store the live canvas.
-      const decodeTargetProducers = ["data/localImage"]
+      # rotateImage, code nodes) whose output is not the final canvas.
+      #
+      # A producer with its OWN node cache on cannot be handed the live canvas
+      # — the cache would hold it and redraw it onto itself on every hit — but
+      # it still must not decode at native resolution: every shipped photo
+      # scene (all five gallery scenes, Immich, Google Photos, XKCD) caches its
+      # producer, so that exclusion alone left them decoding 1024x1024 sources
+      # whole and blowing the ESP32 decode budget. Those get the canvas-SIZED
+      # hint instead: same fit, same result, a canvas-sized image the cache can
+      # safely own.
+      # The list also carries full-frame GENERATORS whose get() renders into
+      # the hint target (they fill their background, so the canvas contents
+      # never bleed through): a generated 1200x1600 intermediate is the same
+      # 7.7MB a decode is, and OOM'd the 16MB-PSRAM ESP32 boards the same way
+      # (render/calendar was the repro). Add producers here only after their
+      # get() consumes context.decodeTargetImage.
+      const decodeTargetProducers = [
+        "data/localImage", "render/calendar",
+        # Download-based producers: all of these go through
+        # downloadImageWithDataForContext, which consumes the hint and falls
+        # back to a display-bounded decode without one. Before they were on
+        # this list they decoded into the canvas anyway, but with the frame's
+        # scaling mode rather than the consumer's placement — the XKCD scene
+        # asked for "contain" and got "cover".
+        "data/downloadImage", "data/unsplash", "data/immich",
+        "data/googlePhotos", "data/openaiImage", "data/wikicommons",
+        "data/frameOSGallery",
+      ]
       var setDecodeTargetHint = false
       var directImageProducer = false
+      var producerCached = false
       if keyword == "render/image" and not asDataNode and cacheEnabled == false and
           self.appInputsForNodeId.hasKey(currentNodeId) and
           self.appInputsForNodeId[currentNodeId].hasKey("image"):
@@ -360,11 +402,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           if producerNode.nodeType == "app" and
               producerNode.data{"keyword"}.getStr() in decodeTargetProducers:
             let (producerCache, _, _, _, _, _) = readCacheConfig(producerNode)
-            directImageProducer = not producerCache
+            directImageProducer = true
+            producerCached = producerCache
       if directImageProducer and
           context.hasImage and not context.image.isNil and
-          context.decodeTargetImage.isNil:
+          context.decodeTargetImage.isNil and context.decodeTargetWidth == 0:
         var placement = ""
+        var blend = ""
         var fullFrameDraw = true
         let config = currentNode.data{"config"}
         if config != nil and config.kind == JObject:
@@ -375,7 +419,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               if (offset.kind == JString and offset.getStr() notin ["", "0"]) or
                   (offset.kind == JInt and offset.getInt() != 0):
                 fullFrameDraw = false
-          let blend = config{"blendMode"}.getStr("")
+          blend = config{"blendMode"}.getStr("")
           if blend notin ["", "normal", "overwrite"]:
             fullFrameDraw = false
         if self.appInputsForNodeId.hasKey(currentNodeId):
@@ -398,10 +442,26 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           for inputName in ["placement", "offsetX", "offsetY", "blendMode", "inputImage"]:
             if inline.hasKey(inputName):
               fullFrameDraw = false
+        if placement == "":
+          # Scene JSON only stores explicitly-set config values; an absent
+          # placement means the schema default (config.json: "cover").
+          placement = "cover"
         if fullFrameDraw and placement in ["cover", "contain", "stretch"]:
-          context.decodeTargetImage = context.image
-          context.decodeTargetScalingMode = placement
-          setDecodeTargetHint = true
+          if not producerCached:
+            context.decodeTargetImage = context.image
+            context.decodeTargetScalingMode = placement
+            setDecodeTargetHint = true
+          elif not (placement == "contain" and blend == "overwrite"):
+            # Canvas-sized, allocated by the producer. render/image then draws
+            # a same-size source, which is a plain draw — identical output to
+            # fitting the native-size image here. The one shape that is NOT
+            # identical is contain + overwrite: the live-canvas path leaves the
+            # letterbox margins alone, while a scratch would carry its own
+            # transparent margins over the canvas.
+            context.decodeTargetWidth = context.image.width
+            context.decodeTargetHeight = context.image.height
+            context.decodeTargetScalingMode = placement
+            setDecodeTargetHint = true
 
       # ---- Wire inputs AND (if enabled) build an input-key JSON alongside ----
       var builtInputKey = %*{} # JObject; only meaningful when cacheInputEnabled = true and there are inputs
@@ -484,6 +544,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       if setDecodeTargetHint:
         context.decodeTargetImage = nil
         context.decodeTargetScalingMode = ""
+        context.decodeTargetWidth = 0
+        context.decodeTargetHeight = 0
 
       if asDataNode and cacheEnabled:
         var cacheExprActive = false
@@ -495,6 +557,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
                            cacheExprActive, cacheExprValue,
+                           true,
                            %*{"keyword": keyword}):
           (proc (): Value =
             getInterpretedApp(keyword, app, context)
@@ -634,6 +697,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       var args = initTable[string, Value]()
       var builtInputKey = %*{}
       var builtAnyInput = false
+      # Args whose producer raised and were replaced by a zero value. Tracked so
+      # (a) the resulting JS error can name the real culprit and (b) the result
+      # of this pass is kept out of the node cache.
+      var defaultedArgs: seq[DefaultedArg] = @[]
 
       let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
            cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode)
@@ -651,6 +718,12 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                 builtInputKey[argName] = valueToKeyJson(vIn)
                 builtAnyInput = true
             except Exception as e:
+              # One flaky producer must not take down the whole node. Hand the
+              # code the zero value of the arg's declared type instead of
+              # leaving the arg unset: an unset arg reaches JS as `undefined`,
+              # and `[...undefined]` throws, killing every *other* data source
+              # merged in the same expression.
+              let zero = zeroValueForCodeArgType(argTypes.getOrDefault(argName, ""))
               self.logger.log(%*{
                 "event": "interpreter:codeArg:error",
                 "sceneId": self.id,
@@ -658,8 +731,19 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                 "arg": argName,
                 "producer": producerNodeId.int,
                 "error": $e.msg,
-                "stacktrace": e.getStackTrace()
+                "stacktrace": e.getStackTrace(),
+                "defaulted": true,
+                "defaultValue": valueToJson(zero)
               })
+              args[argName] = zero
+              if not argTypes.hasKey(argName):
+                argTypes[argName] = ""
+              defaultedArgs.add((name: argName, error: $e.msg))
+              # Deliberately NOT added to builtInputKey: a zero value is the
+              # absence of data, not data. Keying on it would either poison a
+              # good cache entry with a degraded result or make "no data" look
+              # like a legitimate input change. The store guard below is what
+              # actually keeps the degraded result out of the cache.
 
       if self.codeInlineInputsForNodeId.hasKey(currentNodeId):
         let inlineArgs = self.codeInlineInputsForNodeId[currentNodeId]
@@ -676,6 +760,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               builtInputKey[argName] = valueToKeyJson(vIn)
               builtAnyInput = true
           except Exception as e:
+            # Same reasoning as the connected-producer path above: substitute
+            # the zero value so downstream code sees "no data", not `undefined`.
+            let zero = zeroValueForCodeArgType(argTypes.getOrDefault(argName, ""))
             self.logger.log(%*{
               "event": "interpreter:codeArg:error:inlineCode",
               "sceneId": self.id,
@@ -683,15 +770,23 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               "arg": argName,
               "code": snippet,
               "error": $e.msg,
-              "stacktrace": e.getStackTrace()
+              "stacktrace": e.getStackTrace(),
+              "defaulted": true,
+              "defaultValue": valueToJson(zero)
             })
+            args[argName] = zero
+            if not argTypes.hasKey(argName):
+              argTypes[argName] = ""
+            defaultedArgs.add((name: argName, error: $e.msg))
+            # Not a cache-input contribution; see the connected-arg comment.
 
       let targetField = if defaultOutputName.len > 0: defaultOutputName else: ""
 
       # Compute (with optional caching)
       let computeFresh = proc (): Value =
         var fnName = getOrCompileCodeFn(self, currentNode)
-        callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField)
+        callCompiledFn(self, context, currentNodeId, fnName, args, argTypes, outputTypes, targetField,
+                       defaultedArgs)
 
       if asDataNode and cacheEnabled:
         var cacheExprActive = false
@@ -703,6 +798,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
                            cacheExprActive, cacheExprValue,
+                           defaultedArgs.len == 0,
                            %*{"nodeType": "code"},
                            computeFresh)
       else:
@@ -1052,9 +1148,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
         "targetHandle": edge.targetHandle})
 
-  ## Ensure one JS context per scene and precompile functions
-  ensureSceneJs(scene)
-
+  ## Precompile functions. The JS context is built on demand, not here:
+  ## compileAppInlineFn/compileCodeFn/evalOneShot each call ensureSceneJs
+  ## themselves, so eagerly building one here only ever cost scenes that turn
+  ## out to have no code nodes and no inline JS at all — a whole QuickJS
+  ## runtime for nothing. That matters most for nested scenes, where the
+  ## purely structural wrapper is the common case and every level used to pay.
   # Precompile functions for inline app/scene inputs (for all nodes that have them)
   for nodeId, inlineMap in scene.appInlineInputsForNodeId:
     for inputName, snippet in inlineMap.pairs:
@@ -1216,19 +1315,43 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
       applyPublicStateFromPayload(scene, context.payload["state"])
   of "render":
     if not context.hasImage or context.image.isNil:
-      context.image = newImage(self.frameConfig.width, self.frameConfig.height)
+      # Same rotation contract as runner.renderSceneImage: scenes render at
+      # the rotated dimensions; the output is rotated back to panel space
+      # afterwards (Pi: rotateDegrees; embedded: rotation-aware packers).
+      context.image = case self.frameConfig.rotate:
+        of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+        else: newImage(self.frameConfig.width, self.frameConfig.height)
       context.hasImage = true
     context.image.fill(scene.backgroundColor)
   else:
     discard
 
   if scene.eventListeners.hasKey(context.event):
+    # Track filtered-out listeners so a press that matches nothing says so.
+    # A scene whose event node filters on label "A" and a frame whose buttons
+    # are labelled BOOT/KEY1 (board silkscreen, per the ESP32 preset) is a
+    # dead button with no error anywhere: the GPIO fires, the event reaches
+    # the scene, every listener rejects it, and runEvent returns quietly.
+    var listenersFiltered = 0
+    var matched = 0
+    var expectedFilters: seq[string] = @[]
     for nodeId in scene.eventListeners[context.event]:
       let nextNode = if scene.nextNodeIds.hasKey(nodeId): scene.nextNodeIds[nodeId] else: -1.NodeId
       if nextNode != 0.NodeId and nextNode != -1.NodeId:
         if scene.nodes.hasKey(nodeId) and not eventNodeMatchesPayload(scene.nodes[nodeId], context.payload):
+          listenersFiltered += 1
+          let d = scene.nodes[nodeId].data
+          if not d.isNil and d.kind == JObject:
+            if d.hasKey("config") and d["config"].kind == JObject:
+              for key, value in d["config"].pairs:
+                let expected = eventFilterValue(value)
+                if expected.len > 0: expectedFilters.add(key & "=" & expected)
+            elif d.hasKey("label"):
+              let expected = eventFilterValue(d["label"])
+              if expected.len > 0: expectedFilters.add("label=" & expected)
           continue
         try:
+          matched += 1
           discard scene.runNode(nextNode, context)
         except Exception as e:
           self.logger.log(%*{
@@ -1239,6 +1362,18 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
             "error": $e.msg,
             "stacktrace": e.getStackTrace()
           })
+      else:
+        listenersFiltered += 1
+    if listenersFiltered > 0 and matched == 0:
+      self.logger.log(%*{
+        "event": "runEvent:noListenerMatched",
+        "sceneId": self.id,
+        "contextEvent": context.event,
+        "payload": context.payload,
+        "expected": expectedFilters,
+        "error": "\"" & context.event & "\" reached the scene but every listener filtered it out" &
+          (if expectedFilters.len > 0: " (nodes want " & expectedFilters.join(", ") & ")" else: "")
+      })
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
   if TRACING:

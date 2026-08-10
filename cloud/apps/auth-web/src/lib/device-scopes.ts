@@ -1,0 +1,78 @@
+// Scopes a FrameOS backend (or frame) may request through the device
+// authorization flow. This module is free of server-only imports so the
+// device approval UI can show the exact descriptions being granted.
+
+export const defaultDeviceScopes = ["backend:link", "backend:read"];
+
+export const deviceScopeDescriptions: Record<string, string> = {
+  "auth:login":
+    "Sign users in to this backend with their FrameOS Cloud account",
+  "backend:link": "Register this backend with your FrameOS Cloud account",
+  "backend:read": "Read basic backend connection details",
+  "backup:assets":
+    "Store encrypted backups of frame assets (may require a paid plan)",
+  "backup:frames":
+    "Store encrypted backups of frame configurations (may require a paid plan)",
+  "backup:scenes":
+    "Store encrypted backups of your scenes (may require a paid plan)",
+  "frame:link":
+    "Link a frame directly to your FrameOS Cloud account without a backend",
+  "frame:managed":
+    "Manage this frame from FrameOS Cloud: assign scenes, change display settings, reboot",
+  "gallery:read": "Show curated images from the FrameOS gallery on frames",
+  "remote:access":
+    "Open a relay so this backend can be reached from cloud.frameos.net (may require a paid plan)",
+  "settings:services":
+    "Send this frame the service API keys its scenes need (Unsplash, OpenAI, Home Assistant, Immich, GitHub, FrameOS Gallery)",
+  "store:publish":
+    "Save scenes from this backend to your cloud account and share them on the FrameOS store",
+  "store:read": "Browse and install scenes from the FrameOS store",
+  "telemetry:logs":
+    "Send frame and backend logs to FrameOS Cloud (may require a paid plan)",
+  "telemetry:metrics":
+    "Send frame and backend metrics to FrameOS Cloud (may require a paid plan)",
+};
+
+// Human names shown on the approval screen ("Cloud login" instead of
+// "auth:login"). Base link scopes carry no user-visible feature.
+export const deviceScopeLabels: Record<string, string> = {
+  "auth:login": "Cloud login",
+  "backend:link": "Backend link",
+  "backend:read": "Backend details",
+  "backup:assets": "Asset backups",
+  "backup:frames": "Frame backups",
+  "backup:scenes": "Scene backups",
+  "frame:link": "Frame link",
+  "frame:managed": "Cloud-managed frame",
+  "gallery:read": "Gallery access",
+  "remote:access": "Remote access",
+  "settings:services": "Service API keys",
+  "store:publish": "Save and share scenes",
+  "store:read": "Store access",
+  "telemetry:logs": "Log shipping",
+  "telemetry:metrics": "Metrics shipping",
+};
+
+// Scopes implied by the connection itself. The approval screen folds these
+// into the connect/approve action instead of listing them as features next
+// to the ones the user explicitly toggled on in FrameOS.
+export const baselineDeviceScopes = new Set([
+  "backend:link",
+  "backend:read",
+  "frame:link",
+]);
+
+// Scopes a linked client may add to an existing link (POST /api/backends/scopes)
+// without a consent screen.
+//
+// Deliberately empty. `backup:*` reads and writes every config backup on the
+// account — not just the ones this client pushed — and `store:publish` posts to
+// the public store under the owner's publisher identity. Auto-granting them let
+// any link that the owner had approved for "just the basic cloud connection"
+// silently escalate to both. Additions now always need approval; removals stay
+// free (see the route: only `addedNeedingApproval` triggers consent).
+export const autoGrantedDeviceScopes = new Set<string>([]);
+
+export const allowedDeviceScopes = new Set(
+  Object.keys(deviceScopeDescriptions),
+);

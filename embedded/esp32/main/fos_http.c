@@ -6,6 +6,9 @@
 #include <string.h>
 #include <sys/time.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "esp_app_desc.h"
 #include "esp_flash.h"
 #include "esp_heap_caps.h"
@@ -19,10 +22,13 @@
 #include "mbedtls/base64.h"
 
 #include "cJSON.h"
+#include "fos_assets.h"
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
 #include "fos_client.h"
+#include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_mem.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
@@ -227,7 +233,7 @@ static esp_err_t read_request_body(httpd_req_t *req, size_t max_len, bool allow_
     if (total < 0 || (total == 0 && !allow_empty) || (size_t)total > max_len) {
         return ESP_ERR_INVALID_SIZE;
     }
-    char *body = heap_caps_malloc((size_t)total + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *body = fos_big_malloc((size_t)total + 1);
     if (!body) body = malloc((size_t)total + 1);
     if (!body) return ESP_ERR_NO_MEM;
     int received = 0;
@@ -292,6 +298,48 @@ static bool request_basic_matches(httpd_req_t *req, const fos_config_t *config)
     return strncmp(auth, prefix, prefix_len) == 0 && strcmp(auth + prefix_len, (const char *)encoded) == 0;
 }
 
+static const char *http_method_name(int method)
+{
+    switch (method) {
+        case HTTP_GET: return "GET";
+        case HTTP_POST: return "POST";
+        case HTTP_PUT: return "PUT";
+        case HTTP_DELETE: return "DELETE";
+        case HTTP_HEAD: return "HEAD";
+        case HTTP_OPTIONS: return "OPTIONS";
+        case HTTP_PATCH: return "PATCH";
+        default: return "OTHER";
+    }
+}
+
+static void log_http_denied(httpd_req_t *req, int status)
+{
+    /* A client polling with stale credentials (a backend or cloud UI retries
+     * /logs every few seconds) would otherwise fill the 128-line ring with
+     * denials; one line per window is enough to see it happening. */
+    static int64_t s_last_denied_us = 0;
+    int64_t now_us = esp_timer_get_time();
+    if (s_last_denied_us != 0 && now_us - s_last_denied_us < 10 * 1000 * 1000) {
+        return;
+    }
+    s_last_denied_us = now_us;
+
+    char path[272];
+    if (!copy_request_path(req, path, sizeof(path))) {
+        strlcpy(path, req->uri, sizeof(path));
+    }
+    char *escaped_path = json_escape_dup(path);
+    if (!escaped_path) return;
+
+    char log_line[640];
+    snprintf(log_line, sizeof(log_line),
+             "{\"event\":\"http:denied\",\"source\":\"esp32\",\"method\":\"%s\","
+             "\"path\":\"%s\",\"status\":%d}",
+             http_method_name(req->method), escaped_path, status);
+    free(escaped_path);
+    frameos_nim_log_hook(log_line);
+}
+
 static esp_err_t require_protected_access(httpd_req_t *req)
 {
     if (s_portal_mode) return ESP_OK;
@@ -302,6 +350,7 @@ static esp_err_t require_protected_access(httpd_req_t *req)
     }
 
     if (!admin_auth_configured(config)) {
+        log_http_denied(req, 403);
         httpd_resp_set_type(req, "text/plain");
         return httpd_resp_send_err(
             req,
@@ -310,6 +359,7 @@ static esp_err_t require_protected_access(httpd_req_t *req)
             "Connect through the FrameOS hotspot, or set frame admin auth in the backend and redeploy.");
     }
 
+    log_http_denied(req, 401);
     httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"FrameOS\"");
     return httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Authentication required");
 }
@@ -591,6 +641,13 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     snprintf(field, sizeof(field), "%lu", (unsigned long)config->assets_sd.max_freq_khz);
     if (send_input(req, "SD max frequency (kHz)", "assets_sd_freq", "number", field,
                    " min='400' max='40000'") != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "<label for='assets_sd_autoformat'>Format blank SD cards</label>"
+                     "<select id='assets_sd_autoformat' name='assets_sd_autoformat'>") != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "1", "Yes, if the card is provably empty",
+                    config->assets_sd.autoformat) != ESP_OK) return ESP_FAIL;
+    if (send_option(req, "0", "Never format without asking",
+                    !config->assets_sd.autoformat) != ESP_OK) return ESP_FAIL;
+    if (sendstr(req, "</select>") != ESP_OK) return ESP_FAIL;
     if (sendstr(req,
         "<button type='submit'>Save and reboot</button></form>"
         "<p class='muted'><a href='/status'>Status JSON</a> | <a href='/api/scenes'>Scenes JSON</a> | "
@@ -609,7 +666,8 @@ static esp_err_t root_get_handler(httpd_req_t *req)
         "`<div class='metric'><b>Flash</b>${Math.round((st.flashBytes||0)/1024)}K: ${fl}</div>`+"
         "`<div class='metric'><b>PSRAM</b>${Math.round((m.psramFree||0)/1024)}K free / ${Math.round((m.psramTotal||0)/1024)}K</div>`+"
         "`<div class='metric'><b>Wi-Fi</b>${s.wifi?s.wifi.rssi:'?'} dBm</div>`+"
-        "`<div class='metric'><b>Assets</b>${s.assets&&s.assets.sdMounted?'SD mounted':(s.assets&&s.assets.sdEnabled?'SD unavailable':'SD off')}</div>`;"
+        "`<div class='metric'><b>Assets</b>${s.assets&&s.assets.sdMounted?'SD mounted':(s.assets&&s.assets.sdEnabled?'SD unavailable':'SD off')}</div>`+"
+        "(s.assets&&s.assets.sdError?`<div class='metric'><b>SD error</b>${s.assets.sdError}</div>`:'');"
         "const img=document.getElementById('preview');if(s.render&&s.render.previewReady&&!img.getAttribute('src'))refreshPreview();}"
         "function refreshPreview(){const img=document.getElementById('preview');img.src='/image?t='+Date.now();}"
         "function renderNow(){fetch('/reload',{method:'POST'}).then(()=>{let n=0;"
@@ -654,6 +712,9 @@ char *fos_http_status_json(void)
     fos_storage_info_t storage;
     collect_storage_info(&storage);
 
+    char *cloud_url = json_escape_dup(config->cloud_url);
+    char *cloud_frame_id = json_escape_dup(fos_cloud_frame_id());
+    char *cloud_error = json_escape_dup(fos_cloud_last_error());
     char *app_name = json_escape_dup(app->project_name);
     char *app_version = json_escape_dup(app->version);
     char *idf_version = json_escape_dup(app->idf_ver);
@@ -666,10 +727,16 @@ char *fos_http_status_json(void)
     char *backend = json_escape_dup(config->backend_url);
     char *ssid = json_escape_dup(config->wifi_ssid);
     char *nim_info = json_escape_dup(frameos_nim_info());
+    /* Why the card is not mounted, verbatim — "0 assets" with no reason is
+     * what makes SD problems unanswerable from the panel. */
+    char *sd_error = json_escape_dup(fos_assets_sd_last_error());
     if (!app_name || !app_version || !idf_version || !partition || !ip ||
-        !panel || !pins_json || !sd_pins_json || !assets_path || !backend || !ssid || !nim_info) {
+        !panel || !pins_json || !sd_pins_json || !assets_path || !backend || !ssid || !nim_info ||
+        !sd_error || !cloud_url || !cloud_frame_id || !cloud_error) {
         free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
         free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+        free(sd_error);
+        free(cloud_url); free(cloud_frame_id); free(cloud_error);
         return NULL;
     }
 
@@ -683,7 +750,8 @@ char *fos_http_status_json(void)
         "\"factorySlotBytes\":%u,\"otaSlots\":%u,\"otaSlotBytes\":%u,\"otaBytes\":%u,"
         "\"stateBytes\":%u},"
         "\"assets\":{\"path\":\"%s\",\"sdEnabled\":%s,\"sdMounted\":%s,\"sdPins\":\"%s\","
-        "\"sdMaxFrequencyKHz\":%lu,\"sdCapacityBytes\":%llu},"
+        "\"sdMaxFrequencyKHz\":%lu,\"sdCapacityBytes\":%llu,\"sdAutoformat\":%s,"
+        "\"sdErrorCode\":\"%s\",\"sdError\":\"%s\"},"
         "\"ota\":{\"supported\":%s,\"slotBytes\":%u,\"retryAttempts\":64,\"requestMode\":\"early-reboot\","
         "\"resumable\":true,\"bootRequestSupported\":true,"
         "\"partialRequestBytes\":524288,\"wifiSettleMs\":3000},"
@@ -694,6 +762,9 @@ char *fos_http_status_json(void)
         "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\","
         "\"displayStateReady\":%s,\"panelImageReady\":%s},"
         "\"nim\":{\"info\":\"%s\"},\"scenes\":%s,"
+        /* enrollment state only — no claim token, access token, or key */
+        "\"cloud\":{\"state\":\"%s\",\"url\":\"%s\",\"frameId\":\"%s\","
+        "\"wsConnected\":%s,\"error\":\"%s\"},"
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\",\"renderMode\":\"%s\","
         "\"intervalSec\":%lu,\"maxHttpResponseBytes\":%lu,"
         "\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
@@ -712,6 +783,8 @@ char *fos_http_status_json(void)
         fos_assets_sd_mounted() ? "true" : "false", sd_pins_json,
         (unsigned long)config->assets_sd.max_freq_khz,
         (unsigned long long)fos_assets_sd_capacity_bytes(),
+        config->assets_sd.autoformat ? "true" : "false",
+        fos_assets_sd_last_error_code(), sd_error,
         storage.ota_slots > 0 ? "true" : "false", (unsigned)storage.ota_slot_bytes,
         (int)fos_wifi_state(), ip, fos_wifi_rssi(),
         fos_wifi_time_synced() ? "true" : "false",
@@ -725,6 +798,8 @@ char *fos_http_status_json(void)
         display_state_ready ? "true" : "false",
         (render_count > 0 || display_state_ready) ? "true" : "false",
         nim_info, scene_json,
+        fos_cloud_state_name(), cloud_url, cloud_frame_id,
+        fos_cloud_ws_connected() ? "true" : "false", cloud_error,
         (unsigned long)config->frame_id, panel,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
         (unsigned long)config->interval_sec,
@@ -736,6 +811,8 @@ char *fos_http_status_json(void)
         pins_json, backend, ssid);
     free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
     free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+    free(sd_error);
+    free(cloud_url); free(cloud_frame_id); free(cloud_error);
     if (len < 0 || !json) {
         free(json);
         return NULL;
@@ -904,7 +981,7 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
         return ESP_ERR_NOT_FOUND;
     }
 
-    uint8_t *packed = heap_caps_malloc(packed_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *packed = fos_big_malloc(packed_len);
     if (!packed) packed = malloc(packed_len);
     if (!packed) return ESP_ERR_NO_MEM;
     esp_err_t err = fos_client_snapshot_copy(packed, packed_len, &width, &height, &format, NULL, NULL);
@@ -913,18 +990,25 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
         return ESP_ERR_NOT_FOUND;
     }
 
+    /* The packed snapshot is in PANEL orientation (the packers rotate while
+     * packing); previews are served in SCENE orientation like the Pi's, so
+     * the UI never shows a sideways image on rotated frames. */
+    int rotate = fos_config()->rotate;
+    int out_width = (rotate == 90 || rotate == 270) ? height : width;
+    int out_height = (rotate == 90 || rotate == 270) ? width : height;
+
     uint16_t bit_count = format == FOS_PIXEL_1BPP ? 1 : 4;
     size_t palette_entries = bit_count == 1 ? 2 : 16;
-    size_t row_payload = (((size_t)width * bit_count) + 7u) / 8u;
+    size_t row_payload = (((size_t)out_width * bit_count) + 7u) / 8u;
     size_t row_stride = (row_payload + 3u) & ~3u;
-    size_t pixel_bytes = row_stride * (size_t)height;
+    size_t pixel_bytes = row_stride * (size_t)out_height;
     size_t palette_bytes = palette_entries * 4u;
     if (pixel_bytes > UINT32_MAX - 54u - palette_bytes) {
         free(packed);
         return ESP_ERR_INVALID_SIZE;
     }
     size_t bmp_len = 54u + palette_bytes + pixel_bytes;
-    uint8_t *bmp = heap_caps_malloc(bmp_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *bmp = fos_big_malloc(bmp_len);
     if (!bmp) bmp = malloc(bmp_len);
     if (!bmp) {
         free(packed);
@@ -936,8 +1020,8 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
     put_u32le(&bmp[2], (uint32_t)bmp_len);
     put_u32le(&bmp[10], (uint32_t)(54u + palette_bytes));
     put_u32le(&bmp[14], 40);
-    put_u32le(&bmp[18], (uint32_t)width);
-    put_u32le(&bmp[22], (uint32_t)height);
+    put_u32le(&bmp[18], (uint32_t)out_width);
+    put_u32le(&bmp[22], (uint32_t)out_height);
     put_u16le(&bmp[26], 1);
     put_u16le(&bmp[28], bit_count);
     put_u32le(&bmp[34], (uint32_t)pixel_bytes);
@@ -961,11 +1045,20 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
     }
     uint8_t *pixels = bmp + 54u + palette_bytes;
     size_t row_index = 0;
-    for (int y = height - 1; y >= 0; y--) {
+    for (int y = out_height - 1; y >= 0; y--) {
         uint8_t *row = pixels + row_index * row_stride;
         memset(row, 0, row_stride);
-        for (int x = 0; x < width; x++) {
-            uint8_t index = preview_palette_index(packed, width, height, format, x, y);
+        for (int x = 0; x < out_width; x++) {
+            /* Scene (x,y) → the panel position the packer put it at (the
+             * same mapping embedded_main.panelCoords applies). */
+            int px = x, py = y;
+            switch (rotate) {
+                case 90: px = out_height - 1 - y; py = x; break;
+                case 180: px = out_width - 1 - x; py = out_height - 1 - y; break;
+                case 270: px = y; py = out_width - 1 - x; break;
+                default: break;
+            }
+            uint8_t index = preview_palette_index(packed, width, height, format, px, py);
             if (bit_count == 1) {
                 if (index & 1u) row[(size_t)x >> 3] |= 0x80 >> (x & 7);
             } else if (x & 1) {
@@ -1077,6 +1170,7 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
     if (form_value(body, "assets_path", value, sizeof(value))) strlcpy(config->assets_path, value, sizeof(config->assets_path));
     if (form_value(body, "assets_sd_enable", value, sizeof(value))) config->assets_sd.enabled = atoi(value) != 0;
     if (form_value(body, "assets_sd_pins", value, sizeof(value))) fos_config_parse_assets_sd_pins(value, &config->assets_sd);
+    if (form_value(body, "assets_sd_autoformat", value, sizeof(value))) config->assets_sd.autoformat = atoi(value) != 0;
     if (form_value(body, "assets_sd_freq", value, sizeof(value))) {
         uint32_t freq = strtoul(value, NULL, 10);
         if (freq >= 400 && freq <= 40000) config->assets_sd.max_freq_khz = freq;
@@ -1318,7 +1412,7 @@ static cJSON *frame_api_frame_json(void)
     cJSON_AddNumberToObject(frame, "max_http_response_bytes", config->max_http_response_bytes);
     cJSON_AddStringToObject(frame, "scaling_mode", "contain");
     cJSON_AddStringToObject(frame, "image_engine", "");
-    cJSON_AddNumberToObject(frame, "rotate", 0);
+    cJSON_AddNumberToObject(frame, "rotate", fos_config()->rotate);
     cJSON_AddStringToObject(frame, "flip", "");
     cJSON_AddStringToObject(frame, "background_color", "#000000");
     cJSON_AddItemToObject(frame, "scenes", frame_api_stored_scenes_json());
@@ -1675,6 +1769,403 @@ static esp_err_t event_post_handler(httpd_req_t *req)
     return handle_event_post(req, event_name);
 }
 
+/* ------------------------------------------------------- logs + metrics */
+
+/* {"logs":[{"timestamp":…,"type":"webhook","line":"<raw json>"}…]} — the
+ * same row shape the backend serves, so the standalone/frame-admin Logs
+ * panel renders these identically. */
+static esp_err_t logs_get_handler(httpd_req_t *req)
+{
+    frameos_log_entry_t *entries = calloc(FOS_NIM_LOG_RING_CAP, sizeof(*entries));
+    if (!entries) return httpd_resp_send_500(req);
+    size_t count = frameos_nim_log_recent(entries, FOS_NIM_LOG_RING_CAP);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send_chunk(req, "{\"logs\":[", 9);
+    for (size_t i = 0; i < count && err == ESP_OK; i++) {
+        char *escaped = json_escape_dup(entries[i].line);
+        if (!escaped) break;
+        char head[64];
+        int head_len;
+        if (entries[i].timestamp > 1e9) {
+            head_len = snprintf(head, sizeof(head), "%s{\"timestamp\":%.0f,",
+                                i ? "," : "", entries[i].timestamp);
+        } else {
+            head_len = snprintf(head, sizeof(head), "%s{", i ? "," : "");
+        }
+        err = httpd_resp_send_chunk(req, head, head_len);
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, "\"type\":\"webhook\",\"line\":\"", 25);
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, escaped, strlen(escaped));
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, "\"}", 2);
+        free(escaped);
+    }
+    for (size_t i = 0; i < count; i++) free(entries[i].line);
+    free(entries);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, "]}", 2);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, NULL, 0);
+    return err;
+}
+
+static esp_err_t metrics_get_handler(httpd_req_t *req)
+{
+    fos_metrics_sample_t *samples = calloc(32, sizeof(*samples));
+    if (!samples) return httpd_resp_send_500(req);
+    size_t count = fos_client_metrics_recent(samples, 32);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send_chunk(req, "{\"metrics\":[", 12);
+    for (size_t i = 0; i < count && err == ESP_OK; i++) {
+        char head[64];
+        int head_len = snprintf(head, sizeof(head), "%s{%s",
+                                i ? "," : "",
+                                samples[i].timestamp > 1e9 ? "" : "\"timestamp\":null,");
+        if (samples[i].timestamp > 1e9) {
+            head_len = snprintf(head, sizeof(head), "%s{\"timestamp\":%.0f,",
+                                i ? "," : "", samples[i].timestamp);
+        }
+        err = httpd_resp_send_chunk(req, head, head_len);
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, "\"metrics\":", 10);
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, samples[i].json, strlen(samples[i].json));
+        if (err == ESP_OK) err = httpd_resp_send_chunk(req, "}", 1);
+    }
+    for (size_t i = 0; i < count; i++) free(samples[i].json);
+    free(samples);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, "]}", 2);
+    if (err == ESP_OK) err = httpd_resp_send_chunk(req, NULL, 0);
+    return err;
+}
+
+/* --------------------------------------------------------- restart action */
+
+static void restart_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(750)); /* let the HTTP response flush first */
+    esp_restart();
+}
+
+/* POST /api/action/restart and /api/action/reboot: on ESP32 the runtime is
+ * the firmware, so both are a chip reset. The backend's restart/reboot
+ * tasks call these instead of systemd-over-SSH. */
+static esp_err_t restart_post_handler(httpd_req_t *req)
+{
+    REQUIRE_PROTECTED_ACCESS();
+    log_http_command_from_path(req, 0);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+    if (xTaskCreate(restart_task, "fos_restart", 2048, NULL, 5, NULL) != pdPASS) {
+        esp_restart();
+    }
+    return err;
+}
+
+/* ---------------------------------------------------------- asset routes */
+
+/* Query strings on asset routes carry the (url-encoded) path plus, for
+ * chunked uploads, upload_id/offset/complete. */
+#define FOS_ASSETS_QUERY_MAX (FOS_ASSETS_PATH_MAX + 192)
+
+/* Pull one url-decoded query parameter; false when absent or truncated. */
+static bool asset_query_param(httpd_req_t *req, const char *key, char *out, size_t out_len)
+{
+    char query[FOS_ASSETS_QUERY_MAX];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) return false;
+    if (httpd_query_key_value(query, key, out, out_len) != ESP_OK) return false;
+    url_decode(out);
+    return true;
+}
+
+/* Pull a sanitized asset path out of the request's query string. */
+static bool asset_query_path(httpd_req_t *req, bool write_rule, char *out, size_t out_len)
+{
+    char raw[FOS_ASSETS_PATH_MAX];
+    if (!asset_query_param(req, "path", raw, sizeof(raw))) return false;
+    return write_rule ? fos_assets_sanitize_write_path(raw, out, out_len)
+                      : fos_assets_sanitize_path(raw, out, out_len);
+}
+
+static esp_err_t assets_list_get_handler(httpd_req_t *req)
+{
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return httpd_resp_send_500(req);
+    cJSON *assets = cJSON_AddArrayToObject(msg, "assets");
+    bool truncated = false;
+    bool ok = assets && fos_assets_list_json(assets, &truncated);
+    if (truncated) cJSON_AddBoolToObject(msg, "truncated", true);
+    cJSON_AddBoolToObject(msg, "mounted", fos_assets_available());
+    char *body = ok ? cJSON_PrintUnformatted(msg) : NULL;
+    cJSON_Delete(msg);
+    if (!body) return httpd_resp_send_500(req);
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_sendstr(req, body);
+    cJSON_free(body);
+    return err;
+}
+
+static esp_err_t asset_file_get_handler(httpd_req_t *req)
+{
+    char rel[FOS_ASSETS_PATH_MAX];
+    if (!asset_query_path(req, false, rel, sizeof(rel))) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid path");
+    }
+    struct stat st;
+    if (fos_assets_stat(rel, &st) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    if (S_ISDIR(st.st_mode)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "is a directory");
+    }
+    char full[FOS_ASSETS_FULL_PATH_MAX];
+    fos_assets_full_path(full, sizeof(full), rel);
+    FILE *file = fopen(full, "rb");
+    if (!file) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    httpd_resp_set_type(req, fos_assets_content_type(rel));
+    size_t cap = 16 * 1024;
+    char *chunk = fos_big_malloc(cap);
+    if (!chunk) {
+        cap = 4096;
+        chunk = malloc(cap);
+    }
+    if (!chunk) {
+        fclose(file);
+        return httpd_resp_send_500(req);
+    }
+    esp_err_t err = ESP_OK;
+    while (err == ESP_OK) {
+        size_t r = fread(chunk, 1, cap, file);
+        if (ferror(file)) {
+            err = ESP_FAIL;
+            break;
+        }
+        err = httpd_resp_send_chunk(req, chunk, r);
+        if (r == 0) break; /* final zero-length chunk ends the response */
+    }
+    free(chunk);
+    fclose(file);
+    return err;
+}
+
+/* How many consecutive soft recv timeouts (recv_wait_timeout, 5s each) to
+ * ride out before giving up on an upload chunk. Slow links stall; a stall
+ * is only fatal once it outlives ~30s. */
+#define FOS_UPLOAD_RECV_STALL_LIMIT 6
+
+static esp_err_t asset_upload_post_handler(httpd_req_t *req)
+{
+    keep_awake_for_http_mutation();
+    char rel[FOS_ASSETS_PATH_MAX];
+    if (!asset_query_path(req, true, rel, sizeof(rel))) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid path");
+    }
+    if (!fos_assets_available()) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "assets storage not mounted");
+    }
+    int total = req->content_len;
+    if (total <= 0) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
+    }
+    /* Chunked mode: bytes accumulate in a part file across requests sharing
+     * upload_id; complete=1 commits the part to `path`. Offsets make chunk
+     * retries idempotent (a resent chunk overwrites itself). */
+    char upload_id[FOS_ASSETS_UPLOAD_ID_MAX] = "";
+    bool chunked = asset_query_param(req, "upload_id", upload_id, sizeof(upload_id));
+    long long offset = 0;
+    bool complete = true;
+    if (chunked) {
+        if (!fos_assets_valid_upload_id(upload_id)) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid upload id");
+        }
+        char val[24];
+        if (asset_query_param(req, "offset", val, sizeof(val))) offset = atoll(val);
+        if (asset_query_param(req, "complete", val, sizeof(val))) {
+            complete = strcmp(val, "1") == 0;
+        }
+    }
+    const char *asset_err = NULL;
+    fos_assets_writer_t writer;
+    esp_err_t begin = chunked
+        ? fos_assets_chunk_begin(upload_id, offset, &writer, &asset_err)
+        : fos_assets_write_begin(rel, &writer, &asset_err);
+    if (begin != ESP_OK) {
+        if (asset_err && strcmp(asset_err, "chunk_gap") == 0) {
+            /* An earlier chunk is missing — client must restart from 0. */
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_set_type(req, "application/json");
+            return httpd_resp_sendstr(req, "{\"error\":\"chunk_gap\"}");
+        }
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   asset_err ? asset_err : "write failed");
+    }
+    size_t cap = 16 * 1024;
+    char *chunk = fos_big_malloc(cap);
+    if (!chunk) {
+        cap = 4096;
+        chunk = malloc(cap);
+    }
+    if (!chunk) {
+        if (chunked) fos_assets_chunk_close(&writer);
+        else fos_assets_write_abort(&writer);
+        return httpd_resp_send_500(req);
+    }
+    int received = 0;
+    int stalls = 0;
+    esp_err_t err = ESP_OK;
+    while (received < total) {
+        int want = total - received;
+        if (want > (int)cap) want = (int)cap;
+        int r = httpd_req_recv(req, chunk, want);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) {
+            if (++stalls <= FOS_UPLOAD_RECV_STALL_LIMIT) continue;
+            err = ESP_FAIL;
+            break;
+        }
+        if (r <= 0) {
+            err = ESP_FAIL;
+            break;
+        }
+        stalls = 0;
+        if (fos_assets_write_chunk(&writer, chunk, (size_t)r) != ESP_OK) {
+            err = ESP_FAIL;
+            break;
+        }
+        received += r;
+    }
+    free(chunk);
+    if (err != ESP_OK) {
+        /* Keep the part on chunked failures so the client can retry the
+         * same offset; single-shot uploads roll back as before. */
+        if (chunked) fos_assets_chunk_close(&writer);
+        else fos_assets_write_abort(&writer);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "write failed");
+    }
+    long long part_size = 0;
+    if (chunked) {
+        if (fos_assets_chunk_finish(&writer, complete ? rel : NULL, &part_size,
+                                    &asset_err) != ESP_OK) {
+            return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                       asset_err ? asset_err : "write failed");
+        }
+    } else if (fos_assets_write_commit(&writer, &asset_err) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   asset_err ? asset_err : "write failed");
+    }
+    if (chunked && !complete) {
+        char reply[96];
+        snprintf(reply, sizeof(reply), "{\"pending\":true,\"received\":%lld}", part_size);
+        httpd_resp_set_type(req, "application/json");
+        return httpd_resp_sendstr(req, reply);
+    }
+    log_http_command(req, "assetUpload", chunked ? (size_t)part_size : (size_t)total);
+    struct stat st;
+    bool have_stat = fos_assets_stat(rel, &st) == ESP_OK;
+    char *escaped = json_escape_dup(rel);
+    if (!escaped) return httpd_resp_send_500(req);
+    char reply[FOS_ASSETS_PATH_MAX * 2 + 96];
+    snprintf(reply, sizeof(reply),
+             "{\"path\":\"%s\",\"size\":%lld,\"mtime\":%lld,\"is_dir\":false}",
+             escaped,
+             have_stat ? (long long)st.st_size
+                       : (chunked ? part_size : (long long)total),
+             (long long)(have_stat ? st.st_mtime : 0));
+    free(escaped);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, reply);
+}
+
+/* mkdir + delete share a form body of `path=...`; rename reads src + dst. */
+static esp_err_t asset_mutate_post_handler(httpd_req_t *req, const char *op)
+{
+    keep_awake_for_http_mutation();
+    char *body = NULL;
+    if (read_request_body(req, 2048, false, &body) != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
+    }
+    char raw[FOS_ASSETS_PATH_MAX];
+    char rel[FOS_ASSETS_PATH_MAX];
+    char dst_rel[FOS_ASSETS_PATH_MAX];
+    bool ok_paths = false;
+    if (strcmp(op, "rename") == 0) {
+        char raw_dst[FOS_ASSETS_PATH_MAX];
+        ok_paths = form_value(body, "src", raw, sizeof(raw)) &&
+                   form_value(body, "dst", raw_dst, sizeof(raw_dst)) &&
+                   fos_assets_sanitize_write_path(raw, rel, sizeof(rel)) &&
+                   fos_assets_sanitize_write_path(raw_dst, dst_rel, sizeof(dst_rel));
+    } else {
+        ok_paths = form_value(body, "path", raw, sizeof(raw)) &&
+                   fos_assets_sanitize_write_path(raw, rel, sizeof(rel));
+    }
+    free(body);
+    if (!ok_paths) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid path");
+    }
+    const char *asset_err = NULL;
+    esp_err_t err;
+    if (strcmp(op, "mkdir") == 0) {
+        err = fos_assets_mkdir(rel, &asset_err);
+    } else if (strcmp(op, "delete") == 0) {
+        err = fos_assets_delete(rel, &asset_err);
+    } else {
+        err = fos_assets_rename(rel, dst_rel, &asset_err);
+    }
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(
+            req,
+            err == ESP_ERR_NOT_FOUND ? HTTPD_404_NOT_FOUND
+                                     : HTTPD_500_INTERNAL_SERVER_ERROR,
+            asset_err ? asset_err : "failed");
+    }
+    log_http_command_from_path(req, 0);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+/* Explicit SD-card maintenance. Boot formats only a card whose raw sectors
+ * prove it empty, and never re-probes the socket after boot (fos_assets_sd.c),
+ * so these two actions are the only ways to put a filesystem on a card the
+ * probe refused, or to pick up a card inserted while the frame was running:
+ *
+ *   POST /api/action/remount-sd  |  POST /api/frames/<id>/assets/remount-sd
+ *   POST /api/action/format-sd   |  POST /api/frames/<id>/assets/format-sd
+ *
+ * format-sd ERASES the card: it writes a fresh filesystem to a card that
+ * carries no volume this firmware can mount (a blank card, or an exFAT card
+ * whose contents the frame cannot see). A card that mounts is never touched.
+ * Callers must warn the user before POSTing it. */
+static esp_err_t sd_maintenance_post_handler(httpd_req_t *req, bool format)
+{
+    REQUIRE_PROTECTED_ACCESS();
+    keep_awake_for_http_mutation();
+    log_http_command(req, format ? "format-sd" : "remount-sd", 0);
+
+    esp_err_t err = format ? fos_assets_sd_format() : fos_assets_sd_remount();
+    if (err != ESP_OK) {
+        const char *detail = fos_assets_sd_last_error();
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   (detail && detail[0]) ? detail : esp_err_to_name(err));
+    }
+    char *body = NULL;
+    int len = asprintf(&body, "{\"ok\":true,\"mounted\":true,\"capacityBytes\":%llu}",
+                       (unsigned long long)fos_assets_sd_capacity_bytes());
+    if (len < 0 || !body) {
+        free(body);
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t send_err = httpd_resp_sendstr(req, body);
+    free(body);
+    return send_err;
+}
+
+static esp_err_t sd_remount_post_handler(httpd_req_t *req)
+{
+    return sd_maintenance_post_handler(req, false);
+}
+
+static esp_err_t sd_format_post_handler(httpd_req_t *req)
+{
+    return sd_maintenance_post_handler(req, true);
+}
+
 static bool frame_api_suffix(httpd_req_t *req, char *suffix, size_t suffix_len)
 {
     char path[256];
@@ -1711,18 +2202,10 @@ static esp_err_t frame_api_get_handler(httpd_req_t *req)
     if (strcmp(suffix, "/image") == 0 || strncmp(suffix, "/scene_images/", 14) == 0) {
         return preview_bmp_handler(req);
     }
-    if (strcmp(suffix, "/logs") == 0) {
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_send(req, "{\"logs\":[]}", HTTPD_RESP_USE_STRLEN);
-    }
-    if (strcmp(suffix, "/metrics") == 0) {
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_send(req, "{\"metrics\":[]}", HTTPD_RESP_USE_STRLEN);
-    }
-    if (strcmp(suffix, "/assets") == 0) {
-        httpd_resp_set_type(req, "application/json");
-        return httpd_resp_send(req, "{\"assets\":[]}", HTTPD_RESP_USE_STRLEN);
-    }
+    if (strcmp(suffix, "/logs") == 0) return logs_get_handler(req);
+    if (strcmp(suffix, "/metrics") == 0) return metrics_get_handler(req);
+    if (strcmp(suffix, "/assets") == 0) return assets_list_get_handler(req);
+    if (strcmp(suffix, "/asset") == 0) return asset_file_get_handler(req);
     return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
 }
 
@@ -1741,6 +2224,12 @@ static esp_err_t frame_api_post_handler(httpd_req_t *req)
         strcmp(suffix, "/uploaded_scenes") == 0) {
         return scenes_post_handler(req);
     }
+    if (strcmp(suffix, "/assets/upload") == 0) return asset_upload_post_handler(req);
+    if (strcmp(suffix, "/assets/mkdir") == 0) return asset_mutate_post_handler(req, "mkdir");
+    if (strcmp(suffix, "/assets/delete") == 0) return asset_mutate_post_handler(req, "delete");
+    if (strcmp(suffix, "/assets/rename") == 0) return asset_mutate_post_handler(req, "rename");
+    if (strcmp(suffix, "/assets/remount-sd") == 0) return sd_remount_post_handler(req);
+    if (strcmp(suffix, "/assets/format-sd") == 0) return sd_format_post_handler(req);
     const char *event_prefix = "/event/";
     if (strncmp(suffix, event_prefix, strlen(event_prefix)) == 0) {
         char event_name[96];
@@ -1801,7 +2290,7 @@ static esp_err_t scenes_post_handler(httpd_req_t *req)
     if (total <= 0 || total > 512 * 1024) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad length");
     }
-    char *body = heap_caps_malloc(total + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *body = fos_big_malloc(total + 1);
     if (!body) body = malloc(total + 1);
     if (!body) return httpd_resp_send_500(req);
     int received = 0;
@@ -1857,11 +2346,151 @@ static esp_err_t probe_handler(httpd_req_t *req)
     return portal_redirect_handler(req, 0);
 }
 
+/* Incoming-request logging: every route is registered through a trampoline
+ * (logged_dispatch) that times the real handler and emits one JSON log line
+ * via frameos_nim_log_hook. Per-route state lives in a static table; each
+ * registration (plain + TLS server both call register_routes) gets its own
+ * slot, whose address becomes the registered user_ctx. */
+typedef struct {
+    esp_err_t (*handler)(httpd_req_t *req);
+    void *user_ctx;
+    httpd_method_t method;
+    char uri[32];
+} logged_route_t;
+
+/* 27 routes per server (13 GET + 14 POST), x2 servers (http + https), or
+ * 27 + 7 captive-portal probes in portal mode. 64 leaves headroom. */
+#define FOS_HTTP_MAX_LOGGED_ROUTES 64
+static logged_route_t s_logged_routes[FOS_HTTP_MAX_LOGGED_ROUTES];
+static size_t s_logged_route_count = 0;
+
+static bool path_has_suffix(const char *path, const char *suffix)
+{
+    size_t path_len = strlen(path);
+    size_t suffix_len = strlen(suffix);
+    if (suffix_len > path_len) return false;
+    return strcmp(path + path_len - suffix_len, suffix) == 0;
+}
+
+/* True when POST <path> is a "frame update" (/api/frames/<id> or
+ * /api/frames/<id>/), which already logs its own http:command line. */
+static bool path_is_frame_update_root(const char *path)
+{
+    const char *prefix = "/api/frames/";
+    size_t prefix_len = strlen(prefix);
+    if (strncmp(path, prefix, prefix_len) != 0) return false;
+    const char *p = path + prefix_len;
+    if (*p < '0' || *p > '9') return false;
+    while (*p >= '0' && *p <= '9') p++;
+    return *p == '\0' || (p[0] == '/' && p[1] == '\0');
+}
+
+static bool should_log_request(int method, const char *path)
+{
+    /* High-frequency polling / image endpoints: never log. Matched on the
+     * ACTUAL request path so /api/frames/<id>/... wildcards are covered. */
+    if (path_has_suffix(path, "/ping") ||
+        path_has_suffix(path, "/image") ||
+        path_has_suffix(path, "/logs") ||
+        path_has_suffix(path, "/metrics") ||
+        path_has_suffix(path, "/status") ||
+        strcmp(path, "/api/preview.bmp") == 0 ||
+        strstr(path, "/scene_images/") != NULL) {
+        return false;
+    }
+
+    /* Captive-portal probe paths (registered in portal mode only). */
+    if (strcmp(path, "/generate_204") == 0 ||
+        strcmp(path, "/gen_204") == 0 ||
+        strcmp(path, "/hotspot-detect.html") == 0 ||
+        strcmp(path, "/connecttest.txt") == 0 ||
+        strcmp(path, "/ncsi.txt") == 0 ||
+        strcmp(path, "/redirect") == 0 ||
+        strcmp(path, "/success.txt") == 0) {
+        return false;
+    }
+
+    /* POSTs whose handlers already emit an http:command line with command
+     * detail (log_http_command / log_http_command_from_path) would double
+     * log; keep the richer http:command line and skip http:request. */
+    if (method == HTTP_POST) {
+        if (strncmp(path, "/api/action/", strlen("/api/action/")) == 0 ||
+            strstr(path, "/event/") != NULL ||
+            path_has_suffix(path, "/reload") ||
+            path_has_suffix(path, "/uploadScenes") ||
+            path_has_suffix(path, "/upload_scenes") ||
+            path_has_suffix(path, "/uploaded_scenes") ||
+            path_has_suffix(path, "/assets/upload") ||
+            path_has_suffix(path, "/assets/mkdir") ||
+            path_has_suffix(path, "/assets/delete") ||
+            path_has_suffix(path, "/assets/rename") ||
+            path_has_suffix(path, "/assets/remount-sd") ||
+            path_has_suffix(path, "/assets/format-sd") ||
+            strcmp(path, "/api/scenes") == 0 ||
+            path_is_frame_update_root(path)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static esp_err_t logged_dispatch(httpd_req_t *req)
+{
+    logged_route_t *route = (logged_route_t *)req->user_ctx;
+    /* Restore the original user_ctx before dispatching: handlers such as
+     * action_handler read their callback out of req->user_ctx. */
+    req->user_ctx = route->user_ctx;
+
+    char path[272];
+    bool have_path = copy_request_path(req, path, sizeof(path));
+    if (!have_path || !should_log_request(req->method, path)) {
+        return route->handler(req);
+    }
+
+    int64_t start_us = esp_timer_get_time();
+    esp_err_t err = route->handler(req);
+    int64_t elapsed_ms = (esp_timer_get_time() - start_us) / 1000;
+
+    char *escaped_path = json_escape_dup(path);
+    if (escaped_path) {
+        char log_line[640];
+        snprintf(log_line, sizeof(log_line),
+                 "{\"event\":\"http:request\",\"source\":\"esp32\",\"method\":\"%s\","
+                 "\"path\":\"%s\",\"ok\":%s,\"ms\":%lld}",
+                 http_method_name(req->method), escaped_path,
+                 err == ESP_OK ? "true" : "false", (long long)elapsed_ms);
+        free(escaped_path);
+        frameos_nim_log_hook(log_line);
+    }
+    return err;
+}
+
+static esp_err_t register_logged_route(httpd_handle_t server, const httpd_uri_t *route)
+{
+    if (s_logged_route_count >= FOS_HTTP_MAX_LOGGED_ROUTES) {
+        ESP_LOGE(TAG, "logged route table full, cannot register %s", route->uri);
+        return ESP_ERR_NO_MEM;
+    }
+    logged_route_t *slot = &s_logged_routes[s_logged_route_count];
+    slot->handler = route->handler;
+    slot->user_ctx = route->user_ctx;
+    slot->method = route->method;
+    strlcpy(slot->uri, route->uri, sizeof(slot->uri));
+
+    httpd_uri_t wrapped = *route;
+    wrapped.handler = logged_dispatch;
+    wrapped.user_ctx = slot;
+    esp_err_t err = httpd_register_uri_handler(server, &wrapped);
+    if (err == ESP_OK) s_logged_route_count++;
+    return err;
+}
+
 static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
 {
     esp_err_t err = ESP_OK;
 #define REGISTER_ROUTE(route) do { \
-        err = httpd_register_uri_handler(server, &(route)); \
+        err = register_logged_route(server, &(route)); \
         if (err != ESP_OK) return err; \
     } while (0)
 
@@ -1894,10 +2523,18 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
 
     httpd_uri_t render = {.uri = "/api/action/render", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_render_cb};
     httpd_uri_t ota = {.uri = "/api/action/ota", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_ota_cb};
+    httpd_uri_t action_restart = {.uri = "/api/action/restart", .method = HTTP_POST, .handler = restart_post_handler};
+    httpd_uri_t action_reboot = {.uri = "/api/action/reboot", .method = HTTP_POST, .handler = restart_post_handler};
     httpd_uri_t scene = {.uri = "/api/action/scene", .method = HTTP_POST, .handler = scene_select_handler};
+    httpd_uri_t remount_sd = {.uri = "/api/action/remount-sd", .method = HTTP_POST, .handler = sd_remount_post_handler};
+    httpd_uri_t format_sd = {.uri = "/api/action/format-sd", .method = HTTP_POST, .handler = sd_format_post_handler};
     REGISTER_ROUTE(render);
     REGISTER_ROUTE(ota);
+    REGISTER_ROUTE(action_restart);
+    REGISTER_ROUTE(action_reboot);
     REGISTER_ROUTE(scene);
+    REGISTER_ROUTE(remount_sd);
+    REGISTER_ROUTE(format_sd);
 
     httpd_uri_t scenes = {.uri = "/api/scenes", .method = HTTP_POST, .handler = scenes_post_handler};
     httpd_uri_t scenes_sync = {.uri = "/api/action/scenes_sync", .method = HTTP_POST, .handler = scenes_sync_handler};
@@ -1933,7 +2570,7 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
 
 static void configure_httpd_defaults(httpd_config_t *config)
 {
-    config->max_uri_handlers = 32;
+    config->max_uri_handlers = 40;
     config->max_open_sockets = 7;
     config->backlog_conn = 8;
     config->recv_wait_timeout = 5;
@@ -1952,6 +2589,7 @@ esp_err_t fos_http_start(bool portal_mode)
 {
     if (s_http_server || s_https_server) return ESP_OK;
     s_portal_mode = portal_mode;
+    s_logged_route_count = 0;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     configure_httpd_defaults(&config);

@@ -1,9 +1,11 @@
 import { actions, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
 
-import { FrameScene, GPIOButton, RepositoryType, TemplateType } from '../../../../types'
+import { FrameScene, GPIOButton, RepositoryType, TemplateType, FrameId } from '../../../../types'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { assetUrl } from '../../../../utils/assetUrl'
+import { isCloudMode } from '../../../../utils/cloudMode'
+import { isFrameControlMode } from '../../../../utils/frameControlMode'
 import { getBasePath } from '../../../../utils/getBasePath'
 import { projectApiPath } from '../../../../utils/projectApi'
 import { frameLogic } from '../../frameLogic'
@@ -12,7 +14,7 @@ import { collectScenePreviewPayloadScenes, scenesLogic } from './scenesLogic'
 import type { livePreviewLogicType } from './livePreviewLogicType'
 
 export interface LivePreviewLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export interface LivePreviewSceneEvent {
@@ -289,15 +291,24 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
 
       const frameId = values.frame?.id ?? props.frameId
 
-      // Fetch the frame's assembled settings (app API keys etc.) so data apps
-      // that need secrets can run in the preview. Best-effort: a scene with no
-      // secret-using apps still previews fine if this fails.
+      // Fetch the stored settings (app API keys etc.) so data apps that need
+      // secrets can run in the preview. Best-effort: a scene with no
+      // secret-using apps still previews fine if this fails. On the cloud
+      // GET /api/settings already answers with the merged {group: value}
+      // object; the backend assembles the same shape per frame.
       let settings: Record<string, any> = {}
       try {
-        const response = await apiFetch(`/api/frames/${frameId}/scene_preview_settings`)
-        if (response.ok) {
-          const data = await response.json()
-          settings = data?.settings ?? {}
+        if (isCloudMode()) {
+          const response = await apiFetch(`/api/settings`)
+          if (response.ok) {
+            settings = (await response.json()) ?? {}
+          }
+        } else {
+          const response = await apiFetch(`/api/frames/${frameId}/scene_preview_settings`)
+          if (response.ok) {
+            const data = await response.json()
+            settings = data?.settings ?? {}
+          }
         }
       } catch (error) {
         // fall through with empty settings
@@ -309,7 +320,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       }
       const settingsJson = JSON.stringify(settings)
 
-      // Same-origin backend proxy so the runtime's HTTP requests (image apps,
+      // Same-origin proxy so the runtime's HTTP requests (image apps,
       // weather, ...) work despite CORS — the worker's sync XHR carries auth
       // cookies to it. Resolve the project-prefixed absolute path up front.
       // An embedding page (the standalone editor bundle) can supply its own
@@ -318,6 +329,14 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       const configuredProxyUrl = (window as any).FRAMEOS_APP_CONFIG?.preview_proxy_url
       if (typeof configuredProxyUrl === 'string' && configuredProxyUrl) {
         proxyUrl = configuredProxyUrl
+      } else if (isCloudMode()) {
+        // The cloud has no project-scoped backend proxy; it serves the same
+        // anonymous, rate-limited proxy the store's preview pages use. Also
+        // the fallback for a shell served without injected app config.
+        proxyUrl = getBasePath() + '/api/store/preview-proxy'
+      } else if (isFrameControlMode()) {
+        // The frame's own web server has no proxy endpoint — leave the
+        // preview direct-only rather than probing routes that don't exist.
       } else {
         try {
           proxyUrl = getBasePath() + (await projectApiPath(`/api/frames/${frameId}/scene_preview_proxy`))

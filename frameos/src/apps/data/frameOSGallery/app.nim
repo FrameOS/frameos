@@ -2,7 +2,6 @@ import pixie, strformat, json
 import frameos/apps
 import frameos/types
 import frameos/utils/app_images
-import frameos/utils/image
 
 const BASE_URL = "https://gallery.frameos.net/image"
 
@@ -34,10 +33,14 @@ proc get*(self: App, context: ExecutionContext): Image =
   let category = self.appConfig.resolvedCategory()
   self.log(%*{"category": category})
   let url = galleryUrl(category)
-  let target = context.contextImage()
+  # Decode straight into a consumer-sized target only when the interpreter
+  # says the consumer will draw this full-frame, and with the placement it
+  # asked for. Taking context.image plus the frame's scaling mode instead
+  # meant a node asking for "contain" silently got the frame default.
+  let (target, targetScalingMode) = context.takeDecodeTarget()
   try:
     result = galleryDownloadHook(url, self.maxImageResponseBytes(), target,
-        scaledDecodeFitForFrame(self.frameConfig))
+        scaledDecodeFit(targetScalingMode))
   except CatchableError as e:
     let detail = if e.msg.len > 0: e.msg else: "unknown error"
     self.logError "An error occurred while downloading the gallery image: " & detail

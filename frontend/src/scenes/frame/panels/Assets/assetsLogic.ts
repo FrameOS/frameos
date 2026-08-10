@@ -1,6 +1,6 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 
-import { AssetType, MetricsType } from '../../../../types'
+import { AssetType, MetricsType, FrameId } from '../../../../types'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
 
@@ -9,13 +9,15 @@ import { frameLogic } from '../../frameLogic'
 import { metricsLogic } from '../Metrics/metricsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { isVirtualFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { isHiddenOrJunkAssetPath } from '../../../../utils/hiddenFiles'
 
 export interface AssetsLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export interface AssetNode {
@@ -40,6 +42,21 @@ export interface DiskStats {
   usedBytes: number
   availableBytes: number
   usedPercent: number
+  // Virtual frames have no disk metrics; their stats describe the
+  // backend-enforced asset quota instead.
+  isQuota?: boolean
+}
+
+// Mirrors backend virtual_assets.quota_bytes: per-frame override in the
+// frame settings, 100 MB default.
+const VIRTUAL_ASSETS_DEFAULT_QUOTA_MB = 100
+
+function virtualQuotaBytes(frame: { device_config?: Record<string, any> | null } | null): number {
+  const raw = frame?.device_config?.assetsQuotaMb
+  const parsed = typeof raw === 'string' ? parseFloat(raw) : raw
+  const quotaMb =
+    typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : VIRTUAL_ASSETS_DEFAULT_QUOTA_MB
+  return quotaMb * 1024 * 1024
 }
 
 interface FrameAssetsResponse {
@@ -48,6 +65,21 @@ interface FrameAssetsResponse {
     refreshing?: boolean
     retry_after?: number
   }
+  /** Backend shape. Only SD-backed frames report it. */
+  storage?: { mounted?: boolean | null } | null
+  /** The on-device admin API answers with the flag at the top level. */
+  mounted?: boolean | null
+}
+
+/**
+ * Whether the frame's storage is mounted, or null when nothing said either way
+ * (Pi/agent frames, virtual frames, firmware older than the flag). Only an
+ * explicit false is worth telling the user about: it turns "no assets" from
+ * "the card is empty" into "the card is not readable".
+ */
+function storageMountedFromResponse(data: FrameAssetsResponse): boolean | null {
+  const mounted = data.storage?.mounted ?? data.mounted
+  return typeof mounted === 'boolean' ? mounted : null
 }
 
 function buildAssetTree(assets: AssetType[], rootName: string): AssetNode {
@@ -251,6 +283,7 @@ export const assetsLogic = kea<assetsLogicType>([
     uploadProgress: (path: string, size: number) => ({ path, size }),
     uploadFailure: (path: string) => ({ path }),
     setAssetsRefreshing: (assetsRefreshing: boolean) => ({ assetsRefreshing }),
+    setStorageMounted: (storageMounted: boolean | null) => ({ storageMounted }),
     syncAssets: true,
     deleteAsset: (path: string) => ({ path }),
     assetDeleted: (path: string) => ({ path }),
@@ -258,8 +291,9 @@ export const assetsLogic = kea<assetsLogicType>([
     assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
     createFolder: (path: string) => ({ path }),
     toggleShowSystemFolders: true,
+    toggleShowHiddenFiles: true,
   }),
-  loaders(({ actions, cache, props }) => ({
+  loaders(({ actions, cache, props, values }) => ({
     assets: [
       [] as AssetType[],
       {
@@ -271,16 +305,25 @@ export const assetsLogic = kea<assetsLogicType>([
             }
             const data = (await response.json()) as FrameAssetsResponse
             window.clearTimeout(cache.reloadTimer)
+            actions.setStorageMounted(storageMountedFromResponse(data))
             if (data.cache?.refreshing) {
               const retryDelay = Math.max(1, data.cache.retry_after ?? 2) * 1000
               cache.reloadTimer = window.setTimeout(() => actions.loadAssets(), retryDelay)
             }
             actions.setAssetsRefreshing(Boolean(data.cache?.refreshing))
+            // While a refresh is still in flight the server may answer with
+            // an empty listing (cloud: the device has not replied yet). The
+            // list already on screen is newer information than "nothing" —
+            // keep it instead of blanking the panel until the reply lands.
+            if (data.cache?.refreshing && data.assets.length === 0 && values.assets.length > 0) {
+              return values.assets
+            }
             return data.assets as AssetType[]
           } catch (error) {
             actions.setAssetsRefreshing(false)
             console.error(error)
-            return []
+            // A transient fetch failure must not wipe the listing.
+            return values.assets
           }
         },
         refreshAssets: async () => {
@@ -292,12 +335,23 @@ export const assetsLogic = kea<assetsLogicType>([
               throw new Error('Failed to refresh assets')
             }
             const data = (await response.json()) as FrameAssetsResponse
+            actions.setStorageMounted(storageMountedFromResponse(data))
+            if (data.cache?.refreshing) {
+              // The listing is being fetched (cloud: an assets_list command is
+              // on its way to the device) — poll until it lands, exactly like
+              // the initial load does.
+              const retryDelay = Math.max(1, data.cache.retry_after ?? 2) * 1000
+              cache.reloadTimer = window.setTimeout(() => actions.loadAssets(), retryDelay)
+            }
             actions.setAssetsRefreshing(Boolean(data.cache?.refreshing))
+            if (data.cache?.refreshing && data.assets.length === 0 && values.assets.length > 0) {
+              return values.assets
+            }
             return data.assets as AssetType[]
           } catch (error) {
             actions.setAssetsRefreshing(false)
             console.error(error)
-            return []
+            return values.assets
           }
         },
       },
@@ -306,7 +360,9 @@ export const assetsLogic = kea<assetsLogicType>([
       false,
       {
         syncAssets: async () => {
-          if (isInFrameAdminMode()) {
+          // Font sync is a backend feature; the on-device panel and the cloud
+          // (read-only asset verbs) have nothing to sync from.
+          if (workspaceMode() !== 'backend') {
             return true
           }
           const taskId = `asset-sync:${props.frameId}:${Date.now()}`
@@ -354,10 +410,28 @@ export const assetsLogic = kea<assetsLogicType>([
         setAssetsRefreshing: (_, { assetsRefreshing }) => assetsRefreshing,
       },
     ],
+    // null until something reports it, and null forever for the frames that
+    // never do — see storageMountedFromResponse.
+    storageMounted: [
+      null as boolean | null,
+      {
+        setStorageMounted: (_, { storageMounted }) => storageMounted,
+      },
+    ],
     showSystemFolders: [
       false,
       {
         toggleShowSystemFolders: (state) => !state,
+      },
+    ],
+    // OS junk (.DS_Store, ._sidecars, Thumbs.db, @eaDir, …) is hidden by
+    // default; the preference is global, not per frame — you plug the same
+    // SD card into several frames.
+    showHiddenFiles: [
+      false,
+      { persist: true, storageKey: 'assetsLogic.showHiddenFiles' },
+      {
+        toggleShowHiddenFiles: (state) => !state,
       },
     ],
     assets: {
@@ -423,115 +497,192 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
     assetTree: [
-      (s) => [s.cleanedAssets, s.frame, s.showSystemFolders],
-      (cleanedAssets, frame, showSystemFolders) => {
-        const visibleAssets = showSystemFolders
-          ? cleanedAssets
-          : cleanedAssets.filter((asset) => !isSystemAssetPath(asset.path))
+      (s) => [s.cleanedAssets, s.frame, s.showSystemFolders, s.showHiddenFiles],
+      (cleanedAssets, frame, showSystemFolders, showHiddenFiles) => {
+        const visibleAssets = cleanedAssets.filter((asset) => {
+          // The FrameOS-owned folders (.frameos, .thumbs) keep their own
+          // toggle: they are ours, not the operating system's droppings.
+          if (isSystemAssetPath(asset.path)) {
+            return showSystemFolders
+          }
+          return showHiddenFiles || !isHiddenOrJunkAssetPath(asset.path)
+        })
         return buildAssetTree(visibleAssets, frame.assets_path ?? '/srv/assets')
       },
     ],
     assetStats: [(s) => [s.assetTree], (assetTree) => collectAssetStats(assetTree)],
-    diskStats: [(s) => [s.sortedMetrics], (sortedMetrics): DiskStats | null => latestDiskStats(sortedMetrics)],
+    storageUnmounted: [(s) => [s.storageMounted], (storageMounted): boolean => storageMounted === false],
+    diskStats: [
+      (s) => [s.sortedMetrics, s.cleanedAssets, s.frame],
+      (sortedMetrics, cleanedAssets, frame): DiskStats | null => {
+        // Virtual frames never emit disk metrics; show the backend asset
+        // quota instead, with usage summed from the full listing (system
+        // folders included — the quota counts them too).
+        if (isVirtualFrame(frame)) {
+          const usedBytes = cleanedAssets.reduce(
+            (sum: number, asset: AssetType) => sum + (asset.is_dir ? 0 : asset.size || 0),
+            0
+          )
+          const totalBytes = virtualQuotaBytes(frame)
+          return {
+            totalBytes,
+            usedBytes,
+            availableBytes: Math.max(0, totalBytes - usedBytes),
+            usedPercent: totalBytes > 0 ? Math.min(100, (usedBytes / totalBytes) * 100) : 0,
+            isQuota: true,
+          }
+        }
+        return latestDiskStats(sortedMetrics)
+      },
+    ],
   }),
-  listeners(({ actions, props, values }) => ({
+  listeners(({ actions, props, values, cache }) => ({
     uploadDroppedFiles: async ({ path, files }) => {
       if (files.length === 0) {
         return
       }
       const assetsPath = values.frame.assets_path ?? '/srv/assets'
       const uploadedFiles = files.map((file) => normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath))
-      const taskId = `asset-upload:${props.frameId}:${Date.now()}:${files.length}`
-      const taskTotalBytes = files.reduce((total, file) => total + Math.max(file.size, 1), 0)
-      let completedTaskBytes = 0
-      let failures = 0
-
-      longRunningTasksModel.actions.startTask({
-        id: taskId,
-        frameId: props.frameId,
-        kind: 'upload',
-        title: files.length === 1 ? 'Uploading asset' : `Uploading ${files.length} assets`,
-        detail: files.length === 1 ? files[0].name : 'Preparing upload',
-        progressCurrent: 0,
-        progressTotal: taskTotalBytes,
-      })
-
       actions.filesToUpload(uploadedFiles)
+
+      // One toast per frame: files dropped while an upload is running join
+      // the running task (queue + growing totals) instead of replacing it.
+      const queue: { file: File; path: string }[] = (cache.uploadQueue ??= [])
       for (const file of files) {
-        const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload')
-        const normalizedPath = normalizeAssetPath(`${path ? path + '/' : ''}${file.name}`, assetsPath)
-        const fileTaskBytes = Math.max(file.size, 1)
-        const updateProgress = (fileUploadedBytes: number, detail = `Uploading ${file.name}`) => {
-          const safeFileUploadedBytes = Math.max(0, Math.min(fileTaskBytes, fileUploadedBytes || 0))
-          actions.uploadProgress(normalizedPath, Math.min(file.size, fileUploadedBytes || 0))
-          longRunningTasksModel.actions.updateTaskProgress({
-            taskId,
-            frameId: props.frameId,
-            kind: 'upload',
-            progressCurrent: Math.min(taskTotalBytes, completedTaskBytes + safeFileUploadedBytes),
-            progressTotal: taskTotalBytes,
-            detail,
-          })
-        }
-        try {
-          const asset = isInFrameAdminMode()
-            ? await uploadFileInChunks({
-                frameId: props.frameId,
-                suffix: 'assets/upload',
-                file,
-                path,
-                filename: file.name,
-                onProgress: (size) => updateProgress(size),
-              })
-            : await (async () => {
-                const formData = new FormData()
-                formData.append('file', file)
-                formData.append('path', path)
-                return await uploadFormDataWithProgress<AssetType>({
-                  url: uploadPath,
-                  formData,
-                  onProgress: (uploadedBytes, totalBytes) => {
-                    const fileUploadedBytes =
-                      totalBytes && totalBytes > 0
-                        ? Math.round((uploadedBytes / totalBytes) * fileTaskBytes)
-                        : uploadedBytes
-                    updateProgress(fileUploadedBytes)
-                  },
-                })
-              })()
-          completedTaskBytes += fileTaskBytes
-          updateProgress(fileTaskBytes, `Uploaded ${file.name}`)
-          actions.assetUploaded({
-            ...asset,
-            path: normalizeAssetPath(asset.path, assetsPath),
-          })
-        } catch (error) {
-          failures += 1
-          completedTaskBytes += fileTaskBytes
-          actions.uploadFailure(normalizedPath)
-          longRunningTasksModel.actions.updateTaskProgress({
-            taskId,
-            frameId: props.frameId,
-            kind: 'upload',
-            progressCurrent: Math.min(taskTotalBytes, completedTaskBytes),
-            progressTotal: taskTotalBytes,
-            detail: `Failed ${file.name}`,
-          })
-        }
+        queue.push({ file, path })
       }
-      if (failures > 0) {
-        longRunningTasksModel.actions.taskFailed({
-          taskId,
+      const batchBytes = files.reduce((total, file) => total + Math.max(file.size, 1), 0)
+
+      const uploadTitle = (totalFiles: number): string =>
+        totalFiles === 1 ? 'Uploading asset' : `Uploading ${totalFiles} assets`
+
+      if (cache.uploadTask) {
+        // A drain loop is already running: grow its totals and retitle.
+        const task = cache.uploadTask
+        task.totalFiles += files.length
+        task.totalBytes += batchBytes
+        longRunningTasksModel.actions.updateTaskProgress({
+          taskId: task.id,
           frameId: props.frameId,
           kind: 'upload',
-          detail: failures === 1 ? '1 asset failed to upload' : `${failures} assets failed to upload`,
+          title: uploadTitle(task.totalFiles),
+          progressCurrent: task.lastReportedBytes,
+          progressTotal: task.totalBytes,
+        })
+        return
+      }
+
+      const task = (cache.uploadTask = {
+        id: `asset-upload:${props.frameId}:${Date.now()}:${files.length}`,
+        totalFiles: files.length,
+        totalBytes: batchBytes,
+        completedBytes: 0,
+        lastReportedBytes: 0,
+        failures: 0,
+        firstFileName: files[0].name,
+      })
+
+      longRunningTasksModel.actions.startTask({
+        id: task.id,
+        frameId: props.frameId,
+        kind: 'upload',
+        title: uploadTitle(task.totalFiles),
+        detail: files.length === 1 ? files[0].name : 'Preparing upload',
+        progressCurrent: 0,
+        progressTotal: task.totalBytes,
+      })
+
+      try {
+        while (queue.length > 0) {
+          const { file, path: filePath } = queue.shift()!
+          const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload')
+          const normalizedPath = normalizeAssetPath(`${filePath ? filePath + '/' : ''}${file.name}`, assetsPath)
+          const fileTaskBytes = Math.max(file.size, 1)
+          const updateProgress = (fileUploadedBytes: number, detail = `Uploading ${file.name}`) => {
+            const safeFileUploadedBytes = Math.max(0, Math.min(fileTaskBytes, fileUploadedBytes || 0))
+            actions.uploadProgress(normalizedPath, Math.min(file.size, fileUploadedBytes || 0))
+            task.lastReportedBytes = Math.min(task.totalBytes, task.completedBytes + safeFileUploadedBytes)
+            longRunningTasksModel.actions.updateTaskProgress({
+              taskId: task.id,
+              frameId: props.frameId,
+              kind: 'upload',
+              progressCurrent: task.lastReportedBytes,
+              progressTotal: task.totalBytes,
+              detail,
+            })
+          }
+          // Embedded frames always upload in chunks: the backend forwards each
+          // chunk to the device synchronously, so one slow request never has to
+          // carry the whole file and the progress bar tracks what the device
+          // actually received. Retried chunks overwrite themselves (offset
+          // semantics) — safe on the backend + ESP32, not on the Nim admin API.
+          const chunkedUpload = isInFrameAdminMode() || values.frame.mode === 'embedded'
+          try {
+            const asset = chunkedUpload
+              ? await uploadFileInChunks({
+                  frameId: props.frameId,
+                  suffix: 'assets/upload',
+                  file,
+                  path: filePath,
+                  filename: file.name,
+                  chunkSize: isInFrameAdminMode() ? undefined : 256 * 1024,
+                  retries: isInFrameAdminMode() ? 0 : 2,
+                  onProgress: (size) => updateProgress(size),
+                })
+              : await (async () => {
+                  const formData = new FormData()
+                  formData.append('file', file)
+                  formData.append('path', filePath)
+                  return await uploadFormDataWithProgress<AssetType>({
+                    url: uploadPath,
+                    formData,
+                    onProgress: (uploadedBytes, totalBytes) => {
+                      const fileUploadedBytes =
+                        totalBytes && totalBytes > 0
+                          ? Math.round((uploadedBytes / totalBytes) * fileTaskBytes)
+                          : uploadedBytes
+                      updateProgress(fileUploadedBytes)
+                    },
+                  })
+                })()
+            task.completedBytes += fileTaskBytes
+            updateProgress(fileTaskBytes, `Uploaded ${file.name}`)
+            actions.assetUploaded({
+              ...asset,
+              path: normalizeAssetPath(asset.path, assetsPath),
+            })
+          } catch (error) {
+            task.failures += 1
+            task.completedBytes += fileTaskBytes
+            task.lastReportedBytes = Math.min(task.totalBytes, task.completedBytes)
+            actions.uploadFailure(normalizedPath)
+            longRunningTasksModel.actions.updateTaskProgress({
+              taskId: task.id,
+              frameId: props.frameId,
+              kind: 'upload',
+              progressCurrent: task.lastReportedBytes,
+              progressTotal: task.totalBytes,
+              detail: `Failed ${file.name}`,
+            })
+          }
+        }
+      } finally {
+        cache.uploadTask = null
+      }
+
+      if (task.failures > 0) {
+        longRunningTasksModel.actions.taskFailed({
+          taskId: task.id,
+          frameId: props.frameId,
+          kind: 'upload',
+          detail: task.failures === 1 ? '1 asset failed to upload' : `${task.failures} assets failed to upload`,
         })
       } else {
         longRunningTasksModel.actions.finishTask({
-          taskId,
+          taskId: task.id,
           frameId: props.frameId,
           kind: 'upload',
-          detail: files.length === 1 ? `Uploaded ${files[0].name}` : `Uploaded ${files.length} assets`,
+          detail: task.totalFiles === 1 ? `Uploaded ${task.firstFileName}` : `Uploaded ${task.totalFiles} assets`,
         })
       }
     },

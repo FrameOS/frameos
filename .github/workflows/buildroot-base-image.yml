@@ -7,11 +7,19 @@ on:
         description: "Buildroot platform to publish"
         required: true
         default: raspberry-pi-zero-2-w
-        type: string
+        type: choice
+        options:
+          - raspberry-pi-zero-2-w
+          - raspberry-pi-zero-w
       runner_label:
-        description: "Runner label to use; override with a larger/self-hosted ARM runner label if available"
-        required: true
-        default: ubuntu-24.04-arm
+        description: "Runner label override; empty uses the platform default (32-core Depot runners — x86_64 for 32-bit ARM targets so prebuilt Bootlin toolchains apply)"
+        required: false
+        default: ""
+        type: string
+      next_version:
+        description: "Version to stamp the image with; empty computes the next CalVer (base images are published FOR the release that follows them)"
+        required: false
+        default: ""
         type: string
       bucket:
         description: "R2 bucket"
@@ -43,9 +51,37 @@ permissions:
   contents: write
 
 jobs:
+  resolve-runner:
+    runs-on: ubuntu-24.04
+    outputs:
+      runner_label: ${{ steps.resolve.outputs.runner_label }}
+    steps:
+      - id: resolve
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          RUNNER_OVERRIDE: ${{ inputs.runner_label }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RUNNER_OVERRIDE}" ]; then
+            runner="${RUNNER_OVERRIDE}"
+          else
+            # 32-core Depot runners: a Buildroot build is compile-bound and
+            # scales nearly linearly, and Depot serves actions/cache from its
+            # own storage (faster restores, no 10GB repo quota squeezing the
+            # ccache). Keep the arch split in sync with default_runner_label
+            # in backend/app/tasks/buildroot_platforms.py: 32-bit ARM targets
+            # build on x86_64 so the prebuilt Bootlin toolchains apply.
+            case "${PLATFORM}" in
+              raspberry-pi-zero-w) runner="depot-ubuntu-24.04-32" ;;
+              *) runner="depot-ubuntu-24.04-arm-32" ;;
+            esac
+          fi
+          echo "runner_label=${runner}" >> "$GITHUB_OUTPUT"
+
   publish:
     name: Build and publish ${{ inputs.platform }}
-    runs-on: ${{ inputs.runner_label }}
+    needs: resolve-runner
+    runs-on: ${{ needs.resolve-runner.outputs.runner_label }}
     timeout-minutes: 360
     env:
       PLATFORM: ${{ inputs.platform }}
@@ -80,11 +116,29 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Restore Buildroot download cache
+      # The cache dir holds Buildroot downloads AND the ccache (BR2_CCACHE_DIR
+      # points into it). The key ends in the run id ON PURPOSE: actions/cache
+      # only saves when the exact key is new, so a content-hash key meant the
+      # ccache warmed by a run was thrown away and every future run restored
+      # the same increasingly stale snapshot. With a per-run key each run
+      # restores the newest cache via restore-keys and saves its own warmer
+      # one.
+      #
+      # The wiring is verified: buildroot_images.py bind-mounts this dir at
+      # /cache and the generated config sets BR2_DL_DIR=/cache/dl and
+      # BR2_CCACHE_DIR=/cache/ccache, so post-job saves are ~1.5-1.8GB.
+      # Historical "restored 0 bytes" runs were NOT a path bug: saves on
+      # GitHub-hosted runners went to the repo's 10GB GitHub cache where
+      # turbo/buildx caches evicted them within hours, and Depot runners use
+      # Depot's own cache store, which started cold. Cache continuity
+      # therefore requires staying on Depot runners: a runner_label override
+      # onto a GitHub-hosted runner reads/writes the other, quota-squeezed
+      # store.
+      - name: Restore Buildroot download + compiler cache
         uses: actions/cache@v4
         with:
           path: build/buildroot-images/cache
-          key: buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ hashFiles('backend/app/tasks/buildroot_image.py', 'tools/buildroot-images/buildroot_images.py') }}
+          key: buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ github.run_id }}
           restore-keys: |
             buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-
             buildroot-dl-${{ runner.os }}-${{ runner.arch }}-
@@ -94,6 +148,21 @@ jobs:
           set -euo pipefail
           python3 -m pip install --upgrade pip
           python3 -m pip install -r backend/requirements.txt boto3
+
+      # Resolve the stamped version ONCE and pin it for every later step.
+      # Base images are published FOR the release that follows them (publish
+      # bases -> merge manifest -> bump versions -> release), so the stamp is
+      # the next CalVer, not the current one. Recomputing it per step would
+      # also let a build that runs across a month boundary stamp and verify
+      # two different versions.
+      - name: Resolve target version
+        env:
+          NEXT_VERSION_INPUT: ${{ inputs.next_version }}
+        run: |
+          set -euo pipefail
+          version="$(FRAMEOS_NEXT_VERSION="${NEXT_VERSION_INPUT}" python3 -c "import sys; sys.path.insert(0, 'tools/buildroot-images'); import buildroot_images; print(buildroot_images.next_frameos_version())")"
+          echo "FRAMEOS_NEXT_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "Publishing base image as FrameOS ${version}"
 
       - name: Validate configuration
         env:
@@ -167,7 +236,9 @@ jobs:
           from pathlib import Path
 
           platform = os.environ["PLATFORM"]
-          version = json.loads(Path("versions.json").read_text(encoding="utf-8"))["frameos"].split("+", 1)[0]
+          # The version the image was stamped with (Resolve target version),
+          # not whatever versions.json currently says.
+          version = os.environ["FRAMEOS_NEXT_VERSION"]
           manifest = json.loads(Path("tools/buildroot-images/manifest.json").read_text(encoding="utf-8"))
           matches = [
               entry
@@ -187,17 +258,48 @@ jobs:
       - name: Commit manifest changes
         run: |
           set -euo pipefail
-          git add tools/buildroot-images/manifest.json
-          if git diff --cached --quiet; then
-            echo "No manifest changes to commit."
-            exit 0
-          fi
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
-          version="$(python3 -c "import json; print(json.load(open('versions.json'))['frameos'].split('+', 1)[0])")"
-          git commit -m "chore: refresh Buildroot base image manifest for ${version}"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          # Pinned by the Resolve target version step — the next release's
+          # version, which is what the entry was written under. Asking
+          # versions.json here would look up an entry that was never written.
+          version="${FRAMEOS_NEXT_VERSION}"
+          # The manifest's source of truth is R2 — `upload` already upserted
+          # this build's entry there. The repo copy is a mirror, so parallel
+          # platform builds must NOT rebase their local mutations onto each
+          # other (that ended in a manifest.json merge conflict after a
+          # 90-minute build). Instead: re-download the converged manifest from
+          # R2 on top of the current branch tip and retry when a concurrent
+          # job pushes first.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+            # --force: the checkout always carries a committed manifest.json,
+            # and the R2 copy is the source of truth we are mirroring over it.
+            python3 tools/buildroot-images/buildroot_images.py \
+              --platform "${PLATFORM}" \
+              --bucket "${R2_BUCKET}" \
+              --prefix "${R2_PREFIX}" \
+              download --force
+            # R2's manifest upsert is read-modify-write: two uploads finishing
+            # in the same instant could drop an entry. Committing a mirror
+            # that lost OUR image would silently unpublish it — fail loudly
+            # instead (rerunning the upload step with force_upload repairs it).
+            python3 -c "import json, os, sys; m = json.load(open('tools/buildroot-images/manifest.json')); p = os.environ['PLATFORM']; v = '${version}'; sys.exit(0 if any(e.get('platform') == p and e.get('frameos_version') == v for e in m.get('entries', [])) else f'R2 manifest lost the {p} {v} entry (concurrent upload race) — rerun with force_upload')"
+            git add tools/buildroot-images/manifest.json
+            if git diff --cached --quiet; then
+              echo "No manifest changes to commit."
+              exit 0
+            fi
+            git commit -m "chore: refresh Buildroot base image manifest for ${version} (${PLATFORM})"
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            echo "Push rejected — a concurrent build updated the branch; retrying (${attempt}/5)"
+            sleep $((RANDOM % 20 + 5))
+          done
+          echo "Could not push the manifest after 5 attempts."
+          exit 1
 
       - name: Upload build metadata
         if: always()

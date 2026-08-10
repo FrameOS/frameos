@@ -2,20 +2,25 @@ import { actions, kea, reducers, path, key, props, connect, listeners, selectors
 import { forms } from 'kea-forms'
 
 import type { templatesLogicType } from './templatesLogicType'
-import { FrameScene, RepositoryType, TemplateForm, TemplateType } from '../../../../types'
+import { FrameScene, RepositoryType, TemplateForm, TemplateType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { templatesModel } from '../../../../models/templatesModel'
 import { repositoriesModel } from '../../../../models/repositoriesModel'
 import { appsModel } from '../../../../models/appsModel'
 import { searchInText } from '../../../../utils/searchInText'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { assignCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
+import { isCloudMode } from '../../../../utils/cloudMode'
+import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { framesModel } from '../../../../models/framesModel'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
 import { templateWithSceneOrigins } from '../../../../utils/sceneOrigin'
 import { templateFavouriteId, type TemplateWithFavouriteId } from './templateFavourites'
+import { cloudDriveLogic } from './cloudDriveLogic'
 
 export interface TemplateLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 /** Repository listings only carry template metadata; fetch the scenes separately when needed. */
@@ -92,6 +97,7 @@ export const templatesLogic = kea<templatesLogicType>([
   actions({
     saveAsTemplate: (template?: Partial<TemplateForm>) => ({ template: template ?? {} }),
     saveAsZip: (template?: Partial<TemplateForm>) => ({ template: template ?? {} }),
+    saveAsCloudTemplate: (template?: Partial<TemplateForm>) => ({ template: template ?? {} }),
     editLocalTemplate: (template: TemplateType) => ({ template }),
     hideModal: true,
     saveRemoteAsLocal: (repository: RepositoryType, template: TemplateType) => ({ repository, template }),
@@ -107,6 +113,8 @@ export const templatesLogic = kea<templatesLogicType>([
     showAddRepository: true,
     hideAddRepository: true,
     setSearch: (search: string) => ({ search }),
+    addUrlToFrame: (url: string, openDrawer?: boolean) => ({ url, openDrawer: openDrawer ?? false }),
+    setAddingUrlToFrame: (adding: boolean) => ({ adding }),
     toggleExpanded: (url: string) => ({ url }),
     applyFavouriteTemplatesToFrame: (openDrawer?: boolean) => ({
       openDrawer: openDrawer ?? false,
@@ -139,11 +147,60 @@ export const templatesLogic = kea<templatesLogicType>([
         } else {
           // create
           const target = values.modalTarget
+          const exportScenes = formValues.exportScenes ?? []
+          // The preview image should show one of the scenes being saved: use
+          // the frame's snapshot only when the active scene is included,
+          // otherwise the first selected scene's cached snapshot.
+          const activeSceneId = values.frame?.active_scene_id
+          const imageSceneId = activeSceneId && exportScenes.includes(activeSceneId) ? undefined : exportScenes[0]
+
+          if (target === 'cloud') {
+            const response = await apiFetch('/api/cloud/store/publish', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: formValues.name,
+                description: formValues.description,
+                scenes: (values.frameForm.scenes || []).filter((scene) => exportScenes.includes(scene.id)),
+                from_frame_id: props.frameId,
+                ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
+                ...(formValues.visibility === 'private' || formValues.visibility === 'public'
+                  ? { visibility: formValues.visibility }
+                  : {}),
+              }),
+            })
+            if (!response.ok) {
+              let detail = `unexpected status ${response.status}`
+              try {
+                detail = (await response.json())?.detail ?? detail
+              } catch {
+                // keep fallback detail
+              }
+              window.alert(`Could not save to your private cloud: ${detail}`)
+              throw new Error('Failed to save to private cloud scenes')
+            }
+            const payload = await response.json()
+            const scene = payload?.scene
+            cloudDriveLogic.findMounted()?.actions.loadDrive()
+            actions.hideModal()
+            actions.resetTemplateForm()
+            if (
+              scene?.url &&
+              window.confirm(
+                `Saved "${formValues.name}" to your private cloud scenes (v${scene?.version ?? '?'}). Open it?`
+              )
+            ) {
+              window.open(scene.url, '_blank', 'noopener')
+            }
+            return
+          }
+
           const request: TemplateType & Record<string, any> = {
             name: formValues.name,
             description: formValues.description,
-            scenes: (values.frameForm.scenes || []).filter((scene) => formValues.exportScenes?.includes(scene.id)),
+            scenes: (values.frameForm.scenes || []).filter((scene) => exportScenes.includes(scene.id)),
             from_frame_id: props.frameId,
+            ...(imageSceneId ? { image_scene_id: imageSceneId } : {}),
             format: target === 'zip' ? 'zip' : 'json',
           }
           const response = await apiFetch('/api/templates', {
@@ -192,10 +249,22 @@ export const templatesLogic = kea<templatesLogicType>([
           body: JSON.stringify(request),
         })
         if (!response.ok) {
-          throw new Error('Failed to update frame')
+          let detail = `unexpected status ${response.status}`
+          try {
+            detail = (await response.json())?.detail ?? detail
+          } catch {
+            // keep fallback detail
+          }
+          window.alert(`Could not add the scene: ${detail}`)
+          throw new Error('Failed to add template from URL')
         }
         actions.updateTemplate(await response.json())
         actions.resetAddTemplateUrlForm()
+        // A pasted URL doubles as the search value ("Add scene from URL"
+        // quick action); clear it so the freshly added scene is visible.
+        if (values.search === formValues.url) {
+          actions.setSearch('')
+        }
       },
     },
     uploadTemplateForm: {
@@ -245,20 +314,23 @@ export const templatesLogic = kea<templatesLogicType>([
   })),
   reducers({
     search: ['', { setSearch: (_, { search }) => search }],
+    addingUrlToFrame: [false, { setAddingUrlToFrame: (_, { adding }) => adding }],
     showingModal: [
       false,
       {
         saveAsZip: () => true,
         saveAsTemplate: () => true,
+        saveAsCloudTemplate: () => true,
         editLocalTemplate: () => true,
         hideModal: () => false,
       },
     ],
     modalTarget: [
-      'localTemplate' as 'localTemplate' | 'zip',
+      'localTemplate' as 'localTemplate' | 'zip' | 'cloud',
       {
         saveAsZip: () => 'zip',
         saveAsTemplate: () => 'localTemplate',
+        saveAsCloudTemplate: () => 'cloud',
         editLocalTemplate: () => 'localTemplate',
       },
     ],
@@ -271,6 +343,15 @@ export const templatesLogic = kea<templatesLogicType>([
         ...template,
       }),
       saveAsZip: (_, { template }) => ({ id: '', name: '', description: '', exportScenes: undefined, ...template }),
+      saveAsCloudTemplate: (_, { template }) => ({
+        id: '',
+        name: '',
+        description: '',
+        exportScenes: undefined,
+        // '' = keep current visibility (new scenes start private)
+        visibility: '',
+        ...template,
+      }),
       editLocalTemplate: (_, { template }) => ({
         id: template.id,
         name: template.name,
@@ -394,7 +475,41 @@ export const templatesLogic = kea<templatesLogicType>([
         favouriteTemplates.filter((template) => template.compatibility.supported),
     ],
   }),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions, props, values }) => ({
+    // Install the scene(s) behind a pasted URL (template zip, or a scene page
+    // with a frameos:zip meta tag) straight onto this frame — the flow behind
+    // "copy this link into the Templates search box" on FrameOS Cloud.
+    addUrlToFrame: async ({ url, openDrawer }) => {
+      actions.setAddingUrlToFrame(true)
+      try {
+        const response = await apiFetch(`/api/templates`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, format: 'scenes' }),
+        })
+        if (!response.ok) {
+          let detail = `unexpected status ${response.status}`
+          try {
+            detail = (await response.json())?.detail ?? detail
+          } catch {
+            // keep fallback detail
+          }
+          window.alert(`Could not add the scene: ${detail}`)
+          return
+        }
+        const scenes = await response.json()
+        if (!Array.isArray(scenes) || scenes.length === 0) {
+          window.alert('No scenes found at this URL.')
+          return
+        }
+        actions.applyTemplate({ scenes }, openDrawer)
+        if (values.search === url) {
+          actions.setSearch('')
+        }
+      } finally {
+        actions.setAddingUrlToFrame(false)
+      }
+    },
     saveRemoteAsLocal: async ({ template, repository }) => {
       if ('zip' in template) {
         let zipPath = (template as any).zip
@@ -425,8 +540,61 @@ export const templatesLogic = kea<templatesLogicType>([
       }
     },
     applyRemoteToFrame: async ({ template, repository, openDrawer }) => {
+      // Cloud store scenes carry risk flags; installing one that can run shell
+      // commands on the frame deserves an explicit confirmation. This listener
+      // is the funnel for every remote install — buttons, menus and
+      // drag-and-drop alike.
+      if (
+        template.flags?.includes('shell') &&
+        !window.confirm(
+          `"${template.name}" configures apps or custom code that run shell commands on the frame. ` +
+            'Only install it if you trust the publisher. Install anyway?'
+        )
+      ) {
+        return
+      }
       const scenes = await loadRepositoryTemplateScenes(repository, template)
       actions.applyTemplate(templateWithSceneOrigins({ ...template, scenes }, repository), openDrawer)
+
+      // On the cloud control plane the scene list that actually reaches the
+      // device is the server-side store-scene assignment (set_scenes over the
+      // hub WS) — the client-side applyTemplate above only shapes the
+      // workspace view. Both cloud catalogs (the public store and "my cloud
+      // scenes") carry the store scene uuid, so assign it here too.
+      const storeSceneId = (template as TemplateType & { sceneId?: string }).sceneId
+      if (isCloudMode() && storeSceneId) {
+        longRunningTasksModel.actions.startTask({
+          frameId: props.frameId,
+          kind: 'save',
+          title: `Adding "${template.name}"`,
+          detail: 'Assigning the scene to this frame',
+        })
+        try {
+          const assigned = await assignCloudFrameStoreScene(props.frameId, storeSceneId)
+          longRunningTasksModel.actions.finishTask({
+            frameId: props.frameId,
+            kind: 'save',
+            status: 'success',
+            detail: assigned ? 'Scene queued for the frame' : 'Scene was already on the frame',
+          })
+          if (assigned) {
+            // The server now owns this scene; rehydrate frame.scenes from the
+            // assignment list (force skips the poll throttle) so the tiles
+            // show server truth immediately — not just until the next reload.
+            framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+            framesModel.actions.loadFrame(props.frameId)
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          longRunningTasksModel.actions.taskFailed({
+            frameId: props.frameId,
+            kind: 'save',
+            detail: message.includes('frame_not_active')
+              ? 'This frame is still pending — confirm it on its dashboard, then add the scene again.'
+              : message,
+          })
+        }
+      }
     },
     applyFavouriteTemplatesToFrame: async ({ openDrawer }) => {
       const templates: Partial<TemplateType>[] = []
@@ -455,6 +623,11 @@ export const templatesLogic = kea<templatesLogicType>([
       }
     },
     saveAsZip: () => {
+      if ((values.templateForm.exportScenes?.length ?? 0) === 0) {
+        actions.setTemplateFormValues({ exportScenes: values.frameForm?.scenes?.map((s) => s.id) || [] })
+      }
+    },
+    saveAsCloudTemplate: () => {
       if ((values.templateForm.exportScenes?.length ?? 0) === 0) {
         actions.setTemplateFormValues({ exportScenes: values.frameForm?.scenes?.map((s) => s.id) || [] })
       }

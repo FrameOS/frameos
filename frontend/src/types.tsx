@@ -1,12 +1,32 @@
 import { Edge, Node } from 'reactflow'
 import type { FrameCompilationModeOptionValue } from './utils/frameBuildOptions'
+import type { FrameId } from './utils/frameId'
+
+// Defined in utils/frameId.ts (which has no imports) and re-exported here so
+// the SPA's usual `from '../types'` import keeps working.
+export type { FrameId }
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
-export type FrameEmbeddedFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
+export type FrameVirtualColorMode = 'rgb' | 'bw' | 'gray4' | 'bwyr' | 'sevencolor' | 'spectra6'
+export type FrameEmbeddedFlashSize = '2MB' | '4MB' | '8MB' | '16MB' | '32MB'
 export type FrameEmbeddedHardwarePreset =
   | 'custom'
   | 'waveshare_esp32_s3_photopainter'
   | 'waveshare_esp32_s3_epaper_13_3e6'
+  | 'trmnl_og'
+  | 'trmnl_bwry'
+  | 'trmnl_og_diy_kit'
+  | 'trmnl_4in26_diy_kit'
+  | 'xteink_x4'
+  | 'seeed_reterminal_sticky'
+  | 'seeed_reterminal_e1001'
+  | 'seeed_reterminal_e1002'
+  | 'elecrow_crowpanel_5in79'
+  | 'pimoroni_inky_frame_4'
+  | 'pimoroni_inky_frame_5_7'
+  | 'pimoroni_inky_frame_7_3'
+  | 'pimoroni_inky_frame_7_3_pico2'
+  | 'pimoroni_inky_frame_7_3_spectra'
 
 export interface FrameErrorBehavior {
   mode?: FrameErrorBehaviorMode
@@ -18,10 +38,35 @@ export interface FrameErrorBehavior {
 }
 
 export interface FrameType {
-  id: number
+  id: FrameId
   project_id: number
   name: string
   mode?: 'rpios' | 'buildroot' | 'embedded'
+  /** Which control plane manages this frame. Cloud-managed frames are
+   * interpreted-only: no SSH, no compiled scenes, no shell-flagged apps. */
+  managed_by?: 'backend' | 'cloud'
+  /** Cloud-managed frames: which service-settings groups ("unsplash",
+   * "openAI", …) this frame's assigned scenes declare. Group NAMES only —
+   * the keys themselves only ever travel over the device's own authenticated
+   * pull (cloud/docs/cloud-frames.md, "Service settings"). */
+  service_setting_groups?: string[]
+  /** Cloud-managed frames: whether the frame's link still holds
+   * `settings:services`, i.e. whether those keys are actually delivered. The
+   * owner toggles it per frame; absent means "not reported" (hub broadcasts
+   * that do not carry the link), never "off". */
+  service_settings_enabled?: boolean
+  /** The hardware object the device reported at cloud enrollment (frames.hardware
+   * jsonb on the cloud; absent on backend-managed frames). `platform` drives the
+   * device-profile capability gating in workspaceSurfaces.ts: an "esp32" frame
+   * implements only a subset of the management verbs (docs/cloud-frames.md). */
+  hardware?: {
+    platform?: string | null
+    device?: string | null
+    panel?: string | null
+    width?: number | null
+    height?: number | null
+    color?: string | null
+  } | null
   frame_host: string
   frame_port: number
   frame_access_key: string
@@ -73,6 +118,11 @@ export interface FrameType {
     psramMB?: number
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
+    /** Virtual frames only: how the backend quantizes the rendered image.
+     * Mirrors VIRTUAL_COLOR_MODES in backend/app/api/virtual_frame.py. */
+    colorMode?: FrameVirtualColorMode
+    // View-only credential for the virtual image/page URLs
+    viewToken?: string
     pins?: {
       rst?: number
       dc?: number
@@ -83,6 +133,13 @@ export interface FrameType {
       sclk?: number
       mosi?: number
       pwr?: number
+      // Pimoroni Inky Frame extras: BUSY and the front buttons live behind a
+      // shift register; consumed by the pico firmware only.
+      sr_clock?: number
+      sr_latch?: number
+      sr_data?: number
+      busy_bit?: number
+      hold_vsys?: number
     }
     sdCardAssets?: {
       enabled?: boolean
@@ -116,6 +173,19 @@ export interface FrameType {
   last_successful_deploy?: Record<string, any>
   last_successful_deploy_at?: string
   active_scene_id?: string
+  /** Cloud only: the device-reported state the hub mirrors onto the frame row (e.g. active_scene). */
+  last_state?: Record<string, any>
+  /** Cloud only: the checksum of the scene payload the CONTROL PLANE has
+   * assigned, and the one the DEVICE last acknowledged applying. Equal means
+   * in sync; a device that never acked one has never had a scene delivered,
+   * which is the cloud's notion of "not deployed yet" (there is no
+   * last_successful_deploy_at on this control plane). */
+  assigned_checksum?: string | null
+  scenes_checksum?: string | null
+  /** Cloud only: the newest metrics sample the device sent. Read for the
+   * memory advisory (utils/frameMemory.ts) — an embedded frame can render
+   * fine while having too little internal RAM left to open its TLS link. */
+  last_metrics?: Record<string, any>
   reboot?: {
     enabled?: 'true' | 'false'
     crontab?: string
@@ -159,6 +229,9 @@ export interface FrameType {
   rpios?: FrameRpiOSConfig
   terminal_history?: string[]
   active_connections?: number
+  // Cloud frames only: whether the device's management WebSocket is live on
+  // the hub right now. Commands sent while false queue until it redials.
+  connected?: boolean
   frame_sync_hint?: FrameSyncHint
 }
 
@@ -250,6 +323,10 @@ export interface NewFrameFormType {
   device?: string | null
   device_config?: FrameType['device_config']
   embedded?: FrameEmbeddedConfig
+  /** Virtual frames only. FrameCreateRequest has no width/height fields, so
+   * these are applied with a follow-up update right after creation. */
+  width?: number
+  height?: number
   timezone?: string | null
   server_host?: string | null
   ssh_pass?: string | null
@@ -302,6 +379,18 @@ export interface TemplateType {
   image?: any
   imageWidth?: number
   imageHeight?: number
+  /** Publisher display name (FrameOS Cloud store scenes). */
+  author?: string
+  /** FrameOS version the scene was exported with (FrameOS Cloud store scenes). */
+  frameosVersion?: string
+  /** Risk flags computed by the cloud store, e.g. 'shell' for scenes that run shell commands. */
+  flags?: string[]
+  /** Store scene uuid ("Private cloud scenes" entries). */
+  sceneId?: string
+  /** Scene page on the cloud store. */
+  url?: string
+  /** 'private' | 'public' ("Private cloud scenes" entries). */
+  visibility?: string
 }
 
 export interface TemplateForm extends TemplateType {
@@ -323,7 +412,7 @@ export interface LogType {
   ip: string
   type: string
   line: string
-  frame_id: number
+  frame_id: FrameId
 }
 
 export interface AiSceneLogType {
@@ -344,7 +433,7 @@ export interface AssetType {
 export interface MetricsType {
   id: string
   timestamp: string
-  frame_id: number
+  frame_id: FrameId
   metrics: Record<string, any>
 }
 
@@ -555,7 +644,11 @@ export interface SceneNodeData {
 export type NodeData = AppNodeData | CodeNodeData | EventNodeData | DispatchNodeData | StateNodeData | SceneNodeData
 
 export type DiagramNode = Node<NodeData, NodeType>
-export type DiagramEdge = Edge<any>
+// Scene edges are serialized JSON and only use custom string edge types, so `label` is
+// narrowed to `string`: React 19 types ReactElement props as `unknown`, which kea-forms'
+// DeepPartial can't recurse into, making the raw `Edge<any>` (whose `label` is a ReactNode)
+// unusable in form value types.
+export type DiagramEdge = Omit<Edge<any>, 'label'> & { label?: string }
 
 export interface HandleType {
   handleId: string
@@ -691,7 +784,7 @@ export type ChatContextType = 'scene' | 'frame' | 'app'
 
 export interface ChatSummary {
   id: string
-  frameId: number
+  frameId: FrameId
   sceneId?: string | null
   contextType?: ChatContextType | null
   contextId?: string | null
@@ -805,6 +898,97 @@ export interface FrameOSSettings {
     environmentName?: string
     enableDocker?: boolean
   }
+}
+
+/** Mirrors GET /api/cloud/status (backend/app/api/cloud.py and the frame's cloud_api_routes.nim) */
+export interface CloudUsage {
+  scenes: { private_bytes: number; private_max_bytes: number; public_bytes: number }
+  backups: { bytes: number; max_bytes: number }
+  frame_logs: { bytes: number; max_bytes: number }
+}
+
+export interface CloudStatus {
+  enabled: boolean
+  provider_url: string | null
+  default_provider_url: string | null
+  status: 'disconnected' | 'connecting' | 'connected'
+  can_edit_provider: boolean
+  poll_error: string | null
+  connection: {
+    user_code: string | null
+    verification_uri: string | null
+    verification_uri_complete: string | null
+    expires_at: string | null
+    interval_seconds: number
+  } | null
+  link: {
+    linked_client_id: string | null
+    scopes: string[]
+    account_id: string | null
+    account_email: string | null
+    connected_at: string | null
+    last_inventory_sync_at: string | null
+    /** Storage usage + quota snapshot from the provider's grants poll.
+     * Public scenes are quota-free, hence the private/public split. */
+    usage?: CloudUsage | null
+  } | null
+  /** True unless cloud login is enforced (local passwords disabled). */
+  local_fallback_enabled?: boolean
+  /** Local switches: the backup scopes come with the account, but nothing is
+   * uploaded until these are turned on. */
+  backup_scenes_enabled?: boolean
+  backup_frames_enabled?: boolean
+  /** Short id (e.g. "AB12-CD34") of the key sealing every backup payload;
+   * null until the key is generated with the first backup. */
+  backup_key_fingerprint?: string | null
+  /** A pending feature change awaiting owner approval on the provider. */
+  upgrade?: {
+    user_code: string | null
+    verification_uri: string | null
+    verification_uri_complete: string | null
+    expires_at: string | null
+    interval_seconds: number
+  } | null
+  /** The current user's linked cloud identity, if any. */
+  identity?: {
+    cloud_account_id: string | null
+    email: string | null
+    name: string | null
+    provider_url: string | null
+    last_login_at: string | null
+  } | null
+  /** Frame admin only: set once the frame is enrolled as cloud-managed. */
+  mode?: 'managed'
+  /** Frame admin only: a self-hosted backend controls this frame, so
+   * cloud-managed enrollment is unavailable until serverHost is cleared. */
+  backend_managed?: boolean
+}
+
+/** Mirrors GET /api/cloud/login/options (open endpoint for the login/setup screens) */
+export interface CloudLoginOptions {
+  available: boolean
+  provider_url: string | null
+  local_login_enabled: boolean
+  setup_mode: boolean
+}
+
+/** GET /api/cloud/backup-key: the recovery code for the account backup key. */
+export interface CloudBackupKey {
+  fingerprint: string
+  recovery_code: string
+}
+
+/** One backup as listed by GET /api/cloud/backups (proxied from the provider) */
+export interface CloudBackupItem {
+  id: string
+  kind: 'templates' | 'frames' | string
+  item_key: string
+  name: string | null
+  size_bytes: number
+  sha256: string
+  content_type: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface SSHKeyEntry {

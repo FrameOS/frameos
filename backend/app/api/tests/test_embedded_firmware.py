@@ -37,8 +37,10 @@ from app.tasks.embedded_firmware import (
     embedded_sdkconfig_defaults_for_frame,
     embedded_sd_card_assets_for_frame,
     ensure_embedded_frame_defaults,
+    embedded_platform_for_frame,
     latest_embedded_firmware,
     normalize_embedded_flash_size,
+    normalize_embedded_platform,
     request_pending_embedded_firmware_ota,
     _reset_stale_embedded_sdkconfig,
 )
@@ -148,8 +150,9 @@ def test_embedded_flash_size_profiles():
     assert normalize_embedded_flash_size('4mb') == '4MB'
     assert normalize_embedded_flash_size('32 MB') == '32MB'
     assert normalize_embedded_flash_size(16) == '16MB'
+    assert normalize_embedded_flash_size('2MB') == '2MB'  # Pico W
     with pytest.raises(ValueError):
-        normalize_embedded_flash_size('2MB')
+        normalize_embedded_flash_size('3MB')
 
     default_frame = Frame()
     assert embedded_flash_size_for_frame(default_frame) == '8MB'
@@ -720,6 +723,208 @@ def test_embedded_hardware_preset_for_waveshare_photopainter():
     assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 41" in header
 
 
+def test_normalize_embedded_platform():
+    assert normalize_embedded_platform(None) == "esp32-s3"
+    assert normalize_embedded_platform("") == "esp32-s3"
+    assert normalize_embedded_platform("esp32s3") == "esp32-s3"
+    assert normalize_embedded_platform("esp32-s3-devkitc-1") == "esp32-s3"
+    assert normalize_embedded_platform("esp32-c3") == "esp32-c3"
+    assert normalize_embedded_platform("esp32c3") == "esp32-c3"
+    assert normalize_embedded_platform("ESP32-C3") == "esp32-c3"
+    with pytest.raises(ValueError):
+        normalize_embedded_platform("esp32-p4")
+
+
+def test_embedded_hardware_preset_for_trmnl_og():
+    frame = Frame(id=9, embedded={"hardwarePreset": "trmnl_og"})
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert frame.device == "waveshare.EPD_7in5_V2"
+    assert frame.embedded["platform"] == "esp32-c3"
+    assert embedded_platform_for_frame(frame) == "esp32-c3"
+    assert embedded_flash_size_for_frame(frame) == "4MB"
+    assert embedded_ota_supported_for_frame(frame) is False
+    assert embedded_module_psram_bytes(frame) == 0
+    # No PSRAM: local rendering is impossible, the platform forces thin-client.
+    assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+    # Remote mode always passes the guardrail regardless of PSRAM.
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 10, "dc": 5, "cs": 6, "cs2": -1,
+        "busy": 4, "sck": 7, "mosi": 8, "pwr": -1,
+    }
+    assert frame.gpio_buttons == [{"pin": 2, "label": "BUTTON"}]
+    assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
+    assert embedded_sdkconfig_defaults_for_frame(frame) == (
+        "sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota;sdkconfig.defaults.esp32c3"
+    )
+    required = embedded_required_sdkconfig_for_frame(frame)
+    assert required["CONFIG_IDF_TARGET"] == '"esp32c3"'
+    assert required["CONFIG_ESPTOOLPY_FLASHSIZE"] == '"4MB"'
+
+
+def test_embedded_hardware_preset_for_trmnl_bwry():
+    frame = Frame(id=9, embedded={"hardwarePreset": "trmnl_bwry"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device == "waveshare.EPD_7in5yr"
+    assert embedded_panel_for_frame(frame) == "EPD_7in5yr"
+    assert embedded_platform_for_frame(frame) == "esp32-c3"
+    assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+
+
+def test_embedded_hardware_preset_for_xteink_x4():
+    frame = Frame(id=9, embedded={"hardwarePreset": "xteink_x4"})
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert frame.device == "waveshare.EPD_4in26"
+    assert embedded_platform_for_frame(frame) == "esp32-c3"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_ota_supported_for_frame(frame) is True
+    assert embedded_module_psram_bytes(frame) == 0
+    assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    pins = embedded_pins_for_frame(frame)
+    assert pins == {
+        "rst": 5, "dc": 4, "cs": 21, "cs2": -1,
+        "busy": 6, "sck": 8, "mosi": 10, "pwr": -1,
+    }
+    # Every pin fits the C3's GPIO range (0-21).
+    assert all(-1 <= pin <= 21 for pin in pins.values())
+    assert frame.gpio_buttons == [{"pin": 3, "label": "POWER"}]
+
+
+def test_embedded_pins_clamp_uses_platform_gpio_range():
+    frame = Frame(
+        id=9,
+        embedded={"hardwarePreset": "trmnl_og"},
+        device_config={"hardwarePreset": "trmnl_og", "pins": {"rst": 38}},
+    )
+    # GPIO 38 does not exist on the C3; the override is ignored.
+    assert embedded_pins_for_frame(frame)["rst"] == 10
+
+
+def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
+    frame = Frame(id=9, embedded={"hardwarePreset": "seeed_reterminal_sticky"})
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert frame.device == "waveshare.EPD_3in97"
+    assert embedded_panel_for_frame(frame) == "EPD_3in97"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "32MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    # PSRAM on board: local rendering stays available.
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 17, "dc": 16, "cs": 15, "cs2": -1,
+        "busy": 18, "sck": 13, "mosi": 14, "pwr": -1,
+    }
+    assert embedded_sdkconfig_defaults_for_frame(frame) == (
+        "sdkconfig.defaults;sdkconfig.defaults.32mb-ota"
+    )
+    assert embedded_required_sdkconfig_for_frame(frame)["CONFIG_IDF_TARGET"] == '"esp32s3"'
+
+
+def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
+    for preset, panel in (
+        ("seeed_reterminal_e1001", "EPD_7in5_V2"),
+        ("seeed_reterminal_e1002", "EPD_7in3e"),
+    ):
+        frame = Frame(id=9, embedded={"hardwarePreset": preset})
+        ensure_embedded_frame_defaults(frame)
+        assert embedded_panel_for_frame(frame) == panel
+        assert embedded_platform_for_frame(frame) == "esp32-s3"
+        assert embedded_flash_size_for_frame(frame) == "32MB"
+        assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+        check_embedded_panel_fits_memory(frame)
+        # Both boards share the same EPD wiring (Zephyr DTS + TRMNL firmware).
+        assert embedded_pins_for_frame(frame) == {
+            "rst": 12, "dc": 11, "cs": 10, "cs2": -1,
+            "busy": 13, "sck": 7, "mosi": 9, "pwr": -1,
+        }
+        assert frame.gpio_buttons == [
+            {"pin": 3, "label": "REFRESH"},
+            {"pin": 4, "label": "LEFT"},
+            {"pin": 5, "label": "RIGHT"},
+        ]
+        assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
+
+
+def test_embedded_hardware_preset_for_elecrow_crowpanel_5in79():
+    frame = Frame(id=9, embedded={"hardwarePreset": "elecrow_crowpanel_5in79"})
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert embedded_panel_for_frame(frame) == "EPD_5in79"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "8MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 47, "dc": 46, "cs": 45, "cs2": -1,
+        "busy": 48, "sck": 12, "mosi": 11, "pwr": -1,
+    }
+    assert {"pin": 2, "label": "HOME"} in frame.gpio_buttons
+    assert {"pin": 5, "label": "OK"} in frame.gpio_buttons
+
+
+def test_embedded_hardware_preset_for_inky_frames():
+    for preset, panel, platform, flash in (
+        ("pimoroni_inky_frame_4", "EPD_4in01f", "pico-w", "2MB"),
+        ("pimoroni_inky_frame_5_7", "EPD_5in65f", "pico-w", "2MB"),
+        ("pimoroni_inky_frame_7_3", "EPD_7in3f", "pico-w", "2MB"),
+        ("pimoroni_inky_frame_7_3_pico2", "EPD_7in3f", "pico-2w", "4MB"),
+        ("pimoroni_inky_frame_7_3_spectra", "EPD_7in3e", "pico-2w", "4MB"),
+    ):
+        frame = Frame(id=9, embedded={"hardwarePreset": preset})
+        ensure_embedded_frame_defaults(frame)
+        assert embedded_panel_for_frame(frame) == panel
+        assert embedded_platform_for_frame(frame) == platform
+        assert embedded_flash_size_for_frame(frame) == flash
+        assert embedded_ota_supported_for_frame(frame) is False
+        assert embedded_module_psram_bytes(frame) == 0
+        # Pico family: thin client always, no ESP-IDF build inputs.
+        assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+        assert embedded_required_sdkconfig_for_frame(frame) == {}
+        check_embedded_panel_fits_memory(frame)
+        # The shift-register wiring rides along in device_config for the
+        # pico firmware's provisioning flow.
+        assert frame.device_config["pins"]["sr_clock"] == 8
+        assert frame.device_config["pins"]["busy_bit"] == 7
+        # Layout must not crash without a partition table.
+        layout = embedded_firmware_layout_for_frame(frame)
+        assert layout["flash"]["flashBytes"] == (2 if flash == "2MB" else 4) * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_pico_frames_refuse_backend_firmware_builds():
+    frame = Frame(id=9, embedded={"hardwarePreset": "pimoroni_inky_frame_5_7"})
+    ensure_embedded_frame_defaults(frame)
+
+    with pytest.raises(ValueError, match="BOOTSEL"):
+        await embedded_firmware_module._build_firmware(None, None, frame, None)
+
+
+def test_embedded_hardware_preset_for_trmnl_diy_kits():
+    for preset, panel, button in (
+        ("trmnl_og_diy_kit", "EPD_7in5_V2", {"pin": 5, "label": "KEY3"}),
+        ("trmnl_4in26_diy_kit", "EPD_4in26", {"pin": 2, "label": "KEY1"}),
+    ):
+        frame = Frame(id=9, embedded={"hardwarePreset": preset})
+        ensure_embedded_frame_defaults(frame)
+        assert embedded_panel_for_frame(frame) == panel
+        assert embedded_platform_for_frame(frame) == "esp32-s3"
+        assert embedded_flash_size_for_frame(frame) == "8MB"
+        assert embedded_pins_for_frame(frame) == {
+            "rst": 38, "dc": 10, "cs": 44, "cs2": -1,
+            "busy": 4, "sck": 7, "mosi": 9, "pwr": -1,
+        }
+        assert button in frame.gpio_buttons
+
+
 def test_embedded_hardware_preset_keeps_explicit_gpio_buttons():
     frame = Frame(
         id=8,
@@ -1012,37 +1217,32 @@ def test_ready_4mb_firmware_does_not_require_ota_artifact(tmp_path):
 
 
 def test_reset_stale_embedded_sdkconfig_removes_generated_files(tmp_path):
-    sdkconfig = tmp_path / "sdkconfig"
-    sdkconfig.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
-    sdkconfig_old = tmp_path / "sdkconfig.old"
-    sdkconfig_old.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
-    build_dir = tmp_path / "build"
+    build_dir = tmp_path / "build-esp32-s3-8mb"
     build_dir.mkdir()
+    sdkconfig = build_dir / "sdkconfig"
+    sdkconfig.write_text("CONFIG_ESP_MAIN_TASK_STACK_SIZE=3584\n", encoding="utf-8")
     (build_dir / "stale.o").write_text("old", encoding="utf-8")
 
-    with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
-        missing = _reset_stale_embedded_sdkconfig(build_dir)
+    missing = _reset_stale_embedded_sdkconfig(build_dir)
 
     assert missing == {
         "CONFIG_ESP_ERR_TO_NAME_LOOKUP": "y",
         "CONFIG_ESP_MAIN_TASK_STACK_SIZE": "8192",
     }
     assert not sdkconfig.exists()
-    assert not sdkconfig_old.exists()
     assert not build_dir.exists()
 
 
 def test_reset_stale_embedded_sdkconfig_keeps_current_config(tmp_path):
-    sdkconfig = tmp_path / "sdkconfig"
+    build_dir = tmp_path / "build-esp32-s3-8mb"
+    build_dir.mkdir()
+    sdkconfig = build_dir / "sdkconfig"
     sdkconfig.write_text(
         "CONFIG_ESP_ERR_TO_NAME_LOOKUP=y\nCONFIG_ESP_MAIN_TASK_STACK_SIZE=8192\n",
         encoding="utf-8",
     )
-    build_dir = tmp_path / "build"
-    build_dir.mkdir()
 
-    with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
-        missing = _reset_stale_embedded_sdkconfig(build_dir)
+    missing = _reset_stale_embedded_sdkconfig(build_dir)
 
     assert missing == {}
     assert sdkconfig.exists()
@@ -1050,23 +1250,23 @@ def test_reset_stale_embedded_sdkconfig_keeps_current_config(tmp_path):
 
 
 def test_reset_stale_embedded_sdkconfig_detects_flash_profile_switch(tmp_path):
-    sdkconfig = tmp_path / "sdkconfig"
+    build_dir = tmp_path / "build-esp32-s3-8mb"
+    build_dir.mkdir()
+    sdkconfig = build_dir / "sdkconfig"
     sdkconfig.write_text(
         '\n'.join([
             'CONFIG_ESP_ERR_TO_NAME_LOOKUP=y',
             'CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192',
+            'CONFIG_IDF_TARGET="esp32s3"',
             'CONFIG_ESPTOOLPY_FLASHSIZE="8MB"',
             'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"',
             '',
         ]),
         encoding="utf-8",
     )
-    build_dir = tmp_path / "build"
-    build_dir.mkdir()
 
     required = embedded_required_sdkconfig_for_frame(Frame(embedded={"flashSize": "32MB"}))
-    with patch("app.tasks.embedded_firmware.EMBEDDED_PROJECT_DIR", tmp_path):
-        missing = _reset_stale_embedded_sdkconfig(build_dir, required)
+    missing = _reset_stale_embedded_sdkconfig(build_dir, required)
 
     assert missing == {
         "CONFIG_ESPTOOLPY_FLASHSIZE": '"32MB"',
@@ -1124,3 +1324,102 @@ def test_embedded_source_fingerprint_uses_contents_without_git(tmp_path, monkeyp
     lock.write_text('{"packages":{"pixie":{"vcsRevision":"pixie-two"}}}\n', encoding="utf-8")
     monkeypatch.setattr(embedded_firmware_module, "_source_fingerprint_cache", None)
     assert embedded_firmware_source_fingerprint() != second
+
+
+@pytest.mark.asyncio
+async def test_ssh_agent_endpoints_reject_embedded_frames(async_client, redis):
+    frame = await create_embedded_frame(async_client)
+
+    for action in ('reset', 'stop', 'deploy_remote', 'restart_remote', 'clear_build_cache'):
+        response = await async_client.post(f"/api/frames/{frame['id']}/{action}")
+        assert response.status_code == 400, (action, response.text)
+
+    # Restart and reboot stay available: they run over the device's HTTP API.
+    for action in ('restart', 'reboot'):
+        response = await async_client.post(f"/api/frames/{frame['id']}/{action}")
+        assert response.status_code == 200, (action, response.text)
+
+
+@pytest.mark.asyncio
+async def test_deploy_plan_combined_for_embedded_includes_full_ota_plan(async_client):
+    frame = await create_embedded_frame(async_client)
+
+    response = await async_client.get(f"/api/frames/{frame['id']}/deploy_plan?mode=combined")
+    assert response.status_code == 200, response.text
+    plan = response.json()['plan']
+    assert plan['mode'] == 'combined'
+    assert plan['fast_deploy']['action'] == 'http_upload_scenes_reload'
+    assert plan['full_deploy']['embedded']['platform'] == 'esp32-s3'
+    assert plan['full_deploy']['embedded']['otaSupported'] is True
+    assert plan['full_deploy']['embedded']['needsFirmwareBuild'] is True
+    # FullDeployPlanResponse shape stays intact for the drawer
+    assert plan['full_deploy']['packages'] == []
+    assert plan['full_deploy']['target']['distro'] == 'esp-idf'
+
+
+@pytest.mark.asyncio
+async def test_deploy_plan_full_for_embedded_pico_is_unavailable(async_client, db):
+    frame_json = await create_embedded_frame(async_client)
+    frame = db.get(Frame, frame_json['id'])
+    frame.embedded = {'platform': 'pico-w', 'flashSize': '2MB'}
+    db.add(frame)
+    db.commit()
+
+    response = await async_client.get(f"/api/frames/{frame.id}/deploy_plan?mode=combined")
+    assert response.status_code == 200, response.text
+    plan = response.json()['plan']
+    assert plan['full_deploy'] is None
+    assert any(note.startswith('Full deploy unavailable:') for note in plan['notes'])
+
+
+@pytest.mark.asyncio
+async def test_ready_firmware_goes_stale_when_platform_changes(async_client, db, tmp_path):
+    frame_json = await create_embedded_frame(async_client)
+    frame = db.get(Frame, frame_json['id'])
+    ensure_embedded_frame_defaults(frame)
+    firmware_file = tmp_path / 'frameos.bin'
+    firmware_file.write_bytes(b'\xe9firmware')
+    embedded = dict(frame.embedded or {})
+    embedded['firmware'] = {
+        'status': 'ready',
+        'firmwareVersion': EMBEDDED_FIRMWARE_VERSION,
+        'platform': 'esp32-s3',
+        'flashSize': embedded_flash_size_for_frame(frame),
+        'path': str(firmware_file),
+        'otaPath': str(firmware_file),
+        'panel': embedded_panel_for_frame(frame),
+        'configHash': embedded_firmware_config_hash(frame),
+    }
+    frame.embedded = embedded
+    db.add(frame)
+    db.commit()
+
+    firmware = latest_embedded_firmware(frame)
+    assert firmware['status'] == 'ready'
+
+    # Same everything, different chip target → stale
+    frame.embedded = {**frame.embedded, 'platform': 'esp32-c3'}
+    frame.device_config = {**(frame.device_config or {}), 'platform': 'esp32-c3'}
+    firmware = latest_embedded_firmware(frame)
+    assert firmware['status'] == 'stale'
+    assert 'different chip target' in firmware['error']
+
+
+@pytest.mark.asyncio
+async def test_embedded_build_lock_is_globally_exclusive(redis, monkeypatch):
+    monkeypatch.setattr(embedded_firmware_module, 'EMBEDDED_BUILD_LOCK_WAIT_SECONDS', 0.05)
+    monkeypatch.setattr(embedded_firmware_module, 'EMBEDDED_BUILD_LOCK_POLL_SECONDS', 0.01)
+
+    token = await embedded_firmware_module._acquire_embedded_build_lock(redis)
+    assert token
+
+    # A second builder (any worker process) cannot take the lock
+    with pytest.raises(ValueError, match='Another embedded firmware build'):
+        await embedded_firmware_module._acquire_embedded_build_lock(redis)
+
+    # Releasing with the wrong token leaves the lock alone
+    await embedded_firmware_module._release_embedded_build_lock(redis, 'not-the-token')
+    assert await redis.get(embedded_firmware_module.EMBEDDED_BUILD_LOCK_KEY) is not None
+
+    await embedded_firmware_module._release_embedded_build_lock(redis, token)
+    assert await redis.get(embedded_firmware_module.EMBEDDED_BUILD_LOCK_KEY) is None

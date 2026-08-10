@@ -232,6 +232,26 @@ block test_system_hardening_defers_live_changes_when_not_live_applying:
   finally:
     resetSetupCommandRunnerForTest()
 
+block test_system_hardening_skips_networkmanager_config_without_the_unit:
+  # /etc/NetworkManager exists even on images without NetworkManager (it is a
+  # bind-mount point on buildroot), so the powersave config must additionally
+  # be gated on the systemd unit being present.
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("systemctl cat NetworkManager.service"):
+      ("", 1)
+    else:
+      ("", 0)
+  )
+  try:
+    discard setupSystemHardening(liveApply = true)
+
+    doAssert not commands.anyIt(it.contains("wifi-powersave-off"))
+    doAssert not commands.anyIt(it.contains("reload NetworkManager"))
+  finally:
+    resetSetupCommandRunnerForTest()
+
 block test_write_frame_config_dimensions_persists_detected_size:
   let path = getTempDir() / ("frameos-dimensions-" & $epochTime().int64 & ".json")
   writeFile(path, pretty(%*{

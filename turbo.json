@@ -1,0 +1,95 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "envMode": "loose",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"]
+    },
+    "@frameos/frontend#build": {
+      "inputs": [
+        "src/**",
+        "public/**",
+        "scripts/**",
+        "schema/**",
+        "build.mjs",
+        "utils.mjs",
+        "package.json",
+        "tsconfig.json",
+        "tailwind.config.js",
+        "postcss.config.js",
+        "../repo/**"
+      ],
+      "outputs": ["dist/**", "dist-editor/**"]
+    },
+    "frameos-editor#build": {
+      "dependsOn": ["@frameos/frontend#build"],
+      "inputs": ["scripts/**", "embed.js", "embed.d.ts", "mount.d.ts", "react.d.ts", "package.json"],
+      "outputs": ["dist/**"]
+    },
+    "frameos-wasm#build": {
+      "inputs": [
+        "src/**",
+        "scripts/**",
+        "tsconfig.json",
+        "package.json",
+        "../../frontend/public/frameos-wasm/**"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "frameos-wasm#build:runtime": {
+      "inputs": [
+        "../src/wasm/**",
+        "../src/frameos/**",
+        "../frameos.nimble",
+        "../tools/build_wasm.sh"
+      ],
+      "outputs": ["../../frontend/public/frameos-wasm/**"]
+    },
+    "@frameos-cloud/frame-hub#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "package.json",
+        "tsconfig.json",
+        "../auth-web/src/lib/**",
+        "../../packages/db/src/**"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "@frameos/cloud-frontend#build": {
+      "inputs": [
+        "src/**",
+        "build.mjs",
+        "package.json",
+        "tsconfig.json",
+        "tailwind.config.js",
+        "postcss.config.js",
+        "../frontend/src/**",
+        "../frontend/public/**",
+        "../frontend/scripts/**",
+        "../repo/**"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "@frameos-cloud/auth-web#build": {
+      "dependsOn": ["^build"],
+      "outputs": [
+        ".next/**",
+        "!.next/cache/**",
+        "public/frameos-editor/**",
+        "public/frameos-wasm/**",
+        "public/frames-app/**"
+      ]
+    },
+    "lint": {},
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "@frameos-cloud/auth-web#typecheck": {
+      "dependsOn": ["^build", "@frameos-cloud/auth-web#build"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    }
+  }
+}

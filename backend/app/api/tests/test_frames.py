@@ -13,6 +13,7 @@ from PIL import Image
 from urllib.parse import urlparse
 
 from app.api import frame_sync, frames as frames_api
+from app.utils.embedded_assets import AssetListing
 from app.models import new_frame
 from app.models.frame import Frame
 from app.models.log import Log
@@ -21,7 +22,11 @@ from app.models.scene_image import SceneImage
 from app.models.settings import Settings
 from app.models.user import User
 from app.tenancy import ensure_default_project_for_user
-from app.tasks.buildroot_image import BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION, buildroot_sd_image_config_fingerprint
+from app.tasks.buildroot_image import (
+    BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+    buildroot_sd_image_config_fingerprint,
+    ensure_buildroot_frame_defaults,
+)
 from app.codegen.drivers_nim import frame_compilation_mode
 from app.drivers.devices import (
     WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
@@ -985,7 +990,10 @@ async def test_api_frame_assets_refresh_bypasses_cache(async_client, db, redis):
     await redis.delete(cache_key, lock_key)
     await frames_api._write_frame_assets_cache(redis, cache_key, cached_assets, fetched_at=time.time())
 
-    with patch("app.api.frames._load_frame_assets", new=AsyncMock(return_value=fresh_assets)) as load_assets:
+    with patch(
+        "app.api.frames._load_frame_assets",
+        new=AsyncMock(return_value=AssetListing(assets=fresh_assets)),
+    ) as load_assets:
         response = await async_client.get(f'/api/frames/{frame.id}/assets?refresh=1')
 
     assert response.status_code == 200
@@ -1015,7 +1023,10 @@ async def test_api_frame_assets_returns_stale_cache_and_refreshes(async_client, 
         fetched_at=time.time() - frames_api.FRAME_ASSETS_CACHE_REFRESH_AFTER_SECONDS - 1,
     )
 
-    with patch("app.api.frames._load_frame_assets", new=AsyncMock(return_value=fresh_assets)) as load_assets:
+    with patch(
+        "app.api.frames._load_frame_assets",
+        new=AsyncMock(return_value=AssetListing(assets=fresh_assets)),
+    ) as load_assets:
         response = await async_client.get(f'/api/frames/{frame.id}/assets')
 
     assert response.status_code == 200
@@ -1294,6 +1305,85 @@ async def test_api_frame_update_name(async_client, db, redis):
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
     assert updated_frame.name == "Updated Name"
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_keeps_server_side_sd_image_record(async_client, db, redis):
+    # The SD image record is build output owned by the backend. Clients echo
+    # back the buildroot dict they loaded with the form, so a save made after
+    # a rebuild must not revert sdImage to the stale copy the client holds.
+    frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {'platform': 'raspberry-pi-zero-w', 'compilationMode': 'precompiled'}
+    frame.scenes = []
+    ensure_buildroot_frame_defaults(frame)
+    db.add(frame)
+    db.commit()
+
+    fresh_sd_image = {
+        'status': 'ready',
+        'buildId': 'freshbuild',
+        'frameosVersion': '2026.8.2',
+        'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+        'compilationMode': 'precompiled',
+    }
+    stale_sd_image = {
+        'status': 'ready',
+        'buildId': 'stalebuild',
+        'frameosVersion': '2026.8.0',
+        'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+        'compilationMode': 'precompiled',
+    }
+    buildroot = dict(frame.buildroot)
+    buildroot['sdImage'] = fresh_sd_image
+    frame.buildroot = buildroot
+    set_buildroot_sd_image_config_fingerprint(frame)
+    fresh_sd_image = frame.buildroot['sdImage']
+    db.add(frame)
+    db.commit()
+
+    client_buildroot = {
+        **{key: value for key, value in frame.buildroot.items() if key != 'sdImage'},
+        'sdImage': stale_sd_image,
+    }
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={'buildroot': client_buildroot})
+    assert resp.status_code == 200
+    db.expire_all()
+    stored = db.get(Frame, frame.id).buildroot['sdImage']
+    assert stored['buildId'] == 'freshbuild'
+    assert stored == fresh_sd_image
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_clears_sd_image_when_config_changes(async_client, db, redis):
+    # Config changes that alter the SD image fingerprint must still clear the
+    # record (the preserved server-side copy no longer matches the config).
+    frame = await new_frame(db, redis, 'BuildrootFrame2', 'frame.local', 'backend.local')
+    frame.mode = 'buildroot'
+    frame.buildroot = {'platform': 'raspberry-pi-zero-w', 'compilationMode': 'precompiled'}
+    frame.scenes = []
+    ensure_buildroot_frame_defaults(frame)
+    db.add(frame)
+    db.commit()
+
+    buildroot = dict(frame.buildroot)
+    buildroot['sdImage'] = {
+        'status': 'ready',
+        'buildId': 'freshbuild',
+        'customizationVersion': BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION,
+        'compilationMode': 'precompiled',
+    }
+    frame.buildroot = buildroot
+    set_buildroot_sd_image_config_fingerprint(frame)
+    db.add(frame)
+    db.commit()
+
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={'name': 'RenamedBuildrootFrame'})
+    assert resp.status_code == 200
+    db.expire_all()
+    updated = db.get(Frame, frame.id)
+    assert updated.name == 'RenamedBuildrootFrame'
+    assert 'sdImage' not in (updated.buildroot or {})
 
 
 @pytest.mark.asyncio
@@ -2183,7 +2273,7 @@ async def test_api_frame_new_buildroot_rejects_unsupported_platform(async_client
         "name": "BuildrootFrame",
         "frame_host": "",
         "server_host": "backend.local",
-        "platform": "luckfox-pico",
+        "platform": "commodore-64",
     }
 
     response = await async_client.post('/api/frames/new', json=payload)
@@ -2192,6 +2282,43 @@ async def test_api_frame_new_buildroot_rejects_unsupported_platform(async_client
     assert 'Unsupported Buildroot platform' in response.json()['detail']
     frames_response = await async_client.get('/api/frames')
     assert frames_response.json()['frames'] == []
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_buildroot_rejects_registered_but_disabled_platform(async_client):
+    payload = {
+        "mode": "buildroot",
+        "name": "BuildrootFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "luckfox-pico",
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 400
+    assert 'not supported yet' in response.json()['detail']
+    frames_response = await async_client.get('/api/frames')
+    assert frames_response.json()['frames'] == []
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_buildroot_accepts_raspberry_pi_zero_w(async_client):
+    payload = {
+        "mode": "buildroot",
+        "name": "BuildrootFrame",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "raspberry-pi-zero-w",
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frames_response = await async_client.get('/api/frames')
+    frames = frames_response.json()['frames']
+    assert len(frames) == 1
+    assert frames[0]['buildroot']['platform'] == 'raspberry-pi-zero-w'
 
 
 @pytest.mark.asyncio

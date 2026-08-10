@@ -58,8 +58,13 @@ class Repository(Base):
             except ValueError:
                 self.templates = []
 
+            # Repository-relative assets are resolved once, here, because the
+            # cached copy is what the scene picker renders. `or ''` because a
+            # template may carry an explicit null image/zip, and an
+            # AttributeError here would abort the whole refresh and leave the
+            # previous (by then possibly dead) URLs in place.
             for template in self.templates:
-                if template.get('image', '').startswith('./'):
+                if (template.get('image') or '').startswith('./'):
                     template['image'] = urljoin(self.url, template['image'])
-                if template.get('zip', '').startswith('./'):
+                if (template.get('zip') or '').startswith('./'):
                     template['zip'] = urljoin(self.url, template['zip'])

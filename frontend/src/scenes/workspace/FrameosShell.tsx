@@ -45,8 +45,12 @@ import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 import { FrameRenameModal } from './FrameActionsMenu'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { getFrameControlFrameId } from '../../utils/frameControlMode'
+import { isCloudMode } from '../../utils/cloudMode'
+import type { FrameId } from '../../types'
 
-const DEFAULT_BROWSER_TITLE = 'FrameOS Backend'
+// The tab title's suffix names the surface being used: the shared SPA also
+// serves cloud.frameos.net/frames, where "FrameOS Backend" is a lie.
+const DEFAULT_BROWSER_TITLE = isCloudMode() ? 'FrameOS Cloud' : 'FrameOS Backend'
 
 interface FrameosShellProps {
   mode: WorkspaceMode
@@ -198,7 +202,7 @@ function WorkspaceChatDrawer({
   sceneId,
   source,
 }: {
-  frameId: number
+  frameId: FrameId
   nodeId?: string | null
   sceneId: string | null
   source?: 'templates' | null
@@ -214,7 +218,7 @@ function WorkspaceChatComingSoonDrawer({
   frameId,
   source,
 }: {
-  frameId: number
+  frameId: FrameId
   source?: 'templates' | null
 }): JSX.Element | null {
   const { frames } = useValues(framesModel)
@@ -273,7 +277,7 @@ function WorkspaceChatDrawerContent({
   sceneId,
   source,
 }: {
-  frameId: number
+  frameId: FrameId
   nodeId?: string | null
   sceneId: string | null
   source?: 'templates' | null
@@ -332,7 +336,7 @@ function WorkspaceChatDrawerContent({
   )
 }
 
-function FrameStatusHeaderButton({ frameId }: { frameId: number }): JSX.Element | null {
+function FrameStatusHeaderButton({ frameId }: { frameId: FrameId }): JSX.Element | null {
   const { undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
   const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)

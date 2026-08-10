@@ -11,27 +11,23 @@ on:
       - buildroot-images.json
       - cross-toolchain-images.json
 
+# Superseded runs on the same PR are cancelled; pushes to main always run to
+# completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
   nim:
-    name: FrameOS Nim Tests (${{ matrix.shard_name }})
+    name: FrameOS Nim Tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - shard: 1
-            shard_name: shard 1
-          - shard: 2
-            shard_name: shard 2
-          - shard: 3
-            shard_name: shard 3
-          - shard: 4
-            shard_name: shard 4
-          - shard: 5
-            shard_name: shard 5
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -43,21 +39,6 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: '3.12'
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install python dependencies
-        run: |
-          cd backend
-          python -m pip install --upgrade uv
-          uv venv
-          uv pip install -r requirements.txt
 
       - uses: pnpm/action-setup@v4
         with:
@@ -75,6 +56,28 @@ jobs:
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache nimble packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble/pkgs2
+          key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nimble-
+
+      - name: Cache QuickJS
+        uses: actions/cache@v4
+        with:
+          path: frameos/quickjs
+          key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
+
+      - name: Cache compiled assets
+        uses: actions/cache@v4
+        with:
+          path: |
+            frameos/assets/compiled
+            frameos/src/assets
+          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'repo/**', 'pnpm-lock.yaml', 'versions.json') }}
 
       - name: FrameOS nim setup
         run: |
@@ -162,6 +165,20 @@ jobs:
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache nimble packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble/pkgs2
+          key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nimble-
+
+      - name: Cache QuickJS
+        uses: actions/cache@v4
+        with:
+          path: frameos/quickjs
+          key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
 
       - name: FrameOS nim build
         run: |
@@ -313,6 +330,11 @@ jobs:
 
       - name: Build frontend
         run: pnpm --dir frontend run build
+
+      - name: Build on-frame admin frontend
+        # frame-admin.spec.ts serves this bundle through route interception;
+        # without it those browser tests skip silently.
+        run: pnpm --dir frameos/frontend run build
 
       - name: Run frontend visual regression tests
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
@@ -530,6 +552,24 @@ jobs:
           uv venv
           uv pip install -r requirements.txt
 
+      # The other two Nim jobs cache these; this one did not, so every run
+      # re-cloned ~15 nimble dependencies and rebuilt QuickJS from scratch —
+      # about 100 s of the step below, on a job that is the slowest in the
+      # workflow. Same keys as the jobs above so all three share the entries.
+      - name: Cache nimble packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble/pkgs2
+          key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-nimble-
+
+      - name: Cache QuickJS
+        uses: actions/cache@v4
+        with:
+          path: frameos/quickjs
+          key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
+
       - name: Prepare FrameOS build inputs
         run: |
           cd frameos
@@ -539,6 +579,21 @@ jobs:
           nimble setup
           FRAMEOS_ROOT_DIR="." python3 ../e2e/makeapploaders.py
           nimble build
+
+      # The test builds a Debian image with a toolchain in it (~54 s). Its tag
+      # is a hash of the build context, so building it here with a layer cache
+      # means the test finds it already present and skips the build; an edit to
+      # the context changes the tag and both this and the test rebuild.
+      - name: Pre-build SSH target image
+        run: |
+          TAG="$(python3 backend/app/tasks/tests/deploy_ssh_target/context_tag.py)"
+          echo "SSH target image: $TAG"
+          docker buildx build \
+            --load \
+            --cache-from type=gha,scope=deploy-e2e-ssh-target \
+            --cache-to type=gha,mode=max,scope=deploy-e2e-ssh-target \
+            -t "$TAG" \
+            backend/app/tasks/tests/deploy_ssh_target
 
       - name: Run SSH deploy E2E test
         run: |
@@ -605,3 +660,45 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm --dir frontend run build
+
+  pico-firmware:
+    name: Pico W / Pico 2 W firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install pico toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
+
+      - name: Cache pico-sdk
+        id: pico-sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/pico-sdk
+          key: pico-sdk-2.1.1
+
+      - name: Fetch pico-sdk
+        if: steps.pico-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch 2.1.1 https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk
+          cd ~/pico-sdk
+          git submodule update --init --depth 1 lib/cyw43-driver lib/lwip lib/mbedtls lib/tinyusb
+
+      - name: Build Pico W firmware
+        run: |
+          cd embedded/pico
+          cmake -B build-pico-w -DPICO_BOARD=pico_w -DPICO_SDK_PATH=$HOME/pico-sdk -G Ninja
+          cmake --build build-pico-w
+          test -f build-pico-w/frameos_pico.uf2
+
+      - name: Build Pico 2 W firmware
+        run: |
+          cd embedded/pico
+          cmake -B build-pico2-w -DPICO_BOARD=pico2_w -DPICO_SDK_PATH=$HOME/pico-sdk -G Ninja
+          cmake --build build-pico2-w
+          test -f build-pico2-w/frameos_pico.uf2

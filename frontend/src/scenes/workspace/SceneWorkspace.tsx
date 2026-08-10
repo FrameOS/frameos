@@ -7,6 +7,7 @@ import {
   ClipboardDocumentIcon,
   CodeBracketIcon,
   Cog6ToothIcon,
+  ExclamationTriangleIcon,
   InformationCircleIcon,
   PhotoIcon,
   PlusIcon,
@@ -21,8 +22,10 @@ import { useEffect, type DragEvent } from 'react'
 import { FrameImage } from '../../components/FrameImage'
 import { Tag } from '../../components/Tag'
 import { framesModel } from '../../models/framesModel'
+import { frameMemoryAdvisory } from '../../utils/frameMemory'
 import { frameHost } from '../../decorators/frame'
-import { FrameScene, FrameType, NodeData } from '../../types'
+import { FrameScene, FrameType, NodeData, FrameId } from '../../types'
+import { parseRouteFrameId } from '../../utils/frameId'
 import { FrameosShell } from './FrameosShell'
 import { TemplateDrawer } from './FramesHome'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
@@ -51,6 +54,7 @@ import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { sceneUtilityPanelIsAllowed, workspaceMode } from './workspaceSurfaces'
 
 interface SceneWorkspaceProps {
   frameId?: string
@@ -58,7 +62,7 @@ interface SceneWorkspaceProps {
 }
 
 interface SceneWorkspaceFrameProps {
-  frameId: number
+  frameId: FrameId
 }
 
 interface UtilityDefinition {
@@ -82,7 +86,15 @@ function sceneIsCompiled(scene: FrameScene | null, frameMode?: FrameType['mode']
 }
 
 function sceneUtilityDefinitions(scene: FrameScene | null, frameMode?: FrameType['mode'] | null): UtilityDefinition[] {
-  return utilityDefinitions.filter((definition) => definition.panel !== 'source' || sceneIsCompiled(scene, frameMode))
+  const mode = workspaceMode()
+  return utilityDefinitions.filter(
+    (definition) =>
+      // Allow-list per control plane (workspaceSurfaces.ts), plus one
+      // per-scene rule: SceneSource shows generated Nim, so it needs a
+      // compiled scene even where the mode permits the panel.
+      sceneUtilityPanelIsAllowed(mode, definition.panel) &&
+      (definition.panel !== 'source' || sceneIsCompiled(scene, frameMode))
+  )
 }
 
 function sceneUtilityDefinition(
@@ -114,6 +126,43 @@ function nodeKindLabel(item: DiagramNodeTreeItem): string {
     return `${item.node.type} · disconnected`
   }
   return item.node.type ?? item.kind
+}
+
+/**
+ * "This frame is out of internal RAM" — shown on the scene list because that
+ * is where the cause is: on an ESP32 every parsed scene lives in the small
+ * internal pool (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL sends sub-16 KB
+ * allocations there), while the render canvas sits in PSRAM. A frame can
+ * therefore render perfectly and still have too little left to open the TLS
+ * session its cloud link needs — which surfaces as a connection error and
+ * looks like a network fault. The numbers come from the device's own metrics;
+ * the thresholds match the firmware (see utils/frameMemory.ts).
+ */
+function FrameMemoryNotice({ frame }: { frame: FrameType }): JSX.Element | null {
+  const advisory = frameMemoryAdvisory(frame.last_metrics, { cloudManaged: workspaceMode() === 'cloud' })
+  if (!advisory) {
+    return null
+  }
+  const critical = advisory.level === 'critical'
+  return (
+    <div
+      role="status"
+      className={clsx(
+        'mb-2 rounded-xl border px-3 py-2 text-xs leading-5',
+        critical
+          ? 'border-red-300 bg-red-50 text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200'
+          : 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200'
+      )}
+    >
+      <div className="flex items-start gap-1.5">
+        <ExclamationTriangleIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <div>
+          <div className="font-semibold">{advisory.headline}</div>
+          <div className="mt-0.5 opacity-90">{advisory.detail}</div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function SceneSelector({
@@ -169,7 +218,7 @@ function SceneSelector({
                 <div className="relative min-w-0 flex-1">
                   <select
                     value={frame.id}
-                    onChange={(event) => navigateToSceneFrame(parseInt(event.target.value, 10))}
+                    onChange={(event) => navigateToSceneFrame(parseRouteFrameId(event.target.value) ?? frame.id)}
                     className="frameos-form-control min-w-0 w-full rounded-xl border border-slate-200 bg-white py-2 pl-3 pr-9 text-sm font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
                   >
                     {frameGroups.map((group) => (
@@ -214,6 +263,7 @@ function SceneSelector({
             </button>
           </div>
         </div>
+        <FrameMemoryNotice frame={frame} />
         {scenes.length === 0 ? (
           <div className="frameos-muted rounded-xl border border-dashed border-slate-200 px-3 py-3 text-sm text-slate-400">
             <div>No scenes</div>
@@ -362,7 +412,7 @@ function SceneTree({
   )
 }
 
-function SceneNodesList({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
+function SceneNodesList({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   const { selectedNodeId } = useValues(workspaceLogic)
   const { selectNode } = useActions(workspaceLogic)
   const nodeTreeItems = buildDiagramNodeTreeItems(scene.nodes ?? [], scene.edges ?? [])
@@ -554,7 +604,7 @@ function SceneDiagramOverlay({
   scene,
   sceneId,
 }: {
-  frameId: number
+  frameId: FrameId
   frameMode?: FrameType['mode'] | null
   scene: FrameScene | null
   sceneId: string | null
@@ -674,11 +724,11 @@ function SceneCanvasLoadingPlaceholder(): JSX.Element {
   )
 }
 
-function ScenePreviewPanel({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
+function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   return <ExpandedScene frameId={frameId} sceneId={scene.id} scene={scene} showEditButton={false} />
 }
 
-function SceneInfoPanel({ frameId, scene }: { frameId: number; scene: FrameScene }): JSX.Element {
+function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   const { renameScene, updateSceneFromRepo } = useActions(scenesLogic({ frameId }))
   const { sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
   const availableUpdateVersion = sceneUpdateVersions[scene.id]
@@ -790,7 +840,7 @@ function UtilityDrawer({
   scene,
   frameMode,
 }: {
-  frameId: number
+  frameId: FrameId
   scene: FrameScene | null
   frameMode?: FrameType['mode'] | null
 }): JSX.Element | null {
@@ -854,7 +904,7 @@ function SceneCanvas({
   selectedSceneId,
 }: {
   hasScenes: boolean
-  frameId: number
+  frameId: FrameId
   frameMode?: FrameType['mode'] | null
   selectedScene: FrameScene | null
   selectedSceneId: string | null
@@ -922,7 +972,7 @@ function SceneCanvas({
   )
 }
 
-function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: number; sceneId: string }): null {
+function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): null {
   const { selectedNodeId } = useValues(workspaceLogic)
   const diagram = diagramLogic({ frameId, sceneId })
   const { nodes } = useValues(diagram)
@@ -1018,9 +1068,9 @@ export function SceneWorkspace({ frameId, sceneId }: SceneWorkspaceProps): JSX.E
   useMountedLogic(sceneWorkspaceLogic({ routeFrameId: frameId ?? null, routeSceneId: sceneId ?? null }))
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesLoading } = useValues(framesModel)
-  const routeFrameId = frameId ? parseInt(frameId, 10) : null
+  const routeFrameId = parseRouteFrameId(frameId)
 
-  if (routeFrameId && Number.isFinite(routeFrameId)) {
+  if (routeFrameId !== null) {
     return <SceneWorkspaceFrame frameId={routeFrameId} />
   }
 

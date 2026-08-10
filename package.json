@@ -10,27 +10,15 @@
     "dev:frontend": "pnpm --dir frontend run dev",
     "dev:frame-frontend": "pnpm --dir frameos/frontend run dev",
     "dev:redis": "sh -c 'mkdir -p .local/redis && exec redis-server --dir .local/redis'",
+    "dev:postgres": "cloud/scripts/db-run.sh",
     "test:frontend-e2e": "playwright test -c e2e/frontend-visual/playwright.config.ts --grep @e2e",
     "test:frontend-visual": "playwright test -c e2e/frontend-visual/playwright.config.ts",
     "test:frontend-visual:update": "playwright test -c e2e/frontend-visual/playwright.config.ts --update-snapshots",
     "test:frontend-visual:ui": "playwright test -c e2e/frontend-visual/playwright.config.ts --ui"
   },
-  "pnpm": {
-    "overrides": {
-      "@types/react": "18.0.19",
-      "@types/react-dom": "18.0.6",
-      "csstype": "3.2.3"
-    },
-    "packageExtensions": {
-      "kea-forms@*": {
-        "peerDependencies": {
-          "typescript": ">=5.0.0"
-        }
-      }
-    }
-  },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
-    "mprocs": "^0.8.3"
+    "mprocs": "^0.8.3",
+    "turbo": "^2.5.0"
   }
 }

@@ -17,7 +17,13 @@ from app.models.log import new_log as log
 from app.models.settings import get_settings_dict
 from app.utils.build_environment import selected_build_environment_provider
 from app.utils.local_exec import exec_local_command
-from app.utils.remote_exec import RemoteTransport, normalize_remote_transport, upload_file
+from app.utils.remote_exec import (
+    RemoteTransport,
+    normalize_remote_transport,
+    ssh_is_configured,
+    upload_file,
+)
+from app.ws.remote_ws import number_of_connections_for_frame
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.frame_deploy_helpers import sanitize_apt_package_name
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
@@ -110,7 +116,9 @@ def delayed_remote_restart_command(suffix: str = "manual") -> str:
     )
 
 
-def resolve_remote_task_transport(frame: Frame, transport: RemoteTransport) -> RemoteTransport:
+async def resolve_remote_task_transport(
+    frame: Frame, transport: RemoteTransport, redis: Redis | None = None
+) -> RemoteTransport:
     transport = normalize_remote_transport(transport)
     if transport != "auto":
         return transport
@@ -121,6 +129,22 @@ def resolve_remote_task_transport(frame: Frame, transport: RemoteTransport) -> R
         and agent.get("agentRunCommands")
         and agent.get("deployWithAgent") is not False
     ):
+        # "auto" promises a transport that works, so prefer the remote only
+        # while it is actually connected. A frame whose remote has dropped is
+        # still reachable over SSH, and falling back beats failing the task
+        # with "try SSH instead" — advice the user cannot always act on.
+        try:
+            connected = redis is None or (await number_of_connections_for_frame(redis, frame.id)) > 0
+        except Exception:
+            # If we cannot ask (redis hiccup), keep the configured preference
+            # rather than silently rerouting a deploy onto SSH.
+            connected = True
+        if connected:
+            return "remote"
+        if ssh_is_configured(frame):
+            return "ssh"
+        # No SSH to fall back to: stay on "remote" so the caller raises the
+        # clear "remote disconnected" error rather than an SSH failure.
         return "remote"
     return "ssh"
 
@@ -145,7 +169,7 @@ async def deploy_remote_task(
     # Workspace ────────────────────────────────────────────────────────────
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            resolved_transport = resolve_remote_task_transport(frame, transport)
+            resolved_transport = await resolve_remote_task_transport(frame, transport, redis)
             deployer = RemoteDeployer(db, redis, frame, "", tmp, force_source=recompile, transport=resolved_transport)
             await deployer.run()
     except Exception as e:

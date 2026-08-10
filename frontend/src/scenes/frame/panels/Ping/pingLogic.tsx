@@ -4,6 +4,7 @@ import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { apiFetch } from '../../../../utils/apiFetch'
 
 import type { pingLogicType } from './pingLogicType'
+import type { FrameId } from '../../../../types'
 
 export type PingMode = 'icmp' | 'http'
 
@@ -21,7 +22,7 @@ export type PingResult = {
 }
 
 export interface PingLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 const MAX_RESULTS = 200

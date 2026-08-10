@@ -5,24 +5,33 @@ import {
   ArrowLeftIcon,
   ArrowUpTrayIcon,
   CommandLineIcon,
+  ComputerDesktopIcon,
   CpuChipIcon,
   ServerStackIcon,
 } from '@heroicons/react/24/outline'
+import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import {
   BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+  EMBEDDED_ESP32_C3,
   EMBEDDED_ESP32_S3,
+  EMBEDDED_PICO_2W,
+  EMBEDDED_PICO_W,
+  EMBEDDED_VIRTUAL,
   devices,
   partialRefreshDefaultsByDevice,
   partialRefreshDevices,
   buildrootPlatforms,
   embeddedPlatforms,
+  isThinClientEmbeddedPlatform,
   rpiOSPlatforms,
+  virtualColorModes,
 } from '../../devices'
-import { newFrameForm } from './newFrameForm'
+import { defaultRemoteControl, newFrameForm } from './newFrameForm'
 import {
   FrameEmbeddedHardwarePreset,
   FrameInstallMethod,
   FrameOSSettings,
+  FrameVirtualColorMode,
   GPIOButton,
   NewFrameFormType,
 } from '../../types'
@@ -33,6 +42,7 @@ import { Spinner } from '../../components/Spinner'
 import { Field } from '../../components/Field'
 import { Checkbox } from '../../components/Checkbox'
 import { Switch } from '../../components/Switch'
+import { Tooltip } from '../../components/Tooltip'
 import { PartialRefreshSettingsFields } from '../../components/PartialRefreshSettingsFields'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 import { urls } from '../../urls'
@@ -73,6 +83,56 @@ function ModeButton({
       </span>
       <span className="mt-1 text-xs leading-4 text-slate-500">{description}</span>
     </button>
+  )
+}
+
+// The frame is reachable in one of two directions, and which one decides how
+// every later deploy, restart and screenshot gets to it. Making the choice
+// explicit at add time beats discovering it when a deploy fails: a frame on a
+// network the backend cannot dial needs Remote, and a frame you would rather
+// not have phoning home can stay SSH-only.
+function RemoteControlField({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean
+  onChange: (enabled: boolean) => void
+}): JSX.Element {
+  return (
+    <div className="space-y-2">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <div className="frameos-form-label text-sm font-semibold text-slate-700">FrameOS remote control</div>
+        <Tooltip
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full"
+          titleClassName="w-72"
+          title={
+            <div className="space-y-1">
+              <div>
+                FrameOS Remote is a reverse tunnel: the frame connects out to this backend and holds the connection
+                open, so it works from behind NAT, on another network, or without a reachable address.
+              </div>
+              <div>
+                With it off, this backend has to reach the frame directly on your network — SSH for deploys and
+                commands, HTTP to the frame's own web server for screenshots and events.
+              </div>
+              <div>You can change this later in frame settings.</div>
+            </div>
+          }
+        >
+          <ExclamationCircleIcon className="h-4 w-4" aria-label="FrameOS remote control help" />
+        </Tooltip>
+      </div>
+      <div className="frame-tool-panel">
+        <div className="flex min-w-0 items-center gap-2">
+          <Switch value={enabled} onChange={onChange} />
+          <div className="min-w-0 flex-1 text-sm text-slate-700">
+            {enabled
+              ? 'Enabled — the frame connects back to this backend and waits for commands'
+              : 'Disabled — this backend reaches the frame'}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -143,7 +203,8 @@ function setInstallMethodValues(
       platform: EMBEDDED_ESP32_S3,
       frame_host: '',
       server_host: defaultNewFrameServerHost(savedSettings),
-      device: '',
+      // "none" = headless firmware (panel "none"); a real panel is opt-in.
+      device: 'none',
       network: defaultWifiNetwork(savedSettings),
       rememberWifi: true,
     }
@@ -162,6 +223,31 @@ function setInstallMethodValues(
     mode: 'rpios',
     platform: '',
     server_host: defaultNewFrameServerHost(savedSettings),
+  }
+}
+
+// A virtual frame is an embedded-mode frame on the "virtual" platform: no
+// board, no panel, no pins, no WiFi. The backend renders its scenes (same
+// wasm path as the thin clients) and serves them as an image/page URL, and
+// ensure_embedded_frame_defaults sets device to "virtual" server-side.
+// Mirrors the clamp in backend/app/api/virtual_frame.py
+const VIRTUAL_MIN_DIMENSION = 16
+const VIRTUAL_MAX_DIMENSION = 4096
+const VIRTUAL_DEFAULT_WIDTH = 800
+const VIRTUAL_DEFAULT_HEIGHT = 480
+
+function setVirtualInstallValues(savedSettings: FrameOSSettings): Partial<NewFrameFormType> {
+  return {
+    install_method: 'embedded',
+    mode: 'embedded',
+    platform: EMBEDDED_VIRTUAL,
+    frame_host: '',
+    server_host: defaultNewFrameServerHost(savedSettings),
+    device: 'virtual',
+    device_config: {},
+    width: VIRTUAL_DEFAULT_WIDTH,
+    height: VIRTUAL_DEFAULT_HEIGHT,
+    gpio_buttons: [],
   }
 }
 
@@ -202,9 +288,7 @@ const WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS: NonNullable<
   pins: { cs: 38, sck: 39, miso: 40, mosi: 41 },
   maxFrequencyKHz: 20000,
 }
-const WAVESHARE_13IN3E6_SD_CARD_ASSETS: NonNullable<
-  NonNullable<NewFrameFormType['device_config']>['sdCardAssets']
-> = {
+const WAVESHARE_13IN3E6_SD_CARD_ASSETS: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']> = {
   enabled: true,
   preset: WAVESHARE_13IN3E6_HARDWARE_PRESET,
   mountPath: '/srv/assets',
@@ -212,51 +296,291 @@ const WAVESHARE_13IN3E6_SD_CARD_ASSETS: NonNullable<
   maxFrequencyKHz: 20000,
 }
 
-function normalizeEmbeddedHardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
-  if (value === WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
-    return WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET
-  }
-  if (value === WAVESHARE_13IN3E6_HARDWARE_PRESET) {
-    return WAVESHARE_13IN3E6_HARDWARE_PRESET
-  }
-  return 'custom'
+// Mirrors EMBEDDED_TRMNL_OG_PINS and friends in backend/app/tasks/embedded_firmware.py
+const TRMNL_OG_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 10,
+  dc: 5,
+  cs: 6,
+  cs2: -1,
+  busy: 4,
+  sck: 7,
+  mosi: 8,
+  pwr: -1,
+}
+const XIAO_EPAPER_DRIVER_BOARD_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 38,
+  dc: 10,
+  cs: 44,
+  cs2: -1,
+  busy: 4,
+  sck: 7,
+  mosi: 9,
+  pwr: -1,
+}
+const XTEINK_X4_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 5,
+  dc: 4,
+  cs: 21,
+  cs2: -1,
+  busy: 6,
+  sck: 8,
+  mosi: 10,
+  pwr: -1,
+}
+const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 17,
+  dc: 16,
+  cs: 15,
+  cs2: -1,
+  busy: 18,
+  sck: 13,
+  mosi: 14,
+  pwr: -1,
+}
+const SEEED_RETERMINAL_E10XX_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 12,
+  dc: 11,
+  cs: 10,
+  cs2: -1,
+  busy: 13,
+  sck: 7,
+  mosi: 9,
+  pwr: -1,
+}
+const ELECROW_CROWPANEL_5IN79_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 47,
+  dc: 46,
+  cs: 45,
+  cs2: -1,
+  busy: 48,
+  sck: 12,
+  mosi: 11,
+  pwr: -1,
+}
+// Mirrors EMBEDDED_INKY_FRAME_PINS in backend/app/tasks/embedded_firmware.py.
+// All Inky Frame sizes share the carrier wiring; BUSY and the five front
+// buttons sit behind a shift register (sr_* keys, busy_bit) that only the
+// pico firmware consumes.
+const INKY_FRAME_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 27,
+  dc: 28,
+  cs: 17,
+  cs2: -1,
+  busy: -1,
+  sck: 18,
+  mosi: 19,
+  pwr: -1,
+  sr_clock: 8,
+  sr_latch: 9,
+  sr_data: 10,
+  busy_bit: 7,
+  hold_vsys: 2,
 }
 
-function embeddedHardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePreset): {
+interface EmbeddedHardwarePresetConfig {
+  label: string
+  platform: string
   device: string
   flashSize: NonNullable<NonNullable<NewFrameFormType['embedded']>['flashSize']>
   psramMB: number
   pins: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']>
   gpioButtons: GPIOButton[]
-  sdCardAssets: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']>
-} | null {
-  if (hardwarePreset === WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
-    return {
-      device: WAVESHARE_PHOTOPAINTER_DEVICE,
-      flashSize: '16MB',
-      psramMB: 8,
-      pins: { ...WAVESHARE_PHOTOPAINTER_PINS },
-      gpioButtons: WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS.map((button) => ({ ...button })),
-      sdCardAssets: {
-        ...WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS,
-        pins: { ...WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS.pins },
-      },
-    }
+  sdCardAssets?: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']>
+}
+
+// Mirrors EMBEDDED_HARDWARE_PRESETS in backend/app/tasks/embedded_firmware.py
+const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePreset, EmbeddedHardwarePresetConfig>> = {
+  [WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET]: {
+    label: 'Waveshare ESP32-S3 PhotoPainter',
+    platform: EMBEDDED_ESP32_S3,
+    device: WAVESHARE_PHOTOPAINTER_DEVICE,
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: WAVESHARE_PHOTOPAINTER_PINS,
+    gpioButtons: WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS,
+    sdCardAssets: WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS,
+  },
+  [WAVESHARE_13IN3E6_HARDWARE_PRESET]: {
+    label: 'Waveshare ESP32-S3 ePaper 13.3E6',
+    platform: EMBEDDED_ESP32_S3,
+    device: WAVESHARE_13IN3E6_DEVICE,
+    flashSize: '32MB',
+    psramMB: 16,
+    pins: WAVESHARE_13IN3E6_PINS,
+    gpioButtons: [],
+    sdCardAssets: WAVESHARE_13IN3E6_SD_CARD_ASSETS,
+  },
+  trmnl_og: {
+    label: 'TRMNL OG (7.5" ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: TRMNL_OG_PINS,
+    gpioButtons: [{ pin: 2, label: 'BUTTON' }],
+  },
+  trmnl_bwry: {
+    label: 'TRMNL BWRY (7.5" color ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_7in5yr',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: TRMNL_OG_PINS,
+    gpioButtons: [{ pin: 2, label: 'BUTTON' }],
+  },
+  trmnl_og_diy_kit: {
+    label: 'TRMNL 7.5" DIY Kit (XIAO ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: XIAO_EPAPER_DRIVER_BOARD_PINS,
+    gpioButtons: [
+      { pin: 0, label: 'BOOT' },
+      { pin: 5, label: 'KEY3' },
+    ],
+  },
+  trmnl_4in26_diy_kit: {
+    label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_4in26',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: XIAO_EPAPER_DRIVER_BOARD_PINS,
+    gpioButtons: [
+      { pin: 0, label: 'BOOT' },
+      { pin: 2, label: 'KEY1' },
+    ],
+  },
+  xteink_x4: {
+    label: 'XTEINK X4 (4.26" ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_4in26',
+    flashSize: '16MB',
+    psramMB: 0,
+    pins: XTEINK_X4_PINS,
+    gpioButtons: [{ pin: 3, label: 'POWER' }],
+  },
+  seeed_reterminal_sticky: {
+    label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_3in97',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: SEEED_RETERMINAL_STICKY_PINS,
+    gpioButtons: [{ pin: 4, label: 'POWER' }],
+  },
+  seeed_reterminal_e1001: {
+    label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: SEEED_RETERMINAL_E10XX_PINS,
+    gpioButtons: [
+      { pin: 3, label: 'REFRESH' },
+      { pin: 4, label: 'LEFT' },
+      { pin: 5, label: 'RIGHT' },
+    ],
+  },
+  seeed_reterminal_e1002: {
+    label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in3e',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: SEEED_RETERMINAL_E10XX_PINS,
+    gpioButtons: [
+      { pin: 3, label: 'REFRESH' },
+      { pin: 4, label: 'LEFT' },
+      { pin: 5, label: 'RIGHT' },
+    ],
+  },
+  elecrow_crowpanel_5in79: {
+    label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_5in79',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ELECROW_CROWPANEL_5IN79_PINS,
+    gpioButtons: [
+      { pin: 2, label: 'HOME' },
+      { pin: 1, label: 'EXIT' },
+      { pin: 4, label: 'NEXT' },
+      { pin: 5, label: 'OK' },
+      { pin: 6, label: 'PREV' },
+    ],
+  },
+  // Pimoroni Inky Frame family: pico platforms flash a generic UF2 over
+  // BOOTSEL and are provisioned via USB serial — no backend firmware builds.
+  // Buttons A-E live behind the shift register, so gpioButtons stays empty.
+  pimoroni_inky_frame_4: {
+    label: 'Pimoroni Inky Frame 4.0" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_4in01f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: INKY_FRAME_PINS,
+    gpioButtons: [],
+  },
+  pimoroni_inky_frame_5_7: {
+    label: 'Pimoroni Inky Frame 5.7" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_5in65f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: INKY_FRAME_PINS,
+    gpioButtons: [],
+  },
+  pimoroni_inky_frame_7_3: {
+    label: 'Pimoroni Inky Frame 7.3" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_7in3f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: INKY_FRAME_PINS,
+    gpioButtons: [],
+  },
+  pimoroni_inky_frame_7_3_pico2: {
+    label: 'Pimoroni Inky Frame 7.3" (Pico 2 W, 2024)',
+    platform: EMBEDDED_PICO_2W,
+    device: 'waveshare.EPD_7in3f',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: INKY_FRAME_PINS,
+    gpioButtons: [],
+  },
+  pimoroni_inky_frame_7_3_spectra: {
+    label: 'Pimoroni Inky Frame 7.3" Spectra 6 (Pico 2 W)',
+    platform: EMBEDDED_PICO_2W,
+    device: 'waveshare.EPD_7in3e',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: INKY_FRAME_PINS,
+    gpioButtons: [],
+  },
+}
+
+function normalizeEmbeddedHardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
+  if (typeof value === 'string' && value in EMBEDDED_HARDWARE_PRESET_CONFIGS) {
+    return value as FrameEmbeddedHardwarePreset
   }
-  if (hardwarePreset === WAVESHARE_13IN3E6_HARDWARE_PRESET) {
-    return {
-      device: WAVESHARE_13IN3E6_DEVICE,
-      flashSize: '32MB',
-      psramMB: 16,
-      pins: { ...WAVESHARE_13IN3E6_PINS },
-      gpioButtons: [],
-      sdCardAssets: {
-        ...WAVESHARE_13IN3E6_SD_CARD_ASSETS,
-        pins: { ...WAVESHARE_13IN3E6_SD_CARD_ASSETS.pins },
-      },
-    }
+  return 'custom'
+}
+
+function embeddedHardwarePresetConfig(
+  hardwarePreset: FrameEmbeddedHardwarePreset
+): EmbeddedHardwarePresetConfig | null {
+  const config = EMBEDDED_HARDWARE_PRESET_CONFIGS[hardwarePreset]
+  if (!config) {
+    return null
   }
-  return null
+  return {
+    ...config,
+    pins: { ...config.pins },
+    gpioButtons: config.gpioButtons.map((button) => ({ ...button })),
+    sdCardAssets: config.sdCardAssets ? { ...config.sdCardAssets, pins: { ...config.sdCardAssets.pins } } : undefined,
+  }
 }
 
 function renderDeviceOptions(): JSX.Element[] {
@@ -279,10 +603,14 @@ const unsupportedEmbeddedWaveshareDevices = new Set([
 ])
 
 const embeddedDevices = [
+  // Device "none" is what survives the backend's embedded defaults and maps
+  // to firmware panel "none" (headless). "web_only" would NOT: the backend
+  // rewrites an empty or web_only device to the default Waveshare panel
+  // (ensure_embedded_frame_defaults in backend/app/tasks/embedded_firmware.py).
+  { value: 'none', label: 'No display panel' },
   ...(devices
     .find((group) => group.label === 'Waveshare')
     ?.options.filter((device) => !unsupportedEmbeddedWaveshareDevices.has(device.value)) ?? []),
-  { value: 'web_only', label: 'No display (headless)' },
 ]
 
 function renderEmbeddedDeviceOptions(): JSX.Element[] {
@@ -303,7 +631,10 @@ function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[]
   ))
 }
 
-type AddFrameMode = FrameInstallMethod | 'import'
+// 'virtual' is not its own install_method: it is the embedded install flow on
+// the "virtual" platform, surfaced as a separate card because there is no
+// hardware to flash and none of the ESP32 steps apply.
+type AddFrameMode = FrameInstallMethod | 'import' | 'virtual'
 type UploadHeader = { name: string; value: string }
 
 function installMethodTitle(installMethod: AddFrameMode): string {
@@ -315,6 +646,9 @@ function installMethodTitle(installMethod: AddFrameMode): string {
   }
   if (installMethod === 'embedded') {
     return 'Flash embedded device'
+  }
+  if (installMethod === 'virtual') {
+    return 'Virtual frame'
   }
   if (installMethod === 'import') {
     return 'Import frame'
@@ -450,11 +784,27 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
   const { file, importingFrameLoading, isNewFrameSubmitting, newFrame, newFrameErrors } = useValues(newFrameForm)
   const { savedSettings } = useValues(settingsLogic)
   const installMethod = newFrame.install_method
-  const addFrameMode: AddFrameMode | undefined = newFrame.mode === 'import' ? 'import' : installMethod
+  const isVirtualPlatform = installMethod === 'embedded' && newFrame.platform === EMBEDDED_VIRTUAL
+  const addFrameMode: AddFrameMode | undefined =
+    newFrame.mode === 'import' ? 'import' : isVirtualPlatform ? 'virtual' : installMethod
   const timezone = normalizedTimezone(newFrame.timezone, savedSettings.defaults?.timezone)
   const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
   const selectedSshKeys = new Set(newFrame.ssh_keys ?? defaultInstallSshKeyIds(savedSettings))
   const rootPassword = newFrame.ssh_pass ?? ''
+  // Each form states its own default rather than inferring it from the form
+  // value: install_method is not guaranteed to be populated on every route
+  // into this screen, and inferring it wrong silently offers the user the
+  // opposite transport from the one the install method needs.
+  const remoteControlFor = (method: FrameInstallMethod): boolean =>
+    newFrame.agent?.agentEnabled ?? defaultRemoteControl(method)
+  const setRemoteControl = (enabled: boolean): void => {
+    setNewFrameValue('agent', {
+      ...(newFrame.agent ?? {}),
+      agentEnabled: enabled,
+      agentRunCommands: enabled,
+      deployWithAgent: enabled,
+    })
+  }
   const embeddedHardwarePreset = normalizeEmbeddedHardwarePreset(
     newFrame.embedded?.hardwarePreset ?? newFrame.device_config?.hardwarePreset
   )
@@ -473,11 +823,11 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
     }
 
     setNewFrameValues({
-      platform: EMBEDDED_ESP32_S3,
+      platform: presetConfig.platform,
       device: presetConfig.device,
       embedded: {
         ...(newFrame.embedded ?? {}),
-        platform: EMBEDDED_ESP32_S3,
+        platform: presetConfig.platform,
         flashSize: presetConfig.flashSize,
         hardwarePreset,
       },
@@ -489,6 +839,36 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
         sdCardAssets: presetConfig.sdCardAssets,
       },
       gpio_buttons: presetConfig.gpioButtons.map((button) => ({ ...button })),
+    })
+  }
+
+  // Virtual frames have no board, panel, pins, or WiFi: the backend renders
+  // them and serves the result as an image/page URL. Picking the platform
+  // wires in the "virtual" device (the backend would default it the same
+  // way) and flips the form to the virtual flow; leaving it resets the
+  // device to headless ("none") so the panel picker starts at no panel.
+  const setEmbeddedPlatform = (platform: string): void => {
+    if (platform === EMBEDDED_VIRTUAL) {
+      setNewFrameValues({
+        platform,
+        device: 'virtual',
+        embedded: { ...(newFrame.embedded ?? {}), platform, hardwarePreset: 'custom' },
+        device_config: { ...(newFrame.device_config ?? {}), hardwarePreset: 'custom' },
+        gpio_buttons: [],
+      })
+      return
+    }
+    if (newFrame.device === 'virtual') {
+      setNewFrameValues({
+        platform,
+        device: 'none',
+        embedded: { ...(newFrame.embedded ?? {}), platform },
+      })
+      return
+    }
+    setNewFrameValues({
+      platform,
+      embedded: { ...(newFrame.embedded ?? {}), platform },
     })
   }
 
@@ -557,10 +937,17 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </ModeButton>
             <ModeButton
               onClick={() => setNewFrameValues(setInstallMethodValues('embedded', savedSettings))}
-              title="Flash ESP32 (EXPERIMENTAL)"
-              description="Build firmware for an ESP32 and flash it over USB."
+              title="Flash embedded device"
+              description="ESP32-S3/C3 boards and e-ink devices like the TRMNL, XTEINK X4, Inky Frame (Pico W), reTerminal, and CrowPanel."
             >
               <CpuChipIcon className="h-4 w-4" />
+            </ModeButton>
+            <ModeButton
+              onClick={() => setNewFrameValues(setVirtualInstallValues(savedSettings))}
+              title="Virtual frame"
+              description="No hardware — the backend renders to a PNG anyone can download."
+            >
+              <ComputerDesktopIcon className="h-4 w-4" />
             </ModeButton>
             <ModeButton
               onClick={() => setNewFrameValues({ mode: 'import', install_method: undefined })}
@@ -649,6 +1036,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </select>
           </FormField>
           {renderNewFrameDriverConfig(newFrame, setNewFrameValue)}
+          <RemoteControlField enabled={remoteControlFor('ssh')} onChange={setRemoteControl} />
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button
@@ -833,6 +1221,8 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             )}
           </div>
 
+          <RemoteControlField enabled={remoteControlFor('sd_card')} onChange={setRemoteControl} />
+
           <FormField label="WiFi network" error={newFrameErrors.network?.wifiSSID}>
             <input
               className={textInputClassName()}
@@ -870,6 +1260,83 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </button>
           </div>
         </Form>
+      ) : addFrameMode === 'virtual' ? (
+        <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
+          <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
+            No hardware — the backend renders this frame's scenes and serves them as an image URL (one PNG per request)
+            and a self-refreshing kiosk page for browsers, tablets, and signage players. Both URLs appear in the frame's
+            settings after it is added.
+          </p>
+          <FormField label="Name" error={newFrameErrors.name}>
+            <input
+              className={textInputClassName()}
+              value={newFrame.name ?? ''}
+              onChange={(event) => setNewFrameValue('name', event.target.value)}
+              placeholder="Kitchen Frame"
+              required
+            />
+          </FormField>
+          <div className="grid grid-cols-1 gap-2 @md:grid-cols-2">
+            <FormField label="Width">
+              <input
+                className={textInputClassName()}
+                type="number"
+                min={VIRTUAL_MIN_DIMENSION}
+                max={VIRTUAL_MAX_DIMENSION}
+                value={newFrame.width ?? ''}
+                onChange={(event) => {
+                  const parsed = parseInt(event.target.value, 10)
+                  setNewFrameValue('width', Number.isNaN(parsed) ? undefined : parsed)
+                }}
+                placeholder={String(VIRTUAL_DEFAULT_WIDTH)}
+                required
+              />
+            </FormField>
+            <FormField label="Height">
+              <input
+                className={textInputClassName()}
+                type="number"
+                min={VIRTUAL_MIN_DIMENSION}
+                max={VIRTUAL_MAX_DIMENSION}
+                value={newFrame.height ?? ''}
+                onChange={(event) => {
+                  const parsed = parseInt(event.target.value, 10)
+                  setNewFrameValue('height', Number.isNaN(parsed) ? undefined : parsed)
+                }}
+                placeholder={String(VIRTUAL_DEFAULT_HEIGHT)}
+                required
+              />
+            </FormField>
+          </div>
+          <FormField label="Color mode">
+            <select
+              className={selectClassName()}
+              value={newFrame.device_config?.colorMode ?? 'rgb'}
+              onChange={(event) =>
+                setNewFrameValue('device_config', {
+                  ...(newFrame.device_config ?? {}),
+                  colorMode: event.target.value as FrameVirtualColorMode,
+                })
+              }
+            >
+              {virtualColorModes.map((mode) => (
+                <option key={mode.value} value={mode.value}>
+                  {mode.label}
+                </option>
+              ))}
+            </select>
+          </FormField>
+          <div className="flex gap-2 pt-2">
+            <AddFrameSubmitButton loading={isNewFrameSubmitting} />
+            <button
+              type="button"
+              onClick={cancel}
+              className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </Form>
       ) : addFrameMode === 'embedded' ? (
         <Form logic={newFrameForm} formKey="newFrame" className="space-y-4" enableFormOnSubmit>
           <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
@@ -889,7 +1356,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             <select
               className={selectClassName()}
               value={newFrame.platform ?? ''}
-              onChange={(event) => setNewFrameValue('platform', event.target.value)}
+              onChange={(event) => setEmbeddedPlatform(event.target.value)}
             >
               {renderPlatformOptions('embedded')}
             </select>
@@ -900,21 +1367,21 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               value={embeddedHardwarePreset}
               onChange={(event) => setEmbeddedHardwarePreset(normalizeEmbeddedHardwarePreset(event.target.value))}
             >
-              <option value="custom">Custom ESP32-S3 board</option>
-              <option value={WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET}>Waveshare ESP32-S3 PhotoPainter</option>
-              <option value={WAVESHARE_13IN3E6_HARDWARE_PRESET}>Waveshare ESP32-S3 ePaper 13.3E6</option>
+              <option value="custom">Custom ESP32 board</option>
+              {Object.entries(EMBEDDED_HARDWARE_PRESET_CONFIGS).map(([preset, config]) => (
+                <option key={preset} value={preset}>
+                  {isThinClientEmbeddedPlatform(config.platform) ? `${config.label} — Thin client` : config.label}
+                </option>
+              ))}
             </select>
           </FormField>
           <FormField label="Display panel" error={newFrameErrors.device}>
             <select
               className={selectClassName()}
-              value={newFrame.device ?? ''}
+              value={newFrame.device || 'none'}
               onChange={(event) => setEmbeddedDevice(event.target.value)}
               required
             >
-              <option value="" disabled>
-                Select display panel
-              </option>
               {renderEmbeddedDeviceOptions()}
             </select>
           </FormField>

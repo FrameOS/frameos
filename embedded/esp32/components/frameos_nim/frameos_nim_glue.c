@@ -12,6 +12,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "esp_crt_bundle.h"
@@ -39,7 +40,7 @@ ssize_t readlink(const char *path, char *buf, size_t bufsize)
 
 extern void NimMain(void);
 extern bool fos_nim_init_impl(int width, int height, const char *name, int max_http_response_bytes,
-                              const char *backend_url, int frame_id);
+                              int rotate);
 extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
 extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
@@ -48,7 +49,11 @@ extern const char *fos_nim_scene_info_json_impl(void);
 extern const char *fos_nim_scene_state_json_impl(void);
 extern bool fos_nim_set_scene_impl(const char *scene_id);
 extern int fos_nim_load_scenes_impl(const char *json);
+extern int fos_nim_set_scene_catalog_impl(const char *index_json);
+extern int fos_nim_load_scene_impl(const char *scene_json);
+extern void fos_nim_apply_service_settings_impl(const char *json);
 extern double fos_nim_scene_interval_impl(void);
+extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
 extern bool fos_nim_send_event_impl(const char *event, const char *payload_json);
 
@@ -56,7 +61,6 @@ static bool s_nim_started = false;
 static bool s_nim_ready = false;
 static SemaphoreHandle_t s_nim_lock = NULL;
 static char s_backend_url[256] = "";
-static char s_backend_embedded_prefix[320] = "";
 static char s_backend_auth[192] = "";
 static bool s_log_upload_configured = false;
 static bool s_log_upload_enabled = false;
@@ -65,8 +69,14 @@ static bool s_log_upload_enabled = false;
 #define FOS_NIM_LOG_MAX_PENDING 128
 #define FOS_NIM_LOG_BATCH_MAX 8
 #define FOS_NIM_LOG_BODY_MAX (8 * 1024)
-#define FOS_NIM_LOG_MIN_INTERNAL_FREE (48 * 1024)
-#define FOS_NIM_LOG_MIN_INTERNAL_BLOCK (16 * 1024)
+/* TLS handshakes genuinely need internal-heap headroom; a plain-http POST
+ * only needs the client struct + a 2K buffer. A single 48K floor silently
+ * disabled log upload forever on frames that idle under it (the 13.3E6
+ * with a dozen scenes loaded sits at ~16-19K internal free). */
+#define FOS_NIM_LOG_MIN_INTERNAL_FREE_TLS (48 * 1024)
+#define FOS_NIM_LOG_MIN_INTERNAL_BLOCK_TLS (16 * 1024)
+#define FOS_NIM_LOG_MIN_INTERNAL_FREE_PLAIN (14 * 1024)
+#define FOS_NIM_LOG_MIN_INTERNAL_BLOCK_PLAIN (8 * 1024)
 
 typedef struct fos_nim_log_node {
     struct fos_nim_log_node *next;
@@ -109,6 +119,69 @@ void frameos_nim_free_render_buffer(void *ptr)
         s_pending_render_buffer = NULL;
     }
     free(ptr);
+}
+
+/* ---------------------------------------------------------- Nim heap
+ *
+ * The Nim heap goes to PSRAM, deliberately and explicitly.
+ *
+ * ESP-IDF is built with CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384, so plain
+ * malloc() serves everything smaller than 16 KB from INTERNAL RAM. Nearly
+ * every Nim allocation is smaller than that — parsed scene graphs, strings,
+ * JsonNodes, sequence spines — so the interpreter used to fill the ~300 KB
+ * internal pool while megabytes of PSRAM sat idle. A frame with a dozen
+ * scenes still rendered (the canvas is big enough to reach PSRAM on its own)
+ * but had too little internal RAM left for a TLS handshake, so the cloud link
+ * died with what looked like a network error. See the ws_start heap guard in
+ * main/fos_cloud.c.
+ *
+ * Fixing it here rather than by lowering ALWAYSINTERNAL globally: that knob
+ * would also push Wi-Fi, lwIP and driver buffers into PSRAM, where DMA cannot
+ * reach them. This moves only the Nim heap, which is the actual consumer and
+ * never DMAs.
+ *
+ * Internal RAM stays the fallback: a small allocation that PSRAM cannot serve
+ * (fragmentation, or PSRAM absent on a board built with SPIRAM_IGNORE_NOTFOUND)
+ * still succeeds rather than turning into a fatal OOM. free() needs no
+ * counterpart — heap_caps_free/free accept pointers from either region. */
+/* Zero-size requests are rounded up to one byte, and that is load-bearing
+ * rather than tidy-mindedness.
+ *
+ * heap_caps_realloc(ptr, 0, caps) FREES ptr and returns NULL. The caller
+ * here cannot tell that apart from a failed allocation, so the obvious
+ * `if (next == NULL) next = realloc(ptr, size);` fallback calls realloc on
+ * an already-freed pointer — a double free that corrupts the heap. The Nim
+ * side compounds it by retrying the same call on the same dead pointer after
+ * releasing the emergency reserve.
+ *
+ * Rounding up also keeps the NULL return meaning exactly one thing —
+ * "allocation failed" — which is what patched_malloc.nim treats it as. A
+ * zero-size malloc returning NULL would otherwise be reported as an
+ * out-of-memory abort. */
+void *fos_nim_heap_malloc(size_t size)
+{
+    if (size == 0) size = 1;
+    void *ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ptr == NULL) ptr = malloc(size);
+    return ptr;
+}
+
+void *fos_nim_heap_calloc(size_t count, size_t size)
+{
+    if (count == 0 || size == 0) { count = 1; size = 1; }
+    void *ptr = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ptr == NULL) ptr = calloc(count, size);
+    return ptr;
+}
+
+void *fos_nim_heap_realloc(void *ptr, size_t size)
+{
+    if (size == 0) size = 1;
+    void *next = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    /* Safe now that size is never 0: a failed heap_caps_realloc leaves the
+     * original block untouched, so the fallback gets a live pointer. */
+    if (next == NULL) next = realloc(ptr, size);
+    return next;
 }
 
 /* Live PSRAM headroom for the Nim side (frameos/utils/memory.nim), which
@@ -223,10 +296,9 @@ static void nim_oom_abort_note(const char *what)
 
 bool frameos_nim_available(void) { return true; }
 
-static void configure_backend_auth(const char *backend_url, uint32_t frame_id, const char *api_key)
+static void configure_backend_auth(const char *backend_url, const char *api_key)
 {
     s_backend_url[0] = '\0';
-    s_backend_embedded_prefix[0] = '\0';
     s_backend_auth[0] = '\0';
     if (backend_url == NULL || backend_url[0] == '\0') return;
 
@@ -237,8 +309,6 @@ static void configure_backend_auth(const char *backend_url, uint32_t frame_id, c
     }
     if (s_backend_url[0] == '\0') return;
 
-    snprintf(s_backend_embedded_prefix, sizeof(s_backend_embedded_prefix),
-             "%s/api/frames/%lu/embedded/", s_backend_url, (unsigned long)frame_id);
     if (api_key != NULL && api_key[0] != '\0') {
         snprintf(s_backend_auth, sizeof(s_backend_auth), "Bearer %s", api_key);
     }
@@ -256,10 +326,14 @@ static void ensure_log_lock(void)
 
 static bool log_upload_heap_ready(void)
 {
+    bool tls = strncmp(s_backend_url, "https://", 8) == 0;
+    size_t min_free = tls ? FOS_NIM_LOG_MIN_INTERNAL_FREE_TLS
+                          : FOS_NIM_LOG_MIN_INTERNAL_FREE_PLAIN;
+    size_t min_block = tls ? FOS_NIM_LOG_MIN_INTERNAL_BLOCK_TLS
+                           : FOS_NIM_LOG_MIN_INTERNAL_BLOCK_PLAIN;
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t largest_internal = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (free_internal < FOS_NIM_LOG_MIN_INTERNAL_FREE ||
-        largest_internal < FOS_NIM_LOG_MIN_INTERNAL_BLOCK) {
+    if (free_internal < min_free || largest_internal < min_block) {
         ESP_LOGD("fos_nim_log", "deferring log upload: internal=%u largest=%u",
                  (unsigned)free_internal, (unsigned)largest_internal);
         return false;
@@ -269,12 +343,11 @@ static bool log_upload_heap_ready(void)
 
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
-                      uint32_t frame_id, const char *api_key,
-                      bool server_send_logs)
+                      const char *api_key, bool server_send_logs, int rotate)
 {
     s_frame_width = width;
     s_frame_height = height;
-    configure_backend_auth(backend_url, frame_id, api_key);
+    configure_backend_auth(backend_url, api_key);
     s_log_upload_configured = server_send_logs;
     s_log_upload_enabled = false;
     ensure_log_lock();
@@ -290,7 +363,7 @@ bool frameos_nim_init(int width, int height, const char *frame_name,
         s_nim_started = true;
     }
     s_nim_ready = fos_nim_init_impl(width, height, frame_name, (int)max_http_response_bytes,
-                                    s_backend_url, (int)frame_id);
+                                    rotate);
     nim_lock_give();
     return s_nim_ready;
 }
@@ -405,6 +478,24 @@ int frameos_nim_load_scenes(const char *json)
     return count;
 }
 
+int frameos_nim_set_scene_catalog(const char *index_json)
+{
+    if (!s_nim_ready || index_json == NULL) return 0;
+    if (!nim_lock_take()) return 0;
+    int result = fos_nim_set_scene_catalog_impl(index_json);
+    nim_lock_give();
+    return result;
+}
+
+int frameos_nim_load_scene(const char *scene_json)
+{
+    if (!s_nim_ready || scene_json == NULL) return 0;
+    if (!nim_lock_take()) return 0;
+    int result = fos_nim_load_scene_impl(scene_json);
+    nim_lock_give();
+    return result;
+}
+
 double frameos_nim_scene_interval(void)
 {
     if (!s_nim_ready) return 0;
@@ -412,6 +503,15 @@ double frameos_nim_scene_interval(void)
     double interval = fos_nim_scene_interval_impl();
     nim_lock_give();
     return interval;
+}
+
+double frameos_nim_next_sleep(void)
+{
+    if (!s_nim_ready) return -1;
+    if (!nim_lock_take()) return -1;
+    double next_sleep = fos_nim_next_sleep_impl();
+    nim_lock_give();
+    return next_sleep;
 }
 
 bool frameos_nim_render_requested(void)
@@ -505,10 +605,98 @@ static void queue_log_line(const char *msg)
     xSemaphoreGive(s_log_lock);
 }
 
+static void (*s_log_tap)(const char *line) = NULL;
+
+void frameos_nim_apply_service_settings(const char *json)
+{
+    if (!s_nim_ready) return;
+    /* A NULL payload is the revocation case: clear every cloud-owned group. */
+    if (json == NULL) json = "{}";
+    if (!nim_lock_take()) return;
+    fos_nim_apply_service_settings_impl(json);
+    nim_lock_give();
+}
+
+void frameos_nim_set_log_tap(void (*tap)(const char *line))
+{
+    s_log_tap = tap;
+}
+
+/* Ring of the most recent log lines, independent of the backend upload queue
+ * (which drains on flush) and the cloud tap (live sessions only). Serves
+ * GET /logs, the cloud get_logs verb and `usb_api logs`. Guarded by the same
+ * lock as the upload queue. */
+static frameos_log_entry_t s_log_ring[FOS_NIM_LOG_RING_CAP];
+static size_t s_log_ring_next = 0;
+static size_t s_log_ring_count = 0;
+
+static void ring_log_line(const char *msg)
+{
+    ensure_log_lock();
+    if (s_log_lock == NULL || msg == NULL) return;
+    size_t len = strnlen(msg, FOS_NIM_LOG_MAX_LINE + 1);
+    if (len > FOS_NIM_LOG_MAX_LINE) len = FOS_NIM_LOG_MAX_LINE;
+    char *line = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (line == NULL) line = malloc(len + 1);
+    if (line == NULL) return;
+    memcpy(line, msg, len);
+    line[len] = '\0';
+    /* time() before SNTP reports seconds-since-boot epoch; consumers treat
+     * anything before ~2001 as "no wall clock". */
+    double now = (double)time(NULL);
+    if (xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(5)) != pdTRUE) {
+        free(line);
+        return;
+    }
+    free(s_log_ring[s_log_ring_next].line);
+    s_log_ring[s_log_ring_next].line = line;
+    s_log_ring[s_log_ring_next].timestamp = now;
+    s_log_ring_next = (s_log_ring_next + 1) % FOS_NIM_LOG_RING_CAP;
+    if (s_log_ring_count < FOS_NIM_LOG_RING_CAP) s_log_ring_count++;
+    xSemaphoreGive(s_log_lock);
+}
+
+size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
+{
+    if (out == NULL || max == 0 || s_log_lock == NULL) return 0;
+    if (xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(50)) != pdTRUE) return 0;
+    size_t take = s_log_ring_count < max ? s_log_ring_count : max;
+    /* Oldest-first of the newest `take` entries. */
+    size_t start = (s_log_ring_next + FOS_NIM_LOG_RING_CAP - take) % FOS_NIM_LOG_RING_CAP;
+    size_t copied = 0;
+    for (size_t i = 0; i < take; i++) {
+        const frameos_log_entry_t *src = &s_log_ring[(start + i) % FOS_NIM_LOG_RING_CAP];
+        if (src->line == NULL) continue;
+        char *copy = strdup(src->line);
+        if (copy == NULL) break;
+        out[copied].line = copy;
+        out[copied].timestamp = src->timestamp;
+        copied++;
+    }
+    xSemaphoreGive(s_log_lock);
+    return copied;
+}
+
 void frameos_nim_log_hook(const char *msg)
 {
-    ESP_LOGI("nim", "%s", msg ? msg : "");
+    /* printf, not ESP_LOGI: every FrameOS profile builds with
+     * CONFIG_LOG_MAXIMUM_LEVEL=WARN, so the INFO macro this used to be
+     * compiled to nothing — no shipped firmware has ever put a device log
+     * line on the serial console. That console is the last-resort sink, the
+     * one that still works when the backend upload is off, when the cloud
+     * session lacks telemetry:logs, or when there is no network at all, so it
+     * has to carry these unconditionally. Interleaving with a usb_api base64
+     * payload is expected and handled: the browser drops non-base64 lines,
+     * verifies the declared length and retries the transfer. */
+    printf("%s\n", msg ? msg : "");
     queue_log_line(msg);
+    ring_log_line(msg);
+    /* The tap runs on whatever task logged; the cloud client's tap only
+     * copies the line into its own queue (or drops it). */
+    void (*tap)(const char *) = s_log_tap;
+    if (tap != NULL && msg != NULL) {
+        tap(msg);
+    }
 }
 
 void frameos_nim_set_log_upload_enabled(bool enabled)
@@ -777,6 +965,46 @@ static const char *TAG = "fos_nim_http";
  * Streamed decodes need well under 200KB of working memory; a bigger
  * reserve starves legitimate downloads when a render is already live. */
 #define FOS_NIM_HTTP_PSRAM_RESERVE (768u * 1024u)
+/* Spill-to-storage: when even the smallest chunk cannot be buffered without
+ * breaching the reserve, the body can stream to a temp file instead of
+ * failing with BODY_OOM (measured on the bench 2026-08-03: a ~3MB gallery
+ * JPEG with 12 scenes resident left ~894KB PSRAM free). The read window is
+ * small and internal-RAM-first so spilling itself adds no PSRAM pressure.
+ *
+ * The path is inert until the firmware registers a spill directory via
+ * fos_nim_http_set_spill_dir() (TODO: wire from main.c — /srv/assets/.cache
+ * when the SD card is mounted, else /state with a low cap; see
+ * cloud/docs/esp32-large-image-spill.md). */
+#define FOS_NIM_HTTP_SPILL_IO_BYTES (16u * 1024u)
+
+static char s_http_spill_dir[128] = "";
+static size_t s_http_spill_max_bytes = 0;
+static uint32_t s_http_spill_seq = 0;
+static size_t s_http_spill_force_bytes = 0;
+
+void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes)
+{
+    if (dir == NULL || dir[0] == '\0') {
+        s_http_spill_dir[0] = '\0';
+        s_http_spill_max_bytes = 0;
+        return;
+    }
+    snprintf(s_http_spill_dir, sizeof(s_http_spill_dir), "%s", dir);
+    s_http_spill_max_bytes = max_spill_bytes;
+}
+
+void fos_nim_http_set_spill_force_bytes(size_t threshold)
+{
+    s_http_spill_force_bytes = threshold;
+}
+
+typedef enum {
+    FOS_NIM_BODY_OK,
+    FOS_NIM_BODY_OOM,
+    FOS_NIM_BODY_TOO_BIG,
+    FOS_NIM_BODY_READ_FAILED,
+    FOS_NIM_BODY_SPILL_FAILED,
+} fos_nim_body_status_t;
 
 void fos_nim_http_free_chunks(fos_nim_http_chunk *chunks, size_t count)
 {
@@ -837,15 +1065,6 @@ static fos_nim_http_chunk *chunked_error(int *out_status, size_t *out_count,
     return chunks;
 }
 
-static bool should_authorize_backend_url(const char *url)
-{
-    if (url == NULL || s_backend_embedded_prefix[0] == '\0' || s_backend_auth[0] == '\0') {
-        return false;
-    }
-    size_t prefix_len = strlen(s_backend_embedded_prefix);
-    return strncmp(url, s_backend_embedded_prefix, prefix_len) == 0;
-}
-
 static char *trim_ascii(char *s)
 {
     if (s == NULL) return s;
@@ -895,15 +1114,122 @@ static bool set_extra_headers(esp_http_client_handle_t client, const char *heade
     return has_content_type;
 }
 
-fos_nim_http_chunk *fos_nim_http_request_chunked(
+/* Streams the rest of an HTTP body to a temp file after PSRAM buffering
+ * gave out. Takes ownership of `chunks` unconditionally: the already
+ * buffered bytes are written out first and their PSRAM freed as they go.
+ * On success *out_path is a malloc'd file path (caller frees with
+ * fos_nim_http_free) holding the ENTIRE body and *out_total its size. On
+ * failure the partial file is unlinked. */
+static fos_nim_body_status_t http_spill_remaining(
+    esp_http_client_handle_t client, const char *url,
+    fos_nim_http_chunk *chunks, size_t chunk_count,
+    size_t buffered, size_t limit,
+    char **out_path, size_t *out_total)
+{
+    *out_path = NULL;
+    *out_total = 0;
+
+    size_t spill_limit = limit;
+    if (s_http_spill_max_bytes > 0 && s_http_spill_max_bytes < spill_limit) {
+        spill_limit = s_http_spill_max_bytes;
+    }
+    if (buffered > spill_limit) {
+        fos_nim_http_free_chunks(chunks, chunk_count);
+        return FOS_NIM_BODY_TOO_BIG;
+    }
+
+    char path[192];
+    snprintf(path, sizeof(path), "%s/http-spill-%lu.tmp",
+             s_http_spill_dir, (unsigned long)(s_http_spill_seq++));
+
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) {
+        ESP_LOGW(TAG, "%s: cannot open spill file %s (errno=%d)", url, path, errno);
+        fos_nim_http_free_chunks(chunks, chunk_count);
+        return FOS_NIM_BODY_SPILL_FAILED;
+    }
+    /* WARN: spilling is a memory-pressure event (or the spill_force debug
+     * knob) and the only runtime evidence the spill path ran — the 32MB
+     * profile compiles ESP_LOGI out (CONFIG_LOG_DEFAULT_LEVEL=WARN). */
+    ESP_LOGW(TAG, "%s: PSRAM exhausted after %u buffered bytes; spilling body to %s",
+             url, (unsigned)buffered, path);
+
+    bool ok = true;
+    for (size_t i = 0; i < chunk_count; i++) {
+        if (ok && chunks[i].len > 0 &&
+            fwrite(chunks[i].data, 1, chunks[i].len, f) != chunks[i].len) {
+            ok = false;
+        }
+        free(chunks[i].data);
+        chunks[i].data = NULL;
+    }
+    free(chunks);
+
+    fos_nim_body_status_t status = ok ? FOS_NIM_BODY_OK : FOS_NIM_BODY_SPILL_FAILED;
+    uint8_t *io = NULL;
+    if (ok) {
+        /* Internal RAM first: the whole point is that PSRAM is exhausted. */
+        io = heap_caps_malloc(FOS_NIM_HTTP_SPILL_IO_BYTES,
+                              MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (io == NULL) io = malloc(FOS_NIM_HTTP_SPILL_IO_BYTES);
+        if (io == NULL) {
+            ok = false;
+            status = FOS_NIM_BODY_SPILL_FAILED;
+        }
+    }
+
+    size_t total = buffered;
+    while (ok) {
+        int r = esp_http_client_read(client, (char *)io, FOS_NIM_HTTP_SPILL_IO_BYTES);
+        if (r < 0) {
+            status = FOS_NIM_BODY_READ_FAILED;
+            break;
+        }
+        if (r == 0) break;
+        if (total + (size_t)r > spill_limit) {
+            status = FOS_NIM_BODY_TOO_BIG;
+            break;
+        }
+        if (fwrite(io, 1, (size_t)r, f) != (size_t)r) {
+            ESP_LOGW(TAG, "%s: spill write failed at %u bytes (errno=%d)",
+                     url, (unsigned)total, errno);
+            status = FOS_NIM_BODY_SPILL_FAILED;
+            break;
+        }
+        total += (size_t)r;
+    }
+    free(io);
+    fclose(f);
+    if (status != FOS_NIM_BODY_OK) {
+        unlink(path);
+        return status;
+    }
+
+    char *dup = strdup(path);
+    if (dup == NULL) {
+        unlink(path);
+        return FOS_NIM_BODY_SPILL_FAILED;
+    }
+    *out_path = dup;
+    *out_total = total;
+    ESP_LOGW(TAG, "%s: spilled %u-byte body to %s", url, (unsigned)total, path);
+    return FOS_NIM_BODY_OK;
+}
+
+fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                               const char *method, const char *url,
                               const void *body, size_t body_len,
                               const char *headers, size_t headers_len,
                               int timeout_ms, size_t max_bytes,
-                              int *out_status, size_t *out_count)
+                              int *out_status, size_t *out_count,
+                              char **out_spill_path, size_t *out_spill_len)
 {
     *out_status = 0;
     *out_count = 0;
+    if (out_spill_path != NULL) *out_spill_path = NULL;
+    if (out_spill_len != NULL) *out_spill_len = 0;
+    const bool spill_allowed = out_spill_path != NULL && out_spill_len != NULL &&
+                               s_http_spill_dir[0] != '\0';
 
     esp_http_client_method_t http_method = HTTP_METHOD_GET;
     if (method != NULL) {
@@ -928,9 +1254,10 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
     esp_http_client_set_header(client, "Accept-Encoding", "identity");
     esp_http_client_set_header(client, "User-Agent", "FrameOS-ESP32/1");
     bool has_content_type = set_extra_headers(client, headers, headers_len);
-    if (should_authorize_backend_url(url)) {
-        esp_http_client_set_header(client, "Authorization", s_backend_auth);
-    }
+    /* No implicit Authorization header here: scene HTTP is scene HTTP. The
+     * only backend-authed calls the device makes are the firmware's own
+     * (log upload below, fos_settings.c's settings poll), which set the
+     * header themselves. */
 
     if (body != NULL && body_len > 0 && !has_content_type) {
         esp_http_client_set_header(client, "Content-Type", "application/json");
@@ -1003,7 +1330,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
     size_t total = 0;
     size_t cur_cap = 0, cur_len = 0;
     uint8_t *cur = NULL;
-    enum { BODY_OK, BODY_OOM, BODY_TOO_BIG, BODY_READ_FAILED } body_status = BODY_OK;
+    fos_nim_body_status_t body_status = FOS_NIM_BODY_OK;
 
     while (true) {
         if (cur == NULL || cur_len == cur_cap) {
@@ -1012,7 +1339,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
                 cur = NULL;
             }
             if (total >= limit) {
-                body_status = BODY_TOO_BIG;
+                body_status = FOS_NIM_BODY_TOO_BIG;
                 break;
             }
             if (chunk_count == chunk_capacity) {
@@ -1020,7 +1347,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
                 fos_nim_http_chunk *new_chunks =
                     realloc(chunks, new_capacity * sizeof(*new_chunks));
                 if (new_chunks == NULL) {
-                    body_status = BODY_OOM;
+                    body_status = FOS_NIM_BODY_OOM;
                     break;
                 }
                 chunks = new_chunks;
@@ -1030,18 +1357,46 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
             if (want > limit - total) want = limit - total;
             if (want < 1) want = 1;
             uint8_t *buf = NULL;
-            while (true) {
-                size_t free_spiram =
-                    heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-                if (free_spiram >= want + 1 + FOS_NIM_HTTP_PSRAM_RESERVE) {
-                    buf = heap_caps_malloc(want + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            /* Debug knob (`set spill_force <bytes>`): pretend PSRAM ran out
+             * once this many bytes are buffered, so the spill path can be
+             * exercised on a frame with memory to spare. Small bodies
+             * (scene JSON, API calls) keep buffering normally. */
+            bool force_spill = s_http_spill_force_bytes > 0 && spill_allowed &&
+                               total >= s_http_spill_force_bytes;
+            if (!force_spill) {
+                while (true) {
+                    size_t free_spiram =
+                        heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    if (free_spiram >= want + 1 + FOS_NIM_HTTP_PSRAM_RESERVE) {
+                        buf = heap_caps_malloc(want + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    }
+                    if (buf != NULL) break;
+                    if (want <= FOS_NIM_HTTP_CHUNK_MIN_BYTES) break;
+                    want /= 2;
                 }
-                if (buf != NULL) break;
-                if (want <= FOS_NIM_HTTP_CHUNK_MIN_BYTES) break;
-                want /= 2;
             }
             if (buf == NULL) {
-                body_status = BODY_OOM;
+                if (spill_allowed) {
+                    /* PSRAM cannot hold another chunk without breaching the
+                     * reserve: stream what we have plus the rest of the body
+                     * to storage. http_spill_remaining owns `chunks` from
+                     * here on, success or not. */
+                    char *spill_path = NULL;
+                    size_t spill_total = 0;
+                    body_status = http_spill_remaining(client, url, chunks,
+                                                       chunk_count, total, limit,
+                                                       &spill_path, &spill_total);
+                    chunks = NULL;
+                    chunk_count = 0;
+                    chunk_capacity = 0;
+                    if (body_status == FOS_NIM_BODY_OK) {
+                        total = spill_total;
+                        *out_spill_path = spill_path;
+                        *out_spill_len = spill_total;
+                    }
+                    break;
+                }
+                body_status = FOS_NIM_BODY_OOM;
                 break;
             }
             chunks[chunk_count].data = buf;
@@ -1057,7 +1412,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
                      method ? method : "GET", url,
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-            body_status = BODY_READ_FAILED;
+            body_status = FOS_NIM_BODY_READ_FAILED;
             break;
         }
         if (r == 0) break;
@@ -1072,15 +1427,19 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
 
-    if (body_status != BODY_OK) {
+    if (body_status != FOS_NIM_BODY_OK) {
         fos_nim_http_free_chunks(chunks, chunk_count);
         switch (body_status) {
-        case BODY_TOO_BIG:
+        case FOS_NIM_BODY_TOO_BIG:
             ESP_LOGW(TAG, "%s: response exceeded %u bytes", url, (unsigned)limit);
             return chunked_error(out_status, out_count, "response exceeded %u bytes",
                                  (unsigned)limit);
-        case BODY_READ_FAILED:
+        case FOS_NIM_BODY_READ_FAILED:
             return chunked_error(out_status, out_count, "response read failed");
+        case FOS_NIM_BODY_SPILL_FAILED:
+            return chunked_error(out_status, out_count,
+                                 "spilling HTTP response to storage failed after %u bytes",
+                                 (unsigned)total);
         default:
             ESP_LOGW(TAG, "%s: out of memory buffering HTTP response: total=%u internal=%u psram=%u largest_psram=%u",
                      url, (unsigned)total,
@@ -1114,6 +1473,22 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
 
     *out_count = chunk_count;
     return chunks;
+}
+
+fos_nim_http_chunk *fos_nim_http_request_chunked(
+                              const char *method, const char *url,
+                              const void *body, size_t body_len,
+                              const char *headers, size_t headers_len,
+                              int timeout_ms, size_t max_bytes,
+                              int *out_status, size_t *out_count)
+{
+    /* No spill out-params: this variant never spills, matching the historic
+     * contract (BODY_OOM error chunk when PSRAM runs out). */
+    return fos_nim_http_request_chunked_spill(method, url, body, body_len,
+                                              headers, headers_len,
+                                              timeout_ms, max_bytes,
+                                              out_status, out_count,
+                                              NULL, NULL);
 }
 
 uint8_t *fos_nim_http_request(const char *method, const char *url,

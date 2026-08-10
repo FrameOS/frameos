@@ -16,15 +16,22 @@ import {
   FrameType,
   SceneNodeData,
   TemplateType,
+  FrameId,
 } from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
 import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
+import { isCloudMode } from '../../utils/cloudMode'
+import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
+import { cloudFrameSettingKeys } from '../../utils/cloudFrameSettings'
+import { persistAndPushCloudFrameScenes } from '../../utils/cloudFrameScenesSave'
+import { clearCloudSceneJsonCache } from '../../models/framesModel'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
-import { entityImagesModel } from '../../models/entityImagesModel'
+import { longRunningTasksModel } from '../../models/longRunningTasksModel'
+import { assignSceneImages, reportSceneImageFailure, type SceneImageSource } from '../../utils/sceneImages'
 import { arrangeSceneGraph } from '../../utils/arrangeNodes'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
@@ -199,7 +206,7 @@ function defaultFrameSyncViews(sync: FrameSyncStatus | null): FrameSyncViews {
 export type DeployDrawerView = 'main' | 'sdCard' | 'script' | 'embedded'
 
 export interface FrameLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export type FrameNextAction = 'render' | 'restart' | 'reboot' | 'stop' | 'deploy' | null
@@ -582,8 +589,24 @@ function frameosVersionRequiresDeploy(previousFrameosVersion: string | null): bo
   return false
 }
 
-function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
+// The keys a diff between server truth and the form may consider. On the
+// cloud only the declarative settings allowlist (plus scenes) round-trips:
+// GET /api/frames/{id} never returns fields like frame_admin_auth or
+// error_behavior, while sanitizeFrame materializes defaults for them in the
+// form — so diffing the full key list pinned "Frame admin auth" and "Global
+// error handling" into Pending save forever, unsaveable by construction.
+function frameDiffKeys(): (keyof FrameType)[] {
+  if (isCloudMode()) {
+    // `schedule` rides its own verb (POST /api/frames/{id}/schedule →
+    // set_schedule), not the settings allowlist — but it round-trips through
+    // GET /api/frames/{id} like the settings do, so it diffs cleanly.
+    return [...(cloudFrameSettingKeys as readonly (keyof FrameType)[]), 'scenes', 'schedule']
+  }
   return FRAME_KEYS
+}
+
+function frameSubmitKeys(frame: Partial<FrameType>): (keyof FrameType)[] {
+  return frameDiffKeys()
 }
 
 export function normalizeSceneForComparison(
@@ -703,7 +726,7 @@ function computeChangeDetails(
   const details: ChangeDetail[] = []
   const previousFrameosVersion = includeFrameosVersion ? deployedFrameosVersion(previous) : null
 
-  for (const key of FRAME_KEYS.filter((k) => k !== 'scenes')) {
+  for (const key of frameDiffKeys().filter((k) => k !== 'scenes')) {
     if (!frameKeyEqual(key, previous?.[key], next?.[key])) {
       details.push({
         label: frameChangeDetailLabel(key, previous?.[key], next?.[key]),
@@ -1026,36 +1049,56 @@ function buildUndeployedSummaryItems(
   return items
 }
 
-async function resolveTemplateImageUrl(template: Partial<TemplateType>): Promise<string | null> {
-  if (template.id) {
-    return await projectApiPath(`/api/templates/${template.id}/image`)
+const SYSTEM_TEMPLATE_IMAGE_PATH = /^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/
+const LOCAL_TEMPLATE_IMAGE_PATH = /^\/api\/(?:projects\/\d+\/)?templates\/([^/]+)\/image$/
+
+/** Where the backend should copy this template's cover image from.
+ *
+ * The bytes must not travel through the browser unless we already hold them:
+ * repository covers live on third-party origins (the FrameOS Cloud store
+ * serves them from scenes.frameos.net with no CORS header), so `fetch()`ing
+ * them to re-upload is blocked and every store install silently ended up with
+ * "no snapshot". Same-origin proxy paths we cannot name to the backend (the
+ * cloud drive proxy) still go through the blob path, which works because they
+ * are same-origin.
+ */
+async function templateImageSource(template: Partial<TemplateType>): Promise<SceneImageSource | null> {
+  if (template.image instanceof Blob) {
+    return { blob: template.image }
   }
 
-  if (typeof template.image === 'string') {
-    const match = template.image.match(/^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/)
-    if (match) {
-      return `/api/${match[1]}/image`
+  // Deliberately keyed off `image`, never off `template.id`: repository
+  // templates carry an id too ("bird-field-journal", a template folder name),
+  // and treating that as a locally saved template's id resolves to a template
+  // that does not exist here.
+  if (typeof template.image === 'string' && template.image) {
+    if (/^https?:\/\//i.test(template.image)) {
+      return { url: template.image }
     }
-    return projectApiPathFromCache(template.image)
+    const systemMatch = template.image.match(SYSTEM_TEMPLATE_IMAGE_PATH)
+    if (systemMatch) {
+      return { url: `/api/${systemMatch[1]}/image` }
+    }
+    const localMatch = template.image.match(LOCAL_TEMPLATE_IMAGE_PATH)
+    if (localMatch) {
+      return { templateId: localMatch[1] }
+    }
+
+    // Same-origin, but not a shape the backend can resolve on its own (e.g.
+    // /api/cloud/store/drive/image/{sceneId}, which the backend proxies with
+    // the cloud link token): fetching it here is safe, no CORS involved.
+    const blob = await fetchSameOriginImageBlob(projectApiPathFromCache(template.image))
+    return blob ? { blob } : null
   }
 
   return null
 }
 
-async function fetchTemplateImageBlob(template: Partial<TemplateType>): Promise<Blob | null> {
-  if (template.image instanceof Blob) {
-    return template.image
-  }
-
-  const imageUrl = await resolveTemplateImageUrl(template)
-  if (!imageUrl) {
-    return null
-  }
-
+async function fetchSameOriginImageBlob(imageUrl: string): Promise<Blob | null> {
   const basePath = getBasePath()
   const scopedImageUrl = imageUrl.startsWith('/api/') ? await projectApiPath(imageUrl) : imageUrl
   const resolvedUrl = scopedImageUrl.startsWith('/api/') && basePath ? `${basePath}${scopedImageUrl}` : scopedImageUrl
-  const response = await fetch(resolvedUrl)
+  const response = await fetch(resolvedUrl, { credentials: 'include' })
   if (!response.ok) {
     return null
   }
@@ -1085,7 +1128,7 @@ function templatesFromPayload(template: Partial<TemplateType>): Partial<Template
 }
 
 async function saveTemplateSceneImages(
-  frameId: number,
+  frameId: FrameId,
   template: Partial<TemplateType>,
   newScenes: FrameScene[]
 ): Promise<void> {
@@ -1093,31 +1136,25 @@ async function saveTemplateSceneImages(
     return
   }
 
-  try {
-    const imageBlob = await fetchTemplateImageBlob(template)
-    if (!imageBlob) {
-      return
-    }
-
-    const targetScenes = getScenesWithoutParents(newScenes)
-    if (!targetScenes.length) {
-      return
-    }
-
-    await Promise.all(
-      targetScenes.map((scene) =>
-        apiFetch(`/api/frames/${frameId}/scene_images/${scene.id}`, {
-          method: 'POST',
-          body: imageBlob,
-        })
-      )
-    )
-    targetScenes.forEach((scene) =>
-      entityImagesModel.actions.updateEntityImage(`frames/${frameId}`, `scene_images/${scene.id}`)
-    )
-  } catch (error) {
-    console.error('Failed to save template image for scenes', error)
+  const targetScenes = getScenesWithoutParents(newScenes)
+  if (!targetScenes.length) {
+    return
   }
+
+  let source: SceneImageSource | null = null
+  try {
+    source = await templateImageSource(template)
+  } catch (error) {
+    reportSceneImageFailure(frameId, targetScenes[0].id, 'cover image', error)
+    return
+  }
+
+  await assignSceneImages(
+    frameId,
+    targetScenes.map((scene) => scene.id),
+    source,
+    { label: 'cover image' }
+  )
 }
 
 function getScenesWithoutParents(scenes: FrameScene[]): FrameScene[] {
@@ -1298,17 +1335,6 @@ function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> 
     }
   }
   return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame
-}
-
-function preferSshTransportWhenRemoteUnavailable(
-  frame: Partial<FrameType>,
-  remoteConnected: boolean
-): Partial<FrameType> {
-  const agent = frame.agent
-  if (!remoteConnected && isRemoteDeployConfigured(agent) && agent?.deployWithAgent !== false) {
-    return { ...frame, agent: { ...agent, deployWithAgent: false } }
-  }
-  return frame
 }
 
 function getCurrentFrameForm(frame: FrameType | null | undefined, frameForm: Partial<FrameType>): Partial<FrameType> {
@@ -1508,8 +1534,40 @@ export function buildSplitScene(
   )
 }
 
-async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAction: FrameNextAction): Promise<void> {
+async function saveFrameForm(frame: Partial<FrameType>, frameId: FrameId, nextAction: FrameNextAction): Promise<void> {
   const normalizedFrame = normalizeFrameForSubmit(frame)
+  if (isCloudMode()) {
+    // Cloud frames have no POST /api/frames/{id} — the control plane only
+    // accepts the declarative settings allowlist, and applies it on the
+    // device immediately (which is why Save stays visible with no deploy
+    // step). Edited scene graphs go through the same store-scene persistence
+    // Deploy uses (new immutable versions of assigned scenes, new private
+    // scenes for unclaimed ones, then the checksummed assignment push).
+    // Save used to skip scenes entirely, which silently dropped a newly
+    // added scene while still reporting success because the name pushed.
+    const settingsPushed = await pushCloudFrameSettings(frameId, normalizedFrame)
+    // The schedule is its own verb (set_schedule via POST .../schedule), not
+    // a settings key — push it only when the form's schedule differs from
+    // server truth, so a name-only save does not re-enqueue an unchanged
+    // schedule toward a sleeping battery frame.
+    const schedule = normalizedFrame.schedule
+    const savedSchedule = framesModel.findMounted()?.values.frames?.[frameId]?.schedule
+    const schedulePushed = schedule !== undefined && !equal(schedule, savedSchedule)
+    if (schedulePushed && schedule) {
+      await pushCloudFrameSchedule(frameId, schedule)
+    }
+    const scenes = normalizedFrame.scenes ?? []
+    if (scenes.length > 0) {
+      const outcome = await persistAndPushCloudFrameScenes(frameId, scenes, normalizedFrame.active_scene_id)
+      for (const storeSceneId of outcome.changedStoreSceneIds) {
+        clearCloudSceneJsonCache(storeSceneId)
+      }
+      framesModel.actions.hydrateCloudFrameScenes(frameId, true)
+    } else if (!settingsPushed && !schedulePushed) {
+      throw new Error('Nothing in these settings can be pushed to a cloud-managed frame')
+    }
+    return
+  }
   const json = buildDeployPlanRequestBody(normalizedFrame, frameSubmitKeys(normalizedFrame))
   if (nextAction) {
     json['next_action'] = nextAction
@@ -1526,7 +1584,7 @@ async function saveFrameForm(frame: Partial<FrameType>, frameId: number, nextAct
   }
 }
 
-function openSceneControlDrawer(frameId: number, sceneId: string): void {
+function openSceneControlDrawer(frameId: FrameId, sceneId: string): void {
   const searchParams = {
     ...router.values.searchParams,
     drawer: 'scene',
@@ -1937,7 +1995,10 @@ export const frameLogic = kea<frameLogicType>([
         ...(values.frame ?? {}),
         ...(values.frameForm ?? {}),
       }
-      const deployPlanMode = (currentFrameForm.mode ?? 'rpios') === 'embedded' ? 'fast' : 'combined'
+      // Embedded frames use 'combined' too: the backend's combined plan for
+      // them carries the fast (HTTP scene upload) section and, for ESP32
+      // targets with OTA support, the full (firmware rebuild + OTA) section.
+      const deployPlanMode = 'combined'
       const response = await apiFetch(`/api/frames/${values.frameId}/deploy_plan?mode=${deployPlanMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2003,6 +2064,14 @@ export const frameLogic = kea<frameLogicType>([
       }
     },
     showDeployPlanModal: () => {
+      // The cloud's deploy dialog (FrameDeployPlanDrawer's cloud branch)
+      // shows no build plan: there is no POST /api/frames/{id}/deploy_plan
+      // and no /sync on that control plane, so fetching either only parked a
+      // 404 in the drawer's error slot. Its own state — unsaved changes,
+      // scene count, connection — comes from the frame row.
+      if (isCloudMode()) {
+        return
+      }
       if (
         !values.frameSyncStatusLoading &&
         shouldLoadFrameSyncStatus(values.frame, values.frameSyncStatus, values.frameSyncIgnoredToken)
@@ -2183,9 +2252,9 @@ export const frameLogic = kea<frameLogicType>([
         if (!isRemoteDeployConfigured(agent)) {
           return false
         }
-        if ((frame?.active_connections ?? 0) <= 0) {
-          return false
-        }
+        // Deliberately not clamped to the live connection state: this is the
+        // user's chosen transport, not a reachability report. The dot next to
+        // the Remote button shows whether it is currently connected.
         return agent?.deployWithAgent ?? true
       },
     ],
@@ -2270,45 +2339,146 @@ export const frameLogic = kea<frameLogicType>([
       )
     }
 
+    // Cloud Save & Deploy. The cloud's "save" is the declarative settings
+    // push (the same call saveFrameForm makes) — but a form whose only
+    // pending changes are scenes maps onto no settings at all, which
+    // saveFrameForm treats as an error on a plain Save. Here it is fine: the
+    // scenes are persisted separately — each edited scene becomes a new
+    // version of its private cloud scene (new scenes are created), the
+    // assignment list is updated, and POST /api/frames/{id}/scenes pushes the
+    // checksummed result to the device. That push IS the deploy; the ad-hoc
+    // uploadScenes shim stays as the fallback when persistence fails, so the
+    // frame still updates even if the cloud refuses a scene.
+    const cloudSaveAndDeploy = async (): Promise<void> => {
+      try {
+        await pushCloudFrameSettings(props.frameId, normalizeFrameForSubmit(values.frameForm))
+        framesModel.actions.loadFrame(props.frameId)
+      } catch (error) {
+        // Same surfacing as submitFrameFormFailure: a silent failure looks
+        // like the click did nothing.
+        const message = error instanceof Error ? error.message : 'Failed to save the frame'
+        const detail = message.includes('frame_not_active')
+          ? 'This frame is still pending — confirm it on its dashboard before saving changes to it.'
+          : message
+        longRunningTasksModel.actions.startTask({
+          frameId: props.frameId,
+          kind: 'save',
+          title: 'Saving frame',
+          detail: null,
+        })
+        longRunningTasksModel.actions.taskFailed({ frameId: props.frameId, kind: 'save', detail })
+        throw error
+      }
+      const scenes = values.frameForm?.scenes ?? values.frame?.scenes ?? []
+      if (!scenes.length) {
+        framesModel.actions.deployFrame(props.frameId, false)
+        return
+      }
+      longRunningTasksModel.actions.startTask({
+        frameId: props.frameId,
+        kind: 'deploy',
+        title: 'Deploying scenes',
+        detail: 'Saving scenes to your cloud account',
+      })
+      try {
+        const outcome = await persistAndPushCloudFrameScenes(props.frameId, scenes, values.frame?.active_scene_id)
+        for (const storeSceneId of outcome.changedStoreSceneIds) {
+          clearCloudSceneJsonCache(storeSceneId)
+        }
+        framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+        framesModel.actions.loadFrame(props.frameId)
+        longRunningTasksModel.actions.finishTask({
+          frameId: props.frameId,
+          kind: 'deploy',
+          status: 'success',
+          detail: [
+            values.frame?.connected === false
+              ? 'Deploy queued — the frame is offline right now and applies the scenes when it reconnects'
+              : 'Deployed — the frame applies the scenes as soon as it syncs',
+            // The scene graphs themselves live in the account's cloud scene
+            // library (that IS the storage for cloud frames), mentioned so
+            // the library entries this creates are not a mystery.
+            'Also saved to your cloud scenes',
+            ...outcome.notes,
+          ].join('. '),
+        })
+      } catch (error) {
+        // Persistence failed (rate limit, moderation, offline store…) — the
+        // ad-hoc push still deploys the edited scenes to the device, it just
+        // cannot save them; deployFrame reports its own outcome.
+        const message = error instanceof Error ? error.message : String(error)
+        longRunningTasksModel.actions.taskFailed({
+          frameId: props.frameId,
+          kind: 'deploy',
+          detail: `Could not save the scenes to your cloud account (${message}) — pushing them straight to the frame instead`,
+        })
+        framesModel.actions.deployFrame(props.frameId, false)
+      }
+    }
+
     return {
       saveFrame: () => actions.submitFrameForm(),
       submitFrameFormSuccess: () => {
         framesModel.actions.loadFrame(props.frameId)
       },
-      saveAndDeployFrame: async () => {
-        const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
-        if (frameForm !== values.frameForm) {
-          actions.setFrameFormValues({ agent: frameForm.agent })
-          await saveFrameForm(frameForm, props.frameId, values.nextAction)
-          framesModel.actions.loadFrame(props.frameId)
-        } else {
-          await asyncActions.submitFrameForm()
+      submitFrameFormFailure: ({ error }) => {
+        // Nothing listened to this before, so a failed Save vanished without
+        // a trace — most visibly on the cloud, where saving to a frame the
+        // owner has not confirmed yet is refused with `frame_not_active`
+        // (409) and the workspace just sat there still saying "unsaved".
+        // Field-level validation renders inline; skip its sentinel error.
+        if (error?.message === 'Validation Failed') {
+          return
         }
+        const detail =
+          error?.message?.includes('frame_not_active') && isCloudMode()
+            ? 'This frame is still pending — confirm it on its dashboard before saving changes to it.'
+            : error?.message || 'Failed to save the frame'
+        longRunningTasksModel.actions.startTask({
+          frameId: props.frameId,
+          kind: 'save',
+          title: 'Saving frame',
+          detail: null,
+        })
+        longRunningTasksModel.actions.taskFailed({ frameId: props.frameId, kind: 'save', detail })
+      },
+      saveAndDeployFrame: async () => {
+        if (isCloudMode()) {
+          await cloudSaveAndDeploy()
+          return
+        }
+        // No transport rewriting here: the backend resolves "auto" against the
+        // live connection and falls back to SSH by itself, so a disconnected
+        // remote is not a reason to silently overwrite the user's saved
+        // choice of how this frame is reached.
+        await asyncActions.submitFrameForm()
         framesModel.actions.deployFrame(
           props.frameId,
           frameCanUseFastDeploy(values.frame, values.requiresRecompilation)
         )
       },
       saveAndFastDeployFrame: async () => {
-        const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
-        if (frameForm !== values.frameForm) {
-          actions.setFrameFormValues({ agent: frameForm.agent })
-          await saveFrameForm(frameForm, props.frameId, values.nextAction)
-          framesModel.actions.loadFrame(props.frameId)
-        } else {
-          await asyncActions.submitFrameForm()
+        if (isCloudMode()) {
+          await cloudSaveAndDeploy()
+          return
         }
+        // No transport rewriting here: the backend resolves "auto" against the
+        // live connection and falls back to SSH by itself, so a disconnected
+        // remote is not a reason to silently overwrite the user's saved
+        // choice of how this frame is reached.
+        await asyncActions.submitFrameForm()
         framesModel.actions.deployFrame(props.frameId, true)
       },
       saveAndFullDeployFrame: async () => {
-        const frameForm = preferSshTransportWhenRemoteUnavailable(values.frameForm, values.remoteDeployConnected)
-        if (frameForm !== values.frameForm) {
-          actions.setFrameFormValues({ agent: frameForm.agent })
-          await saveFrameForm(frameForm, props.frameId, values.nextAction)
-          framesModel.actions.loadFrame(props.frameId)
-        } else {
-          await asyncActions.submitFrameForm()
+        if (isCloudMode()) {
+          await cloudSaveAndDeploy()
+          return
         }
+        // No transport rewriting here: the backend resolves "auto" against the
+        // live connection and falls back to SSH by itself, so a disconnected
+        // remote is not a reason to silently overwrite the user's saved
+        // choice of how this frame is reached.
+        await asyncActions.submitFrameForm()
         framesModel.actions.deployFrame(props.frameId, false)
       },
       renderFrame: () => framesModel.actions.renderFrame(props.frameId),

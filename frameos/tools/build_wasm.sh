@@ -46,14 +46,42 @@ python3 tools/prepare_assets.py
 # ------------------------------------------------------- QuickJS via emcc
 # Engine only, no quickjs-libc — same surface as the ESP32 build
 # (embedded/esp32/components/frameos_quickjs/CMakeLists.txt).
+#
+# nimble build_quickjs may have installed a *prebuilt* QuickJS into quickjs/
+# (headers + a native libquickjs.a, no C sources — see
+# tools/install_prebuilt_quickjs.py). emcc needs the sources, so fetch the
+# source tarball into the build dir when quickjs/ has none. Version and
+# sha256 must stay in sync with the build_quickjs task in frameos.nimble.
+QJS_SRC="$FRAMEOS_DIR/quickjs"
+if [[ ! -f "$QJS_SRC/quickjs.c" ]]; then
+    QJS_SRC="$BUILD_DIR/quickjs-src"
+    if [[ ! -f "$QJS_SRC/quickjs.c" ]]; then
+        QJS_TARBALL_VERSION="2026-06-04"
+        QJS_TARBALL_SHA256="b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a"
+        echo "quickjs/ has no C sources (prebuilt install) — downloading QuickJS $QJS_TARBALL_VERSION sources"
+        mkdir -p "$BUILD_DIR"
+        curl -fsSL -o "$BUILD_DIR/quickjs-src.tar.xz" \
+            "https://bellard.org/quickjs/quickjs-$QJS_TARBALL_VERSION.tar.xz"
+        if command -v sha256sum >/dev/null; then
+            echo "$QJS_TARBALL_SHA256  $BUILD_DIR/quickjs-src.tar.xz" | sha256sum -c -
+        else
+            echo "$QJS_TARBALL_SHA256  $BUILD_DIR/quickjs-src.tar.xz" | shasum -a 256 -c -
+        fi
+        rm -rf "$QJS_SRC"
+        mkdir -p "$QJS_SRC"
+        tar -xf "$BUILD_DIR/quickjs-src.tar.xz" -C "$QJS_SRC" --strip-components=1
+        rm "$BUILD_DIR/quickjs-src.tar.xz"
+    fi
+fi
+
 QJS_BUILD="$BUILD_DIR/quickjs"
-QJS_VERSION="$(head -n1 quickjs/VERSION)"
+QJS_VERSION="$(head -n1 "$QJS_SRC/VERSION")"
 mkdir -p "$QJS_BUILD"
 
 qjs_needs_build=0
 for src in quickjs.c dtoa.c libregexp.c libunicode.c cutils.c; do
     obj="$QJS_BUILD/${src%.c}.o"
-    if [[ ! -f "$obj" || "quickjs/$src" -nt "$obj" ]]; then
+    if [[ ! -f "$obj" || "$QJS_SRC/$src" -nt "$obj" ]]; then
         qjs_needs_build=1
     fi
 done
@@ -64,7 +92,7 @@ if [[ "$qjs_needs_build" == "1" || ! -f "$QJS_BUILD/libquickjs.a" ]]; then
             -D_GNU_SOURCE \
             -DCONFIG_VERSION="\"$QJS_VERSION\"" \
             -funsigned-char -fwrapv -fno-strict-aliasing -w \
-            "quickjs/$src" -o "$QJS_BUILD/${src%.c}.o"
+            "$QJS_SRC/$src" -o "$QJS_BUILD/${src%.c}.o"
     done
     emar rcs "$QJS_BUILD/libquickjs.a" "$QJS_BUILD"/*.o
 fi
@@ -75,8 +103,9 @@ FRAMEOS_VERSION="$(python3 tools/frameos_version.py ../versions.json)"
 # _main keeps Nim's generated main() alive: emscripten calls it on module
 # startup and that runs NimMain (all Nim module initializers, e.g. the
 # baked-in font asset tables).
-EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error
-EXPORTED_RUNTIME_METHODS=cwrap,ccall,UTF8ToString,stringToNewUTF8,lengthBytesUTF8,HEAPU8
+EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error
+# FS lets the render harness preload a virtual frame's assets into MEMFS.
+EXPORTED_RUNTIME_METHODS=cwrap,ccall,UTF8ToString,stringToNewUTF8,lengthBytesUTF8,HEAPU8,FS
 
 mkdir -p "$BUILD_DIR"
 
@@ -101,7 +130,10 @@ nim c \
     --passL:"-sMODULARIZE=1" \
     --passL:"-sEXPORT_ES6=1" \
     --passL:"-sEXPORT_NAME=createFrameOS" \
-    --passL:"-sENVIRONMENT=web,worker" \
+    `# node: the backend's thin-client renderer runs this same bundle under` \
+    `# Node (backend/tools/embedded_wasm_render.mjs); web,worker keep the` \
+    `# browser live-preview working.` \
+    --passL:"-sENVIRONMENT=web,worker,node" \
     --passL:"-sALLOW_MEMORY_GROWTH=1" \
     `# Growable memory via resizable ArrayBuffers (GROWABLE_ARRAYBUFFERS=1,` \
     `# the default) makes wasmMemory.buffer resizable, and Chrome's` \

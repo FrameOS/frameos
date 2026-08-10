@@ -1,7 +1,7 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, path, props, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 
-import type { MetricsType } from '../../types'
+import type { MetricsType, FrameId } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import {
   filterMetricsByCategoryAndTimeRange,
@@ -20,7 +20,7 @@ const PREVIEW_METRICS_LIMIT = 1000
 const CURRENT_TIME_UPDATE_MS = 60 * 1000
 
 export interface FrameMetricsPreviewLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export const frameMetricsPreviewLogic = kea<frameMetricsPreviewLogicType>([

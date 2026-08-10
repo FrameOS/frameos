@@ -1,3 +1,4 @@
+import datetime
 from http import HTTPStatus
 
 import pytest
@@ -7,7 +8,7 @@ from app.models.assets import Assets
 from app.models.chat import Chat, ChatMessage
 from app.models.frame import Frame
 from app.models.user import User
-from app.api.auth import create_access_token
+from app.api.auth import ACCESS_TOKEN_EXPIRE_MINUTES, issue_credentials
 from app.tenancy import ensure_default_project_for_user
 
 pytestmark = pytest.mark.asyncio
@@ -23,13 +24,16 @@ def create_user_with_project(db: Session, email: str):
     return user, project
 
 
-def authorize_client(client, user: User):
-    client.headers.update({"Authorization": f"Bearer {create_access_token({'sub': user.email})}"})
+def authorize_client(client, user: User, db: Session):
+    # Goes through issue_credentials so the token references a real
+    # user_session row; a bearer token without one is no longer accepted.
+    access_token, _, _ = issue_credentials(db, user, datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    client.headers.update({"Authorization": f"Bearer {access_token}"})
 
 
 async def test_project_access_is_required(no_auth_client, db: Session):
     user, project = create_user_with_project(db, "tenant1@example.com")
-    authorize_client(no_auth_client, user)
+    authorize_client(no_auth_client, user, db)
     _, other_project = create_user_with_project(db, "tenant2@example.com")
 
     response = await no_auth_client.get(f"/api/projects/{other_project.id}/assets")
@@ -39,7 +43,7 @@ async def test_project_access_is_required(no_auth_client, db: Session):
 
 async def test_assets_are_scoped_to_selected_project(no_auth_client, db: Session):
     user, project = create_user_with_project(db, "tenant1@example.com")
-    authorize_client(no_auth_client, user)
+    authorize_client(no_auth_client, user, db)
     _, other_project = create_user_with_project(db, "tenant2@example.com")
     asset = Assets(project_id=other_project.id, path="fonts/Other.ttf", data=b"font")
     db.add(asset)
@@ -53,7 +57,7 @@ async def test_assets_are_scoped_to_selected_project(no_auth_client, db: Session
 
 async def test_frames_are_scoped_to_selected_project(no_auth_client, db: Session):
     user, project = create_user_with_project(db, "tenant1@example.com")
-    authorize_client(no_auth_client, user)
+    authorize_client(no_auth_client, user, db)
     _, other_project = create_user_with_project(db, "tenant2@example.com")
     frame = Frame(
         project_id=other_project.id,
@@ -85,7 +89,7 @@ async def test_frames_are_scoped_to_selected_project(no_auth_client, db: Session
 )
 async def test_frame_task_routes_require_frame_in_selected_project(no_auth_client, db: Session, path: str):
     user, project = create_user_with_project(db, "tenant1@example.com")
-    authorize_client(no_auth_client, user)
+    authorize_client(no_auth_client, user, db)
     _, other_project = create_user_with_project(db, "tenant2@example.com")
     frame = Frame(
         project_id=other_project.id,
@@ -104,7 +108,7 @@ async def test_frame_task_routes_require_frame_in_selected_project(no_auth_clien
 
 async def test_ai_scene_chat_rejects_frame_outside_selected_project(no_auth_client, db: Session):
     user, project = create_user_with_project(db, "tenant1@example.com")
-    authorize_client(no_auth_client, user)
+    authorize_client(no_auth_client, user, db)
     _, other_project = create_user_with_project(db, "tenant2@example.com")
     frame = Frame(
         project_id=other_project.id,

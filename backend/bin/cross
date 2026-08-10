@@ -31,7 +31,7 @@ class TargetDefinition:
     arch: str
     platform: str
     image: str
-    runner: str = "ubuntu-24.04"
+    runner: str = "depot-ubuntu-24.04-16"
 
     @property
     def slug(self) -> str:
@@ -49,17 +49,42 @@ class TargetDefinition:
         }
 
 
+# armhf (linux/arm/v7) is the one target that must NOT go to a Depot ARM
+# runner. Depot's ARM runners are AWS Graviton, which cannot execute AArch32
+# at EL0, so the arm/v7 build container falls back to QEMU: measured 773s and
+# 825s on depot-ubuntu-24.04-arm-16 versus 349-377s for arm64 on the same
+# runner. GitHub's ubuntu-24.04-arm runners are Ampere Altra, which does run
+# AArch32 natively — there armhf costs the same as arm64 (501s vs 507s and
+# 516s vs 507s across two releases), so 4 native cores beat 16 emulated ones.
+# The permanent fix is to give linux/arm/v7 the same treatment as arm/v6 (an
+# amd64 container plus the arm-linux-gnueabihf cross toolchain that
+# cross_toolchain_packages.py already defines and the Modal executor already
+# uses); until that is validated, keep armhf on GitHub's ARM runners.
+ARMHF_RUNNER = "ubuntu-24.04-arm"
+
 TARGETS: tuple[TargetDefinition, ...] = (
-    TargetDefinition("debian", "bookworm", "armhf", "linux/arm/v7", "debian:bookworm", runner="ubuntu-24.04-arm"),
-    TargetDefinition("debian", "bookworm", "arm64", "linux/arm64", "debian:bookworm", runner="ubuntu-24.04-arm"),
+    TargetDefinition("debian", "bookworm", "armhf", "linux/arm/v7", "debian:bookworm", runner=ARMHF_RUNNER),
+    TargetDefinition("debian", "bookworm", "arm64", "linux/arm64", "debian:bookworm", runner="depot-ubuntu-24.04-arm-16"),
     TargetDefinition("debian", "bookworm", "amd64", "linux/amd64", "debian:bookworm"),
-    TargetDefinition("debian", "trixie", "armhf", "linux/arm/v7", "debian:trixie", runner="ubuntu-24.04-arm"),
-    TargetDefinition("debian", "trixie", "arm64", "linux/arm64", "debian:trixie", runner="ubuntu-24.04-arm"),
+    # ARMv6 hard-float for the Raspberry Pi Zero W Buildroot image. Debian has
+    # no ARMv6 port, so this builds in an amd64 container with the Bootlin
+    # armv6-eabihf toolchain (see cross_toolchain_packages.py); armhf packages
+    # only provide headers and link stubs.
+    TargetDefinition("debian", "bookworm", "armv6", "linux/arm/v6", "debian:bookworm"),
+    TargetDefinition("debian", "trixie", "armhf", "linux/arm/v7", "debian:trixie", runner=ARMHF_RUNNER),
+    TargetDefinition("debian", "trixie", "arm64", "linux/arm64", "debian:trixie", runner="depot-ubuntu-24.04-arm-16"),
     TargetDefinition("debian", "trixie", "amd64", "linux/amd64", "debian:trixie"),
-    TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04", runner="ubuntu-24.04-arm"),
+    # Same Bootlin-toolchain build as bookworm armv6 (Raspberry Pi OS trixie
+    # still supports the Pi Zero W / Pi 1). Trixie's OpenSSL stubs pull
+    # libz/libzstd transitively at link time — needs the -rpath-link mirror
+    # flag in cross_compile.py.
+    TargetDefinition("debian", "trixie", "armv6", "linux/arm/v6", "debian:trixie"),
+    TargetDefinition("ubuntu", "24.04", "arm64", "linux/arm64", "ubuntu:24.04", runner="depot-ubuntu-24.04-arm-16"),
     TargetDefinition("ubuntu", "24.04", "amd64", "linux/amd64", "ubuntu:24.04"),
-    TargetDefinition("ubuntu", "26.04", "arm64", "linux/arm64", "ubuntu:26.04", runner="ubuntu-24.04-arm"),
+    TargetDefinition("ubuntu", "26.04", "arm64", "linux/arm64", "ubuntu:26.04", runner="depot-ubuntu-24.04-arm-16"),
     TargetDefinition("ubuntu", "26.04", "amd64", "linux/amd64", "ubuntu:26.04"),
+    # TODO(rockchip/allwinner): 32-bit ARMv7 targets for Luckfox Pico
+    # (RV1103/RV1106) and T113-S3/S4 boards can reuse the armhf toolchain:
     # TargetDefinition("buildroot", "luckfox-pico-plus", "armv7l", "linux/amd64", "ubuntu:26.04"),
 )
 

@@ -61,6 +61,11 @@ static void enqueue_press(const fos_gpio_button_t *button, int level)
     strlcpy(event.label, button->label, sizeof(event.label));
     if (xQueueSend(s_queue, &event, 0) != pdTRUE) {
         ESP_LOGW(TAG, "button event queue full, dropping GPIO %d", button->pin);
+        char dropped[160];
+        snprintf(dropped, sizeof(dropped),
+                 "{\"event\":\"button:dropped\",\"source\":\"esp32\",\"pin\":%d,"
+                 "\"reason\":\"queue-full\"}", button->pin);
+        frameos_nim_log_hook(dropped);
         return;
     }
     fos_client_render_now();
@@ -140,6 +145,30 @@ esp_err_t fos_buttons_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* One line naming the pins and labels this frame is listening on. Half of
+     * "I pressed the button and nothing happened" is not knowing which pin the
+     * board actually wired, and which label a scene has to match. */
+    {
+        char list[256];
+        size_t used = 0;
+        list[0] = '\0';
+        for (size_t i = 0; i < config->gpio_button_count && used + 1 < sizeof(list); i++) {
+            if (!s_enabled[i]) continue;
+            char label[FOS_GPIO_BUTTON_LABEL_LEN * 2];
+            json_escape(config->gpio_buttons[i].label, label, sizeof(label));
+            int written = snprintf(list + used, sizeof(list) - used,
+                                   "%s{\"pin\":%d,\"label\":\"%s\"}",
+                                   used ? "," : "", config->gpio_buttons[i].pin, label);
+            if (written < 0 || (size_t)written >= sizeof(list) - used) break;
+            used += (size_t)written;
+        }
+        char line[320];
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"buttons:listening\",\"source\":\"esp32\",\"buttons\":[%s]}",
+                 list);
+        frameos_nim_log_hook(line);
+    }
+
     BaseType_t created = xTaskCreate(buttons_task, "fos_buttons", 3072, NULL, 4, NULL);
     if (created != pdPASS) {
         vQueueDelete(s_queue);
@@ -161,7 +190,18 @@ void fos_buttons_process_events(void)
         char payload[96];
         snprintf(payload, sizeof(payload), "{\"pin\":%d,\"label\":\"%s\",\"level\":%d}",
                  event.pin, label, event.level);
-        if (!frameos_nim_send_event("button", payload)) {
+        bool dispatched = frameos_nim_send_event("button", payload);
+        /* Into the frame log, not just the serial console: a press used to
+         * leave no trace anywhere a user can see. When a scene ignores it the
+         * interpreter says so (runEvent:noListenerMatched), but that only
+         * helps if you can first tell the press was registered at all. */
+        char line[192];
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"button\",\"source\":\"esp32\",\"pin\":%d,"
+                 "\"label\":\"%s\",\"level\":%d,\"dispatched\":%s}",
+                 event.pin, label, event.level, dispatched ? "true" : "false");
+        frameos_nim_log_hook(line);
+        if (!dispatched) {
             ESP_LOGW(TAG, "button event skipped: Nim runtime unavailable");
         }
     }

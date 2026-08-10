@@ -9,6 +9,12 @@ on:
       - buildroot-images.json
       - cross-toolchain-images.json
 
+# Superseded runs on the same PR are cancelled; pushes to main always run to
+# completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   docker_image:
     name: Build Docker Image
@@ -59,26 +65,95 @@ jobs:
   esp32_firmware_image:
     name: Build and boot ESP32 firmware image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # Token auth, same as the release workflow: OIDC would spare us the
+      # secret, but it needs a trust relationship configured in the Depot
+      # project first (until then the exchange dies with permission_denied).
+      # Secrets are absent on forked PRs, so those fall back to a plain
+      # docker build below.
+      DEPOT_AVAILABLE: ${{ secrets.DEPOT_TOKEN != '' && 'true' || 'false' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Build ESP32 CI Docker image
+      - name: Set up Depot CLI
+        if: env.DEPOT_AVAILABLE == 'true'
+        uses: depot/setup-action@v1
+
+      # Depot keeps a persistent layer cache per project, so the esp32-ci
+      # target (ESP-IDF toolchain + Nim) only rebuilds layers that changed.
+      # load: true pulls the image into the local Docker daemon for the
+      # `docker run` below.
+      #
+      # Keep the cache-relevant inputs (project, context, target, build-args,
+      # platforms) identical to the esp32-ci build in docker-publish-multi.yml
+      # — this job runs on every push to main and is what warms the release
+      # build's cache.
+      - name: Build ESP32 CI Docker image (Depot)
+        if: env.DEPOT_AVAILABLE == 'true'
+        uses: depot/build-push-action@v1
+        with:
+          project: rsbh2wrlkj
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          target: esp32-ci
+          tags: frameos-esp32-ci
+          load: true
+          push: false
+
+      - name: Build ESP32 CI Docker image (forked PR fallback)
+        if: env.DEPOT_AVAILABLE != 'true'
         run: |
           docker build --target esp32-ci -t frameos-esp32-ci .
+
+      # The step below builds the firmware three times (8 MB, QEMU, 32 MB).
+      # They share a nimcache but not a single object file, and ESP-IDF ships
+      # ccache support that was simply never switched on — so every run
+      # recompiled all of ESP-IDF three times over. The cache is keyed loosely
+      # and restored from any previous run: a stale entry only costs misses,
+      # never correctness, since ccache hashes the compiler, flags and source.
+      - name: Cache ESP-IDF ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ${{ runner.os }}-esp32-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-esp32-ccache-
 
       - name: Build and boot ESP32 firmware image
         timeout-minutes: 60
         run: |
+          mkdir -p "$GITHUB_WORKSPACE/.ccache"
+          # The esp32-ci image does not carry versions.json (only the
+          # app-builder stage copies it), so the firmware version has to come
+          # from the runner's checkout. ci_build_image.sh refuses to build
+          # without one — a firmware that misreports its version re-flashes
+          # itself on every OTA check (see the guard's comment).
+          FRAMEOS_VERSION="$(python3 -c 'import json; print(json.load(open("versions.json"))["frameos"].split("+")[0])')"
           docker run --rm \
             -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
+            -e FRAMEOS_VERSION="$FRAMEOS_VERSION" \
+            -e IDF_CCACHE_ENABLE=1 \
+            -e CCACHE_DIR=/ccache \
+            -e CCACHE_MAXSIZE=2G \
+            -v "$GITHUB_WORKSPACE/.ccache:/ccache" \
             frameos-esp32-ci \
             bash -lc '
               set -euo pipefail
               bash embedded/esp32/ci_build_image.sh
               FRAMEOS_ESP32_QEMU=1 FRAMEOS_ESP32_BUILD_DIR=build-ci-qemu \
                 bash embedded/esp32/ci_build_image.sh
+              # The 32MB layout (13.3E6-class boards) — build-validated here
+              # because no release job covers it. Same S3 nimcache, so the
+              # incremental cost is one IDF configure+link.
+              FRAMEOS_ESP32_PLATFORM=esp32-s3-32mb FRAMEOS_ESP32_BUILD_DIR=build-ci-32mb \
+                bash embedded/esp32/ci_build_image.sh
+              ccache --show-stats || true
             '
+          # The container writes as root; actions/cache runs as the runner user.
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/.ccache"
 
   build-and-test:
     name: build-and-test

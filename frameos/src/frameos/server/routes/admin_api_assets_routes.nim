@@ -316,6 +316,110 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
     headers["Content-Type"] = "application/json"
     return (Http500, headers, $(%*{"detail": "Failed to fetch asset", "error": e.msg}))
 
+proc handleAssetsUpload*(request: Request) {.gcsafe.} =
+  if not hasAdminAccess(request):
+    request.respond(Http401, body = "Unauthorized")
+    return
+  {.gcsafe.}:
+    if not requestedFrameMatches(request):
+      request.respond(Http404, body = "Not found!")
+    else:
+      try:
+        if request.queryParams.contains("upload_id"):
+          let chunkIndex =
+            try:
+              parseInt(request.queryParams.getOrDefault("chunk_index", "0"))
+            except ValueError:
+              0
+          appendUploadChunk(request.queryParams["upload_id"], chunkIndex, request.body)
+          if request.queryParams.getOrDefault("complete", "") == "1":
+            jsonResponse(
+              request,
+              Http200,
+              finishChunkedAssetUpload(
+                request.queryParams["upload_id"],
+                request.queryParams.getOrDefault("path", ""),
+                request.queryParams.getOrDefault("filename", "uploaded_file")
+              )
+            )
+          else:
+            jsonResponse(request, Http200, %*{"status": "partial"})
+        else:
+          let payload = parseJson(if request.body == "": "{}" else: request.body)
+          let path = payload{"path"}.getStr("")
+          let filename = payload{"filename"}.getStr("uploaded_file")
+          let dataUrl = payload{"data_url"}.getStr("")
+          if dataUrl.len == 0:
+            jsonResponse(request, Http400, %*{"detail": "Missing upload payload"})
+            return
+          let asset = saveAssetUploadPayload(path, filename, decodeDataUrlPayload(dataUrl))
+          jsonResponse(request, Http200, asset)
+      except ValueError as e:
+        jsonResponse(request, Http400, %*{"detail": e.msg})
+      except OSError:
+        jsonResponse(request, Http404, %*{"detail": "Upload not found"})
+      except CatchableError as e:
+        jsonResponse(request, Http500, %*{"detail": e.msg})
+
+proc handleAssetsMkdir*(request: Request) {.gcsafe.} =
+  if not hasAdminAccess(request):
+    request.respond(Http401, body = "Unauthorized")
+    return
+  {.gcsafe.}:
+    if not requestedFrameMatches(request):
+      request.respond(Http404, body = "Not found!")
+    else:
+      try:
+        let params = parseUrlEncoded(request.body)
+        createAssetDirectory(if params.hasKey("path"): params["path"] else: "")
+        jsonResponse(request, Http200, %*{"message": "Created"})
+      except ValueError as e:
+        jsonResponse(request, Http400, %*{"detail": e.msg})
+      except CatchableError as e:
+        jsonResponse(request, Http500, %*{"detail": e.msg})
+
+proc handleAssetsDelete*(request: Request) {.gcsafe.} =
+  if not hasAdminAccess(request):
+    request.respond(Http401, body = "Unauthorized")
+    return
+  {.gcsafe.}:
+    if not requestedFrameMatches(request):
+      request.respond(Http404, body = "Not found!")
+    else:
+      try:
+        let params = parseUrlEncoded(request.body)
+        deleteAssetEntry(if params.hasKey("path"): params["path"] else: "")
+        jsonResponse(request, Http200, %*{"message": "Deleted"})
+      except ValueError as e:
+        jsonResponse(request, Http400, %*{"detail": e.msg})
+      except OSError:
+        jsonResponse(request, Http404, %*{"detail": "Asset not found"})
+      except CatchableError as e:
+        jsonResponse(request, Http500, %*{"detail": e.msg})
+
+proc handleAssetsRename*(request: Request) {.gcsafe.} =
+  if not hasAdminAccess(request):
+    request.respond(Http401, body = "Unauthorized")
+    return
+  {.gcsafe.}:
+    if not requestedFrameMatches(request):
+      request.respond(Http404, body = "Not found!")
+    else:
+      try:
+        let params = parseUrlEncoded(request.body)
+        renameAssetEntry(
+          if params.hasKey("src"): params["src"] else: "",
+          if params.hasKey("dst"): params["dst"] else: ""
+        )
+        jsonResponse(request, Http200, %*{"message": "Renamed"})
+      except ValueError as e:
+        jsonResponse(request, Http400, %*{"detail": e.msg})
+      except OSError:
+        jsonResponse(request, Http404, %*{"detail": "Asset not found"})
+      except CatchableError as e:
+        jsonResponse(request, Http500, %*{"detail": e.msg})
+
+
 proc addAdminApiAssetRoutes*(router: var Router) =
   router.get("/api/admin/frames/@id/assets", proc(request: Request) {.gcsafe.} =
     if not hasAdminAccess(request):
@@ -342,51 +446,12 @@ proc addAdminApiAssetRoutes*(router: var Router) =
         request.respond(status, headers, body)
   )
 
-  router.post("/api/admin/frames/@id/assets/upload", proc(request: Request) {.gcsafe.} =
-    if not hasAdminAccess(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    {.gcsafe.}:
-      if not requestedFrameMatches(request):
-        request.respond(Http404, body = "Not found!")
-      else:
-        try:
-          if request.queryParams.contains("upload_id"):
-            let chunkIndex =
-              try:
-                parseInt(request.queryParams.getOrDefault("chunk_index", "0"))
-              except ValueError:
-                0
-            appendUploadChunk(request.queryParams["upload_id"], chunkIndex, request.body)
-            if request.queryParams.getOrDefault("complete", "") == "1":
-              jsonResponse(
-                request,
-                Http200,
-                finishChunkedAssetUpload(
-                  request.queryParams["upload_id"],
-                  request.queryParams.getOrDefault("path", ""),
-                  request.queryParams.getOrDefault("filename", "uploaded_file")
-                )
-              )
-            else:
-              jsonResponse(request, Http200, %*{"status": "partial"})
-          else:
-            let payload = parseJson(if request.body == "": "{}" else: request.body)
-            let path = payload{"path"}.getStr("")
-            let filename = payload{"filename"}.getStr("uploaded_file")
-            let dataUrl = payload{"data_url"}.getStr("")
-            if dataUrl.len == 0:
-              jsonResponse(request, Http400, %*{"detail": "Missing upload payload"})
-              return
-            let asset = saveAssetUploadPayload(path, filename, decodeDataUrlPayload(dataUrl))
-            jsonResponse(request, Http200, asset)
-        except ValueError as e:
-          jsonResponse(request, Http400, %*{"detail": e.msg})
-        except OSError:
-          jsonResponse(request, Http404, %*{"detail": "Upload not found"})
-        except CatchableError as e:
-          jsonResponse(request, Http500, %*{"detail": e.msg})
-  )
+  router.post("/api/admin/frames/@id/assets/upload", handleAssetsUpload)
+  # Canonical frame API (docs/api-triality.md). Same handler, same
+  # hasAdminAccess check the admin route makes — the two paths differ only
+  # in name, so the shared frontend can call the canonical one on a Pi the
+  # way it already does on the backend and the ESP32.
+  router.post("/api/frames/@id/assets/upload", handleAssetsUpload)
 
   router.post("/api/admin/frames/@id/assets/upload_image", proc(request: Request) {.gcsafe.} =
     if not hasAdminAccess(request):
@@ -431,63 +496,23 @@ proc addAdminApiAssetRoutes*(router: var Router) =
           jsonResponse(request, Http500, %*{"detail": e.msg})
   )
 
-  router.post("/api/admin/frames/@id/assets/mkdir", proc(request: Request) {.gcsafe.} =
-    if not hasAdminAccess(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    {.gcsafe.}:
-      if not requestedFrameMatches(request):
-        request.respond(Http404, body = "Not found!")
-      else:
-        try:
-          let params = parseUrlEncoded(request.body)
-          createAssetDirectory(if params.hasKey("path"): params["path"] else: "")
-          jsonResponse(request, Http200, %*{"message": "Created"})
-        except ValueError as e:
-          jsonResponse(request, Http400, %*{"detail": e.msg})
-        except CatchableError as e:
-          jsonResponse(request, Http500, %*{"detail": e.msg})
-  )
+  router.post("/api/admin/frames/@id/assets/mkdir", handleAssetsMkdir)
+  # Canonical frame API (docs/api-triality.md). Same handler, same
+  # hasAdminAccess check the admin route makes — the two paths differ only
+  # in name, so the shared frontend can call the canonical one on a Pi the
+  # way it already does on the backend and the ESP32.
+  router.post("/api/frames/@id/assets/mkdir", handleAssetsMkdir)
 
-  router.post("/api/admin/frames/@id/assets/delete", proc(request: Request) {.gcsafe.} =
-    if not hasAdminAccess(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    {.gcsafe.}:
-      if not requestedFrameMatches(request):
-        request.respond(Http404, body = "Not found!")
-      else:
-        try:
-          let params = parseUrlEncoded(request.body)
-          deleteAssetEntry(if params.hasKey("path"): params["path"] else: "")
-          jsonResponse(request, Http200, %*{"message": "Deleted"})
-        except ValueError as e:
-          jsonResponse(request, Http400, %*{"detail": e.msg})
-        except OSError:
-          jsonResponse(request, Http404, %*{"detail": "Asset not found"})
-        except CatchableError as e:
-          jsonResponse(request, Http500, %*{"detail": e.msg})
-  )
+  router.post("/api/admin/frames/@id/assets/delete", handleAssetsDelete)
+  # Canonical frame API (docs/api-triality.md). Same handler, same
+  # hasAdminAccess check the admin route makes — the two paths differ only
+  # in name, so the shared frontend can call the canonical one on a Pi the
+  # way it already does on the backend and the ESP32.
+  router.post("/api/frames/@id/assets/delete", handleAssetsDelete)
 
-  router.post("/api/admin/frames/@id/assets/rename", proc(request: Request) {.gcsafe.} =
-    if not hasAdminAccess(request):
-      request.respond(Http401, body = "Unauthorized")
-      return
-    {.gcsafe.}:
-      if not requestedFrameMatches(request):
-        request.respond(Http404, body = "Not found!")
-      else:
-        try:
-          let params = parseUrlEncoded(request.body)
-          renameAssetEntry(
-            if params.hasKey("src"): params["src"] else: "",
-            if params.hasKey("dst"): params["dst"] else: ""
-          )
-          jsonResponse(request, Http200, %*{"message": "Renamed"})
-        except ValueError as e:
-          jsonResponse(request, Http400, %*{"detail": e.msg})
-        except OSError:
-          jsonResponse(request, Http404, %*{"detail": "Asset not found"})
-        except CatchableError as e:
-          jsonResponse(request, Http500, %*{"detail": e.msg})
-  )
+  router.post("/api/admin/frames/@id/assets/rename", handleAssetsRename)
+  # Canonical frame API (docs/api-triality.md). Same handler, same
+  # hasAdminAccess check the admin route makes — the two paths differ only
+  # in name, so the shared frontend can call the canonical one on a Pi the
+  # way it already does on the backend and the ESP32.
+  router.post("/api/frames/@id/assets/rename", handleAssetsRename)

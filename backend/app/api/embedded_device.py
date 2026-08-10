@@ -3,9 +3,13 @@
 The microcontroller authenticates with its ``server_api_key`` as a Bearer
 token (same scheme as ``/api/log``). Device endpoints:
 
-- ``GET /api/frames/{id}/embedded/render`` — a diagnostic thin-client bitmap.
-  Normal scenes render on-device via the Nim runtime; this route gives remote
-  render mode a simple end-to-end bitmap in the panel's wire format.
+- ``GET /api/frames/{id}/embedded/render`` — the thin-client bitmap in the
+  panel's wire format. When the frame has scenes and the wasm scene runtime
+  is available (node + the emscripten bundle, see
+  ``app/utils/embedded_render.py``), the active scene renders server-side —
+  sandboxed inside wasm, no outbound network. Otherwise (or on any render
+  failure) a diagnostic card is served so the device always gets a frame.
+  Boards with PSRAM normally render on-device via the Nim runtime instead.
 - ``GET /api/frames/{id}/embedded/ota/manifest`` — sha256/size of the latest
   OTA app image so the device can decide whether to update.
 - ``GET /api/frames/{id}/embedded/ota/download`` — the OTA app image
@@ -36,6 +40,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.drivers.devices import device_dimensions
 from app.models.frame import Frame, get_frame_json
+from app.redis import get_redis
+from app.utils.embedded_render import render_scene_rgba
 from app.tasks.embedded_firmware import (
     FOS_PIXEL_1BPP,
     FOS_PIXEL_2BPP_BWYR,
@@ -174,9 +180,15 @@ def _pack_palette(image, palette: list[tuple[int, int, int]], bits: int) -> byte
 def render_embedded_diagnostic_bitmap(frame: Frame, width: int, height: int, pixel_format: int) -> bytes:
     """Readable diagnostic card packed in the panel format.
 
-    Real scene rendering happens on-device in local mode. This exists so
-    thin-client mode has a deterministic bitmap to fetch end to end.
+    The fallback for thin-client mode: served when the frame has no scenes
+    or the wasm scene render is unavailable/fails, so the device always has
+    a deterministic bitmap to fetch end to end.
     """
+    return pack_image_for_panel(embedded_diagnostic_image(frame, width, height), pixel_format)
+
+
+def embedded_diagnostic_image(frame: Frame, width: int, height: int):
+    """The diagnostic card as a PIL RGB image (also used by virtual frames)."""
     from PIL import Image, ImageDraw
 
     image = Image.new("RGB", (width, height), (255, 255, 255))
@@ -202,6 +214,11 @@ def render_embedded_diagnostic_bitmap(frame: Frame, width: int, height: int, pix
     draw.text((32, height * 0.50), f"Backend diagnostic bitmap - {stamp}", fill=(0, 0, 0))
     draw.text((32, height * 0.60), "Scenes render on-device in local mode", fill=(0, 0, 0))
 
+    return image
+
+
+def pack_image_for_panel(image, pixel_format: int) -> bytes:
+    """Pack an RGB(A) PIL image into the panel's FOSB payload format."""
     if pixel_format == FOS_PIXEL_1BPP:
         return _pack_1bpp(image)
     if pixel_format == FOS_PIXEL_DUAL_1BPP_RED:
@@ -226,16 +243,53 @@ def fosb_payload(width: int, height: int, pixel_format: int, packed: bytes) -> b
     return header + packed
 
 
+async def _active_scene_id(redis, frame: Frame) -> str | None:
+    """The workspace-activated scene, when one is cached; None lets the wasm
+    runtime fall back to the scene marked default (same choice the device
+    runtime makes)."""
+    if redis is None:
+        return None
+    try:
+        value = await redis.get(f"frame:{frame.id}:active_scene")
+    except Exception:
+        return None
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return value or None
+
+
 @api_public.get("/frames/{id:int}/embedded/render")
 async def api_embedded_device_render(
     id: int,
     db: Session = Depends(get_db),
+    redis=Depends(get_redis),
     authorization: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
     width, height = embedded_render_dimensions(frame)
     pixel_format = embedded_pixel_format_for_panel(embedded_panel_for_frame(frame))
-    packed = render_embedded_diagnostic_bitmap(frame, width, height, pixel_format)
+
+    # Thin-client scene render: the frame's scenes run inside the wasm scene
+    # runtime (QuickJS sandboxed in wasm, no outbound network) in a bounded
+    # Node subprocess. Any failure — no scenes, no node/wasm toolchain, scene
+    # error, timeout — falls back to the diagnostic bitmap below, so the
+    # device always gets a valid frame.
+    packed: bytes | None = None
+    rgba = await render_scene_rgba(
+        frame,
+        width,
+        height,
+        scene_id=await _active_scene_id(redis, frame),
+        settings=embedded_settings_payload(db, frame),
+    )
+    if rgba is not None:
+        from PIL import Image
+
+        image = Image.frombytes("RGBA", (width, height), rgba).convert("RGB")
+        packed = pack_image_for_panel(image, pixel_format)
+
+    if packed is None:
+        packed = render_embedded_diagnostic_bitmap(frame, width, height, pixel_format)
     expected = embedded_buffer_size(width, height, pixel_format)
     if len(packed) != expected:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -283,14 +337,85 @@ async def api_embedded_device_scenes(
                     headers={"ETag": etag})
 
 
+def embedded_frame_settings(frame: Frame) -> dict:
+    """Live frame settings the device polls between firmware builds.
+
+    Mirrors what the firmware build bakes as compile-time defaults
+    (``_generated_config_header``): the interval, name, render mode, and the
+    power-management flags from ``device_config``, so a settings change takes
+    effect on the next poll instead of the next reflash. ``renderMode`` is
+    derived by the same ``embedded_render_mode_for_frame`` that feeds
+    ``FRAMEOS_DEFAULT_RENDER_MODE``, serialized as the "local"/"remote"
+    string the device parser (fos_settings.c) expects.
+    """
+    from app.tasks.embedded_firmware import (
+        EMBEDDED_RENDER_REMOTE,
+        embedded_device_config,
+        embedded_render_mode_for_frame,
+    )
+
+    device_config = embedded_device_config(frame)
+
+    def _bool_config(*keys: str) -> bool:
+        for key in keys:
+            value = device_config.get(key)
+            if isinstance(value, bool):
+                return value
+        return False
+
+    return {
+        "interval": float(frame.interval or 300),
+        "name": frame.name or "",
+        "renderMode": "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
+        "deepSleep": _bool_config("deepSleep", "deep_sleep"),
+        "wakeSchedule": _bool_config("wakeSchedule", "wake_schedule"),
+        # 0/90/180/270 — the firmware restarts itself to re-init the renderer
+        # when this changes (scene canvases are sized at init).
+        "rotate": int(frame.rotate or 0) % 360,
+        # The device matches schedule events in frame-local wall-clock time
+        # but carries no tz database — it applies this offset to UTC. Sent as
+        # the CURRENT offset, so a DST shift propagates on the next poll.
+        "utcOffsetMinutes": _frame_utc_offset_minutes(frame),
+    }
+
+
+def _frame_utc_offset_minutes(frame: Frame) -> int:
+    tz_name = (getattr(frame, "timezone", None) or "").strip()
+    if not tz_name:
+        return 0
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        offset = datetime.now(ZoneInfo(tz_name)).utcoffset()
+        return int(offset.total_seconds() // 60) if offset else 0
+    except Exception:
+        return 0
+
+
 @api_public.get("/frames/{id:int}/embedded/settings")
 async def api_embedded_device_settings(
     id: int,
     db: Session = Depends(get_db),
     authorization: str = Header(None),
+    if_none_match: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
-    return embedded_settings_payload(db, frame)
+    payload_dict = {
+        **embedded_settings_payload(db, frame),
+        "frame": embedded_frame_settings(frame),
+        # The scene schedule ({"events": [...]}) — the device evaluates it
+        # on-device (fos_schedule.c), same event model as the Pi scheduler.
+        "schedule": frame.schedule if isinstance(frame.schedule, dict) else None,
+    }
+    payload = json.dumps(payload_dict, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    # Same cheap-poll contract as /embedded/scenes: the ETag is the payload's
+    # sha256, so an unchanged configuration costs the device a 304.
+    etag = f'"{hashlib.sha256(payload).hexdigest()}"'
+    if if_none_match and if_none_match.strip() == etag:
+        return Response(status_code=HTTPStatus.NOT_MODIFIED, headers={"ETag": etag})
+    return Response(content=payload, media_type="application/json",
+                    headers={"ETag": etag})
 
 
 # NOTE: Do NOT add a backend image proxy for device rendering here. Frames

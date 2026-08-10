@@ -5,6 +5,8 @@ import { ArrowsRightLeftIcon, CloudArrowUpIcon } from '@heroicons/react/24/outli
 
 import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
+import { frameMenuActionIsAllowed, workspaceMode } from './workspaceSurfaces'
+import type { FrameId } from '../../types'
 
 export function DeployToFrameIcon(props: SVGProps<SVGSVGElement>): JSX.Element {
   return (
@@ -41,15 +43,30 @@ export function FrameChangeStatusIcon({
   frameId,
   variant = 'sidebar',
 }: {
-  frameId: number
+  frameId: FrameId
   variant?: 'sidebar' | 'dashboard'
 }): JSX.Element {
-  const { hasFrameSyncChanges, undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
+  const { frame, hasFrameSyncChanges, undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
   const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, focusFrame, openFrameChangeDrawer } = useActions(workspaceLogic)
-  const statusLabel = unsavedChanges ? 'Unsaved' : hasFrameSyncChanges ? 'Sync' : undeployedChanges ? 'Undeployed' : null
+  const statusLabel = unsavedChanges
+    ? 'Unsaved'
+    : hasFrameSyncChanges
+    ? 'Sync'
+    : undeployedChanges
+    ? 'Undeployed'
+    : null
   const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  // The deploy drawer is the 'deploy' menu action's dialog, so this icon may
+  // only open it where that action exists — the same predicate the "…" menu,
+  // the dashboard tile and the scene sidebar use, so every deploy affordance
+  // appears and disappears together. (The on-device admin panel deploys
+  // through its own FrameLocalDeployMenu and has no drawer; it keeps the
+  // change indicator, just not as a button into a dialog it cannot serve.)
+  // The 'unsaved' drawer is a different dialog and is never gated here.
+  const canOpenDeployDrawer =
+    drawerKind === 'unsaved' || frameMenuActionIsAllowed(workspaceMode(), 'deploy', frame)
   const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : hasFrameSyncChanges ? ArrowsRightLeftIcon : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
@@ -87,6 +104,11 @@ export function FrameChangeStatusIcon({
   }
 
   if (!statusLabel) {
+    if (!canOpenDeployDrawer) {
+      // Nothing to report and no dialog to open: an idle "open deploy" tile
+      // that does nothing is worse than no tile.
+      return <span className={clsx(wrapperClassName, 'pointer-events-none opacity-0')} aria-hidden="true" />
+    }
     return (
       <button
         type="button"
@@ -103,6 +125,23 @@ export function FrameChangeStatusIcon({
       >
         <DeployPlanReadyIcon className={iconClassName} />
       </button>
+    )
+  }
+
+  if (!canOpenDeployDrawer) {
+    // Keep reporting the state, drop the affordance.
+    return (
+      <span
+        title={`${statusLabel} changes`}
+        className={clsx(
+          wrapperClassName,
+          'frameos-change-status-button',
+          isDashboard ? 'frameos-change-status-button--dashboard' : 'frameos-change-status-button--sidebar',
+          'frameos-change-status-button--undeployed'
+        )}
+      >
+        <StatusIcon className={iconClassName} />
+      </span>
     )
   }
 

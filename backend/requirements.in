@@ -3,10 +3,12 @@ aiomqtt
 alembic
 arq
 asyncssh
+cryptography
 email_validator
 fastapi[standard]
 fonttools
 honcho
+httpx
 jwt
 mypy
 modal>=1.4.0

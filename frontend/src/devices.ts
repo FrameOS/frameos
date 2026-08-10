@@ -96,6 +96,7 @@ export const devices: OptionGroup<Option>[] = [
       { value: 'waveshare.EPD_3in0g', label: 'Waveshare 3.0" (G) 400x168 Black/White/Yellow/Red' },
       { value: 'waveshare.EPD_3in52', label: 'Waveshare 3.52" 360x240 Black/White' },
       { value: 'waveshare.EPD_3in52b', label: 'Waveshare 3.52" (B) 360x240 Black/White/Red' },
+      { value: 'waveshare.EPD_3in97', label: 'Good Display 3.97" 800x480 Black/White' },
       { value: 'waveshare.EPD_3in7', label: 'Waveshare 3.7" 480x280 4 Grayscale' },
       { value: 'waveshare.EPD_4in0e', label: 'Waveshare 4.0" (E) 600x400 Spectra 6 Color' },
       { value: 'waveshare.EPD_4in01f', label: 'Waveshare 4.01" (F) 640x400 7 Color' },
@@ -131,6 +132,7 @@ export const devices: OptionGroup<Option>[] = [
       { value: 'waveshare.EPD_7in5b', label: 'Waveshare 7.5" (B) 640x384 Black/White/Red' },
       { value: 'waveshare.EPD_7in5bc', label: 'Waveshare 7.5" (BC) 640x384 Black/White/Yellow' },
       { value: 'waveshare.EPD_7in5c', label: 'Waveshare 7.5" (C) 640x384 Black/White/Yellow' },
+      { value: 'waveshare.EPD_7in5yr', label: 'TRMNL BWRY 7.5" (YR) 800x480 Black/White/Yellow/Red' },
       { value: 'waveshare.EPD_7in5_V2', label: 'Waveshare 7.5" (V2) 800x480 Black/White' },
       { value: 'waveshare.EPD_7in5_V2_gray', label: 'Waveshare 7.5" (V2 GRAY) 800x480 4 Grayscale' },
       { value: 'waveshare.EPD_7in5b_V2', label: 'Waveshare 7.5" (B V2) 800x480 Black/White/Red' },
@@ -233,13 +235,52 @@ export const withCustomPalette: Record<string, Palette> = {
   'pimoroni.inky_impression_13_2025': spectraPalettes[0],
 }
 
+// Keep in sync with backend/app/tasks/buildroot_platforms.py
 export const BUILDROOT_RASPBERRY_PI_ZERO_2_W = 'raspberry-pi-zero-2-w'
+export const BUILDROOT_RASPBERRY_PI_ZERO_W = 'raspberry-pi-zero-w'
 
-export const buildrootPlatforms: Option[] = [{ value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' }]
+export const buildrootPlatforms: Option[] = [
+  { value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' },
+  { value: BUILDROOT_RASPBERRY_PI_ZERO_W, label: 'Raspberry Pi Zero W (32-bit)' },
+]
 
 export const EMBEDDED_ESP32_S3 = 'esp32-s3'
+export const EMBEDDED_ESP32_C3 = 'esp32-c3'
+export const EMBEDDED_PICO_W = 'pico-w'
+export const EMBEDDED_PICO_2W = 'pico-2w'
+export const EMBEDDED_VIRTUAL = 'virtual'
 
-export const embeddedPlatforms: Option[] = [{ value: EMBEDDED_ESP32_S3, label: 'ESP32-S3' }]
+export const embeddedPlatforms: Option[] = [
+  { value: EMBEDDED_ESP32_S3, label: 'ESP32-S3' },
+  // No PSRAM on supported C3 boards: firmware runs thin-client only.
+  { value: EMBEDDED_ESP32_C3, label: 'ESP32-C3 (thin client)' },
+  // Pico family: generic UF2 flashed over BOOTSEL, provisioned over USB
+  // serial — the backend never builds per-frame firmware for these.
+  { value: EMBEDDED_PICO_W, label: 'Raspberry Pi Pico W (thin client)' },
+  { value: EMBEDDED_PICO_2W, label: 'Raspberry Pi Pico 2 W (thin client)' },
+  // No hardware at all: the backend renders the frame and serves it as an
+  // image/page URL. Mirrors EMBEDDED_PLATFORMS["virtual"] in
+  // backend/app/tasks/embedded_firmware.py.
+  { value: EMBEDDED_VIRTUAL, label: 'Virtual frame (backend renderer)' },
+]
+
+// ESP32-C3 and the Pico family have no PSRAM to render scenes on-device:
+// their firmware runs thin-client only, with the backend doing the rendering.
+// Used to tag hardware presets for those boards in the preset dropdowns.
+export function isThinClientEmbeddedPlatform(platform?: string | null): boolean {
+  return platform === EMBEDDED_ESP32_C3 || platform === EMBEDDED_PICO_W || platform === EMBEDDED_PICO_2W
+}
+
+// How the backend quantizes a virtual frame's rendered image.
+// Mirrors VIRTUAL_COLOR_MODES in backend/app/api/virtual_frame.py.
+export const virtualColorModes: Option[] = [
+  { value: 'rgb', label: 'Full color' },
+  { value: 'bw', label: 'Black & white' },
+  { value: 'gray4', label: '4-level grayscale' },
+  { value: 'bwyr', label: 'Black/White/Yellow/Red' },
+  { value: 'sevencolor', label: '7-color ACeP' },
+  { value: 'spectra6', label: 'Spectra 6' },
+]
 
 export const rpiOSPlatforms: Option[] = [
   { value: '', label: 'Autodetect' },

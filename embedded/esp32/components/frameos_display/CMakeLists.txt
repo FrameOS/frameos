@@ -1,13 +1,10 @@
 get_filename_component(FRAMEOS_REPO_ROOT
     "${CMAKE_CURRENT_LIST_DIR}/../../../.." REALPATH)
 
-if(DEFINED ENV{FRAMEOS_SELECTED_PANEL})
-    set(FRAMEOS_SELECTED_PANEL "$ENV{FRAMEOS_SELECTED_PANEL}" CACHE STRING
-        "Waveshare panel compiled into this firmware" FORCE)
-elseif(NOT DEFINED FRAMEOS_SELECTED_PANEL)
-    set(FRAMEOS_SELECTED_PANEL "none" CACHE STRING
-        "Waveshare panel compiled into this firmware")
-endif()
+# Every supported Waveshare panel driver is compiled into the firmware; the
+# active panel is chosen at runtime from the configured panel name (NVS
+# "panel" key). FRAMEOS_SELECTED_PANEL no longer limits what is compiled —
+# it only sets the default panel baked into main/ (see main/CMakeLists.txt).
 
 if(NOT DEFINED PYTHON)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -16,9 +13,8 @@ endif()
 
 set(FRAMEOS_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 execute_process(
-    COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/generate_selected_panel.py"
+    COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/generate_panel_table.py"
             --repo-root "${FRAMEOS_REPO_ROOT}"
-            --panel "${FRAMEOS_SELECTED_PANEL}"
             --out-dir "${FRAMEOS_GENERATED_DIR}"
     RESULT_VARIABLE FRAMEOS_PANEL_GENERATOR_RESULT
     OUTPUT_VARIABLE FRAMEOS_PANEL_GENERATOR_STDOUT
@@ -26,31 +22,38 @@ execute_process(
 )
 if(NOT FRAMEOS_PANEL_GENERATOR_RESULT EQUAL 0)
     message(FATAL_ERROR
-        "Failed to generate selected Waveshare panel ${FRAMEOS_SELECTED_PANEL}: "
+        "Failed to generate the Waveshare panel table: "
         "${FRAMEOS_PANEL_GENERATOR_STDERR}${FRAMEOS_PANEL_GENERATOR_STDOUT}")
 endif()
 
-include("${FRAMEOS_GENERATED_DIR}/selected_panel.cmake")
+include("${FRAMEOS_GENERATED_DIR}/panel_sources.cmake")
 
+# The root sources are symlinked into one flat vendor dir so their
+# #include "DEV_Config.h" resolves against this component's ESP-IDF
+# DEV_Config instead of the Raspberry Pi lgpio one next to them.
 set(FRAMEOS_VENDOR_DIR "${CMAKE_CURRENT_BINARY_DIR}/vendor")
+file(MAKE_DIRECTORY "${FRAMEOS_VENDOR_DIR}")
 set(vendor_srcs "")
-if(FRAMEOS_SELECTED_PANEL_SOURCE)
-    file(MAKE_DIRECTORY "${FRAMEOS_VENDOR_DIR}")
-    file(CREATE_LINK "${FRAMEOS_SELECTED_PANEL_SOURCE}"
-                     "${FRAMEOS_VENDOR_DIR}/${FRAMEOS_SELECTED_PANEL_SOURCE_BASENAME}"
+foreach(panel_source IN LISTS FRAMEOS_PANEL_SOURCES)
+    get_filename_component(panel_basename "${panel_source}" NAME)
+    file(CREATE_LINK "${panel_source}"
+                     "${FRAMEOS_VENDOR_DIR}/${panel_basename}"
                      SYMBOLIC COPY_ON_ERROR)
-    file(CREATE_LINK "${FRAMEOS_SELECTED_PANEL_HEADER}"
-                     "${FRAMEOS_VENDOR_DIR}/${FRAMEOS_SELECTED_PANEL_HEADER_BASENAME}"
+    list(APPEND vendor_srcs "${FRAMEOS_VENDOR_DIR}/${panel_basename}")
+endforeach()
+foreach(panel_header IN LISTS FRAMEOS_PANEL_HEADERS)
+    get_filename_component(panel_basename "${panel_header}" NAME)
+    file(CREATE_LINK "${panel_header}"
+                     "${FRAMEOS_VENDOR_DIR}/${panel_basename}"
                      SYMBOLIC COPY_ON_ERROR)
-    list(APPEND vendor_srcs "${FRAMEOS_VENDOR_DIR}/${FRAMEOS_SELECTED_PANEL_SOURCE_BASENAME}")
-endif()
+endforeach()
 
 idf_component_register(
     SRCS
         "DEV_Config_esp.c"
         "frameos_display.c"
         "photo_painter_pmic.c"
-        "${FRAMEOS_GENERATED_DIR}/frameos_selected_panel.c"
+        "${FRAMEOS_GENERATED_DIR}/frameos_panel_table.c"
         ${vendor_srcs}
     INCLUDE_DIRS
         "include"

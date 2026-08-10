@@ -85,9 +85,13 @@ DEFAULT_TARGETS = [
     "debian-bookworm-armhf",
     "debian-bookworm-arm64",
     "debian-bookworm-amd64",
+    # ARMv6 (Raspberry Pi Zero W / 1): quickjs only — nim tarballs bootstrap
+    # CI runners and dev hosts, which are never armv6.
+    "debian-bookworm-armv6",
     "debian-trixie-armhf",
     "debian-trixie-arm64",
     "debian-trixie-amd64",
+    "debian-trixie-armv6",
     "ubuntu-24.04-arm64",
     "ubuntu-24.04-amd64",
     "ubuntu-26.04-arm64",
@@ -98,6 +102,7 @@ TARGET_PLATFORMS = {
     "armhf": "linux/arm/v7",
     "arm64": "linux/arm64",
     "amd64": "linux/amd64",
+    "armv6": "linux/arm/v6",
 }
 
 
@@ -256,18 +261,25 @@ def s3_client():
     )
 
 
+def metadata_components(metadata: Dict[str, str]) -> List[str]:
+    components = metadata.get("components")
+    if isinstance(components, list) and components:
+        return [str(component) for component in components]
+    return list(COMPONENTS)
+
+
 def package_identifier(metadata: Dict[str, str]) -> str:
-    return (
-        f"{metadata['target']}/"
-        f"nim-{metadata['nim_version']}_"
-        f"quickjs-{metadata['quickjs_version']}"
+    parts = "_".join(
+        f"{component}-{metadata.get(f'{component}_version', '')}"
+        for component in metadata_components(metadata)
     )
+    return f"{metadata['target']}/{parts}"
 
 
 def versions_from_metadata(metadata: Dict[str, str]) -> Dict[str, str]:
     return {
-        "nim": metadata.get("nim_version", ""),
-        "quickjs": metadata.get("quickjs_version", ""),
+        component: metadata.get(f"{component}_version", "")
+        for component in metadata_components(metadata)
     }
 
 
@@ -295,15 +307,19 @@ def component_object_key(prefix: str, target: str, component: str, version: str)
 def write_local_metadata(entry: ManifestEntry, target_dir: Path) -> None:
     distro, release, arch = target_distro_release_arch(entry.target)
     platform = TARGET_PLATFORMS.get(arch, "")
+    components = [component for component in COMPONENTS if entry.versions.get(component)]
+    if not components:
+        components = list(COMPONENTS)
     payload = {
         "target": entry.target,
         "distribution": distro,
         "release": release,
         "arch": arch,
         "platform": platform,
-        "nim_version": entry.versions.get("nim", ""),
-        "quickjs_version": entry.versions.get("quickjs", ""),
+        "components": components,
     }
+    for component in components:
+        payload[f"{component}_version"] = entry.versions.get(component, "")
     target_dir.mkdir(parents=True, exist_ok=True)
     target_file = target_dir / "metadata.json"
     target_file.write_text(json.dumps(payload, indent=2) + "\n")
@@ -433,7 +449,7 @@ def prepare_upload_target(
     component_keys: Dict[str, str] = {}
     component_md5sums: Dict[str, str] = {}
     components_to_upload = []
-    for component in COMPONENTS:
+    for component in metadata_components(metadata):
         version = component_version(metadata, component)
         if not version:
             print(

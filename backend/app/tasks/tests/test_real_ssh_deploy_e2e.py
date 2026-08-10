@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 import threading
 import time
@@ -131,6 +132,15 @@ def _external_target_from_env() -> SshTarget | None:
     )
 
 
+def _docker_image_exists(tag: str) -> bool:
+    return subprocess.run(
+        ["docker", "image", "inspect", tag],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode == 0
+
+
 def _run_docker(args: list[str]) -> str:
     _say("docker " + " ".join(args))
     result = subprocess.run(
@@ -160,11 +170,21 @@ def ssh_target() -> Iterator[SshTarget]:
         pytest.skip("docker is required for FRAMEOS_E2E_DEPLOY without FRAMEOS_E2E_DEPLOY_HOST")
 
     dockerfile = Path(__file__).with_name("deploy_ssh_target") / "Dockerfile"
-    tag = "frameos-deploy-e2e-ssh-target:latest"
+    # Tagged by a hash of the build context, so an image with this name can
+    # only have come from exactly these files. That makes reuse safe: CI
+    # pre-builds it with a layer cache and this skips the ~54 s rebuild, while
+    # any edit here produces a different tag and a fresh build.
+    sys.path.insert(0, str(dockerfile.parent))
+    from context_tag import context_tag  # noqa: E402  (path set just above)
+
+    tag = context_tag(dockerfile.parent)
     container_id = ""
     try:
-        with _phase("build disposable SSH target image"):
-            _run_docker(["build", "-q", "-t", tag, str(dockerfile.parent)])
+        if _docker_image_exists(tag):
+            _say(f"reusing SSH target image {tag}")
+        else:
+            with _phase("build disposable SSH target image"):
+                _run_docker(["build", "-q", "-t", tag, str(dockerfile.parent)])
         with _phase("start disposable SSH target container"):
             container_id = _run_docker(["run", "-d", "-p", "127.0.0.1::22", tag])
         port = int(_run_docker(["port", container_id, "22/tcp"]).rsplit(":", 1)[1])

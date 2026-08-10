@@ -194,7 +194,6 @@ proc fetchRandomAsset(self: App, serverUrl: string, apiKey: string, albumId = ""
   (pickRandomAsset(assets), "")
 
 proc get*(self: App, context: ExecutionContext): Image =
-  self.ensureEmbeddedServiceSettings()
   let serverUrl = normalizeServerUrl(self.frameConfig.settings{"immich"}{"url"}.getStr)
   if serverUrl == "":
     return self.error(context, "Please provide an Immich server URL in the settings.")

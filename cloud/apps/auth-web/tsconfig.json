@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "jsx": "preserve",
+    "module": "ESNext",
+    "noEmit": true,
+    "plugins": [{ "name": "next" }],
+    "types": ["node", "react", "react-dom"]
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    "../../packages/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    // Renders the legacy workspace's FrameActionsMenu, whose import graph
+    // (frontend/src components) predates this package's strict compiler
+    // options. Vitest still runs it; only tsc leaves it out.
+    "src/test/shared-spa/esp32-frame-controls.test.tsx",
+    // Same story: mounts the real framesModel, whose import graph reaches
+    // the legacy workspace components (bare JSX namespace, pre-strict
+    // typing). Vitest still runs it; only tsc leaves it out.
+    "src/test/shared-spa/cloud-scene-deploy.test.ts",
+    // Same story again, and the widest graph of the three: it renders the
+    // whole deploy drawer. Vitest still runs it; only tsc leaves it out.
+    // (frontend/ typechecks these components itself with its own config.)
+    "src/test/shared-spa/cloud-deploy-dialog.test.tsx"
+  ]
+}

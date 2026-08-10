@@ -42,6 +42,7 @@ VARIANT_COLORS = {
     "EPD_4in37g": "BlackWhiteYellowRed",
     "EPD_5in79g": "BlackWhiteYellowRed",
     "EPD_7in3g": "BlackWhiteYellowRed",
+    "EPD_7in5yr": "BlackWhiteYellowRed",  # TRMNL BWRY (GDEM075F52)
 
     "EPD_1in02d": "Black",
     "EPD_1in54": "Black",
@@ -58,6 +59,7 @@ VARIANT_COLORS = {
     "EPD_2in13_V4": "Black",
     "EPD_2in66": "Black",
     "EPD_3in52": "Black",
+    "EPD_3in97": "Black",  # Seeed reTerminal Sticky (GDEM0397T81P)
     "EPD_5in83": "Black",
     "EPD_5in83_V2": "FourGray",
     "EPD_5in84": "Black",
@@ -82,11 +84,11 @@ NO_SPI_VARIANTS = {
     "EPD_12in48",
     "EPD_12in48b",
     "EPD_12in48b_V2",
-    "EPD_13in3e",
 }
 
 BOOT_CONFIG_SPI_VARIANTS = {
     "EPD_10in3",
+    "EPD_13in3e",
 }
 
 BOOT_CONFIG_LINES_BY_VARIANT = {
@@ -94,7 +96,11 @@ BOOT_CONFIG_LINES_BY_VARIANT = {
         "dtoverlay=spi0-0cs",
         "#dtparam=spi=on",
     ],
+    # spi0 without kernel chip selects: the driver toggles CS M/S (GPIO 8/7)
+    # manually, so the kernel must not claim those pins.
     "EPD_13in3e": [
+        "dtoverlay=spi0-0cs",
+        "#dtparam=spi=on",
         "gpio=7=op,dl",
         "gpio=8=op,dl",
     ],

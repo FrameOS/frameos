@@ -12,9 +12,11 @@
 
 #include "esp_crt_bundle.h"
 #include "esp_err.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "nvs.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
@@ -23,8 +25,11 @@
 #include "fos_battery.h"
 #include "fos_buttons.h"
 #include "fos_config.h"
+#include "fos_mem.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
+#include "fos_schedule.h"
+#include "fos_settings.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -83,6 +88,86 @@ uint32_t fos_client_render_count(void) { return s_render_count; }
 int64_t fos_client_last_render_ms(void) { return s_last_render_ms; }
 bool fos_client_last_refresh_skipped(void) { return s_last_refresh_skipped; }
 
+/* ------------------------------------------------------------- metrics */
+
+/* One sample per render pass, kept in a small ring for GET /metrics and the
+ * cloud get_metrics verb; each sample is also emitted as an `event: metrics`
+ * log line, which is how the backend's Metrics panel ingests it. */
+#define FOS_METRICS_RING_CAP 32
+
+static SemaphoreHandle_t s_metrics_lock = NULL;
+static fos_metrics_sample_t s_metrics_ring[FOS_METRICS_RING_CAP];
+static size_t s_metrics_next = 0;
+static size_t s_metrics_count = 0;
+
+static void log_metrics_sample(void)
+{
+    char json[512];
+    int battery_pct = fos_battery_present() ? fos_battery_percent() : -1;
+    size_t used = (size_t)snprintf(
+        json, sizeof(json),
+        "{\"event\":\"metrics\",\"source\":\"esp32\","
+        "\"uptimeSeconds\":%lld,"
+        "\"freeHeapKB\":%u,\"largestHeapBlockKB\":%u,"
+        "\"freePsramKB\":%u,\"largestPsramBlockKB\":%u,"
+        "\"wifiRssi\":%d,\"renders\":%lu,\"renderLastMs\":%lld,"
+        "\"loadedScenes\":%d",
+        (long long)(esp_timer_get_time() / 1000000),
+        (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+        /* Internal fragmentation, not just the total: TLS wants a contiguous
+         * block, so a frame with 50 KB free in 4 KB pieces still cannot open
+         * the cloud link. This is the number that explains such a frame. */
+        (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024),
+        (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
+        (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
+        fos_wifi_rssi(), (unsigned long)s_render_count, s_last_render_ms,
+        fos_scenes_loaded());
+    if (battery_pct >= 0 && used < sizeof(json) - 96) {
+        used += (size_t)snprintf(json + used, sizeof(json) - used,
+                                 ",\"batteryPercent\":%d,\"batteryMillivolts\":%d",
+                                 battery_pct, fos_battery_millivolts());
+    }
+    if (used < sizeof(json) - 2) {
+        snprintf(json + used, sizeof(json) - used, "}");
+    } else {
+        return; /* truncated JSON is worse than a missing sample */
+    }
+    frameos_nim_log_hook(json);
+
+    if (s_metrics_lock == NULL) s_metrics_lock = xSemaphoreCreateMutex();
+    if (s_metrics_lock == NULL) return;
+    char *copy = strdup(json);
+    if (copy == NULL) return;
+    double now = (double)time(NULL);
+    xSemaphoreTake(s_metrics_lock, portMAX_DELAY);
+    free(s_metrics_ring[s_metrics_next].json);
+    s_metrics_ring[s_metrics_next].json = copy;
+    s_metrics_ring[s_metrics_next].timestamp = now;
+    s_metrics_next = (s_metrics_next + 1) % FOS_METRICS_RING_CAP;
+    if (s_metrics_count < FOS_METRICS_RING_CAP) s_metrics_count++;
+    xSemaphoreGive(s_metrics_lock);
+}
+
+size_t fos_client_metrics_recent(fos_metrics_sample_t *out, size_t max)
+{
+    if (out == NULL || max == 0 || s_metrics_lock == NULL) return 0;
+    xSemaphoreTake(s_metrics_lock, portMAX_DELAY);
+    size_t take = s_metrics_count < max ? s_metrics_count : max;
+    size_t start = (s_metrics_next + FOS_METRICS_RING_CAP - take) % FOS_METRICS_RING_CAP;
+    size_t copied = 0;
+    for (size_t i = 0; i < take; i++) {
+        const fos_metrics_sample_t *src = &s_metrics_ring[(start + i) % FOS_METRICS_RING_CAP];
+        if (src->json == NULL) continue;
+        char *copy = strdup(src->json);
+        if (copy == NULL) break;
+        out[copied].json = copy;
+        out[copied].timestamp = src->timestamp;
+        copied++;
+    }
+    xSemaphoreGive(s_metrics_lock);
+    return copied;
+}
+
 const char *fos_client_snapshot_mode(void)
 {
     if (!s_snapshot_lock) return "none";
@@ -131,7 +216,7 @@ static bool display_state_for_buffer(const uint8_t *buf, size_t len, int width, 
     state->height = (uint16_t)height;
     state->format = (uint8_t)format;
     state->len = (uint32_t)len;
-    strlcpy(state->panel, fos_display_panel_name(0), sizeof(state->panel));
+    strlcpy(state->panel, fos_display_selected_panel(), sizeof(state->panel));
     if (sha256_buffer(buf, len, state->sha256) != ESP_OK) {
         memset(state, 0, sizeof(*state));
         return false;
@@ -262,6 +347,12 @@ static bool json_string_value(const char *json, const char *key, char *out, size
     return used > 0;
 }
 
+RTC_NOINIT_ATTR static uint32_t s_render_recovery_restarts;
+RTC_NOINIT_ATTR static uint32_t s_render_recovery_magic;
+#define FOS_RENDER_RECOVERY_MAGIC 0x5245434fu /* "RECO" */
+
+static bool s_render_paused_for_memory = false;
+
 static void json_escape_value(const char *src, char *out, size_t out_len)
 {
     if (!out || out_len == 0) return;
@@ -300,6 +391,9 @@ static void current_scene_details(char *scene_id, size_t scene_id_len,
     json_string_value(info, "currentSceneId", scene_id, scene_id_len);
     json_string_value(info, "currentSceneName", scene_name, scene_name_len);
 }
+
+/* Defined below, next to the other render helpers. */
+static void render_failure_recover(const char *scene_name);
 
 static void log_render_event(const char *event, const char *scene_id,
                              const char *scene_name, const char *status,
@@ -388,7 +482,7 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         return;
     }
-    uint8_t *copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *copy = fos_big_malloc(len);
     if (!copy) copy = malloc(len);
     if (!copy) {
         ESP_LOGW(TAG, "preview snapshot skipped: out of memory for %u bytes", (unsigned)len);
@@ -565,7 +659,7 @@ static esp_err_t render_once(void)
         err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
     } else {
-        buf = heap_caps_malloc(buf_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        buf = fos_big_malloc(buf_len);
         if (!buf) buf = malloc(buf_len);
         if (!buf) {
             ESP_LOGE(TAG, "out of memory for %u byte framebuffer", (unsigned)buf_len);
@@ -640,6 +734,7 @@ static esp_err_t render_once(void)
         store_snapshot(buf, buf_len, width, height, format, s_render_count, s_last_render_ms);
         ESP_LOGI(TAG, "render #%lu done in %lld ms",
                  (unsigned long)s_render_count, s_last_render_ms);
+        s_render_recovery_restarts = 0; /* a good render clears the streak */
         if (s_render_count == 1) {
             ESP_LOGI(TAG, "render task stack free at low-water mark: %u bytes",
                      (unsigned)uxTaskGetStackHighWaterMark(NULL));
@@ -654,7 +749,112 @@ static esp_err_t render_once(void)
                      width, height, format, buf_len, err);
     frameos_nim_flush_logs();
     free(buf);
+    if (err != ESP_OK) {
+        render_failure_recover(scene_name);
+    }
     return err;
+}
+
+/* A render that fails without releasing its PSRAM leaves a frame that can do
+ * nothing at all: the next render fails the same way, and mbedTLS cannot
+ * handshake either (CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC puts its buffers in
+ * PSRAM), so the cloud link stays down and the frame cannot even be told to
+ * switch to a lighter scene. Measured on an 8 MB board rendering a heavy
+ * scene: the pool drops to ~4 KB at the moment of failure and stays there
+ * indefinitely. The only way out was a power cycle.
+ *
+ * So: after a failed render, check whether the pool came back. If it did,
+ * this was an ordinary failure and the frame carries on. If it did not, the
+ * runtime is holding memory it will never return, and a reboot is strictly
+ * better than a frame that is silently dead — it comes back able to render,
+ * able to connect, and able to receive a different scene.
+ *
+ * The threshold is deliberately far below any working render (which needs
+ * megabytes): only a frame that is genuinely stuck reaches it. */
+#define FOS_RENDER_RECOVERY_MIN_PSRAM (256 * 1024)
+/* Restarting rescues a wedged frame, but a scene that always exhausts memory
+ * would restart it forever. After this many consecutive rescues the frame
+ * stops rendering instead and stays up: a reachable frame showing a stale
+ * image can be given a lighter scene, a rebooting one cannot. Survives the
+ * software reset in RTC memory (not a power cycle, which is the right scope —
+ * unplugging is how a person says "try again"). */
+#define FOS_RENDER_RECOVERY_MAX_RESTARTS 2
+
+/* Called once at startup, before the first render. */
+void fos_client_render_recovery_boot(void)
+{
+    /* A power-on reset means a person intervened, and intervening is how they
+     * say "try again" — so the streak starts over.
+     *
+     * esp_reset_reason(), not the RTC magic below: RTC memory is NOT reliably
+     * cleared by a brief unplug. Observed on hardware — a frame paused after
+     * repeated out-of-memory renders was unplugged, replugged, and came back
+     * still paused, because the counter survived the power interruption. The
+     * magic can only detect memory that was never stamped, which is a
+     * different (and rarer) thing than a deliberate power cycle. */
+    if (esp_reset_reason() == ESP_RST_POWERON) {
+        s_render_recovery_magic = FOS_RENDER_RECOVERY_MAGIC;
+        s_render_recovery_restarts = 0;
+        return;
+    }
+    if (s_render_recovery_magic != FOS_RENDER_RECOVERY_MAGIC) {
+        /* First boot on this board, or RTC memory that was never stamped. */
+        s_render_recovery_magic = FOS_RENDER_RECOVERY_MAGIC;
+        s_render_recovery_restarts = 0;
+        return;
+    }
+    if (s_render_recovery_restarts >= FOS_RENDER_RECOVERY_MAX_RESTARTS) {
+        s_render_paused_for_memory = true;
+        ESP_LOGE(TAG, "rendering paused: the active scene exhausted PSRAM %u times in a row. "
+                      "The frame stays online so a lighter scene can be assigned; "
+                      "select another scene or power-cycle to retry.",
+                 (unsigned)s_render_recovery_restarts);
+        frameos_nim_log_hook(
+            "{\"event\":\"render:paused\",\"source\":\"esp32\","
+            "\"reason\":\"psram-exhausted-repeatedly\","
+            "\"detail\":\"rendering paused so the frame stays reachable; assign a lighter scene\"}");
+        frameos_nim_flush_logs();
+    }
+}
+
+bool fos_client_render_paused(void) { return s_render_paused_for_memory; }
+
+void fos_client_clear_render_pause(void)
+{
+    /* A new scene selection or a new payload is the user saying "try this
+     * instead", so give rendering another chance. */
+    s_render_recovery_restarts = 0;
+    if (s_render_paused_for_memory) {
+        s_render_paused_for_memory = false;
+        ESP_LOGI(TAG, "rendering resumed after a scene change");
+    }
+}
+
+static void render_failure_recover(const char *scene_name)
+{
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (free_psram >= FOS_RENDER_RECOVERY_MIN_PSRAM) {
+        return; /* memory came back; nothing to recover from */
+    }
+    s_render_recovery_restarts += 1;
+    ESP_LOGE(TAG, "render failed and PSRAM did not recover (%u bytes free); "
+                  "restarting so the frame can render and reconnect",
+             (unsigned)free_psram);
+    /* Escaped and bounded: a scene name is user-controlled and goes into a
+     * JSON log line that the cloud parses. */
+    char scene_esc[128];
+    json_escape_value(scene_name ? scene_name : "", scene_esc, sizeof(scene_esc));
+    char line[320];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"render:recover\",\"source\":\"esp32\","
+             "\"status\":\"restarting\",\"reason\":\"psram-exhausted\","
+             "\"freePsram\":%u,\"sceneName\":\"%s\"}",
+             (unsigned)free_psram, scene_esc);
+    frameos_nim_log_hook(line);
+    frameos_nim_flush_logs();
+    /* Give the log upload and any USB reader a moment before the reset. */
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    esp_restart();
 }
 
 static void log_render_skipped(const char *reason, int battery_pct)
@@ -723,12 +923,26 @@ static void client_task(void *arg)
             fos_buttons_process_events();
         }
 
+        /* Live settings: pick up backend-side interval/name/render-mode
+         * changes without a rebuild. ETag'd, so steady state is a 304. */
+        fos_settings_sync(false);
+
+        /* A console `set spill_force` may have changed it since last pass. */
+        fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);
+
         /* Battery guardrail: when the cell is nearly empty, skip the (costly)
          * render + panel refresh and sleep long so a low battery can't keep
          * cycling the display down to a damaging voltage. */
         int battery_pct = fos_battery_present() ? fos_battery_percent() : -1;
         bool battery_critical = battery_pct >= 0 && battery_pct <= FOS_BATTERY_CRITICAL_PCT;
-        if (battery_critical) {
+        bool rendered = false;
+        if (s_render_paused_for_memory) {
+            /* Paused after repeated PSRAM exhaustion — see
+             * fos_client_render_recovery_boot. Skipping the render is what
+             * keeps this frame reachable, so it can be handed a lighter
+             * scene instead of rebooting forever. */
+            log_render_skipped("memory", -1);
+        } else if (battery_critical) {
             ESP_LOGW(TAG, "battery critical (%d%%); skipping render to protect the cell", battery_pct);
             log_render_skipped("battery", battery_pct);
         } else {
@@ -737,19 +951,41 @@ static void client_task(void *arg)
                 log_render_skipped("ota", -1);
             } else {
                 render_once();
+                rendered = true;
             }
         }
+        log_metrics_sample();
+        frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
+        /* The scene's refreshInterval is authoritative when a scene is
+         * loaded and has an opinion (>= 1), matching the Pi runner where
+         * the frame-level interval is only the no-scene fallback. Clamped
+         * like the settings-pulled interval: a bad value must not park the
+         * frame for months. */
         uint32_t interval = config->interval_sec ? config->interval_sec : 300;
         double scene_interval = frameos_nim_scene_interval();
-        if (scene_interval >= 1.0 && scene_interval < interval) {
+        if (scene_interval >= 1.0) {
+            if (scene_interval > 7 * 86400.0) scene_interval = 7 * 86400.0;
             interval = (uint32_t)scene_interval;
+        }
+        /* A per-render override from logic/nextSleepDuration beats both
+         * intervals, like context.nextSleep on the Pi runner. Only valid
+         * right after a render actually ran. */
+        if (rendered) {
+            double next_sleep = frameos_nim_next_sleep();
+            if (next_sleep >= 0.0) {
+                if (next_sleep > 7 * 86400.0) next_sleep = 7 * 86400.0;
+                if (next_sleep < 1.0) next_sleep = 1.0;
+                interval = (uint32_t)next_sleep;
+            }
         }
         if (battery_critical && interval < FOS_BATTERY_CRITICAL_SLEEP_SEC) {
             interval = FOS_BATTERY_CRITICAL_SLEEP_SEC;
         }
 
         uint32_t sleep_s = compute_sleep_seconds(interval, cycle_start);
+        ESP_LOGI(TAG, "next render in %lu s (interval %lu s)",
+                 (unsigned long)sleep_s, (unsigned long)interval);
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
         if (config->deep_sleep && fos_display_present() && keep_awake_s == 0) {
             ESP_LOGI(TAG, "deep sleeping for %lu s%s", (unsigned long)sleep_s,
@@ -772,6 +1008,9 @@ static void client_task(void *arg)
             if (bits & RENDER_NOW_BIT) break;
             if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
                 fos_buttons_process_events();
+                /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —
+                 * evaluated on the render task, like every Nim call. */
+                if (fos_schedule_tick()) break;
             }
             if (frameos_nim_render_requested()) break;
             remaining_ms -= slice;

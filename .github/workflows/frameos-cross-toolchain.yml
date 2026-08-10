@@ -61,6 +61,7 @@ jobs:
 
           sys.path.insert(0, str(Path("backend").resolve()))
           from app.utils.cross_toolchain_packages import (  # noqa: E402
+              CONTAINERLESS_TARGET_PLATFORMS,
               TARGET_CROSS_TOOLCHAIN_DPKG_ARCHS,
               TARGET_CROSS_TOOLCHAIN_PACKAGES,
           )
@@ -74,6 +75,11 @@ jobs:
           digest_data = {"images": {}}
 
           for index, target in enumerate(matrix["include"]):
+              if target["platform"] in CONTAINERLESS_TARGET_PLATFORMS:
+                  # No container images exist for this platform (e.g.
+                  # linux/arm/v6); cross builds use the mapped platform's
+                  # toolchain image instead.
+                  continue
               base_image = target["image"]
               safe_base = sanitize(base_image.replace("/", "_"))
               safe_platform = sanitize(target["platform"].replace("/", "_"))

@@ -42,9 +42,33 @@ class Config:
     DEBUG = get_bool_env('DEBUG')
     TEST = get_bool_env('TEST')
     SECRET_KEY = os.environ.get('SECRET_KEY') or secrets.token_urlsafe(32)
+    # Cloud link secrets are encrypted with CLOUD_SECRET_KEY when set, else
+    # SECRET_KEY. Set it to decouple them, so SECRET_KEY can be rotated without
+    # killing the cloud link. PREVIOUS_SECRET_KEYS (comma separated) are tried
+    # on decrypt only; stored secrets are re-encrypted with the current key as
+    # they are read, so old keys can be dropped after a sync cycle.
+    # See docs/cloud-link.md.
+    CLOUD_SECRET_KEY = os.environ.get('CLOUD_SECRET_KEY') or ''
+    PREVIOUS_SECRET_KEYS = [
+        key.strip() for key in (os.environ.get('PREVIOUS_SECRET_KEYS') or '').split(',') if key.strip()
+    ]
     DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///../db/frameos.db'
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
     INSTANCE_ID = INSTANCE_ID
+    # FrameOS Cloud provider origin. Empty = https://cloud.frameos.net,
+    # any http(s) URL = a compatible self-hosted provider, 'disabled' = hide
+    # the cloud link entirely. See docs/cloud-link.md.
+    FRAMEOS_CLOUD_URL = os.environ.get('FRAMEOS_CLOUD_URL') or os.environ.get('FRAMEOS_AUTH_PROVIDER_URL') or ''
+    # The origin this install is reached at, e.g. https://frameos.example. Set
+    # this when a reverse proxy fronts FrameOS: it governs the cloud login
+    # redirect_uri and the logout return_to, and without it those are derived
+    # from request headers the caller controls. See docs/cloud-link.md.
+    FRAMEOS_PUBLIC_URL = os.environ.get('FRAMEOS_PUBLIC_URL') or ''
+    # Comma-separated proxy addresses whose X-Forwarded-* headers may be
+    # trusted. Empty = trust loopback and private-range peers only, which
+    # covers the usual docker/reverse-proxy setups without letting a client
+    # off the local network claim any origin it likes.
+    FRAMEOS_TRUSTED_PROXIES = os.environ.get('FRAMEOS_TRUSTED_PROXIES') or ''
     HASSIO_RUN_MODE = os.environ.get('HASSIO_RUN_MODE', None)
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)

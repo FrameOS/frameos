@@ -4,6 +4,8 @@ import { framesModel } from '../../models/framesModel'
 import { newFrameForm } from '../frames/newFrameForm'
 import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'
 import type { framesHomeLogicType } from './framesHomeLogicType'
+import type { FrameId } from '../../types'
+import { parseRouteFrameId } from '../../utils/frameId'
 
 function framesMainElement(): HTMLElement | null {
   if (typeof document === 'undefined') {
@@ -37,7 +39,7 @@ function removeFrameScrollSpy(cache: Record<string, any>): void {
   cache.documentScrollElement = null
 }
 
-function currentFrameInView(): number | null {
+function currentFrameInView(): FrameId | null {
   if (typeof document === 'undefined' || typeof window === 'undefined') {
     return null
   }
@@ -57,10 +59,11 @@ function currentFrameInView(): number | null {
 
   const sections = Array.from(document.querySelectorAll<HTMLElement>('[data-workspace-frame-section]'))
     .map((section) => {
-      const frameId = Number(section.dataset.workspaceFrameSection)
-      return Number.isFinite(frameId) ? { frameId, rect: section.getBoundingClientRect() } : null
+      // The dataset carries the raw id — a uuid on the cloud, so never Number() it.
+      const frameId = parseRouteFrameId(section.dataset.workspaceFrameSection)
+      return frameId !== null ? { frameId, rect: section.getBoundingClientRect() } : null
     })
-    .filter((section): section is { frameId: number; rect: DOMRect } => section !== null)
+    .filter((section): section is { frameId: FrameId; rect: DOMRect } => section !== null)
     .filter((section) => section.rect.bottom >= viewportTop && section.rect.top <= viewportBottom)
 
   if (sections.length === 0) {

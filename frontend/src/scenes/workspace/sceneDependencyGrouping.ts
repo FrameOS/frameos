@@ -1,4 +1,4 @@
-import type { FrameScene, SceneNodeData } from '../../types'
+import type { FrameScene, SceneNodeData, FrameId } from '../../types'
 import { sceneChildExpansionKey } from './workspaceLogic'
 
 export interface SceneDependencyEntry {
@@ -71,7 +71,7 @@ export function buildSceneDependencyEntries({
   scenes,
 }: {
   childrenBySceneId: Map<string, string[]>
-  frameId: number
+  frameId: FrameId
   matchingSceneIds: Set<string> | null
   sceneById: Map<string, FrameScene>
   sceneChildExpansion: Record<string, boolean>

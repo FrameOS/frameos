@@ -2,7 +2,7 @@
 env
 __pycache__
 *.db
-db/
+/db/
 !.flox/
 !.flox/env/
 !.flox/env/manifest.toml
@@ -76,6 +76,7 @@ gpt.txt
 .local/redis/
 .flox/cache/
 .flox/log/
+.flox/postgres/
 .flox/redis/
 .flox/run/
 .flox/state/
@@ -97,8 +98,19 @@ e2e/scenes/*.so
 *.rdb
 tmp/
 release-assets/
+# ... except the firmware-signing PUBLIC key: the release workflow
+# verifies each signed image against it, and it is the reference copy of
+# the key baked into shipped firmware (embedded/esp32/main/fos_ota_pubkey.h).
+!release-assets/firmware-signing.pub
 # wasm live-preview bundle (built by frameos/tools/build_wasm.sh)
 frontend/public/frameos-wasm/
 frameos/build/wasm/
 dist-editor
 frontend/editor-smoke.png
+
+# Turborepo cache
+.turbo/
+
+# Pico firmware build trees (embedded/pico)
+embedded/pico/build*/
+cloud/.dev-firmware/

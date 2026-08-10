@@ -22,10 +22,10 @@ import {
   type SplitLayoutDirection,
   type SplitScreenSceneLayout,
 } from '../../utils/splitScreenLayouts'
-import type { StateField } from '../../types'
+import type { StateField, FrameId } from '../../types'
 
 export interface SplitScreenLayoutLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export interface SplitScreenResizeState {

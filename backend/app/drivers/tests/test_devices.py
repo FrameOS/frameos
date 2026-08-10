@@ -194,11 +194,11 @@ def test_base_inky_impression_stays_on_python_driver():
     assert "i2c" in drivers
 
 
-def test_boot_config_spi_variants_match_it8951_variants():
-    assert BOOT_CONFIG_SPI_VARIANTS == set(get_variant_keys_for("it8951"))
+def test_boot_config_spi_variants_enable_spi0_without_kernel_chip_selects():
+    assert BOOT_CONFIG_SPI_VARIANTS == set(get_variant_keys_for("it8951")) | {"EPD_13in3e"}
 
     for variant in BOOT_CONFIG_SPI_VARIANTS:
-        assert BOOT_CONFIG_LINES_BY_VARIANT[variant] == [
+        assert BOOT_CONFIG_LINES_BY_VARIANT[variant][:2] == [
             "dtoverlay=spi0-0cs",
             "#dtparam=spi=on",
         ]

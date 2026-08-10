@@ -137,7 +137,39 @@ async def test_release_image_composes_with_executor_when_host_tools_are_missing(
         assert self.executor is fake_executor
         assert image == "frameos/frameos-buildroot:test"
         assert base_image_path == calls["base_image_path"]
-        assert not (temp_dir / "overlay" / "boot" / "frameos-setup.json").exists()
+        overlay = temp_dir / "overlay"
+        # Generic release images ship no per-frame setup payload...
+        assert not (overlay / "boot" / "frameos-setup.json").exists()
+        assert not (overlay / "boot" / "frameos-wifi.nmconnection").exists()
+        # ...but they DO ship the canonical 4096-byte all-comments
+        # frameos-cloud.txt placeholder that the in-browser personalizer
+        # patches in place (byte-exact: magic first line + fixed size).
+        placeholder = (overlay / "boot" / "frameos-cloud.txt").read_bytes()
+        assert placeholder == module.render_cloud_config_placeholder()
+        assert len(placeholder) == 4096
+        assert placeholder.startswith(b"# FRAMEOS-CLOUD-CONFIG-V1\n")
+        # ...but the first-boot service and script stay staged and dormant,
+        # armed for both frameos-setup.json and frameos-cloud.txt.
+        script_path = overlay / "usr" / "local" / "bin" / "frameos-setup-reset.sh"
+        assert script_path.is_file()
+        script_text = script_path.read_text(encoding="utf-8")
+        assert "cloud_enroll_pending.json" in script_text
+        assert 'CLOUD_FILE="$BOOT_DIR"/frameos-cloud.txt' in script_text
+        service_path = overlay / "etc" / "systemd" / "system" / "frameos-firstboot-setup.service"
+        service_text = service_path.read_text(encoding="utf-8")
+        assert "ConditionPathExists=|/boot/frameos-setup.json" in service_text
+        assert "ConditionPathExists=|/boot/frameos-cloud.txt" in service_text
+        wants_link = (
+            overlay / "etc" / "systemd" / "system" / "multi-user.target.wants" / "frameos-firstboot-setup.service"
+        )
+        assert wants_link.is_symlink()
+        # Without embedded WiFi the captive portal must still come up.
+        frame_json = json.loads(
+            (overlay / "srv" / "frameos" / "releases" / "release_2026.6.2" / "frame.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert frame_json["network"]["wifiHotspot"] == "bootOnly"
         output_path.write_bytes(b"release raw image")
         calls["compose_image"] = image
 

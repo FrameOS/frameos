@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { mockCloudBackupsApi } from './visual-helpers'
 
 export type VisualTheme = 'light' | 'dark'
 export type VisualViewportName = 'mobile' | 'mid' | 'full'
@@ -12,6 +13,8 @@ export interface VisualViewport {
 export interface VisualVariant {
   id: string
   label?: string
+  /** Runs before page.goto — for network mocks that must catch mount-time requests. Overrides the case-level setup. */
+  setup?: (page: Page) => Promise<void>
   prepare?: (page: Page) => Promise<void>
   fullPage?: boolean
 }
@@ -24,6 +27,8 @@ export interface VisualCase {
   themes?: VisualTheme[]
   viewports?: VisualViewportName[]
   fullPage?: boolean
+  /** Runs before page.goto — for network mocks that must catch mount-time requests. */
+  setup?: (page: Page) => Promise<void>
   ready?: (page: Page) => Promise<void>
   variants?: VisualVariant[]
 }
@@ -128,7 +133,12 @@ async function scrollLogsToLatest(page: Page): Promise<void> {
       break
     }
     if (await scrollButton.isVisible().catch(() => false)) {
-      await scrollButton.click()
+      // The panel can auto-follow to the bottom between the visibility check
+      // and the click, which hides the button — that is the state this
+      // helper is trying to reach, not a failure. A short timeout plus
+      // swallow keeps the loop's own retry (and the final asserts below) as
+      // the source of truth instead of deadlocking on a vanished button.
+      await scrollButton.click({ timeout: 1000 }).catch(() => {})
     }
     await page.evaluate(() => {
       const scrollElement = document.scrollingElement ?? document.documentElement
@@ -168,6 +178,17 @@ async function openSettingsNetworkSection(page: Page): Promise<void> {
     await networkShortcut.click()
   }
   await page.locator('#frame-settings-network').scrollIntoViewIfNeeded()
+}
+
+async function openSettingsCloudSection(page: Page): Promise<void> {
+  await page.locator('#settings-cloud').scrollIntoViewIfNeeded()
+}
+
+async function showCloudBackupsList(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /^Show backups$/ }).click()
+  await page.getByText('Living room frame').waitFor()
+  await page.getByText('Morning dashboard scene').waitFor()
+  await openSettingsCloudSection(page)
 }
 
 async function stabilizeTerminal(page: Page): Promise<void> {
@@ -337,5 +358,26 @@ export const visualCases: VisualCase[] = [
     path: '/settings',
     fullPage: true,
     variants: [{ id: 'default' }],
+  },
+  {
+    id: 'global-settings-cloud-backups',
+    title: 'Global settings cloud backups',
+    path: '/settings',
+    fullPage: true,
+    viewports: ['mobile', 'full'],
+    setup: async (page) => {
+      await mockCloudBackupsApi(page)
+    },
+    variants: [
+      { id: 'connected', prepare: openSettingsCloudSection },
+      { id: 'backups-list', prepare: showCloudBackupsList },
+      {
+        id: 'switched-off',
+        setup: async (page) => {
+          await mockCloudBackupsApi(page, { backupScenesEnabled: false, backupFramesEnabled: false })
+        },
+        prepare: openSettingsCloudSection,
+      },
+    ],
   },
 ]

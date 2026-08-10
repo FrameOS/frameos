@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FrameOS Cloud</title>
+    <link rel="icon" type="image/svg+xml" href="/frames-app/img/logo-2/logo.svg" />
+    <script>
+      // Pre-paint theme, mirroring the Next app's inline script in
+      // app/layout.tsx: the shared frameos_theme cookie first, then the
+      // workspace's own localStorage, then the system preference — the same
+      // precedence cloudThemeSync.ts seeds kea with, so the pre-paint theme
+      // and the one the workspace applies after mount always agree. Without
+      // this, arriving on /frames from a dark account page flashed the light
+      // background until the lazy workspace chunk loaded — the one place the
+      // two apps still visibly disagreed about the theme.
+      ;(function () {
+        try {
+          var match = document.cookie.match(/(?:^|;\s*)frameos_theme=(dark|light)/)
+          var theme = match ? match[1] : null
+          if (!theme) {
+            var stored = window.localStorage.getItem('frameos.workspaceTheme')
+            theme =
+              stored === 'dark' || stored === 'light'
+                ? stored
+                : window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+          }
+          document.documentElement.dataset.frameosTheme = theme
+          document.documentElement.style.colorScheme = theme
+        } catch (e) {}
+      })()
+    </script>
+    <link rel="stylesheet" href="/frames-app/static/main.css" />
+    <script>
+      // NOTE: the //__FRAMEOS_CLOUD_WS_ORIGIN__ and //__FRAMEOS_CLOUD_APP_CONFIG__
+      // lines below are named replacement anchors for
+      // cloud/apps/auth-web/app/frames/[[...path]]/route.ts, which swaps the
+      // first for cloud_ws_origin in dev and the second for this deployment's
+      // account/scenes/logout URLs, enrollment origin and claim-code TTL —
+      // server-side configuration a client-only bundle cannot derive from
+      // window.location (see src/cloudConfig.ts). Keep the tokens; the text
+      // around them is free to change. build.mjs fails the build if either
+      // goes missing, and the route fails loudly rather than serving a shell
+      // whose websocket points nowhere or whose header links point at the
+      // wrong origin.
+      // Base-path contract (see cloud-frontend/README.md):
+      //   API           /api/frames/...  -> ingress_path ''
+      //   SPA routes    /frames/**       -> route_base_path
+      //   Public assets /frames-app/**   -> assets_base_path
+      window.FRAMEOS_APP_CONFIG = {
+        ...(window.FRAMEOS_APP_CONFIG || {}),
+        cloudMode: true,
+        //__FRAMEOS_CLOUD_WS_ORIGIN__
+        //__FRAMEOS_CLOUD_APP_CONFIG__
+        ingress_path: '',
+        route_base_path: '/frames',
+        assets_base_path: '/frames-app',
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="popper" style="position: absolute; z-index: 80"></div>
+    <script type="module" src="/frames-app/static/main.js"></script>
+  </body>
+</html>

@@ -1,12 +1,13 @@
 import { isInFrameAdminMode } from './frameAdmin'
 import { projectApiPathFromCache } from './projectApi'
+import type { FrameId } from '../types'
 
-function frameAssetApiPrefix(frameId: number): string {
+function frameAssetApiPrefix(frameId: FrameId): string {
   const prefix = isInFrameAdminMode() ? '/api/admin/frames' : projectApiPathFromCache('/api/frames')
   return `${prefix}/${frameId}`
 }
 
-export function frameAssetsApiPath(frameId: number, suffix = 'assets'): string {
+export function frameAssetsApiPath(frameId: FrameId, suffix = 'assets'): string {
   return `${frameAssetApiPrefix(frameId)}/${suffix}`
 }
 
@@ -17,7 +18,7 @@ interface FrameAssetUrlOptions {
 }
 
 export function frameAssetUrl(
-  frameId: number,
+  frameId: FrameId,
   path: string,
   thumbOrOptions: boolean | FrameAssetUrlOptions = false
 ): string {

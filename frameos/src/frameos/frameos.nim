@@ -14,6 +14,7 @@ import frameos/timezone_updater
 import frameos/types
 import frameos/utils/memory
 import frameos/portal as netportal
+import frameos/cloud/hub_client
 import frameos/tls_proxy
 import frameos/setup_proxy
 import frameos/boot_guard
@@ -134,7 +135,11 @@ proc newFrameOS*(): FrameOS =
       hotspotStatus: HotspotStatus.disabled,
     ),
   )
-  drivers.init(result)
+  # Display drivers are initialized later, in start(): first the network
+  # check and boot hotspot get their chance to run, so a display driver that
+  # crashes or hangs during init (bad SPI overlay, wrong pins, unvalidated
+  # panel) cannot leave the frame both blank AND unreachable. A frame with a
+  # broken display but a live hotspot/network can still be debugged.
   result.runner = newRunner(frameConfig)
   result.server = newServer(result)
   startScheduler(result)
@@ -179,11 +184,17 @@ proc start*(self: FrameOS) {.async.} =
     message["reboot"] = rebootInfo
   self.logger.log(message)
   netportal.setLogger(self.logger)
+  # Decide (and log) NetworkManager vs wpa_supplicant before anything touches
+  # the radio, and let the supplicant backend rejoin its saved network.
+  netportal.ensureNetworkBackendReady(self)
 
   var firstSceneId: Option[SceneId] = none(SceneId)
-  if self.frameConfig.network.networkCheck:
+  # The boot hotspot needs a connectivity probe to decide whether to start,
+  # so it runs the network check even when "wait for network" is switched off.
+  let hotspotBootOnly = self.frameConfig.network.wifiHotspot == "bootOnly"
+  if self.frameConfig.network.networkCheck or hotspotBootOnly:
     let connected = checkNetwork(self)
-    if self.frameConfig.network.wifiHotspot == "bootOnly":
+    if hotspotBootOnly:
       if connected:
         netportal.stopAp(self)
       else:
@@ -202,7 +213,18 @@ proc start*(self: FrameOS) {.async.} =
     self.logger.log(%*{"event": "boot:guard:fallback", "sceneId": bootGuardFallbackSceneId(),
       "crashesWithoutRender": bootCrashCount, "threshold": BOOT_GUARD_CRASH_LIMIT})
 
+  # Deliberately after the network check, boot hotspot and boot-crash
+  # accounting: a driver that dies here leaves a reachable frame, and the
+  # crash is counted by the boot guard on the next attempt.
+  drivers.init(self)
+
   self.runner.start(firstSceneId)
+
+  # Cloud-managed frames (docs/cloud-frames.md): a background thread completes
+  # any pending claim-token enrollment from provisioning and, once the frame is
+  # enrolled, dials the provider's management WebSocket. Idles cheaply when the
+  # frame is standalone or backend-managed.
+  startCloudManagement(self.frameConfig)
 
   startTlsProxy(self.frameConfig, self.logger)
 

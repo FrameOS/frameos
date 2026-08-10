@@ -378,7 +378,7 @@ class FrameDeployer:
     async def arch_to_nim_cpu(self, arch: str) -> str:
         if arch in ("aarch64", "arm64"):
             return "arm64"
-        elif arch in ("armv6l", "armv7l", "armhf"):
+        elif arch in ("armv6", "armv6l", "armv7l", "armhf"):
             return "arm"
         elif arch == "i386":
             return "i386"
@@ -918,8 +918,8 @@ $(OBJECTS): pre-build
         pixie_env = ""
         if pixie_override is not None:
             pixie_env = f"FRAMEOS_PIXIE_PATH={shlex.quote(str(pixie_override))} "
-            await log(
-                self.db, self.redis, int(frame.id), "stdout",
+            await self.log(
+                "stdout",
                 f"Using local Pixie checkout at {pixie_override}",
             )
         cmd = (

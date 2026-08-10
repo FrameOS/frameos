@@ -48,6 +48,9 @@ function taskIcon(kind: LongRunningTaskKind): JSX.Element {
   if (kind === 'upload') {
     return <DocumentArrowUpIcon className="h-5 w-5" />
   }
+  if (kind === 'save') {
+    return <DocumentTextIcon className="h-5 w-5" />
+  }
   return <ServerStackIcon className="h-5 w-5" />
 }
 

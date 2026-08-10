@@ -189,16 +189,58 @@ async def test_deploy_remote_defaults_to_auto_transport():
     assert redis.jobs == [("deploy_remote", {"id": 7, "recompile": False, "transport": "auto"})]
 
 
-def test_resolve_remote_task_transport_uses_frame_remote_preference():
+@pytest.mark.asyncio
+async def test_resolve_remote_task_transport_uses_frame_remote_preference():
     frame = SimpleNamespace(
-        agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True}
+        id=1,
+        frame_host="frame.local",
+        ssh_user="pi",
+        agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
     )
 
-    assert resolve_remote_task_transport(frame, "auto") == "remote"
-    assert resolve_remote_task_transport(frame, "ssh") == "ssh"
+    # Without a redis to ask, the configured preference decides.
+    assert await resolve_remote_task_transport(frame, "auto") == "remote"
+    assert await resolve_remote_task_transport(frame, "ssh") == "ssh"
 
     frame.agent["deployWithAgent"] = False
-    assert resolve_remote_task_transport(frame, "auto") == "ssh"
+    assert await resolve_remote_task_transport(frame, "auto") == "ssh"
+
+
+@pytest.mark.asyncio
+async def test_resolve_remote_task_transport_falls_back_to_ssh_when_remote_is_down(monkeypatch):
+    frame = SimpleNamespace(
+        id=1,
+        frame_host="frame.local",
+        ssh_user="pi",
+        agent={"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True},
+    )
+    connections = 0
+
+    async def fake_connections(_redis, _frame_id):
+        return connections
+
+    monkeypatch.setattr(
+        importlib.import_module("app.tasks.deploy_remote"),
+        "number_of_connections_for_frame",
+        fake_connections,
+    )
+
+    # Remote preferred but disconnected, and the frame is SSH-reachable: use it
+    # instead of failing the task.
+    assert await resolve_remote_task_transport(frame, "auto", FakeRedis()) == "ssh"
+
+    # An explicit choice is always honoured, connected or not.
+    assert await resolve_remote_task_transport(frame, "remote", FakeRedis()) == "remote"
+
+    # Nothing to fall back to: stay on remote so the caller raises the clear
+    # "remote disconnected" error rather than an SSH failure.
+    frame.frame_host = ""
+    assert await resolve_remote_task_transport(frame, "auto", FakeRedis()) == "remote"
+
+    # Connected again: back to the preferred transport.
+    frame.frame_host = "frame.local"
+    connections = 1
+    assert await resolve_remote_task_transport(frame, "auto", FakeRedis()) == "remote"
 
 
 def test_delayed_remote_restart_command_uses_immediate_transient_service():

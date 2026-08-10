@@ -23,6 +23,7 @@ openssl.outputs = "all"
 pkg-config.pkg-path = "pkg-config"
 pkg-config.outputs = "all"
 pnpm.pkg-path = "pnpm"
+postgresql.pkg-path = "postgresql"
 python.pkg-path = "python312"
 redis.pkg-path = "redis"
 xz.pkg-path = "xz"
@@ -30,6 +31,7 @@ xz.outputs = "all"
 nimble.pkg-path = "nimble"
 
 [vars]
+NEXT_TELEMETRY_DISABLED = "1"
 PIP_DISABLE_PIP_VERSION_CHECK = "1"
 PIP_NO_COLOR = "1"
 PYTHONDONTWRITEBYTECODE = "1"
@@ -71,6 +73,22 @@ on-activate = '''
   export LIBRARY_PATH="$FLOX_ENV/lib"
   export PKG_CONFIG_PATH="$FLOX_ENV/lib/pkgconfig:$FLOX_ENV/share/pkgconfig"
 
+  # Nim's stdlib opens libssl/libcrypto with dlopen at RUNTIME, not at link
+  # time, so LDFLAGS above does nothing for it. This environment installs
+  # openssl but does not surface its dylibs in $FLOX_ENV/lib, and macOS has no
+  # usable system libssl to fall back on — so every dlopen candidate misses,
+  # the proc pointers stay nil, and the first `newContext()` segfaults instead
+  # of raising. That takes down anything that makes an HTTPS request: the
+  # frameos binary, its network check, and any Nim test that renders a scene
+  # with a downloading app. Point the loader at the openssl this env already
+  # has (pkg-config knows where it landed in the store).
+  frameos_openssl_libdir="$(pkg-config --variable=libdir openssl 2>/dev/null || true)"
+  if [ -n "$frameos_openssl_libdir" ] && [ -d "$frameos_openssl_libdir" ]; then
+    export DYLD_FALLBACK_LIBRARY_PATH="$frameos_openssl_libdir${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH="$frameos_openssl_libdir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
+  unset frameos_openssl_libdir
+
   mkdir -p "$FRAMEOS_FLOX_CACHE_DIR" "$FRAMEOS_FLOX_REDIS_DIR"
 
   new_venv=0
@@ -104,15 +122,20 @@ on-activate = '''
     printf '%s' "$python_requirements_hash" > "$python_stamp"
   fi
 
-  js_workspace_hash="$(
-    sha256sum \
-      package.json \
-      pnpm-lock.yaml \
-      pnpm-workspace.yaml \
-      frontend/package.json \
-      frameos/frontend/package.json \
-    | sha256sum | awk '{print $1}'
-  )"
+  js_workspace_files="package.json pnpm-lock.yaml pnpm-workspace.yaml"
+  for manifest in \
+    frontend/package.json \
+    frameos/frontend/package.json \
+    frameos/editor/package.json \
+    frameos/wasm/package.json \
+    cloud/package.json \
+    cloud/apps/*/package.json \
+    cloud/packages/*/package.json; do
+    if [ -f "$manifest" ]; then
+      js_workspace_files="$js_workspace_files $manifest"
+    fi
+  done
+  js_workspace_hash="$(sha256sum $js_workspace_files | sha256sum | awk '{print $1}')"
   js_stamp="$FRAMEOS_FLOX_CACHE_DIR/pnpm-workspace.sha256"
   if [ ! -f node_modules/.modules.yaml ] || [ ! -f "$js_stamp" ] || [ "$(cat "$js_stamp")" != "$js_workspace_hash" ]; then
     echo "Syncing pnpm workspace dependencies..."

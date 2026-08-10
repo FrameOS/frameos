@@ -1,5 +1,5 @@
 import { actions, connect, kea, listeners, path, reducers, selectors } from 'kea'
-import type { LogType, FrameType } from '../types'
+import type { LogType, FrameType, FrameId } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
 import type { longRunningTasksModelType } from './longRunningTasksModelType'
 
@@ -8,6 +8,8 @@ export type LongRunningTaskKind =
   | 'render'
   | 'preview'
   | 'activate'
+  | 'save'
+  | 'sceneImage'
   | 'upload'
   | 'remoteDeploy'
   | 'remoteRestart'
@@ -25,7 +27,7 @@ export interface LongRunningTaskLog {
 
 export interface LongRunningTask {
   id: string
-  frameId: number
+  frameId: FrameId
   kind: LongRunningTaskKind
   sceneId?: string | null
   title: string
@@ -42,7 +44,7 @@ export interface LongRunningTask {
 
 export interface StartTaskPayload {
   id?: string
-  frameId: number
+  frameId: FrameId
   kind: LongRunningTaskKind
   title: string
   detail?: string | null
@@ -53,7 +55,7 @@ export interface StartTaskPayload {
 
 export interface FinishTaskPayload {
   taskId?: string
-  frameId: number
+  frameId: FrameId
   kind?: LongRunningTaskKind
   sceneId?: string | null
   status?: LongRunningTaskStatus
@@ -62,12 +64,14 @@ export interface FinishTaskPayload {
 
 export interface UpdateTaskProgressPayload {
   taskId?: string
-  frameId: number
+  frameId: FrameId
   kind?: LongRunningTaskKind
   sceneId?: string | null
   progressCurrent: number | null
   progressTotal: number | null
   detail?: string | null
+  /** Retitle the running task — e.g. an upload that grows while running. */
+  title?: string
 }
 
 const MAX_TASK_LOGS = 200
@@ -87,7 +91,7 @@ const UPLOADED_SCENE_PREFIX = 'uploaded/'
 
 let nextTaskCounter = 0
 
-function nextTaskId(frameId: number, kind: LongRunningTaskKind, sceneId?: string | null): string {
+function nextTaskId(frameId: FrameId, kind: LongRunningTaskKind, sceneId?: string | null): string {
   nextTaskCounter += 1
   return [kind, frameId, sceneId || 'frame', Date.now(), nextTaskCounter].join(':')
 }
@@ -152,6 +156,7 @@ function updateLatestTaskProgress(tasks: LongRunningTask[], payload: UpdateTaskP
   const nextTasks = [...tasks]
   nextTasks[index] = {
     ...task,
+    title: payload.title ?? task.title,
     detail: payload.detail ?? task.detail,
     progressCurrent: payload.progressCurrent,
     progressTotal: payload.progressTotal,
@@ -164,7 +169,7 @@ function latestRunningTask(tasks: LongRunningTask[], payload: FinishTaskPayload)
   return index === -1 ? null : tasks[index]
 }
 
-function latestRunningDeployTaskWithActiveStatus(tasks: LongRunningTask[], frameId: number): LongRunningTask | null {
+function latestRunningDeployTaskWithActiveStatus(tasks: LongRunningTask[], frameId: FrameId): LongRunningTask | null {
   for (let index = tasks.length - 1; index >= 0; index -= 1) {
     const task = tasks[index]
     if (task.status === 'running' && task.frameId === frameId && task.kind === 'deploy' && task.activeStatusSeen) {

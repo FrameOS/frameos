@@ -29,6 +29,7 @@ static void load_defaults(void)
     strlcpy(s_config.hardware_preset, FRAMEOS_DEFAULT_HARDWARE_PRESET, sizeof(s_config.hardware_preset));
     strlcpy(s_config.panel, FRAMEOS_DEFAULT_PANEL, sizeof(s_config.panel));
     s_config.render_mode = (fos_render_mode_t)FRAMEOS_DEFAULT_RENDER_MODE;
+    s_config.rotate = FRAMEOS_DEFAULT_ROTATE;
     s_config.interval_sec = FRAMEOS_DEFAULT_INTERVAL_SEC;
     s_config.max_http_response_bytes = FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES;
     s_config.server_send_logs = FRAMEOS_DEFAULT_SERVER_SEND_LOGS;
@@ -41,6 +42,7 @@ static void load_defaults(void)
     strlcpy(s_config.admin_pass, FRAMEOS_DEFAULT_ADMIN_AUTH_PASS, sizeof(s_config.admin_pass));
     strlcpy(s_config.assets_path, FRAMEOS_DEFAULT_ASSETS_PATH, sizeof(s_config.assets_path));
     s_config.assets_sd.enabled = FRAMEOS_DEFAULT_ASSETS_SD_ENABLE;
+    s_config.assets_sd.autoformat = FRAMEOS_DEFAULT_ASSETS_SD_AUTOFORMAT;
     s_config.assets_sd.cs = FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS;
     s_config.assets_sd.sck = FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK;
     s_config.assets_sd.miso = FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO;
@@ -103,6 +105,8 @@ esp_err_t fos_config_init(void)
     nvs_get_string(nvs, "wifi_pass", s_config.wifi_pass, sizeof(s_config.wifi_pass));
     nvs_get_string(nvs, "backend_url", s_config.backend_url, sizeof(s_config.backend_url));
     nvs_get_string(nvs, "api_key", s_config.api_key, sizeof(s_config.api_key));
+    nvs_get_string(nvs, "cloud_url", s_config.cloud_url, sizeof(s_config.cloud_url));
+    nvs_get_string(nvs, "claim_token", s_config.claim_token, sizeof(s_config.claim_token));
     nvs_get_string(nvs, "hostname", s_config.hostname, sizeof(s_config.hostname));
     nvs_get_string(nvs, "hardware", s_config.hardware_preset, sizeof(s_config.hardware_preset));
     nvs_get_string(nvs, "panel", s_config.panel, sizeof(s_config.panel));
@@ -121,6 +125,12 @@ esp_err_t fos_config_init(void)
     uint32_t u32;
     if (nvs_get_u32(nvs, "frame_id", &u32) == ESP_OK) s_config.frame_id = u32;
     if (nvs_get_u32(nvs, "interval", &u32) == ESP_OK) s_config.interval_sec = u32;
+    if (nvs_get_u32(nvs, "spill_force", &u32) == ESP_OK) s_config.http_spill_force_bytes = u32;
+    uint16_t rotate_u16 = 0;
+    if (nvs_get_u16(nvs, "rotate", &rotate_u16) == ESP_OK &&
+        (rotate_u16 == 0 || rotate_u16 == 90 || rotate_u16 == 180 || rotate_u16 == 270)) {
+        s_config.rotate = rotate_u16;
+    }
     if (nvs_get_u32(nvs, "max_http", &u32) == ESP_OK) s_config.max_http_response_bytes = u32;
     uint8_t u8;
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
@@ -130,6 +140,7 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
     int8_t i8;
     if (nvs_get_u8(nvs, "assets_sd", &u8) == ESP_OK) s_config.assets_sd.enabled = u8 != 0;
+    if (nvs_get_u8(nvs, "sd_autofmt", &u8) == ESP_OK) s_config.assets_sd.autoformat = u8 != 0;
     if (nvs_get_i8(nvs, "sd_cs", &i8) == ESP_OK) s_config.assets_sd.cs = i8;
     if (nvs_get_i8(nvs, "sd_sck", &i8) == ESP_OK) s_config.assets_sd.sck = i8;
     if (nvs_get_i8(nvs, "sd_miso", &i8) == ESP_OK) s_config.assets_sd.miso = i8;
@@ -154,6 +165,12 @@ esp_err_t fos_config_init(void)
              (unsigned)s_config.gpio_button_count,
              s_config.wifi_ssid[0] ? s_config.wifi_ssid : "(unset)",
              s_config.backend_url[0] ? s_config.backend_url : "(unset)");
+    if (s_config.cloud_url[0] || s_config.claim_token[0]) {
+        /* never log the claim token itself */
+        ESP_LOGI(TAG, "cloud config: url=%s claim_token=%s",
+                 s_config.cloud_url[0] ? s_config.cloud_url : "(unset)",
+                 s_config.claim_token[0] ? "(set)" : "(none)");
+    }
     return ESP_OK;
 }
 
@@ -167,6 +184,14 @@ esp_err_t fos_config_save(void)
     nvs_set_str(nvs, "wifi_pass", s_config.wifi_pass);
     nvs_set_str(nvs, "backend_url", s_config.backend_url);
     nvs_set_str(nvs, "api_key", s_config.api_key);
+    nvs_set_str(nvs, "cloud_url", s_config.cloud_url);
+    /* The claim token is single use: once enrollment consumes it the struct
+     * field is cleared and the NVS key must disappear, not persist as "". */
+    if (s_config.claim_token[0]) {
+        nvs_set_str(nvs, "claim_token", s_config.claim_token);
+    } else {
+        nvs_erase_key(nvs, "claim_token");
+    }
     nvs_set_str(nvs, "hostname", s_config.hostname);
     nvs_set_str(nvs, "hardware", s_config.hardware_preset);
     nvs_set_str(nvs, "panel", s_config.panel);
@@ -175,13 +200,16 @@ esp_err_t fos_config_save(void)
     nvs_set_str(nvs, "admin_pass", s_config.admin_pass);
     nvs_set_u32(nvs, "frame_id", s_config.frame_id);
     nvs_set_u32(nvs, "interval", s_config.interval_sec);
+    nvs_set_u16(nvs, "rotate", s_config.rotate);
     nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes);
+    nvs_set_u32(nvs, "spill_force", s_config.http_spill_force_bytes);
     nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
     nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0);
     nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0);
     nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0);
     nvs_set_u32(nvs, "tls_port", s_config.tls_port);
     nvs_set_u8(nvs, "assets_sd", s_config.assets_sd.enabled ? 1 : 0);
+    nvs_set_u8(nvs, "sd_autofmt", s_config.assets_sd.autoformat ? 1 : 0);
     nvs_set_i8(nvs, "sd_cs", s_config.assets_sd.cs);
     nvs_set_i8(nvs, "sd_sck", s_config.assets_sd.sck);
     nvs_set_i8(nvs, "sd_miso", s_config.assets_sd.miso);
@@ -219,6 +247,15 @@ esp_err_t fos_config_erase(void)
 bool fos_config_wifi_ready(void)
 {
     return s_config.wifi_ssid[0] != '\0';
+}
+
+bool fos_config_normalize_rotate(double value, uint16_t *out)
+{
+    if (!(value >= -100000.0 && value <= 100000.0)) return false; /* NaN too */
+    int rot = (((int)value % 360) + 360) % 360;
+    if (rot != 0 && rot != 90 && rot != 180 && rot != 270) return false;
+    if (out != NULL) *out = (uint16_t)rot;
+    return true;
 }
 
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins)

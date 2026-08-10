@@ -1,12 +1,15 @@
 import std/[algorithm, base64, json, options, os, streams, strformat, strutils, tables]
+import frameos/utils/memory
 import pixie
 
 import frameos/apps as frameos_apps
 import frameos/js_runtime/runtime
+import frameos/js_runtime/source_map
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/image
+import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
 
@@ -15,10 +18,22 @@ type
     category*: string
     outputType*: string
     source*: string
+    ## Only .tsx/.jsx sources get the JSX transform, as in TypeScript itself.
+    allowJsx*: bool
     settingsKeys*: seq[string]
     js*: QuickJS
     ready*: bool
     initialized*: bool
+    # Transpiling is the most expensive thing a JS app does on a frame: 22
+    # seconds for the 36 KB app in the bundled Weather scene, on top of 7 for
+    # the 11 KB one. Evicting a runtime under memory pressure would otherwise
+    # pay that again on every render, so the result is kept — it is ~50 KB
+    # against ~29 s per render.
+    transpiled*: bool
+    transpiledCode*: string
+    transpiledMap*: SourceLineMap
+    transpiledMapBuilt*: bool
+    transpiledName*: string
     nextImageId*: int
     images*: Table[int, Image]
     transientImageIds: seq[int]
@@ -31,6 +46,68 @@ type
     contextImageJson: JsonNode
 
 var jsAppEnvByCtx = initTable[ptr JSContext, JsAppEvalEnv]()
+
+proc teardownJsRuntime(runtime: JsAppRuntime) =
+  ## Close one JS app node's interpreter. Not embedded-only: JsAppRuntime has
+  ## no destructor, so a runtime that merely goes out of scope leaks its whole
+  ## QuickJS on every platform.
+  if runtime.isNil or not runtime.ready:
+    return
+  if not runtime.js.context.isNil:
+    if jsAppEnvByCtx.hasKey(runtime.js.context):
+      jsAppEnvByCtx.del(runtime.js.context)
+    # The transpiler's source map is held in a global keyed by context, and
+    # for a large app it is a bigger object than the QuickJS runtime itself.
+    # Dropping the runtime without this recovers only the interpreter.
+    clearJsSourceMaps(runtime.js.context)
+  runtime.js.close()
+  runtime.ready = false
+  runtime.initialized = false
+  runtime.images.clear()
+  runtime.transientImageIds.setLen(0)
+
+when defined(frameosEmbedded):
+  # Every JS app node builds its own QuickJS runtime, and each one costs about
+  # 580 KB of PSRAM: ~151 KB for the runtime itself, the rest for the prelude
+  # and the compiled app source. A scene with four JS nodes — the bundled
+  # Weather scene has three weatherPanels and a weatherIcons — therefore holds
+  # ~2.3 MB of interpreter that only one node is ever using, on a board whose
+  # whole render budget is 3.4 MB. Measured with -d:memProbe; it was the
+  # single largest term in the Weather OOM, larger than the canvas.
+  #
+  # Nodes run one at a time, so under memory pressure we keep one live runtime
+  # and rebuild the others on demand. Rebuilding re-runs the app's init(), so
+  # this only happens when headroom is actually short: a Pi, the backend and a
+  # roomy frame never evict and keep today's behaviour exactly.
+  var liveJsRuntimes: seq[JsAppRuntime] = @[]
+  var jsRuntimeStack: seq[JsAppRuntime] = @[]
+  const JsEvictHeadroomBytes = 2 * 1024 * 1024
+
+  proc evictIdleJsRuntimes(keep: JsAppRuntime) =
+    let headroom = availableRenderBytes()
+    if headroom <= 0 or headroom >= JsEvictHeadroomBytes:
+      return
+    for other in liveJsRuntimes:
+      if other != keep and other.ready and not jsRuntimeStack.contains(other):
+        teardownJsRuntime(other)
+
+proc releaseIdleJsAppRuntimes*() =
+  ## Drop every JS app interpreter that is not mid-call. Called when a render
+  ## finishes.
+  ##
+  ## Eviction otherwise only ever runs from ensureReady — that is, when ANOTHER
+  ## JS node is about to be built. Nothing on the image path triggers it, so a
+  ## decode could be refused for want of memory that was sitting in idle
+  ## interpreters the whole time, and a frame that sleeps for five minutes
+  ## between renders sleeps holding all of them.
+  ##
+  ## Cheap to undo: teardownJsRuntime keeps transpiledCode, so rebuilding
+  ## re-evaluates the module without re-transpiling — the expensive part, ~22 s
+  ## for the bundled Weather app.
+  when defined(frameosEmbedded):
+    for runtime in liveJsRuntimes:
+      if runtime.ready and not jsRuntimeStack.contains(runtime):
+        teardownJsRuntime(runtime)
 
 proc jsFetchMaxBytes(e: JsAppEvalEnv): int =
   if e != nil:
@@ -231,9 +308,9 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       let dir = if pathStr.len == 0: root else: resolveAssetPath(e, pathStr)
       var files: seq[string] = @[]
       if dir.len > 0 and dirExists(dir):
-        for filePath in walkDirRec(dir, relative = false):
-          if "/.thumbs/" in filePath or "/.frameos/" in filePath:
-            continue
+        # Hidden/OS-junk entries (`.thumbs`, `.frameos`, `._IMG.jpg`,
+        # `Thumbs.db`, `@eaDir`, …) never show up in an app's asset listing.
+        for filePath in walkDirRecNoJunk(dir, relative = false):
           files.add(filePath[(root.len + 1)..^1])
       files.sort()
       let arr = newJArray()
@@ -455,7 +532,6 @@ proc jsGetSetting(ctx: ptr JSContext, pathJson: JSValue): JSValue {.nimcall.} =
       "\" is not declared in the app config's \"settings\" list")
     return jsUndefSentinel(ctx)
 
-  frameos_apps.ensureEmbeddedServiceSettings(e.owner)
   var node = e.owner.frameConfig.settings
   for part in path.items:
     if node.isNil:
@@ -487,6 +563,13 @@ proc jsGetAppConfig(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let configJson = if e.configJson.isNil: %*{} else: e.configJson
   let keyStr = toNimString(ctx, key)
   if configJson.kind == JObject and configJson.hasKey(keyStr):
+    when defined(memProbe):
+      let approx = ($configJson[keyStr]).len
+      if approx > 8192:
+        memProbe("      cfg." & keyStr & " ->JS src=" & $approx & "B BEFORE")
+        let converted = jsonToJS(ctx, configJson[keyStr])
+        memProbe("      cfg." & keyStr & " ->JS AFTER")
+        return converted
     return jsonToJS(ctx, configJson[keyStr])
   return jsUndefSentinel(ctx)
 
@@ -590,11 +673,13 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
   return jsonToJS(ctx, arr)
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string,
-    settingsKeys: seq[string] = @[]): JsAppRuntime =
+    settingsKeys: seq[string] = @[], sourceName: string = ""): JsAppRuntime =
+  when defined(memProbe): memProbe("  NEW JsAppRuntime " & category & " src=" & $source.len & "B")
   return JsAppRuntime(
     category: category,
     outputType: outputType,
     source: source,
+    allowJsx: sourceName.endsWith(".tsx") or sourceName.endsWith(".jsx"),
     settingsKeys: settingsKeys,
     nextImageId: 0,
     images: initTable[int, Image](),
@@ -605,6 +690,24 @@ type
   DynamicJsApp* = ref object of AppRoot
     configJson*: JsonNode
     runtime*: JsAppRuntime
+
+proc sourceMapForRuntime(runtime: JsAppRuntime): SourceLineMap {.gcsafe, raises: [].} =
+  ## This app's line map, built the first time an error needs one.
+  ##
+  ## Building it is ~45% of a transform — about 10 s of the 22 s a 36 KB app
+  ## cost on an ESP32-S3 — and it is read only to rewrite line numbers in an
+  ## error message. Both inputs are already retained (the original source and
+  ## the transpiled output), so deferring keeps nothing alive that was not.
+  if runtime.transpiledMapBuilt:
+    return runtime.transpiledMap
+  try:
+    runtime.transpiledMap = lineBasedSourceLineMap(
+      runtime.source, runtime.transpiledCode,
+      runtime.transpiledName, runtime.transpiledName)
+  except CatchableError, Defect:
+    runtime.transpiledMap = emptySourceLineMap(runtime.transpiledName, runtime.transpiledName)
+  runtime.transpiledMapBuilt = true
+  runtime.transpiledMap
 
 proc storeImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
   if image.isNil:
@@ -671,10 +774,26 @@ proc jsAppValueToJson(runtime: JsAppRuntime, value: Value): JsonNode =
   of fkNone:
     return newJNull()
 
+const JsAppSourceNames = ["app.ts", "app.js", "app.tsx", "app.jsx"]
+
+proc jsAppSourceNameFromSources*(sources: JsonNode): string =
+  ## Which of the candidate files the source came from. The extension decides
+  ## whether the JSX pass runs at all: TypeScript itself only treats `<x>` as
+  ## JSX in .tsx/.jsx — in a .ts file it is a type assertion. Running the JSX
+  ## walk there is both wasted work (about half of a transform: 12 ms of the
+  ## 24 ms a 36 KB app takes on a host, and it is the slowest stage on an
+  ## ESP32) and the wrong reading of the syntax.
+  if sources.isNil or sources.kind != JObject:
+    return ""
+  for filename in JsAppSourceNames:
+    if sources.hasKey(filename) and sources[filename].kind == JString:
+      return filename
+  return ""
+
 proc jsAppSourceFromSources*(sources: JsonNode): string =
   if sources.isNil or sources.kind != JObject:
     return ""
-  for filename in ["app.ts", "app.js", "app.tsx", "app.jsx"]:
+  for filename in JsAppSourceNames:
     if sources.hasKey(filename) and sources[filename].kind == JString:
       return sources[filename].getStr()
   return ""
@@ -742,7 +861,8 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
     for key in settingsNode.items:
       if key.kind == JString and key.getStr().len > 0:
         settingsKeys.add(key.getStr())
-  let runtime = newJsAppRuntime(category, outputType, source, settingsKeys)
+  let runtime = newJsAppRuntime(category, outputType, source, settingsKeys,
+                                jsAppSourceNameFromSources(sources))
   return DynamicJsApp(
     nodeId: node.id,
     nodeName: node.data{"name"}.getStr(keyword),
@@ -754,6 +874,32 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
 
 proc isDynamicJsApp*(app: AppRoot): bool =
   app of DynamicJsApp
+
+proc releaseJsAppRuntime*(app: AppRoot) =
+  ## Close a JS app node's interpreter as its scene is torn down.
+  ##
+  ## Scene cleanup has to call this explicitly. Dropping the app object is not
+  ## enough — JsAppRuntime owns raw QuickJS pointers and has no destructor —
+  ## and on embedded `liveJsRuntimes` holds a reference to every runtime it has
+  ## ever readied, so nothing about dropping the scene makes one collectable.
+  ## The cost is per NODE, not per scene: the bundled Weather scene builds four
+  ## (~148 KB of PSRAM each, measured with -d:memProbe), so a frame cycling
+  ## between two JS scenes used to shed a few hundred KB per switch and reboot
+  ## itself after about seven.
+  if not (app of DynamicJsApp):
+    return
+  let runtime = DynamicJsApp(app).runtime
+  if runtime.isNil:
+    return
+  when defined(frameosEmbedded):
+    # Never pull the rug from under a runtime that is mid-call; scene teardown
+    # runs between renders, so this is belt-and-braces.
+    if jsRuntimeStack.contains(runtime):
+      return
+    let live = liveJsRuntimes.find(runtime)
+    if live >= 0:
+      liveJsRuntimes.delete(live)
+  teardownJsRuntime(runtime)
 
 proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
   let dynamicApp = DynamicJsApp(app)
@@ -768,7 +914,15 @@ proc ensureReady(runtime: JsAppRuntime) =
   if runtime.ready:
     return
 
+  when defined(frameosEmbedded):
+    # Reclaim the other nodes' interpreters before building this one.
+    evictIdleJsRuntimes(runtime)
+    if not liveJsRuntimes.contains(runtime):
+      liveJsRuntimes.add(runtime)
+
+  when defined(memProbe): memProbe("    newQuickJS BEFORE")
   runtime.js = newQuickJS()
+  when defined(memProbe): memProbe("    newQuickJS AFTER")
   runtime.js.registerFunction("jsAppLog", jsAppLog)
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
   runtime.js.registerFunction("jsSetState", jsSetState)
@@ -880,12 +1034,51 @@ proc ensureReady(runtime: JsAppRuntime) =
   }
   """ & sceneJsPrelude)
   let filename = "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"
-  let transformed = transpileModuleSourceWithMap(runtime.source, filename)
+  if not runtime.transpiled:
+    when defined(memProbe): memProbe("      prelude done, transpile src=" & $runtime.source.len & "B BEFORE")
+    # Erase types and stop: the module form goes to QuickJS as-is, and no line
+    # map is built here.
+    let transformed = transpileAppSource(runtime.source, filename, runtime.allowJsx)
+    when defined(memProbe): memProbe("      transpile AFTER code=" & $transformed.len & "B")
+    runtime.transpiledCode = transformed
+    runtime.transpiledName = filename
+    runtime.transpiledMapBuilt = false
+    runtime.transpiled = true
+  else:
+    when defined(memProbe): memProbe("      transpile CACHED code=" & $runtime.transpiledCode.len & "B")
+
+  # Evaluate as a real ES module and publish its namespace where the prelude's
+  # __frameosExports() looks for it.
+  let ctx = runtime.js.context
+  var namespace: JSValue
   try:
-    discard runtime.js.eval(transformed.code, filename)
+    namespace = runtime.js.evalModuleNamespace(runtime.transpiledCode, filename)
   except CatchableError as error:
-    raise newException(JSException, error.msg.mapJsErrorText(transformed.sourceMap))
-  registerJsSourceMap(runtime.js.context, transformed.sourceMap)
+    # FrameOS used to run the JSX pass over every source, so an app could have
+    # JSX in a plain .ts file and work. TypeScript itself does not allow that
+    # — `<x>` is a type assertion in .ts — and the pass is the single most
+    # expensive stage on a frame, so it is now gated on the extension. Rather
+    # than break such an app, notice the syntax error it produces and retry
+    # with JSX enabled. The happy path never pays for this.
+    if not runtime.allowJsx and error.msg.contains("'<'"):
+      runtime.transpiledCode = transpileAppSource(runtime.source, filename, allowJsx = true)
+      runtime.transpiledMapBuilt = false
+      runtime.allowJsx = true
+      try:
+        namespace = runtime.js.evalModuleNamespace(runtime.transpiledCode, filename)
+      except CatchableError as retryError:
+        raise newException(JSException, retryError.msg.mapJsErrorText(runtime.sourceMapForRuntime()))
+    else:
+      raise newException(JSException, error.msg.mapJsErrorText(runtime.sourceMapForRuntime()))
+  let globalObj = JS_GetGlobalObject(ctx)
+  let installed = JS_SetPropertyStr(ctx, globalObj, "__frameosModule", namespace)
+  JS_FreeValue(ctx, globalObj)
+  if installed < 0:
+    raise newException(JSException, "Could not install the app module: " & filename)
+  when defined(memProbe): memProbe("      module eval AFTER")
+  registerJsSourceMapProvider(ctx, filename,
+    proc(): SourceLineMap {.closure, gcsafe, raises: [].} = runtime.sourceMapForRuntime())
+  when defined(memProbe): memProbe("      sourcemap registered")
   runtime.ready = true
 
 proc defaultImageWidth(owner: AppRoot, context: ExecutionContext, spec: JsonNode): int =
@@ -946,7 +1139,9 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     return nil
   of "image":
     if spec.hasKey("svg"):
+      when defined(memProbe): memProbe("    svg decode src=" & $spec["svg"].getStr().len & "B BEFORE")
       let image = decodeSvgWithFallback(spec["svg"].getStr(), defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
+      when defined(memProbe): memProbe("    svg decode AFTER")
       if image.isSome:
         return image.get()
       return nil
@@ -1050,12 +1245,20 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
   defer: JS_FreeValue(ctx, fnNameValue)
 
   jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)
+  # A JS app can run another node, which can be another JS app, so track the
+  # whole call chain — an ancestor mid-call must never be evicted underneath.
+  when defined(frameosEmbedded): jsRuntimeStack.add(runtime)
+  when defined(memProbe): memProbe("    js invoke " & fnName & " BEFORE")
   result =
     try:
       callGlobalFunction(ctx, "__frameosInvoke", [fnNameValue])
     finally:
       if jsAppEnvByCtx.hasKey(ctx):
         jsAppEnvByCtx.del(ctx)
+      when defined(frameosEmbedded):
+        if jsRuntimeStack.len > 0 and jsRuntimeStack[^1] == runtime:
+          discard jsRuntimeStack.pop()
+      when defined(memProbe): memProbe("    js invoke " & fnName & " AFTER")
 
   if JS_IsException(result) != 0:
     let details = mappedJsExceptionDetails(ctx)

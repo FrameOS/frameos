@@ -1,7 +1,7 @@
 import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
 
 import { forms } from 'kea-forms'
-import { FrameInstallMethod, FrameOSSettings, NewFrameFormType } from '../../types'
+import { FrameInstallMethod, FrameOSSettings, NewFrameFormType, FrameId } from '../../types'
 
 import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
@@ -27,9 +27,42 @@ function fallbackFrameHost(name?: string | null): string {
   return `${slug || 'frame'}.local`
 }
 
+export function installMethodOf(frame: NewFrameFormType): FrameInstallMethod {
+  return frame.install_method ?? (frame.mode === 'buildroot' ? 'sd_card' : 'ssh')
+}
+
+// Whether FrameOS Remote (the reverse tunnel from frame to backend) should be
+// on for a frame installed this way, when the user has not said otherwise.
+// SSH installs are by definition backend-can-reach-frame, so they start
+// SSH-only; the script and SD-card paths exist precisely for frames the
+// backend cannot dial into, so they start with Remote on.
+export function defaultRemoteControl(installMethod: FrameInstallMethod): boolean {
+  return installMethod !== 'ssh'
+}
+
+export function remoteControlEnabled(frame: NewFrameFormType): boolean {
+  return frame.agent?.agentEnabled ?? defaultRemoteControl(installMethodOf(frame))
+}
+
+// The three agent flags always move together from this form: a frame either
+// is driven over FrameOS Remote or it is not. Finer-grained control (running
+// commands but not deploying, say) lives in frame settings afterwards.
+function agentPayload(frame: NewFrameFormType): NonNullable<NewFrameFormType['agent']> {
+  const enabled = remoteControlEnabled(frame)
+  return {
+    ...(frame.agent ?? {}),
+    agentEnabled: enabled,
+    agentRunCommands: enabled,
+    deployWithAgent: enabled,
+  }
+}
+
 function framePayload(frame: NewFrameFormType): NewFrameFormType {
-  const { rememberWifi: _rememberWifi, ...frameValues } = frame
-  const installMethod = frame.install_method ?? (frame.mode === 'buildroot' ? 'sd_card' : 'ssh')
+  // width/height are not part of FrameCreateRequest (the backend would drop
+  // them silently); they are applied with a follow-up update after creation.
+  const { rememberWifi: _rememberWifi, width: _width, height: _height, ...frameValues } = frame
+  const installMethod = installMethodOf(frame)
+  const agent = agentPayload(frame)
 
   if (installMethod === 'sd_card') {
     return {
@@ -37,6 +70,7 @@ function framePayload(frame: NewFrameFormType): NewFrameFormType {
       mode: 'buildroot',
       frame_host: '',
       platform: frameValues.platform || BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+      agent,
     }
   }
 
@@ -50,6 +84,11 @@ function framePayload(frame: NewFrameFormType): NewFrameFormType {
   }
 
   if (installMethod === 'script') {
+    // Not a choice: the generated command installs FrameOS Remote and connects
+    // it back here — that is the entire point of the script install, and it is
+    // the only way in for a frame this backend cannot reach. Forced on rather
+    // than defaulted so a toggle left off in another tab cannot produce a
+    // frame with no way to talk to it.
     return {
       ...frameValues,
       mode: 'rpios',
@@ -66,12 +105,7 @@ function framePayload(frame: NewFrameFormType): NewFrameFormType {
   return {
     ...frameValues,
     mode: 'rpios',
-    agent: {
-      ...(frameValues.agent ?? {}),
-      agentEnabled: false,
-      agentRunCommands: false,
-      deployWithAgent: false,
-    },
+    agent,
   }
 }
 
@@ -111,7 +145,7 @@ export const newFrameForm = kea<newFrameFormType>([
     hideForm: true,
     setFile: (file: File | null) => ({ file }),
     importFrame: true,
-    frameCreated: (frameId: number, installMethod?: FrameInstallMethod) => ({ frameId, installMethod }),
+    frameCreated: (frameId: FrameId, installMethod?: FrameInstallMethod) => ({ frameId, installMethod }),
   }),
   reducers({
     file: [
@@ -173,6 +207,32 @@ export const newFrameForm = kea<newFrameFormType>([
           }
 
           const result = await response.json()
+          let createdFrame = result?.frame
+          // FrameCreateRequest carries no width/height, so a virtual frame's
+          // chosen size is applied through the regular frame-update endpoint
+          // right after creation.
+          const sizeUpdate = {
+            ...(frame.width ? { width: frame.width } : {}),
+            ...(frame.height ? { height: frame.height } : {}),
+          }
+          if (createdFrame?.id && Object.keys(sizeUpdate).length > 0) {
+            try {
+              const updateResponse = await apiFetch(`/api/frames/${createdFrame.id}`, {
+                method: 'POST',
+                body: JSON.stringify(sizeUpdate),
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+              })
+              if (updateResponse.ok) {
+                createdFrame = { ...createdFrame, ...sizeUpdate }
+              } else {
+                console.error('Failed to apply frame size after creation')
+              }
+            } catch (error) {
+              console.error(error)
+            }
+          }
           try {
             await saveRememberedWifiDefaults(frame)
           } catch (error) {
@@ -180,9 +240,9 @@ export const newFrameForm = kea<newFrameFormType>([
           }
           actions.resetNewFrame()
           actions.hideForm()
-          if (result?.frame?.id) {
-            framesModel.actions.addFrame(result.frame)
-            actions.frameCreated(result.frame.id, installMethod)
+          if (createdFrame?.id) {
+            framesModel.actions.addFrame(createdFrame)
+            actions.frameCreated(createdFrame.id, installMethod)
           }
         } catch (error) {
           console.error(error)

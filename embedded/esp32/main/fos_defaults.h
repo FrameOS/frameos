@@ -43,10 +43,20 @@
 #define FRAMEOS_DEFAULT_HARDWARE_PRESET ""
 #endif
 #ifndef FRAMEOS_DEFAULT_PANEL
+/* All panel drivers are always compiled in; FRAMEOS_SELECTED_PANEL only sets
+ * the default the device boots with before `set panel` / portal / NVS
+ * override it. generated_config.h (backend builds) takes precedence. */
+#ifdef FRAMEOS_ENV_DEFAULT_PANEL
+#define FRAMEOS_DEFAULT_PANEL FRAMEOS_ENV_DEFAULT_PANEL
+#else
 #define FRAMEOS_DEFAULT_PANEL "none"
+#endif
 #endif
 #ifndef FRAMEOS_DEFAULT_RENDER_MODE
 #define FRAMEOS_DEFAULT_RENDER_MODE 0 /* local */
+#endif
+#ifndef FRAMEOS_DEFAULT_ROTATE
+#define FRAMEOS_DEFAULT_ROTATE 0
 #endif
 #ifndef FRAMEOS_DEFAULT_INTERVAL_SEC
 #define FRAMEOS_DEFAULT_INTERVAL_SEC 300
@@ -83,6 +93,11 @@
 #endif
 #ifndef FRAMEOS_DEFAULT_ASSETS_SD_ENABLE
 #define FRAMEOS_DEFAULT_ASSETS_SD_ENABLE 0
+#endif
+/* Auto-format a card at boot only when the probe proves it empty; see
+ * fos_sd_probe.h. On by default: a new card should just work. */
+#ifndef FRAMEOS_DEFAULT_ASSETS_SD_AUTOFORMAT
+#define FRAMEOS_DEFAULT_ASSETS_SD_AUTOFORMAT 1
 #endif
 #ifndef FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS
 #define FRAMEOS_DEFAULT_ASSETS_SD_PIN_CS -1

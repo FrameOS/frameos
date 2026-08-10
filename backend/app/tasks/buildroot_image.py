@@ -41,17 +41,37 @@ from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_remote import RemoteDeployer
 from app.tasks.precompiled_remote import download_precompiled_remote_release
 from app.tasks.precompiled_frameos import frame_compiled_scene_count, release_version
+from app.tasks.sd_image_blob_patch import (
+    build_setup_blob_payload,
+    patch_setup_blob_into_image,
+)
 from app.tasks.setup_json_reset import (
     BOOT_AUTHORIZED_KEYS_FILE,
+    BOOT_CLOUD_CONFIG_FILE,
     BOOT_HOSTNAME_FILE,
     BOOT_ROOT_PASSWORD_FILE,
+    BOOT_SETUP_BLOB_FILE,
     BOOT_WIFI_CONNECTION_FILE,
+    SETUP_BLOB_MEMBERS,
     SETUP_JSON_RESET_SCRIPT_PATH,
     SETUP_JSON_RESET_SERVICE_NAME,
+    render_setup_blob_region,
     render_setup_json_reset_script,
     render_setup_json_reset_service,
     setup_json_reset_enabled,
     setup_json_reset_file_path,
+)
+from app.tasks.buildroot_platforms import (
+    BUILDROOT_PLATFORMS,
+    DEFAULT_BUILDROOT_PLATFORM,
+    BuildrootPlatform,
+    get_buildroot_platform,
+    normalize_buildroot_platform,
+)
+from app.tasks.postboot_log import (
+    POSTBOOT_LOG_SCRIPT_PATH,
+    POSTBOOT_LOG_SERVICE_NAME,
+    stage_postboot_log,
 )
 from app.tasks.utils import get_fresh_frame
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
@@ -60,18 +80,20 @@ from app.utils.build_host import BuildHostConfig, get_build_executor_config
 from app.utils.build_executor import (
     BuildExecutor,
     DockerMount,
+    LocalBuildExecutor,
     build_executor_display_name,
     create_build_executor,
     ensure_build_executor_configured,
 )
-from app.utils.cross_compile import CrossCompiler, TargetMetadata
+from app.utils.cross_compile import CrossCompiler
 from app.utils.modal_sandbox import ModalSandboxConfig
 from app.utils.ssh_key_utils import select_ssh_keys_for_frame
 from app.utils.token import secure_token
 from app.utils.versions import current_frameos_version
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SUPPORTED_BUILDROOT_PLATFORM = "raspberry-pi-zero-2-w"
+# Default platform; the full registry lives in app.tasks.buildroot_platforms.
+SUPPORTED_BUILDROOT_PLATFORM = DEFAULT_BUILDROOT_PLATFORM
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
@@ -132,23 +154,8 @@ BUILDROOT_COMPOSE_TOOLS = ("genimage", "mkfs.vfat", "mcopy", "mlabel", "debugfs"
 BUILDROOT_BOOT_PATCH_TOOLS = ("mcopy", "mlabel", "debugfs")
 SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 SAFE_RELEASE_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
-LEGACY_PLATFORM_ALIASES = {
-    "",
-    "pi-zero2",
-    "pi-zero-2",
-    "pi-zero-w2",
-    "pi-zero-2-w",
-    "raspberry-pi-zero2",
-    "raspberry-pi-zero-2",
-    "raspberry-pi-zero-w-2",
-    "raspberrypi-zero-2-w",
-    "raspberrypizero2w",
-    "raspberrypizero2w_defconfig",
-    "raspberrypizero2w_64_defconfig",
-}
 
 BUILDROOT_VERSION = os.environ.get("FRAMEOS_BUILDROOT_VERSION", "2025.02.13")
-BUILDROOT_DEFCONFIG = "raspberrypizero2w_64_defconfig"
 BUILDROOT_DOCKER_IMAGE = os.environ.get("FRAMEOS_BUILDROOT_DOCKER_IMAGE", "debian:bookworm")
 BUILDROOT_IMAGE = os.environ.get("FRAMEOS_BUILDROOT_IMAGE")
 BUILDROOT_IMAGE_REPO = os.environ.get("FRAMEOS_BUILDROOT_IMAGE_REPO", "frameos/frameos-buildroot")
@@ -179,26 +186,143 @@ BUILDROOT_IMAGE_HEARTBEAT_INTERVAL_SECONDS = max(1, min(60, BUILDROOT_IMAGE_INAC
 BUILDROOT_IMAGES_DIGESTS_PATH = os.environ.get("FRAMEOS_BUILDROOT_IMAGES_DIGESTS_PATH", str(REPO_ROOT / "buildroot-images.json"))
 BUILDROOT_BOOT_LOGO_SOURCE = REPO_ROOT / "backend" / "app" / "tasks" / "assets" / "frameos-boot-logo.png"
 BUILDROOT_BOOT_LOGO_WORK_PATH = "/work/frameos-boot-logo.png"
+
+# Buildroot's `make olddefconfig` silently deletes any symbol whose Kconfig
+# dependencies are unmet on the selected architecture/toolchain: no warning, no
+# non-zero exit, the package just never gets built. That is how a Raspberry Pi
+# Zero W (ARMv6) image shipped without NetworkManager/nmcli even though the
+# shared config asked for it. This checker runs right after olddefconfig and
+# fails the build with the exact list of symbols that vanished.
+#
+# Only BR2_PACKAGE_* symbols are enforced: non-package symbols such as
+# BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_* are host-dependent on purpose (see
+# BuildrootPlatform.extra_config_lines) and are expected to fall back.
+BUILDROOT_ENFORCED_CONFIG_PREFIXES = ("BR2_PACKAGE_",)
+BUILDROOT_CONFIG_CHECK_SCRIPT = r'''
+import sys
+
+ENFORCED_PREFIXES = __ENFORCED_PREFIXES__
+
+
+def parse_config(text):
+    values = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("# ") and line.endswith(" is not set"):
+            values[line[2:-len(" is not set")]] = None
+            continue
+        if line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip()
+    return values
+
+
+def enforced(key):
+    return any(key.startswith(prefix) for prefix in ENFORCED_PREFIXES)
+
+
+def main(argv):
+    if len(argv) != 3:
+        sys.stderr.write("usage: check-buildroot-config.py REQUESTED_CONFIG RESOLVED_CONFIG\n")
+        return 2
+    requested_path, resolved_path = argv[1], argv[2]
+    with open(requested_path, "r", encoding="utf-8") as handle:
+        requested_text = handle.read()
+    with open(resolved_path, "r", encoding="utf-8") as handle:
+        resolved_text = handle.read()
+
+    resolved = parse_config(resolved_text)
+    dropped = []
+    seen = set()
+    for raw in requested_text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if not enforced(key) or key in seen:
+            continue
+        seen.add(key)
+        actual = resolved.get(key, "<absent>")
+        if actual != value:
+            dropped.append((key, value, actual))
+
+    if not dropped:
+        return 0
+
+    sys.stderr.write(
+        "\n"
+        "ERROR: Buildroot dropped %d requested package symbol(s) during `make olddefconfig`.\n"
+        "Their Kconfig dependencies are unmet for this architecture/toolchain, so the\n"
+        "packages would be silently missing from the image. Fix the dependency (add the\n"
+        "enabling symbol) or stop requesting the package for this platform.\n\n"
+        % len(dropped)
+    )
+    for key, wanted, actual in dropped:
+        shown = "not present in .config" if actual == "<absent>" else (
+            "explicitly disabled" if actual is None else "resolved to %s" % actual
+        )
+        sys.stderr.write("  %s=%s  ->  %s\n" % (key, wanted, shown))
+    sys.stderr.write(
+        "\nRequested config: %s\nResolved config:  %s\n" % (requested_path, resolved_path)
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+'''.replace("__ENFORCED_PREFIXES__", repr(BUILDROOT_ENFORCED_CONFIG_PREFIXES))
 BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH = "/usr/sbin/frameos-expand-sd-card"
 BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME = "frameos-expand-sd-card.service"
-BUILDROOT_DEFAULT_BOOT_CONFIG_LINES = (
-    # Keep a small firmware framebuffer reserve for standard HDMI output while
-    # returning the rest of the Pi Zero 2 W's 512MB RAM to Linux/userland.
-    "gpu_mem=32",
-)
 BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR = "/etc/NetworkManager/system-connections"
 BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR = "/srv/frameos/state/NetworkManager/system-connections"
 BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE = (
     f"{BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR} {BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR} none "
     "bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0"
 )
+# armv6 (Pi Zero W) images have no NetworkManager - its Kconfig deps do not
+# resolve on ARM1176 - so frameos drives wpa_supplicant/hostapd there instead
+# (frameos/src/frameos/network/supplicant.nim). Its generated
+# wpa_supplicant-<iface>.conf needs to survive reboots and image upgrades the
+# same way the .nmconnection files do, so /etc/wpa_supplicant gets the same
+# bind mount onto the state partition.
+BUILDROOT_WPA_SUPPLICANT_DIR = "/etc/wpa_supplicant"
+BUILDROOT_WPA_SUPPLICANT_STATE_DIR = "/srv/frameos/state/wpa_supplicant"
+# Interface name and control socket the supplicant backend uses; keep in sync
+# with confFileName / wpaCtrlDir in frameos/src/frameos/network/supplicant.nim.
+BUILDROOT_WPA_SUPPLICANT_CONF_NAME = "wpa_supplicant-wlan0.conf"
+BUILDROOT_WPA_SUPPLICANT_CTRL_DIR = "/var/run/wpa_supplicant"
+BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE = (
+    f"{BUILDROOT_WPA_SUPPLICANT_STATE_DIR} {BUILDROOT_WPA_SUPPLICANT_DIR} none "
+    "bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=wpa_supplicant.service 0 0"
+)
+# /boot carries one-time provisioning secrets (frameos-setup.json until the
+# first boot consumes it, frameos-cloud.txt claim tokens), so it is mounted
+# root-only (umask=077). Everything that touches /boot at runtime already runs
+# as root: frameos.service, frameos-remote.service, the first-boot setup
+# service, and portal.nim's sudo tee of /boot/frameos-hostname.
+BUILDROOT_BOOT_FSTAB_LINE = "LABEL=BOOT /boot vfat defaults,noatime,umask=077 0 0"
+BUILDROOT_FSTAB_CONTENT = (
+    "\n".join(
+        [
+            BUILDROOT_BOOT_FSTAB_LINE,
+            "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2",
+            "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0",
+            BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE,
+            BUILDROOT_WPA_SUPPLICANT_FSTAB_LINE,
+        ]
+    )
+    + "\n"
+)
 BACKEND_ROOT = REPO_ROOT / "backend"
 BUILDROOT_DOCKERFILE = BACKEND_ROOT / "tools" / "buildroot.Dockerfile"
-FRAMEOS_BUILD_TARGET = TargetMetadata(
-    arch="aarch64",
-    distro="debian",
-    version="bookworm",
-)
+# Cross-compile target of the default platform; per-platform targets come
+# from the registry (BuildrootPlatform.build_target).
+FRAMEOS_BUILD_TARGET = BUILDROOT_PLATFORMS[DEFAULT_BUILDROOT_PLATFORM].build_target_copy()
 ACTIVE_SD_IMAGE_STATUSES = {"queued", "building"}
 ACTIVE_ARQ_JOB_STATUSES = {
     JobStatus.deferred,
@@ -208,11 +332,9 @@ ACTIVE_ARQ_JOB_STATUSES = {
 T = TypeVar("T")
 
 
-def normalize_buildroot_platform(platform: str | None) -> str:
-    value = (platform or "").strip()
-    if value == SUPPORTED_BUILDROOT_PLATFORM or value in LEGACY_PLATFORM_ALIASES:
-        return SUPPORTED_BUILDROOT_PLATFORM
-    raise ValueError(f"Unsupported Buildroot platform: {value or '(empty)'}")
+def buildroot_platform_for_frame(frame: Frame | Any) -> BuildrootPlatform:
+    buildroot = getattr(frame, "buildroot", None) or {}
+    return get_buildroot_platform(buildroot.get("platform"))
 
 
 def buildroot_artifact_dir() -> Path:
@@ -285,16 +407,19 @@ def _frameos_version() -> str:
     return current_frameos_version() or ""
 
 
-async def _buildroot_base_manifest() -> dict[str, Any]:
-    manifest_file = Path(BUILDROOT_BASE_MANIFEST_FILE)
-    if manifest_file.is_file() and not BUILDROOT_BASE_USE_REMOTE:
-        return json.loads(manifest_file.read_text(encoding="utf-8"))
-
+async def _remote_buildroot_base_manifest() -> dict[str, Any]:
     manifest_url = urljoin(_normalize_url_base(BUILDROOT_ARCHIVE_BASE_URL), BUILDROOT_BASE_MANIFEST_PATH)
     async with httpx.AsyncClient(timeout=BUILDROOT_BASE_TIMEOUT) as client:
         response = await client.get(manifest_url)
         response.raise_for_status()
         return response.json()
+
+
+async def _buildroot_base_manifest() -> dict[str, Any]:
+    manifest_file = Path(BUILDROOT_BASE_MANIFEST_FILE)
+    if manifest_file.is_file() and not BUILDROOT_BASE_USE_REMOTE:
+        return json.loads(manifest_file.read_text(encoding="utf-8"))
+    return await _remote_buildroot_base_manifest()
 
 
 def _normalize_url_base(url: str) -> str:
@@ -383,8 +508,20 @@ async def resolve_buildroot_base_entry(platform: str, frameos_version: str | Non
     wanted_version = frameos_version if frameos_version is not None else _frameos_version()
     manifest = await _buildroot_base_manifest()
     entries = [entry for entry in manifest.get("entries", []) if entry.get("platform") == normalized_platform]
+    if not entries and not BUILDROOT_BASE_USE_REMOTE:
+        # The checked-in manifest goes stale the moment a base for a new
+        # platform is published — an install that has not pulled since then
+        # would dead-end here, so ask the archive before giving up.
+        try:
+            manifest = await _remote_buildroot_base_manifest()
+        except (httpx.HTTPError, ValueError):
+            manifest = {}
+        entries = [entry for entry in manifest.get("entries", []) if entry.get("platform") == normalized_platform]
     if not entries:
-        raise RuntimeError(f"No cached Buildroot base image found for {normalized_platform}")
+        raise RuntimeError(
+            f"No Buildroot base image is available for {normalized_platform} "
+            "(checked the local manifest and the archive)"
+        )
 
     if wanted_version:
         for entry in entries:
@@ -469,7 +606,7 @@ def render_systemd_service(
     return "\n".join(rendered_lines) + "\n"
 
 
-def render_buildroot_frameos_service() -> str:
+def render_buildroot_frameos_service(uses_network_manager: bool = True) -> str:
     service = render_systemd_service(
         REPO_ROOT / "frameos" / "frameos.service",
         user="root",
@@ -478,6 +615,13 @@ def render_buildroot_frameos_service() -> str:
             "LD_LIBRARY_PATH": "/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib",
         },
     )
+    # Platforms without NetworkManager (armv6 runs wpa_supplicant + hostapd
+    # instead) must not name the unit at all: a Wants= pointing at a unit
+    # that does not exist logs a failed dependency on every boot and buys
+    # nothing. wpa_supplicant.service is enabled in the base image and
+    # ordered before network.target already.
+    if not uses_network_manager:
+        return service
     return service.replace(
         "After=network.target\n",
         "Wants=NetworkManager.service\nAfter=network.target NetworkManager.service\n",
@@ -485,12 +629,14 @@ def render_buildroot_frameos_service() -> str:
     )
 
 
-def stage_buildroot_frameos_service(root: Path) -> None:
+def stage_buildroot_frameos_service(root: Path, uses_network_manager: bool = True) -> None:
     systemd_dir = root / "etc" / "systemd" / "system"
     wants_dir = systemd_dir / "multi-user.target.wants"
     systemd_dir.mkdir(parents=True, exist_ok=True)
     wants_dir.mkdir(parents=True, exist_ok=True)
-    (systemd_dir / "frameos.service").write_text(render_buildroot_frameos_service(), encoding="utf-8")
+    (systemd_dir / "frameos.service").write_text(
+        render_buildroot_frameos_service(uses_network_manager), encoding="utf-8"
+    )
     link = wants_dir / "frameos.service"
     if link.exists() or link.is_symlink():
         link.unlink()
@@ -498,12 +644,18 @@ def stage_buildroot_frameos_service(root: Path) -> None:
 
 
 def stage_buildroot_network_manager_state(root: Path) -> None:
-    state_dir = root / BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR.lstrip("/")
-    connections_dir = root / BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR.lstrip("/")
-    state_dir.mkdir(parents=True, exist_ok=True)
-    connections_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(state_dir, 0o700)
-    os.chmod(connections_dir, 0o700)
+    for state_path, etc_path in (
+        (BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR, BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR),
+        # Mount point for the wpa_supplicant backend used by images without
+        # NetworkManager; empty on a NetworkManager image, harmless there.
+        (BUILDROOT_WPA_SUPPLICANT_STATE_DIR, BUILDROOT_WPA_SUPPLICANT_DIR),
+    ):
+        state_dir = root / state_path.lstrip("/")
+        connections_dir = root / etc_path.lstrip("/")
+        state_dir.mkdir(parents=True, exist_ok=True)
+        connections_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(state_dir, 0o700)
+        os.chmod(connections_dir, 0o700)
 
 
 def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[str, bool]:
@@ -550,7 +702,8 @@ def _merge_boot_config_lines(content: str, requested_lines: list[str]) -> str:
 
 
 def _frame_boot_config_lines(frame: Frame) -> list[str]:
-    lines: list[str] = list(BUILDROOT_DEFAULT_BOOT_CONFIG_LINES)
+    platform = buildroot_platform_for_frame(frame)
+    lines: list[str] = list(platform.default_boot_config_lines)
     seen: set[str] = set(lines)
     for driver in drivers_for_frame(frame).values():
         for line in getattr(driver, "lines", []) or []:
@@ -612,6 +765,17 @@ def _boot_setup_payload_path(boot_overlay_dir: Path, setup_file_path: str) -> Pa
     return boot_overlay_dir / relative_path
 
 
+def buildroot_agent_defaults() -> dict[str, bool]:
+    """
+    What FrameOS Remote should look like on a brand new buildroot frame.
+
+    A freshly flashed card usually lands on a network the backend cannot SSH
+    into, so Remote is on by default — but it is a *default*, applied once at
+    creation, not re-imposed on every later save.
+    """
+    return {"agentEnabled": True, "agentRunCommands": True, "deployWithAgent": True}
+
+
 def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -> None:
     normalized_platform = normalize_buildroot_platform(platform or (frame.buildroot or {}).get("platform"))
 
@@ -620,18 +784,26 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
     if not frame.frame_host:
         frame.frame_host = f"frame{frame.id}.local" if frame.id else "frame.local"
     frame.assets_path = "/srv/assets"
-    frame.log_to_file = None
+    # Buildroot journald storage is volatile, so keep a persistent on-device
+    # log for debugging boot issues (hotspot, network check, driver setup).
+    if not getattr(frame, "log_to_file", None):
+        frame.log_to_file = "/srv/frameos/logs/frameos-{date}.log"
 
     https_proxy = dict(frame.https_proxy or {})
     https_proxy["enable"] = False
     frame.https_proxy = https_proxy
 
+    # Only the shared secret is guaranteed here. Whether FrameOS Remote is
+    # enabled at all is the user's call, made when the frame is added (see
+    # buildroot_agent_defaults) and editable afterwards in frame settings —
+    # this function runs on every save, SD rebuild, deploy-plan preview and
+    # sync-apply, so forcing the flags on here would silently undo that
+    # choice and leave "Connect via SSH" unable to stick. Keeping the secret
+    # present costs nothing and means turning Remote back on later needs no
+    # re-provisioning.
     agent = dict(frame.agent or {})
     if not agent.get("agentSharedSecret"):
         agent["agentSharedSecret"] = secure_token(32)
-    agent["agentEnabled"] = True
-    agent["agentRunCommands"] = True
-    agent["deployWithAgent"] = True
     frame.agent = agent
 
     network = dict(frame.network or {})
@@ -701,6 +873,23 @@ def latest_buildroot_sd_image(frame: Frame, current_base_entry: dict[str, Any] |
             **sd_image,
             "status": "stale",
             "error": "The generated image was built with an older SD image customization version",
+        }
+    if (
+        sd_image.get("status") == "ready"
+        and sd_image.get("precompiledSdImage")
+        and sd_image.get("frameosVersion") != current_frameos_version()
+    ):
+        # A precompiled SD image embeds the FrameOS release binaries matching
+        # the versions.json pin at build time. Once the backend moves to a new
+        # release, the old image would boot outdated (possibly broken)
+        # binaries, so surface it as stale instead of "ready".
+        return {
+            **sd_image,
+            "status": "stale",
+            "error": (
+                f"The generated image embeds FrameOS release {sd_image.get('frameosVersion') or 'unknown'}, "
+                f"but this backend now targets {current_frameos_version() or 'unknown'}"
+            ),
         }
     if (
         sd_image.get("status") == "ready"
@@ -775,9 +964,10 @@ async def start_buildroot_sd_image(
     *,
     force: bool = False,
 ) -> tuple[bool, dict[str, Any]]:
+    platform = buildroot_platform_for_frame(frame)
     current_base_entry = None
     try:
-        current_base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+        current_base_entry = await resolve_buildroot_base_entry(platform.key)
     except Exception:
         if not can_use_precompiled_buildroot_sd_image(frame):
             raise
@@ -805,7 +995,7 @@ async def start_buildroot_sd_image(
         "status": "queued",
         "requestId": request_id,
         "queueJobId": queue_job_id,
-        "platform": SUPPORTED_BUILDROOT_PLATFORM,
+        "platform": platform.key,
         "queuedAt": queued_at,
         "startedAt": queued_at,
     }
@@ -871,7 +1061,7 @@ async def buildroot_sd_image_task(ctx: dict[str, Any], id: int, request_id: str 
                 {
                     **_preserved_queue_metadata(current),
                     "status": "error",
-                    "platform": (frame.buildroot or {}).get("platform") or SUPPORTED_BUILDROOT_PLATFORM,
+                    "platform": (frame.buildroot or {}).get("platform") or DEFAULT_BUILDROOT_PLATFORM,
                     "error": str(exc),
                     "completedAt": _utc_now(),
                 },
@@ -885,6 +1075,7 @@ class BuildrootImageBuilder:
         self.db = db
         self.redis = redis
         self.frame = frame
+        self.platform = buildroot_platform_for_frame(frame)
         self.request_id = request_id
         self.build_environment_provider: BuildEnvironmentProvider = "docker"
         self.build_executor_config: BuildHostConfig | ModalSandboxConfig | None = None
@@ -959,7 +1150,7 @@ class BuildrootImageBuilder:
             temp_dir = Path(tmp)
             deployer = FrameDeployer(self.db, self.redis, self.frame, "", str(temp_dir))
             build_id = deployer.build_id
-            raw_filename = f"frameos-{self.frame.id}-{SUPPORTED_BUILDROOT_PLATFORM}-{build_id}.img"
+            raw_filename = f"frameos-{self.frame.id}-{self.platform.key}-{build_id}.img"
             filename = f"{raw_filename}.gz"
             raw_output_path = artifact_dir / raw_filename
             output_path = artifact_dir / filename
@@ -973,7 +1164,7 @@ class BuildrootImageBuilder:
                     **_preserved_queue_metadata(latest_buildroot_sd_image(self.frame) or {}),
                     "status": "building",
                     "buildId": build_id,
-                    "platform": SUPPORTED_BUILDROOT_PLATFORM,
+                    "platform": self.platform.key,
                     "frameosVersion": current_frameos_version(),
                     "filename": filename,
                     "rawFilename": raw_filename,
@@ -988,16 +1179,34 @@ class BuildrootImageBuilder:
             base_entry: dict[str, Any] | None = None
             compose_image = None
             precompiled_sd_image = None
+            personalization_mode: str | None = None
             if self._can_use_precompiled_sd_image():
-                compose_image = await self._precompiled_sd_image_patch_image()
-                precompiled_sd_image = await self._try_compose_precompiled_sd_image(
+                # Cheapest first: pure in-place byte patching of the release
+                # image's frameos-setup.bin placeholder — the same mechanism
+                # the cloud's in-browser SD builder uses, needing no mtools,
+                # debugfs or docker anywhere. Falls through to the partition
+                # patching path for older release images without the
+                # placeholder or payloads too big for the region.
+                precompiled_sd_image = await self._try_patch_precompiled_sd_image(
                     temp_dir=temp_dir,
                     output_path=raw_output_path,
                     bootstrap_frame=bootstrap_frame,
                     setup_payload=setup_payload,
-                    image=compose_image,
-                    allow_fallback=self.build_environment_provider != "none",
                 )
+                if precompiled_sd_image is not None:
+                    personalization_mode = "placeholder"
+                else:
+                    compose_image = await self._precompiled_sd_image_patch_image()
+                    precompiled_sd_image = await self._try_compose_precompiled_sd_image(
+                        temp_dir=temp_dir,
+                        output_path=raw_output_path,
+                        bootstrap_frame=bootstrap_frame,
+                        setup_payload=setup_payload,
+                        image=compose_image,
+                        allow_fallback=self.build_environment_provider != "none",
+                    )
+                    if precompiled_sd_image is not None:
+                        personalization_mode = "partition-patch"
             if precompiled_sd_image is None and self.build_environment_provider == "none":
                 raise RuntimeError(
                     buildroot_sd_image_no_build_environment_message(
@@ -1005,7 +1214,7 @@ class BuildrootImageBuilder:
                     )
                 )
             if precompiled_sd_image is None:
-                base_entry = await resolve_buildroot_base_entry(SUPPORTED_BUILDROOT_PLATFORM)
+                base_entry = await resolve_buildroot_base_entry(self.platform.key)
                 if compose_image is None:
                     compose_image = await self._compose_tools_image()
                 frameos_build = await self._build_frameos_binary(deployer, str(temp_dir), self.frame)
@@ -1026,11 +1235,11 @@ class BuildrootImageBuilder:
                 partition_post_build_path = temp_dir / "partition-post-build.sh"
                 post_image_path = temp_dir / "post-image.sh"
                 kernel_fragment_path = temp_dir / "linux-fragment.config"
-                self._write_buildroot_config(config_path)
-                self._write_kernel_config_fragment(kernel_fragment_path)
-                self._write_post_build_script(post_build_path)
+                self._write_buildroot_config(config_path, self.platform)
+                self._write_kernel_config_fragment(kernel_fragment_path, self.platform)
+                self._write_post_build_script(post_build_path, self.platform)
                 self._write_partition_post_build_script(partition_post_build_path)
-                self._write_post_image_script(post_image_path)
+                self._write_post_image_script(post_image_path, self.platform)
                 self._write_boot_logo(temp_dir / Path(BUILDROOT_BOOT_LOGO_WORK_PATH).name)
                 base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
                 await self._compose_sd_image_from_base(
@@ -1062,7 +1271,7 @@ class BuildrootImageBuilder:
                 **_preserved_queue_metadata(latest_buildroot_sd_image(self.frame) or {}),
                 "status": "ready",
                 "buildId": build_id,
-                "platform": SUPPORTED_BUILDROOT_PLATFORM,
+                "platform": self.platform.key,
                 "frameosVersion": current_frameos_version(),
                 "buildrootVersion": BUILDROOT_VERSION,
                 **(
@@ -1082,6 +1291,7 @@ class BuildrootImageBuilder:
                         "precompiledSdImage": {
                             "releaseUrl": precompiled_sd_image.release_url,
                             "cacheHit": precompiled_sd_image.cache_hit,
+                            "personalization": personalization_mode,
                         },
                     }
                     if precompiled_sd_image is not None
@@ -1142,6 +1352,137 @@ class BuildrootImageBuilder:
             stderr_log_tag=stderr_log_tag,
         )
 
+    async def _run_local_command(
+        self,
+        command: str,
+        *,
+        log_command: str | bool = True,
+        log_output: bool = True,
+        stderr_log_tag: Literal["stderr", "stdout"] = "stderr",
+    ) -> tuple[int, str | None, str | None]:
+        """
+        Run on THIS host, whatever build environment is configured. Used by the
+        partition patches, whose input and output are both the image file
+        sitting in the local artifact directory.
+
+        An executor that already runs here is used as-is, so a local or Modal
+        setup keeps its existing behavior; only a remote build host, which
+        would otherwise need the image shipped to it, gets stepped around.
+        """
+        executor: BuildExecutor | Any = self.executor
+        if executor is None or not getattr(executor, "uses_local_filesystem", True):
+            executor = LocalBuildExecutor(db=self.db, redis=self.redis, frame=self.frame)
+        return await executor.run(
+            command,
+            log_command=log_command,
+            log_output=log_output,
+            stderr_log_tag=stderr_log_tag,
+        )
+
+    def _patches_image_locally(self) -> bool:
+        """
+        Both partition patches are a few kilobytes of debugfs/mtools edits on an
+        image file that already lives on this host. Routing them through a
+        remote build host means scp'ing the whole image up and back for each
+        one — on a Pi Zero W card that is ~1.5GB of transfer to perform ~25ms of
+        work, and it is reported as "Still patching", so it reads as the patch
+        being slow. Do them here whenever the tools exist locally; the build
+        host is for compiling, which is the part that actually wants the CPU.
+        """
+        return self._host_has_boot_patch_tools()
+
+    async def _try_patch_precompiled_sd_image(
+        self,
+        *,
+        temp_dir: Path,
+        output_path: Path,
+        bootstrap_frame: Frame | Any,
+        setup_payload: dict[str, Any],
+    ) -> PrecompiledBuildrootSdImageResult | None:
+        """Personalize a release image by patching its setup-blob placeholder.
+
+        Pure byte surgery on the gunzipped .img — the /boot personalization
+        files ride a gzipped tar inside the fixed-size frameos-setup.bin
+        region, and the first-boot script extracts them (config.txt comes
+        from `frameos setup` running drivers.setup on-device, so no boot
+        partition merge is needed). Returns None whenever anything makes
+        this path inapplicable — no release image, no placeholder in it
+        (older release), payload too big — and the caller falls back.
+        """
+        if not self._can_use_precompiled_sd_image():
+            return None
+
+        precompiled_sd_image = await download_precompiled_buildroot_sd_image(
+            platform=self.platform.key,
+            logger=self._log,
+        )
+        if precompiled_sd_image is None:
+            return None
+
+        overlay_dir = temp_dir / "blob-overlay"
+        self._stage_boot_overlay(
+            overlay_dir=overlay_dir,
+            bootstrap_frame=bootstrap_frame,
+            setup_payload=setup_payload,
+        )
+        boot_dir = overlay_dir / "boot"
+        boot_files: dict[str, bytes] = {}
+        for name in SETUP_BLOB_MEMBERS:
+            member_path = boot_dir / name
+            if member_path.is_file():
+                boot_files[name] = member_path.read_bytes()
+        if "frameos-setup.json" not in boot_files:
+            # Without the setup payload the first boot would have nothing to
+            # apply; the partition-patching path handles whatever this is.
+            return None
+
+        try:
+            payload = build_setup_blob_payload(boot_files)
+            # Fail on size before spending time gunzipping ~1.5 GB.
+            render_setup_blob_region(payload)
+        except ValueError as exc:
+            await self._log(
+                "stdout",
+                f"Setup payload does not fit the in-image placeholder ({exc}); "
+                "falling back to partition patching",
+            )
+            return None
+
+        await self._log(
+            "stdout",
+            f"Personalizing precompiled SD image {precompiled_sd_image.archive_path.name} "
+            "via its setup-blob placeholder",
+        )
+        try:
+            await self._with_progress_updates(
+                "Still unpacking precompiled Buildroot SD image",
+                asyncio.to_thread(
+                    self._prepare_precompiled_release_image,
+                    precompiled_sd_image.archive_path,
+                    output_path,
+                ),
+            )
+            patched = await asyncio.to_thread(
+                patch_setup_blob_into_image, output_path, payload
+            )
+        except Exception as exc:
+            output_path.unlink(missing_ok=True)
+            await self._log(
+                "stderr",
+                f"Could not patch the precompiled SD image in place: {exc}. "
+                "Falling back to partition patching.",
+            )
+            return None
+        if not patched:
+            output_path.unlink(missing_ok=True)
+            await self._log(
+                "stdout",
+                "Release image carries no setup-blob placeholder (pre-placeholder "
+                "release); falling back to partition patching",
+            )
+            return None
+        return precompiled_sd_image
+
     async def _try_compose_precompiled_sd_image(
         self,
         *,
@@ -1156,7 +1497,7 @@ class BuildrootImageBuilder:
             return None
 
         precompiled_sd_image = await download_precompiled_buildroot_sd_image(
-            platform=SUPPORTED_BUILDROOT_PLATFORM,
+            platform=self.platform.key,
             logger=self._log,
         )
         if precompiled_sd_image is None:
@@ -1193,7 +1534,7 @@ class BuildrootImageBuilder:
         temp_dir: str,
         frame: Frame,
     ) -> FrameBinaryBuildResult:
-        await self._log("stdout", "Building FrameOS binary for Raspberry Pi Zero 2 W")
+        await self._log("stdout", f"Building FrameOS binary for {self.platform.label}")
         builder = FrameBinaryBuilder(
             db=self.db,
             redis=self.redis,
@@ -1204,17 +1545,18 @@ class BuildrootImageBuilder:
         plan = await builder.plan_build(
             force_cross_compile=False,
             allow_on_device_fallback=False,
-            target_override=FRAMEOS_BUILD_TARGET,
+            target_override=self.platform.build_target_copy(),
             compilation_mode=frame_compilation_mode(frame),
         )
         return await builder.build(plan, precompiled_install_all_drivers=True)
 
     async def _build_remote_binary(self, deployer: FrameDeployer, temp_dir: str, frame: Frame) -> str:
-        await self._log("stdout", "Building FrameOS Remote for Raspberry Pi Zero 2 W")
+        await self._log("stdout", f"Building FrameOS Remote for {self.platform.label}")
+        build_target = self.platform.build_target_copy()
         prebuilt_target = resolve_prebuilt_target(
-            FRAMEOS_BUILD_TARGET.distro,
-            FRAMEOS_BUILD_TARGET.version,
-            FRAMEOS_BUILD_TARGET.arch,
+            build_target.distro,
+            build_target.version,
+            build_target.arch,
         )
         if prebuilt_target:
             try:
@@ -1237,13 +1579,13 @@ class BuildrootImageBuilder:
         remote_deployer = RemoteDeployer(self.db, self.redis, frame, "", temp_dir, force_source=True)
         remote_deployer.build_id = deployer.build_id
         build_dir, source_dir = remote_deployer._create_remote_build_folders()
-        await remote_deployer._create_local_build_archive(build_dir, source_dir, FRAMEOS_BUILD_TARGET.arch)
+        await remote_deployer._create_local_build_archive(build_dir, source_dir, build_target.arch)
         return await CrossCompiler(
             db=self.db,
             redis=self.redis,
             frame=frame,
             deployer=remote_deployer,
-            target=FRAMEOS_BUILD_TARGET,
+            target=build_target,
             temp_dir=temp_dir,
             build_dir=build_dir,
             logger=remote_deployer.log,
@@ -1281,6 +1623,7 @@ class BuildrootImageBuilder:
         ):
             directory.mkdir(parents=True, exist_ok=True)
         stage_buildroot_network_manager_state(overlay_dir)
+        stage_postboot_log(overlay_dir)
 
         if not frameos_build.binary_path:
             raise RuntimeError("FrameOS cross compilation did not produce a binary")
@@ -1366,7 +1709,12 @@ class BuildrootImageBuilder:
             script_path = overlay_dir / SETUP_JSON_RESET_SCRIPT_PATH.lstrip("/")
             script_path.parent.mkdir(parents=True, exist_ok=True)
             wants_dir.mkdir(parents=True, exist_ok=True)
-            script_path.write_text(render_setup_json_reset_script(setup_file_path), encoding="utf-8")
+            script_path.write_text(
+                render_setup_json_reset_script(
+                    setup_file_path, uses_network_manager=self.platform.uses_network_manager
+                ),
+                encoding="utf-8",
+            )
             os.chmod(script_path, 0o755)
             (systemd_dir / SETUP_JSON_RESET_SERVICE_NAME).write_text(
                 render_setup_json_reset_service(
@@ -1382,6 +1730,7 @@ class BuildrootImageBuilder:
 
         (boot_overlay_dir / Path(BOOT_HOSTNAME_FILE).name).write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
         self._write_boot_wifi_connection(boot_overlay_dir / Path(BOOT_WIFI_CONNECTION_FILE).name)
+        self._write_state_wpa_supplicant_conf(overlay_dir)
         self._write_boot_config(overlay_dir, _frame_boot_config_lines(bootstrap_frame))
         self._write_boot_authorized_keys(boot_overlay_dir / Path(BOOT_AUTHORIZED_KEYS_FILE).name)
         self._write_boot_root_password(boot_overlay_dir / Path(BOOT_ROOT_PASSWORD_FILE).name)
@@ -1478,6 +1827,27 @@ class BuildrootImageBuilder:
         path.write_text(_network_manager_wifi_connection(ssid, password), encoding="utf-8")
         os.chmod(path, 0o600)
 
+    def _write_state_wpa_supplicant_conf(self, overlay_dir: Path) -> None:
+        """Bake the credentials in wpa_supplicant form on non-NetworkManager platforms.
+
+        A .nmconnection keyfile is read by nothing on the armv6 image (no
+        NetworkManager), so a card flashed with WiFi credentials came up with no
+        network. The first-boot script mirrors the same file, but writing it
+        here too means the credentials are on the state partition from the very
+        first boot, before any service has run.
+        """
+        if self.platform.uses_network_manager:
+            return
+        ssid, password = validate_buildroot_wifi_credentials(self.frame)
+        if not ssid:
+            return
+        conf_dir = overlay_dir / BUILDROOT_WPA_SUPPLICANT_STATE_DIR.lstrip("/")
+        conf_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(conf_dir, 0o700)
+        conf_path = conf_dir / BUILDROOT_WPA_SUPPLICANT_CONF_NAME
+        conf_path.write_text(_wpa_supplicant_conf(ssid, password), encoding="utf-8")
+        os.chmod(conf_path, 0o600)
+
     @staticmethod
     def _relative_symlink(target: str, link: Path) -> None:
         link.parent.mkdir(parents=True, exist_ok=True)
@@ -1486,7 +1856,27 @@ class BuildrootImageBuilder:
         link.symlink_to(target)
 
     @staticmethod
-    def _write_buildroot_config(path: Path) -> None:
+    def _write_buildroot_config(path: Path, platform: BuildrootPlatform) -> None:
+        if platform.family != "raspberrypi":
+            # TODO(luckfox-pico, t113): non-Raspberry-Pi families need their
+            # own post-build hooks and boot layout before the shared config
+            # below applies.
+            raise NotImplementedError(
+                f"Buildroot config generation is not implemented for the {platform.family} family"
+            )
+        # NetworkManager needs kernel headers >= 4.20; boards pinned to a Bootlin
+        # "stable" external toolchain (4.19 headers) cannot have it and use the
+        # wpa_supplicant + hostapd stack instead.
+        # (BR2_PACKAGE_NETWORK_MANAGER_WIFI does not exist in Buildroot — NM gets
+        # Wi-Fi from wpa_supplicant being installed — so asking for it was a no-op.)
+        network_manager_lines = (
+            [
+                "BR2_PACKAGE_NETWORK_MANAGER=y",
+                "BR2_PACKAGE_NETWORK_MANAGER_CLI=y",
+            ]
+            if platform.uses_network_manager
+            else []
+        )
         path.write_text(
             "\n".join(
                 [
@@ -1527,7 +1917,6 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_IPROUTE2=y",
                     "BR2_PACKAGE_IPTABLES=y",
                     "BR2_PACKAGE_IPTABLES_NFTABLES=y",
-                    "BR2_PACKAGE_IPTABLES_NFTABLES_DEFAULT=y",
                     "BR2_PACKAGE_NFTABLES=y",
                     "BR2_PACKAGE_KMOD=y",
                     "BR2_PACKAGE_OPENSSL=y",
@@ -1537,14 +1926,20 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_FFMPEG_FFPROBE=y",
                     "BR2_PACKAGE_FFMPEG_SWSCALE=y",
                     "BR2_PACKAGE_HOSTAPD=y",
+                    "BR2_PACKAGE_HOSTAPD_WPA3=y",
                     "BR2_PACKAGE_DNSMASQ=y",
-                    "BR2_PACKAGE_NETWORK_MANAGER=y",
-                    "BR2_PACKAGE_NETWORK_MANAGER_CLI=y",
-                    "BR2_PACKAGE_NETWORK_MANAGER_WIFI=y",
+                    *network_manager_lines,
                     "BR2_PACKAGE_WPA_SUPPLICANT=y",
                     "BR2_PACKAGE_WPA_SUPPLICANT_DBUS=y",
                     "BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y",
                     "BR2_PACKAGE_WPA_SUPPLICANT_AP_SUPPORT=y",
+                    # wpa_cli (implies the /var/run/wpa_supplicant control
+                    # socket) and wpa_passphrase are how the FrameOS portal
+                    # scans, joins and persists Wi-Fi without NetworkManager.
+                    "BR2_PACKAGE_WPA_SUPPLICANT_CLI=y",
+                    "BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y",
+                    "BR2_PACKAGE_WPA_SUPPLICANT_AUTOSCAN=y",
+                    "BR2_PACKAGE_WPA_SUPPLICANT_WPA3=y",
                     "BR2_PACKAGE_IW=y",
                     "BR2_PACKAGE_WIRELESS_TOOLS=y",
                     "BR2_PACKAGE_WIRELESS_REGDB=y",
@@ -1558,6 +1953,7 @@ class BuildrootImageBuilder:
                     'BR2_ROOTFS_OVERLAY="/work/overlay"',
                     'BR2_ROOTFS_POST_BUILD_SCRIPT="board/raspberrypi/post-build.sh /work/post-build.sh /work/partition-post-build.sh"',
                     'BR2_ROOTFS_POST_IMAGE_SCRIPT="/work/post-image.sh"',
+                    *platform.extra_config_lines,
                     "",
                 ]
             ),
@@ -1565,7 +1961,7 @@ class BuildrootImageBuilder:
         )
 
     @staticmethod
-    def _write_kernel_config_fragment(path: Path) -> None:
+    def _write_kernel_config_fragment(path: Path, platform: BuildrootPlatform) -> None:
         path.write_text(
             "\n".join(
                 [
@@ -1579,7 +1975,7 @@ class BuildrootImageBuilder:
                     "# CONFIG_IP_NF_TARGET_TTL is not set",
                     "# CONFIG_IP6_NF_TARGET_HL is not set",
                     "",
-                    "# Trimmed for Raspberry Pi Zero 2 W use cases.",
+                    "# Trimmed for FrameOS display use cases.",
                     "# Keep HID, HDMI, Wi-Fi, Bluetooth and USB storage; trim the rest.",
                     "# Telephony/streaming/media/input-complexity reducers.",
                     "# CONFIG_AUXDISPLAY is not set",
@@ -1611,6 +2007,7 @@ class BuildrootImageBuilder:
                     "# CONFIG_USB_SERIAL is not set",
                     "# CONFIG_USB_MON is not set",
                     "# CONFIG_WIMAX is not set",
+                    *platform.kernel_fragment_lines,
                     "",
                 ]
             ),
@@ -1636,8 +2033,8 @@ class BuildrootImageBuilder:
             boot_file.write_text(merged, encoding="utf-8")
 
     @staticmethod
-    def _write_post_build_script(path: Path) -> None:
-        path.write_text(POST_BUILD_SCRIPT, encoding="utf-8")
+    def _write_post_build_script(path: Path, platform: BuildrootPlatform) -> None:
+        path.write_text(render_post_build_script(platform), encoding="utf-8")
         os.chmod(path, 0o755)
 
     @staticmethod
@@ -1646,8 +2043,8 @@ class BuildrootImageBuilder:
         os.chmod(path, 0o755)
 
     @staticmethod
-    def _write_post_image_script(path: Path) -> None:
-        path.write_text(POST_IMAGE_SCRIPT, encoding="utf-8")
+    def _write_post_image_script(path: Path, platform: BuildrootPlatform) -> None:
+        path.write_text(render_post_image_script(platform), encoding="utf-8")
         os.chmod(path, 0o755)
 
     @staticmethod
@@ -1680,7 +2077,7 @@ class BuildrootImageBuilder:
         return SimpleNamespace(**bootstrap_data)
 
     @staticmethod
-    def _write_build_script(path: Path, output_filename: str) -> None:
+    def _write_build_script(path: Path, output_filename: str, platform: BuildrootPlatform) -> None:
         tarball = f"buildroot-{BUILDROOT_VERSION}.tar.gz"
         path.write_text(
             f"""#!/usr/bin/env bash
@@ -1815,10 +2212,16 @@ if compgen -G "/build/output/build/ncurses-*/.stamp_staging_installed" >/dev/nul
     rm -f "$ncurses_dir/.stamp_staging_installed" "$ncurses_dir/.stamp_target_installed"
   done
 fi
-make -C /build/buildroot O=/build/output {BUILDROOT_DEFCONFIG}
+make -C /build/buildroot O=/build/output {platform.defconfig}
 cat /work/frameos-buildroot.config >> /build/output/.config
 make -C /build/buildroot O=/build/output olddefconfig
 rm -f /build/output/build/linux-custom/.stamp_configured
+phase_end
+
+phase_start verify_buildroot_config
+python3 - /work/frameos-buildroot.config /build/output/.config <<'FRAMEOS_CONFIG_CHECK_PY'
+{BUILDROOT_CONFIG_CHECK_SCRIPT}
+FRAMEOS_CONFIG_CHECK_PY
 phase_end
 
 phase_start buildroot_make
@@ -1904,7 +2307,7 @@ phase_end
         image: str,
         skip_apt_install: bool,
     ) -> None:
-        await self._log("stdout", f"Running Buildroot {BUILDROOT_VERSION} for Raspberry Pi Zero 2 W")
+        await self._log("stdout", f"Running Buildroot {BUILDROOT_VERSION} for {self.platform.label}")
         if self.executor is None:
             raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
         status, _, err = await self._with_progress_updates(
@@ -2135,55 +2538,34 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         if compose_dir.exists():
             shutil.rmtree(compose_dir)
         compose_dir.mkdir(parents=True, exist_ok=True)
-        stage_buildroot_frameos_service(service_root)
+        stage_buildroot_frameos_service(service_root, self.platform.uses_network_manager)
+        stage_postboot_log(service_root)
         (service_root / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
+        # Refresh the first-boot setup script/unit and fstab on the root
+        # partition so images composed from older cached base images pick up
+        # the current behavior (frameos-cloud.txt handling, shred-not-rename,
+        # root-only /boot) without a base image rebuild.
+        setup_file_path = setup_json_reset_file_path(self.frame, default_if_missing=True)
+        firstboot_script = service_root / SETUP_JSON_RESET_SCRIPT_PATH.lstrip("/")
+        firstboot_script.parent.mkdir(parents=True, exist_ok=True)
+        firstboot_script.write_text(
+            render_setup_json_reset_script(
+                setup_file_path, uses_network_manager=self.platform.uses_network_manager
+            ),
+            encoding="utf-8",
+        )
+        os.chmod(firstboot_script, 0o755)
+        (service_root / "etc" / "systemd" / "system" / SETUP_JSON_RESET_SERVICE_NAME).write_text(
+            render_setup_json_reset_service(setup_file_path, script_path=SETUP_JSON_RESET_SCRIPT_PATH),
+            encoding="utf-8",
+        )
+        (service_root / "etc" / "fstab").write_text(BUILDROOT_FSTAB_CONTENT, encoding="utf-8")
 
-        script_path = compose_dir / "patch-root.sh"
-        script_path.write_text(
-            f"""#!/usr/bin/env bash
-set -euo pipefail
-export DEBIAN_FRONTEND=noninteractive
-image_dir="${{FRAMEOS_IMAGE_DIR:-/image}}"
-service_root="${{FRAMEOS_ROOT_SERVICE_ROOT:-/root-service}}"
-if ! command -v debugfs >/dev/null 2>&1; then
-  apt-get update
-  apt-get install -y --no-install-recommends e2fsprogs
-fi
-disk="$image_dir"/{shlex.quote(output_path.name)}
-rootfs="$(mktemp)"
-cmds="$(mktemp)"
-firmware_tmp="$(mktemp -d)"
-cleanup_root_patch() {{
-  rm -rf "$rootfs" "$cmds" "$firmware_tmp"
-}}
-trap cleanup_root_patch EXIT
-python3 - "$disk" "$rootfs" {root_partition["start"]} {root_partition["size"]} <<'PY'
-import sys
-
-disk_path, rootfs_path, start, size = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
-with open(disk_path, "rb") as disk, open(rootfs_path, "wb") as rootfs:
-    disk.seek(start)
-    remaining = size
-    while remaining:
-        chunk = disk.read(min(1024 * 1024, remaining))
-        if not chunk:
-            raise SystemExit("root partition ended unexpectedly")
-        rootfs.write(chunk)
-        remaining -= len(chunk)
-PY
-cat > "$cmds" <<EOF
-mkdir /etc
-mkdir /etc/systemd
-mkdir /etc/systemd/system
-mkdir /etc/systemd/system/multi-user.target.wants
-rm /etc/systemd/system/frameos.service
-write $service_root/etc/systemd/system/frameos.service /etc/systemd/system/frameos.service
-rm /etc/systemd/system/multi-user.target.wants/frameos.service
-symlink /etc/systemd/system/multi-user.target.wants/frameos.service ../frameos.service
-rm /etc/hostname
-write $service_root/etc/hostname /etc/hostname
-EOF
-if ! debugfs -R "stat /usr/lib/firmware/brcm/brcmfmac43436-sdio.bin" "$rootfs" >/dev/null 2>&1 || \
+        # The Zero 2 W's BCM43436 firmware only exists in the RPi-Distro
+        # firmware-nonfree repo; older base images may lack it.
+        zero_2_w_wifi_firmware_section = ""
+        if self.platform.needs_zero_2_w_wifi_firmware:
+            zero_2_w_wifi_firmware_section = f"""if ! debugfs -R "stat /usr/lib/firmware/brcm/brcmfmac43436-sdio.bin" "$rootfs" >/dev/null 2>&1 || \\
    ! debugfs -R "stat /usr/lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" "$rootfs" >/dev/null 2>&1; then
 python3 - "$firmware_tmp" <<'PY'
 import hashlib
@@ -2261,7 +2643,73 @@ rm /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.txt
 symlink /usr/lib/firmware/brcm/brcmfmac43436s-sdio.raspberrypi,model-zero-2-2.txt brcmfmac43436s-sdio.txt
 EOF
 fi
-debugfs -w -f "$cmds" "$rootfs"
+"""
+
+        script_path = compose_dir / "patch-root.sh"
+        script_path.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+image_dir="${{FRAMEOS_IMAGE_DIR:-/image}}"
+service_root="${{FRAMEOS_ROOT_SERVICE_ROOT:-/root-service}}"
+if ! command -v debugfs >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y --no-install-recommends e2fsprogs
+fi
+disk="$image_dir"/{shlex.quote(output_path.name)}
+rootfs="$(mktemp)"
+cmds="$(mktemp)"
+firmware_tmp="$(mktemp -d)"
+cleanup_root_patch() {{
+  rm -rf "$rootfs" "$cmds" "$firmware_tmp"
+}}
+trap cleanup_root_patch EXIT
+python3 - "$disk" "$rootfs" {root_partition["start"]} {root_partition["size"]} <<'PY'
+import sys
+
+disk_path, rootfs_path, start, size = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+with open(disk_path, "rb") as disk, open(rootfs_path, "wb") as rootfs:
+    disk.seek(start)
+    remaining = size
+    while remaining:
+        chunk = disk.read(min(1024 * 1024, remaining))
+        if not chunk:
+            raise SystemExit("root partition ended unexpectedly")
+        rootfs.write(chunk)
+        remaining -= len(chunk)
+PY
+cat > "$cmds" <<EOF
+mkdir /etc
+mkdir /etc/systemd
+mkdir /etc/systemd/system
+mkdir /etc/systemd/system/multi-user.target.wants
+rm /etc/systemd/system/frameos.service
+write $service_root/etc/systemd/system/frameos.service /etc/systemd/system/frameos.service
+rm /etc/systemd/system/multi-user.target.wants/frameos.service
+symlink /etc/systemd/system/multi-user.target.wants/frameos.service ../frameos.service
+rm /etc/hostname
+write $service_root/etc/hostname /etc/hostname
+mkdir /usr
+mkdir /usr/local
+mkdir /usr/local/bin
+rm {SETUP_JSON_RESET_SCRIPT_PATH}
+write $service_root{SETUP_JSON_RESET_SCRIPT_PATH} {SETUP_JSON_RESET_SCRIPT_PATH}
+sif {SETUP_JSON_RESET_SCRIPT_PATH} mode 0100755
+rm /etc/systemd/system/{SETUP_JSON_RESET_SERVICE_NAME}
+write $service_root/etc/systemd/system/{SETUP_JSON_RESET_SERVICE_NAME} /etc/systemd/system/{SETUP_JSON_RESET_SERVICE_NAME}
+rm /etc/systemd/system/multi-user.target.wants/{SETUP_JSON_RESET_SERVICE_NAME}
+symlink /etc/systemd/system/multi-user.target.wants/{SETUP_JSON_RESET_SERVICE_NAME} ../{SETUP_JSON_RESET_SERVICE_NAME}
+rm /etc/fstab
+write $service_root/etc/fstab /etc/fstab
+rm {POSTBOOT_LOG_SCRIPT_PATH}
+write $service_root{POSTBOOT_LOG_SCRIPT_PATH} {POSTBOOT_LOG_SCRIPT_PATH}
+sif {POSTBOOT_LOG_SCRIPT_PATH} mode 0100755
+rm /etc/systemd/system/{POSTBOOT_LOG_SERVICE_NAME}
+write $service_root/etc/systemd/system/{POSTBOOT_LOG_SERVICE_NAME} /etc/systemd/system/{POSTBOOT_LOG_SERVICE_NAME}
+rm /etc/systemd/system/multi-user.target.wants/{POSTBOOT_LOG_SERVICE_NAME}
+symlink /etc/systemd/system/multi-user.target.wants/{POSTBOOT_LOG_SERVICE_NAME} ../{POSTBOOT_LOG_SERVICE_NAME}
+EOF
+{zero_2_w_wifi_firmware_section}debugfs -w -f "$cmds" "$rootfs"
 python3 - "$disk" "$rootfs" {root_partition["start"]} <<'PY'
 import sys
 
@@ -2280,7 +2728,7 @@ PY
         os.chmod(script_path, 0o755)
 
         try:
-            if image:
+            if image and not self._patches_image_locally():
                 if self.executor is None:
                     raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
                 status, _, err = await self._with_progress_updates(
@@ -2309,7 +2757,7 @@ PY
                 )
                 status, _, err = await self._with_progress_updates(
                     "Still patching Buildroot SD image root partition",
-                    self._run_command(
+                    self._run_local_command(
                         patch_cmd,
                         log_command="buildroot root partition patch",
                         stderr_log_tag="stdout",
@@ -2342,36 +2790,68 @@ PY
                 Path(BOOT_HOSTNAME_FILE).name,
                 Path(BOOT_WIFI_CONNECTION_FILE).name,
                 Path(BOOT_AUTHORIZED_KEYS_FILE).name,
+                # Backend-personalized images are self-hosted; never ship a
+                # (stale) cloud-enrollment personalization file on them. The
+                # setup-blob placeholder is equally dead weight here — this
+                # path writes the personalization files directly.
+                Path(BOOT_CLOUD_CONFIG_FILE).name,
+                Path(BOOT_SETUP_BLOB_FILE).name,
                 setup_relpath,
             }
         )
         managed_boot_files_shell = " ".join(shlex.quote(path) for path in managed_boot_files if path)
+        cloud_config_name = Path(BOOT_CLOUD_CONFIG_FILE).name
         script_path.write_text(
             f"""#!/usr/bin/env bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+# Every step here is milliseconds on a healthy host. Announce each one anyway:
+# when this stalls it is the environment (a missing mtools pulling in apt, an
+# image file on slow storage), and a silent script leaves nothing to go on but
+# "still patching (16m elapsed)".
+step() {{ echo "boot patch: $*"; }}
 image_dir="${{FRAMEOS_IMAGE_DIR:-/image}}"
 boot_root="${{FRAMEOS_BOOT_ROOT:-/boot-root}}"
 if ! command -v mlabel >/dev/null 2>&1 || ! command -v mcopy >/dev/null 2>&1; then
+  step "mtools missing, installing it with apt"
   apt-get update
   apt-get install -y --no-install-recommends mtools
 fi
 disk="$image_dir"/{shlex.quote(output_path.name)}
 offset={partitions[0]["start"]}
 target="${{disk}}@@${{offset}}"
+step "labelling BOOT partition at offset $offset of $disk"
 mlabel -i "$target" ::BOOT
+step "removing unmanaged boot files"
 managed_boot_files=({managed_boot_files_shell})
 for relpath in "${{managed_boot_files[@]}}"; do
   if [ ! -e "$boot_root/$relpath" ]; then
     mdel -i "$target" "::${{relpath}}" 2>/dev/null || true
   fi
 done
+# Release images ship {cloud_config_name} as a fixed-size placeholder that the
+# provider's in-browser personalizer later overwrites IN PLACE inside the raw
+# .img (no FAT metadata changes) — which assumes the file's clusters are
+# contiguous. That holds because the BOOT FAT comes from the base image's
+# fresh buildroot mkfs+mcopy build (files written sequentially, nothing
+# deleted), so the free clusters form one sequential run at the tail. Copy
+# the placeholder before the config.txt merges and bulk copies below, which
+# rewrite existing files and can punch holes into the free-cluster run; a
+# file allocated first on the fresh FAT is guaranteed contiguous. Backend-
+# personalized (self-hosted) images stage no placeholder in $boot_root, so
+# this block no-ops there and the managed-file mdel above removes any stale
+# copy instead.
+if [ -f "$boot_root/{cloud_config_name}" ]; then
+  step "copying {cloud_config_name} placeholder"
+  mcopy -i "$target" -o "$boot_root/{cloud_config_name}" "::{cloud_config_name}"
+fi
 merge_config() {{
   relpath="$1"
   src="$boot_root/$relpath"
   if [ ! -f "$src" ]; then
     return 0
   fi
+  step "merging $relpath"
 
   existing="$(mktemp)"
   merged="$(mktemp)"
@@ -2430,18 +2910,21 @@ merge_config "firmware/config.txt"
 
 if find "$boot_root" -mindepth 1 -print -quit | grep -q .; then
   cd "$boot_root"
-  find . -mindepth 1 -maxdepth 1 ! -name config.txt ! -name firmware -exec mcopy -i "$target" -o -s {{}} :: \\;
+  step "copying boot overlay files"
+  find . -mindepth 1 -maxdepth 1 ! -name config.txt ! -name firmware ! -name {cloud_config_name} -exec mcopy -i "$target" -o -s {{}} :: \\;
   if [ -d firmware ]; then
+    step "copying boot overlay firmware/ files"
     mmd -i "$target" ::firmware 2>/dev/null || true
     find firmware -mindepth 1 -maxdepth 1 ! -name config.txt -exec mcopy -i "$target" -o -s {{}} ::firmware/ \\;
   fi
 fi
+step "done"
 """,
             encoding="utf-8",
         )
         os.chmod(script_path, 0o755)
 
-        if image:
+        if image and not self._patches_image_locally():
             if self.executor is None:
                 raise RuntimeError("Build executor unavailable during Buildroot SD image generation")
             status, _, err = await self._with_progress_updates(
@@ -2471,7 +2954,7 @@ fi
             log_command = "buildroot boot partition patch"
             status, _, err = await self._with_progress_updates(
                 "Still patching Buildroot SD image boot partition",
-                self._run_command(
+                self._run_local_command(
                     patch_cmd,
                     log_command=log_command,
                     stderr_log_tag="stdout",
@@ -2710,13 +3193,15 @@ fi
         *,
         build_image: str,
         skip_apt_install: bool,
+        platform: BuildrootPlatform | None = None,
     ) -> str:
         def normalize_path(value: str) -> str:
             return value.replace(f"release_{build_id}", "release_$BUILD_ID")
 
+        defconfig = (platform or BUILDROOT_PLATFORMS[DEFAULT_BUILDROOT_PLATFORM]).defconfig
         digest = hashlib.sha256()
         digest.update(f"buildroot-version={BUILDROOT_VERSION}\n".encode("utf-8"))
-        digest.update(f"buildroot-defconfig={BUILDROOT_DEFCONFIG}\n".encode("utf-8"))
+        digest.update(f"buildroot-defconfig={defconfig}\n".encode("utf-8"))
         digest.update(f"buildroot-bootstrap-image={build_image}\n".encode("utf-8"))
         digest.update(f"buildroot-skip-apt-install={skip_apt_install}\n".encode("utf-8"))
         digest.update(f"buildroot-bootstrap-script-version={BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}\n".encode("utf-8"))
@@ -2743,7 +3228,7 @@ fi
         return digest.hexdigest()
 
 
-POST_BUILD_SCRIPT = """#!/usr/bin/env bash
+POST_BUILD_SCRIPT_HEADER = """#!/usr/bin/env bash
 set -euo pipefail
 
 target_dir="${TARGET_DIR:?TARGET_DIR is required}"
@@ -2759,11 +3244,14 @@ fi
 if [ -f "$target_dir/boot/frameos-hostname" ]; then
   install -m 0644 "$target_dir/boot/frameos-hostname" "$target_dir/etc/hostname"
 fi
+"""
 
+
+POST_BUILD_WIFI_FIRMWARE_SYMLINKS_TEMPLATE = """
 if [ -d "$target_dir/usr/lib/firmware/brcm" ]; then
   cd "$target_dir/usr/lib/firmware/brcm"
   for base in brcmfmac43436-sdio brcmfmac43436s-sdio brcmfmac43430-sdio; do
-    for model in raspberrypi,model-zero-2-w raspberrypi,model-zero-2-2; do
+    for model in __WIFI_FIRMWARE_MODELS__; do
       if [ -e "${base}.bin" ] && [ ! -e "${base}.${model}.bin" ]; then
         ln -s "${base}.bin" "${base}.${model}.bin" || true
       fi
@@ -2773,7 +3261,12 @@ if [ -d "$target_dir/usr/lib/firmware/brcm" ]; then
     done
   done
 fi
+"""
 
+
+# The Zero 2 W's BCM43436 firmware is not part of linux-firmware; fetch it
+# from the RPi-Distro firmware-nonfree repo and alias the device-tree names.
+POST_BUILD_ZERO_2_W_WIFI_FIRMWARE_SECTION = """
 rpi_wifi_firmware_commit="c91cd2804cf7463aab913e7247c176049f16bbd6"
 rpi_wifi_firmware_base_url="https://raw.githubusercontent.com/RPi-Distro/firmware-nonfree/${rpi_wifi_firmware_commit}/debian/config/brcm80211/brcm"
 rpi_wifi_firmware_dir="$target_dir/usr/lib/firmware/brcm"
@@ -2830,6 +3323,23 @@ EOF
 """
 
 
+def render_post_build_script(platform: BuildrootPlatform) -> str:
+    if platform.family != "raspberrypi":
+        # TODO(luckfox-pico, t113): non-Raspberry-Pi families need their own
+        # post-build firmware handling.
+        raise NotImplementedError(
+            f"Post-build script generation is not implemented for the {platform.family} family"
+        )
+    script = POST_BUILD_SCRIPT_HEADER
+    if platform.wifi_firmware_models:
+        script += POST_BUILD_WIFI_FIRMWARE_SYMLINKS_TEMPLATE.replace(
+            "__WIFI_FIRMWARE_MODELS__", " ".join(platform.wifi_firmware_models)
+        )
+    if platform.needs_zero_2_w_wifi_firmware:
+        script += POST_BUILD_ZERO_2_W_WIFI_FIRMWARE_SECTION
+    return script
+
+
 PARTITION_POST_BUILD_SCRIPT = """#!/usr/bin/env bash
 set -euo pipefail
 
@@ -2856,24 +3366,34 @@ fi
 mkdir -p "$frameos_root/state/NetworkManager/system-connections"
 chown 0:0 "$frameos_root/state/NetworkManager" "$frameos_root/state/NetworkManager/system-connections"
 chmod 700 "$frameos_root/state/NetworkManager/system-connections"
-mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc/NetworkManager/system-connections"
+mkdir -p "$frameos_root/state/wpa_supplicant"
+chown 0:0 "$frameos_root/state/wpa_supplicant"
+chmod 700 "$frameos_root/state/wpa_supplicant"
+mkdir -p "$target_dir/srv/frameos" "$target_dir/srv/assets" "$target_dir/etc/NetworkManager/system-connections" "$target_dir/etc/wpa_supplicant"
 chown 0:0 "$target_dir/etc/NetworkManager/system-connections"
 chmod 700 "$target_dir/etc/NetworkManager/system-connections"
+chown 0:0 "$target_dir/etc/wpa_supplicant"
+chmod 700 "$target_dir/etc/wpa_supplicant"
 fstab="$target_dir/etc/fstab"
 tmp_fstab="${fstab}.frameos"
 touch "$fstab"
-grep -vE '[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections)[[:space:]]' "$fstab" > "$tmp_fstab" || true
+grep -vE '[[:space:]](/boot|/srv/(frameos|assets)|/etc/NetworkManager/system-connections|/etc/wpa_supplicant)[[:space:]]' "$fstab" > "$tmp_fstab" || true
 cat >> "$tmp_fstab" <<'EOF'
-LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0
-LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2
-LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0
-/srv/frameos/state/NetworkManager/system-connections /etc/NetworkManager/system-connections none bind,x-systemd.requires-mounts-for=/srv/frameos,x-systemd.before=NetworkManager.service 0 0
-EOF
+__FRAMEOS_FSTAB_CONTENT__EOF
 mv "$tmp_fstab" "$fstab"
-"""
+""".replace("__FRAMEOS_FSTAB_CONTENT__", BUILDROOT_FSTAB_CONTENT)
 
 
-POST_IMAGE_SCRIPT = f"""#!/usr/bin/env bash
+def render_post_image_script(platform: BuildrootPlatform) -> str:
+    if platform.family != "raspberrypi":
+        # TODO(luckfox-pico, t113): Rockchip needs idblock/uboot partitions,
+        # Allwinner needs u-boot-sunxi-with-spl at the 8KiB offset; both need
+        # their own genimage layout instead of the rpi-firmware boot files.
+        raise NotImplementedError(
+            f"Post-image script generation is not implemented for the {platform.family} family"
+        )
+    boot_config_line = platform.default_boot_config_lines[0] if platform.default_boot_config_lines else ""
+    return f"""#!/usr/bin/env bash
 set -euo pipefail
 
 board_dir="/build/buildroot/board/raspberrypi"
@@ -2897,7 +3417,7 @@ if [ -f "$cmdline" ]; then
 fi
 
 boot_config="${{BINARIES_DIR:?BINARIES_DIR is required}}/rpi-firmware/config.txt"
-if [ -f "$boot_config" ]; then
+if [ -f "$boot_config" ] && [ -n "{boot_config_line}" ]; then
   python3 - "$boot_config" <<'PY'
 import sys
 
@@ -2907,7 +3427,7 @@ gpu_keys = {{"gpu_mem", "gpu_mem_256", "gpu_mem_512", "gpu_mem_1024"}}
 with open(path, encoding="utf-8") as handle:
     lines = handle.read().splitlines()
 
-line = "{BUILDROOT_DEFAULT_BOOT_CONFIG_LINES[0]}"
+line = "{boot_config_line}"
 lines = [
     existing for existing in lines
     if existing == line or existing.split("=", 1)[0] not in gpu_keys
@@ -3433,6 +3953,46 @@ def _nm_keyfile_value(value: str) -> str:
     if "\n" in value or "\r" in value:
         raise ValueError("NetworkManager keyfile values cannot contain line breaks")
     return value.replace("\\", "\\\\")
+
+
+def _wpa_quote(value: str) -> str:
+    """wpa_supplicant quoted string: backslash and double quote are escaped."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _wpa_supplicant_conf(ssid: str, password: str) -> str:
+    """Byte-for-byte the config frameos/src/frameos/network/supplicant.nim writes.
+
+    Used on platforms without NetworkManager (armv6 / Pi Zero W), where the
+    .nmconnection keyfile has no reader at all.
+    """
+    if "\n" in ssid or "\r" in ssid:
+        raise ValueError("WiFi network cannot contain line breaks")
+    if "\n" in password or "\r" in password:
+        raise ValueError("WiFi password cannot contain line breaks")
+    lines = [
+        "# Generated by FrameOS. Edits are overwritten on the next Wi-Fi setup.",
+        # The armv6 image builds wpa_supplicant with BR2_PACKAGE_WPA_SUPPLICANT_CLI,
+        # so the control interface exists and FrameOS can drive it with wpa_cli.
+        f"ctrl_interface={BUILDROOT_WPA_SUPPLICANT_CTRL_DIR}",
+        "ctrl_interface_group=0",
+        "update_config=1",
+        "network={",
+        f"    ssid={_wpa_quote(ssid)}",
+        "    scan_ssid=1",
+    ]
+    if not password:
+        # Open network: any key management makes wpa_supplicant wait forever
+        # for a handshake that never comes.
+        lines.append("    key_mgmt=NONE")
+    else:
+        lines.append("    key_mgmt=WPA-PSK")
+        if len(password) == 64 and all(c in "0123456789abcdefABCDEF" for c in password):
+            lines.append(f"    psk={password.lower()}")
+        else:
+            lines.append(f"    psk={_wpa_quote(password)}")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
 
 
 async def _set_sd_image_status(

@@ -18,7 +18,6 @@ import { v4 as uuidv4 } from 'uuid'
 
 import type { XYPosition } from '@reactflow/core/dist/esm/types/utils'
 import type { Node } from '@reactflow/core/dist/esm/types/nodes'
-import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 import type { Connection } from '@reactflow/core/dist/esm/types/general'
 import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/changes'
 import equal from 'fast-deep-equal'
@@ -30,6 +29,7 @@ import {
   AppConfigField,
   AppNodeData,
   CodeNodeData,
+  DiagramEdge,
   DiagramNode,
   DispatchNodeData,
   EventNodeData,
@@ -38,6 +38,7 @@ import {
   MarkdownField,
   SceneApp,
   StateNodeData,
+  FrameId,
 } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
@@ -64,7 +65,7 @@ function fieldOrderFromFields(fields?: (AppConfigField | MarkdownField)[] | null
 }
 
 export interface DiagramLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId: string
   updateNodeInternals?: (nodeId: string) => void
 }
@@ -91,7 +92,7 @@ export type CodeNodeLanguage = 'js' | 'nim'
 
 export type DiagramHistorySnapshot = {
   nodes: DiagramNode[]
-  edges: Edge[]
+  edges: DiagramEdge[]
   apps: Record<string, SceneApp>
 }
 
@@ -102,7 +103,7 @@ export type DiagramHistoryState = {
 
 type ClipboardDiagramPayload = {
   nodes: DiagramNode[]
-  edges: Edge[]
+  edges: DiagramEdge[]
   apps?: Record<string, SceneApp>
 }
 
@@ -150,10 +151,10 @@ const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
     return rest as DiagramNode
   })
 
-const normalizeEdges = (edges: Edge[] = []): Edge[] =>
+const normalizeEdges = (edges: DiagramEdge[] = []): DiagramEdge[] =>
   edges.map((edge) => {
     const { selected, ...rest } = edge
-    return rest as Edge
+    return rest as DiagramEdge
   })
 
 const deselectNodes = (nodes: DiagramNode[]): DiagramNode[] =>
@@ -161,7 +162,7 @@ const deselectNodes = (nodes: DiagramNode[]): DiagramNode[] =>
 
 const makeHistorySnapshot = (
   nodes: DiagramNode[],
-  edges: Edge[],
+  edges: DiagramEdge[],
   apps: Record<string, SceneApp> = {}
 ): DiagramHistorySnapshot => ({
   nodes: normalizeNodes(nodes),
@@ -180,7 +181,7 @@ const comparableHistorySnapshot = (snapshot: DiagramHistorySnapshot): DiagramHis
   edges: sortById(
     normalizeEdges(snapshot.edges ?? []).map((edge) => {
       const { type, ...rest } = edge
-      return rest as Edge
+      return rest as DiagramEdge
     })
   ),
   apps: snapshot.apps,
@@ -305,7 +306,7 @@ const collectSceneAppsForNodes = (
 
 const clipboardPayloadForNodes = (
   nodes: DiagramNode[],
-  edges: Edge[],
+  edges: DiagramEdge[],
   sceneApps: Record<string, SceneApp>
 ): DiagramNode | ClipboardDiagramPayload => {
   const sanitizedNodes = nodes.map(sanitizeClipboardNode)
@@ -328,7 +329,7 @@ const parseClipboardPayload = (parsed: unknown): ClipboardDiagramPayload | null 
     return { nodes: parsed as DiagramNode[], edges: [] }
   }
   if (typeof parsed === 'object') {
-    const payload = parsed as { nodes?: DiagramNode[]; edges?: Edge[]; apps?: Record<string, SceneApp> }
+    const payload = parsed as { nodes?: DiagramNode[]; edges?: DiagramEdge[]; apps?: Record<string, SceneApp> }
     if (Array.isArray(payload.nodes)) {
       return { nodes: payload.nodes, edges: payload.edges ?? [], apps: payload.apps ?? {} }
     }
@@ -454,7 +455,7 @@ function edgeHandleSortValue(handle?: string | null): string {
   return `30/${handle}`
 }
 
-function isFlowEdge(edge: Edge): boolean {
+function isFlowEdge(edge: DiagramEdge): boolean {
   return edge.sourceHandle === 'next' || edge.targetHandle === 'prev'
 }
 
@@ -468,7 +469,7 @@ function isFlowLikeNode(node: DiagramNode): boolean {
   )
 }
 
-function sortEdgesByTarget(edges: Edge[], nodesById: Record<string, DiagramNode>): Edge[] {
+function sortEdgesByTarget(edges: DiagramEdge[], nodesById: Record<string, DiagramNode>): DiagramEdge[] {
   return edges.toSorted((first, second) => {
     const handleCompare = edgeHandleSortValue(first.targetHandle).localeCompare(
       edgeHandleSortValue(second.targetHandle)
@@ -484,7 +485,7 @@ function sortEdgesByTarget(edges: Edge[], nodesById: Record<string, DiagramNode>
   })
 }
 
-function sortEdgesBySource(edges: Edge[], nodesById: Record<string, DiagramNode>): Edge[] {
+function sortEdgesBySource(edges: DiagramEdge[], nodesById: Record<string, DiagramNode>): DiagramEdge[] {
   return edges.toSorted((first, second) => {
     const handleCompare = edgeHandleSortValue(first.sourceHandle).localeCompare(
       edgeHandleSortValue(second.sourceHandle)
@@ -500,12 +501,12 @@ function sortEdgesBySource(edges: Edge[], nodesById: Record<string, DiagramNode>
   })
 }
 
-export function buildDiagramNodeTreeItems(nodes: DiagramNode[], edges: Edge[]): DiagramNodeTreeItem[] {
+export function buildDiagramNodeTreeItems(nodes: DiagramNode[], edges: DiagramEdge[]): DiagramNodeTreeItem[] {
   const nodesById = Object.fromEntries(nodes.map((node) => [node.id, node]))
   const connectedNodeIds = new Set<string>()
-  const incomingFlowEdges: Record<string, Edge[]> = {}
-  const outgoingFlowEdges: Record<string, Edge[]> = {}
-  const incomingDataEdges: Record<string, Edge[]> = {}
+  const incomingFlowEdges: Record<string, DiagramEdge[]> = {}
+  const outgoingFlowEdges: Record<string, DiagramEdge[]> = {}
+  const incomingDataEdges: Record<string, DiagramEdge[]> = {}
 
   for (const edge of edges) {
     if (!nodesById[edge.source] || !nodesById[edge.target]) {
@@ -603,8 +604,8 @@ export const diagramLogic = kea<diagramLogicType>([
   })),
   actions({
     setNodes: (nodes: DiagramNode[]) => ({ nodes }),
-    setEdges: (edges: Edge[]) => ({ edges }),
-    addEdge: (edge: Edge | Connection) => ({ edge }),
+    setEdges: (edges: DiagramEdge[]) => ({ edges }),
+    addEdge: (edge: DiagramEdge | Connection) => ({ edge }),
     onNodesChange: (changes: NodeChange[]) => ({ changes }),
     onEdgesChange: (changes: EdgeChange[]) => ({ changes }),
     selectNode: (nodeId: string) => ({ nodeId }),
@@ -615,7 +616,7 @@ export const diagramLogic = kea<diagramLogicType>([
     setSceneApps: (apps: Record<string, SceneApp>, forceCompiled: boolean = false) => ({ apps, forceCompiled }),
     forkSceneApp: (nodeId: string) => ({ nodeId }),
     updateNodeData: (id: string, data: Record<string, any>) => ({ id, data }),
-    updateEdge: (edge: Edge) => ({ edge }),
+    updateEdge: (edge: DiagramEdge) => ({ edge }),
     updateNodeConfig: (id: string, field: string, value: any) => ({ id, field, value }),
     copyAppJSON: (nodeId: string) => ({ nodeId }),
     duplicateNode: (nodeId: string) => ({ nodeId }),
@@ -674,12 +675,12 @@ export const diagramLogic = kea<diagramLogicType>([
       },
     ],
     rawEdges: [
-      [] as Edge[],
+      [] as DiagramEdge[],
       {
         setEdges: (_, { edges }) => edges,
         onEdgesChange: (state, { changes }) => {
           const newEdges = applyEdgeChanges(changes, state)
-          return equal(state, newEdges) ? state : newEdges
+          return equal(state, newEdges) ? state : (newEdges as DiagramEdge[])
         },
         addEdge: (state, { edge }) => {
           const newEdges = addEdge(
@@ -689,7 +690,7 @@ export const diagramLogic = kea<diagramLogicType>([
             },
             state
           )
-          return equal(state, newEdges) ? state : newEdges
+          return equal(state, newEdges) ? state : (newEdges as DiagramEdge[])
         },
         deleteApp: (state, { id }) => {
           const newEdges = state.filter((edge) => edge.source !== id && edge.target !== id)
@@ -770,7 +771,7 @@ export const diagramLogic = kea<diagramLogicType>([
     selectedNodes: [(s) => [s.nodes], (nodes: DiagramNode[]): DiagramNode[] => nodes.filter((node) => node.selected)],
     edges: [
       (s) => [s.rawEdges],
-      (rawEdges): Edge[] =>
+      (rawEdges): DiagramEdge[] =>
         rawEdges.map((edge) => {
           const newEdge =
             edge.targetHandle === 'prev' || edge.sourceHandle === 'next'
@@ -783,17 +784,17 @@ export const diagramLogic = kea<diagramLogicType>([
           return newEdge
         }),
     ],
-    selectedEdge: [(s) => [s.edges], (edges): Edge | null => edges.find((edge) => edge.selected) ?? null],
+    selectedEdge: [(s) => [s.edges], (edges): DiagramEdge | null => edges.find((edge) => edge.selected) ?? null],
     selectedEdgeId: [(s) => [s.selectedEdge], (edge) => edge?.id ?? null],
-    selectedEdges: [(s) => [s.edges], (edges: Edge[]): Edge[] => edges.filter((edge) => edge.selected)],
+    selectedEdges: [(s) => [s.edges], (edges: DiagramEdge[]): DiagramEdge[] => edges.filter((edge) => edge.selected)],
     edgesForNode: [
       (s) => [s.edges],
-      (edges: Edge[]): Record<string, Edge[]> => {
+      (edges: DiagramEdge[]): Record<string, DiagramEdge[]> => {
         return edges.reduce((acc, edge) => {
           acc[edge.source] = [...(acc[edge.source] ?? []), edge]
           acc[edge.target] = [...(acc[edge.target] ?? []), edge]
           return acc
-        }, {} as Record<string, Edge[]>)
+        }, {} as Record<string, DiagramEdge[]>)
       },
     ],
     nodesById: [
@@ -825,7 +826,7 @@ export const diagramLogic = kea<diagramLogicType>([
     nodesWithStyle: [(s) => [s.nodes], (nodes: DiagramNode[]): DiagramNode[] => nodes.map(renderNodeWithStyle)],
     nodeTreeItems: [
       (s) => [s.nodes, s.edges],
-      (nodes: DiagramNode[], edges: Edge[]): DiagramNodeTreeItem[] => buildDiagramNodeTreeItems(nodes, edges),
+      (nodes: DiagramNode[], edges: DiagramEdge[]): DiagramNodeTreeItem[] => buildDiagramNodeTreeItems(nodes, edges),
       { resultEqualityCheck: equal },
     ],
     sceneOptions: [
@@ -929,7 +930,7 @@ export const diagramLogic = kea<diagramLogicType>([
     },
   })),
   subscriptions(({ actions, values, props }) => ({
-    edges: (edges: Edge[], oldEdges: Edge[]) => {
+    edges: (edges: DiagramEdge[], oldEdges: DiagramEdge[]) => {
       // Do not update on first render
       if (typeof oldEdges !== 'undefined' && edges && !equal(edges, oldEdges)) {
         actions.setFrameFormValues({

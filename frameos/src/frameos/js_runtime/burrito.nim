@@ -272,13 +272,18 @@ when not defined(frameosEmbedded) and not defined(frameosWasm):
   proc js_std_eval_binary*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: cint)
   {.pop.}
 
-# JavaScript evaluation flags
+# JavaScript evaluation flags. These must match the bundled quickjs.h — the
+# two below were each one bit too high, so JS_EVAL_FLAG_COMPILE_ONLY actually
+# set JS_EVAL_FLAG_BACKTRACE_BARRIER: the code ran instead of being compiled,
+# and the caller got a value (a Promise, for a module) where it expected
+# bytecode. compileToBytecode has been quietly serialising the wrong thing.
 const
   JS_EVAL_TYPE_GLOBAL* = 0
   JS_EVAL_TYPE_MODULE* = 1
   JS_EVAL_FLAG_STRICT* = (1 shl 3)
-  JS_EVAL_FLAG_STRIP* = (1 shl 5)
-  JS_EVAL_FLAG_COMPILE_ONLY* = (1 shl 6)
+  JS_EVAL_FLAG_COMPILE_ONLY* = (1 shl 5)
+  JS_EVAL_FLAG_BACKTRACE_BARRIER* = (1 shl 6)
+  JS_EVAL_FLAG_ASYNC* = (1 shl 7)
 
 # Property flags
 const
@@ -1049,6 +1054,11 @@ proc close*(js: var QuickJS) =
 
   # Free Nim-side data last
   if js.contextData != nil:
+    # BurritoContextData is raw memory (alloc0/dealloc), but it holds a Nim
+    # Table whose payload is heap-allocated. dealloc frees the struct without
+    # running that field's destructor, so every close() used to leak the
+    # function registry's seq. Reset it first, while it is still typed.
+    reset(js.contextData.functions)
     dealloc(js.contextData)
     js.contextData = nil
 
@@ -1110,6 +1120,60 @@ proc evalModule*(js: QuickJS, code: string, filename: string = "<module>"): stri
   when not defined(frameosEmbedded) and not defined(frameosWasm):
     if js.config.enableStdHandlers:
       js_std_loop(js.context)
+
+proc evalModuleNamespace*(js: QuickJS, code: string, filename: string = "<module>"): JSValue =
+  ## Evaluate `code` as a real ES module and return its namespace object —
+  ## the thing that carries its `export`s.
+  ##
+  ## The alternative, and what FrameOS used to do, is to rewrite the module
+  ## into CommonJS first (the transpiler's "imports" transform) so a plain
+  ## global eval can pick the exports off an `exports` object. That rewrite
+  ## tokenises the whole file: ~26% of a transform, about 5.7 s for a 36 KB
+  ## app on an ESP32-S3, to move one `export` keyword. QuickJS parses the
+  ## file anyway during eval, so letting it handle the module form is the
+  ## same work done once instead of twice.
+  ##
+  ## The caller owns the returned value and must JS_FreeValue it.
+  let ctx = js.context
+  let compiled = JS_Eval(ctx, code.cstring, code.len.csize_t, filename.cstring,
+                         (JS_EVAL_TYPE_MODULE or JS_EVAL_FLAG_COMPILE_ONLY).cint)
+  if JS_IsException(compiled) != 0:
+    let exception = JS_GetException(ctx)
+    defer: JS_FreeValue(ctx, exception)
+    let errorMsg = toNimString(ctx, exception)
+    JS_FreeValue(ctx, compiled)
+    raise newException(JSException, errorMsg)
+
+  var moduleDef: ptr JSModuleDef = nil
+  var isModuleValue = false
+  {.emit: """
+  if (JS_VALUE_GET_TAG(`compiled`) == JS_TAG_MODULE) {
+    `isModuleValue` = NIM_TRUE;
+    `moduleDef` = JS_VALUE_GET_PTR(`compiled`);
+  }
+  """.}
+  if not isModuleValue or moduleDef == nil:
+    JS_FreeValue(ctx, compiled)
+    raise newException(JSException, "Compiled source is not a module: " & filename)
+
+  # JS_EvalFunction consumes `compiled`, so the module def pointer taken above
+  # is what keeps the module reachable afterwards.
+  let evaluated = JS_EvalFunction(ctx, compiled)
+  if JS_IsException(evaluated) != 0:
+    let exception = JS_GetException(ctx)
+    defer: JS_FreeValue(ctx, exception)
+    let errorMsg = toNimString(ctx, exception)
+    JS_FreeValue(ctx, evaluated)
+    raise newException(JSException, errorMsg)
+  JS_FreeValue(ctx, evaluated)
+
+  result = JS_GetModuleNamespace(ctx, moduleDef)
+  if JS_IsException(result) != 0:
+    let exception = JS_GetException(ctx)
+    defer: JS_FreeValue(ctx, exception)
+    let errorMsg = toNimString(ctx, exception)
+    JS_FreeValue(ctx, result)
+    raise newException(JSException, errorMsg)
 
 proc compileToBytecode*(js: QuickJS, code: string, filename: string = "<input>", isModule: bool = false): seq[byte] =
   ## Compile JavaScript code to bytecode format

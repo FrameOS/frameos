@@ -4,7 +4,7 @@ import { A } from 'kea-router'
 import clsx from 'clsx'
 import { ParentSize } from '@visx/responsive'
 import { scaleLinear, scaleTime } from '@visx/scale'
-import { max } from '@visx/vendor/d3-array'
+import { max, min } from '@visx/vendor/d3-array'
 
 import { AreaChart } from './AreaChart'
 import { type MetricPoint, type MetricSeries, type TimeRange } from './metricsLogic'
@@ -12,6 +12,7 @@ import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { metricChartThemes, themeMetricSeries, type MetricChartTheme } from './chartTheme'
 import { urls } from '../../../../urls'
 import { frameMetricsPreviewLogic } from '../../../workspace/frameMetricsPreviewLogic'
+import type { FrameId } from '../../../../types'
 
 const chartHeight = 28
 const chartMargin = { top: 3, right: 1, bottom: 3, left: 1 }
@@ -34,6 +35,11 @@ function flattenSeriesData(series: MetricSeries[]): MetricPoint[] {
 
 function getValueMax(data: MetricPoint[]): number {
   return Math.max(max(data, getValue) || 0, 1)
+}
+
+/* Negative series (ESP32 wifiRssi) need the floor to follow the data. */
+function getValueMin(data: MetricPoint[]): number {
+  return Math.min(min(data, getValue) || 0, 0)
 }
 
 function HeaderMetricChart({
@@ -69,7 +75,7 @@ function HeaderMetricChart({
           })
           const yScale = scaleLinear<number>({
             range: [yMax, 0],
-            domain: [0, getValueMax(allData)],
+            domain: [getValueMin(allData), getValueMax(allData)],
             nice: true,
           })
 
@@ -100,7 +106,7 @@ function HeaderMetricChart({
   )
 }
 
-export function HeaderMetrics({ frameId }: { frameId: number }) {
+export function HeaderMetrics({ frameId }: { frameId: FrameId }) {
   const { theme } = useValues(workspaceLogic)
   const { headerMetricsByCategory, previewMetricsTimeRange, latestMetricSummariesByCategory } = useValues(
     frameMetricsPreviewLogic({ frameId })

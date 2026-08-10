@@ -1,4 +1,4 @@
-import { RepositoryType, TemplateType } from '../../../../types'
+import { RepositoryType, TemplateType, FrameId } from '../../../../types'
 import { H6 } from '../../../../components/H6'
 import {
   ArrowDownTrayIcon,
@@ -10,7 +10,9 @@ import {
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import {
   FolderPlusIcon,
+  ArrowTopRightOnSquareIcon,
   CloudArrowDownIcon,
+  CloudArrowUpIcon,
   DocumentPlusIcon,
   CheckIcon,
   EyeIcon,
@@ -24,17 +26,43 @@ import clsx from 'clsx'
 import { appsModel } from '../../../../models/appsModel'
 import { useActions, useValues } from 'kea'
 import { settingsLogic } from '../../../settings/settingsLogic'
+import { cloudLogic } from '../../../settings/cloudLogic'
+import { apiFetch } from '../../../../utils/apiFetch'
 import { collectSecretSettingsFromScenes, getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
 import { templateRowLogic } from './templateRowLogic'
+import { cloudDriveLogic } from './cloudDriveLogic'
 import { type FrameosTemplateDragData, setFrameosTemplateDragData } from '../../../workspace/sceneDrag'
 import type { CompatibilityResult } from '../../../../utils/embeddedCompatibility'
 import { livePreviewLogic } from '../Scenes/livePreviewLogic'
 import { LivePreviewModal } from '../Scenes/LivePreviewModal'
+import { CURRENT_FRAMEOS_VERSION } from '../../frameDeployUtils'
+
+// True when a cloud scene was exported with a newer FrameOS than this install
+// runs — a nudge that upgrading may be needed for it to work as published.
+// CalVer (2026.7.3) compares numerically segment by segment.
+export function builtOnNewerFrameos(templateVersion?: string): boolean {
+  if (!templateVersion || !CURRENT_FRAMEOS_VERSION || CURRENT_FRAMEOS_VERSION === 'dev') {
+    return false
+  }
+  const ours = CURRENT_FRAMEOS_VERSION.split('.').map(Number)
+  const theirs = templateVersion.split('.').map(Number)
+  if (theirs.some(isNaN) || ours.some(isNaN)) {
+    return false
+  }
+  for (let i = 0; i < Math.max(ours.length, theirs.length); i++) {
+    const a = theirs[i] ?? 0
+    const b = ours[i] ?? 0
+    if (a !== b) {
+      return a > b
+    }
+  }
+  return false
+}
 
 interface TemplateProps {
   template: TemplateType
-  frameId?: number
+  frameId?: FrameId
   repository?: RepositoryType
   applyTemplate?: (template: TemplateType) => void
   saveRemoteAsLocal?: (template: TemplateType) => void
@@ -66,6 +94,7 @@ export function TemplateRow({
   onToggleFavourite,
 }: TemplateProps): JSX.Element {
   const { apps } = useValues(appsModel)
+  const { grantedScopes } = useValues(cloudLogic)
   const { settings, savedSettings, settingsChanged } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
   const [activeSettingsKey, setActiveSettingsKey] = useState<string | null>(null)
@@ -108,6 +137,53 @@ export function TemplateRow({
   // so there's nothing the (browser or on-frame) live preview could execute.
   const compiledOnly = templateScenes.length > 0 && !trySceneConfig && !canLoadRemoteScenes
   const showFavourite = Boolean(favouriteId && onToggleFavourite)
+  // Only locally saved templates can be published, and only when the cloud
+  // link has the store:publish feature enabled (Settings → FrameOS Cloud).
+  const canPublishToCloud = !repository && Boolean(template.id) && grantedScopes.includes('store:publish')
+
+  async function publishToCloud(): Promise<void> {
+    if (!template.id) {
+      return
+    }
+    let response: Response
+    try {
+      response = await apiFetch('/api/cloud/store/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template_id: template.id }),
+      })
+    } catch (error) {
+      window.alert(`Could not save to your private cloud: ${error}`)
+      return
+    }
+    if (!response.ok) {
+      let detail = `unexpected status ${response.status}`
+      try {
+        detail = (await response.json())?.detail ?? detail
+      } catch {
+        // keep fallback detail
+      }
+      window.alert(`Could not save to your private cloud: ${detail}`)
+      return
+    }
+    const payload = await response.json()
+    const scene = payload?.scene
+    cloudDriveLogic.findMounted()?.actions.loadDrive()
+    const suffix =
+      scene?.visibility === 'public'
+        ? `It is public on the store, now at version ${scene?.version ?? '?'}.`
+        : 'It stays private until you make it public on FrameOS Cloud.'
+    if (
+      scene?.url &&
+      window.confirm(`Saved "${template.name}" to your private cloud scenes. ${suffix}\n\nOpen it now?`)
+    ) {
+      window.open(scene.url, '_blank', 'noopener')
+    }
+  }
+
+  // Risk flag computed by the cloud store; the install confirmation lives in
+  // the applyRemoteToFrame listener so drag-and-drop installs go through it too.
+  const runsShellCommands = Boolean(template.flags?.includes('shell'))
 
   return (
     <div
@@ -168,7 +244,49 @@ export function TemplateRow({
                     compiled
                   </Tag>
                 ) : null}
+                {runsShellCommands ? (
+                  <Tag
+                    color="red"
+                    className="ml-2 normal-case"
+                    title="This scene configures apps or custom code that run shell commands on the frame"
+                  >
+                    shell
+                  </Tag>
+                ) : null}
+                {template.visibility === 'private' || template.visibility === 'public' ? (
+                  <Tag
+                    color={template.visibility === 'public' ? 'teal' : 'gray'}
+                    className="ml-2 normal-case"
+                    title={
+                      template.visibility === 'public'
+                        ? 'Listed publicly on the FrameOS store'
+                        : 'Only visible to your cloud account'
+                    }
+                  >
+                    {template.visibility}
+                  </Tag>
+                ) : null}
               </H6>
+              {template.author || template.frameosVersion ? (
+                <div className="frame-tool-muted text-xs">
+                  {template.author ? <>by {template.author}</> : null}
+                  {template.author && template.frameosVersion ? ' · ' : null}
+                  {template.frameosVersion ? (
+                    builtOnNewerFrameos(template.frameosVersion) ? (
+                      <span
+                        className="text-amber-500"
+                        title={`Published from FrameOS ${template.frameosVersion}; this install runs ${CURRENT_FRAMEOS_VERSION}. Upgrade FrameOS for best results.`}
+                      >
+                        FrameOS {template.frameosVersion} — newer than this install
+                      </span>
+                    ) : (
+                      <span title="The FrameOS version this scene was published from">
+                        FrameOS {template.frameosVersion}
+                      </span>
+                    )
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className={clsx('flex gap-1', showFavourite && 'pr-6')}>
               {applyTemplate ? (
@@ -176,7 +294,7 @@ export function TemplateRow({
                   className="!px-2 flex gap-1"
                   size="small"
                   color={installedTemplatesByName[template.name] ? 'secondary' : 'primary'}
-                  onClick={() => applyTemplate(template)}
+                  onClick={() => applyTemplate?.(template)}
                   disabled={!canInstall}
                   title={unsupported ? unsupportedReason : 'Add scene'}
                 >
@@ -220,7 +338,7 @@ export function TemplateRow({
                           label: templateScenes.length
                             ? `Add ${templateScenes.length} scene${templateScenes.length === 1 ? '' : 's'} onto frame`
                             : 'Add onto frame',
-                          onClick: () => applyTemplate(template),
+                          onClick: () => applyTemplate?.(template),
                           disabled: !canInstall,
                           title: unsupported ? unsupportedReason : undefined,
                           icon: <DocumentPlusIcon className="w-5 h-5" />,
@@ -236,12 +354,32 @@ export function TemplateRow({
                         },
                       ]
                     : []),
+                  // Store scenes (and private cloud scenes) carry their page's
+                  // URL in the repository index.
+                  ...(template.url
+                    ? [
+                        {
+                          label: 'View store page',
+                          onClick: () => window.open(template.url, '_blank', 'noopener'),
+                          icon: <ArrowTopRightOnSquareIcon className="w-5 h-5" />,
+                        },
+                      ]
+                    : []),
                   ...(exportTemplate
                     ? [
                         {
                           label: 'Download .zip',
                           onClick: () => (template.id ? exportTemplate(template.id, 'zip') : null),
                           icon: <CloudArrowDownIcon className="w-5 h-5" />,
+                        },
+                      ]
+                    : []),
+                  ...(canPublishToCloud
+                    ? [
+                        {
+                          label: 'Save to private cloud',
+                          onClick: () => void publishToCloud(),
+                          icon: <CloudArrowUpIcon className="w-5 h-5" />,
                         },
                       ]
                     : []),
@@ -313,7 +451,7 @@ export function TemplateRow({
 }
 
 /** Renders the in-browser WASM preview modal for a template's entry scene. */
-function TemplateBrowserPreviewModal({ frameId, sceneId }: { frameId: number; sceneId: string }): JSX.Element | null {
+function TemplateBrowserPreviewModal({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element | null {
   const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
   return livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null
 }

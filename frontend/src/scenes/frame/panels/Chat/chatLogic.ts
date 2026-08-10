@@ -15,6 +15,7 @@ import type {
   DiagramNode,
   FrameType,
   FrameScene,
+  FrameId,
 } from '../../../../types'
 import { socketLogic } from '../../../socketLogic'
 import { editAppLogic } from '../EditApp/editAppLogic'
@@ -32,7 +33,7 @@ function frameProjectId(frameForm: Partial<FrameType>, frame: FrameType | null |
 }
 
 export interface ChatLogicProps {
-  frameId: number
+  frameId: FrameId
   sceneId?: string | null
 }
 
@@ -86,7 +87,7 @@ const getChatContextId = (chat: ChatSummary | null): string | null => {
 
 const getChatContextKey = (chat: ChatSummary) => `${getChatContextType(chat)}:${getChatContextId(chat) ?? ''}`
 
-const buildLocalChat = (frameId: number, contextType: ChatContextType, contextId?: string | null): ChatSummary => {
+const buildLocalChat = (frameId: FrameId, contextType: ChatContextType, contextId?: string | null): ChatSummary => {
   const timestamp = new Date().toISOString()
   return {
     id: uuidv4(),

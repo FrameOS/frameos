@@ -1,0 +1,80 @@
+@import "../../frontend/src/index.css";
+/* The cloud header, shared with the Next.js pages (store, /account, auth):
+   one stylesheet so the two apps cannot drift apart. It lives in
+   cloud/apps/auth-web because Next only bundles CSS from its own tree, while
+   esbuild follows any relative path — this import mirrors the frontend/ one
+   above. */
+@import "../../cloud/apps/auth-web/app/cloud-chrome.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: "Inter", "SF Pro", system-ui, -apple-system, sans-serif;
+}
+
+#root {
+  height: 100dvh;
+  max-width: none !important;
+  /* The app below is exactly one viewport tall and scrolls internally; a
+     page-level scrollbar here would let the account header slide away. */
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------------
+ * Account chrome + workspace shell
+ *
+ * The account header is fixed-height chrome at the top; the shared workspace
+ * shell (frontend/src/scenes/workspace/FrameosShell.tsx) fills what is left.
+ *
+ * The shell positions all of its chrome — the rail, every drawer, the floating
+ * toolbars — with `position: fixed` against the viewport, from a dozen
+ * different components. Offsetting each of them by the header height would
+ * mean patching the shared SPA (which also builds the self-hosted and
+ * on-device bundles) and would still miss the next one somebody adds. Instead
+ * the wrapper takes a transform, which makes it the containing block for every
+ * fixed descendant: the shell keeps saying "top: 1.25rem" and lands 1.25rem
+ * below the header. Things that portal out to #popper or document.body
+ * (dropdowns, tooltips, modals) live outside this wrapper, so they still
+ * measure against the real viewport — which is what they want.
+ *
+ * What a transform does NOT rebase is vh/dvh, so the two viewport-height
+ * utilities the shell uses (min-h-screen on the app shell, h-screen on
+ * <main>) are re-anchored to the wrapper here. Both selectors are two classes
+ * deep, so they beat Tailwind's single-class utilities, max-lg: variants
+ * included.
+ * ------------------------------------------------------------------------ */
+.frameos-cloud-app {
+  --frameos-account-header-height: 3.25rem;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+.frameos-cloud-app__shell {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  transform: translateZ(0);
+}
+
+.frameos-cloud-app__shell .frameos-app-shell,
+.frameos-cloud-app__shell .workspace-main {
+  height: 100%;
+  min-height: 0;
+}
+
+/* The shell hands mobile back to page scrolling (max-lg:h-auto,
+   max-lg:overflow-visible). Inside a fixed-height wrapper that would clip
+   whatever does not fit, so the scrolling stays inside <main>. */
+@media (max-width: 1023px) {
+  .frameos-cloud-app__shell .workspace-main {
+    overflow-y: auto;
+  }
+}
+
+/* .frameos-account-header and friends come from the shared
+   cloud/apps/auth-web/app/cloud-chrome.css, imported at the top: the Next
+   pages (store, /account) render the exact same header. */

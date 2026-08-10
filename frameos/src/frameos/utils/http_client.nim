@@ -5,8 +5,14 @@
 ## flaky network park the calling thread — often the render thread — for the
 ## full TCP retransmission window. The `bounded*` procs below speak HTTP/1.1
 ## over a raw socket with a connect timeout and SO_RCVTIMEO/SO_SNDTIMEO set
-## before the TLS handshake, so every phase is bounded. (DNS resolution inside
-## connect() remains bounded only by the system resolver.)
+## before the TLS handshake, so every phase is bounded.
+##
+## DNS is the one phase the socket API will not let us bound: `getAddrInfo`
+## runs inside `connect` before its timeout is armed. Instead of resolving per
+## connect (once per redirect hop), requests resolve once up front through a
+## short-lived cache that also remembers failures, so an unreachable resolver
+## stalls one request per TTL window rather than every request on every worker
+## thread.
 ##
 ## The embedded (ESP32) build has no std/net; requests go through
 ## esp_http_client + mbedTLS on the firmware's C side instead, via the
@@ -16,6 +22,7 @@ const
   DefaultFetchTimeoutMs* = 30000
   DefaultFetchMaxBytes* = 10 * 1024 * 1024
   DefaultFetchMaxSeconds* = 35.0
+  DefaultFetchMaxRedirects* = 5
 
 type
   SimpleHttpHeader* = tuple[name: string, value: string]
@@ -42,8 +49,12 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       code*: int
       status*: string
       body*: pointer # Contiguous view; nil when the body spans >1 chunk
-      bodyLen*: int  # Total length across all chunks
+      bodyLen*: int  # Total length across all chunks (or the spill file size)
       chunks*: seq[HttpBodyChunk]
+      spillPath*: string # Non-empty when the body was spilled to a temp file
+                         # (SD/SPIFFS) because PSRAM could not buffer it; the
+                         # chunks are then empty and bodyLen is the file size.
+                         # freeHttpBufferResponse deletes the file.
       when defined(frameosEmbedded):
         rawChunks: pointer
         rawChunkCount: csize_t
@@ -65,15 +76,18 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       data: pointer
       len: csize_t
 
-    proc fos_nim_http_request_chunked(httpMethod: cstring, url: cstring,
+    proc fos_nim_http_request_chunked_spill(httpMethod: cstring, url: cstring,
                             body: pointer, bodyLen: csize_t,
                             headers: pointer, headersLen: csize_t,
                             timeoutMs: cint, maxBytes: csize_t,
-                            outStatus: ptr cint, outChunkCount: ptr csize_t):
+                            outStatus: ptr cint, outChunkCount: ptr csize_t,
+                            outSpillPath: ptr cstring, outSpillLen: ptr csize_t):
                             ptr UncheckedArray[FosNimHttpChunk]
-                            {.importc: "fos_nim_http_request_chunked", cdecl.}
+                            {.importc: "fos_nim_http_request_chunked_spill", cdecl.}
     proc fos_nim_http_free_chunks(chunks: pointer, count: csize_t)
                             {.importc: "fos_nim_http_free_chunks", cdecl.}
+    proc c_remove(path: cstring): cint
+                            {.importc: "remove", header: "<stdio.h>".}
 
   proc encodeSimpleHeaders(headers: seq[SimpleHttpHeader]): string =
     for header in headers:
@@ -91,6 +105,11 @@ when defined(frameosEmbedded) or defined(frameosWasm):
 
   proc freeHttpBufferResponse*(response: var BoundedHttpBufferResponse) =
     when defined(frameosEmbedded):
+      if response.spillPath.len > 0:
+        # Spilled bodies are single-use temp files; remove as soon as the
+        # consumer is done. Boot-time sweeps catch crash leftovers.
+        discard c_remove(response.spillPath.cstring)
+        response.spillPath = ""
       if response.rawChunks != nil:
         fos_nim_http_free_chunks(response.rawChunks, response.rawChunkCount)
         response.rawChunks = nil
@@ -127,12 +146,18 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     let headerPtr = if headerBlock.len > 0: unsafeAddr headerBlock[0] else: nil
     when defined(frameosEmbedded):
       var chunkCount: csize_t = 0
-      let rawChunks = fos_nim_http_request_chunked(httpMethod.cstring, url.cstring,
+      var spillPath: cstring = nil
+      var spillLen: csize_t = 0
+      let rawChunks = fos_nim_http_request_chunked_spill(httpMethod.cstring, url.cstring,
                                      bodyPtr, body.len.csize_t,
                                      headerPtr, headerBlock.len.csize_t,
                                      timeoutMs.cint, maxBytes.csize_t,
-                                     addr status, addr chunkCount)
+                                     addr status, addr chunkCount,
+                                     addr spillPath, addr spillLen)
       if rawChunks == nil and status == 0:
+        if spillPath != nil:
+          discard c_remove(spillPath)
+          fos_nim_http_free(spillPath)
         raise newException(IOError, &"HTTP request failed: {url}")
       result.code = status.int
       result.status = $status
@@ -145,9 +170,16 @@ when defined(frameosEmbedded) or defined(frameosWasm):
           result.chunks[i] = HttpBodyChunk(
             data: rawChunks[i].data, len: rawChunks[i].len.int)
           total += rawChunks[i].len.int
-      result.bodyLen = total
-      if result.chunks.len == 1:
-        result.body = result.chunks[0].data
+      if spillPath != nil:
+        # The whole body lives in a temp file; the chunk array is a single
+        # empty placeholder. Leave `body` nil so nobody misreads it.
+        result.spillPath = $spillPath
+        fos_nim_http_free(spillPath)
+        result.bodyLen = spillLen.int
+      else:
+        result.bodyLen = total
+        if result.chunks.len == 1:
+          result.body = result.chunks[0].data
     else:
       var outLen: csize_t = 0
       let buf = fos_nim_http_request(httpMethod.cstring, url.cstring,
@@ -187,6 +219,13 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       headers = headers
     )
     try:
+      if response.spillPath.len > 0:
+        # The body only exists because it did NOT fit in memory; copying it
+        # into a Nim string would recreate the OOM this path avoids. Only
+        # buffer-aware consumers (image decode) handle spilled bodies.
+        raise newException(IOError,
+          &"HTTP response ({response.bodyLen} bytes) was spilled to storage; " &
+          "it is too large to load into memory")
       result.code = response.code
       result.status = response.status
       if response.bodyLen > 0:
@@ -244,17 +283,201 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       headers: seq[SimpleHttpHeader] = @[],
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      maxRedirects = DefaultFetchMaxRedirects
     ): BoundedHttpResponse =
+    ## maxRedirects is accepted for signature parity with the native build; the
+    ## C glue caps redirects itself.
+    discard maxRedirects
     boundedRequest(url, httpMethod = httpMethod, body = body, timeoutMs = timeoutMs,
                    maxBytes = maxBytes, maxSeconds = maxSeconds, headers = headers)
 
 else:
-  import std/[httpclient, net, posix, strformat, strutils, times, uri]
+  import std/[httpclient, locks, nativesockets, net, posix, strformat, strutils,
+              tables, times, uri]
 
   const
-    MaxFetchRedirects = 5
     RecvChunkBytes = 65536
+    DnsSuccessTtlSeconds = 60.0
+    DnsFailureTtlSeconds = 10.0
+    DnsCacheMaxEntries = 64
+
+  type DnsCacheEntry = object
+    address: string ## empty when the last resolution failed
+    expiresAt: float
+
+  var
+    dnsCacheLock: Lock
+    dnsCache: Table[string, DnsCacheEntry]
+
+  initLock(dnsCacheLock)
+
+  proc cachedAddress(host: string): tuple[hit: bool, address: string] {.gcsafe.} =
+    let now = epochTime()
+    {.gcsafe.}:
+      withLock dnsCacheLock:
+        if dnsCache.hasKey(host):
+          let entry = dnsCache[host]
+          if entry.expiresAt > now:
+            return (true, entry.address)
+          dnsCache.del(host)
+    (false, "")
+
+  proc rememberAddress(host, address: string, ttl: float) {.gcsafe.} =
+    let expiresAt = epochTime() + ttl
+    {.gcsafe.}:
+      withLock dnsCacheLock:
+        if dnsCache.len >= DnsCacheMaxEntries and not dnsCache.hasKey(host):
+          # Crude bound instead of an LRU: the cache only exists to absorb
+          # bursts, so a full reset costs one resolution per live host.
+          dnsCache.clear()
+        dnsCache[host] = DnsCacheEntry(address: address, expiresAt: expiresAt)
+
+  proc forgetResolvedHosts*() {.gcsafe.} =
+    ## Test seam, and worth calling if the resolver config ever changes.
+    {.gcsafe.}:
+      withLock dnsCacheLock:
+        dnsCache.clear()
+
+  # ---- private-network policy (cloud-managed frames) ------------------------
+  # docs/cloud-frames.md: scenes installed by a cloud provider run *inside the
+  # owner's LAN*, so on a managed frame HTTP to private/link-local addresses is
+  # denied by default — otherwise a compromised account becomes an SSRF pivot
+  # onto routers and IoT devices. The check sits on the one address every
+  # request funnels through (literal or resolved, redirects included). The
+  # policy is flipped by frameos/cloud/hub_client.nim from the cloud link
+  # state; the only override is the local-admin-settable
+  # `network.allowLocalNetworkAccess` in frame.json.
+
+  var
+    localNetworkPolicyLock: Lock
+    localNetworkPolicyBlock = false
+    localNetworkPolicyExempt: seq[string] ## lowercase "host:port" entries
+
+  initLock(localNetworkPolicyLock)
+
+  proc isPrivateNetworkAddress*(address: string): bool {.gcsafe.} =
+    ## True for addresses a cloud-installed scene must not reach: loopback,
+    ## RFC1918, link-local, CGNAT, 0.0.0.0/8, broadcast — and their IPv6
+    ## equivalents (loopback/unspecified, ULA, link-local, mapped IPv4).
+    ## Unparseable input classifies as private: the caller is about to hand
+    ## the string to connect(), so failing closed is the only safe answer.
+    var ip: IpAddress
+    try:
+      ip = parseIpAddress(address)
+    except ValueError:
+      return true
+    case ip.family
+    of IpAddressFamily.IPv4:
+      let b = ip.address_v4
+      if b[0] == 0: return true                               # 0.0.0.0/8 incl. unspecified
+      if b[0] == 10: return true                              # 10/8
+      if b[0] == 100 and (b[1] and 0b1100_0000'u8) == 64: return true # 100.64/10 CGNAT
+      if b[0] == 127: return true                             # loopback
+      if b[0] == 169 and b[1] == 254: return true             # link-local
+      if b[0] == 172 and (b[1] and 0b1111_0000'u8) == 16: return true # 172.16/12
+      if b[0] == 192 and b[1] == 0 and b[2] == 0: return true  # 192.0.0.0/24 IETF protocol assignments
+      if b[0] == 192 and b[1] == 168: return true             # 192.168/16
+      if b[0] == 198 and (b[1] and 0b1111_1110'u8) == 18: return true # 198.18/15 benchmarking
+      if (b[0] and 0b1111_0000'u8) == 224: return true        # 224/4 multicast
+      if b[0] >= 240: return true                             # 240/4 reserved, incl. 255.255.255.255
+      false
+    of IpAddressFamily.IPv6:
+      let b = ip.address_v6
+      # ::ffff:a.b.c.d (IPv4-mapped) and ::a.b.c.d (the deprecated
+      # IPv4-compatible form, which has no ffff marker at all): both carry an
+      # IPv4 address in the low 32 bits, so classify that instead. Missing the
+      # second form let ::127.0.0.1 through as "public".
+      var zeroPrefix = true
+      for i in 0 .. 9:
+        if b[i] != 0: zeroPrefix = false
+      let embedsIPv4 = zeroPrefix and
+        ((b[10] == 0xff and b[11] == 0xff) or (b[10] == 0 and b[11] == 0))
+      # :: and ::1 first: they are the unspecified/loopback addresses, not an
+      # embedded 0.0.0.x.
+      var allZero = true
+      for i in 0 .. 14:
+        if b[i] != 0: allZero = false
+      if allZero and b[15] <= 1: return true
+      if embedsIPv4:
+        return isPrivateNetworkAddress($b[12] & "." & $b[13] & "." & $b[14] & "." & $b[15])
+      # 64:ff9b::/96 — the well-known NAT64 prefix, another wrapper around an
+      # IPv4 destination.
+      if b[0] == 0 and b[1] == 0x64 and b[2] == 0xff and b[3] == 0x9b and
+          b[4] == 0 and b[5] == 0 and b[6] == 0 and b[7] == 0 and
+          b[8] == 0 and b[9] == 0 and b[10] == 0 and b[11] == 0:
+        return isPrivateNetworkAddress($b[12] & "." & $b[13] & "." & $b[14] & "." & $b[15])
+      if (b[0] and 0xfe) == 0xfc: return true                 # fc00::/7 ULA
+      if b[0] == 0xfe and (b[1] and 0xc0) == 0x80: return true # fe80::/10 link-local
+      if b[0] == 0xff: return true                            # ff00::/8 multicast
+      false
+
+  proc setLocalNetworkPolicy*(blockLocal: bool, exemptHostPorts: seq[string] = @[]) {.gcsafe.} =
+    ## Activates/deactivates the private-network deny and replaces the exempt
+    ## "host:port" list (the cloud provider's own API endpoint, which the local
+    ## admin linked deliberately — possibly a dev provider on the LAN).
+    {.gcsafe.}:
+      withLock localNetworkPolicyLock:
+        localNetworkPolicyBlock = blockLocal
+        localNetworkPolicyExempt = @[]
+        for entry in exemptHostPorts:
+          localNetworkPolicyExempt.add(entry.toLowerAscii())
+
+  proc localNetworkPolicySnapshot*(): tuple[active: bool, exemptHostPorts: seq[string]] {.gcsafe.} =
+    {.gcsafe.}:
+      withLock localNetworkPolicyLock:
+        result = (localNetworkPolicyBlock, localNetworkPolicyExempt)
+
+  proc enforceLocalNetworkPolicy(hostname: string, port: Port, address: string) {.gcsafe.} =
+    {.gcsafe.}:
+      var blocked = false
+      withLock localNetworkPolicyLock:
+        if localNetworkPolicyBlock:
+          let key = hostname.toLowerAscii() & ":" & $int(port)
+          if key notin localNetworkPolicyExempt and isPrivateNetworkAddress(address):
+            blocked = true
+      if blocked:
+        raise newException(IOError,
+          "local network access is blocked on cloud-managed frames (" &
+          hostname & " resolves to " & address & ")")
+
+  proc resolveHostBounded(host: string): string {.gcsafe.} =
+    ## Resolve `host` to an IPv4 literal once per request instead of once per
+    ## connect. `getAddrInfo` is bounded only by the system resolver, and
+    ## `Socket.connect` runs it *before* arming its own timeout, so a blackholed
+    ## resolver parks the calling thread — with 1-4 HTTP workers that is the
+    ## whole server. Results are cached, failures included: a dead resolver then
+    ## costs one stalled request per TTL window rather than one per request.
+    ##
+    ## AF_INET only, matching `newSocket()`'s domain — resolving anything the
+    ## socket cannot connect to would only turn a DNS answer into a connect
+    ## error.
+    if host.len == 0:
+      raise newException(ValueError, "Invalid HTTP URL: empty host")
+    if host.isIpAddress():
+      return host
+    let cached = cachedAddress(host)
+    if cached.hit:
+      if cached.address.len == 0:
+        raise newException(IOError, &"Could not resolve {host} (cached failure)")
+      return cached.address
+
+    var info: ptr AddrInfo = nil
+    try:
+      info = getAddrInfo(host, Port(0), AF_INET)
+    except OSError as err:
+      rememberAddress(host, "", DnsFailureTtlSeconds)
+      raise newException(IOError, &"Could not resolve {host}: {err.msg}")
+    try:
+      if info != nil and info.ai_addr != nil:
+        result = getAddrString(info.ai_addr)
+    finally:
+      if info != nil:
+        freeAddrInfo(info)
+    if result.len == 0:
+      rememberAddress(host, "", DnsFailureTtlSeconds)
+      raise newException(IOError, &"Could not resolve {host}")
+    rememberAddress(host, result, DnsSuccessTtlSeconds)
 
   proc fetchHeaders(headers: HttpHeaders): HttpHeaders =
     result = newHttpHeaders()
@@ -271,6 +494,31 @@ else:
         raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
       if maxSeconds > 0 and epochTime() > startedAt + maxSeconds:
         raise newException(IOError, &"HTTP response exceeded {maxSeconds} seconds")
+
+  # Headers that authenticate the caller to one specific origin. A redirect to
+  # a different origin must not carry them: an open redirect (or a compromised
+  # first hop) would otherwise hand a bearer token or session cookie to
+  # whatever host the Location header names.
+  const CrossOriginHeaders = ["authorization", "proxy-authorization", "cookie"]
+
+  proc effectiveHttpPort(uri: Uri): string =
+    if uri.port.len > 0: uri.port
+    elif uri.scheme.toLowerAscii() == "https": "443"
+    else: "80"
+
+  proc sameHttpOrigin(a, b: Uri): bool =
+    a.scheme.toLowerAscii() == b.scheme.toLowerAscii() and
+      a.hostname.toLowerAscii() == b.hostname.toLowerAscii() and
+      effectiveHttpPort(a) == effectiveHttpPort(b)
+
+  proc withoutCrossOriginHeaders(headers: HttpHeaders): HttpHeaders =
+    result = newHttpHeaders()
+    if headers == nil:
+      return
+    for key, value in headers:
+      if key.toLowerAscii() in CrossOriginHeaders:
+        continue
+      result.add(key, value)
 
   proc validateHttpUrl(url: string) =
     let parsed = parseUri(url)
@@ -372,10 +620,19 @@ else:
       elif isSsl: Port(443)
       else: Port(80)
 
+    # Resolve before opening the socket: resolution can block, and the deadline
+    # check below then aborts a request whose DNS already ate the budget
+    # instead of starting a connect that cannot finish in time.
+    let address = resolveHostBounded(parsed.hostname)
+    # Every request — literal IP or DNS name, redirects included — passes its
+    # connect address through the managed-frame private-network policy.
+    enforceLocalNetworkPolicy(parsed.hostname, port, address)
+
     var sslContext: SslContext = nil
     var socket = newSocket()
     try:
-      socket.connect(parsed.hostname, port, timeout = ioTimeoutMs(timeoutMs, deadline))
+      # Connect by address, but keep the hostname for SNI and the Host header.
+      socket.connect(address, port, timeout = ioTimeoutMs(timeoutMs, deadline))
       socket.setSocketSendRecvTimeouts(ioTimeoutMs(timeoutMs, deadline))
       if isSsl:
         sslContext = newContext()
@@ -433,27 +690,37 @@ else:
       headers: HttpHeaders = nil,
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      maxRedirects = DefaultFetchMaxRedirects
     ): BoundedHttpResponse =
-    ## HTTP request with every phase bounded; follows up to 5 redirects.
+    ## HTTP request with every phase bounded. Each redirect is a fresh connect
+    ## (and a fresh resolution for a new host), so callers that talk to a known
+    ## endpoint should keep `maxRedirects` low.
     validateHttpUrl(url)
     let deadline = if maxSeconds > 0: epochTime() + maxSeconds else: 0.0
     var currentUrl = url
     var currentMethod = httpMethod
     var currentBody = body
-    for _ in 0 .. MaxFetchRedirects:
-      result = singleBoundedRequest(currentUrl, currentMethod, currentBody, headers,
+    var currentHeaders = headers
+    for _ in 0 .. max(maxRedirects, 0):
+      result = singleBoundedRequest(currentUrl, currentMethod, currentBody, currentHeaders,
                                     timeoutMs, maxBytes, deadline)
       if result.code notin [301, 302, 303, 307, 308]:
         return result
       let location = headerValue(result.headers, "Location")
       if location.len == 0:
         return result
-      currentUrl = $combine(parseUri(currentUrl), parseUri(location))
+      let previousUri = parseUri(currentUrl)
+      currentUrl = $combine(previousUri, parseUri(location))
       validateHttpUrl(currentUrl)
+      if not sameHttpOrigin(previousUri, parseUri(currentUrl)):
+        currentHeaders = withoutCrossOriginHeaders(currentHeaders)
       if result.code in [301, 302, 303] and currentMethod notin {HttpGet, HttpHead}:
         currentMethod = HttpGet
         currentBody = ""
+      # A redirect chain is also a chain of resolutions and connects; make sure
+      # what is left of the budget can still cover one.
+      discard ioTimeoutMs(timeoutMs, deadline)
     raise newException(HttpRequestError, &"Too many HTTP redirects fetching {url}")
 
   proc boundedHeadMetadata*(
@@ -481,9 +748,11 @@ else:
       headers: HttpHeaders = nil,
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      maxRedirects = DefaultFetchMaxRedirects
     ): string =
-    let response = boundedRequest(url, httpMethod, body, headers, timeoutMs, maxBytes, maxSeconds)
+    let response = boundedRequest(url, httpMethod, body, headers, timeoutMs, maxBytes,
+                                  maxSeconds, maxRedirects)
     if response.code >= 400:
       raise newException(HttpRequestError, response.status)
     result = response.body
@@ -545,7 +814,8 @@ else:
       headers: seq[SimpleHttpHeader] = @[],
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
-      maxSeconds = DefaultFetchMaxSeconds
+      maxSeconds = DefaultFetchMaxSeconds,
+      maxRedirects = DefaultFetchMaxRedirects
     ): BoundedHttpResponse =
     boundedRequest(
       url,
@@ -554,5 +824,6 @@ else:
       headers = simpleHeaders(headers),
       timeoutMs = timeoutMs,
       maxBytes = maxBytes,
-      maxSeconds = maxSeconds
+      maxSeconds = maxSeconds,
+      maxRedirects = maxRedirects
     )

@@ -1,7 +1,9 @@
 import { actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import type { scenesLogicType } from './scenesLogicType'
-import { FrameScene, SceneNodeData } from '../../../../types'
+import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
 import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
+import { undeployedSceneIdsFor } from '../../../../utils/sceneDeployState'
+import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { appsModel } from '../../../../models/appsModel'
 import { sceneUpdatesLogic } from './sceneUpdatesLogic'
 import { forms } from 'kea-forms'
@@ -10,17 +12,19 @@ import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { controlLogic } from './controlLogic'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { isCloudMode } from '../../../../utils/cloudMode'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { buildSdCardImageScene } from './sceneShortcuts'
+import { assignSceneImages } from '../../../../utils/sceneImages'
 import { socketLogic } from '../../../socketLogic'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
 import { embeddedUsbUploadTimeoutMs, scheduleEmbeddedUsbFrameImageRefresh } from '../../../../models/framesModel'
 
 export interface ScenesLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 export interface SceneRenameDialog {
@@ -403,23 +407,13 @@ export const scenesLogic = kea<scenesLogicType>([
     rawScenes: [(s) => [s.editingFrame], (frame): FrameScene[] => frame?.scenes ?? []],
     undeployedSceneIds: [
       (s) => [s.rawScenes, s.frame, s.isFrameAdminMode],
-      (scenes, frame, isFrameAdminMode): Set<string> => {
-        if (isFrameAdminMode) {
-          return new Set<string>()
-        }
-
-        const deployedScenes: FrameScene[] = frame?.last_successful_deploy?.scenes ?? []
-        const undeployed = new Set<string>()
-
-        scenes.forEach((scene) => {
-          const deployed = deployedScenes.find((deployedScene) => deployedScene.id === scene.id)
-          if (!deployed || !sceneEqualForComparison(scene, deployed)) {
-            undeployed.add(scene.id)
-          }
-        })
-
-        return undeployed
-      },
+      (scenes, frame, isFrameAdminMode): Set<string> =>
+        undeployedSceneIdsFor({
+          mode: isFrameAdminMode ? 'frameAdmin' : workspaceMode(),
+          scenes,
+          frame,
+          scenesEqual: sceneEqualForComparison,
+        }),
     ],
     unsavedSceneIds: [
       (s) => [s.frame, s.frameForm],
@@ -732,6 +726,17 @@ export const scenesLogic = kea<scenesLogicType>([
           if (!response.ok) {
             throw new Error('Failed to send preview scene event')
           }
+          // On the cloud "accepted" only means "queued on the hub". With the
+          // frame offline nothing happens on the panel, and the silent
+          // success used to read as "preview does nothing" — say so.
+          if (isCloudMode() && values.frame?.connected === false) {
+            longRunningTasksModel.actions.finishTask({
+              frameId: props.frameId,
+              kind: taskKind,
+              sceneId,
+              detail: 'Queued — the frame is offline; it shows this when it reconnects.',
+            })
+          }
         }
         actions.previewSceneSuccess()
       } catch (error) {
@@ -817,14 +822,27 @@ export const scenesLogic = kea<scenesLogicType>([
         }),
       })
     },
-    duplicateScene: ({ sceneId }) => {
+    duplicateScene: async ({ sceneId }) => {
       const scene = values.scenes.find((s) => s.id === sceneId)
       if (!scene) {
         return
       }
+      const newSceneId = uuidv4()
       frameLogic({ frameId: props.frameId }).actions.setFrameFormValues({
-        scenes: [...values.scenes, { ...scene, default: false, id: uuidv4() }],
+        scenes: [...values.scenes, { ...scene, default: false, id: newSceneId }],
       })
+      // The copy looks exactly like the original until it is edited, so it
+      // should not sit at "no snapshot" while its twin shows a picture. The
+      // backend copies the stored bytes; nothing goes over the network.
+      await assignSceneImages(
+        props.frameId,
+        [newSceneId],
+        { sourceSceneId: sceneId },
+        {
+          label: 'snapshot',
+          ignoreMissingSource: true,
+        }
+      )
     },
     renameScene: ({ sceneId }) => {
       const scene = values.scenes.find((s) => s.id === sceneId)

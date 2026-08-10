@@ -2,18 +2,20 @@ import { actions, afterMount, connect, kea, key, listeners, path, props, reducer
 
 import { frameLogic } from '../../frameLogic'
 
-import { FrameScene, FrameStateRecord, FrameType } from '../../../../types'
+import { FrameScene, FrameStateRecord, FrameType, FrameId } from '../../../../types'
 
 import { loaders } from 'kea-loaders'
 
 import type { controlLogicType } from './controlLogicType'
 import { socketLogic } from '../../../socketLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { isCloudMode } from '../../../../utils/cloudMode'
+import { activeSceneFromLastState } from '../../../../utils/cloudFrameScenes'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
 
 export interface ControlLogicProps {
-  frameId: number
+  frameId: FrameId
 }
 
 const UPLOADED_SCENE_PREFIX = 'uploaded/'
@@ -56,6 +58,18 @@ export const controlLogic = kea<controlLogicType>([
             return emptyFrameStateRecord
           }
 
+          // The cloud has no /states or /state route (both used to 404 and
+          // log a loader error every time the drawer or scene editor
+          // mounted). The hub stores the device's last reported state on the
+          // frame row instead — the active scene is what the drawer's
+          // controls need; per-scene public state has no cloud store yet.
+          if (isCloudMode()) {
+            return normaliseFrameStateRecord({
+              sceneId: activeSceneFromLastState(values.frame?.last_state) ?? '',
+              states: {},
+            })
+          }
+
           try {
             const statesResponse = await apiFetch(`/api/frames/${props.frameId}/states`)
             if (statesResponse.ok) {
@@ -79,6 +93,11 @@ export const controlLogic = kea<controlLogicType>([
       [] as FrameScene[],
       {
         loadUploadedScenes: async () => {
+          // No /uploaded_scenes route on the cloud: the pushed set already
+          // lives in the frame form / frame row the drawer resolves against.
+          if (isCloudMode()) {
+            return []
+          }
           const response = await apiFetch(`/api/frames/${props.frameId}/uploaded_scenes`)
           if (!response.ok) {
             throw new Error('Failed to fetch uploaded scenes')

@@ -7,6 +7,7 @@ import {
   ArrowLeftIcon,
   ArrowsRightLeftIcon,
   ChevronRightIcon,
+  CloudArrowDownIcon,
   CloudArrowUpIcon,
   ClipboardDocumentIcon,
   CommandLineIcon,
@@ -23,7 +24,14 @@ import { Switch } from '../../components/Switch'
 import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHasActivityLog, frameHost } from '../../decorators/frame'
-import { buildrootPlatforms, devices, partialRefreshDefaultsByDevice, partialRefreshDevices } from '../../devices'
+import {
+  BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+  EMBEDDED_VIRTUAL,
+  buildrootPlatforms,
+  devices,
+  partialRefreshDefaultsByDevice,
+  partialRefreshDevices,
+} from '../../devices'
 import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
 import type {
   FrameOSSettings,
@@ -34,9 +42,12 @@ import type {
   FrameSyncStatus,
   FrameType,
   LogType,
+  FrameId,
 } from '../../types'
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
+import { secureToken } from '../../utils/secureToken'
+import { Button } from '../../components/Button'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 import { normalizedTimezone } from '../../utils/timezone'
 import {
@@ -52,9 +63,18 @@ import { buildRemoteUpgradeNotice, frameosGitHubReleaseUrl, type RemoteUpgradeNo
 import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
+import { EmbeddedUsbFirmwareUpdate } from './EmbeddedUsbFirmwareUpdate'
+import { registeredReenrollFramePanel } from './reenrollFramePanelRegistry'
+import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
 import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
+import {
+  frameMenuActionDisabledReason,
+  frameMenuActionIsAllowed,
+  isEsp32CloudFrame,
+  workspaceMode,
+} from './workspaceSurfaces'
 import { timezoneOptions } from '../../decorators/timezones'
 
 interface DeployPlanProgressStep {
@@ -63,10 +83,14 @@ interface DeployPlanProgressStep {
   state: 'done' | 'current' | 'pending' | 'error'
 }
 
-function embeddedFlashSize(frame: FrameType): '4MB' | '8MB' | '16MB' | '32MB' {
+function embeddedFlashSize(frame: FrameType): '2MB' | '4MB' | '8MB' | '16MB' | '32MB' {
   const raw = frame.embedded?.firmware?.flashSize ?? frame.embedded?.flashSize ?? '8MB'
   const normalized = typeof raw === 'string' ? raw.trim().toUpperCase().replace(/\s+/g, '') : '8MB'
-  return normalized === '4MB' || normalized === '8MB' || normalized === '16MB' || normalized === '32MB'
+  return normalized === '2MB' ||
+    normalized === '4MB' ||
+    normalized === '8MB' ||
+    normalized === '16MB' ||
+    normalized === '32MB'
     ? normalized
     : '8MB'
 }
@@ -76,7 +100,8 @@ function embeddedOtaSupported(frame: FrameType): boolean {
   if (typeof firmwareSupport === 'boolean') {
     return firmwareSupport
   }
-  return embeddedFlashSize(frame) !== '4MB'
+  const flashSize = embeddedFlashSize(frame)
+  return flashSize !== '2MB' && flashSize !== '4MB'
 }
 
 function needsEsp32UsbJtagPortGuidance(frame: FrameType): boolean {
@@ -158,15 +183,7 @@ function partitionColor(partition: EmbeddedFlashPartition, index: number): strin
   return ['#16a34a', '#2563eb', '#b45309', '#7c3aed'][index % 4]
 }
 
-function FirmwareStat({
-  label,
-  value,
-  detail,
-}: {
-  label: string
-  value: ReactNode
-  detail?: ReactNode
-}): JSX.Element {
+function FirmwareStat({ label, value, detail }: { label: string; value: ReactNode; detail?: ReactNode }): JSX.Element {
   return (
     <div className="min-w-0">
       <div className="frame-tool-muted text-[11px] font-semibold uppercase tracking-wide">{label}</div>
@@ -274,7 +291,9 @@ function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.El
                   />
                   {partition.name}
                 </div>
-                <div className="text-right text-[color:var(--tool-strong)]">{formatFirmwareAddress(partition.offset)}</div>
+                <div className="text-right text-[color:var(--tool-strong)]">
+                  {formatFirmwareAddress(partition.offset)}
+                </div>
                 <div className="text-right text-[color:var(--tool-strong)]">{formatFirmwareBytes(partition.size)}</div>
                 <div className="text-right text-[color:var(--tool-strong)]">
                   {partition.usedBytes ? formatFirmwareBytes(partition.usedBytes) : '-'}
@@ -753,7 +772,7 @@ function BackToDeployButton({ onClick }: { onClick: () => void }): JSX.Element {
   )
 }
 
-function FrameSettingsLink({ frameId }: { frameId: number }): JSX.Element {
+function FrameSettingsLink({ frameId }: { frameId: FrameId }): JSX.Element {
   return (
     <Link
       href={urls.frame(frameId, 'settings')}
@@ -857,7 +876,7 @@ function DeployTransportToggle({
   deployWithAgent,
   onChange,
 }: {
-  frameId: number
+  frameId: FrameId
   remoteConnected: boolean
   remoteUpgradeNotice: RemoteUpgradeNotice | null
   canDeployRemote: boolean
@@ -891,8 +910,9 @@ function DeployTransportToggle({
             title={
               <div className="space-y-1">
                 <div>
-                  SSH needs direct network access from the backend to the frame. FrameOS Remote runs on the frame, and
-                  keeps a connection open to the backend.
+                  Without FrameOS Remote the backend reaches the frame directly on your network: SSH for deploys and
+                  commands, HTTP to the frame's web server for screenshots and events. FrameOS Remote instead runs on
+                  the frame and keeps a connection open to the backend, so neither needs a route in.
                 </div>
                 <div>
                   To use FrameOS Remote, enable it under{' '}
@@ -1075,7 +1095,7 @@ function BuildrootSdCardSection({
   const device = frameForm.device ?? frame.device ?? 'web_only'
   const deviceConfig = frameForm.device_config ?? frame.device_config ?? {}
   const timezone = normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone)
-  const platform = buildroot.platform ?? 'raspberry-pi-zero-2-w'
+  const platform = buildroot.platform ?? BUILDROOT_RASPBERRY_PI_ZERO_2_W
   const compilationMode = String(buildroot.compilationMode ?? '')
   const rootPassword = frameForm.ssh_pass ?? frame.ssh_pass ?? ''
   const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
@@ -1361,7 +1381,8 @@ function formatSyncTimestamp(timestamp?: string | null): string {
 }
 
 function syncDownloadFilename(change: FrameSyncChange, side: 'backend' | 'frame'): string {
-  const name = change.label.replace(/^Scene (changed|added on frame|only in backend):\s*/i, '') || change.choice_key || 'scene'
+  const name =
+    change.label.replace(/^Scene (changed|added on frame|only in backend):\s*/i, '') || change.choice_key || 'scene'
   const safeName = name
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
@@ -1561,9 +1582,7 @@ function FrameSyncReviewSection({
           Sync from frame
         </DrawerHeading>
         <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
-          <div className="frame-tool-muted text-sm leading-5">
-            The backend copy and the live frame copy differ.
-          </div>
+          <div className="frame-tool-muted text-sm leading-5">The backend copy and the live frame copy differ.</div>
           <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
             <div className="frameos-inset rounded-xl border p-3">
               <div className="frame-tool-muted font-semibold uppercase tracking-wide">Last in sync</div>
@@ -1611,64 +1630,60 @@ function FrameSyncReviewSection({
                 </div>
               </div>
             </div>
-              <div className="space-y-3">
-                {section.changes.map((change) => {
-                  const choiceKey = frameSyncChangeKey(change)
-                  const choice = choices[section.id]?.[choiceKey] ?? 'ignore'
-                  return (
-                    <div key={`${section.id}-${change.path}`} className="frameos-inset rounded-xl border p-3">
-                      <div className="flex items-start gap-2">
-                        <ArrowsRightLeftIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-semibold text-[color:var(--tool-strong)]">{change.label}</div>
-                          <div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
-                            <div>
-                              <FrameSyncSideLabel change={change} side="backend" label="Backend" />
-                              <div className="mt-0.5 break-words text-[color:var(--tool-strong)]">
-                                {change.backend}
-                              </div>
-                            </div>
-                            <div>
-                              <FrameSyncSideLabel change={change} side="frame" label="Frame" />
-                              <div className="mt-0.5 break-words text-[color:var(--tool-strong)]">
-                                {change.frame}
-                              </div>
-                            </div>
+            <div className="space-y-3">
+              {section.changes.map((change) => {
+                const choiceKey = frameSyncChangeKey(change)
+                const choice = choices[section.id]?.[choiceKey] ?? 'ignore'
+                return (
+                  <div key={`${section.id}-${change.path}`} className="frameos-inset rounded-xl border p-3">
+                    <div className="flex items-start gap-2">
+                      <ArrowsRightLeftIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-[color:var(--tool-strong)]">{change.label}</div>
+                        <div className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                          <div>
+                            <FrameSyncSideLabel change={change} side="backend" label="Backend" />
+                            <div className="mt-0.5 break-words text-[color:var(--tool-strong)]">{change.backend}</div>
                           </div>
-                          {change.details?.length ? (
-                            <div className="mt-3 space-y-1 border-t border-slate-200/70 pt-2">
-                              {change.details.slice(0, 8).map((detail) => (
-                                <div
-                                  key={`${change.path}-${detail.path}`}
-                                  className="grid grid-cols-[minmax(0,1fr)] gap-1 text-xs"
-                                >
-                                  <div className="frame-tool-muted truncate font-mono">{detail.path}</div>
-                                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                                    <div className="break-words text-slate-500">Backend: {detail.backend}</div>
-                                    <div className="break-words text-slate-700">Frame: {detail.frame}</div>
-                                  </div>
+                          <div>
+                            <FrameSyncSideLabel change={change} side="frame" label="Frame" />
+                            <div className="mt-0.5 break-words text-[color:var(--tool-strong)]">{change.frame}</div>
+                          </div>
+                        </div>
+                        {change.details?.length ? (
+                          <div className="mt-3 space-y-1 border-t border-slate-200/70 pt-2">
+                            {change.details.slice(0, 8).map((detail) => (
+                              <div
+                                key={`${change.path}-${detail.path}`}
+                                className="grid grid-cols-[minmax(0,1fr)] gap-1 text-xs"
+                              >
+                                <div className="frame-tool-muted truncate font-mono">{detail.path}</div>
+                                <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                                  <div className="break-words text-slate-500">Backend: {detail.backend}</div>
+                                  <div className="break-words text-slate-700">Frame: {detail.frame}</div>
                                 </div>
-                              ))}
-                            </div>
-                          ) : null}
-                          <div className="mt-3 border-t border-slate-200/70 pt-3">
-                            <div className="frame-tool-muted mb-2 text-xs font-semibold uppercase tracking-wide">
-                              Resolution
-                            </div>
-                            <FrameSyncResolutionButtons
-                              section={section}
-                              change={change}
-                              choice={choice}
-                              onChange={(next) => onChoice(section.id, choiceKey, next)}
-                            />
+                              </div>
+                            ))}
                           </div>
+                        ) : null}
+                        <div className="mt-3 border-t border-slate-200/70 pt-3">
+                          <div className="frame-tool-muted mb-2 text-xs font-semibold uppercase tracking-wide">
+                            Resolution
+                          </div>
+                          <FrameSyncResolutionButtons
+                            section={section}
+                            change={change}
+                            choice={choice}
+                            onChange={(next) => onChoice(section.id, choiceKey, next)}
+                          />
                         </div>
                       </div>
                     </div>
-                  )
-                })}
-              </div>
+                  </div>
+                )
+              })}
             </div>
+          </div>
         </section>
       ))}
     </div>
@@ -1773,6 +1788,29 @@ function ScriptInstallSection({ frame, onBack }: { frame: FrameType; onBack: () 
   )
 }
 
+function VirtualFrameUrlRow({ label, url }: { label: string; url: string }): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-semibold text-[color:var(--tool-strong)]">{label}</div>
+      <pre className="frameos-inset whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
+        <code>{url}</code>
+      </pre>
+      <button
+        type="button"
+        onClick={() => {
+          copy(url)
+          setCopied(true)
+        }}
+        className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <ClipboardDocumentIcon className="h-4 w-4" />
+        {copied ? 'Copied' : 'Copy URL'}
+      </button>
+    </div>
+  )
+}
+
 function EmbeddedFirmwareSection({
   frame,
   onBack,
@@ -1788,11 +1826,40 @@ function EmbeddedFirmwareSection({
   const [browserFlashBusy, setBrowserFlashBusy] = useState(false)
   const firmware = frame.embedded?.firmware
   const platformLabel = frame.embedded?.platform || 'esp32-s3'
+  // Pico-family boards flash a generic UF2 release asset over BOOTSEL and are
+  // provisioned over the USB serial console: no per-frame firmware builds, no
+  // esptool, no browser flashing, no OTA. Hide all of those controls.
+  const isPicoPlatform = platformLabel.startsWith('pico')
+  // Virtual frames have no hardware at all: the backend renders them, so
+  // instead of firmware the section shows the image and kiosk page URLs.
+  const isVirtualPlatform = platformLabel === EMBEDDED_VIRTUAL
+  const virtualUrlOrigin = typeof window !== 'undefined' ? window.location.origin : ''
+  // View-only credential, never the device API key: leaking a kiosk URL
+  // grants nothing but the picture.
+  const virtualUrlToken = frame.device_config?.viewToken || '<view-token>'
+  const { loadFrame } = useActions(framesModel)
+  const rotateVirtualViewToken = async (): Promise<void> => {
+    const response = await apiFetch(`/api/frames/${frame.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_config: { ...(frame.device_config ?? {}), viewToken: secureToken(32) },
+      }),
+    })
+    if (response.ok) {
+      loadFrame(frame.id)
+    }
+  }
+  const virtualImageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/image?k=${virtualUrlToken}`
+  const virtualPageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/page?k=${virtualUrlToken}`
   const flashSize = embeddedFlashSize(frame)
   const otaSupported = embeddedOtaSupported(frame)
   const showUsbJtagPortGuidance = needsEsp32UsbJtagPortGuidance(frame)
-  const filename = firmware?.filename || `frameos-esp32-s3-frame${frame.id}.bin`
-  const flashCommand = `esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size ${flashSize} write_flash ${
+  const filename = firmware?.filename || `frameos-${platformLabel}-frame${frame.id}.bin`
+  const flashCommand = `esptool.py --chip ${platformLabel.replace(
+    /-/g,
+    ''
+  )} --port /dev/tty.usbmodem* --baud 460800 --flash_size ${flashSize} write_flash ${
     firmware?.flashOffset || '0x0'
   } ${filename}`
   const building = firmware?.status === 'building' || firmware?.status === 'queued'
@@ -1808,20 +1875,39 @@ function EmbeddedFirmwareSection({
       <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>
         <span className="inline-flex items-center gap-2">
           {onBack ? <BackToDeployButton onClick={onBack} /> : null}
-          <span>Firmware</span>
+          <span>{isVirtualPlatform ? 'Virtual frame' : 'Firmware'}</span>
         </span>
       </DrawerHeading>
       <div className="mb-3">
         <div className="frame-tool-muted mt-1 text-sm leading-5">
-          Download a {flashSize} firmware image for the {platformLabel.toUpperCase()} and flash it over USB serial. The
-          firmware runs the embedded FrameOS runtime and can hot-load interpreted scenes after it checks in.
+          {isVirtualPlatform ? (
+            <>
+              Nothing to flash: the backend renders this frame. Point any browser, tablet, or signage player at the
+              kiosk page URL, or fetch the image URL for a PNG.
+            </>
+          ) : isPicoPlatform ? (
+            <>
+              This {platformLabel} board runs the generic FrameOS UF2 firmware: copy the release asset onto the board
+              over BOOTSEL drag-and-drop and provision it over the USB serial console. The backend does not build
+              per-frame firmware for it.{' '}
+              <a
+                href="https://github.com/FrameOS/frameos/releases/latest"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Download frameos-&lt;version&gt;-{platformLabel}.uf2 from the latest release
+              </a>
+              .
+            </>
+          ) : null}
         </div>
-        {firmware?.status ? (
+        {firmware?.status && !isVirtualPlatform ? (
           <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
             Status: {firmware.status}
           </div>
         ) : null}
-        {firmware?.error ? (
+        {firmware?.error && !isVirtualPlatform ? (
           <div
             className={clsx(
               'mt-2 text-sm font-semibold',
@@ -1835,72 +1921,224 @@ function EmbeddedFirmwareSection({
           </div>
         ) : null}
       </div>
-      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-        <div className="frame-tool-muted text-sm leading-5">
-          Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built on
-          demand, so the first flash can take a few minutes.
-          {showUsbJtagPortGuidance ? (
-            <span className="mt-2 block">
-              The 13.3&quot; ESP32 board can appear as two serial ports. Choose
-              <span className="font-semibold text-[color:var(--tool-strong)]"> USB JTAG/serial debug unit</span> for
-              browser flashing when you want scenes uploaded after flashing. Use
-              <span className="font-semibold text-[color:var(--tool-strong)]"> USB single serial</span> only for
-              manual/recovery flashing; it does not carry FrameOS logs, previews, or scene uploads.
+      {isVirtualPlatform ? (
+        <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+          <VirtualFrameUrlRow label="Image URL (PNG)" url={virtualImageUrl} />
+          <VirtualFrameUrlRow label="Kiosk page URL (self-refreshing)" url={virtualPageUrl} />
+          <div className="flex items-center gap-3">
+            <Button size="small" color="secondary" onClick={rotateVirtualViewToken}>
+              Rotate view token
+            </Button>
+            <span className="frame-tool-muted text-xs leading-4">
+              Mints a new token and invalidates every shared URL immediately.
             </span>
-          ) : null}
+          </div>
         </div>
-        <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
-      </div>
-      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
-            <div className="frame-tool-muted mt-1 text-sm leading-5">
-              {otaSupported
-                ? 'Build the latest app image, then ask the frame to pull it from this backend and reboot.'
-                : 'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'}
+      ) : isPicoPlatform ? null : (
+        <>
+          <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+            <div className="frame-tool-muted text-sm leading-5">
+              Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built
+              on demand, so the first flash can take a few minutes.
+              {showUsbJtagPortGuidance ? (
+                <span className="mt-2 block">
+                  The 13.3&quot; ESP32 board can appear as two serial ports. Choose
+                  <span className="font-semibold text-[color:var(--tool-strong)]"> USB JTAG/serial debug unit</span> for
+                  browser flashing when you want scenes uploaded after flashing. Use
+                  <span className="font-semibold text-[color:var(--tool-strong)]"> USB single serial</span> only for
+                  manual/recovery flashing; it does not carry FrameOS logs, previews, or scene uploads.
+                </span>
+              ) : null}
+            </div>
+            <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
+          </div>
+          <EmbeddedUsbSetup frame={frame} />
+          <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Over-the-air update</div>
+                <div className="frame-tool-muted mt-1 text-sm leading-5">
+                  {otaSupported
+                    ? 'Build the latest app image, then ask the frame to pull it from this backend and reboot.'
+                    : 'The 4MB flash profile uses a single app slot, so firmware updates must be flashed over USB.'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onOtaUpdate}
+                disabled={browserFlashBusy || !otaSupported}
+                className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                {otaBuilding ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
+                {otaBuilding ? 'Finish build & update' : 'Update over the air'}
+              </button>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onOtaUpdate}
-            disabled={browserFlashBusy || !otaSupported}
-            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-          >
-            {otaBuilding ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
-            {otaBuilding ? 'Finish build & update' : 'Update over the air'}
-          </button>
-        </div>
-      </div>
-      <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
-        <div className="frame-tool-muted text-sm leading-5">
-          Or download the image and flash it by hand (<code>pip install esptool</code> if you don't have it):
-        </div>
-        <pre className="frameos-inset whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
-          <code>{flashCommand}</code>
-        </pre>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={onDownload}
-            disabled={building}
-            className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-          >
-            {building ? <Spinner /> : <ArrowDownTrayIcon className="h-4 w-4" />}
-            {building ? 'Building firmware' : 'Build & download firmware'}
-          </button>
-          <button
-            type="button"
-            onClick={copyFlashCommand}
-            className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <ClipboardDocumentIcon className="h-4 w-4" />
-            {copied ? 'Copied' : 'Copy flash command'}
-          </button>
-        </div>
-      </div>
-      <FirmwareFootprintVisualization frame={frame} />
+          <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+            <div className="frame-tool-muted text-sm leading-5">
+              Or download the image and flash it by hand (<code>pip install esptool</code> if you don't have it):
+            </div>
+            <pre className="frameos-inset whitespace-pre-wrap break-all rounded-xl border p-3 text-xs leading-5 text-[color:var(--tool-strong)]">
+              <code>{flashCommand}</code>
+            </pre>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onDownload}
+                disabled={building}
+                className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                {building ? <Spinner /> : <ArrowDownTrayIcon className="h-4 w-4" />}
+                {building ? 'Building firmware' : 'Build & download firmware'}
+              </button>
+              <button
+                type="button"
+                onClick={copyFlashCommand}
+                className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <ClipboardDocumentIcon className="h-4 w-4" />
+                {copied ? 'Copied' : 'Copy flash command'}
+              </button>
+            </div>
+          </div>
+          <FirmwareFootprintVisualization frame={frame} />
+        </>
+      )}
     </section>
+  )
+}
+
+/**
+ * The deploy dialog for a cloud-managed frame.
+ *
+ * Nothing the backend drawer shows applies here: there is no build host, no
+ * SSH transport to pick, no fast/full distinction (cloud frames are
+ * interpreted-only), no SD-card image and no deploy plan endpoint. What the
+ * cloud DOES have is three deploy-shaped actions that used to live in three
+ * different places (a dialog-less sidebar button, the "…" menu, and nowhere
+ * at all), so they are collected here:
+ *
+ *   1. Push scenes      the settings push + one checksummed set_scenes
+ *                       (frameLogic's cloudSaveAndDeploy) — the footer's
+ *                       primary button.
+ *   2. Update firmware  two paths to the same released image:
+ *                       notify_update_available over the wire (the device
+ *                       fetches and signature-verifies it itself), and
+ *                       EmbeddedUsbFirmwareUpdate over WebSerial for a board
+ *                       plugged into this computer — the latter also being
+ *                       the only route for a board that cannot reach the
+ *                       network.
+ *   3. USB setup        WebSerial provisioning for esp32 boards, the same
+ *                       component the backend's embedded view mounts. It
+ *                       speaks only to the serial port, so it works
+ *                       identically on a control plane with no device HTTP
+ *                       API at all — and it is the only way to fix the Wi-Fi
+ *                       credentials of a board that cannot reach the cloud.
+ *
+ *   4. Re-enroll        the cloud bundle's flasher in re-enrollment mode
+ *                       (reenrollFramePanelRegistry): a claim token bound to
+ *                       THIS frame, so a board that lost its NVS — factory
+ *                       reset, full 0x0 flash — comes back as this row
+ *                       instead of a duplicate. Updating firmware does not
+ *                       need it: the USB updater writes around the NVS.
+ *
+ * Deliberately absent: the firmware BUILD controls (EmbeddedWebFlasher,
+ * OTA-from-this-backend, esptool command, footprint chart). Those all read
+ * frame.embedded.firmware, which the backend builds and cloud frames do not
+ * have — the cloud only ever installs published release binaries.
+ */
+function CloudDeploySection({ frame }: { frame: FrameType }): JSX.Element {
+  const { frameForm, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
+  const { updateFrameFirmware } = useActions(framesModel)
+  const ReenrollFramePanel = registeredReenrollFramePanel()
+  const mode = workspaceMode()
+  const isEsp32 = isEsp32CloudFrame(frame, mode)
+  const canUpdateFirmware = isEsp32 && frameMenuActionIsAllowed(mode, 'updateFirmware', frame)
+  const firmwareDisabledReason = frameMenuActionDisabledReason(mode, 'updateFirmware', frame)
+  const scenes = frameForm?.scenes ?? frame.scenes ?? []
+  const offline = frame.connected === false
+
+  return (
+    <div className="space-y-5">
+      <section className="space-y-2">
+        <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Push to frame</DrawerHeading>
+        <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+          <div className="frame-tool-muted text-sm leading-5">
+            Saves this frame's settings and scenes to your cloud account, then pushes the scene list to the device.{' '}
+            {offline
+              ? 'The frame is offline right now — the push is queued and applied when it reconnects.'
+              : 'The frame applies them as soon as it syncs.'}
+          </div>
+          <SummaryRows
+            items={[
+              { label: 'Scenes', value: `${scenes.length} scene${scenes.length === 1 ? '' : 's'}` },
+              {
+                label: 'Unsaved changes',
+                value:
+                  unsavedChangeDetails.length === 0
+                    ? 'None — this re-sends the current scenes'
+                    : unsavedChangeDetails.map((change) => change.label).join(', '),
+              },
+            ]}
+          />
+        </div>
+      </section>
+      {isEsp32 ? (
+        <section className="space-y-2">
+          <DrawerHeading>Firmware</DrawerHeading>
+          {canUpdateFirmware ? (
+            <div className="frame-tool-card flex flex-wrap items-start justify-between gap-3 rounded-[22px] p-4">
+              <div className="frame-tool-muted min-w-0 flex-1 text-sm leading-5">
+                <span className="font-semibold text-[color:var(--tool-strong)]">Over the air.</span> Ask the frame to
+                check for new firmware and install it in the background. The device downloads the image and verifies its
+                signature itself. It needs to be online and reachable.
+              </div>
+              <button
+                type="button"
+                title={firmwareDisabledReason ?? 'Queue a firmware update notification'}
+                disabled={Boolean(firmwareDisabledReason)}
+                onClick={() => updateFrameFirmware(frame.id)}
+                className="frameos-secondary-button inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                <CloudArrowDownIcon className="h-4 w-4" />
+                Update firmware
+              </button>
+            </div>
+          ) : null}
+          {/* The USB path, for a board that is plugged into this computer:
+              writes the published image around the settings partition, so the
+              frame keeps its Wi-Fi and its cloud enrollment and comes back as
+              itself. Works on a board that cannot reach the network at all —
+              which is exactly when the OTA nudge above cannot help. */}
+          {/* Stacked, not side by side like the OTA row: this control grows a
+              progress bar and status lines while it runs. */}
+          <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+            <div className="frame-tool-muted text-sm leading-5">
+              <span className="font-semibold text-[color:var(--tool-strong)]">Over USB.</span> Flash the latest released
+              firmware straight from this browser. The frame keeps its Wi-Fi credentials, its settings and its link to
+              this account — no re-enrollment, and no network needed.
+            </div>
+            <EmbeddedUsbFirmwareUpdate frame={frame} />
+          </div>
+          {/* Re-enrollment, not an update: this one erases the board and
+              rebuilds its identity against THIS frame row. Only offered when
+              the cloud bundle registered a panel (the backend has its own
+              flashing surfaces). */}
+          {ReenrollFramePanel ? (
+            <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+              <div className="frame-tool-muted text-sm leading-5">
+                <span className="font-semibold text-[color:var(--tool-strong)]">Re-enroll over USB.</span> For a board
+                whose settings were wiped — a factory reset, or a full flash from the "Add frame" panel. It writes the
+                firmware and links the board back to <em>this</em> frame, keeping its scenes, assets and logs. Wi-Fi has
+                to be entered again.
+              </div>
+              <ReenrollFramePanel frameId={frame.id} frameName={frame.name} />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+      {isEsp32 ? <EmbeddedUsbSetup frame={frame} /> : null}
+    </div>
   )
 }
 
@@ -1934,6 +2172,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     loadDeployPlans,
     loadFrameSyncStatus,
     restartRemote,
+    saveAndDeployFrame,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
     setFrameSyncItemChoice,
@@ -1946,10 +2185,26 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const { savedSettings } = useValues(settingsLogic)
   const defaultTimezone = savedSettings.defaults?.timezone
 
+  // Everything below this line is backend-shaped: frame.mode, deploy plans,
+  // SSH transports, firmware the backend builds. A cloud frame has none of
+  // those fields (its summary carries `hardware`, not `mode`), so the cloud
+  // takes its own branch in both the body and the footer and reads none of
+  // it. See CloudDeploySection.
+  const isCloud = workspaceMode() === 'cloud'
   const deployPlanLogs = deployPlanLogsSince(logs, deployPlansLoadingStartedAt)
   const isBuildrootFrame = (frame.mode ?? 'rpios') === 'buildroot'
   const isEmbeddedFrame = (frame.mode ?? 'rpios') === 'embedded'
   const embeddedFastDeployReady = isEmbeddedFrame && frameHasActivityLog(frame)
+  const embeddedPlatform = frameForm.embedded?.platform ?? frame.embedded?.platform ?? ''
+  // ESP32 targets get a real full deploy: rebuild the firmware and deliver it
+  // over the air. The Pico family runs a generic UF2 the backend never builds,
+  // and 2/4MB flash profiles have a single app slot (no OTA), so both keep
+  // fast deploy only.
+  const embeddedFullDeploySupported =
+    isEmbeddedFrame &&
+    embeddedPlatform !== EMBEDDED_VIRTUAL &&
+    !embeddedPlatform.startsWith('pico') &&
+    embeddedOtaSupported(frame)
   const hasSuccessfulDeploy = Boolean(
     frame.last_successful_deploy_at || frame.last_successful_deploy || embeddedFastDeployReady
   )
@@ -1987,7 +2242,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     Object.values(frameSyncChoices.frame_json).some((choice) => choice !== 'ignore') ||
     Object.values(frameSyncChoices.scenes_json).some((choice) => choice !== 'ignore')
   const frameSyncStatusNeedsRefresh =
-    hasFrameSyncChanges && Boolean(frame.frame_sync_hint?.has_changes) && (!frameSyncStatus || !frameSyncStatus.has_changes)
+    hasFrameSyncChanges &&
+    Boolean(frame.frame_sync_hint?.has_changes) &&
+    (!frameSyncStatus || !frameSyncStatus.has_changes)
   const frameSyncStatusReady = Boolean(frameSyncStatus && !frameSyncStatusNeedsRefresh)
   const canIgnoreFrameSyncChanges = hasFrameSyncChanges && !frameSyncStatusLoading
 
@@ -2043,7 +2300,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {activeDeployDrawerView === 'embedded' ? (
+          {isCloud ? (
+            <CloudDeploySection frame={frame} />
+          ) : activeDeployDrawerView === 'embedded' ? (
             <EmbeddedFirmwareSection
               frame={frame}
               onBack={embeddedFastDeployReady ? showMainDeployView : undefined}
@@ -2068,7 +2327,11 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   <FrameBootstrapAction frame={frame} />
                 </div>
               ) : null}
-              {deployTransportToggleVisible && !firstInstall ? (
+              {/* Shown from the first visit: choosing SSH is exactly what you
+                  need before a frame has ever deployed, and gating it on a
+                  past successful deploy left no way to pick a transport for a
+                  frame whose remote never connects. */}
+              {deployTransportToggleVisible ? (
                 <DeployTransportToggle
                   frameId={frame.id}
                   remoteConnected={remoteDeployConnected}
@@ -2112,7 +2375,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                     <div className="frame-tool-muted text-sm leading-5">
                       The frame reports local changes since the last successful deploy. Checking the detailed diff.
                     </div>
-                    {frameSyncError ? <div className="mt-2 text-sm font-semibold text-red-500">{frameSyncError}</div> : null}
+                    {frameSyncError ? (
+                      <div className="mt-2 text-sm font-semibold text-red-500">{frameSyncError}</div>
+                    ) : null}
                   </div>
                 </section>
               ) : deployPlansLoading ? (
@@ -2202,7 +2467,43 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           )}
         </div>
         <div className="frameos-divider flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
-          {activeDeployDrawerView !== 'main' ? (
+          {isCloud ? (
+            <>
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                title="Save this frame's settings and push its scenes to the device"
+                onClick={() => closeAndRun(saveAndDeployFrame)}
+                className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Push scenes
+              </button>
+            </>
+          ) : (frameForm.embedded?.platform ?? frame.embedded?.platform) === 'virtual' ? (
+            <>
+              <button
+                type="button"
+                onClick={closeDrawer}
+                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                title="Save changes and render this frame's scenes now"
+                onClick={() => closeAndRun(saveAndFullDeployFrame)}
+                className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                Deploy
+              </button>
+            </>
+          ) : activeDeployDrawerView !== 'main' ? (
             <button
               type="button"
               onClick={closeOnlyDrawerView ? closeDrawer : showMainDeployView}
@@ -2281,9 +2582,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
               >
                 Fast deploy
               </button>
-              {!isEmbeddedFrame ? (
+              {!isEmbeddedFrame || embeddedFullDeploySupported ? (
                 <button
                   type="button"
+                  title={isEmbeddedFrame ? 'Rebuild the firmware and update the frame over the air (OTA)' : undefined}
                   onClick={() => closeAndRun(saveAndFullDeployFrame)}
                   className={clsx(
                     'rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',

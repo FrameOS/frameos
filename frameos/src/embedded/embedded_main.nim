@@ -16,6 +16,7 @@ import pixie
 
 import embedded_scene
 import embedded_runtime
+from frameos/apps import applyServiceSettings
 import frameos/utils/dither
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
@@ -25,14 +26,33 @@ import frameos/utils/memory
 # ------------------------------------------------------------------- state
 
 var
-  frameWidth = 0
+  frameWidth = 0   # panel dimensions — what the packed buffer is shaped for
   frameHeight = 0
+  frameRotate = 0  # 0/90/180/270; scenes render at the rotated dimensions
   frameName = ""
   renderCount = 0
   lastRenderMs = 0
   infoBuffer: string
   sceneInfoBuffer: string
   sceneStateBuffer: string
+
+proc sceneWidth(): int {.inline.} =
+  if frameRotate in [90, 270]: frameHeight else: frameWidth
+
+proc sceneHeight(): int {.inline.} =
+  if frameRotate in [90, 270]: frameWidth else: frameHeight
+
+# Map a SOURCE pixel (scene-rendered image, rotated dims) to its PANEL
+# coordinates. Matches utils/image.rotateDegrees, which the Pi runner applies
+# to the finished frame — here the packers apply the mapping per pixel so a
+# second full-frame image is never allocated (rotating 1200x1600 RGBA
+# out-of-place costs 7.7MB, which OOMs the 16MB-PSRAM boards mid-pack).
+proc panelCoords(x, y, srcW, srcH: int): tuple[px, py: int] {.inline.} =
+  case frameRotate
+  of 90: (srcH - 1 - y, x)
+  of 180: (srcW - 1 - x, srcH - 1 - y)
+  of 270: (y, srcW - 1 - x)
+  else: (x, y)
 
 # --------------------------------------------------------- out-of-memory
 # The patched allocator (src/embedded/patched_malloc.nim via config.nims)
@@ -60,9 +80,9 @@ proc packImage1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): b
   let
     width = image.width
     height = image.height
-    rowBytes = (width + 7) div 8
-  if rowBytes * height != bufLen:
-    log(&"pack: buffer mismatch, want {rowBytes * height} bytes, got {bufLen}")
+    rowBytes = (frameWidth + 7) div 8
+  if rowBytes * frameHeight != bufLen:
+    log(&"pack: buffer mismatch, want {rowBytes * frameHeight} bytes, got {bufLen}")
     return false
 
   var
@@ -72,6 +92,8 @@ proc packImage1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): b
   for i in 0 ..< bufLen:
     buf[i] = 0
 
+  # Dither in source scan order (the error kernel follows the rendered
+  # image); each output bit lands at its rotated panel position.
   for y in 0 ..< height:
     for x in 0 ..< width:
       let pixel = image.data[image.dataIndex(x, y)]
@@ -79,8 +101,9 @@ proc packImage1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): b
                   pixel.b.float32 * 0.114f) / 255.0f + currentError[x + 1]
       let white = gray >= 0.5f
       if white:
-        buf[y * rowBytes + (x shr 3)] = buf[y * rowBytes + (x shr 3)] or
-          (0x80'u8 shr (x and 7))
+        let (px, py) = panelCoords(x, y, width, height)
+        buf[py * rowBytes + (px shr 3)] = buf[py * rowBytes + (px shr 3)] or
+          (0x80'u8 shr (px and 7))
       let error = gray - (if white: 1.0f else: 0.0f)
       currentError[x + 2] += error * 7.0f / 16.0f
       nextError[x] += error * 3.0f / 16.0f
@@ -121,9 +144,9 @@ proc packImageGray(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int; ma
     height = image.height
     pixelsPerByte = if maxValue <= 3: 4 else: 2
     bits = if maxValue <= 3: 2 else: 4
-    rowBytes = (width + pixelsPerByte - 1) div pixelsPerByte
-  if rowBytes * height != bufLen:
-    log(&"pack gray: buffer mismatch, want {rowBytes * height} bytes, got {bufLen}")
+    rowBytes = (frameWidth + pixelsPerByte - 1) div pixelsPerByte
+  if rowBytes * frameHeight != bufLen:
+    log(&"pack gray: buffer mismatch, want {rowBytes * frameHeight} bytes, got {bufLen}")
     return false
 
   var
@@ -137,12 +160,13 @@ proc packImageGray(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int; ma
     for x in 0 ..< width:
       let
         inputIndex = y * width + x
-        outIndex = y * rowBytes + x div pixelsPerByte
+        (px, py) = panelCoords(x, y, width, height)
+        outIndex = py * rowBytes + px div pixelsPerByte
         level = grayLevel(gray[inputIndex].float32, maxValue)
       if bits == 2:
-        buf[outIndex] = buf[outIndex] or ((level and 0b11'u8) shl (6 - (x mod 4) * 2))
+        buf[outIndex] = buf[outIndex] or ((level and 0b11'u8) shl (6 - (px mod 4) * 2))
       else:
-        buf[outIndex] = buf[outIndex] or ((level and 0x0F'u8) shl (if (x mod 2) == 0: 4 else: 0))
+        buf[outIndex] = buf[outIndex] or ((level and 0x0F'u8) shl (if (px mod 2) == 0: 4 else: 0))
   true
 
 proc packImageDual1bpp(
@@ -155,8 +179,8 @@ proc packImageDual1bpp(
     width = image.width
     height = image.height
     inputRowBytes = (width + 3) div 4
-    packedRowBytes = (width + 7) div 8
-    planeBytes = packedRowBytes * height
+    packedRowBytes = (frameWidth + 7) div 8
+    planeBytes = packedRowBytes * frameHeight
   if planeBytes * 2 != bufLen:
     log(&"pack dual: buffer mismatch, want {planeBytes * 2} bytes, got {bufLen}")
     return false
@@ -172,8 +196,9 @@ proc packImageDual1bpp(
         pixelValue = (pixelByte shr ((3 - x mod 4) * 2)) and 0b11
         black: uint8 = if pixelValue == 0: 0'u8 else: 1'u8
         accent: uint8 = if pixelValue == 1: 0'u8 else: 1'u8
-        outputIndex = y * packedRowBytes + x div 8
-        shift = 7 - (x mod 8)
+        (px, py) = panelCoords(x, y, width, height)
+        outputIndex = py * packedRowBytes + px div 8
+        shift = 7 - (px mod 8)
       buf[outputIndex] = buf[outputIndex] or (black shl shift)
       buf[planeBytes + outputIndex] = buf[planeBytes + outputIndex] or (accent shl shift)
   true
@@ -189,13 +214,13 @@ proc packImagePalette(
     height = image.height
     bits = if palette.len <= 2: 1 elif palette.len <= 4: 2 elif palette.len <= 16: 4 else: 8
     pixelsPerByte = if palette.len <= 2: 8 elif palette.len <= 4: 4 elif palette.len <= 16: 2 else: 1
-    rowBytes = (width + pixelsPerByte - 1) div pixelsPerByte
+    rowBytes = (frameWidth + pixelsPerByte - 1) div pixelsPerByte
     distribution = [7, 3, 5, 1]
     dy = [0, 1, 1, 1]
     dx = [1, -1, 0, 1]
 
-  if rowBytes * height != bufLen:
-    log(&"pack palette: buffer mismatch, want {rowBytes * height} bytes, got {bufLen}")
+  if rowBytes * frameHeight != bufLen:
+    log(&"pack palette: buffer mismatch, want {rowBytes * frameHeight} bytes, got {bufLen}")
     return false
 
   for i in 0 ..< bufLen:
@@ -208,7 +233,8 @@ proc packImagePalette(
     for x in 0 ..< width:
       let
         dataIndex = y * width + x
-        outputIndex = y * rowBytes + x div pixelsPerByte
+        (px, py) = panelCoords(x, y, width, height)
+        outputIndex = py * rowBytes + px div pixelsPerByte
         imageR = image.data[dataIndex].r.int
         imageG = image.data[dataIndex].g.int
         imageB = image.data[dataIndex].b.int
@@ -221,13 +247,13 @@ proc packImagePalette(
       of 8:
         buf[outputIndex] = index.uint8
       of 4:
-        let bitPosition = (1 - (x mod 2)) * 4
+        let bitPosition = (1 - (px mod 2)) * 4
         buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
       of 2:
-        let bitPosition = (3 - (x mod 4)) * 2
+        let bitPosition = (3 - (px mod 4)) * 2
         buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
       of 1:
-        let bitPosition = (7 - x) mod 8
+        let bitPosition = (7 - px) mod 8
         buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
       else:
         discard
@@ -248,7 +274,7 @@ proc renderFrameImage(): tuple[image: Image, source: string] =
   let interpreted = renderCurrentScene()
   if interpreted.isSome:
     return (interpreted.get(), "interpreted scene \"" & currentSceneName() & "\"")
-  (render(frameWidth, frameHeight, frameName, renderCount + 1), "demo scene")
+  (render(sceneWidth(), sceneHeight(), frameName, renderCount + 1), "demo scene")
 
 proc packImageForFormat(
     image: Image;
@@ -298,20 +324,23 @@ proc renderBufferFree(p: pointer) {.importc: "frameos_nim_free_render_buffer".}
 # ------------------------------------------------------------------ C API
 
 proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint,
-    backendUrl: cstring, frameId: cint): bool {.exportc, cdecl.} =
+    rotate: cint): bool {.exportc, cdecl.} =
   frameWidth = width.int
   frameHeight = height.int
+  frameRotate = ((rotate.int mod 360) + 360) mod 360
+  if frameRotate notin [0, 90, 180, 270]:
+    frameRotate = 0
   frameName = $name
   try:
+    when defined(memProbe): memProbe("INIT start")
     armEmergencyReserve()
-    let backend =
-      if backendUrl == nil or ($backendUrl).len == 0:
-        ""
-      else:
-        $backendUrl
-    initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int, backend, frameId.int)
+    when defined(memProbe): memProbe("INIT after armEmergencyReserve")
+    initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int, frameRotate)
+    when defined(memProbe): memProbe("INIT after initRuntime")
     initScene()
-    log(&"nim runtime initialized: {frameWidth}x{frameHeight} \"{frameName}\", nim {NimVersion}")
+    when defined(memProbe): memProbe("INIT after initScene")
+    log(&"nim runtime initialized: {frameWidth}x{frameHeight} rotate={frameRotate} " &
+        &"\"{frameName}\", nim {NimVersion}")
     true
   except Defect as e:
     log("nim init failed (defect): " & e.msg)
@@ -319,6 +348,21 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
   except CatchableError as e:
     log("nim init failed: " & e.msg)
     false
+
+proc fos_nim_apply_service_settings_impl(payload: cstring) {.exportc, cdecl.} =
+  ## The firmware's settings poll (fos_settings.c) delivered the cloud-owned
+  ## service settings. `payload` is the pull's `settings` object — group →
+  ## field → value — for the six groups of docs/cloud-frames.md; every one of
+  ## them absent from it is deleted, and `{}` clears them all (what a
+  ## `403 insufficient_scope` means). Never logs a value: the firmware logs the
+  ## group NAMES, and device logs are uploaded to the provider.
+  try:
+    if applyServiceSettings(getFrameConfig(), $payload):
+      log("service settings updated")
+  except Defect as e:
+    log("service settings apply failed (defect): " & e.msg)
+  except CatchableError as e:
+    log("service settings apply failed: " & e.msg)
 
 proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
   ## Install interpreted scenes from JSON (backend scenes.json format).
@@ -336,6 +380,42 @@ proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
     recoverEmergencyReserve("scene load failure")
     result = 0
 
+proc fos_nim_set_scene_catalog_impl(indexJson: cstring): cint {.exportc, cdecl.} =
+  ## Lazy path: tell the runtime which scenes exist on flash without parsing
+  ## any of them (/state/scenes/index.json). Returns the count, 0 on a bad
+  ## index — the caller then falls back to the combined payload.
+  try:
+    if indexJson == nil:
+      return 0
+    result = setSceneCatalog($indexJson).cint
+  except Defect as e:
+    log("setSceneCatalog failed (defect): " & e.msg)
+    GC_fullCollect()
+    recoverEmergencyReserve("scene catalog failure")
+    result = 0
+  except CatchableError as e:
+    log("setSceneCatalog failed: " & e.msg)
+    result = 0
+
+proc fos_nim_load_scene_impl(payload: cstring): cint {.exportc, cdecl.} =
+  ## Lazy path: make ONE scene resident, replacing whatever was live. The
+  ## previous scene's QuickJS context and app instances are torn down first,
+  ## so holding twenty JS-heavy scenes costs the memory of one.
+  try:
+    if payload == nil:
+      return 0
+    result = (if loadScene($payload): 1 else: 0).cint
+    recoverEmergencyReserve("scene load")
+  except Defect as e:
+    log("loadScene failed (defect): " & e.msg)
+    GC_fullCollect()
+    recoverEmergencyReserve("scene load failure")
+    result = 0
+  except CatchableError as e:
+    log("loadScene failed: " & e.msg)
+    recoverEmergencyReserve("scene load failure")
+    result = 0
+
 proc renderErrorFallback(
     buf: ptr UncheckedArray[uint8];
     bufLen: int;
@@ -347,7 +427,7 @@ proc renderErrorFallback(
   ## the previous panel contents) when it does not.
   try:
     GC_fullCollect()
-    let image = renderError(frameWidth, frameHeight, message)
+    let image = renderError(sceneWidth(), sceneHeight(), message)
     if not packImageForFormat(image, buf, bufLen, pixelFormat):
       return 1
     GC_fullCollect()
@@ -414,7 +494,7 @@ proc renderErrorFallbackAlloc(
     let raw = renderBufferAlloc(packedLen.csize_t)
     if raw == nil:
       return 1
-    let image = renderError(frameWidth, frameHeight, message)
+    let image = renderError(sceneWidth(), sceneHeight(), message)
     if not packImageForFormat(image, cast[ptr UncheckedArray[uint8]](raw), packedLen, pixelFormat):
       renderBufferFree(raw)
       return 1
@@ -505,6 +585,18 @@ proc fos_nim_scene_interval_impl(): cdouble {.exportc, cdecl.} =
   except CatchableError as e:
     log("scene interval failed: " & e.msg)
     0.cdouble
+
+proc fos_nim_next_sleep_impl(): cdouble {.exportc, cdecl.} =
+  ## Sleep override set by the just-finished render (logic/nextSleepDuration);
+  ## negative means "no override" and the interval logic applies.
+  try:
+    sceneNextSleepSeconds().cdouble
+  except Defect as e:
+    log("next sleep failed (defect): " & e.msg)
+    -1.cdouble
+  except CatchableError as e:
+    log("next sleep failed: " & e.msg)
+    -1.cdouble
 
 proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   ## True once when a scene event (e.g. dispatched "render") asked for a

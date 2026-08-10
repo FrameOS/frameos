@@ -18,6 +18,7 @@ import { longRunningTasksModel } from '../models/longRunningTasksModel'
 import { embeddedUsbLogsModel } from '../models/embeddedUsbLogsModel'
 import { LongRunningTaskToasts } from '../components/LongRunningTaskToasts'
 import { inHassioIngress } from '../utils/inHassioIngress'
+import { isCloudMode } from '../utils/cloudMode'
 import { WorkspaceRouteLoading } from './workspace/WorkspaceRouteLoading'
 import { PersistentTerminalSessions } from './frame/panels/Terminal/PersistentTerminalSessions'
 
@@ -141,7 +142,13 @@ export function LoggedOutApp() {
 
 export function App() {
   const { scene, params } = useValues(sceneLogic)
-  if (!inHassioIngress() && (scene === 'login' || scene === 'signup' || scene === 'setupUnavailable')) {
+  // Cloud mode: Next.js owns login/signup — the SPA's auth scenes never
+  // render (apiFetch redirects to /login on 401).
+  if (
+    !isCloudMode() &&
+    !inHassioIngress() &&
+    (scene === 'login' || scene === 'signup' || scene === 'setupUnavailable')
+  ) {
     return <LoggedOutApp />
   }
   return <LoggedInApp />

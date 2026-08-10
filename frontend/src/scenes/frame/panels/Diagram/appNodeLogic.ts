@@ -15,9 +15,9 @@ import {
   toFieldType,
   FrameScene,
   SceneNodeData,
+  DiagramEdge,
 } from '../../../../types'
 import { filterFieldsByShowIf, stateFieldShowIfValues } from '../../../../utils/showIf'
-import type { Edge } from '@reactflow/core/dist/esm/types/edges'
 
 import equal from 'fast-deep-equal'
 import { frameLogic } from '../../frameLogic'
@@ -68,7 +68,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     ],
     nodeEdges: [
       (s) => [s.edges, s.nodeId],
-      (edges: Edge[], nodeId): Edge[] => edges?.filter((e) => e.source === nodeId || e.target === nodeId) ?? [],
+      (edges: DiagramEdge[], nodeId): DiagramEdge[] => edges?.filter((e) => e.source === nodeId || e.target === nodeId) ?? [],
     ],
     nodeConfig: [
       (s) => [s.node],
@@ -457,7 +457,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       )
 
       const updatedNodes: Record<string, DiagramNode | false> = {}
-      const updatedEdges: Record<string, Edge | false> = {}
+      const updatedEdges: Record<string, DiagramEdge | false> = {}
       for (const edge of codeOutputEdges) {
         const otherNode = nodes.find((n) => n.id === edge.target)
         if (!otherNode) {
@@ -487,7 +487,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
         }
       }
 
-      const newEdges = edges.map((edge) => updatedEdges[edge.id] ?? edge).filter((e): e is Edge => e !== false)
+      const newEdges = edges.map((edge) => updatedEdges[edge.id] ?? edge).filter((e): e is DiagramEdge => e !== false)
       const newNodes = nodes.map((node) => updatedNodes[node.id] ?? node).filter((n): n is DiagramNode => n !== false)
       actions.setEdges(newEdges)
       actions.setNodes(newNodes)

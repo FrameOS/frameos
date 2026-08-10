@@ -10,15 +10,23 @@ import sequtils
 import strutils
 import strformat
 import uri
+import std/xmlparser
+import std/xmltree
+import std/strtabs
 
 import frameos/utils/http_client
 import frameos/utils/memory
 import frameos/utils/font
 when defined(frameosEmbedded):
+  # pixie.nim imports the fileformat modules without re-exporting them, so
+  # every format the streaming decode paths reach for has to be imported by
+  # name here. Miss one and its `when compiles(...)` branch below quietly
+  # evaluates false — the format silently loses its file-backed decoder.
   import pixie/blends
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
   import pixie/fileformats/png
+  import pixie/fileformats/ppm
   import pixie/inflatestream
 when not defined(frameosEmbedded) and not defined(frameosWasm):
   # No child processes on FreeRTOS or WebAssembly: ImageMagick/exiftool
@@ -179,9 +187,96 @@ proc decodeSvgWithImageMagick*(svg: string, width: int, height: int): Option[Ima
     return decodeImageMagickOutput(output.get())
   return none(Image)
 
+const SvgBandMinHeight = 8
+const SvgBandMinBytes = 128 * 1024
+
+proc svgNeedsPaintServer*(svg: string): bool =
+  ## True when the SVG paints with a gradient/pattern reference. pixie fills
+  ## those through a full-canvas mask + fill image pair (paths.fillPath), so
+  ## such an SVG costs 3x its output image to rasterise in one pass. Solid
+  ## fills and strokes rasterise straight into the canvas and cost 1x.
+  svg.contains("url(")
+
+proc svgBandHeight*(width, height: int, svg: string): int =
+  ## Height of the horizontal slice an SVG is rasterised in. Returns `height`
+  ## (a single pass, pixie's own behaviour) unless the 3x one-pass plan would
+  ## take a big share of the memory still available for rendering — which on
+  ## development hosts, the backend, wasm and RAM-rich frames it never does.
+  if width <= 0 or height <= 0 or not svgNeedsPaintServer(svg):
+    return height
+  let
+    rowBytes = width.int64 * 4
+    fullBytes = rowBytes * height.int64
+    available = availableRenderBytes().int64
+  # Banding keeps the parsed XML document live across every pass, where a
+  # single pass drops it before allocating the canvas. Documents that big are
+  # not worth banding.
+  if svg.len.int64 * 16 > fullBytes:
+    return height
+  if available <= 0:
+    return height
+  if fullBytes * 3 <= available div 2:
+    return height
+  var bandBytes = available div 12
+  # The finished image stays live while the bands are rasterised, so the
+  # band-sized trio has to fit in what is left once it exists.
+  let headroom = available - fullBytes
+  if headroom > 0 and bandBytes * 3 > headroom:
+    bandBytes = headroom div 3
+  if bandBytes < SvgBandMinBytes:
+    bandBytes = SvgBandMinBytes
+  if bandBytes >= fullBytes:
+    return height
+  result = max(SvgBandMinHeight, int(bandBytes div max(1'i64, rowBytes)))
+  if result >= height:
+    result = height
+
+proc renderSvgBanded(svg: string, width, height, bandHeight: int): Image =
+  ## Rasterises the SVG one horizontal slice at a time, so pixie's gradient
+  ## mask+fill pair is band-sized instead of canvas-sized.
+  ##
+  ## Each pass re-renders the whole element list into a band-tall canvas with
+  ## the root shifted up by the band's offset, so shapes are clipped by the
+  ## band's scanline range rather than being cut geometrically: coverage for
+  ## an output row is computed from the full shape either way.
+  let root = parseXml(svg)
+  let attrs = root.attrs
+  if attrs.isNil:
+    # No attributes means no viewBox; parseSvg would reject it anyway.
+    raise newException(PixieError, "SVG root has no attributes")
+  let baseTransform = root.attr("transform")
+  result = newImage(width, height)
+  try:
+    var y = 0
+    while y < height:
+      let bandH = min(bandHeight, height - y)
+      # Leftmost transform is applied last, i.e. in device space: this shifts
+      # the finished drawing up by `y` so the band shows rows y ..< y+bandH.
+      attrs["transform"] = strutils.strip("translate(0 " & $(-y) & ") " & baseTransform)
+      let parsed = parseSvg(root, width, height)
+      # parseSvg already derived the scale from the full height; shrinking the
+      # canvas afterwards only changes how much of it gets rasterised.
+      parsed.height = bandH
+      let band = newImage(parsed)
+      copyMem(result.data[y * width].addr, band.data[0].addr, bandH * width * 4)
+      y += bandH
+  finally:
+    if baseTransform.len == 0:
+      attrs.del("transform")
+    else:
+      attrs["transform"] = baseTransform
+
 proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image] =
   if useImageMagick():
     return decodeSvgWithImageMagick(svg, width, height)
+  let bandHeight = svgBandHeight(width, height, svg)
+  if bandHeight > 0 and bandHeight < height:
+    try:
+      return some(renderSvgBanded(svg, width, height, bandHeight))
+    except CatchableError:
+      # Banding is an optimisation; anything it cannot handle falls through
+      # to the plain one-pass render below.
+      discard
   try:
     return some(newImage(parseSvg(svg, width, height)))
   except CatchableError:
@@ -234,6 +329,8 @@ when defined(frameosEmbedded):
       return "JPEG"
     if len > 2 and bytes[0] == 'B'.uint8 and bytes[1] == 'M'.uint8:
       return "BMP"
+    if len > 2 and bytes[0] == 'P'.uint8 and bytes[1] == '6'.uint8:
+      return "PPM"
     if len > 6 and bytes[0] == 'G'.uint8 and bytes[1] == 'I'.uint8 and bytes[2] == 'F'.uint8:
       return "GIF"
     if len > 12 and bytes[0] == 'R'.uint8 and bytes[1] == 'I'.uint8 and
@@ -590,6 +687,58 @@ proc embeddedSizedRemoteImageUrl*(url: string, target: Image): string =
     return url
 
 when defined(frameosEmbedded):
+  proc decodeSpilledImageInto(path: string, totalLen: int, target: Image,
+      fit: ScaledDecodeFit): Image =
+    ## Decodes an image whose HTTP body was spilled to storage (SD/SPIFFS)
+    ## because PSRAM could not buffer it. JPEGs and PNGs stream from the file
+    ## through pixie's windowed decoders — neither the compressed body nor a
+    ## full-size RGBA intermediate ever lives in RAM. Formats without a
+    ## file-backed streaming decoder fail with a clear error: buffering the
+    ## file back would recreate the OOM the spill just avoided.
+    var file: File
+    if not file.open(path):
+      raise newException(PixieError, "Cannot open spilled image file: " & path)
+    defer: file.close()
+    var header = newString(64)
+    let got = file.readBuffer(addr header[0], header.len)
+    header.setLen(max(0, got))
+    let format = embeddedImageFormat(header.cstring, header.len)
+    if format == "JPEG" and not target.isNil and target.width > 0 and target.height > 0:
+      file.setFilePos(0)
+      GC_fullCollect()
+      when compiles(decodeJpegStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
+        # Progressive JPEGs raise here; the buffered retry other paths use is
+        # exactly the allocation that could not be made, so let it surface.
+        decodeJpegStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
+        return target
+    if format == "PNG" and not target.isNil and target.width > 0 and target.height > 0:
+      file.setFilePos(0)
+      GC_fullCollect()
+      when compiles(decodePngStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
+        # Row-streamed chunk walk over the spilled file: a small read buffer
+        # plus pixie's fixed inflate window, never the whole compressed body.
+        # Interlaced/16-bit PNGs raise here — decoding those would need the
+        # buffered copy the spill exists to avoid, so let it surface.
+        decodePngStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
+        return target
+    if format == "BMP" and not target.isNil and target.width > 0 and target.height > 0:
+      file.setFilePos(0)
+      GC_fullCollect()
+      when compiles(decodeBmpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
+        # Uncompressed fixed-stride rows: one source row in RAM at a time,
+        # rows outside the fitted rect are skipped without conversion.
+        decodeBmpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
+        return target
+    if format == "PPM" and not target.isNil and target.width > 0 and target.height > 0:
+      file.setFilePos(0)
+      GC_fullCollect()
+      when compiles(decodePpmStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
+        # P6 only — ASCII P3 raises rather than buffering the file back.
+        decodePpmStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
+        return target
+    raise newException(PixieError,
+      &"Spilled {format} download ({totalLen div 1024}K) has no file-backed streaming decoder")
+
   proc decodeImageChunks(chunks: seq[HttpBodyChunk], totalLen: int,
       target: Image, fit: ScaledDecodeFit): Image =
     ## Decodes an image whose bytes arrived in multiple download chunks.
@@ -625,7 +774,9 @@ when defined(frameosEmbedded):
       if response.code >= 400:
         raise newException(HttpRequestError, "HTTP " & response.status & httpErrorDetail(response))
       let image =
-        if response.chunks.len > 1:
+        if response.spillPath.len > 0:
+          decodeSpilledImageInto(response.spillPath, response.bodyLen, target, fit)
+        elif response.chunks.len > 1:
           decodeImageChunks(response.chunks, response.bodyLen, target, fit)
         elif not target.isNil:
           decodeImageWithFallback(response.body, response.bodyLen, target, fit)

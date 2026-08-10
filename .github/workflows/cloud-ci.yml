@@ -1,0 +1,108 @@
+name: Cloud CI
+
+# The cloud app consumes frameos-wasm and frameos-editor as workspace
+# packages, so its build pulls in the frontend build and the wasm runtime
+# (nim + emscripten). Turbo caches every step: warm runs skip whatever
+# didn't change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cloud/**"
+      - "frontend/**"
+      - "frameos/wasm/**"
+      - "frameos/editor/**"
+      - "frameos/src/wasm/**"
+      - "turbo.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/cloud-ci.yml"
+  pull_request:
+    paths:
+      - "cloud/**"
+      - "frontend/**"
+      - "frameos/wasm/**"
+      - "frameos/editor/**"
+      - "frameos/src/wasm/**"
+      - "turbo.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/cloud-ci.yml"
+
+# Superseded runs on the same PR are cancelled; pushes to main always run to
+# completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    # Real Postgres for the backend-linking integration tests.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: frameos_cloud
+          POSTGRES_PASSWORD: frameos_cloud
+          POSTGRES_DB: frameos_cloud_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the pnpm version from the packageManager field in package.json.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 6.0.2
+
+      - uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-cloud-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-cloud-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      # The wasm runtime (frameos.js/frameos.wasm) is a build output, not
+      # committed; turbo caches it against the nim sources.
+      - name: Build the wasm runtime
+        run: |
+          (cd frameos && nimble install -d -y)
+          pnpm exec turbo run build:runtime --filter=frameos-wasm
+
+      # Lint, typecheck, test, and build the cloud workspace; turbo builds
+      # the frontend, editor, and wasm packages it depends on.
+      - run: pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*'
+
+      # Backend-linking flow against the Postgres service container.
+      - run: pnpm --filter @frameos-cloud/auth-web test:integration
+        env:
+          TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_test
+
+      # Frame hub: device/browser WebSocket protocol against real Postgres
+      # (its global-setup creates its own database so the suites can share
+      # the service container).
+      - run: pnpm --filter @frameos-cloud/frame-hub test:integration
+        env:
+          TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_frame_hub_test

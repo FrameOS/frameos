@@ -1,22 +1,34 @@
-import { actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
+import { actions, afterMount, beforeUnmount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
-import { FrameScene, FrameType } from '../types'
+import { FrameScene, FrameType, FrameId } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
 import type { framesModelType } from './framesModelType'
 import { router } from 'kea-router'
-import { sanitizeScene } from '../scenes/frame/frameLogic'
+import { frameLogic, sanitizeScene } from '../scenes/frame/frameLogic'
+import { compareFrames } from '../utils/frameSort'
 import { apiFetch } from '../utils/apiFetch'
+import { isCloudMode } from '../utils/cloudMode'
+import {
+  sendCloudFrameCommand,
+  pushCloudFrameSettings,
+  listCloudFrameScenes,
+  deployCloudFrameScenes,
+  cloudDeployActiveSceneId,
+} from '../utils/cloudFrameApi'
+import {
+  activeSceneFromLastState,
+  cloudSceneCacheKey,
+  cloudSceneStub,
+  scenesFromStoreSceneJson,
+} from '../utils/cloudFrameScenes'
 import { entityImagesModel } from './entityImagesModel'
 import { urls } from '../urls'
 import { logUpdatesFrameActivity } from '../decorators/frame'
 import { longRunningTasksModel } from './longRunningTasksModel'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
-import {
-  embeddedUsbApiCanUse,
-  embeddedUsbLogsModel,
-  runEmbeddedUsbApiCommand,
-} from './embeddedUsbLogsModel'
+import { embeddedUsbApiCanUse, embeddedUsbLogsModel, runEmbeddedUsbApiCommand, usbRestart } from './embeddedUsbLogsModel'
+import { frameSupportsUsbSerialConsole } from '../scenes/workspace/workspaceSurfaces'
 
 export type RemoteTaskTransport = 'auto' | 'remote' | 'ssh'
 export type EmbeddedFirmware = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
@@ -33,7 +45,7 @@ function remoteTaskQuery(params: { recompile?: boolean; transport?: RemoteTaskTr
   return queryString ? `?${queryString}` : ''
 }
 
-function deployTaskId(frameId: number, fastDeploy: boolean): string {
+function deployTaskId(frameId: FrameId, fastDeploy: boolean): string {
   const random =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
@@ -51,6 +63,10 @@ function sanitizeFrameForStore(frame: FrameType): FrameType {
   const lastSuccessfulDeploy = frame.last_successful_deploy
   return {
     ...frame,
+    // Cloud rows report the device's current scene under last_state (the hub
+    // writes it); the backend's newLog-based inference below never fires
+    // there, so without this the Active badge stays dark after a reload.
+    active_scene_id: frame.active_scene_id ?? activeSceneFromLastState(frame.last_state) ?? undefined,
     scenes: frame.scenes?.map((scene) => sanitizeScene(scene as FrameScene, frame)) ?? [],
     last_successful_deploy:
       lastSuccessfulDeploy && Array.isArray(lastSuccessfulDeploy.scenes)
@@ -65,9 +81,10 @@ function sanitizeFrameForStore(frame: FrameType): FrameType {
 }
 
 function sortFrames(frames: FrameType[]): FrameType[] {
-  return frames.sort(
-    (a, b) => a.frame_host.localeCompare(b.frame_host) || (a.ssh_user || '').localeCompare(b.ssh_user || '')
-  )
+  // compareFrames is null-safe: cloud frames have no frame_host, and a
+  // freshly enrolled one can lack a name too — sorting one used to throw
+  // inside the fleet selectors and white-screen the workspace.
+  return frames.sort(compareFrames)
 }
 
 function activeSceneIdFromLogLine(line: string): string | null {
@@ -100,18 +117,83 @@ function startBrowserDownload(path: string): void {
   anchor.remove()
 }
 
-const pendingSdCardImageDownloads = new Set<number>()
-const sdCardImageStatusPollsInFlight = new Set<number>()
-const sdCardImageProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
+// Cloud scene hydration. Cloud frame payloads are frameSummary rows with no
+// scene JSON at all — the scene list lives server-side as store-scene
+// assignments. The tiles hydrate from GET /api/frames/{id}/scenes plus each
+// store scene's /api/store/scenes/{scene_id}/scenes.json (the exact payload
+// the device receives over set_scenes, so the tile ids match the runtime ids
+// the device reports as active_scene). scenes.json bodies are cached per
+// store scene id + version so the 15s fleet poll re-checks assignments
+// without refetching scene bodies; the assignment list itself is only
+// re-listed once a minute per frame unless forced (install flow), keeping
+// well under the endpoint's 240/15min rate limit.
+const cloudSceneJsonCache = new Map<string, FrameScene[]>()
+const cloudFrameSceneHydrationsInFlight = new Set<FrameId>()
+const cloudFrameScenesHydratedAt = new Map<FrameId, number>()
+const CLOUD_FRAME_SCENES_REFRESH_MS = 60_000
 
-const pendingEmbeddedFirmwareDownloads = new Set<number>()
-const embeddedFirmwareStatusPollsInFlight = new Set<number>()
-const embeddedFirmwareProgressTimers = new Map<number, ReturnType<typeof window.setInterval>>()
-const embeddedFirmwareRecoveryAttempts = new Map<number, number>()
+/**
+ * Drop cached scenes.json bodies for one store scene (all pinned versions and
+ * 'latest'). A content save publishes a new version, and the '@latest' cache
+ * key would otherwise keep serving the pre-save body until a reload.
+ */
+export function clearCloudSceneJsonCache(storeSceneId: string): void {
+  for (const key of [...cloudSceneJsonCache.keys()]) {
+    if (key.startsWith(`${storeSceneId}@`)) {
+      cloudSceneJsonCache.delete(key)
+    }
+  }
+}
+
+async function fetchCloudFrameScenes(frameId: FrameId): Promise<FrameScene[]> {
+  const rows = await listCloudFrameScenes(frameId)
+  const scenes: FrameScene[] = []
+  for (const row of rows) {
+    const cacheKey = cloudSceneCacheKey(row)
+    let sceneJson = cloudSceneJsonCache.get(cacheKey)
+    if (!sceneJson) {
+      try {
+        const response = await apiFetch(`/api/store/scenes/${row.scene_id}/scenes.json`)
+        const parsed = response.ok ? scenesFromStoreSceneJson(await response.json()) : null
+        if (parsed) {
+          cloudSceneJsonCache.set(cacheKey, parsed)
+          sceneJson = parsed
+        }
+      } catch (error) {
+        // Fall through to the stub. Failures are deliberately not cached, so
+        // a transient error heals on the next hydration pass.
+      }
+    }
+    scenes.push(...(sceneJson ?? [cloudSceneStub(row)]))
+  }
+  return scenes
+}
+
+/**
+ * Cloud only: a frame refetch (15s fleet poll, hub broadcast) always arrives
+ * without scenes; it must not blank the hydrated tiles for the seconds until
+ * the next hydration lands. Backend frames carry their scenes inline, and a
+ * non-empty incoming list always wins, so this never masks real data.
+ */
+function withStoredCloudScenes(next: FrameType, previous?: FrameType): FrameType {
+  if (!isCloudMode() || next.scenes?.length || !previous?.scenes?.length) {
+    return next
+  }
+  return { ...next, scenes: previous.scenes }
+}
+
+const pendingSdCardImageDownloads = new Set<FrameId>()
+const sdCardImageStatusPollsInFlight = new Set<FrameId>()
+const sdCardImageProgressTimers = new Map<FrameId, ReturnType<typeof window.setInterval>>()
+
+const pendingEmbeddedFirmwareDownloads = new Set<FrameId>()
+const embeddedFirmwareStatusPollsInFlight = new Set<FrameId>()
+const embeddedFirmwareProgressTimers = new Map<FrameId, ReturnType<typeof window.setInterval>>()
+const embeddedFirmwareRecoveryAttempts = new Map<FrameId, number>()
 const EMBEDDED_FIRMWARE_RECOVERY_ATTEMPT_LIMIT = 2
-const embeddedUsbImageRefreshTimers = new Map<number, ReturnType<typeof window.setTimeout>>()
-const embeddedUsbImageRefreshesInFlight = new Set<number>()
-const embeddedUsbImageRefreshRetries = new Map<number, number>()
+const embeddedUsbImageRefreshTimers = new Map<FrameId, ReturnType<typeof window.setTimeout>>()
+const embeddedUsbImageRefreshesInFlight = new Set<FrameId>()
+const embeddedUsbImageRefreshRetries = new Map<FrameId, number>()
 const EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS = 1500
 const EMBEDDED_USB_IMAGE_REFRESH_TIMEOUT_MS = 45000
 // The first render after a deploy takes minutes on e-paper; keep asking
@@ -151,7 +233,7 @@ function mergeEmbeddedFirmwareStatus(
   }
 }
 
-async function requestEmbeddedFirmwareBuild(frameId: number, force = false): Promise<EmbeddedFirmware | null> {
+async function requestEmbeddedFirmwareBuild(frameId: FrameId, force = false): Promise<EmbeddedFirmware | null> {
   const response = await apiFetch(`/api/frames/${frameId}/embedded/firmware${force ? '?force=1' : ''}`, {
     method: 'POST',
   })
@@ -162,7 +244,7 @@ async function requestEmbeddedFirmwareBuild(frameId: number, force = false): Pro
   return (data?.firmware as EmbeddedFirmware | undefined) ?? null
 }
 
-async function recoverEmbeddedFirmwareBuild(frameId: number, status: EmbeddedFirmware): Promise<boolean> {
+async function recoverEmbeddedFirmwareBuild(frameId: FrameId, status: EmbeddedFirmware): Promise<boolean> {
   if (status.status !== 'stale' && status.status !== 'missing') {
     return false
   }
@@ -205,7 +287,7 @@ function embeddedUsbImageSceneId(metadata?: string): string | null {
   return sceneId || null
 }
 
-async function refreshEmbeddedUsbFrameImage(frameId: number): Promise<void> {
+async function refreshEmbeddedUsbFrameImage(frameId: FrameId): Promise<void> {
   if (embeddedUsbImageRefreshesInFlight.has(frameId) || !embeddedUsbApiCanUse(frameId)) {
     return
   }
@@ -239,9 +321,14 @@ async function refreshEmbeddedUsbFrameImage(frameId: number): Promise<void> {
     embeddedUsbImageRefreshRetries.delete(frameId)
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
-    if (/no preview rendered yet|preview snapshot was not retained/i.test(detail)) {
-      // Expected right after a deploy: the first render is still in
-      // progress. Quietly retry until a preview exists.
+    const retryable =
+      // Expected right after a deploy: the first render is still in progress.
+      /no preview rendered yet|preview snapshot was not retained/i.test(detail) ||
+      // Expected under load: a console log line interleaved with the serial
+      // payload dump (UsbPayloadCorruptedError). The next transfer usually
+      // lands in a quiet window.
+      (error instanceof Error && error.name === 'UsbPayloadCorruptedError')
+    if (retryable) {
       const attempts = (embeddedUsbImageRefreshRetries.get(frameId) ?? 0) + 1
       if (attempts <= EMBEDDED_USB_IMAGE_RETRY_LIMIT) {
         embeddedUsbImageRefreshRetries.set(frameId, attempts)
@@ -257,8 +344,27 @@ async function refreshEmbeddedUsbFrameImage(frameId: number): Promise<void> {
   }
 }
 
+/**
+ * Restart/Reboot fallback for embedded frames: when the network path fails
+ * but a USB serial session is connected, reboot the board over the console.
+ * Returns true when the USB restart succeeded.
+ */
+async function restartEmbeddedFrameOverUsb(frameId: FrameId, frame?: FrameType): Promise<boolean> {
+  const isEmbedded = (frame?.mode ?? 'rpios') === 'embedded' || frameSupportsUsbSerialConsole(frame)
+  if (!isEmbedded || !embeddedUsbApiCanUse(frameId)) {
+    return false
+  }
+  try {
+    await usbRestart(frameId)
+    return true
+  } catch (error) {
+    // Stale/busy USB port — let the caller surface the original network error.
+    return false
+  }
+}
+
 export function scheduleEmbeddedUsbFrameImageRefresh(
-  frameId: number,
+  frameId: FrameId,
   delayMs: number = EMBEDDED_USB_IMAGE_REFRESH_DELAY_MS
 ): void {
   if (!embeddedUsbApiCanUse(frameId) || typeof window === 'undefined') {
@@ -286,7 +392,7 @@ function sdCardImageProgressDetail(startedAt: number): string {
   return 'Still preparing SD card image'
 }
 
-function stopSdCardImageProgress(frameId: number): void {
+function stopSdCardImageProgress(frameId: FrameId): void {
   const timer = sdCardImageProgressTimers.get(frameId)
   if (timer === undefined || typeof window === 'undefined') {
     return
@@ -295,7 +401,7 @@ function stopSdCardImageProgress(frameId: number): void {
   sdCardImageProgressTimers.delete(frameId)
 }
 
-async function pollSdCardImageStatus(frameId: number, downloadUrl?: string): Promise<void> {
+async function pollSdCardImageStatus(frameId: FrameId, downloadUrl?: string): Promise<void> {
   if (!pendingSdCardImageDownloads.has(frameId) || sdCardImageStatusPollsInFlight.has(frameId)) {
     return
   }
@@ -336,7 +442,7 @@ async function pollSdCardImageStatus(frameId: number, downloadUrl?: string): Pro
   }
 }
 
-function startSdCardImageProgress(frameId: number): void {
+function startSdCardImageProgress(frameId: FrameId): void {
   stopSdCardImageProgress(frameId)
   if (typeof window === 'undefined') {
     return
@@ -370,7 +476,7 @@ function embeddedFirmwareProgressDetail(startedAt: number): string {
   return 'Still building firmware'
 }
 
-function stopEmbeddedFirmwareProgress(frameId: number): void {
+function stopEmbeddedFirmwareProgress(frameId: FrameId): void {
   const timer = embeddedFirmwareProgressTimers.get(frameId)
   if (timer === undefined || typeof window === 'undefined') {
     return
@@ -379,7 +485,7 @@ function stopEmbeddedFirmwareProgress(frameId: number): void {
   embeddedFirmwareProgressTimers.delete(frameId)
 }
 
-async function pollEmbeddedFirmwareStatus(frameId: number, downloadUrl?: string): Promise<void> {
+async function pollEmbeddedFirmwareStatus(frameId: FrameId, downloadUrl?: string): Promise<void> {
   if (!pendingEmbeddedFirmwareDownloads.has(frameId) || embeddedFirmwareStatusPollsInFlight.has(frameId)) {
     return
   }
@@ -436,7 +542,7 @@ async function pollEmbeddedFirmwareStatus(frameId: number, downloadUrl?: string)
   }
 }
 
-function startEmbeddedFirmwareProgress(frameId: number): void {
+function startEmbeddedFirmwareProgress(frameId: FrameId): void {
   stopEmbeddedFirmwareProgress(frameId)
   if (typeof window === 'undefined') {
     return
@@ -467,33 +573,47 @@ export const framesModel = kea<framesModelType>([
   path(['src', 'models', 'framesModel']),
   actions({
     addFrame: (frame: FrameType) => ({ frame }),
-    loadFrame: (id: number) => ({ id }),
-    deployFrame: (id: number, fastDeploy?: boolean) => ({ id, fastDeploy: fastDeploy || false }),
-    cancelDeploy: (id: number) => ({ id }),
-    stopFrame: (id: number) => ({ id }),
-    restartFrame: (id: number) => ({ id }),
-    rebootFrame: (id: number) => ({ id }),
-    renderFrame: (id: number) => ({ id }),
-    deleteFrame: (id: number) => ({ id }),
-    renameFrame: (id: number, name: string) => ({ id, name }),
-    deployRemote: (id: number, recompile?: boolean, transport: RemoteTaskTransport = 'auto') => ({
+    loadFrame: (id: FrameId) => ({ id }),
+    deployFrame: (id: FrameId, fastDeploy?: boolean) => ({ id, fastDeploy: fastDeploy || false }),
+    cancelDeploy: (id: FrameId) => ({ id }),
+    stopFrame: (id: FrameId) => ({ id }),
+    restartFrame: (id: FrameId) => ({ id }),
+    rebootFrame: (id: FrameId) => ({ id }),
+    renderFrame: (id: FrameId) => ({ id }),
+    deleteFrame: (id: FrameId) => ({ id }),
+    renameFrame: (id: FrameId, name: string) => ({ id, name }),
+    // Cloud only: a freshly enrolled frame is `pending` until its owner
+    // confirms it, and the control plane refuses scene/settings pushes with
+    // frame_not_active until then (POST /api/frames/{id}/confirm).
+    confirmCloudFrame: (id: FrameId) => ({ id }),
+    confirmCloudFrameFailure: (id: FrameId, error: string) => ({ id, error }),
+    // Cloud only: pull the frame's store-scene assignments + scene JSON into
+    // frame.scenes so the tiles survive a reload. `force` skips the
+    // once-a-minute throttle (used right after an install).
+    hydrateCloudFrameScenes: (id: FrameId, force?: boolean) => ({ id, force: force || false }),
+    setCloudFrameScenes: (id: FrameId, scenes: FrameScene[]) => ({ id, scenes }),
+    deployRemote: (id: FrameId, recompile?: boolean, transport: RemoteTaskTransport = 'auto') => ({
       id,
       recompile: recompile || false,
       transport,
     }),
-    restartRemote: (id: number, transport: RemoteTaskTransport = 'auto') => ({ id, transport }),
-    downloadSdCardImage: (id: number) => ({ id }),
-    downloadEmbeddedFirmware: (id: number) => ({ id }),
-    updateEmbeddedFirmwareStatus: (id: number, firmware: EmbeddedFirmware) => ({ id, firmware }),
-    applyEmbeddedFirmwareOta: (id: number, force?: boolean) => ({ id, force: force || false }),
-    setDeployWithAgent: (id: number, deployWithAgent: boolean) => ({ id, deployWithAgent }),
-    setFrameArchived: (id: number, archived: boolean) => ({ id, archived }),
+    restartRemote: (id: FrameId, transport: RemoteTaskTransport = 'auto') => ({ id, transport }),
+    downloadSdCardImage: (id: FrameId) => ({ id }),
+    downloadEmbeddedFirmware: (id: FrameId) => ({ id }),
+    updateEmbeddedFirmwareStatus: (id: FrameId, firmware: EmbeddedFirmware) => ({ id, firmware }),
+    applyEmbeddedFirmwareOta: (id: FrameId, force?: boolean) => ({ id, force: force || false }),
+    // Cloud only: enqueue the advisory notify_update_available verb. The
+    // device fetches the signed OTA manifest and installs on its own
+    // schedule (docs/cloud-frames.md "Signed OTA") — nothing to track here.
+    updateFrameFirmware: (id: FrameId) => ({ id }),
+    setDeployWithAgent: (id: FrameId, deployWithAgent: boolean) => ({ id, deployWithAgent }),
+    setFrameArchived: (id: FrameId, archived: boolean) => ({ id, archived }),
     toggleArchivedFramesExpanded: true,
     toggleInactiveFramesExpanded: true,
   }),
   loaders(({ values }) => ({
     frames: [
-      {} as Record<number, FrameType>,
+      {} as Record<FrameId, FrameType>,
       {
         loadFrame: async ({ id }) => {
           try {
@@ -505,7 +625,7 @@ export const framesModel = kea<framesModelType>([
             const frame = data.frame as FrameType
             return {
               ...values.frames,
-              [frame.id]: sanitizeFrameForStore(frame),
+              [frame.id]: withStoredCloudScenes(sanitizeFrameForStore(frame), values.frames[frame.id]),
             }
           } catch (error) {
             console.error(error)
@@ -520,7 +640,10 @@ export const framesModel = kea<framesModelType>([
             }
             const data = await response.json()
             const framesDict = Object.fromEntries(
-              (data.frames as FrameType[]).map((frame) => [frame.id, sanitizeFrameForStore(frame)])
+              (data.frames as FrameType[]).map((frame) => [
+                frame.id,
+                withStoredCloudScenes(sanitizeFrameForStore(frame), values.frames[frame.id]),
+              ])
             )
             return framesDict
           } catch (error) {
@@ -532,13 +655,57 @@ export const framesModel = kea<framesModelType>([
     ],
   })),
   reducers(() => ({
+    // Whether the frame list has come back at least once — NOT whether it
+    // contains anything. `framesLoaded` below means "has at least one frame",
+    // which reads the same at a glance and is what gates the cloud workspace:
+    // an account with no frames yet sat on "Loading..." forever, which is
+    // exactly what a brand-new account sees. The loader swallows its own
+    // errors, so success is the only outcome to listen for.
+    framesEverLoaded: [
+      false,
+      {
+        loadFramesSuccess: () => true,
+      },
+    ],
+    // Per-frame confirm-in-flight flags and errors for the cloud's pending
+    // banner. Keyed by String(id) — reducers index with the raw FrameId.
+    cloudFramesConfirming: [
+      {} as Record<FrameId, boolean>,
+      {
+        confirmCloudFrame: (state, { id }) => ({ ...state, [id]: true }),
+        confirmCloudFrameFailure: (state, { id }) => ({ ...state, [id]: false }),
+        loadFrameSuccess: (state) => (Object.keys(state).length > 0 ? {} : state),
+      },
+    ],
+    cloudFrameConfirmErrors: [
+      {} as Record<FrameId, string>,
+      {
+        confirmCloudFrame: (state, { id }) => {
+          if (!(id in state)) {
+            return state
+          }
+          const next = { ...state }
+          delete next[id]
+          return next
+        },
+        confirmCloudFrameFailure: (state, { id, error }) => ({ ...state, [id]: error }),
+      },
+    ],
     frames: [
-      {} as Record<number, FrameType>,
+      {} as Record<FrameId, FrameType>,
       {
         addFrame: (state, { frame }) => ({
           ...state,
           [frame.id]: sanitizeFrameForStore(frame),
         }),
+        setCloudFrameScenes: (state, { id, scenes }) => {
+          const frame = state[id]
+          if (!frame) return state
+          return {
+            ...state,
+            [id]: sanitizeFrameForStore({ ...frame, scenes }),
+          }
+        },
         setDeployWithAgent: (state, { id, deployWithAgent }) => {
           const frame = state[id]
           if (!frame) return state
@@ -589,22 +756,30 @@ export const framesModel = kea<framesModelType>([
         },
         [socketLogic.actionTypes.newFrame]: (state, { frame }) => ({
           ...state,
-          [frame.id]: sanitizeFrameForStore(frame),
+          // Cloud hub broadcasts are scene-less frameSummary rows too; keep
+          // the hydrated tiles instead of blanking them until the next poll.
+          [frame.id]: withStoredCloudScenes(sanitizeFrameForStore(frame), state[frame.id]),
         }),
         [socketLogic.actionTypes.updateFrame]: (state, { frame }) => ({
           ...state,
-          [frame.id]: sanitizeFrameForStore({
-            ...(state[frame.id] ?? {}),
-            ...frame,
-            embedded:
-              frame.embedded?.firmware && state[frame.id]?.embedded?.firmware
-                ? {
-                    ...(state[frame.id]?.embedded ?? {}),
-                    ...frame.embedded,
-                    firmware: mergeEmbeddedFirmwareStatus(state[frame.id]?.embedded?.firmware, frame.embedded.firmware),
-                  }
-                : frame.embedded ?? state[frame.id]?.embedded,
-          }),
+          [frame.id]: withStoredCloudScenes(
+            sanitizeFrameForStore({
+              ...(state[frame.id] ?? {}),
+              ...frame,
+              embedded:
+                frame.embedded?.firmware && state[frame.id]?.embedded?.firmware
+                  ? {
+                      ...(state[frame.id]?.embedded ?? {}),
+                      ...frame.embedded,
+                      firmware: mergeEmbeddedFirmwareStatus(
+                        state[frame.id]?.embedded?.firmware,
+                        frame.embedded.firmware
+                      ),
+                    }
+                  : (frame.embedded ?? state[frame.id]?.embedded),
+            }),
+            state[frame.id]
+          ),
         }),
         [socketLogic.actionTypes.newLog]: (state, { log }) => {
           const frame = state[log.frame_id]
@@ -665,8 +840,28 @@ export const framesModel = kea<framesModelType>([
     ],
     framesLoaded: [(s) => [s.frames], (frames) => Object.keys(frames).length > 0],
   }),
-  afterMount(({ actions }) => {
+  afterMount(({ actions, cache }) => {
     actions.loadFrames()
+    // Cloud fleets change behind the SPA's back: enrollment is an HTTP call
+    // into auth-web, and the hub only broadcasts a frame once it connects its
+    // WebSocket — which a pending frame flashed from an SD image may not do
+    // for minutes (or, unreachable, ever). Without a refresh the list stayed
+    // frozen until a manual reload. A slow, tab-visible-only poll keeps it
+    // honest; the websocket still delivers the fast-path updates. Backend
+    // mode keeps its pure event-sourcing — its server owns every mutation.
+    if (isCloudMode() && typeof window !== 'undefined') {
+      cache.cloudFleetRefreshInterval = window.setInterval(() => {
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+          actions.loadFrames()
+        }
+      }, 15_000)
+    }
+  }),
+  beforeUnmount(({ cache }) => {
+    if (cache.cloudFleetRefreshInterval) {
+      window.clearInterval(cache.cloudFleetRefreshInterval)
+      cache.cloudFleetRefreshInterval = undefined
+    }
   }),
   listeners(({ actions, values }) => ({
     renderFrame: async ({ id }) => {
@@ -688,9 +883,15 @@ export const framesModel = kea<framesModelType>([
           }
         }
         if (!usbSucceeded) {
-          const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
-          if (!response.ok) {
-            throw new Error('Failed to send render event')
+          if (isCloudMode()) {
+            // The cloud has no /event/* routes; `render` is one of its four
+            // command verbs (cloud/apps/auth-web/src/lib/frames.ts).
+            await sendCloudFrameCommand(id, 'render')
+          } else {
+            const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
+            if (!response.ok) {
+              throw new Error('Failed to send render event')
+            }
           }
         }
       } catch (error) {
@@ -703,6 +904,55 @@ export const framesModel = kea<framesModelType>([
       }
     },
     deployFrame: async ({ id, fastDeploy }) => {
+      // Cloud: there is no /deploy or /fast_deploy (both 404). The cloud's
+      // deploy primitive is the uploadScenes event shim — one checksummed,
+      // durable set_scenes push of the workspace's CURRENT scene list
+      // (cloud/docs/cloud-workspace-gaps.md item 3). Fast vs full deploy is a
+      // compile-time distinction that does not exist for interpreted-only
+      // cloud frames, so both flags take the same path.
+      if (isCloudMode()) {
+        const taskId = deployTaskId(id, false)
+        longRunningTasksModel.actions.startTask({
+          id: taskId,
+          frameId: id,
+          kind: 'deploy',
+          title: 'Deploying scenes',
+          detail: 'Pushing scenes to the frame',
+        })
+        try {
+          const frame = values.frames[id]
+          // The edited form when the frame's workspace is open, the stored
+          // scene list otherwise. framesModel cannot connect to a keyed logic,
+          // hence findMounted.
+          const scenes = frameLogic.findMounted({ frameId: id })?.values.frameForm?.scenes ?? frame?.scenes ?? []
+          if (!scenes.length) {
+            throw new Error('This frame has no scenes to deploy')
+          }
+          // Keep the currently active scene active; the runtime otherwise
+          // activates the payload sceneId or the first scene.
+          await deployCloudFrameScenes(id, scenes, {
+            sceneId: cloudDeployActiveSceneId(frame?.active_scene_id, scenes),
+          })
+          longRunningTasksModel.actions.finishTask({
+            taskId,
+            frameId: id,
+            kind: 'deploy',
+            status: 'success',
+            detail: 'Deployed — the frame applies the scenes as soon as it syncs',
+          })
+        } catch (error) {
+          // No rethrow: deployFrame is dispatched, never awaited, so a throw
+          // here is only an unhandled rejection — the task toast above is
+          // the user-facing surfacing.
+          longRunningTasksModel.actions.taskFailed({
+            taskId,
+            frameId: id,
+            kind: 'deploy',
+            detail: error instanceof Error ? error.message : 'Failed to deploy scenes',
+          })
+        }
+        return
+      }
       const taskId = deployTaskId(id, fastDeploy)
       longRunningTasksModel.actions.startTask({
         id: taskId,
@@ -743,13 +993,40 @@ export const framesModel = kea<framesModelType>([
       await apiFetch(`/api/frames/${id}/stop`, { method: 'POST' })
     },
     restartFrame: async ({ id }) => {
-      const response = await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
-      if (!response.ok) {
-        throw new Error('Failed to restart frame')
+      try {
+        if (isCloudMode()) {
+          await sendCloudFrameCommand(id, 'restart_runtime')
+          return
+        }
+        const response = await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to restart frame')
+        }
+      } catch (error) {
+        // An embedded board that never joined Wi-Fi (or joined the wrong
+        // network) has no reachable network path, but a connected USB serial
+        // session can still reboot it.
+        if (!(await restartEmbeddedFrameOverUsb(id, values.frames[id]))) {
+          throw error
+        }
       }
     },
     rebootFrame: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
+      try {
+        if (isCloudMode()) {
+          await sendCloudFrameCommand(id, 'reboot')
+          return
+        }
+        const response = await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
+        if (!response.ok) {
+          throw new Error('Failed to reboot frame')
+        }
+      } catch (error) {
+        // On embedded frames restart and reboot are the same esp_restart().
+        if (!(await restartEmbeddedFrameOverUsb(id, values.frames[id]))) {
+          throw error
+        }
+      }
     },
     deployRemote: async ({ id, recompile, transport }) => {
       longRunningTasksModel.actions.startTask({
@@ -909,8 +1186,8 @@ export const framesModel = kea<framesModelType>([
           firmware?.status === 'ready' && !force
             ? 'Requesting OTA update'
             : firmware?.status === 'building' || firmware?.status === 'queued'
-            ? 'Waiting for firmware build'
-            : 'Preparing firmware image',
+              ? 'Waiting for firmware build'
+              : 'Preparing firmware image',
       })
 
       try {
@@ -945,6 +1222,34 @@ export const framesModel = kea<framesModelType>([
         throw error
       }
     },
+    updateFrameFirmware: async ({ id }) => {
+      // The "Update firmware" menu entry, offered only for esp32 cloud
+      // frames (FrameActionsMenu). One durable notify_update_available in
+      // the queue; the device does the manifest fetch, signature check and
+      // slot switch itself, so the toast finishes immediately — progress, if
+      // any, arrives later as ota:cloud log lines.
+      longRunningTasksModel.actions.startTask({
+        frameId: id,
+        kind: 'embeddedOta',
+        title: 'Requesting firmware update',
+        detail: 'Queueing the update notification',
+      })
+      try {
+        await sendCloudFrameCommand(id, 'notify_update_available')
+        longRunningTasksModel.actions.finishTask({
+          frameId: id,
+          kind: 'embeddedOta',
+          status: 'success',
+          detail: 'Update requested — the frame will check for new firmware and install it in the background',
+        })
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: id,
+          kind: 'embeddedOta',
+          detail: error instanceof Error ? error.message : 'Failed to request the firmware update',
+        })
+      }
+    },
     [socketLogic.actionTypes.socketReconnected]: () => {
       // Frame state is event-sourced over the websocket; anything that
       // happened while disconnected (backend deploys drop the socket at
@@ -961,6 +1266,14 @@ export const framesModel = kea<framesModelType>([
         } else if (sdImage.status === 'error' || sdImage.status === 'missing' || sdImage.status === 'stale') {
           pendingSdCardImageDownloads.delete(frame.id)
           stopSdCardImageProgress(frame.id)
+          // A build can fail within a second of starting; this broadcast then
+          // races the first status poll (which bails once the pending flag is
+          // gone), so the failure must be surfaced here or nothing shows it.
+          longRunningTasksModel.actions.taskFailed({
+            frameId: frame.id,
+            kind: 'buildrootImage',
+            detail: sdImage.error || 'SD card image generation failed',
+          })
         }
       }
       const firmware = frame.embedded?.firmware
@@ -1039,13 +1352,80 @@ export const framesModel = kea<framesModelType>([
       }
     },
     deleteFrame: async ({ id }) => {
-      await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
+      const response = await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
       if (router.values.location.pathname.includes('/frames/' + id)) {
         router.actions.push(urls.frames())
+      }
+      // The backend announces the deletion over its websocket (the reducer
+      // listens for socketLogic.deleteFrame); the cloud has no such event, so
+      // re-list to drop the row now instead of on the next 15 s poll.
+      if (response.ok && isCloudMode()) {
+        actions.loadFrames()
+      }
+    },
+    confirmCloudFrame: async ({ id }) => {
+      try {
+        const response = await apiFetch(`/api/frames/${id}/confirm`, { method: 'POST' })
+        if (!response.ok) {
+          const detail = (await response.json().catch(() => ({}))) as { error?: string }
+          throw new Error(detail.error ?? `error_${response.status}`)
+        }
+        // The row flips to active server-side; refetch so the banner drops
+        // and Save/scene pushes stop being refused with frame_not_active.
+        actions.loadFrame(id)
+      } catch (error) {
+        console.error(error)
+        actions.confirmCloudFrameFailure(id, error instanceof Error ? error.message : 'Failed to confirm the frame')
+      }
+    },
+    hydrateCloudFrameScenes: async ({ id, force }) => {
+      if (!isCloudMode() || cloudFrameSceneHydrationsInFlight.has(id)) {
+        return
+      }
+      const hydratedAt = cloudFrameScenesHydratedAt.get(id) ?? 0
+      if (!force && Date.now() - hydratedAt < CLOUD_FRAME_SCENES_REFRESH_MS) {
+        return
+      }
+      cloudFrameSceneHydrationsInFlight.add(id)
+      try {
+        const scenes = await fetchCloudFrameScenes(id)
+        cloudFrameScenesHydratedAt.set(id, Date.now())
+        const frame = values.frames[id]
+        if (!frame) {
+          return
+        }
+        // Only dispatch real changes: every write replaces the frame object,
+        // which cascades into frameLogic's `frame` subscription (frame form
+        // reset) and re-renders every tile — needless churn on a poll where
+        // nothing moved.
+        const sanitized = scenes.map((scene) => sanitizeScene(scene, frame))
+        if (JSON.stringify(frame.scenes ?? []) !== JSON.stringify(sanitized)) {
+          actions.setCloudFrameScenes(id, scenes)
+        }
+      } catch (error) {
+        console.error(error)
+      } finally {
+        cloudFrameSceneHydrationsInFlight.delete(id)
+      }
+    },
+    loadFrameSuccess: ({ frames }) => {
+      if (isCloudMode()) {
+        Object.values(frames).forEach((frame) => actions.hydrateCloudFrameScenes(frame.id))
+      }
+    },
+    loadFramesSuccess: ({ frames }) => {
+      if (isCloudMode()) {
+        Object.values(frames).forEach((frame) => actions.hydrateCloudFrameScenes(frame.id))
       }
     },
     renameFrame: async ({ id, name }) => {
       try {
+        if (isCloudMode()) {
+          // `name` is on the cloud's settings allowlist; there is no
+          // POST /api/frames/{id} to rename through.
+          await pushCloudFrameSettings(id, { name })
+          return
+        }
         const response = await apiFetch(`/api/frames/${id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

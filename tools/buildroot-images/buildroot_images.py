@@ -17,6 +17,7 @@ import tarfile
 import tempfile
 import uuid
 from dataclasses import dataclass, field
+import datetime as dt
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,10 +25,13 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = REPO_ROOT / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
+# tools/ holds update_versions.py, whose CalVer helpers decide what the next
+# release is called; base images are stamped with that (see
+# next_frameos_version) rather than duplicating the rules here.
+sys.path.insert(0, str(REPO_ROOT / "tools"))
 
 from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_ASSETS_PARTITION_SIZE,
-    BUILDROOT_DEFCONFIG,
     BUILDROOT_DOCKER_APT_DEPS_LINE,
     BUILDROOT_DOCKER_IMAGE,
     BUILDROOT_DOCKER_NOFILE_LIMIT,
@@ -35,12 +39,12 @@ from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_EXPAND_SD_CARD_SCRIPT_PATH,
     BUILDROOT_EXPAND_SD_CARD_SERVICE_NAME,
     BUILDROOT_FRAMEOS_PARTITION_SIZE,
+    BUILDROOT_FSTAB_CONTENT,
     BUILDROOT_NETWORK_MANAGER_CONNECTIONS_DIR,
     BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE,
     BUILDROOT_NETWORK_MANAGER_STATE_CONNECTIONS_DIR,
     BUILDROOT_VERSION,
     BuildrootImageBuilder,
-    FRAMEOS_BUILD_TARGET,
     SUPPORTED_BUILDROOT_PLATFORM,
     _mbr_partitions,
     ensure_buildroot_base_image,
@@ -51,8 +55,12 @@ from app.tasks.buildroot_image import (  # noqa: E402
     stage_buildroot_frameos_service,
     _gzip_file,
     _sha256,
-    normalize_buildroot_platform,
     stage_buildroot_network_manager_state,
+)
+from app.tasks.buildroot_platforms import (  # noqa: E402
+    BuildrootPlatform,
+    enabled_buildroot_platforms,
+    get_buildroot_platform,
 )
 from app.models.frame import (  # noqa: E402
     DEFAULT_ERROR_BEHAVIOR,
@@ -60,10 +68,19 @@ from app.models.frame import (  # noqa: E402
     get_frame_json,
 )
 from app.tasks.binary_builder import FrameBinaryBuildResult  # noqa: E402
+from update_versions import (  # noqa: E402
+    _max_base_version,
+    _next_calver,
+    _validate_base_version,
+)
 from app.utils.cross_compile import TargetMetadata  # noqa: E402
 from app.tasks.setup_json_reset import (  # noqa: E402
+    BOOT_CLOUD_CONFIG_FILE,
+    BOOT_SETUP_BLOB_FILE,
     SETUP_JSON_RESET_SCRIPT_PATH,
     SETUP_JSON_RESET_SERVICE_NAME,
+    render_cloud_config_placeholder,
+    render_setup_blob_placeholder,
     render_setup_json_reset_script,
     render_setup_json_reset_service,
 )
@@ -77,7 +94,11 @@ DEFAULT_PREFIX = os.environ.get("R2_PREFIX", "buildroot-images")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", default=SUPPORTED_BUILDROOT_PLATFORM)
+    parser.add_argument(
+        "--platform",
+        default=SUPPORTED_BUILDROOT_PLATFORM,
+        choices=sorted(platform.key for platform in enabled_buildroot_platforms()),
+    )
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
     parser.add_argument("--prefix", default=DEFAULT_PREFIX)
     parser.add_argument("--manifest-key", default=None)
@@ -122,9 +143,14 @@ def parse_args() -> argparse.Namespace:
     release = sub.add_parser("release-image", help="Build a release-ready SD image from precompiled artifacts")
     release.add_argument("--prebuilt-cross-dir", default=str(REPO_ROOT / "build" / "prebuilt-cross"))
     release.add_argument("--release-assets-dir", default=str(REPO_ROOT / "release-assets"))
-    release.add_argument("--target", default="debian-bookworm-arm64")
+    release.add_argument(
+        "--target",
+        default=None,
+        help="Precompiled release slug; defaults to the platform's release target",
+    )
     release.add_argument("--version", default=None)
     sub.add_parser("list", help="List manifest entries in R2")
+    sub.add_parser("platforms", help="Print enabled platforms as a JSON matrix for CI")
     download = sub.add_parser("download", help="Download the manifest to the repo")
     download.add_argument("--force", action="store_true")
     args = parser.parse_args()
@@ -182,6 +208,30 @@ def is_client_error(exc: Exception) -> bool:
 def frameos_version() -> str:
     payload = json.loads((REPO_ROOT / "versions.json").read_text(encoding="utf-8"))
     return published_frameos_version(str(payload.get("frameos") or ""))
+
+
+def next_frameos_version() -> str:
+    """The version a base image is published under.
+
+    Base images are stamped with the version of the release they are FOR, not
+    the one that happens to be current while CI builds them: the workflow
+    order is publish base images -> merge the manifest -> bump versions ->
+    release, so by the time anything consumes these images the current version
+    is this one. Stamping the current version instead left every fresh base
+    image looking a release behind, and the SD builder's version-match then
+    fell through to "newest entry" instead of an exact hit.
+
+    FRAMEOS_NEXT_VERSION pins it explicitly, matching the release workflow's
+    own `next_version` input — pass the same value to both when overriding.
+    The computed default reuses tools/update_versions.py so the CalVer rules
+    cannot drift from the bump that will actually happen.
+    """
+    override = (os.environ.get("FRAMEOS_NEXT_VERSION") or "").strip()
+    if override:
+        return published_frameos_version(_validate_base_version(override))
+    payload = json.loads((REPO_ROOT / "versions.json").read_text(encoding="utf-8"))
+    versions = {key: str(value) for key, value in payload.items() if value}
+    return _next_calver(_max_base_version(versions), dt.date.today())
 
 
 def raw_frameos_version() -> str:
@@ -286,7 +336,11 @@ class ReleaseImageFrame:
     ssh_pass: str | None = None
     ssh_port: int = 22
     ssh_keys: list[str] = field(default_factory=list)
-    server_host: str = "localhost"
+    # Empty on purpose: no self-hosted backend controls a generic release
+    # image. A non-empty serverHost blocks cloud enrollment on the frame
+    # (frameos cloud/enrollment.nim, otherControlPlaneActive) and used to make
+    # the setup portal demand a bogus localhost:8989 backend.
+    server_host: str = ""
     server_port: int = 8989
     server_api_key: str = ""
     server_send_logs: bool = False
@@ -310,7 +364,7 @@ class ReleaseImageFrame:
     background_color: str | None = None
     debug: bool = False
     last_log_at: str | None = None
-    log_to_file: str | None = None
+    log_to_file: str | None = "/srv/frameos/logs/frameos-{date}.log"
     assets_path: str = "/srv/assets"
     save_assets: bool = True
     upload_fonts: str = ""
@@ -394,12 +448,12 @@ def buildroot_output_cache_root(args: argparse.Namespace, cache_root: Path) -> P
     return resolve_host_dir(args.output_cache_dir, default_buildroot_output_cache_root())
 
 
-def base_build_cache_key(paths: list[Path], *, platform: str, docker_image: str, skip_apt_install: bool) -> str:
+def base_build_cache_key(paths: list[Path], *, platform: BuildrootPlatform, docker_image: str, skip_apt_install: bool) -> str:
     digest = hashlib.sha256()
-    digest.update(f"platform={platform}\n".encode("utf-8"))
+    digest.update(f"platform={platform.key}\n".encode("utf-8"))
     digest.update(f"build-host-machine={os.uname().machine}\n".encode("utf-8"))
     digest.update(f"buildroot-version={BUILDROOT_VERSION}\n".encode("utf-8"))
-    digest.update(f"buildroot-defconfig={BUILDROOT_DEFCONFIG}\n".encode("utf-8"))
+    digest.update(f"buildroot-defconfig={platform.defconfig}\n".encode("utf-8"))
     digest.update(f"bootstrap-script-version={BUILDROOT_BOOTSTRAP_SCRIPT_VERSION}\n".encode("utf-8"))
     digest.update(f"docker-image={docker_image}\n".encode("utf-8"))
     digest.update(f"skip-apt-install={skip_apt_install}\n".encode("utf-8"))
@@ -412,7 +466,7 @@ def legacy_local_dir(platform: str) -> Path:
     return BUILD_DIR / platform / raw_frameos_version()
 
 
-def write_base_bootstrap_overlay(overlay: Path) -> None:
+def write_base_bootstrap_overlay(overlay: Path, platform: BuildrootPlatform | None = None) -> None:
     systemd = overlay / "etc" / "systemd" / "system"
     wants = systemd / "multi-user.target.wants"
     local_fs_pre_wants = systemd / "local-fs-pre.target.wants"
@@ -422,7 +476,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(render_setup_json_reset_script("/boot/frameos-setup.json"), encoding="utf-8")
     os.chmod(script_path, 0o755)
-    stage_buildroot_frameos_service(overlay)
+    stage_buildroot_frameos_service(overlay, platform is None or platform.uses_network_manager)
     (systemd / SETUP_JSON_RESET_SERVICE_NAME).write_text(
         render_setup_json_reset_service(
             "/boot/frameos-setup.json",
@@ -435,7 +489,12 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
         if link.exists() or link.is_symlink():
             link.unlink()
         link.symlink_to(f"../{service}")
-    for service in ("NetworkManager.service", "dropbear.service", "dcron.service", "systemd-timesyncd.service"):
+    enabled_services = ["dropbear.service", "dcron.service", "systemd-timesyncd.service"]
+    # Only enable NetworkManager where Buildroot actually builds it — otherwise
+    # the image boots with an enabled unit that does not exist.
+    if platform is None or platform.uses_network_manager:
+        enabled_services.insert(0, "NetworkManager.service")
+    for service in enabled_services:
         link = wants / service
         if link.exists() or link.is_symlink():
             link.unlink()
@@ -460,13 +519,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
     )
     (overlay / "etc" / "default").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "default" / "dropbear").write_text('DROPBEAR_ARGS="-s -g"\n', encoding="utf-8")
-    (overlay / "etc" / "fstab").write_text(
-        "LABEL=BOOT /boot vfat defaults,noatime,umask=000 0 0\n"
-        "LABEL=FRAMEOS /srv/frameos ext4 defaults,noatime 0 2\n"
-        "LABEL=ASSETS /srv/assets vfat defaults,noatime,umask=000 0 0\n"
-        f"{BUILDROOT_NETWORK_MANAGER_CONNECTIONS_FSTAB_LINE}\n",
-        encoding="utf-8",
-    )
+    (overlay / "etc" / "fstab").write_text(BUILDROOT_FSTAB_CONTENT, encoding="utf-8")
     (overlay / "etc" / "profile.d").mkdir(parents=True, exist_ok=True)
     (overlay / "etc" / "profile.d" / "frameos.sh").write_text(
         "export FRAMEOS_HOME=/srv/frameos/current\n",
@@ -477,6 +530,7 @@ def write_base_bootstrap_overlay(overlay: Path) -> None:
 
 
 def build(args: argparse.Namespace) -> None:
+    platform = get_buildroot_platform(args.platform)
     out_dir = local_dir(args.platform)
     out_dir.mkdir(parents=True, exist_ok=True)
     image_path = out_dir / "base.img"
@@ -488,7 +542,7 @@ def build(args: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory(prefix="frameos-buildroot-base-") as tmp:
         tmp_path = Path(tmp)
         overlay = tmp_path / "overlay"
-        write_base_bootstrap_overlay(overlay)
+        write_base_bootstrap_overlay(overlay, platform)
         config_path = tmp_path / "frameos-buildroot.config"
         kernel_fragment_path = tmp_path / "linux-fragment.config"
         post_build_path = tmp_path / "post-build.sh"
@@ -496,13 +550,13 @@ def build(args: argparse.Namespace) -> None:
         post_image_path = tmp_path / "post-image.sh"
         boot_logo_path = tmp_path / "frameos-boot-logo.png"
         build_script_path = tmp_path / "buildroot-build.sh"
-        BuildrootImageBuilder._write_buildroot_config(config_path)
-        BuildrootImageBuilder._write_kernel_config_fragment(kernel_fragment_path)
-        BuildrootImageBuilder._write_post_build_script(post_build_path)
+        BuildrootImageBuilder._write_buildroot_config(config_path, platform)
+        BuildrootImageBuilder._write_kernel_config_fragment(kernel_fragment_path, platform)
+        BuildrootImageBuilder._write_post_build_script(post_build_path, platform)
         BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
-        BuildrootImageBuilder._write_post_image_script(post_image_path)
+        BuildrootImageBuilder._write_post_image_script(post_image_path, platform)
         BuildrootImageBuilder._write_boot_logo(boot_logo_path)
-        BuildrootImageBuilder._write_build_script(build_script_path, "base.img")
+        BuildrootImageBuilder._write_build_script(build_script_path, "base.img", platform)
         cache_root = resolve_host_dir(args.cache_dir, default_buildroot_cache_dir())
         source_cache = buildroot_source_cache_dir(args, cache_root)
         cache_key = base_build_cache_key(
@@ -516,7 +570,7 @@ def build(args: argparse.Namespace) -> None:
                 boot_logo_path,
                 build_script_path,
             ],
-            platform=args.platform,
+            platform=platform,
             docker_image=BUILDROOT_DOCKER_IMAGE,
             skip_apt_install=args.skip_apt_install,
         )
@@ -571,9 +625,9 @@ def build(args: argparse.Namespace) -> None:
     package_timings = read_json_file(package_timings_path) or {}
     metadata = {
         "platform": args.platform,
-        "frameos_version": frameos_version(),
+        "frameos_version": next_frameos_version(),
         "buildroot_version": BUILDROOT_VERSION,
-        "defconfig": BUILDROOT_DEFCONFIG,
+        "defconfig": platform.defconfig,
         "docker_image": BUILDROOT_DOCKER_IMAGE,
         "buildroot_apt_deps": BUILDROOT_DOCKER_APT_DEPS_LINE,
         "frameos_partition_size": BUILDROOT_FRAMEOS_PARTITION_SIZE,
@@ -623,7 +677,9 @@ def upload(args: argparse.Namespace) -> None:
     if not image_path.is_file() or not metadata_path.is_file():
         raise SystemExit(f"Run build first; missing {image_path} or metadata.json")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata["frameos_version"] = published_frameos_version(str(metadata.get("frameos_version") or frameos_version()))
+    metadata["frameos_version"] = published_frameos_version(
+        str(metadata.get("frameos_version") or next_frameos_version())
+    )
     archive_name = f"{args.platform}-{safe_segment(metadata['frameos_version'])}-{metadata['sha256'][:16]}.img.gz"
     object_key = f"{args.prefix}/{args.platform}/{metadata['frameos_version']}/{archive_name}"
     if not args.yes:
@@ -647,7 +703,16 @@ def upload(args: argparse.Namespace) -> None:
                 shutil.copyfileobj(source, output)
         client.upload_file(str(archive_path), args.bucket, object_key, ExtraArgs={"ContentType": "application/gzip"})
         print(f"Uploaded s3://{args.bucket}/{object_key}")
-    save_manifest(client, args.bucket, args.manifest_key, {"entries": [entry]})
+    # Replace only this platform's entry; other platforms keep theirs.
+    manifest = load_manifest(client, args.bucket, args.manifest_key)
+    entries = [
+        existing
+        for existing in manifest.get("entries", [])
+        if existing.get("platform") != args.platform
+    ]
+    entries.append(entry)
+    entries.sort(key=lambda item: str(item.get("platform", "")))
+    save_manifest(client, args.bucket, args.manifest_key, {"entries": entries})
 
 
 def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
@@ -731,12 +796,13 @@ class ReleaseBuildrootImageBuilder(BuildrootImageBuilder):
 
 
 async def build_release_image(args: argparse.Namespace) -> None:
-    platform = normalize_buildroot_platform(args.platform)
+    buildroot_platform = get_buildroot_platform(args.platform)
+    platform = buildroot_platform.key
     version = safe_segment(args.version or release_version())
     if not version:
         raise SystemExit("Unable to determine release version")
 
-    target = str(args.target)
+    target = str(args.target or buildroot_platform.release_target)
     prebuilt_cross_dir = Path(args.prebuilt_cross_dir)
     release_assets_dir = Path(args.release_assets_dir)
     release_assets_dir.mkdir(parents=True, exist_ok=True)
@@ -755,19 +821,21 @@ async def build_release_image(args: argparse.Namespace) -> None:
 
         metadata = json.loads((artifact_root / "metadata.json").read_text(encoding="utf-8"))
         frame = ReleaseImageFrame()
+        frame.buildroot = {"platform": platform}
         build_id = safe_segment(version)
         raw_output_path = release_assets_dir / f"frameos-{version}-{platform}-buildroot.img"
         output_path = release_assets_dir / f"{raw_output_path.name}.gz"
         raw_output_path.unlink(missing_ok=True)
         output_path.unlink(missing_ok=True)
 
+        build_target = buildroot_platform.build_target_copy()
         frameos_build = FrameBinaryBuildResult(
             build_id=build_id,
             target=TargetMetadata(
-                arch=FRAMEOS_BUILD_TARGET.arch,
-                distro=FRAMEOS_BUILD_TARGET.distro,
-                version=FRAMEOS_BUILD_TARGET.version,
-                platform="linux/arm64",
+                arch=build_target.arch,
+                distro=build_target.distro,
+                version=build_target.version,
+                platform=buildroot_platform.docker_platform,
                 image="debian:bookworm",
             ),
             compilation_mode=str(metadata.get("compilation_mode") or "shared"),
@@ -800,7 +868,35 @@ async def build_release_image(args: argparse.Namespace) -> None:
         )
         release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
         _copy_release_vendor_folders(artifact_root, release_dir)
+        # Generic release images carry no per-frame setup payload. The
+        # first-boot service and script staged above stay in place, dormant
+        # until a user (or the cloud provider) drops /boot/frameos-setup.json
+        # or personalizes the cloud config /boot/frameos-cloud.txt on the FAT
+        # boot partition.
         (overlay_dir / "boot" / "frameos-setup.json").unlink(missing_ok=True)
+        # Every generic release image ships the 4096-byte all-comments
+        # frameos-cloud.txt placeholder. First boot treats a placeholder with
+        # no KEY=value lines as "not personalized" and exits before doing any
+        # work at all, so it stays in place and costs nothing per boot,
+        # and the provider's in-browser "Download SD image" flow overwrites
+        # the placeholder's bytes in place inside the raw image (locating it
+        # by its magic first line, "# FRAMEOS-CLOUD-CONFIG-V1"). In-place
+        # patching assumes the file's clusters are contiguous in the BOOT
+        # FAT; _patch_boot_partition mcopy's this file first, before anything
+        # else can fragment the fresh FAT's free-cluster run (see the
+        # contiguity comment in backend/app/tasks/buildroot_image.py).
+        (overlay_dir / "boot" / Path(BOOT_CLOUD_CONFIG_FILE).name).write_bytes(
+            render_cloud_config_placeholder()
+        )
+        # And the big sibling: the 8 MiB frameos-setup.bin placeholder that
+        # lets a SELF-HOSTED backend personalize this image by pure in-place
+        # byte patching (backend/app/tasks/sd_image_blob_patch.py) — full
+        # frameos-setup.json payload plus the hostname/WiFi/SSH/root-password
+        # boot files, no mtools/debugfs anywhere. Same contiguity reasoning
+        # as above; a genimage-fresh FAT lays both out contiguously.
+        (overlay_dir / "boot" / Path(BOOT_SETUP_BLOB_FILE).name).write_bytes(
+            render_setup_blob_placeholder()
+        )
 
         base_entry = await resolve_buildroot_base_entry(platform)
         base_image_path = await ensure_buildroot_base_image(base_entry, buildroot_base_cache_dir())
@@ -873,6 +969,22 @@ def download_manifest(args: argparse.Namespace) -> None:
     print(f"Wrote {LOCAL_MANIFEST_PATH}")
 
 
+def print_platform_matrix() -> None:
+    matrix = {
+        "include": [
+            {
+                "platform": platform.key,
+                "label": platform.label,
+                "defconfig": platform.defconfig,
+                "release_target": platform.release_target,
+                "runner": platform.default_runner_label,
+            }
+            for platform in enabled_buildroot_platforms()
+        ]
+    }
+    print(json.dumps(matrix, separators=(",", ":")))
+
+
 def main() -> None:
     load_env_file()
     args = parse_args()
@@ -884,6 +996,8 @@ def main() -> None:
         asyncio.run(build_release_image(args))
     elif args.command == "list":
         list_remote(args)
+    elif args.command == "platforms":
+        print_platform_matrix()
     elif args.command == "download":
         download_manifest(args)
 

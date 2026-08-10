@@ -1,6 +1,6 @@
 import { loader } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor'
-import { getBasePath } from './getBasePath'
+import { getAssetsBasePath } from './getBasePath'
 
 function monacoWorkerUrl(label: string): string {
   const worker =
@@ -14,7 +14,7 @@ function monacoWorkerUrl(label: string): string {
       ? 'ts.worker'
       : 'editor.worker'
 
-  return `${getBasePath()}/static/monaco/${worker}.js`
+  return `${getAssetsBasePath()}/static/monaco/${worker}.js`
 }
 
 ;(globalThis as any).MonacoEnvironment = {

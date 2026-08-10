@@ -64,6 +64,12 @@ proc defaultFrameConfig*(): FrameConfig =
   )
 
 proc portalRunHookForServerTests(cmd: string): (string, int) {.gcsafe, nimcall.} =
+  # Pin the NetworkManager backend: these tests exercise the HTTP routes, not
+  # the backend detection in frameos/network/backend.nim.
+  if cmd.contains("command -v nmcli"):
+    return ("nmcli\n", 0)
+  if cmd.contains("nmcli -t -f RUNNING general status"):
+    return ("running\n", 0)
   if cmd.contains("nmcli --terse --fields SSID device wifi list"):
     return ("test-network\n", 0)
   if cmd.contains("nmcli --colors no -t -f NAME connection show --active"):

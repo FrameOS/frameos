@@ -13,8 +13,14 @@ permissions:
   contents: write
 
 jobs:
+  # Runner sizing: every job runs on Depot. The bookkeeping jobs (version
+  # bump, npm dispatch, release notes, matrix, addon repo, GitHub release) are
+  # I/O bound and take the default Depot size; only the two jobs that actually
+  # compute (Buildroot images, ESP32 firmware) take 16 cores. The one
+  # exception is the armhf leg of build-prebuilt-cross, which stays on
+  # GitHub's ARM runners — see backend/bin/cross for the measurements.
   update-versions:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     outputs:
       release_sha: ${{ steps.release-ref.outputs.release_sha }}
       docker_version: ${{ steps.release-ref.outputs.docker_version }}
@@ -71,80 +77,26 @@ jobs:
   publish-npm:
     name: Publish FrameOS npm packages
     needs: update-versions
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
-      - name: Checkout release commit
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.update-versions.outputs.release_sha }}
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.27.0
-          run_install: false
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-          cache-dependency-path: pnpm-lock.yaml
-          registry-url: 'https://registry.npmjs.org'
-
-      - uses: jiro4989/setup-nim-action@v1
-        with:
-          nim-version: 2.2.4
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: 6.0.2
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # The runtime assets (frameos.js/frameos.wasm) are build outputs, not
-      # committed — compile them like the Dockerfile does.
-      - name: Build the wasm runtime
-        run: |
-          cd frameos
-          nimble install -d -y
-          ./tools/build_wasm.sh
-
-      - name: Build frameos-wasm
-        run: pnpm --dir frameos/wasm run build
-
-      # The embedded editor bundle needs the full frontend build (its build
-      # config lives in frontend/build.mjs).
-      - name: Build the frontend and frameos-editor
-        run: |
-          pnpm --dir frontend run build
-          pnpm --dir frameos/editor run build
-
-      - name: Publish frameos-wasm and frameos-editor
+      # npm auth uses trusted publishing (OIDC), which matches on the
+      # top-level workflow file — so publishing lives in npm-publish.yml and
+      # is dispatched here rather than run inline. That workflow is also
+      # manually dispatchable to re-publish without bumping versions.
+      - name: Dispatch npm publish workflow
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.update-versions.outputs.release_sha }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN secret is not set — skipping npm publish."
-            exit 0
-          fi
-          for package in frameos/wasm frameos/editor; do
-            name=$(node -p "require('./${package}/package.json').name")
-            version=$(node -p "require('./${package}/package.json').version")
-            # Each package version follows its own content-owning component;
-            # skip only when that exact component version already exists.
-            if npm view "${name}@${version}" version >/dev/null 2>&1; then
-              echo "${name}@${version} already on npm — skipping."
-              continue
-            fi
-            (cd "$package" && npm publish --access public)
-          done
+          gh workflow run npm-publish.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f ref="$RELEASE_SHA"
 
   release-notes:
     name: Generate Release Notes
     needs: update-versions
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Checkout release commit
         uses: actions/checkout@v4
@@ -174,7 +126,7 @@ jobs:
 
   determine-release-targets:
     needs: update-versions
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04
     outputs:
       targets: ${{ steps.set-matrix.outputs.targets }}
     steps:
@@ -216,6 +168,15 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: pnpm-lock.yaml
+
+      # Cache pip's wheel cache: installing backend requirements from a warm
+      # cache saves ~35-45s on each of the 11 matrix jobs.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
 
       - name: Install backend dependencies
         run: |
@@ -274,7 +235,7 @@ jobs:
   build-buildroot-release-image:
     name: Build Buildroot Release Image
     needs: [update-versions, build-prebuilt-cross]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-16
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -288,121 +249,333 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      # Same warm pip cache as the cross matrix: this job's requirements
+      # install spent ~31s of its ~150s wall clock building cffi from sdist.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
       - name: Install backend dependencies
         run: |
           pip install -r backend/requirements.txt
 
-      - name: Build Raspberry Pi Zero 2 W Buildroot image
+      - name: Build Buildroot release images
         env:
           DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
         run: |
-          python3 tools/buildroot-images/buildroot_images.py \
-            --platform raspberry-pi-zero-2-w \
-            release-image \
-            --prebuilt-cross-dir release-assets \
-            --release-assets-dir release-assets \
-            --target debian-bookworm-arm64 \
-            --version "$DOCKER_VERSION"
+          set -euo pipefail
+          # Build a release image for every enabled platform that has a
+          # cached Buildroot base image in the checked-in manifest.
+          platforms=$(python3 - <<'PY'
+          import contextlib
+          import json
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, "backend")
+          # Importing app.tasks pulls in the whole backend, which may emit
+          # diagnostics at import time (e.g. SQLite warnings). Keep stdout
+          # clean: it is captured as the platform list below.
+          with contextlib.redirect_stdout(sys.stderr):
+              from app.tasks.buildroot_platforms import enabled_buildroot_platforms
+
+          manifest = json.loads(Path("tools/buildroot-images/manifest.json").read_text(encoding="utf-8"))
+          available = {entry.get("platform") for entry in manifest.get("entries", [])}
+          for platform in enabled_buildroot_platforms():
+              if platform.key in available:
+                  print(platform.key)
+              else:
+                  print(f"Skipping {platform.key}: no cached Buildroot base image in manifest", file=sys.stderr)
+          PY
+          )
+          if [ -z "$platforms" ]; then
+            echo "No Buildroot platforms with cached base images found." >&2
+            exit 1
+          fi
+          # One platform per background job. Each build works in its own
+          # tempdir and writes its own frameos-<version>-<platform>-* files,
+          # so the only shared state is the read-mostly Buildroot base image
+          # cache (one distinct file per platform). Sequentially the two
+          # platforms cost 55s + 38s; in parallel the step is as long as the
+          # slowest one. Output is captured per platform and replayed in
+          # order afterwards so the log stays readable.
+          pids=()
+          names=()
+          for platform in $platforms; do
+            echo "Building release image for ${platform}"
+            python3 tools/buildroot-images/buildroot_images.py \
+              --platform "$platform" \
+              release-image \
+              --prebuilt-cross-dir release-assets \
+              --release-assets-dir release-assets \
+              --version "$DOCKER_VERSION" \
+              > "buildroot-release-${platform}.log" 2>&1 &
+            pids+=("$!")
+            names+=("$platform")
+          done
+          status=0
+          for index in "${!pids[@]}"; do
+            if ! wait "${pids[$index]}"; then
+              echo "Buildroot release image failed for ${names[$index]}" >&2
+              status=1
+            fi
+          done
+          for platform in "${names[@]}"; do
+            echo "::group::Buildroot release image ${platform}"
+            cat "buildroot-release-${platform}.log"
+            echo "::endgroup::"
+          done
+          if [ "$status" -ne 0 ]; then
+            exit 1
+          fi
           ls -lh release-assets/*.img.gz release-assets/*.metadata.json
 
-      - name: Upload Buildroot release image
+      - name: Upload Buildroot release images
         uses: actions/upload-artifact@v4
         with:
-          name: frameos-${{ needs.update-versions.outputs.docker_version }}-raspberry-pi-zero-2-w-buildroot
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-buildroot-images
           path: |
             release-assets/*.img.gz
             release-assets/*.metadata.json
           if-no-files-found: error
 
-  build:
-    needs: update-versions
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - platform: linux/amd64
-            dockerfile: Dockerfile
-          - platform: linux/arm64/v8
-            dockerfile: Dockerfile
-      fail-fast: false
-
+  # Prebuilt ESP32 firmware with no baked credentials: WiFi and cloud config
+  # are provisioned after flashing via the captive portal, the serial console,
+  # or the cloud browser flasher (cloud_url + claim_token over the USB API —
+  # docs/cloud-frames.md). Every supported Waveshare panel driver is compiled
+  # in and the active panel is chosen at runtime (`set panel <key>` on the
+  # serial console or the setup portal dropdown); FRAMEOS_SELECTED_PANEL only
+  # sets the boot-time default, kept at EPD_7in5_V2 for backward compat.
+  # The binary is published as -generic.bin only. The transitional
+  # -epd7in5v2.bin duplicate is gone: the cloud firmware route has read
+  # -generic.bin from release metadata since the same release cycle, no
+  # shipped firmware ever requested the old name for OTA, and old releases
+  # keep the asset they were published with.
+  build-esp32-generic-firmware:
+    name: Build ESP32 firmware (generic, all panels)
+    needs: [update-versions]
+    runs-on: depot-ubuntu-24.04-16
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
-
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v1
-        with:
-          version: latest
-          install: true
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ matrix.platform }}-${{ needs.update-versions.outputs.release_sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-${{ matrix.platform }}-
-
-      - name: Extract branch name
-        shell: bash
-        run: echo "BRANCH_NAME=${GITHUB_REF##*/}" >> $GITHUB_ENV
-
-      - name: Short SHA
-        shell: bash
-        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-
-      - name: Read Docker version tags
-        shell: bash
-        run: |
-          DOCKER_VERSION=$(python3 -c "import json; print(json.load(open('versions.json'))['docker'].split('+', 1)[0])")
-          echo "DOCKER_VERSION=$DOCKER_VERSION" >> $GITHUB_ENV
-          echo "DOCKER_VERSION_MINOR=${DOCKER_VERSION%.*}" >> $GITHUB_ENV
-          echo "DOCKER_VERSION_MAJOR=${DOCKER_VERSION%%.*}" >> $GITHUB_ENV
 
       - name: Set up Depot CLI
         uses: depot/setup-action@v1
 
-      # Build each platform without pushing
-      - name: Build (without push) for ${{ matrix.platform }}
+      # Depot keeps a persistent layer cache per project, so the esp32-ci
+      # target (ESP-IDF toolchain + Nim) is only rebuilt when its layers
+      # actually change. load: true pulls the image into the local Docker
+      # daemon for the `docker run` below.
+      #
+      # This step must stay byte-identical in its cache-relevant inputs
+      # (project, context, target, build-args, platforms) to the esp32-ci
+      # build in e2e-docker.yml, which runs on every push to main. esp32-ci
+      # pulls in the whole app-builder stage, so that job is what keeps the
+      # release build's toolchain layers warm — diverge them and every
+      # release pays for a cold ESP-IDF/Nim/pnpm/emsdk build again.
+      - name: Build ESP32 CI Docker image
         uses: depot/build-push-action@v1
         with:
           project: rsbh2wrlkj
           token: ${{ secrets.DEPOT_TOKEN }}
           context: .
-          file: ./${{ matrix.dockerfile }}
+          target: esp32-ci
+          tags: frameos-esp32-ci
+          load: true
           push: false
-          platforms: ${{ matrix.platform }}
-          tags: frameos/frameos:${{ env.BRANCH_NAME }}-${{ env.SHORT_SHA }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache
 
-  push-multiarch:
-    needs: [update-versions, build, build-prebuilt-cross, build-buildroot-release-image]
+      - name: Build firmware
+        timeout-minutes: 60
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          # DOCKER_VERSION is passed into the container instead of spliced into
+          # the inner single-quoted script, so the value is never re-parsed by
+          # the container's shell.
+          docker run --rm \
+            -e FRAMEOS_SELECTED_PANEL=EPD_7in5_V2 \
+            -e DOCKER_VERSION \
+            -e FRAMEOS_VERSION="$DOCKER_VERSION" \
+            -v "$PWD/release-assets:/release-assets" \
+            frameos-esp32-ci \
+            bash -lc '
+              set -euo pipefail
+              bash embedded/esp32/ci_build_image.sh
+              cp embedded/esp32/build-ci/merged-binary.bin \
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-s3-generic.bin"
+              # TWO artifacts per platform, and they are not interchangeable:
+              # merged-binary.bin is the whole flash from 0x0 (bootloader +
+              # partition table + blank otadata + app) and is what a USB
+              # flasher writes, while frameos_esp32.bin is the bare app image
+              # — the ONLY thing esp_ota_write accepts. Handing an OTA slot the
+              # merged image fails validation (its first bytes are the
+              # bootloader, which carries no esp_app_desc), so the cloud OTA
+              # manifest serves this one. Same split the self-hosted backend
+              # makes (backend/app/api/embedded_device.py).
+              cp embedded/esp32/build-ci/frameos_esp32.bin \
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-s3-generic-app.bin"
+              # ESP32-C3 thin-client firmware (TRMNL OG/BWRY, XTEINK X4):
+              # 4MB no-OTA layout, no on-device Nim renderer.
+              FRAMEOS_ESP32_PLATFORM=esp32-c3 \
+                FRAMEOS_ESP32_BUILD_DIR=build-ci-c3 \
+                bash embedded/esp32/ci_build_image.sh
+              cp embedded/esp32/build-ci-c3/merged-binary.bin \
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-c3-generic.bin"
+              # No OTA slot in the C3 4MB layout, so its app image is
+              # published for symmetry/debugging only — nothing consumes it.
+              cp embedded/esp32/build-ci-c3/frameos_esp32.bin \
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-c3-generic-app.bin"
+            '
+          ls -lh release-assets/
+
+      # Detached minisign-compatible signatures (<asset>.minisig) next to
+      # every firmware image. The device verifies the Ed25519/BLAKE2b-512
+      # signature against the public key baked into the firmware BEFORE
+      # switching boot slots, and the cloud's OTA manifest route answers
+      # 409 unsigned_release for a release without them — so a missing
+      # signing secret must fail the release here, loudly: an unsigned
+      # release is worse than a failed one.
+      - name: Sign ESP32 firmware
+        env:
+          FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FRAMEOS_FIRMWARE_SIGNING_KEY:-}" ]; then
+            echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish unsigned firmware"
+            exit 1
+          fi
+          # Ubuntu 24.04 pip is PEP 668 "externally managed"; the fallback
+          # keeps this working if the runner image ever stops being.
+          python3 -m pip install --quiet --break-system-packages cryptography \
+            || python3 -m pip install --quiet cryptography
+          keyfile=$(mktemp)
+          # The secret is the small text file sign_firmware.py keygen wrote:
+          # a comment line + base64(ED + keyid8 + seed32).
+          printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
+          status=0
+          python3 tools/sign_firmware.py sign --secret "$keyfile" \
+            release-assets/frameos-*.bin || status=$?
+          shred -u "$keyfile"
+          [ "$status" -eq 0 ] || exit "$status"
+          # The CI secret must be the counterpart of the committed public key
+          # (the one baked into shipped firmware) — a rotated-but-not-updated
+          # secret would sign images no device accepts.
+          for bin in release-assets/frameos-*.bin; do
+            python3 tools/sign_firmware.py verify \
+              --public release-assets/firmware-signing.pub "$bin"
+          done
+          ls -lh release-assets/
+
+      - name: Upload ESP32 firmware
+        uses: actions/upload-artifact@v4
+        with:
+          # The github-release job downloads artifacts by the
+          # frameos-<version>-* name pattern, so this name must keep that
+          # prefix.
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-esp32-generic
+          path: |
+            release-assets/*-esp32-s3-generic.bin
+            release-assets/*-esp32-s3-generic.bin.minisig
+            release-assets/*-esp32-s3-generic-app.bin
+            release-assets/*-esp32-s3-generic-app.bin.minisig
+            release-assets/*-esp32-c3-generic.bin
+            release-assets/*-esp32-c3-generic.bin.minisig
+            release-assets/*-esp32-c3-generic-app.bin
+            release-assets/*-esp32-c3-generic-app.bin.minisig
+          if-no-files-found: error
+
+  # Prebuilt thin-client firmware for Raspberry Pi Pico W / Pico 2 W (the
+  # Pimoroni Inky Frame family). Generic on purpose: UF2s flash over BOOTSEL
+  # drag-drop and provision over the USB serial console, the backend never
+  # builds them per-frame.
+  build-pico-firmware:
+    name: Build Pico W / Pico 2 W firmware
+    needs: [update-versions]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
+      - name: Install pico toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
+      - name: Cache pico-sdk
+        id: pico-sdk-cache
+        uses: actions/cache@v4
         with:
-          version: latest
-          install: true
+          path: ~/pico-sdk
+          key: pico-sdk-2.1.1
 
+      - name: Fetch pico-sdk
+        if: steps.pico-sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch 2.1.1 https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk
+          cd ~/pico-sdk
+          git submodule update --init --depth 1 lib/cyw43-driver lib/lwip lib/mbedtls lib/tinyusb
+
+      - name: Build firmware
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cd embedded/pico
+          for board in pico_w pico2_w; do
+            cmake -B "build-$board" -DPICO_BOARD=$board \
+              -DPICO_SDK_PATH=$HOME/pico-sdk \
+              -DFRAMEOS_VERSION="$DOCKER_VERSION" -G Ninja
+            cmake --build "build-$board"
+          done
+          cp build-pico_w/frameos_pico.uf2 \
+            "../../release-assets/frameos-$DOCKER_VERSION-pico-w.uf2"
+          cp build-pico2_w/frameos_pico.uf2 \
+            "../../release-assets/frameos-$DOCKER_VERSION-pico-2w.uf2"
+          ls -lh ../../release-assets/
+
+      - name: Upload Pico firmware
+        uses: actions/upload-artifact@v4
+        with:
+          # github-release downloads artifacts by the frameos-<version>-*
+          # name pattern, so this name must keep that prefix.
+          name: frameos-${{ needs.update-versions.outputs.docker_version }}-pico
+          path: |
+            release-assets/*-pico-w.uf2
+            release-assets/*-pico-2w.uf2
+          if-no-files-found: error
+
+  # Depot builds both platforms remotely with its own persistent layer cache,
+  # so there is no separate warm-up build job: push-multiarch is the only
+  # image build and pushes the multi-arch manifest directly.
+  push-multiarch:
+    needs: [update-versions, build-prebuilt-cross, build-buildroot-release-image]
+    # The image itself is built on Depot's remote builders, so this runner only
+    # orchestrates: the default size is plenty.
+    runs-on: depot-ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+
+      # No QEMU or local buildx setup: depot/build-push-action runs the build
+      # on Depot's remote amd64 and arm64 builders, so nothing is emulated or
+      # built on this runner. Only the registry login is still needed, because
+      # Depot pushes with this runner's Docker credentials.
       - name: Login to Docker Hub
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -444,7 +617,7 @@ jobs:
   update-addon-repo:
     name: Update Home Assistant Addon
     needs: [update-versions, push-multiarch, release-notes]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Checkout frameos
         uses: actions/checkout@v4
@@ -453,7 +626,7 @@ jobs:
           path: frameos
 
       - name: Checkout frameos-home-assistant-addon
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           repository: frameos/frameos-home-assistant-addon
           token: ${{ secrets.ACTIONS_WRITE_TOKEN }}
@@ -522,14 +695,17 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, update-addon-repo, release-notes]
-    runs-on: ubuntu-latest
+    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-pico-firmware, update-addon-repo, release-notes]
+    runs-on: depot-ubuntu-24.04
     steps:
+      # Shallow: this job only needs a working directory for `gh` and the
+      # downloaded artifacts. Release notes come from an artifact and the tag
+      # is created from RELEASE_SHA, so no history is read here.
       - name: Checkout release commit
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Download prebuilt cross artifacts
         uses: actions/download-artifact@v4
@@ -542,6 +718,48 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: release-notes-${{ needs.update-versions.outputs.docker_version }}
+
+      # The Pi/buildroot half of signed OTA. A frame verifies the release
+      # archive against the key compiled into its binary before unpacking it
+      # (frameos/src/frameos/upgrade.nim), which is only possible if the
+      # archive is signed here — so an unsigned archive must fail the release,
+      # exactly as unsigned ESP32 firmware does. The ESP32 images are already
+      # signed in their own job; this covers the .tar.gz assets the upgrade
+      # path consumes.
+      #
+      # Not signed: the buildroot .img.gz SD-card images. Those are flashed by
+      # hand from a machine that already trusts what it downloaded; nothing
+      # on-device verifies them, so a signature there would be decoration.
+      - name: Sign release archives
+        env:
+          FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FRAMEOS_FIRMWARE_SIGNING_KEY:-}" ]; then
+            echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish unsigned release archives"
+            exit 1
+          fi
+          shopt -s nullglob
+          archives=(release-assets/frameos-*.tar.gz)
+          if [ ${#archives[@]} -eq 0 ]; then
+            echo "::error::no release archives found to sign"
+            exit 1
+          fi
+          python3 -m pip install --quiet --break-system-packages cryptography             || python3 -m pip install --quiet cryptography
+          keyfile=$(mktemp)
+          printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
+          status=0
+          python3 tools/sign_firmware.py sign --secret "$keyfile" "${archives[@]}" || status=$?
+          shred -u "$keyfile"
+          [ "$status" -eq 0 ] || exit "$status"
+          # Same counterpart check the firmware job makes: a rotated-but-not-
+          # committed secret would sign archives no frame accepts, and the
+          # failure would only show up on devices.
+          for archive in "${archives[@]}"; do
+            python3 tools/sign_firmware.py verify \
+              --public release-assets/firmware-signing.pub "$archive"
+          done
+          ls -lh release-assets
 
       - name: Create GitHub release
         env:

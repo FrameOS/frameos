@@ -1,6 +1,6 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import { logsLogic } from './logsLogic'
 import { insertBreaks } from '../../../../utils/insertBreaks'
 import { frameLogic } from '../../frameLogic'
@@ -8,12 +8,16 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Spinner } from '../../../../components/Spinner'
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/solid'
-import { CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
+import { ChevronRightIcon, ClockIcon, CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
 import { EMBEDDED_ESP32_S3 } from '../../../../devices'
 import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
+import { frameSupportsUsbSerialConsole, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import {
   embeddedUsbLogsModel,
+  ensureEmbeddedUsbApiPort,
   isEmbeddedUsbLogStreamOpen,
+  loadEmbeddedUsbLogHistory,
+  sendEmbeddedUsbConsoleCommand,
   startEmbeddedUsbLogStream,
 } from '../../../../models/embeddedUsbLogsModel'
 
@@ -314,6 +318,12 @@ function logTypeClassName(type: string, theme: WorkspaceTheme): string {
   if (type === 'usb') {
     return theme === 'dark' ? 'text-emerald-200' : 'text-emerald-700'
   }
+  if (type === 'usb-history') {
+    // Dimmer than live output on purpose: these lines were replayed out of the
+    // device's ring, so they sit in the list at the time they HAPPENED, which
+    // is usually well above whatever was streaming when they arrived.
+    return theme === 'dark' ? 'text-emerald-400/80' : 'text-emerald-800/80'
+  }
   return theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
 }
 
@@ -325,17 +335,42 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
   const { stopUsbLogStream } = useActions(embeddedUsbLogsModel)
   const [atBottom, setAtBottom] = useState(true)
+  const [historyLoading, setHistoryLoading] = useState(false)
   const [expandedMetricLogIds, setExpandedMetricLogIds] = useState<number[]>([])
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const shouldStickToBottomRef = useRef(true)
   const renderTheme: WorkspaceTheme = fullScreen || compact ? workspaceTheme : 'dark'
+  // Full-screen logs are a page-scroll surface. In backend/frameAdmin the
+  // page is the window, so Virtuoso runs with useWindowScroll. The cloud
+  // shell pins the page under the account header (#root is overflow:hidden)
+  // and scrolls the workspace <main> instead — the window never fires a
+  // scroll event there, which left Virtuoso frozen on its first viewport of
+  // items. Hand that <main> to Virtuoso as customScrollParent instead.
+  const scrollsWorkspaceMain = fullScreen && workspaceMode() === 'cloud'
+  const [customScrollParent, setCustomScrollParent] = useState<HTMLElement | null>(null)
+  const panelRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (!scrollsWorkspaceMain) {
+        return
+      }
+      setCustomScrollParent(element?.closest<HTMLElement>('main[data-workspace-main]') ?? null)
+    },
+    [scrollsWorkspaceMain]
+  )
   const searchActive = !compact && logSearch.trim().length > 0
   const visibleLogs = compact ? logs : filteredLogs
   const visibleBaseLogCount = logs.length
-  const virtuosoKey = compact ? 'compact' : `all:${searchActive ? logSearch.trim() : 'all'}`
+  const virtuosoKey = `${customScrollParent ? 'main' : 'window'}:${
+    compact ? 'compact' : `all:${searchActive ? logSearch.trim() : 'all'}`
+  }`
   const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
+  // Two roads to a USB console: a backend/on-device embedded frame, or a
+  // cloud-managed esp32 frame (hardware.platform from enrollment). The cloud
+  // case matters most for a board that never joins WiFi — its serial console
+  // is the only log source there is.
   const isEsp32Frame =
-    frame?.mode === 'embedded' && (frame.embedded?.platform || EMBEDDED_ESP32_S3) === EMBEDDED_ESP32_S3
+    (frame?.mode === 'embedded' && (frame.embedded?.platform || EMBEDDED_ESP32_S3) === EMBEDDED_ESP32_S3) ||
+    frameSupportsUsbSerialConsole(frame)
   const showUsbLogControls = isEsp32Frame && webSerialSupported
   const usbLogStreamState = usbLogStreamStatesByFrameId[frameId]
   const usbLogStreamOpen = isEmbeddedUsbLogStreamOpen(usbLogStreamState)
@@ -343,6 +378,22 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     usbLogStreamState?.status === 'selecting' ||
     usbLogStreamState?.status === 'connecting' ||
     usbLogStreamState?.status === 'stopping'
+  // Console input over the live stream. Kept collapsed until asked for: the
+  // panel is a log reader first, and an always-visible command box on a frame
+  // that has no USB connection is just clutter.
+  const [commandOpen, setCommandOpen] = useState(false)
+  const [command, setCommand] = useState('')
+  const [commandError, setCommandError] = useState<string | null>(null)
+  const [commandSending, setCommandSending] = useState(false)
+  const commandInputRef = useRef<HTMLInputElement | null>(null)
+  // Losing the connection closes the box, so it can never sit there implying
+  // it will send something.
+  useEffect(() => {
+    if (!usbLogStreamOpen && commandOpen) {
+      setCommandOpen(false)
+      setCommandError(null)
+    }
+  }, [usbLogStreamOpen, commandOpen])
   const usbLogButtonLabel =
     usbLogStreamState?.status === 'selecting'
       ? 'Select USB port'
@@ -357,8 +408,12 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const scrollListToAbsoluteEnd = (behavior: ScrollBehavior = 'auto') => {
     virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior })
     if (fullScreen && typeof window !== 'undefined') {
-      const scrollElement = document.scrollingElement ?? document.documentElement
-      window.scrollTo({ top: scrollElement.scrollHeight, behavior })
+      if (customScrollParent) {
+        customScrollParent.scrollTo({ top: customScrollParent.scrollHeight, behavior })
+      } else {
+        const scrollElement = document.scrollingElement ?? document.documentElement
+        window.scrollTo({ top: scrollElement.scrollHeight, behavior })
+      }
     }
   }
 
@@ -378,7 +433,11 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (fullScreen) {
-          window.scrollTo({ top: 0, behavior })
+          if (customScrollParent) {
+            customScrollParent.scrollTo({ top: 0, behavior })
+          } else {
+            window.scrollTo({ top: 0, behavior })
+          }
         } else if (visibleLogs.length > 0) {
           virtuosoRef.current?.scrollToIndex({
             index: 0,
@@ -431,7 +490,57 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     await startEmbeddedUsbLogStream(frameId)
   }
 
+  // The device remembers its last lines whether or not anyone was attached;
+  // the live stream only shows what it printed since we connected. This is
+  // how you find out what happened before the cable went in.
+  const loadUsbLogHistory = async (): Promise<void> => {
+    if (historyLoading) {
+      return
+    }
+    setHistoryLoading(true)
+    try {
+      if (await ensureEmbeddedUsbApiPort(frameId)) {
+        await loadEmbeddedUsbLogHistory(frameId)
+        scrollToLatest()
+      }
+    } catch (error) {
+      // loadEmbeddedUsbLogHistory already put the reason in the log view,
+      // which is where someone reading logs will look for it.
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  const submitCommand = async (): Promise<void> => {
+    const line = command.trim()
+    if (!line || commandSending) {
+      return
+    }
+    setCommandSending(true)
+    setCommandError(null)
+    try {
+      await sendEmbeddedUsbConsoleCommand(frameId, line)
+      // Cleared only on success, so a failed send leaves the text to retry
+      // or edit rather than making the user retype it.
+      setCommand('')
+    } catch (error) {
+      setCommandError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCommandSending(false)
+    }
+  }
+
   const menuItems = [
+    ...(showUsbLogControls
+      ? [
+          {
+            label: 'Load device log history',
+            onClick: loadUsbLogHistory,
+            icon: historyLoading ? <Spinner color="white" className="w-4 h-4" /> : <ClockIcon className="w-5 h-5" />,
+            loading: historyLoading,
+          },
+        ]
+      : []),
     {
       label: 'Download log',
       onClick: downloadLog,
@@ -451,6 +560,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
 
   return logsLoading ? (
     <div
+      ref={panelRef}
       className={clsx(
         'frame-tool-panel flex h-full items-center justify-center text-sm frame-tool-muted',
         className,
@@ -461,6 +571,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     </div>
   ) : (
     <div
+      ref={panelRef}
       className={clsx(
         'frame-tool-panel @container relative',
         className,
@@ -562,6 +673,29 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
               {usbLogButtonLabel}
             </button>
           ) : null}
+          {showUsbLogControls && usbLogStreamOpen ? (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !commandOpen
+                setCommandOpen(next)
+                setCommandError(null)
+                // Focus after the input exists, so the box is ready to type in.
+                if (next) {
+                  window.setTimeout(() => commandInputRef.current?.focus(), 0)
+                }
+              }}
+              title="Type a command into the board's serial console"
+              className={clsx(
+                'frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 font-sans text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                commandOpen && 'ring-2 ring-blue-400',
+                fullScreen ? 'h-8' : 'h-10'
+              )}
+            >
+              <ChevronRightIcon className="h-4 w-4" />
+              Send command
+            </button>
+          ) : null}
           {showUsbLogControls && usbLogStreamState?.status === 'error' && usbLogStreamState.error ? (
             <div className="min-w-0 flex-[1_1_12rem] truncate font-sans text-xs font-semibold text-red-500">
               {usbLogStreamState.error}
@@ -569,9 +703,76 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           ) : null}
         </div>
       )}
+      {showUsbLogControls && usbLogStreamOpen && commandOpen && (
+        <div
+          className={clsx(
+            'flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2',
+            renderTheme === 'dark' ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'
+          )}
+        >
+          <span
+            className={clsx(
+              'font-mono text-xs font-semibold',
+              renderTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
+            )}
+          >
+            frameos&gt;
+          </span>
+          <input
+            ref={commandInputRef}
+            aria-label="Serial console command"
+            className={clsx(
+              'frameos-control min-w-0 flex-1 rounded-lg border px-2.5 py-1.5 font-mono text-xs focus:border-blue-500 focus:ring-blue-500',
+              fullScreen ? 'h-8' : 'h-9'
+            )}
+            disabled={commandSending}
+            onChange={(event) => setCommand(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                void submitCommand()
+              } else if (event.key === 'Escape') {
+                setCommandOpen(false)
+                setCommandError(null)
+              }
+            }}
+            placeholder="status, scenes, set …, restart — the board's own console"
+            spellCheck={false}
+            autoComplete="off"
+            value={command}
+          />
+          <button
+            type="button"
+            onClick={() => void submitCommand()}
+            disabled={commandSending || !command.trim()}
+            className={clsx(
+              'frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 font-sans text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40',
+              fullScreen ? 'h-8' : 'h-9'
+            )}
+          >
+            {commandSending ? <Spinner className="h-4 w-4" /> : null}
+            Send
+          </button>
+          {commandError ? (
+            <div className="min-w-0 flex-[1_1_12rem] truncate font-sans text-xs font-semibold text-red-500">
+              {commandError}
+            </div>
+          ) : (
+            <div
+              className={clsx(
+                'min-w-0 flex-[1_1_12rem] truncate font-sans text-xs',
+                renderTheme === 'dark' ? 'text-slate-500' : 'text-slate-400'
+              )}
+            >
+              The reply appears in the log above.
+            </div>
+          )}
+        </div>
+      )}
       <Virtuoso
         key={virtuosoKey}
-        useWindowScroll={fullScreen}
+        useWindowScroll={fullScreen && !customScrollParent}
+        customScrollParent={customScrollParent ?? undefined}
         className={clsx(
           'overflow-x-hidden bg-transparent font-mono text-sm leading-5',
           fullScreen
@@ -609,7 +810,12 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           if (log.type === 'webhook') {
             try {
               const { event, timestamp, ...rest } = JSON.parse(log.line)
-              if (event === 'metrics') {
+              // The metrics renderer's summary + expander is shaped around the
+              // Pi's load/cpu/ram/disk payload. ESP32 samples carry none of
+              // those keys — render them like any other structured log line.
+              const hasStandardMetricKeys =
+                'load' in rest || 'cpuTemperature' in rest || 'memoryUsage' in rest || 'diskUsage' in rest
+              if (event === 'metrics' && (hasStandardMetricKeys || typeof rest.state === 'string')) {
                 logLine = renderMetricsLog(
                   rest,
                   expandedMetricLogIds.includes(log.id),
@@ -648,6 +854,13 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
                 {logLine}
               </>
             )
+          } else if (log.type === 'usb-history') {
+            logLine = (
+              <>
+                <span className={renderTheme === 'dark' ? 'text-emerald-500' : 'text-emerald-800'}>{'[USB ring]'}</span>{' '}
+                {logLine}
+              </>
+            )
           }
 
           return (
@@ -666,13 +879,87 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           )
         }}
       />
+      {showUsbLogControls && usbLogStreamOpen && commandOpen && (
+        <div
+          className={clsx(
+            'flex shrink-0 flex-wrap items-center gap-2 border-t px-3 py-2',
+            renderTheme === 'dark' ? 'border-slate-700 bg-slate-900/40' : 'border-slate-200 bg-slate-50'
+          )}
+        >
+          <span
+            className={clsx(
+              'font-mono text-xs font-semibold',
+              renderTheme === 'dark' ? 'text-slate-400' : 'text-slate-500'
+            )}
+          >
+            frameos&gt;
+          </span>
+          <input
+            ref={commandInputRef}
+            aria-label="Serial console command"
+            className={clsx(
+              'frameos-control min-w-0 flex-1 rounded-lg border px-2.5 py-1.5 font-mono text-xs focus:border-blue-500 focus:ring-blue-500',
+              fullScreen ? 'h-8' : 'h-9'
+            )}
+            disabled={commandSending}
+            onChange={(event) => setCommand(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                void submitCommand()
+              } else if (event.key === 'Escape') {
+                setCommandOpen(false)
+                setCommandError(null)
+              }
+            }}
+            placeholder="status, scenes, set …, restart — the board's own console"
+            spellCheck={false}
+            autoComplete="off"
+            value={command}
+          />
+          <button
+            type="button"
+            onClick={() => void submitCommand()}
+            disabled={commandSending || !command.trim()}
+            className={clsx(
+              'frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 font-sans text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40',
+              fullScreen ? 'h-8' : 'h-9'
+            )}
+          >
+            {commandSending ? <Spinner className="h-4 w-4" /> : null}
+            Send
+          </button>
+          {commandError ? (
+            <div className="min-w-0 flex-[1_1_12rem] truncate font-sans text-xs font-semibold text-red-500">
+              {commandError}
+            </div>
+          ) : (
+            <div
+              className={clsx(
+                'min-w-0 flex-[1_1_12rem] truncate font-sans text-xs',
+                renderTheme === 'dark' ? 'text-slate-500' : 'text-slate-400'
+              )}
+            >
+              The reply appears in the log above.
+            </div>
+          )}
+        </div>
+      )}
       {!atBottom && (
         <button
           type="button"
           onClick={() => scrollToLatest()}
           className={clsx(
             'frameos-secondary-button z-40 rounded-lg px-4 py-2 text-sm font-semibold shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-            fullScreen ? 'fixed bottom-6 right-4 @4xl:right-8' : 'absolute bottom-5 right-6'
+            fullScreen ? 'fixed right-4 @4xl:right-8' : 'absolute right-6',
+            // Clear the console row when it is open, instead of covering it.
+            showUsbLogControls && usbLogStreamOpen && commandOpen
+              ? fullScreen
+                ? 'bottom-20'
+                : 'bottom-[4.5rem]'
+              : fullScreen
+              ? 'bottom-6'
+              : 'bottom-5'
           )}
         >
           Scroll to latest

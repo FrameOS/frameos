@@ -81,8 +81,35 @@ suite "system/index scene":
       check "Resolution: 800x480" in text
       check "Rotation: 90" in text
       check "Time zone: Europe/Brussels" in text
-      check "Server: frameos.local:8989" in text
+      check "Network: " in text
+      check "Managed via: self-hosted backend (frameos.local:8989)" in text
       check "Frame: http://192.168.1.50:8787" in text
-      check "Agent access: disabled" in text
+      check "FrameOS Remote control: disabled" in text
       check "Installed Scenes" in text
       check "1. Default Scene" in text
+
+  test "management line prefers the cloud link and falls back to standalone":
+    # loadCloudLinkState reads ./state/cloud_link.json relative to the cwd, so
+    # run this from a scratch directory we control.
+    let previousDir = getCurrentDir()
+    let tempDir = getTempDir() / ("frameos-index-scene-link-" & $epochTime())
+    createDir(tempDir / "state")
+    setCurrentDir(tempDir)
+    try:
+      var config = testConfig()
+      config.serverHost = ""
+      check index_scene.managementLine(config) == "Managed via: standalone (no server configured)"
+
+      config.serverHost = "localhost"
+      check index_scene.managementLine(config) == "Managed via: standalone (no server configured)"
+
+      writeFile("state" / "cloud_link.json", $(%*{
+        "mode": "managed",
+        "status": "connected",
+        "provider_url": "https://cloud.frameos.net",
+      }))
+      check index_scene.managementLine(config) ==
+        "Managed via: FrameOS Cloud (cloud.frameos.net, connected)"
+    finally:
+      setCurrentDir(previousDir)
+      removeDir(tempDir)

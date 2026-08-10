@@ -7,6 +7,7 @@ import {
   AdjustmentsHorizontalIcon,
   CalendarDaysIcon,
   ChartBarIcon,
+  CheckCircleIcon,
   CheckIcon,
   CircleStackIcon,
   CommandLineIcon,
@@ -21,6 +22,7 @@ import {
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { FrameImage } from '../../components/FrameImage'
 import { frameHost, frameIsHealthy, frameStatus } from '../../decorators/frame'
+import { framesModel } from '../../models/framesModel'
 import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
@@ -54,6 +56,12 @@ import {
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import {
+  frameMenuActionIsAllowed,
+  sceneToolPanelDisabledReason,
+  sceneToolPanelIsAllowed,
+  workspaceMode,
+} from './workspaceSurfaces'
+import {
   buildSceneDependencyEntries,
   buildSceneDependencyGraph,
   flatSceneDependencyEntries,
@@ -76,7 +84,6 @@ const sceneToolButtons = [
   { label: 'Terminal', panel: 'terminal', icon: CommandLineIcon },
   { label: 'Ping', panel: 'ping', icon: SignalIcon },
 ] as const
-const frameAdminUnsupportedSceneToolPanels = new Set(['terminal', 'ping'])
 
 interface FrameDashboardSurfaceProps {
   frame: FrameType
@@ -311,7 +318,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
             buttonClassName="frameos-icon-tile flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/70 !px-0 !py-0 text-slate-700 shadow-sm transition"
             buttonContent={<DeployToFrameIcon className="h-7 w-7" />}
           />
-        ) : (
+        ) : !frameMenuActionIsAllowed(workspaceMode(), 'deploy', frame) ? null : (
           <FrameChangeStatusIcon frameId={frame.id} variant="dashboard" />
         )}
         <div className="min-w-0">
@@ -364,19 +371,28 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
     ? 'deploy now'
     : 'up to date'
   const frameIsUpToDate = !unsavedChanges && !undeployedChanges
+  // Same predicate as the deploy tile above and the "…" menu: this link is
+  // one more way into the deploy dialog, so it exists exactly where that
+  // dialog does. Unsaved changes open their own drawer and are never gated.
+  const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  const canOpenDrawer = drawerKind === 'unsaved' || frameMenuActionIsAllowed(workspaceMode(), 'deploy', frame)
 
   return (
     <div className="frameos-muted truncate text-sm text-slate-500">
-      <button
-        type="button"
-        onClick={() => openFrameChangeDrawer(frame.id, unsavedChanges ? 'unsaved' : 'deploy')}
-        className={clsx(
-          'frameos-change-status-link rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-          frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null
-        )}
-      >
-        {changeLabel}
-      </button>
+      {canOpenDrawer ? (
+        <button
+          type="button"
+          onClick={() => openFrameChangeDrawer(frame.id, drawerKind)}
+          className={clsx(
+            'frameos-change-status-link rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null
+          )}
+        >
+          {changeLabel}
+        </button>
+      ) : (
+        <span className="font-medium">{changeLabel}</span>
+      )}
       <span> - </span>
       {frameStatus(frame)}
     </div>
@@ -609,7 +625,10 @@ function FrameScenesBlock({
 }): JSX.Element {
   const { frameAssetFolderExpansion, sceneControlSelection, search } = useValues(workspaceLogic)
   const { openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
-  const { frameForm } = useValues(frameLogic({ frameId: frame.id }))
+  // `frameLogic.scenes` is `frameForm.scenes ?? frame.scenes ?? []` — unsaved
+  // edits first, then the saved frame (which is what cloud mode hydrates), so
+  // an empty/absent form never blanks the list.
+  const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
   const { applyTemplate, setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false)
@@ -645,12 +664,13 @@ function FrameScenesBlock({
     ) {
       return
     }
-    const currentScenes = frameForm.scenes ?? frame.scenes ?? scenes
-    setFrameFormValues({ scenes: currentScenes.filter((candidate) => !selectedSceneIds.has(candidate.id)) })
+    setFrameFormValues({ scenes: liveScenes.filter((candidate) => !selectedSceneIds.has(candidate.id)) })
     setMultiSelect(false)
   }
   const searchIsActive = search.trim().length > 0
-  const allScenes = searchIsActive ? frame.scenes ?? scenes : scenes
+  // While searching, `scenes` is only the matching subset; dependency grouping
+  // needs the full (live) list so parents of a match still render.
+  const allScenes = searchIsActive ? liveScenes : scenes
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(allScenes)
   const matchingSceneIds = searchIsActive ? new Set(scenes.map((scene) => scene.id)) : null
   const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'overview')
@@ -664,9 +684,18 @@ function FrameScenesBlock({
         scenes: allScenes,
       })
     : flatSceneDependencyEntries(scenes)
-  const visibleSceneToolButtons = isInFrameAdminMode()
-    ? sceneToolButtons.filter(({ panel }) => !frameAdminUnsupportedSceneToolPanels.has(panel))
-    : sceneToolButtons
+  // Allow-list per control plane — see workspaceSurfaces.ts. The frame's
+  // device profile never removes a shortcut; it disables it with a tooltip
+  // (an esp32 cloud frame keeps Logs — pushed to the cloud and read back —
+  // while Schedule/Settings/Metrics show why they cannot work). Virtual
+  // frames are the exception: shortcuts whose concepts don't exist for them
+  // (terminal, ping, assets, metrics) are hidden outright.
+  const visibleSceneToolButtons = sceneToolButtons
+    .filter(({ panel }) => sceneToolPanelIsAllowed(workspaceMode(), panel, frame))
+    .map((button) => ({
+      ...button,
+      disabledReason: sceneToolPanelDisabledReason(workspaceMode(), button.panel, frame),
+    }))
 
   const handleScenesDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!hasFrameosSceneListDragData(event.dataTransfer)) {
@@ -690,7 +719,7 @@ function FrameScenesBlock({
     }
 
     const sceneId = getFrameosSceneDragData(event.dataTransfer)
-    if (!sceneId || !frame.scenes?.some((scene) => scene.id === sceneId)) {
+    if (!sceneId || !liveScenes.some((scene) => scene.id === sceneId)) {
       return
     }
     event.preventDefault()
@@ -701,16 +730,28 @@ function FrameScenesBlock({
   return (
     <div className="min-w-0" onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        {visibleSceneToolButtons.map(({ label, panel, icon: Icon }) => (
-          <A
-            key={panel}
-            href={urls.frame(frame.id, panel)}
-            className="frameos-secondary-button inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/80 px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <Icon className="h-4 w-4" />
-            {label}
-          </A>
-        ))}
+        {visibleSceneToolButtons.map(({ label, panel, icon: Icon, disabledReason }) =>
+          disabledReason ? (
+            <span
+              key={panel}
+              aria-disabled
+              title={disabledReason}
+              className="frameos-secondary-button inline-flex h-8 cursor-not-allowed items-center gap-1.5 rounded-lg bg-white/80 px-2.5 text-xs font-semibold text-slate-700 opacity-50 shadow-sm"
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </span>
+          ) : (
+            <A
+              key={panel}
+              href={urls.frame(frame.id, panel)}
+              className="frameos-secondary-button inline-flex h-8 items-center gap-1.5 rounded-lg bg-white/80 px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </A>
+          )
+        )}
         <SceneDependencyFormatMenu
           frameId={frame.id}
           surface="overview"
@@ -790,6 +831,45 @@ function FrameScenesBlock({
   )
 }
 
+/**
+ * A cloud frame that enrolled (claim code, SD image, ESP32 flash) sits in
+ * `pending` until its owner confirms it, and the control plane refuses every
+ * scene/settings push with `frame_not_active` until then. This used to be
+ * confirmable only from the old /account/frames page; the workspace showed
+ * the frame but no way to activate it — and Save silently failed. The banner
+ * is that missing step.
+ */
+function CloudPendingFrameBanner({ frame }: { frame: FrameType }): JSX.Element | null {
+  const { cloudFramesConfirming, cloudFrameConfirmErrors } = useValues(framesModel)
+  const { confirmCloudFrame } = useActions(framesModel)
+
+  if (workspaceMode() !== 'cloud' || frame.status !== 'pending') {
+    return null
+  }
+
+  const confirming = Boolean(cloudFramesConfirming[frame.id])
+  const error = cloudFrameConfirmErrors[frame.id]
+
+  return (
+    <div className="frameos-blank-frame-scene-hint mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-100 px-4 py-3 text-sm font-medium leading-5 text-amber-950 shadow-sm">
+      <span className="min-w-0">
+        This frame has enrolled and is waiting for you. Confirm it to activate it — until then it cannot receive scenes
+        or settings.
+        {error ? <span className="block font-semibold">Could not confirm the frame ({error}) — try again.</span> : null}
+      </span>
+      <button
+        type="button"
+        disabled={confirming}
+        onClick={() => confirmCloudFrame(frame.id)}
+        className="frameos-primary-action inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <CheckCircleIcon aria-hidden className="h-4 w-4" />
+        {confirming ? 'Confirming…' : 'Confirm frame'}
+      </button>
+    </div>
+  )
+}
+
 export function FrameDashboardSurface({
   frame,
   scenes,
@@ -834,6 +914,7 @@ export function FrameDashboardSurface({
       className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
       <FrameDashboardHeader frame={frame} archived={archived} />
+      <CloudPendingFrameBanner frame={frame} />
       <div className="grid gap-5 @2xl:grid-cols-[minmax(0,19rem)_minmax(19rem,1fr)] @2xl:items-start">
         <FramePreviewPanel frame={frame} scenes={scenes} />
         <FrameScenesBlock

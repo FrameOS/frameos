@@ -82,7 +82,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
 
         systemctl_calls = self._stub_log("systemctl.log")
         self.assertIn("enable frameos.service", systemctl_calls)
-        self.assertIn("restart frameos.service", systemctl_calls)
+        self.assertIn("restart --no-block frameos.service", systemctl_calls)
         self.assertIn("disable --now frameos-remote.service", systemctl_calls)
         self.assertNotIn("restart frameos-remote.service", systemctl_calls)
 
@@ -99,6 +99,32 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertIn("ExecStopPost=-+/bin/sh -lc 'mkdir -p \"/tmp/out/srv/frameos/runtime\"", service)
         self.assertIn("/tmp/out/srv/frameos/runtime/frameos-last-exit", service)
         self.assertNotIn("TTYPath=/dev/tty1", service)
+
+    def test_old_release_binary_gets_a_simple_service_type(self) -> None:
+        # Releases before 2026.6.14 never send READY=1. With Type=notify,
+        # systemd would time the start out after five minutes and kill a
+        # perfectly healthy frame — after every restart, forever. The installer
+        # probes the binary for NOTIFY_SOCKET and falls back to Type=simple.
+        self._write_fake_release_archive(notify_capable=False)
+        self._run_setup(
+            {
+                "FRAMEOS_NAME": "Old Release Frame",
+                "FRAMEOS_DEVICE": "web_only",
+                "FRAMEOS_WIDTH": "800",
+                "FRAMEOS_HEIGHT": "480",
+                "FRAMEOS_FRAME_PORT": "8787",
+                "FRAMEOS_BACKEND_ENABLED": "false",
+                "FRAMEOS_FRAME_ACCESS_KEY": "local-access-key",
+                "FRAMEOS_NETWORK_CHECK": "false",
+                "FRAMEOS_WIFI_HOTSPOT": "disabled",
+                "FRAMEOS_SAVE_ASSETS": "true",
+            }
+        )
+        service = self._installed_frameos_service()
+        self.assertIn("Type=simple", service)
+        self.assertNotIn("Type=notify", service)
+        self.assertNotIn("WatchdogSec", service)
+        self.assertNotIn("TimeoutStartSec", service)
 
     def test_framebuffer_install_claims_tty1(self) -> None:
         self._run_setup(
@@ -232,11 +258,171 @@ class FrameOSSetupScriptTest(unittest.TestCase):
 
         systemctl_calls = self._stub_log("systemctl.log")
         self.assertIn("enable frameos-remote.service", systemctl_calls)
-        self.assertIn("restart frameos-remote.service", systemctl_calls)
+        self.assertIn("restart --no-block frameos-remote.service", systemctl_calls)
 
         checks = self._container_checks()
         self.assertTrue(checks["frameos_service_installed"])
         self.assertTrue(checks["agent_service_installed"])
+
+    def test_cloud_claim_token_writes_pending_enrollment_and_disables_backend(self) -> None:
+        result = self._run_setup(
+            {
+                "FRAMEOS_NAME": "Cloud Frame",
+                "FRAMEOS_DEVICE": "web_only",
+                "FRAMEOS_WIDTH": "800",
+                "FRAMEOS_HEIGHT": "480",
+                "FRAMEOS_FRAME_PORT": "8787",
+                "FRAMEOS_ADMIN_AUTH_ENABLED": "true",
+                "FRAMEOS_ADMIN_USER": "admin",
+                "FRAMEOS_ADMIN_PASSWORD": "admin-secret",
+                "FRAMEOS_FRAME_ACCESS_KEY": "local-access-key",
+                "FRAMEOS_NETWORK_CHECK": "false",
+                "FRAMEOS_WIFI_HOTSPOT": "disabled",
+                # Deliberately NOT setting FRAMEOS_BACKEND_ENABLED: the claim
+                # token must force it off without prompting.
+                "FRAMEOS_CLAIM_TOKEN": "FRCT_test-claim-token",
+                "FRAMEOS_CLOUD_URL": "https://cloud.example/",
+            }
+        )
+
+        self.assertIn("Cloud: enrolling with https://cloud.example", result.stdout)
+        self.assertIn("appears as PENDING in your account", result.stdout)
+
+        frame_json = self._installed_frame_json()
+        self.assertEqual(frame_json["agent"]["agentEnabled"], False)
+        self.assertEqual(frame_json["serverHost"], "")
+        self.assertEqual(frame_json["serverSendLogs"], False)
+
+        # The state dir is 0700 and chowned to the in-container service user;
+        # on a Linux host the test user can't traverse it until ownership is
+        # restored. chown keeps the modes, so the assertions below still hold.
+        self._restore_tmp_permissions()
+
+        releases = sorted((self.out_dir / "srv" / "frameos" / "releases").glob("release_setup_*"))
+        self.assertEqual(len(releases), 1)
+        state_dir = releases[0] / "state"
+        pending_path = state_dir / "cloud_enroll_pending.json"
+        self.assertTrue(pending_path.is_file())
+        pending = json.loads(pending_path.read_text(encoding="utf-8"))
+        self.assertEqual(pending, {
+            "claim_token": "FRCT_test-claim-token",
+            # Trailing slash is stripped so the runtime's URL joining is safe.
+            "provider_url": "https://cloud.example",
+            "name": "Cloud Frame",
+        })
+        self.assertEqual(os.stat(state_dir).st_mode & 0o777, 0o700)
+        self.assertEqual(os.stat(pending_path).st_mode & 0o777, 0o600)
+
+        systemctl_calls = self._stub_log("systemctl.log")
+        self.assertIn("restart --no-block frameos.service", systemctl_calls)
+        self.assertNotIn("restart frameos-remote.service", systemctl_calls)
+
+    def test_install_hands_the_terminal_back_and_links_to_the_account(self) -> None:
+        # frameos.service is Type=notify with TimeoutStartSec=300, so a plain
+        # `systemctl restart` blocks until the new instance signals readiness —
+        # up to five minutes of silence, which reads as a hung installer, and is
+        # worst on a box already running FrameOS where the old instance still
+        # holds the admin port. The start must be queued, not waited on.
+        result = self._run_setup(
+            {
+                "FRAMEOS_CLAIM_TOKEN": "FRCT_unattended",
+                "FRAMEOS_CLOUD_URL": "https://cloud.example",
+                "FRAMEOS_NETWORK_CHECK": "false",
+                "FRAMEOS_WIFI_HOTSPOT": "disabled",
+            }
+        )
+
+        systemctl_calls = self._stub_log("systemctl.log")
+        self.assertIn("restart --no-block frameos.service", systemctl_calls)
+
+        # And the summary has to say where the frame turns up, since enrollment
+        # only happens once the service is running — the user is otherwise left
+        # with a finished install and no idea what to look at.
+        self.assertIn("Cloud: enrolling with https://cloud.example", result.stdout)
+        self.assertIn("https://cloud.example/frames", result.stdout)
+
+        frame_json = self._installed_frame_json()
+        self.assertTrue(frame_json["name"])
+        self.assertTrue(frame_json["device"])
+        self.assertEqual(frame_json["serverHost"], "")
+
+    def test_prompts_are_asked_unless_unattended_is_requested(self) -> None:
+        # A claim token does NOT imply unattended: a cloud install is still a
+        # person at a terminal choosing a display and an admin password, and
+        # reading /dev/tty works there even though stdin is the curl pipe.
+        # Only FRAMEOS_UNATTENDED suppresses the questions.
+        script = (ROOT / "scripts" / "frameos-setup.sh").read_text(encoding="utf-8")
+        self.assertIn('case "$(printf \'%s\' "${FRAMEOS_UNATTENDED:-}"', script)
+        self.assertNotIn("FRAMEOS_INTERACTIVE", script)
+
+    def test_cloud_claim_token_refuses_explicit_backend(self) -> None:
+        result = self._run_setup(
+            {
+                "FRAMEOS_NAME": "Conflicted Frame",
+                "FRAMEOS_DEVICE": "web_only",
+                "FRAMEOS_CLAIM_TOKEN": "FRCT_test-claim-token",
+                "FRAMEOS_BACKEND_ENABLED": "true",
+            },
+            expect_failure=True,
+        )
+        self.assertIn("exactly one control plane", result.stdout + result.stderr)
+        # Nothing was installed.
+        self.assertFalse((self.out_dir / "srv" / "frameos" / "releases").exists())
+
+    def test_cloud_claim_token_refuses_alternative_truthy_backend_spellings(self) -> None:
+        # "True"/"on" used to be silently coerced to "false" instead of dying:
+        # the point of the check is to refuse two control planes loudly.
+        for truthy in ("True", "on", "YES"):
+            with self.subTest(truthy=truthy):
+                result = self._run_setup(
+                    {
+                        "FRAMEOS_NAME": "Conflicted Frame",
+                        "FRAMEOS_DEVICE": "web_only",
+                        "FRAMEOS_CLAIM_TOKEN": "FRCT_test-claim-token",
+                        "FRAMEOS_BACKEND_ENABLED": truthy,
+                    },
+                    expect_failure=True,
+                )
+                self.assertIn("exactly one control plane", result.stdout + result.stderr)
+                self.assertFalse((self.out_dir / "srv" / "frameos" / "releases").exists())
+
+    def test_cloud_url_must_be_an_http_origin(self) -> None:
+        result = self._run_setup(
+            {
+                "FRAMEOS_NAME": "Bad URL Frame",
+                "FRAMEOS_DEVICE": "web_only",
+                "FRAMEOS_CLAIM_TOKEN": "FRCT_test-claim-token",
+                "FRAMEOS_CLOUD_URL": "cloud.example",
+            },
+            expect_failure=True,
+        )
+        self.assertIn("FRAMEOS_CLOUD_URL must be an http(s) origin", result.stdout + result.stderr)
+        self.assertFalse((self.out_dir / "srv" / "frameos" / "releases").exists())
+
+    def test_plain_http_cloud_url_warns_but_installs(self) -> None:
+        result = self._run_setup(
+            {
+                "FRAMEOS_NAME": "Local Cloud Frame",
+                "FRAMEOS_DEVICE": "web_only",
+                "FRAMEOS_WIDTH": "800",
+                "FRAMEOS_HEIGHT": "480",
+                "FRAMEOS_FRAME_PORT": "8787",
+                "FRAMEOS_FRAME_ACCESS_KEY": "local-access-key",
+                "FRAMEOS_NETWORK_CHECK": "false",
+                "FRAMEOS_WIFI_HOTSPOT": "disabled",
+                "FRAMEOS_CLAIM_TOKEN": "FRCT_test-claim-token",
+                "FRAMEOS_CLOUD_URL": "http://localhost:3000",
+            }
+        )
+
+        self.assertIn("plain http", result.stdout + result.stderr)
+        self._restore_tmp_permissions()
+        releases = sorted((self.out_dir / "srv" / "frameos" / "releases").glob("release_setup_*"))
+        self.assertEqual(len(releases), 1)
+        pending = json.loads(
+            (releases[0] / "state" / "cloud_enroll_pending.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(pending["provider_url"], "http://localhost:3000")
 
     def test_device_menu_prints_real_newlines(self) -> None:
         menu = subprocess.run(
@@ -277,8 +463,10 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertNotIn("\\nDevice choices", menu.stderr)
         self.assertNotIn("custom device key\\nDevice", menu.stderr)
 
-    def _write_fake_release_archive(self) -> None:
+    def _write_fake_release_archive(self, notify_capable: bool = True) -> None:
         artifact_root = self.tmp_path / "artifact" / f"frameos-{VERSION}-{TARGET}"
+        if artifact_root.exists():
+            shutil.rmtree(artifact_root)
         artifact_root.mkdir(parents=True)
         (artifact_root / "metadata.json").write_text(json.dumps({"slug": TARGET}) + "\n", encoding="utf-8")
         (artifact_root / "drivers").mkdir()
@@ -287,12 +475,17 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         (artifact_root / "scenes" / "scene-marker").write_text("scene\n", encoding="utf-8")
         (artifact_root / "vendor").mkdir()
         (artifact_root / "vendor" / "vendor-marker").write_text("vendor\n", encoding="utf-8")
+        # The installer greps the binary for NOTIFY_SOCKET to decide between
+        # Type=notify and Type=simple; releases since 2026.6.14 contain the
+        # string, older ones don't.
+        notify_marker = "# sd_notify support marker: NOTIFY_SOCKET" if notify_capable else "# no sd_notify"
         self._write_executable(
             artifact_root / "frameos",
-            """#!/bin/sh
+            f"""#!/bin/sh
+            {notify_marker}
             echo "$@" >> /tmp/out/frameos-binary.log
-            if [ "${1:-}" = "setup" ]; then
-              exit "${FRAMEOS_STUB_SETUP_EXIT:-0}"
+            if [ "${{1:-}}" = "setup" ]; then
+              exit "${{FRAMEOS_STUB_SETUP_EXIT:-0}}"
             fi
             exit 0
             """,
@@ -306,7 +499,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         )
 
         release_version_dir = self.releases_dir / f"v{VERSION}"
-        release_version_dir.mkdir(parents=True)
+        release_version_dir.mkdir(parents=True, exist_ok=True)
         archive_path = release_version_dir / f"frameos-{VERSION}-{TARGET}.tar.gz"
         with tarfile.open(archive_path, "w:gz") as archive:
             archive.add(artifact_root, arcname=artifact_root.name)
@@ -355,13 +548,22 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         )
         self._write_executable(
             stub_dir / "systemctl",
+            # is-active answers like a healthy systemd would. Without it the
+            # installer's post-start poll finds nothing active and burns its
+            # whole timeout on every test that installs.
             """#!/bin/sh
             echo "$@" >> /tmp/out/systemctl.log
+            case "$1" in
+              is-active) echo active ;;
+              is-failed) echo inactive ;;
+            esac
             exit 0
             """,
         )
 
-    def _run_setup(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    def _run_setup(
+        self, env: dict[str, str], expect_failure: bool = False
+    ) -> subprocess.CompletedProcess[str]:
         merged_env = {
             "FRAMEOS_RELEASE_VERSION": VERSION,
             "FRAMEOS_RELEASE_BASE_URL": "file:///tmp/releases",
@@ -417,6 +619,14 @@ class FrameOSSetupScriptTest(unittest.TestCase):
             text=True,
             timeout=90,
         )
+        if expect_failure:
+            if result.returncode == 0:
+                self.fail(
+                    "setup container unexpectedly succeeded\n"
+                    f"stdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}\n"
+                )
+            return result
         if result.returncode != 0:
             self.fail(
                 "setup container failed\n"

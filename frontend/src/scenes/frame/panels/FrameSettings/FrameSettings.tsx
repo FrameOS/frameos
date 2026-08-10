@@ -1,5 +1,7 @@
 import { useActions, useValues } from 'kea'
+import { useState } from 'react'
 import clsx from 'clsx'
+import copy from 'copy-to-clipboard'
 import equal from 'fast-deep-equal'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
@@ -27,10 +29,17 @@ import {
   withCustomPalette,
   buildrootPlatforms,
   embeddedPlatforms,
+  EMBEDDED_ESP32_C3,
   EMBEDDED_ESP32_S3,
+  EMBEDDED_PICO_2W,
+  EMBEDDED_PICO_W,
+  EMBEDDED_VIRTUAL,
+  isThinClientEmbeddedPlatform,
   modes,
+  virtualColorModes,
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
+import { setCloudFrameServiceSettingsEnabled } from '../../../../utils/cloudFrameApi'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
 import { Spinner } from '../../../../components/Spinner'
@@ -55,6 +64,8 @@ import { TextArea } from '../../../../components/TextArea'
 import { ColorInput } from '../../../../components/ColorInput'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
+import { frameSettingsSectionIsAllowed, isEsp32CloudFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
+import { CloudSettingsSection } from '../../../settings/CloudSettings'
 import { normalizeSshKeys } from '../../../../utils/sshKeys'
 import { Label } from '../../../../components/Label'
 import { logsLogic } from '../Logs/logsLogic'
@@ -170,11 +181,40 @@ function scrollToFrameHttpApiSection(e: React.MouseEvent): void {
 const DEFAULT_MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
 const EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 const ESP32_FLASH_SIZE_OPTIONS: Option[] = [
+  { value: '2MB', label: '2MB (Pico W, no OTA)' },
   { value: '4MB', label: '4MB (no OTA)' },
   { value: '8MB', label: '8MB' },
   { value: '16MB', label: '16MB' },
   { value: '32MB', label: '32MB' },
 ]
+
+function VirtualFrameUrlRow({ label, url }: { label: string; url: string }): JSX.Element {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Field name="_noop" label={label}>
+      <div className="flex w-full items-start gap-2">
+        <A
+          href={url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="frameos-link min-w-0 flex-1 break-all font-mono text-xs leading-5 hover:underline"
+        >
+          {url}
+        </A>
+        <Button
+          color="secondary"
+          size="small"
+          onClick={() => {
+            copy(url)
+            setCopied(true)
+          }}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+    </Field>
+  )
+}
 
 const FRAME_ADMIN_SERVICE_SETTING_KEYS = ['frameOS', 'openAI', 'homeAssistant', 'github', 'immich', 'unsplash'] as const
 
@@ -289,14 +329,96 @@ function FrameAdminServiceSecretsSection(): JSX.Element {
   )
 }
 
+/**
+ * Cloud-managed frames only: which service-settings groups this frame's
+ * scenes ask for, and whether the account's keys for them actually reach the
+ * device. Two independent facts, and a scene that renders "please provide an
+ * API key" can be either one — hence both on screen:
+ *
+ *  - the DECLARED groups come from the frame row (the cloud denormalizes them
+ *    on every scene assignment) and say what the scenes want;
+ *  - the SWITCH is the owner's per-frame grant of `settings:services`. Off
+ *    means the device's pull 403s and it drops every cloud-owned key.
+ *
+ * The keys themselves are account-level (Settings → service secrets) and never
+ * travel through this panel.
+ */
+function CloudServiceSettingsSection(): JSX.Element {
+  const { frameId, frame } = useValues(frameLogic)
+  const { loadFrame } = useActions(framesModel)
+  const { savedSettings } = useValues(settingsLogic)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const groups = frame?.service_setting_groups ?? []
+  const enabled = frame?.service_settings_enabled === true
+
+  const toggle = async (next: boolean): Promise<void> => {
+    setSaving(true)
+    setError(null)
+    try {
+      await setCloudFrameServiceSettingsEnabled(frameId, next)
+      loadFrame(frameId)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <H6 id="frame-settings-service-settings" className="mt-2">
+        Service settings
+      </H6>
+      <div className="pl-2 @md:pl-8 space-y-3">
+        <div className="frameos-muted text-sm">
+          API keys your account stores (Settings → service secrets) are fetched by the frame itself over its own
+          authenticated connection. They are never pushed through the command queue.
+        </div>
+        <Field name="_noop" label="Deliver keys to this frame">
+          <div className="w-full space-y-1">
+            <Switch value={enabled} onChange={toggle} disabled={saving} label={enabled ? 'Enabled' : 'Disabled'} />
+            {!enabled ? (
+              <div className="frameos-muted text-xs">
+                The frame is refused the keys and drops any it still holds at its next check.
+              </div>
+            ) : null}
+            {error ? <div className="text-red-300 text-xs">{error}</div> : null}
+          </div>
+        </Field>
+        <Field name="_noop" label="Requested by this frame's scenes">
+          <div className="w-full">
+            {groups.length === 0 ? (
+              <div className="frameos-muted text-sm">
+                None — no scene assigned to this frame declares a service that needs a key.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {groups.map((group) => {
+                  const details = settingsDetails[group]
+                  const saved = details
+                    ? details.fields.every((field) => hasSettingsFieldValue(getSettingsValue(savedSettings, field.path)))
+                    : false
+                  return (
+                    <Tag key={group} color={saved ? 'teal' : 'yellow'}>
+                      {details?.title ?? group}
+                      {saved ? '' : ' — not set'}
+                    </Tag>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </Field>
+      </div>
+    </>
+  )
+}
+
 function FrameAdminUpgradeSection(): JSX.Element {
-  const {
-    upgradeStatus,
-    upgradeStatusLoading,
-    isUpgradePolling,
-    upgradeError,
-    upgradeStatusIsActive,
-  } = useValues(frameAdminUpgradeLogic)
+  const { upgradeStatus, upgradeStatusLoading, isUpgradePolling, upgradeError, upgradeStatusIsActive } =
+    useValues(frameAdminUpgradeLogic)
   const { checkUpgradeStatus, dryRunUpgrade, confirmStartUpgrade, loadUpgradeStatus } =
     useActions(frameAdminUpgradeLogic)
 
@@ -427,11 +549,9 @@ const ESP32_PIN_FIELDS: { key: Esp32PinKey; label: string }[] = [
   { key: 'pwr', label: 'PWR' },
 ]
 
-const ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET: FrameEmbeddedHardwarePreset =
-  'waveshare_esp32_s3_epaper_13_3e6'
+const ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET: FrameEmbeddedHardwarePreset = 'waveshare_esp32_s3_epaper_13_3e6'
 const ESP32_WAVESHARE_13IN3E6_DEVICE = 'waveshare.EPD_13in3e'
-const ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET: FrameEmbeddedHardwarePreset =
-  'waveshare_esp32_s3_photopainter'
+const ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET: FrameEmbeddedHardwarePreset = 'waveshare_esp32_s3_photopainter'
 const ESP32_WAVESHARE_PHOTOPAINTER_DEVICE = 'waveshare.EPD_7in3e'
 const INKY_GPIO_BUTTONS: GPIOButton[] = [
   { pin: 5, label: 'A' },
@@ -513,6 +633,88 @@ const ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT: Esp32PinLayout = {
   pwr: 1,
 }
 
+// Mirrors EMBEDDED_TRMNL_OG_PINS and friends in backend/app/tasks/embedded_firmware.py
+const ESP32_TRMNL_OG_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 10,
+  dc: 5,
+  cs: 6,
+  cs2: -1,
+  busy: 4,
+  sck: 7,
+  mosi: 8,
+  pwr: -1,
+}
+
+const ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 38,
+  dc: 10,
+  cs: 44,
+  cs2: -1,
+  busy: 4,
+  sck: 7,
+  mosi: 9,
+  pwr: -1,
+}
+
+const ESP32_XTEINK_X4_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 5,
+  dc: 4,
+  cs: 21,
+  cs2: -1,
+  busy: 6,
+  sck: 8,
+  mosi: 10,
+  pwr: -1,
+}
+
+const ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 17,
+  dc: 16,
+  cs: 15,
+  cs2: -1,
+  busy: 18,
+  sck: 13,
+  mosi: 14,
+  pwr: -1,
+}
+
+const ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 12,
+  dc: 11,
+  cs: 10,
+  cs2: -1,
+  busy: 13,
+  sck: 7,
+  mosi: 9,
+  pwr: -1,
+}
+
+const ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 47,
+  dc: 46,
+  cs: 45,
+  cs2: -1,
+  busy: 48,
+  sck: 12,
+  mosi: 11,
+  pwr: -1,
+}
+
+// Mirrors EMBEDDED_INKY_FRAME_PINS in backend/app/tasks/embedded_firmware.py,
+// limited to the eight ESP32-vocabulary keys Esp32PinLayout carries. BUSY sits
+// behind the Inky shift register (sr_* keys, consumed by the pico firmware
+// only), so it is -1 here.
+const PIMORONI_INKY_FRAME_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 27,
+  dc: 28,
+  cs: 17,
+  cs2: -1,
+  busy: -1,
+  sck: 18,
+  mosi: 19,
+  pwr: -1,
+}
+
 const ESP32_SD_CARD_PIN_FIELDS: { key: Esp32SdCardPinKey; label: string }[] = [
   { key: 'cs', label: 'CS' },
   { key: 'sck', label: 'SCK' },
@@ -541,68 +743,194 @@ const ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
   mosi: 7,
 }
 
-const ESP32_HARDWARE_PRESET_OPTIONS: Option[] = [
-  { value: 'custom', label: 'Custom ESP32-S3 board' },
-  { value: ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET, label: 'Waveshare ESP32-S3 PhotoPainter' },
-  { value: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET, label: 'Waveshare ESP32-S3 ePaper 13.3E6' },
-]
-
-function normalizeEsp32HardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
-  if (value === ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
-    return ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET
-  }
-  if (value === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
-    return ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
-  }
-  return 'custom'
-}
-
-function esp32WavesharePhotopainterSdCardAssets(): Esp32SdCardAssets {
-  return {
-    enabled: true,
-    preset: ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET,
-    pins: { ...ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT },
-    maxFrequencyKHz: 20000,
-    mountPath: '/srv/assets',
-  }
-}
-
-function esp32Waveshare13in3e6SdCardAssets(): Esp32SdCardAssets {
-  return {
-    enabled: true,
-    preset: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
-    pins: { ...ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT },
-    maxFrequencyKHz: 20000,
-    mountPath: '/srv/assets',
-  }
-}
-
-function esp32HardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePreset): {
+interface Esp32HardwarePresetConfig {
+  label: string
+  platform: string
   device: string
   flashSize: FrameEmbeddedFlashSize
   psramMB: number
   pins: Esp32PinLayout
-  sdCardAssets: Esp32SdCardAssets
-} | null {
-  if (hardwarePreset === ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET) {
-    return {
-      device: ESP32_WAVESHARE_PHOTOPAINTER_DEVICE,
-      flashSize: '16MB',
-      psramMB: 8,
-      pins: { ...ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT },
-      sdCardAssets: esp32WavesharePhotopainterSdCardAssets(),
-    }
+  sdCardAssets?: Esp32SdCardAssets
+}
+
+// Mirrors EMBEDDED_HARDWARE_PRESETS in backend/app/tasks/embedded_firmware.py
+const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePreset, Esp32HardwarePresetConfig>> = {
+  [ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET]: {
+    label: 'Waveshare ESP32-S3 PhotoPainter',
+    platform: EMBEDDED_ESP32_S3,
+    device: ESP32_WAVESHARE_PHOTOPAINTER_DEVICE,
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET,
+      pins: ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
+  },
+  [ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET]: {
+    label: 'Waveshare ESP32-S3 ePaper 13.3E6',
+    platform: EMBEDDED_ESP32_S3,
+    device: ESP32_WAVESHARE_13IN3E6_DEVICE,
+    flashSize: '32MB',
+    psramMB: 16,
+    pins: ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
+      pins: ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
+  },
+  trmnl_og: {
+    label: 'TRMNL OG (7.5" ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: ESP32_TRMNL_OG_PIN_LAYOUT,
+  },
+  trmnl_bwry: {
+    label: 'TRMNL BWRY (7.5" color ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_7in5yr',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: ESP32_TRMNL_OG_PIN_LAYOUT,
+  },
+  trmnl_og_diy_kit: {
+    label: 'TRMNL 7.5" DIY Kit (XIAO ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT,
+  },
+  trmnl_4in26_diy_kit: {
+    label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_4in26',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT,
+  },
+  xteink_x4: {
+    label: 'XTEINK X4 (4.26" ESP32-C3)',
+    platform: EMBEDDED_ESP32_C3,
+    device: 'waveshare.EPD_4in26',
+    flashSize: '16MB',
+    psramMB: 0,
+    pins: ESP32_XTEINK_X4_PIN_LAYOUT,
+  },
+  seeed_reterminal_sticky: {
+    label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_3in97',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT,
+  },
+  seeed_reterminal_e1001: {
+    label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in5_V2',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  seeed_reterminal_e1002: {
+    label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_7in3e',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  elecrow_crowpanel_5in79: {
+    label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_5in79',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
+  },
+  // Pimoroni Inky Frame family: pico platforms flash a generic UF2 over
+  // BOOTSEL and are provisioned via USB serial — the backend never builds
+  // per-frame firmware for them.
+  pimoroni_inky_frame_4: {
+    label: 'Pimoroni Inky Frame 4.0" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_4in01f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
+  },
+  pimoroni_inky_frame_5_7: {
+    label: 'Pimoroni Inky Frame 5.7" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_5in65f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
+  },
+  pimoroni_inky_frame_7_3: {
+    label: 'Pimoroni Inky Frame 7.3" (Pico W)',
+    platform: EMBEDDED_PICO_W,
+    device: 'waveshare.EPD_7in3f',
+    flashSize: '2MB',
+    psramMB: 0,
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
+  },
+  pimoroni_inky_frame_7_3_pico2: {
+    label: 'Pimoroni Inky Frame 7.3" (Pico 2 W, 2024)',
+    platform: EMBEDDED_PICO_2W,
+    device: 'waveshare.EPD_7in3f',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
+  },
+  pimoroni_inky_frame_7_3_spectra: {
+    label: 'Pimoroni Inky Frame 7.3" Spectra 6 (Pico 2 W)',
+    platform: EMBEDDED_PICO_2W,
+    device: 'waveshare.EPD_7in3e',
+    flashSize: '4MB',
+    psramMB: 0,
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
+  },
+}
+
+const ESP32_HARDWARE_PRESET_OPTIONS: Option[] = [
+  { value: 'custom', label: 'Custom ESP32 board' },
+  ...Object.entries(ESP32_HARDWARE_PRESET_CONFIGS).map(([value, config]) => ({
+    value,
+    // Boards without PSRAM cannot render on-device; flag them so it is clear
+    // the backend does the rendering for these presets.
+    label: isThinClientEmbeddedPlatform(config.platform) ? `${config.label} — Thin client` : config.label,
+  })),
+]
+
+function normalizeEsp32HardwarePreset(value: unknown): FrameEmbeddedHardwarePreset {
+  if (typeof value === 'string' && value in ESP32_HARDWARE_PRESET_CONFIGS) {
+    return value as FrameEmbeddedHardwarePreset
   }
-  if (hardwarePreset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
-    return {
-      device: ESP32_WAVESHARE_13IN3E6_DEVICE,
-      flashSize: '32MB',
-      psramMB: 16,
-      pins: { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT },
-      sdCardAssets: esp32Waveshare13in3e6SdCardAssets(),
-    }
+  return 'custom'
+}
+
+function esp32HardwarePresetConfig(hardwarePreset: FrameEmbeddedHardwarePreset): Esp32HardwarePresetConfig | null {
+  const config = ESP32_HARDWARE_PRESET_CONFIGS[hardwarePreset]
+  if (!config) {
+    return null
   }
-  return null
+  return {
+    ...config,
+    pins: { ...config.pins },
+    sdCardAssets: config.sdCardAssets
+      ? { ...config.sdCardAssets, pins: { ...(config.sdCardAssets.pins ?? {}) } }
+      : undefined,
+  }
 }
 
 function esp32RecommendedPinLayout(
@@ -613,9 +941,7 @@ function esp32RecommendedPinLayout(
   if (presetConfig) {
     return { ...presetConfig.pins }
   }
-  return device === ESP32_WAVESHARE_13IN3E6_DEVICE
-    ? { ...ESP32_XIAO_13IN3E_PIN_LAYOUT }
-    : { ...ESP32_XIAO_PIN_LAYOUT }
+  return device === ESP32_WAVESHARE_13IN3E6_DEVICE ? { ...ESP32_XIAO_13IN3E_PIN_LAYOUT } : { ...ESP32_XIAO_PIN_LAYOUT }
 }
 
 function normalizeEsp32PinNumber(value: unknown, fallback: number): number {
@@ -646,8 +972,7 @@ function normalizeEsp32SdCardPinLayout(
 
 function normalizeEsp32SdCardAssets(value: Esp32SdCardAssets | undefined): NormalizedEsp32SdCardAssets {
   const preset =
-    value?.preset === 'waveshare_esp32_s3_photopainter' ||
-    value?.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+    value?.preset === 'waveshare_esp32_s3_photopainter' || value?.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
       ? value.preset
       : 'custom'
   const presetPins =
@@ -720,33 +1045,62 @@ function esp32PinLayoutsEqual(first: Esp32PinLayout, second: Esp32PinLayout): bo
   return ESP32_PIN_FIELDS.every(({ key }) => first[key] === second[key])
 }
 
+const ESP32_PIN_LAYOUT_PRESETS: { value: string; label: string; pins: Esp32PinLayout }[] = [
+  { value: 'xiao', label: 'Seeed XIAO ESP32-S3', pins: ESP32_XIAO_PIN_LAYOUT },
+  { value: 'xiao-13in3e', label: 'Seeed XIAO ESP32-S3 + CS2 on GPIO8', pins: ESP32_XIAO_13IN3E_PIN_LAYOUT },
+  {
+    value: 'waveshare-photopainter',
+    label: 'Waveshare ESP32-S3 PhotoPainter',
+    pins: ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT,
+  },
+  { value: 'waveshare-13in3e6', label: 'Waveshare ESP32-S3 ePaper 13.3E6', pins: ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT },
+  { value: 'trmnl-og', label: 'TRMNL OG/BWRY (ESP32-C3)', pins: ESP32_TRMNL_OG_PIN_LAYOUT },
+  {
+    value: 'xiao-epaper-driver-board',
+    label: 'Seeed XIAO ePaper Driver Board (TRMNL DIY Kit)',
+    pins: ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT,
+  },
+  { value: 'xteink-x4', label: 'XTEINK X4 (ESP32-C3)', pins: ESP32_XTEINK_X4_PIN_LAYOUT },
+  { value: 'seeed-reterminal-sticky', label: 'Seeed reTerminal Sticky', pins: ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT },
+  {
+    value: 'seeed-reterminal-e10xx',
+    label: 'Seeed reTerminal E1001/E1002',
+    pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  {
+    value: 'elecrow-crowpanel-5in79',
+    label: 'Elecrow CrowPanel 5.79"',
+    pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
+  },
+  {
+    value: 'pimoroni-inky-frame',
+    label: 'Pimoroni Inky Frame (Pico W / Pico 2 W)',
+    pins: PIMORONI_INKY_FRAME_PIN_LAYOUT,
+  },
+]
+
 function esp32PinLayoutPresetValue(pins: Esp32PinLayout): string {
-  if (esp32PinLayoutsEqual(pins, ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT)) {
-    return 'waveshare-photopainter'
-  }
-  if (esp32PinLayoutsEqual(pins, ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT)) {
-    return 'waveshare-13in3e6'
-  }
-  if (esp32PinLayoutsEqual(pins, ESP32_XIAO_PIN_LAYOUT)) {
-    return 'xiao'
-  }
-  if (esp32PinLayoutsEqual(pins, ESP32_XIAO_13IN3E_PIN_LAYOUT)) {
-    return 'xiao-13in3e'
+  for (const layoutPreset of ESP32_PIN_LAYOUT_PRESETS) {
+    if (esp32PinLayoutsEqual(pins, layoutPreset.pins)) {
+      return layoutPreset.value
+    }
   }
   return 'custom'
 }
 
 function esp32PinLayoutPresetOptions(device?: string): Option[] {
-  const xiao = { value: 'xiao', label: 'Seeed XIAO ESP32-S3' }
-  const xiao13in3e = { value: 'xiao-13in3e', label: 'Seeed XIAO ESP32-S3 + CS2 on GPIO8' }
-  const photopainter = { value: 'waveshare-photopainter', label: 'Waveshare ESP32-S3 PhotoPainter' }
-  const waveshare13in3e6 = { value: 'waveshare-13in3e6', label: 'Waveshare ESP32-S3 ePaper 13.3E6' }
-  if (device === ESP32_WAVESHARE_PHOTOPAINTER_DEVICE) {
-    return [photopainter, xiao, xiao13in3e, waveshare13in3e6, { value: 'custom', label: 'Custom' }]
+  const options: Option[] = ESP32_PIN_LAYOUT_PRESETS.map(({ value, label }) => ({ value, label }))
+  // Float the layout that matches the selected panel's dedicated board to the top
+  const preferredValue =
+    device === ESP32_WAVESHARE_PHOTOPAINTER_DEVICE
+      ? 'waveshare-photopainter'
+      : device === ESP32_WAVESHARE_13IN3E6_DEVICE
+      ? 'waveshare-13in3e6'
+      : null
+  if (preferredValue) {
+    options.sort((first, second) => (first.value === preferredValue ? -1 : second.value === preferredValue ? 1 : 0))
   }
-  return device === ESP32_WAVESHARE_13IN3E6_DEVICE
-    ? [waveshare13in3e6, xiao13in3e, xiao, photopainter, { value: 'custom', label: 'Custom' }]
-    : [xiao, xiao13in3e, photopainter, waveshare13in3e6, { value: 'custom', label: 'Custom' }]
+  return [...options, { value: 'custom', label: 'Custom' }]
 }
 
 function esp32PinLayoutForPreset(
@@ -754,17 +1108,9 @@ function esp32PinLayoutForPreset(
   device?: string,
   hardwarePreset?: FrameEmbeddedHardwarePreset | string
 ): Esp32PinLayout | null {
-  if (preset === 'xiao') {
-    return { ...ESP32_XIAO_PIN_LAYOUT }
-  }
-  if (preset === 'xiao-13in3e') {
-    return { ...ESP32_XIAO_13IN3E_PIN_LAYOUT }
-  }
-  if (preset === 'waveshare-photopainter') {
-    return { ...ESP32_WAVESHARE_PHOTOPAINTER_PIN_LAYOUT }
-  }
-  if (preset === 'waveshare-13in3e6') {
-    return { ...ESP32_WAVESHARE_13IN3E6_PIN_LAYOUT }
+  const layoutPreset = ESP32_PIN_LAYOUT_PRESETS.find(({ value }) => value === preset)
+  if (layoutPreset) {
+    return { ...layoutPreset.pins }
   }
   if (preset === 'recommended') {
     return esp32RecommendedPinLayout(device, hardwarePreset)
@@ -801,6 +1147,17 @@ export function FrameSettings({
   const { savedSettings } = useValues(settingsLogic)
   const tlsEnabled = !!(frameForm.https_proxy?.enable ?? frame.https_proxy?.enable)
   const inFrameAdminMode = isInFrameAdminMode()
+  // Cloud-managed frames have no SSH, deploys, or builds — those verbs do
+  // not exist in the cloud protocol, so their settings are never rendered.
+  const workspaceSurfaceMode = workspaceMode()
+  const hideForCloud = workspaceSurfaceMode === 'cloud'
+  // A cloud-managed ESP32 accepts exactly two settings from the cloud —
+  // name and refresh interval (its set_settings subset). Everything else on
+  // this panel (mounts, network, palette, GPIO, …) either does not exist on
+  // the firmware or is provisioned on the device itself, so rendering those
+  // sections was an invitation to edit values that can never be saved.
+  const esp32CloudProfile = hideForCloud && isEsp32CloudFrame(frame)
+  const showBackendSection = frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-backend')
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
     frameForm.embedded?.hardwarePreset ?? frameForm.device_config?.hardwarePreset
   )
@@ -837,7 +1194,7 @@ export function FrameSettings({
       device: presetConfig.device,
       embedded: {
         ...(frameForm.embedded ?? {}),
-        platform: EMBEDDED_ESP32_S3,
+        platform: presetConfig.platform,
         flashSize: presetConfig.flashSize,
         hardwarePreset,
       },
@@ -849,10 +1206,7 @@ export function FrameSettings({
         sdCardAssets: presetConfig.sdCardAssets,
       },
     }
-    if (
-      !frameForm.max_http_response_bytes ||
-      frameForm.max_http_response_bytes === DEFAULT_MAX_HTTP_RESPONSE_BYTES
-    ) {
+    if (!frameForm.max_http_response_bytes || frameForm.max_http_response_bytes === DEFAULT_MAX_HTTP_RESPONSE_BYTES) {
       nextValues.max_http_response_bytes = EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     }
     setFrameFormValues(nextValues)
@@ -872,6 +1226,18 @@ export function FrameSettings({
   const errorBehavior = normalizeFrameErrorBehavior(frameForm.error_behavior ?? frame.error_behavior)
   const isBuildrootMode = mode === 'buildroot'
   const isEmbeddedMode = mode === 'embedded'
+  // Virtual frames have no board at all: the backend renders them and serves
+  // the result at the URLs shown in the "Virtual frame" section below, so all
+  // ESP32 hardware controls (panel, pins, flash, presets) are hidden.
+  const isVirtualPlatform =
+    isEmbeddedMode && (frameForm.embedded?.platform ?? frame.embedded?.platform) === EMBEDDED_VIRTUAL
+  // View-only credential, never the device API key: leaking a kiosk URL
+  // grants nothing but the picture. Rotate via device_config.viewToken.
+  const virtualViewToken = frameForm.device_config?.viewToken ?? frame.device_config?.viewToken ?? ''
+  const virtualUrlToken = virtualViewToken || '<view-token>'
+  const virtualUrlOrigin = typeof window !== 'undefined' ? window.location.origin : ''
+  const virtualImageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/image?k=${virtualUrlToken}`
+  const virtualPageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/page?k=${virtualUrlToken}`
   const configuredGpioButtons = !isEmbeddedMode ? configuredGpioButtonsForDevice(frameForm.device) : null
   const showWifiCredentials = isBuildrootMode || isEmbeddedMode
   const maxHttpResponsePlaceholder = String(
@@ -984,17 +1350,13 @@ export function FrameSettings({
   const imageUrl = frameImageUrl(linkFrame)
   const embeddedAdminAuthMissing =
     isEmbeddedMode &&
-    !(
-      linkFrame.frame_admin_auth?.enabled &&
-      linkFrame.frame_admin_auth.user &&
-      linkFrame.frame_admin_auth.pass
-    )
+    !(linkFrame.frame_admin_auth?.enabled && linkFrame.frame_admin_auth.user && linkFrame.frame_admin_auth.pass)
   const frameActionsMenu = hideDropdown ? null : (
     <DropdownMenu
       className="w-fit"
       buttonColor="tertiary"
       items={[
-        ...(mode === 'rpios' && !inFrameAdminMode
+        ...(mode === 'rpios' && !inFrameAdminMode && !hideForCloud
           ? [
               {
                 label: 'Clear build cache on frame',
@@ -1007,7 +1369,7 @@ export function FrameSettings({
               },
             ]
           : []),
-        ...(mode === 'buildroot' && !inFrameAdminMode
+        ...(mode === 'buildroot' && !inFrameAdminMode && !hideForCloud
           ? [
               {
                 label: 'Download SD card image',
@@ -1067,7 +1429,7 @@ export function FrameSettings({
           icon: <ArrowUpTrayIcon className="w-5 h-5" />,
           loading: false,
         },
-        ...(!inFrameAdminMode
+        ...(!inFrameAdminMode && !hideForCloud
           ? [
               {
                 label: 'Download Nim build .zip',
@@ -1121,6 +1483,8 @@ export function FrameSettings({
       )}
       id="panel-settings-div"
     >
+      {/* Contains its own <form>, so it must stay outside the frameForm <Form> below. */}
+      {inFrameAdminMode ? <CloudSettingsSection headingId="frame-settings-cloud" /> : null}
       <Form
         formKey="frameForm"
         logic={frameLogic}
@@ -1128,7 +1492,55 @@ export function FrameSettings({
         className="space-y-4 @container"
         enableFormOnSubmit
       >
-        {showFrameInfo ? (
+        {esp32CloudProfile ? (
+          <>
+            <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
+              <H6 id="frame-settings-info">Frame settings</H6>
+              {frameActionsMenu}
+            </div>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field name="name" label="Name">
+                <TextInput name="name" placeholder="Hallway frame" required />
+              </Field>
+              <Field
+                name="interval"
+                label="Refresh interval in seconds"
+                tooltip="How often the frame re-renders its active scene. E-paper panels want large values (300 or more); the firmware enforces a 5 second minimum."
+              >
+                <TextInput name="interval" placeholder="300" />
+              </Field>
+              <Field
+                name="rotate"
+                label="Rotation"
+                tooltip="How the scene is rotated onto the panel. The firmware sizes its canvas once at boot, so saving a new rotation reboots the frame."
+              >
+                {({ value, onChange }) => (
+                  <Select
+                    value={value || '0'}
+                    onChange={(v) => onChange(parseInt(v))}
+                    name="rotate"
+                    options={[
+                      { value: 0, label: '0 degrees' },
+                      { value: 90, label: '90 degrees' },
+                      { value: 180, label: '180 degrees' },
+                      { value: 270, label: '270 degrees' },
+                    ]}
+                  />
+                )}
+              </Field>
+              <p className="frameos-muted text-sm">
+                This ESP32 frame accepts its name, refresh interval and rotation from the cloud. The panel driver,
+                WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console
+                or the FrameOS-Setup portal.
+              </p>
+            </div>
+          </>
+        ) : null}
+        {/* Cloud-only, and above the fold on both profiles: "why is my scene
+            asking for an API key" is answered here, not in the account-wide
+            secrets page. */}
+        {hideForCloud ? <CloudServiceSettingsSection /> : null}
+        {!esp32CloudProfile && showFrameInfo ? (
           <>
             <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
               <H6 id="frame-settings-info">Frame info</H6>
@@ -1195,6 +1607,10 @@ export function FrameSettings({
             </div>
           </>
         ) : null}
+        {/* Everything below is the full settings surface; the esp32 cloud
+            profile renders only the compact block above instead. */}
+        {!esp32CloudProfile ? (
+          <>
         {inFrameAdminMode ? <FrameAdminUpgradeSection /> : null}
         {inFrameAdminMode ? <FrameAdminServiceSecretsSection /> : null}
         {showFrameInfo ? (
@@ -1255,12 +1671,17 @@ export function FrameSettings({
               )}
             </Field>
           ) : null}
+          {isVirtualPlatform ? null : (
           <Field name="device" label="Display driver">
             {({ value, onChange }) => (
               <Select
                 name="device"
                 value={(value as string) || ''}
-                options={devices}
+                options={
+                  // Embedded frames can be headless: device "none" maps to the
+                  // firmware's panel "none", so surface it as a real choice.
+                  isEmbeddedMode ? [{ value: 'none', label: 'No display panel' }, ...devices] : devices
+                }
                 onChange={(nextDevice) => {
                   const previousDevice = (value as string) || ''
                   onChange(nextDevice)
@@ -1308,6 +1729,7 @@ export function FrameSettings({
               />
             )}
           </Field>
+          )}
           {frameForm.device === 'waveshare.EPD_10in3' ? (
             <Group name="device_config">
               <Field name="vcom" label="VCOM">
@@ -1452,6 +1874,8 @@ export function FrameSettings({
                 <Field name="platform" label="Platform">
                   <Select name="embedded.platform" options={embeddedPlatforms} />
                 </Field>
+                {isVirtualPlatform ? null : (
+                <>
                 <Field
                   name="hardwarePreset"
                   label="Hardware preset"
@@ -1490,7 +1914,10 @@ export function FrameSettings({
                     />
                   )}
                 </Field>
+                </>
+                )}
               </Group>
+              {isVirtualPlatform ? null : (
               <Group name="device_config">
                 <Field
                   name="pins"
@@ -1614,10 +2041,7 @@ export function FrameSettings({
                                   preset: nextPreset as Esp32SdCardAssets['preset'],
                                   pins: esp32SdCardPinsForPreset(nextPreset),
                                 }
-                                if (
-                                  embeddedHardwarePreset !== 'custom' &&
-                                  nextPreset !== embeddedHardwarePreset
-                                ) {
+                                if (embeddedHardwarePreset !== 'custom' && nextPreset !== embeddedHardwarePreset) {
                                   setEsp32HardwarePresetCustom({
                                     device_config: {
                                       ...(frameForm.device_config ?? {}),
@@ -1698,6 +2122,7 @@ export function FrameSettings({
                   }}
                 </Field>
               </Group>
+              )}
             </>
           ) : null}
           {/* {frameForm.mode === 'rpios' || !frameForm.mode ? (
@@ -1707,7 +2132,8 @@ export function FrameSettings({
               </Field>
             </Group>
           ) : null} */}
-          {(!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode) ? (
+          {!hideForCloud &&
+          ((!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode)) ? (
             <Group name="rpios">
               <Field
                 name="compilationMode"
@@ -1753,7 +2179,71 @@ export function FrameSettings({
           ) : null}
         </div>
 
-        {!inFrameAdminMode ? (
+        {isVirtualPlatform ? (
+          <>
+            <H6 id="frame-settings-virtual" className="mt-2">
+              Virtual frame
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <p className="frameos-muted text-sm">
+                The backend renders this frame and serves it at the URLs below. The token only grants viewing this
+                frame's image — still, treat the URLs as semi-private; save a new view token to invalidate them.
+              </p>
+              {!virtualViewToken ? (
+                <p className="text-sm font-semibold text-amber-600">
+                  No view token is set for this frame yet. Save the frame once and the URLs will fill in.
+                </p>
+              ) : null}
+              <VirtualFrameUrlRow label="Image URL (PNG, rendered on request)" url={virtualImageUrl} />
+              <VirtualFrameUrlRow
+                label={`Kiosk page URL (refreshes every ${frameForm.interval ?? frame.interval ?? 300} seconds)`}
+                url={virtualPageUrl}
+              />
+              <Field name="width" label="Width">
+                <TextInput name="width" placeholder="800" />
+              </Field>
+              <Field name="height" label="Height">
+                <TextInput name="height" placeholder="480" />
+              </Field>
+              <Group name="device_config">
+                <Field
+                  name="colorMode"
+                  label="Color mode"
+                  tooltip="How the backend quantizes the rendered image — pick an e-ink palette to preview how a scene would look on a physical panel."
+                >
+                  {({ value, onChange }) => (
+                    <Select
+                      name="device_config.colorMode"
+                      value={(value as string) || 'rgb'}
+                      options={virtualColorModes}
+                      onChange={onChange}
+                    />
+                  )}
+                </Field>
+                <Field
+                  name="assetsQuotaMb"
+                  label="Assets quota (MB)"
+                  tooltip="How much disk space this frame's assets may use on the backend — uploads and images scenes save (OpenAI, Wikimedia, ...). Leave empty for the default of 100 MB."
+                >
+                  {({ value, onChange }) => (
+                    <TextInput
+                      name="device_config.assetsQuotaMb"
+                      type="number"
+                      placeholder="100"
+                      value={value === undefined || value === null ? '' : String(value)}
+                      onChange={(newValue) => {
+                        const parsed = parseFloat(String(newValue))
+                        onChange(Number.isFinite(parsed) && parsed > 0 ? parsed : undefined)
+                      }}
+                    />
+                  )}
+                </Field>
+              </Group>
+            </div>
+          </>
+        ) : null}
+
+        {!inFrameAdminMode && !hideForCloud ? (
           <>
             <H6 id="frame-settings-ssh" className="mt-2">
               {isEmbeddedMode ? (
@@ -1965,64 +2455,71 @@ export function FrameSettings({
           </>
         ) : null}
 
-        <H6 id="frame-settings-backend" className="mt-2">
-          Backend access <span className="text-gray-500">(frame &#8594; backend)</span>
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Field
-            name="server_host"
-            label="Backend host"
-            tooltip={
-              <>
-                The public host of your FrameOS backend server (this webserver). This is what the frame uses to reach
-                the backend.
-              </>
-            }
-          >
-            <TextInput name="server_host" placeholder="localhost" required />
-          </Field>
-          <Field
-            name="server_port"
-            label="Backend port"
-            tooltip="The port the backend server is running on. Everything ending in 443 is assumed to be HTTPS."
-          >
-            <TextInput name="server_port" placeholder="8989" required />
-          </Field>
-          <Field
-            name="server_api_key"
-            label={<div>Backend API key</div>}
-            labelRight={
-              <Button
-                color="secondary"
-                size="small"
-                onClick={() => {
-                  setFrameFormValues({ server_api_key: secureToken(32) })
-                  touchFrameFormField('server_api_key')
-                }}
+        {/* "frame -> backend" reporting: a cloud frame talks only to the hub,
+            so the section is absent there (and so is its nav anchor — see
+            allowedFrameSettingsSections in workspaceSurfaces.ts). */}
+        {showBackendSection ? (
+          <>
+            <H6 id="frame-settings-backend" className="mt-2">
+              Backend access <span className="text-gray-500">(frame &#8594; backend)</span>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field
+                name="server_host"
+                label="Backend host"
+                tooltip={
+                  <>
+                    The public host of your FrameOS backend server (this webserver). This is what the frame uses to
+                    reach the backend.
+                  </>
+                }
               >
-                Regenerate
-              </Button>
-            }
-            tooltip="This key is used by the frame to access the backend server's API. For example to send logs. It should be kept secret."
-          >
-            <TextInput
-              name="server_api_key"
-              onClick={() => touchFrameFormField('server_api_key')}
-              type={frameFormTouches.server_api_key ? 'text' : 'password'}
-              placeholder=""
-              required
-            />
-          </Field>
-          <Field
-            name="server_send_logs"
-            label="Send logs to backend"
-            tooltip="When disabled, the frame will not upload logs to the backend API."
-          >
-            {({ value, onChange }) => (
-              <Switch name="server_send_logs" value={value ?? true} onChange={onChange} fullWidth />
-            )}
-          </Field>
-        </div>
+                <TextInput name="server_host" placeholder="localhost" required />
+              </Field>
+              <Field
+                name="server_port"
+                label="Backend port"
+                tooltip="The port the backend server is running on. Everything ending in 443 is assumed to be HTTPS."
+              >
+                <TextInput name="server_port" placeholder="8989" required />
+              </Field>
+              <Field
+                name="server_api_key"
+                label={<div>Backend API key</div>}
+                labelRight={
+                  <Button
+                    color="secondary"
+                    size="small"
+                    onClick={() => {
+                      setFrameFormValues({ server_api_key: secureToken(32) })
+                      touchFrameFormField('server_api_key')
+                    }}
+                  >
+                    Regenerate
+                  </Button>
+                }
+                tooltip="This key is used by the frame to access the backend server's API. For example to send logs. It should be kept secret."
+              >
+                <TextInput
+                  name="server_api_key"
+                  onClick={() => touchFrameFormField('server_api_key')}
+                  type={frameFormTouches.server_api_key ? 'text' : 'password'}
+                  placeholder=""
+                  required
+                />
+              </Field>
+              <Field
+                name="server_send_logs"
+                label="Send logs to backend"
+                tooltip="When disabled, the frame will not upload logs to the backend API."
+              >
+                {({ value, onChange }) => (
+                  <Switch name="server_send_logs" value={value ?? true} onChange={onChange} fullWidth />
+                )}
+              </Field>
+            </div>
+          </>
+        ) : null}
 
         <H6 id="frame-http-api-section">
           HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
@@ -2122,8 +2619,8 @@ export function FrameSettings({
               <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
                 <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
                 <div>
-                  Set an admin username and password before deploying ESP32 firmware. Without it, the on-frame setup
-                  URL is locked outside hotspot mode.
+                  Set an admin username and password before deploying ESP32 firmware. Without it, the on-frame setup URL
+                  is locked outside hotspot mode.
                 </div>
               </div>
             ) : null}
@@ -2885,7 +3382,7 @@ export function FrameSettings({
                   </div>
                 </>
               </Field>
-              {!inFrameAdminMode ? (
+              {!inFrameAdminMode && !hideForCloud ? (
                 <Field
                   name="upload_fonts"
                   label="Upload fonts"
@@ -3032,6 +3529,8 @@ export function FrameSettings({
             ))
           )}
         </div>
+          </>
+        ) : null}
       </Form>
     </div>
   )

@@ -5,6 +5,7 @@ import times
 import options
 import algorithm
 import frameos/utils/image
+import frameos/utils/paths
 import frameos/types
 import os, strutils
 import std/random
@@ -47,14 +48,14 @@ proc sortImagesAlphabetically(images: var seq[string]) =
 
 # Function to return all images in a folder
 proc getImagesInFolder(folder: string): seq[string] =
-  # if folder is a file
+  # An exact file path is honored as-is; only enumeration filters OS junk.
   if fileExists(folder):
     if isImage(folder):
       return @[""]
     return @[]
 
   var images: seq[string] = @[]
-  for file in walkDirRec(folder, relative = true):
+  for file in walkDirRecNoJunk(folder, relative = true):
     if isImage(file):
       images.add(file)
   return images
