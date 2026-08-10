@@ -342,6 +342,16 @@ type
     # stretch) and return it, skipping a full-size intermediate copy.
     decodeTargetImage*: Image
     decodeTargetScalingMode*: string
+    # Same hint, for a producer whose own node cache is on. Handing such a
+    # producer the live canvas is not allowed (its cache would hold the
+    # canvas and redraw it onto itself on every hit), but the decode still
+    # has to be bounded — a native-resolution intermediate is what OOMs an
+    # ESP32. The producer allocates this size itself, decodes into it with
+    # `decodeTargetScalingMode`, and caches that instead. Allocating here
+    # would waste a canvas-sized image on every cache HIT, when the
+    # producer never runs.
+    decodeTargetWidth*: int
+    decodeTargetHeight*: int
 
   # State field definitions. Used in interpreted scenes, and to show the right form to the user
   StateField* = ref object

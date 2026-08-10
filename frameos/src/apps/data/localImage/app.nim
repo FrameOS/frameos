@@ -171,14 +171,10 @@ proc decodeBoundsForContext(self: App, context: ExecutionContext):
   (0, 0)
 
 proc get*(self: App, context: ExecutionContext): Image =
-  # Consume the decode-into-canvas hint up front so every path below —
-  # including error frames — can reuse the canvas instead of allocating a
+  # Consume the decode-into-target hint up front so every path below —
+  # including error frames — can reuse that target instead of allocating a
   # second full-size image.
-  let decodeTarget = context.decodeTargetImage
-  let decodeScalingMode = context.decodeTargetScalingMode
-  if not decodeTarget.isNil:
-    context.decodeTargetImage = nil
-    context.decodeTargetScalingMode = ""
+  let (decodeTarget, decodeScalingMode) = context.takeDecodeTarget()
 
   if self.appConfig.search != self.lastSearch or self.appConfig.path != self.lastPath:
     self.init() # re-init if the query changes

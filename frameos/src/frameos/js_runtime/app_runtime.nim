@@ -47,6 +47,25 @@ type
 
 var jsAppEnvByCtx = initTable[ptr JSContext, JsAppEvalEnv]()
 
+proc teardownJsRuntime(runtime: JsAppRuntime) =
+  ## Close one JS app node's interpreter. Not embedded-only: JsAppRuntime has
+  ## no destructor, so a runtime that merely goes out of scope leaks its whole
+  ## QuickJS on every platform.
+  if runtime.isNil or not runtime.ready:
+    return
+  if not runtime.js.context.isNil:
+    if jsAppEnvByCtx.hasKey(runtime.js.context):
+      jsAppEnvByCtx.del(runtime.js.context)
+    # The transpiler's source map is held in a global keyed by context, and
+    # for a large app it is a bigger object than the QuickJS runtime itself.
+    # Dropping the runtime without this recovers only the interpreter.
+    clearJsSourceMaps(runtime.js.context)
+  runtime.js.close()
+  runtime.ready = false
+  runtime.initialized = false
+  runtime.images.clear()
+  runtime.transientImageIds.setLen(0)
+
 when defined(frameosEmbedded):
   # Every JS app node builds its own QuickJS runtime, and each one costs about
   # 580 KB of PSRAM: ~151 KB for the runtime itself, the rest for the prelude
@@ -63,22 +82,6 @@ when defined(frameosEmbedded):
   var liveJsRuntimes: seq[JsAppRuntime] = @[]
   var jsRuntimeStack: seq[JsAppRuntime] = @[]
   const JsEvictHeadroomBytes = 2 * 1024 * 1024
-
-  proc teardownJsRuntime(runtime: JsAppRuntime) =
-    if not runtime.ready:
-      return
-    if not runtime.js.context.isNil:
-      if jsAppEnvByCtx.hasKey(runtime.js.context):
-        jsAppEnvByCtx.del(runtime.js.context)
-      # The transpiler's source map is held in a global keyed by context, and
-      # for a large app it is a bigger object than the QuickJS runtime itself.
-      # Dropping the runtime without this recovers only the interpreter.
-      clearJsSourceMaps(runtime.js.context)
-    runtime.js.close()
-    runtime.ready = false
-    runtime.initialized = false
-    runtime.images.clear()
-    runtime.transientImageIds.setLen(0)
 
   proc evictIdleJsRuntimes(keep: JsAppRuntime) =
     let headroom = availableRenderBytes()
@@ -853,6 +856,32 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
 
 proc isDynamicJsApp*(app: AppRoot): bool =
   app of DynamicJsApp
+
+proc releaseJsAppRuntime*(app: AppRoot) =
+  ## Close a JS app node's interpreter as its scene is torn down.
+  ##
+  ## Scene cleanup has to call this explicitly. Dropping the app object is not
+  ## enough — JsAppRuntime owns raw QuickJS pointers and has no destructor —
+  ## and on embedded `liveJsRuntimes` holds a reference to every runtime it has
+  ## ever readied, so nothing about dropping the scene makes one collectable.
+  ## The cost is per NODE, not per scene: the bundled Weather scene builds four
+  ## (~148 KB of PSRAM each, measured with -d:memProbe), so a frame cycling
+  ## between two JS scenes used to shed a few hundred KB per switch and reboot
+  ## itself after about seven.
+  if not (app of DynamicJsApp):
+    return
+  let runtime = DynamicJsApp(app).runtime
+  if runtime.isNil:
+    return
+  when defined(frameosEmbedded):
+    # Never pull the rug from under a runtime that is mid-call; scene teardown
+    # runs between renders, so this is belt-and-braces.
+    if jsRuntimeStack.contains(runtime):
+      return
+    let live = liveJsRuntimes.find(runtime)
+    if live >= 0:
+      liveJsRuntimes.delete(live)
+  teardownJsRuntime(runtime)
 
 proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
   let dynamicApp = DynamicJsApp(app)

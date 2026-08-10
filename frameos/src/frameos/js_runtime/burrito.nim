@@ -1054,6 +1054,11 @@ proc close*(js: var QuickJS) =
 
   # Free Nim-side data last
   if js.contextData != nil:
+    # BurritoContextData is raw memory (alloc0/dealloc), but it holds a Nim
+    # Table whose payload is heap-allocated. dealloc frees the struct without
+    # running that field's destructor, so every close() used to leak the
+    # function registry's seq. Reset it first, while it is still typed.
+    reset(js.contextData.functions)
     dealloc(js.contextData)
     js.contextData = nil
 

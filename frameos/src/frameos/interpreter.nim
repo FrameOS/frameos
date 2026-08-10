@@ -362,8 +362,16 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       # the hint, that producer may decode straight into the canvas instead
       # of returning a full-size intermediate. Restricting to direct, known
       # producers keeps the hint away from transformer chains (resizeImage,
-      # rotateImage, code nodes) whose output is not the final canvas, and
-      # away from node caches that would otherwise store the live canvas.
+      # rotateImage, code nodes) whose output is not the final canvas.
+      #
+      # A producer with its OWN node cache on cannot be handed the live canvas
+      # — the cache would hold it and redraw it onto itself on every hit — but
+      # it still must not decode at native resolution: every shipped photo
+      # scene (all five gallery scenes, Immich, Google Photos, XKCD) caches its
+      # producer, so that exclusion alone left them decoding 1024x1024 sources
+      # whole and blowing the ESP32 decode budget. Those get the canvas-SIZED
+      # hint instead: same fit, same result, a canvas-sized image the cache can
+      # safely own.
       # The list also carries full-frame GENERATORS whose get() renders into
       # the hint target (they fill their background, so the canvas contents
       # never bleed through): a generated 1200x1600 intermediate is the same
@@ -384,6 +392,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       ]
       var setDecodeTargetHint = false
       var directImageProducer = false
+      var producerCached = false
       if keyword == "render/image" and not asDataNode and cacheEnabled == false and
           self.appInputsForNodeId.hasKey(currentNodeId) and
           self.appInputsForNodeId[currentNodeId].hasKey("image"):
@@ -393,11 +402,13 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           if producerNode.nodeType == "app" and
               producerNode.data{"keyword"}.getStr() in decodeTargetProducers:
             let (producerCache, _, _, _, _, _) = readCacheConfig(producerNode)
-            directImageProducer = not producerCache
+            directImageProducer = true
+            producerCached = producerCache
       if directImageProducer and
           context.hasImage and not context.image.isNil and
-          context.decodeTargetImage.isNil:
+          context.decodeTargetImage.isNil and context.decodeTargetWidth == 0:
         var placement = ""
+        var blend = ""
         var fullFrameDraw = true
         let config = currentNode.data{"config"}
         if config != nil and config.kind == JObject:
@@ -408,7 +419,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               if (offset.kind == JString and offset.getStr() notin ["", "0"]) or
                   (offset.kind == JInt and offset.getInt() != 0):
                 fullFrameDraw = false
-          let blend = config{"blendMode"}.getStr("")
+          blend = config{"blendMode"}.getStr("")
           if blend notin ["", "normal", "overwrite"]:
             fullFrameDraw = false
         if self.appInputsForNodeId.hasKey(currentNodeId):
@@ -436,9 +447,21 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           # placement means the schema default (config.json: "cover").
           placement = "cover"
         if fullFrameDraw and placement in ["cover", "contain", "stretch"]:
-          context.decodeTargetImage = context.image
-          context.decodeTargetScalingMode = placement
-          setDecodeTargetHint = true
+          if not producerCached:
+            context.decodeTargetImage = context.image
+            context.decodeTargetScalingMode = placement
+            setDecodeTargetHint = true
+          elif not (placement == "contain" and blend == "overwrite"):
+            # Canvas-sized, allocated by the producer. render/image then draws
+            # a same-size source, which is a plain draw — identical output to
+            # fitting the native-size image here. The one shape that is NOT
+            # identical is contain + overwrite: the live-canvas path leaves the
+            # letterbox margins alone, while a scratch would carry its own
+            # transparent margins over the canvas.
+            context.decodeTargetWidth = context.image.width
+            context.decodeTargetHeight = context.image.height
+            context.decodeTargetScalingMode = placement
+            setDecodeTargetHint = true
 
       # ---- Wire inputs AND (if enabled) build an input-key JSON alongside ----
       var builtInputKey = %*{} # JObject; only meaningful when cacheInputEnabled = true and there are inputs
@@ -521,6 +544,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       if setDecodeTargetHint:
         context.decodeTargetImage = nil
         context.decodeTargetScalingMode = ""
+        context.decodeTargetWidth = 0
+        context.decodeTargetHeight = 0
 
       if asDataNode and cacheEnabled:
         var cacheExprActive = false
@@ -1123,9 +1148,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
         "targetHandle": edge.targetHandle})
 
-  ## Ensure one JS context per scene and precompile functions
-  ensureSceneJs(scene)
-
+  ## Precompile functions. The JS context is built on demand, not here:
+  ## compileAppInlineFn/compileCodeFn/evalOneShot each call ensureSceneJs
+  ## themselves, so eagerly building one here only ever cost scenes that turn
+  ## out to have no code nodes and no inline JS at all — a whole QuickJS
+  ## runtime for nothing. That matters most for nested scenes, where the
+  ## purely structural wrapper is the common case and every level used to pay.
   # Precompile functions for inline app/scene inputs (for all nodes that have them)
   for nodeId, inlineMap in scene.appInlineInputsForNodeId:
     for inputName, snippet in inlineMap.pairs:

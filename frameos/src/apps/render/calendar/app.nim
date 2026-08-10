@@ -5,6 +5,7 @@ import algorithm
 
 import frameos/apps
 import frameos/types
+import frameos/utils/app_images
 import frameos/utils/font
 
 proc daysInMonth(year, month: int): int =
@@ -607,19 +608,21 @@ proc run*(self: App, context: ExecutionContext) =
   render(self, context, context.image)
 
 proc get*(self: App, context: ExecutionContext): Image =
-  result = if self.appConfig.inputImage.isSome:
-    self.appConfig.inputImage.get()
-  elif not context.decodeTargetImage.isNil:
-    # The interpreter's into-canvas hint: this node feeds a full-frame
-    # render/image directly, so draw into the canvas instead of allocating
-    # a second full-frame image (render() fills the background first).
-    # Consume the hint so nothing downstream reuses the live canvas.
-    let target = context.decodeTargetImage
-    context.decodeTargetImage = nil
-    context.decodeTargetScalingMode = ""
-    target
-  elif context.hasImage:
-    newImage(context.image.width, context.image.height)
-  else:
-    newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
+  result =
+    if self.appConfig.inputImage.isSome:
+      # An explicit input image wins, and leaves the hint for nobody: do not
+      # consume it here.
+      self.appConfig.inputImage.get()
+    else:
+      # The interpreter's decode-target hint: this node feeds a full-frame
+      # render/image directly, so draw into the target it named instead of
+      # allocating a second full-frame image (render() fills the background
+      # first). Consume it so nothing downstream reuses the live canvas.
+      let (target, _) = context.takeDecodeTarget()
+      if not target.isNil:
+        target
+      elif context.hasImage:
+        newImage(context.image.width, context.image.height)
+      else:
+        newImage(self.frameConfig.renderWidth(), self.frameConfig.renderHeight())
   render(self, context, result)

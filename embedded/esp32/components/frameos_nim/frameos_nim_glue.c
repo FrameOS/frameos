@@ -679,7 +679,16 @@ size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
 
 void frameos_nim_log_hook(const char *msg)
 {
-    ESP_LOGI("nim", "%s", msg ? msg : "");
+    /* printf, not ESP_LOGI: every FrameOS profile builds with
+     * CONFIG_LOG_MAXIMUM_LEVEL=WARN, so the INFO macro this used to be
+     * compiled to nothing — no shipped firmware has ever put a device log
+     * line on the serial console. That console is the last-resort sink, the
+     * one that still works when the backend upload is off, when the cloud
+     * session lacks telemetry:logs, or when there is no network at all, so it
+     * has to carry these unconditionally. Interleaving with a usb_api base64
+     * payload is expected and handled: the browser drops non-base64 lines,
+     * verifies the declared length and retries the transfer. */
+    printf("%s\n", msg ? msg : "");
     queue_log_line(msg);
     ring_log_line(msg);
     /* The tap runs on whatever task logged; the cloud client's tap only
