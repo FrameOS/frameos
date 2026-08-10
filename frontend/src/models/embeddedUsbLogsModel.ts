@@ -98,26 +98,32 @@ function serialErrorMessage(error: unknown): string {
   return detail || 'USB serial log stream failed.'
 }
 
-function usbLog(line: string, frameId: FrameId, type = 'usb'): LogType {
+function usbLog(line: string, frameId: FrameId, type = 'usb', timestamp?: string): LogType {
   return {
     id: nextUsbLogId--,
     frame_id: frameId,
     ip: 'usb',
     line,
-    timestamp: new Date().toISOString(),
+    timestamp: timestamp ?? new Date().toISOString(),
     type,
   }
 }
 
-function appendUsbLine(frameId: FrameId, line: string, type = 'usb'): void {
+function appendUsbLine(frameId: FrameId, line: string, type = 'usb', timestamp?: string): void {
   if (line.length === 0) {
     return
   }
-  embeddedUsbLogsModel.actions.appendUsbLog(usbLog(line, frameId, type))
+  embeddedUsbLogsModel.actions.appendUsbLog(usbLog(line, frameId, type, timestamp))
 }
 
-export function appendEmbeddedUsbLogLine(frameId: FrameId, line: string, type = 'usb'): void {
-  appendUsbLine(frameId, line, type)
+/**
+ * Append a line to a frame's USB log view. `timestamp` overrides "now", which
+ * matters for replayed history: the device's log ring carries the epoch each
+ * line was written at, and stamping those with the fetch time would file
+ * yesterday's boot under this minute.
+ */
+export function appendEmbeddedUsbLogLine(frameId: FrameId, line: string, type = 'usb', timestamp?: string): void {
+  appendUsbLine(frameId, line, type, timestamp)
 }
 
 /** Append a line that came off the device's console, minus the wire protocol. */
@@ -1263,6 +1269,52 @@ export async function usbLogsTail(frameId: FrameId): Promise<EmbeddedUsbLogEntry
       }
       return { epoch: match[1] === '-' ? null : Number(match[1]), line: match[2] }
     })
+}
+
+/**
+ * Fetch the device's own log ring and replay it into this frame's USB log view.
+ *
+ * The serial stream only carries what the board printed while a browser was
+ * attached, which is never the interesting part: by the time anyone opens the
+ * logs, whatever went wrong has already scrolled past — or happened before the
+ * cable was plugged in. The firmware keeps the last FOS_NIM_LOG_RING_CAP lines
+ * regardless of who is listening, and `usb_api logs` is the only way to read
+ * them. It needs an explicit request because it is a point-in-time snapshot,
+ * not a stream.
+ *
+ * Lines are stamped with the epoch the DEVICE recorded, so replayed history
+ * files itself under when it happened. Entries from before the board had a
+ * synced clock come back with no epoch; those keep the fetch time, which is
+ * wrong but monotonic, and the marker lines around the batch say so.
+ */
+export async function loadEmbeddedUsbLogHistory(frameId: FrameId): Promise<number> {
+  appendUsbLine(frameId, '[USB API] reading the device log ring')
+  let entries: EmbeddedUsbLogEntry[]
+  try {
+    entries = await usbLogsTail(frameId)
+  } catch (error) {
+    appendUsbLine(frameId, `[USB API] could not read the device log ring: ${serialErrorMessage(error)}`)
+    throw error
+  }
+  if (entries.length === 0) {
+    appendUsbLine(frameId, '[USB API] the device log ring is empty')
+    return 0
+  }
+  let undated = 0
+  for (const entry of entries) {
+    const timestamp = entry.epoch === null ? undefined : new Date(entry.epoch * 1000).toISOString()
+    if (entry.epoch === null) {
+      undated += 1
+    }
+    appendUsbLine(frameId, entry.line, 'usb-history', timestamp)
+  }
+  appendUsbLine(
+    frameId,
+    undated > 0
+      ? `[USB API] replayed ${entries.length} line(s) from the device log ring; ${undated} predate its clock sync and show the time they were read`
+      : `[USB API] replayed ${entries.length} line(s) from the device log ring`
+  )
+  return entries.length
 }
 
 /**

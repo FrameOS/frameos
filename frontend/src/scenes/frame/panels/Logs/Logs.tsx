@@ -8,13 +8,15 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { Spinner } from '../../../../components/Spinner'
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/solid'
-import { ChevronRightIcon, CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
+import { ChevronRightIcon, ClockIcon, CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
 import { EMBEDDED_ESP32_S3 } from '../../../../devices'
 import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
 import { frameSupportsUsbSerialConsole, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import {
   embeddedUsbLogsModel,
+  ensureEmbeddedUsbApiPort,
   isEmbeddedUsbLogStreamOpen,
+  loadEmbeddedUsbLogHistory,
   sendEmbeddedUsbConsoleCommand,
   startEmbeddedUsbLogStream,
 } from '../../../../models/embeddedUsbLogsModel'
@@ -316,6 +318,12 @@ function logTypeClassName(type: string, theme: WorkspaceTheme): string {
   if (type === 'usb') {
     return theme === 'dark' ? 'text-emerald-200' : 'text-emerald-700'
   }
+  if (type === 'usb-history') {
+    // Dimmer than live output on purpose: these lines were replayed out of the
+    // device's ring, so they sit in the list at the time they HAPPENED, which
+    // is usually well above whatever was streaming when they arrived.
+    return theme === 'dark' ? 'text-emerald-400/80' : 'text-emerald-800/80'
+  }
   return theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
 }
 
@@ -327,6 +335,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
   const { stopUsbLogStream } = useActions(embeddedUsbLogsModel)
   const [atBottom, setAtBottom] = useState(true)
+  const [historyLoading, setHistoryLoading] = useState(false)
   const [expandedMetricLogIds, setExpandedMetricLogIds] = useState<number[]>([])
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const shouldStickToBottomRef = useRef(true)
@@ -481,6 +490,27 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     await startEmbeddedUsbLogStream(frameId)
   }
 
+  // The device remembers its last lines whether or not anyone was attached;
+  // the live stream only shows what it printed since we connected. This is
+  // how you find out what happened before the cable went in.
+  const loadUsbLogHistory = async (): Promise<void> => {
+    if (historyLoading) {
+      return
+    }
+    setHistoryLoading(true)
+    try {
+      if (await ensureEmbeddedUsbApiPort(frameId)) {
+        await loadEmbeddedUsbLogHistory(frameId)
+        scrollToLatest()
+      }
+    } catch (error) {
+      // loadEmbeddedUsbLogHistory already put the reason in the log view,
+      // which is where someone reading logs will look for it.
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
   const submitCommand = async (): Promise<void> => {
     const line = command.trim()
     if (!line || commandSending) {
@@ -501,6 +531,16 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   }
 
   const menuItems = [
+    ...(showUsbLogControls
+      ? [
+          {
+            label: 'Load device log history',
+            onClick: loadUsbLogHistory,
+            icon: historyLoading ? <Spinner color="white" className="w-4 h-4" /> : <ClockIcon className="w-5 h-5" />,
+            loading: historyLoading,
+          },
+        ]
+      : []),
     {
       label: 'Download log',
       onClick: downloadLog,
@@ -811,6 +851,13 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
             logLine = (
               <>
                 <span className={renderTheme === 'dark' ? 'text-emerald-300' : 'text-emerald-700'}>{'[USB]'}</span>{' '}
+                {logLine}
+              </>
+            )
+          } else if (log.type === 'usb-history') {
+            logLine = (
+              <>
+                <span className={renderTheme === 'dark' ? 'text-emerald-500' : 'text-emerald-800'}>{'[USB ring]'}</span>{' '}
                 {logLine}
               </>
             )
