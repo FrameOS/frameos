@@ -127,17 +127,47 @@ table. What was still open there, mostly nice-to-have:
 
 ### Startup cost
 
-- **Parse and transpile scenes at deploy time, not on every boot.** After
-  #322 one app transpile is 3.3 s (11 KB source) or 10.2 s (36 KB) on an
-  ESP32-S3, and a frame pays it again on every boot and every scene reload
-  for sources that never change — it is what makes the first render after a
-  boot the worst one. Doing it upstream (the frontend already bundles
-  esbuild, the cloud has typescript) would also let the transpiler be
-  compiled out of the firmware: transpiler + tokens + parser + source_map +
-  token_processor are ~92 KB of object code, against ~420 KB left in the OTA
-  slot. Cheaper interim with no format change: cache the transpiled output on
-  flash keyed by a hash of the source, so the cost is once-ever rather than
-  once-per-boot.
+- **Flashing the bench 7.3" PhotoPainter: use 0x10000, not 0x20000.** That
+  board carries the **8 MB** layout (`partitions.csv`: otadata 0xd000, ota_0
+  0x10000, ota_1 0x380000) while `build-pp73` is configured for
+  `partitions_ota_16mb.csv` (otadata 0xf000, ota_0 0x20000). An app-only
+  `write_flash 0x20000` lands in the middle of ota_0, the image is never
+  found, and the bootloader silently keeps running the *old* app from ota_1 —
+  esptool reports "Hash of data verified" either way. This cost a full day of
+  measurement in 2026-08: two firmwares were "flashed" and compared, and both
+  runs were the same untouched binary, which then read as "the fix does
+  nothing" and "`-d:memProbe` is broken". **After every flash, check the boot
+  log for `boot: Loaded app from partition at offset ...` and confirm the
+  slot.** `esp_image: image at 0x10000 has invalid magic byte` in that log
+  means the write went to the wrong offset.
+- **Serial drops output during CPU-bound bursts.** The USB-Serial-JTAG
+  console loses lines while `fos_client` holds the CPU — the transpile window
+  in a cold boot comes back as a 16 s gap with corrupted joins
+  (`MEMMEMPROBE`, `MEMrender`). Absence of a probe line is not evidence the
+  probe did not fire. Read with a tight poll loop and expect to repeat the
+  capture.
+- **Parse and transpile scenes at deploy time, not on every boot.** Measured
+  on the bench 7.3" PhotoPainter with `-d:memProbe`, after the allocation fix
+  (#329): weatherIcons 11 KB = **0.55 s**, weatherPanel 36 KB = **1.38 s**,
+  and the panel is transpiled twice because each node builds its own runtime
+  — **~3.3 s per boot**, then `transpile CACHED` on every later render. The
+  older 3.3 s / 10.2 s figures look like genuine measurements of the *pre-fix*
+  transpiler (2 x 10.2 + 3.3 lands on the ~24 s cold-vs-warm delta that
+  firmware showed), so the fix appears to be worth roughly 7x on device — but
+  the old binary was overwritten before it could be re-instrumented, so treat
+  the comparison as inferred rather than measured. What is measured on the
+  host: 724,572 heap allocations for the 36 KB app (19.9 per source byte, all
+  through ESP-IDF multi_heap against PSRAM) down to 16,709 (0.46/byte), and
+  14.2 ms -> 4.5 ms, with byte-identical output.
+  **This changes the case for deploy-time transpilation**: it now saves ~3 s
+  per boot, not ~24 s, against ~92 KB of transpiler object code (unverified —
+  one reading of `frameos_esp32.map` put the five modules nearer 78 KB) and
+  ~420 KB left in the OTA slot. Cheapest win left is free: the two
+  weatherPanel nodes transpile the same source twice, so caching per source
+  hash halves what remains. For scale, a cold boot only costs ~6 s more than a
+  warm render (3.3 s transpile + ~1.7 s Open-Meteo fetch + ~0.6 s scene load);
+  the real per-render costs are SVG rasterization (7-8 s for the two weather
+  SVGs), dither+pack (3.2 s) and the panel refresh (~29 s).
 - **`compileToBytecode` serialises the wrong object.** It asked for
   `JS_EVAL_FLAG_COMPILE_ONLY`, which burrito.nim declared one bit too high —
   that value is `JS_EVAL_FLAG_BACKTRACE_BARRIER` in the bundled quickjs.h — so

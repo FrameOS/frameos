@@ -125,12 +125,22 @@ proc decodeJsxEntities(s: string): string =
     i = semi + 1
 
 proc startsWordAt(code: string, i: int, word: string): bool =
-  if i < 0 or i + word.len > code.len:
+  ## Hot: the erasure passes probe this at nearly every byte, and
+  ## stripTypeScriptModifiers alone probes seven words per byte. It used to
+  ## compare with `code.substr(...) != word`, which heap-allocates the slice
+  ## before looking at a single character — 698k malloc/free pairs for one
+  ## 36 KB app. On the ESP32 those go through ESP-IDF multi_heap against PSRAM,
+  ## which is what made a transpile cost seconds rather than milliseconds.
+  ## Compare in place instead, cheapest discriminator first.
+  if word.len == 0 or i < 0 or i + word.len > code.len:
     return false
-  if code.substr(i, i + word.len - 1) != word:
+  if code[i] != word[0]:
     return false
   if i > 0 and isIdentPart(code[i - 1]):
     return false
+  for k in 1 ..< word.len:
+    if code[i + k] != word[k]:
+      return false
   let after = i + word.len
   after >= code.len or not isIdentPart(code[after])
 
@@ -142,8 +152,22 @@ proc readIdentifier(code: string, i: var int): string =
       inc i
   code[start..<i]
 
-proc copyQuoted(code: string, i: var int, quote: char): string =
-  let start = i
+proc addSpan(dest: var string, code: string, start, finish: int) =
+  ## Append `code[start ..< finish]` without materialising a temporary slice.
+  ## The erasure passes copy every string, comment and template literal through
+  ## on their way to the output; going via a fresh string each time is one heap
+  ## allocation per literal, per pass.
+  if finish <= start:
+    return
+  let count = finish - start
+  let at = dest.len
+  dest.setLen(at + count)
+  copyMem(addr dest[at], unsafeAddr code[start], count)
+
+# The scan* procs only advance `i`. copy*/add*/skip* are the three things the
+# callers actually want, and none of them needs to allocate to find the end.
+
+proc scanQuoted(code: string, i: var int, quote: char) =
   inc i
   while i < code.len:
     if code[i] == '\\':
@@ -153,36 +177,21 @@ proc copyQuoted(code: string, i: var int, quote: char): string =
       break
     else:
       inc i
-  code[start..<i]
 
-proc skipQuoted(code: string, i: var int, quote: char) =
-  discard copyQuoted(code, i, quote)
-
-proc copyLineComment(code: string, i: var int): string =
-  let start = i
+proc scanLineComment(code: string, i: var int) =
   i += 2
   while i < code.len and code[i] notin {'\n', '\r'}:
     inc i
-  code[start..<i]
 
-proc skipLineComment(code: string, i: var int) =
-  discard copyLineComment(code, i)
-
-proc copyBlockComment(code: string, i: var int): string =
-  let start = i
+proc scanBlockComment(code: string, i: var int) =
   i += 2
   while i + 1 < code.len:
     if code[i] == '*' and code[i + 1] == '/':
       i += 2
       break
     inc i
-  code[start..<i]
 
-proc skipBlockComment(code: string, i: var int) =
-  discard copyBlockComment(code, i)
-
-proc copyTemplate(code: string, i: var int): string =
-  let start = i
+proc scanTemplate(code: string, i: var int) =
   inc i
   while i < code.len:
     if code[i] == '\\':
@@ -192,10 +201,58 @@ proc copyTemplate(code: string, i: var int): string =
       break
     else:
       inc i
+
+proc copyQuoted(code: string, i: var int, quote: char): string =
+  let start = i
+  scanQuoted(code, i, quote)
   code[start..<i]
 
+proc addQuoted(dest: var string, code: string, i: var int, quote: char) =
+  let start = i
+  scanQuoted(code, i, quote)
+  dest.addSpan(code, start, i)
+
+proc skipQuoted(code: string, i: var int, quote: char) =
+  scanQuoted(code, i, quote)
+
+proc copyLineComment(code: string, i: var int): string =
+  let start = i
+  scanLineComment(code, i)
+  code[start..<i]
+
+proc addLineComment(dest: var string, code: string, i: var int) =
+  let start = i
+  scanLineComment(code, i)
+  dest.addSpan(code, start, i)
+
+proc skipLineComment(code: string, i: var int) =
+  scanLineComment(code, i)
+
+proc copyBlockComment(code: string, i: var int): string =
+  let start = i
+  scanBlockComment(code, i)
+  code[start..<i]
+
+proc addBlockComment(dest: var string, code: string, i: var int) =
+  let start = i
+  scanBlockComment(code, i)
+  dest.addSpan(code, start, i)
+
+proc skipBlockComment(code: string, i: var int) =
+  scanBlockComment(code, i)
+
+proc copyTemplate(code: string, i: var int): string =
+  let start = i
+  scanTemplate(code, i)
+  code[start..<i]
+
+proc addTemplate(dest: var string, code: string, i: var int) =
+  let start = i
+  scanTemplate(code, i)
+  dest.addSpan(code, start, i)
+
 proc skipTemplate(code: string, i: var int) =
-  discard copyTemplate(code, i)
+  scanTemplate(code, i)
 
 proc findMatching(code: string, openIndex: int, openCh: char, closeCh: char): int =
   var i = openIndex
@@ -453,19 +510,20 @@ proc lowerEnumDeclaration(code: string, start: int): tuple[code: string, next: i
   result.next = close + 1
 
 proc lowerEnums(code: string): string =
+  result = newStringOfCap(code.len)
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
-      result.add(copyTemplate(code, i))
+      result.addTemplate(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
 
     if startsWordAt(code, i, "enum") or
@@ -641,17 +699,17 @@ proc stripParamTypes(params: string): string =
   while i < params.len:
     case params[i]
     of '\'', '"':
-      result.add(copyQuoted(params, i, params[i]))
+      result.addQuoted(params, i, params[i])
       continue
     of '`':
-      result.add(copyTemplate(params, i))
+      result.addTemplate(params, i)
       continue
     of '/':
       if i + 1 < params.len and params[i + 1] == '/':
-        result.add(copyLineComment(params, i))
+        result.addLineComment(params, i)
         continue
       if i + 1 < params.len and params[i + 1] == '*':
-        result.add(copyBlockComment(params, i))
+        result.addBlockComment(params, i)
         continue
     of '{':
       inc braceDepth
@@ -678,19 +736,20 @@ proc stripParamTypes(params: string): string =
     inc i
 
 proc stripFunctionAndArrowTypes(code: string): string =
+  result = newStringOfCap(code.len)
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
-      result.add(copyTemplate(code, i))
+      result.addTemplate(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
 
     if startsWordAt(code, i, "function"):
@@ -727,6 +786,7 @@ proc stripFunctionAndArrowTypes(code: string): string =
     inc i
 
 proc stripTypeParametersAndArguments(code: string): string =
+  result = newStringOfCap(code.len)
   proc isLikelyTypeList(raw: string): bool =
     let content = raw.strip()
     if content.len == 0:
@@ -741,16 +801,16 @@ proc stripTypeParametersAndArguments(code: string): string =
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
-      result.add(copyTemplate(code, i))
+      result.addTemplate(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
 
     if code[i] == '<':
@@ -779,20 +839,21 @@ proc stripTypeParametersAndArguments(code: string): string =
     inc i
 
 proc stripTypeScriptModifiers(code: string): string =
+  result = newStringOfCap(code.len)
   let modifiers = ["public", "private", "protected", "abstract", "readonly", "override", "declare"]
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
-      result.add(copyTemplate(code, i))
+      result.addTemplate(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
     var removed = false
     for modifier in modifiers:
@@ -809,6 +870,7 @@ proc stripTypeScriptModifiers(code: string): string =
     inc i
 
 proc stripMethodAndMemberTypes(code: string): string =
+  result = newStringOfCap(code.len)
   proc isLikelyMemberTypeColon(colonIndex: int): bool =
     var lineStart = colonIndex - 1
     while lineStart >= 0 and code[lineStart] notin {'\n', '\r', '{', ';'}:
@@ -875,16 +937,16 @@ proc stripMethodAndMemberTypes(code: string): string =
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
-      result.add(copyTemplate(code, i))
+      result.addTemplate(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
 
     if code[i] == '(' and isLikelyMethodParen(i):
@@ -928,6 +990,7 @@ proc stripMethodAndMemberTypes(code: string): string =
     inc i
 
 proc stripVarTypes(code: string): string =
+  result = newStringOfCap(code.len)
   var i = 0
   var inVarDecl = false
   var inInitializer = false
@@ -936,16 +999,16 @@ proc stripVarTypes(code: string): string =
   var parenDepth = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
-      result.add(copyTemplate(code, i))
+      result.addTemplate(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
 
     if startsWordAt(code, i, "const") or startsWordAt(code, i, "let") or startsWordAt(code, i, "var"):
@@ -1001,6 +1064,7 @@ proc stripVarTypes(code: string): string =
     inc i
 
 proc stripAsAssertions(code: string): string =
+  result = newStringOfCap(code.len)
   proc isLikelyAssertionTypeStart(code: string, i: int): bool =
     i < code.len and (isIdentStart(code[i]) or code[i] in {'{', '[', '(', '\'', '"'})
 
@@ -1013,16 +1077,16 @@ proc stripAsAssertions(code: string): string =
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
-      result.add(copyTemplate(code, i))
+      result.addTemplate(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
     if startsWordAt(code, i, "import"):
       let endStmt = findStatementEnd(code, i)
@@ -1093,19 +1157,20 @@ proc copyTemplateWithTransformedExpressions(code: string, i: var int): string =
     inc i
 
 proc transformTemplateLiteralTypes(code: string): string =
+  result = newStringOfCap(code.len)
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
       result.add(copyTemplateWithTransformedExpressions(code, i))
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
     result.add(code[i])
     inc i
@@ -1157,19 +1222,20 @@ proc looksLikeInterfaceDeclarationAt(code: string, i: int): bool =
   j < code.len and code[j] == '{'
 
 proc stripTypeOnlyStatements(code: string): string =
+  result = newStringOfCap(code.len)
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
-      result.add(copyTemplate(code, i))
+      result.addTemplate(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
 
     if looksLikeInterfaceDeclarationAt(code, i) or
@@ -1198,19 +1264,20 @@ proc stripTypeOnlyStatements(code: string): string =
     inc i
 
 proc stripDeclareStatements(code: string): string =
+  result = newStringOfCap(code.len)
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
       result.add(copyTemplateWithTransformedExpressions(code, i))
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
 
     if startsWordAt(code, i, "declare"):
@@ -1240,6 +1307,7 @@ proc stripDeclareStatements(code: string): string =
     inc i
 
 proc transformConstructorParameterProperties(code: string): string =
+  result = newStringOfCap(code.len)
   proc transformParams(params: string): tuple[code: string, assignments: seq[string]] =
     let parts = splitTopLevelCommaList(params)
     for index, part in parts:
@@ -1282,16 +1350,16 @@ proc transformConstructorParameterProperties(code: string): string =
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
       result.add(copyTemplateWithTransformedExpressions(code, i))
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
 
     if startsWordAt(code, i, "constructor"):
@@ -1432,19 +1500,20 @@ proc tokenStripTypeScriptErasure(code: string): string =
   processor.finish().code
 
 proc stripAbstractMembers(code: string): string =
+  result = newStringOfCap(code.len)
   var i = 0
   while i < code.len:
     if code[i] in {'\'', '"'}:
-      result.add(copyQuoted(code, i, code[i]))
+      result.addQuoted(code, i, code[i])
       continue
     if code[i] == '`':
       result.add(copyTemplateWithTransformedExpressions(code, i))
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '/':
-      result.add(copyLineComment(code, i))
+      result.addLineComment(code, i)
       continue
     if code[i] == '/' and i + 1 < code.len and code[i + 1] == '*':
-      result.add(copyBlockComment(code, i))
+      result.addBlockComment(code, i)
       continue
 
     if startsWordAt(code, i, "abstract"):
