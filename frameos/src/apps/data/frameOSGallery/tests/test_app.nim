@@ -106,6 +106,30 @@ suite "data/frameOSGallery decode-into-canvas hint":
     check context.decodeTargetImage.isNil
     check context.decodeTargetScalingMode == ""
 
+  test "a sized hint is allocated here, not taken from the canvas":
+    let previousHook = galleryDownloadHook
+    galleryDownloadHook = recordingGalleryDownload
+    defer: galleryDownloadHook = previousHook
+
+    # What the interpreter sends when this node's own cache is on: the live
+    # canvas cannot be handed over (the cache would own it), but the decode
+    # still has to be bounded to canvas size.
+    let canvas = newImage(8, 4)
+    let context = ExecutionContext(
+      image: canvas, hasImage: true,
+      decodeTargetWidth: 8, decodeTargetHeight: 4, decodeTargetScalingMode: "cover"
+    )
+    discard newApp("contain").get(context)
+
+    check not galleryHookTarget.isNil
+    check galleryHookTarget != canvas
+    check galleryHookTarget.width == 8
+    check galleryHookTarget.height == 4
+    check galleryHookFit == fitCover
+    check context.decodeTargetWidth == 0
+    check context.decodeTargetHeight == 0
+    check context.decodeTargetScalingMode == ""
+
   test "without a hint it does not decode into the canvas":
     let previousHook = galleryDownloadHook
     galleryDownloadHook = recordingGalleryDownload

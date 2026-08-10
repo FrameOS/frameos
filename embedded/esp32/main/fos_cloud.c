@@ -1807,8 +1807,19 @@ static void ws_handle_message(const char *data, size_t len)
         s_ws_ready = true;
         s_ws_auth_failures = 0; /* a completed handshake clears the streak */
         ws_backoff_reset();
-        ESP_LOGI(TAG, "ws: session ready (logs %s)",
-                 logs_granted ? "granted" : "not granted");
+        /* Through the log hook, not ESP_LOGI: which scopes this session got
+         * is the first thing to check when a frame "sends no logs", and an
+         * INFO line is compiled out at CONFIG_LOG_MAXIMUM_LEVEL=WARN. The
+         * hook prints to the console, so the answer is on the USB serial
+         * stream even in the not-granted case that keeps it off the wire. */
+        char event[192];
+        snprintf(event, sizeof(event),
+                 "{\"event\":\"cloud:session_ready\",\"source\":\"esp32\","
+                 "\"logs\":%s,\"metrics\":%s,\"serviceSettings\":%s}",
+                 logs_granted ? "true" : "false",
+                 metrics_granted ? "true" : "false",
+                 service_settings_granted ? "true" : "false");
+        frameos_nim_log_hook(event);
     } else if (strcmp(type, "get_state") == 0) {
         ws_ack(id, true, NULL);
         ws_send_state(id);
