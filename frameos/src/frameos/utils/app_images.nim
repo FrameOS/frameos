@@ -97,6 +97,18 @@ proc downloadImageForTarget*(url: string, maxBytes: int, target: Image = nil,
     return downloadImageInto(url, target, maxBytes = maxBytes, headers = headers, fit = fit)
   downloadImage(url, maxBytes = maxBytes, headers = headers)
 
+when defined(testing):
+  ## Test seam for the download-based image producers (downloadImage,
+  ## unsplash, immich, googlePhotos, openaiImage, wikicommons). data/frameOS-
+  ## Gallery exposes its own `galleryDownloadHook`; everything else funnels
+  ## through downloadImageWithDataForContext below, and without a seam here a
+  ## test cannot observe what the interpreter handed them — which is exactly
+  ## the invariant worth pinning, since an unhinted producer decodes at native
+  ## resolution on embedded. Compiled out of real builds.
+  type ContextDownloadHook* = proc(url: string, maxBytes: int, target: Image,
+    fit: ScaledDecodeFit): tuple[image: Image, data: string]
+  var contextDownloadHook*: ContextDownloadHook = nil
+
 proc downloadImageWithDataForContext*(self: AppRoot, context: ExecutionContext, url: string,
     maxBytes = 0, headers: seq[SimpleHttpHeader] = @[], fallbackWidth = 0,
     fallbackHeight = 0): tuple[image: Image, data: string] =
@@ -124,6 +136,11 @@ proc downloadImageWithDataForContext*(self: AppRoot, context: ExecutionContext, 
     else: self.maxImageResponseBytes()
 
   let (decodeTarget, decodeScalingMode) = context.takeDecodeTarget()
+
+  when defined(testing):
+    if contextDownloadHook != nil:
+      return contextDownloadHook(url, byteLimit, decodeTarget,
+        scaledDecodeFit(decodeScalingMode))
 
   if decodeTarget.isNil:
     return downloadImageWithData(url, maxBytes = byteLimit, headers = headers)

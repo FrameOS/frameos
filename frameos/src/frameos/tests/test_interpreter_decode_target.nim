@@ -2,6 +2,7 @@ import std/[json, os, strutils, tables]
 import pixie
 import ../interpreter
 import ../types
+import ../utils/app_images
 import ../../apps/data/frameOSGallery/app as galleryApp
 
 # The interpreter's decode-target hint, from the interpreter's side.
@@ -152,25 +153,61 @@ block offset_draw_stays_unhinted:
 # The same invariant over the scenes the repo actually ships.
 #
 # The synthetic cases above pin the interpreter's rules; this pins the rules
-# against real scene JSON, which is where the regression actually bit. All
-# five gallery templates cache their producer, and none of them was hinted —
-# the shape was correct in the tests and wrong in the shipped files. A new
-# template that draws a gallery image some way that loses the hint fails here.
+# against real scene JSON, which is where the regression actually bit. Every
+# photo template caches its producer, and none of them was hinted — the shape
+# was correct in the tests and wrong in every file we ship. A new template that
+# draws a downloaded image some way that loses the hint fails here.
+#
+# Two seams feed this: frameOSGallery's own download hook, and the shared
+# contextDownloadHook that the other six producers funnel through. Neither
+# reaches the network, so this runs offline.
 # ---------------------------------------------------------------------------
 
 const RepoScenesDir = "../repo/scenes"
 
-proc usesGallery(sceneJson: string): bool =
-  sceneJson.contains("frameOSGallery")
+# Producers that decode a downloaded image; the interpreter must hand each of
+# them a target when their image is drawn full-frame.
+const ImageProducers = [
+  "frameOSGallery", "downloadImage", "unsplash", "immich",
+  "googlePhotos", "openaiImage", "wikicommons",
+]
+
+# Apps that reach the network with default state through something OTHER than
+# the image-download seams above (their own API query, an RSS fetch). A scene
+# that needs one cannot render offline at all, so it says nothing about the
+# decode-target hint either way — and rendering them offline segfaults in the
+# code that consumes the failed fetch, which reproduces on main and is not
+# this test's business. wikicommons is here because it queries the Commons API
+# before it downloads; its image decode is seamed, its search is not.
+const OfflineBlockers = ["downloadUrl", "weather", "beRecycle", "wikicommons"]
+
+proc usesImageProducer(sceneJson: string): bool =
+  for producer in ImageProducers:
+    if sceneJson.contains(producer):
+      return true
+  false
+
+proc needsUnseamedNetwork(sceneJson: string): bool =
+  for app in OfflineBlockers:
+    if sceneJson.contains(app):
+      return true
+  false
+
+proc recordingContextDownload(url: string, maxBytes: int, target: Image,
+    fit: ScaledDecodeFit): tuple[image: Image, data: string] =
+  (recordingDownload(url, maxBytes, target, fit), "")
+
+contextDownloadHook = recordingContextDownload
 
 var shippedScenesChecked = 0
 var shippedProducerCalls = 0
+var coveredTemplates: seq[string] = @[]
 
 for scenesPath in walkDirRec(RepoScenesDir):
   if scenesPath.splitPath().tail != "scenes.json":
     continue
   let raw = readFile(scenesPath)
-  if not raw.usesGallery():
+  if not raw.usesImageProducer() or raw.needsUnseamedNetwork():
     continue
 
   let templateName = scenesPath.parentDir().splitPath().tail
@@ -185,7 +222,7 @@ for scenesPath in walkDirRec(RepoScenesDir):
   resetInterpretedScenes()
 
   for sceneInput in inputs:
-    if not ($(%*sceneInput.nodes)).usesGallery():
+    if not ($(%*sceneInput.nodes)).usesImageProducer():
       continue
     hookTargets = @[]
     hookCalls = 0
@@ -202,12 +239,17 @@ for scenesPath in walkDirRec(RepoScenesDir):
     discard render(scene, context)
 
     let label = templateName & " / " & sceneInput.name
-    doAssert hookCalls > 0, label & ": the gallery producer never ran"
+    # A producer that bails before downloading (no API key, no album
+    # configured) never reaches a seam. That is the honest offline outcome,
+    # not a failure — only what it was HANDED is under test here.
+    if hookCalls == 0:
+      continue
     shippedScenesChecked += 1
+    coveredTemplates.add(label)
     for target in hookTargets:
       shippedProducerCalls += 1
       doAssert not target.isNil,
-        label & ": the gallery producer was given no decode target, so on " &
+        label & ": the image producer was given no decode target, so on " &
         "embedded it decodes at native resolution — this is the 1024x1024 " &
         "over-budget crash. Check the decode-target hint in interpreter.nim."
       doAssert target.width <= config.width and target.height <= config.height,
@@ -215,11 +257,14 @@ for scenesPath in walkDirRec(RepoScenesDir):
         " is larger than the 800x480 canvas"
 
 setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+contextDownloadHook = nil
 
-doAssert shippedScenesChecked >= 5,
-  "expected the shipped gallery templates to be covered, saw only " &
-  $shippedScenesChecked
+doAssert shippedScenesChecked >= 8,
+  "expected the shipped photo templates to be covered, saw only " &
+  $shippedScenesChecked & ": " & coveredTemplates.join(", ")
 
 echo "test_interpreter_decode_target: all assertions passed (" &
   $shippedScenesChecked & " shipped scenes, " & $shippedProducerCalls &
   " producer runs)"
+for label in coveredTemplates:
+  echo "  covered: " & label
