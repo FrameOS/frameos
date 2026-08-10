@@ -297,6 +297,17 @@ capped at five attempts — someone who cannot see the screen cannot complete it
 On ESP32 the equivalent is `set allow_local_network 1` on the USB console,
 which is physical presence by construction.
 
+It is persisted in `state/local_access.json`, deliberately not in `frame.json`.
+A backend deploy uploads a freshly generated `frame.json` over SSH and never
+round-trips the device's copy, so a setting stored there is quietly reset by
+the next unrelated deploy — fail-safe, but baffling to debug a week later when
+the Home Assistant scene stops working. Under `state/` it also says the right
+thing about what this is: a device-local fact established by someone standing
+in front of the frame, not fleet configuration the backend has an opinion
+about. `frame.json` is still read as a fallback so frames elevated before the
+setting moved keep working; on ESP32 the equivalent store is NVS, which deploys
+do not touch either.
+
 Still open: cloud-installed scenes are not yet distinguished from local ones at
 runtime, so the `"shell"` risk-flag refusal and any origin-specific profile
 have nothing to key off. A frame demoted out of the managed state also loses

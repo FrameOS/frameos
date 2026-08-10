@@ -468,16 +468,9 @@ proc localNetworkAccessPayload*(): JsonNode =
 proc setLocalNetworkAccess*(enabled: bool): JsonNode =
   ## Applies the private-network elevation. Only ever called after the on-panel
   ## code has been matched — see frameos/local_access.nim for why the bulk
-  ## config save is not allowed to reach this field.
-  withLock frameConfigWriteLock:
-    let configPath = getConfigFilename()
-    var configJson = loadConfigJson()
-    if configJson == nil or configJson.kind != JObject:
-      configJson = %*{}
-    if configJson{"network"} == nil or configJson["network"].kind != JObject:
-      configJson["network"] = %*{}
-    configJson["network"]["allowLocalNetworkAccess"] = %enabled
-    writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
+  ## config save is not allowed to reach this field, and why it is persisted
+  ## under state/ rather than in frame.json.
+  persistLocalNetworkAccess(enabled)
 
   # The hub thread re-reads this object every couple of seconds and recomputes
   # the deny from it (hub_client.nim, refreshLocalNetworkPolicy), so the change

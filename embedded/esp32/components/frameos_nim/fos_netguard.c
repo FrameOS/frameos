@@ -8,6 +8,22 @@
  * main/tests/test_fos_netguard.c can compile this exact file with cc and run
  * the whole classifier on a laptop.
  */
+
+/* getaddrinfo() and struct addrinfo are POSIX, not C11. glibc keys its POSIX
+ * declarations off the feature-test macros and switches them all off when
+ * __STRICT_ANSI__ is set, which -std=c11 does — so the host test build sees
+ * netdb.h as an effectively empty header and fails with a pile of "undefined
+ * type 'struct addrinfo'". macOS and lwIP declare them unconditionally, which
+ * is precisely why this compiled on a laptop and broke on CI.
+ *
+ * Scoped to strict mode so the IDF build (gnu17, newlib) is untouched: asking
+ * newlib for POSIX-only would narrow what it exposes, not widen it. Must come
+ * before every #include — feature-test macros are read as the first system
+ * header is parsed. */
+#if defined(__STRICT_ANSI__) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200112L
+#endif
+
 #include "fos_netguard.h"
 
 #include <stdint.h>

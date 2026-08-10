@@ -1,6 +1,7 @@
 import json, pixie, os, strutils
 import zippy
 import frameos/hal/files
+import frameos/local_access
 import frameos/types
 import frameos/utils/image
 import lib/tz
@@ -309,6 +310,14 @@ proc loadConfig*(configPath = ""): FrameConfig =
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
   setConfigDefaults(result)
+  # The private-network elevation lives in state/, not here — a backend deploy
+  # rewrites frame.json wholesale and would drop it. Fold the stored value in
+  # on every load, including the reload after a deploy, so the in-memory config
+  # every reader consults (the hub's policy refresh, the admin API payload)
+  # agrees with what the frame is actually enforcing.
+  if result.network != nil:
+    result.network.allowLocalNetworkAccess =
+      resolveLocalNetworkAccess(result.network.allowLocalNetworkAccess)
   setRuntimeImageEngine(result.imageEngine)
 
 proc updateSchedule(target: var FrameSchedule, source: FrameSchedule) =

@@ -14,12 +14,27 @@
 ## The state is process-local and deliberately not persisted: a pending
 ## challenge should not survive a reboot.
 
-import std/[locks, os, strutils, times]
+import std/[json, locks, options, os, strutils, times]
+
+import frameos/hal/files
 
 const
   LocalAccessCodeLength* = 6
   LocalAccessChallengeTtlSeconds* = 180.0
   LocalAccessMaxAttempts* = 5
+
+  LocalAccessStatePath* = "./state/local_access.json"
+    ## Deliberately NOT frame.json. A backend deploy uploads a freshly
+    ## generated frame.json over SSH — it never round-trips the device's copy,
+    ## and `get_frame_json` in the backend does not emit this field — so a
+    ## setting stored there is silently reset by the next unrelated deploy.
+    ## Fail-safe, but baffling: the ceremony is completed, and a week later
+    ## the Home Assistant scene stops working for no visible reason.
+    ##
+    ## Putting it under state/ also says the right thing about what it is.
+    ## This is a device-local fact established by someone physically present.
+    ## It is not fleet configuration, and the backend has no business
+    ## expressing an opinion about it.
 
 type
   LocalAccessChallenge* = object
@@ -30,8 +45,57 @@ type
 var
   localAccessLock: Lock
   localAccessChallenge: LocalAccessChallenge
+  # The hub thread re-reads the elevation every couple of seconds; boot_guard
+  # learned the same lesson, so this is cached rather than parsed each time.
+  # A hand-edited state file is picked up on restart, not live.
+  persistedAccessCache: Option[bool]
+  persistedAccessCacheLoaded = false
 
 initLock(localAccessLock)
+
+proc storedLocalNetworkAccess*(): Option[bool] =
+  ## What the state file says, or none() when the ceremony has never been run
+  ## on this device.
+  withLock localAccessLock:
+    if persistedAccessCacheLoaded:
+      return persistedAccessCache
+    persistedAccessCache = none(bool)
+    persistedAccessCacheLoaded = true
+    try:
+      if storedFileExists(LocalAccessStatePath):
+        let data = parseJson(readTextFile(LocalAccessStatePath))
+        if data.kind == JObject and data.hasKey("allowLocalNetworkAccess"):
+          persistedAccessCache = some(data{"allowLocalNetworkAccess"}.getBool(false))
+    except CatchableError:
+      # An unreadable or corrupt state file must not be read as "elevated".
+      persistedAccessCache = none(bool)
+    result = persistedAccessCache
+
+proc persistLocalNetworkAccess*(enabled: bool) =
+  ## Raises on write failure: the caller is an admin request that must not
+  ## report success for a change the next reboot would forget.
+  ensureParentDir(LocalAccessStatePath)
+  writeTextFile(LocalAccessStatePath, $(%*{
+    "allowLocalNetworkAccess": enabled,
+    "updatedAt": now().format("yyyy-MM-dd'T'HH:mm:sszzz"),
+  }) & "\n")
+  withLock localAccessLock:
+    persistedAccessCache = some(enabled)
+    persistedAccessCacheLoaded = true
+
+proc forgetStoredLocalNetworkAccess*() =
+  ## Test seam; also the right call if the state file is ever edited in place.
+  withLock localAccessLock:
+    persistedAccessCache = none(bool)
+    persistedAccessCacheLoaded = false
+
+proc resolveLocalNetworkAccess*(frameJsonValue: bool): bool =
+  ## The state file wins. `frameJsonValue` is the legacy fallback: frames
+  ## elevated before the setting moved carry it in frame.json, and revoking
+  ## that silently on upgrade would be its own outage. Migration happens on
+  ## the next completed ceremony, or leave it — the fallback is permanent.
+  let stored = storedLocalNetworkAccess()
+  if stored.isSome: stored.get() else: frameJsonValue
 
 proc randomDigits(count: int): string =
   ## Rejection-sampled so every digit is uniform; a plain `byte mod 10` would
