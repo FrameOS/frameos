@@ -74,6 +74,15 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 - **Fleet extras** (design phase 4): offline alerting/notifications,
   backups integration, paid-tier gating.
 
+## Value pipeline (design + phased tracker in docs/value-pipeline.md)
+
+Replace the interpreter's single-shape decode-target fusion with declared
+per-port capabilities + a load-time planner with tiered fallback
+(fuse-into-target > canvas-sized scratch > materialize; bytes may spool to
+SD as a last-resort tier). Invisible in the editor. Phase 0 (per-node
+memory profiling on the 13.3E6) gates the ordering of the rest; the phase
+checklists live in the linked doc, not here.
+
 ## ESP32
 
 - **Large-image spill: bench validation** — a forced-spill render on the
