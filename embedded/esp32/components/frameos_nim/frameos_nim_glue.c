@@ -3,6 +3,8 @@
  * outbound-HTTP hook the Nim http_client HAL calls into. */
 #include "frameos_nim.h"
 
+#include "fos_netguard.h"
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -1231,6 +1233,20 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
     const bool spill_allowed = out_spill_path != NULL && out_spill_len != NULL &&
                                s_http_spill_dir[0] != '\0';
 
+    /* Private-network policy (fos_netguard.h). This is the one funnel every
+     * scene HTTP request goes through, and on a cloud-managed frame a scene is
+     * something a provider installed — so it does not get to reach the owner's
+     * router. Checked before the client even exists; the redirect loop below
+     * re-checks every hop, because a 302 to 192.168.1.1 is the same request. */
+    char netguard_reason[96];
+    if (!fos_netguard_url_allowed(url, netguard_reason, sizeof(netguard_reason))) {
+        ESP_LOGW(TAG, "%s %s: blocked by the local-network policy: %s",
+                 method ? method : "GET", url ? url : "(null)", netguard_reason);
+        return chunked_error(out_status, out_count,
+                             "local network access is blocked on cloud-managed frames (%s)",
+                             netguard_reason);
+    }
+
     esp_http_client_method_t http_method = HTTP_METHOD_GET;
     if (method != NULL) {
         if (strcmp(method, "POST") == 0) http_method = HTTP_METHOD_POST;
@@ -1292,6 +1308,36 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
         char drain[512];
         while (esp_http_client_read(client, drain, sizeof(drain)) > 0) {}
         if (esp_http_client_set_redirection(client) != ESP_OK) break;
+        /* The Location header is attacker-controlled even when the first hop
+         * was not: an open redirect on a public host, or a provider-installed
+         * scene pointing at one, would otherwise walk straight into the LAN.
+         * esp_http_client_get_url() renders the URL set_redirection() just
+         * installed as "scheme://host:port/path" — always with an explicit
+         * port, and with an IPv6 host left unbracketed, which the guard reads
+         * as unparseable and therefore refuses. Fine: an IPv6-literal redirect
+         * target is not a thing scenes do, and the failure is closed.
+         * A truncated render is refused for the same reason. */
+        if (fos_netguard_policy_active()) {
+            char redirect_url[256];
+            bool redirect_ok = false;
+            netguard_reason[0] = '\0';
+            if (esp_http_client_get_url(client, redirect_url, sizeof(redirect_url)) != ESP_OK ||
+                strlen(redirect_url) == sizeof(redirect_url) - 1) {
+                strlcpy(netguard_reason, "redirect target unreadable", sizeof(netguard_reason));
+            } else {
+                redirect_ok = fos_netguard_url_allowed(redirect_url, netguard_reason,
+                                                       sizeof(netguard_reason));
+            }
+            if (!redirect_ok) {
+                ESP_LOGW(TAG, "%s %s: redirect blocked by the local-network policy: %s",
+                         method ? method : "GET", url, netguard_reason);
+                esp_http_client_close(client);
+                esp_http_client_cleanup(client);
+                return chunked_error(out_status, out_count,
+                                     "local network access is blocked on cloud-managed frames "
+                                     "(redirect target: %s)", netguard_reason);
+            }
+        }
         err = esp_http_client_open(client, body_len);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "%s %s: redirect connect failed: %s", method ? method : "GET", url,

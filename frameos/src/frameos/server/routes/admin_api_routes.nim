@@ -4,6 +4,7 @@ import mummy
 import mummy/routers
 import httpcore
 import frameos/channels
+import frameos/local_access
 import frameos/upgrade
 import ../auth
 import ../api
@@ -14,6 +15,10 @@ import ./common
 const
   ADMIN_LOGIN_LIMIT = 10
   ADMIN_LOGIN_WINDOW = 300.0
+  # The panel code is six digits and single-use, but the endpoint should not be
+  # a place to grind guesses either; the challenge itself only allows five.
+  LOCAL_ACCESS_LIMIT = 10
+  LOCAL_ACCESS_WINDOW = 300.0
 
 proc addAdminApiRoutes*(router: var Router) =
   router.get("/api/admin/session", proc(request: Request) {.gcsafe.} =
@@ -82,6 +87,72 @@ proc addAdminApiRoutes*(router: var Router) =
         jsonResponse(request, Http200, persistFrameAdminSettingsUpdate(payload))
       except ValueError as error:
         jsonResponse(request, Http400, %*{"detail": error.msg})
+      except CatchableError as error:
+        jsonResponse(request, Http500, %*{"detail": error.msg})
+  )
+
+  # ---- private-network elevation (local-presence ceremony) -----------------
+  # cloud/docs/cloud-frames.md, "sandbox posture": lifting the LAN deny on a
+  # cloud-managed frame takes more than an admin session, which is only a
+  # password on a LAN-reachable page. Ask for a challenge, read the six digits
+  # off the panel, send them back.
+
+  router.get("/api/network/local-access", proc(request: Request) {.gcsafe.} =
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    {.gcsafe.}:
+      jsonResponse(request, Http200, localNetworkAccessPayload())
+  )
+
+  router.post("/api/network/local-access/challenge", proc(request: Request) {.gcsafe.} =
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    if rateLimitExceeded(request, "network:local-access", LOCAL_ACCESS_LIMIT, LOCAL_ACCESS_WINDOW):
+      jsonResponse(request, Http429, %*{"detail": "Too many attempts"})
+      return
+    {.gcsafe.}:
+      try:
+        let challenge = startLocalAccessChallenge()
+        # A sleeping scene renders on its own schedule, and the code is useless
+        # until it is actually on the panel, so ask for a frame now.
+        sendEvent("render", %*{})
+        # No "code" in the response on purpose: a caller who could read it
+        # without seeing the panel is precisely who this keeps out.
+        jsonResponse(request, Http200, %*{
+          "status": "ok",
+          "codeLength": challenge.code.len,
+          "expiresInSeconds": LocalAccessChallengeTtlSeconds,
+        })
+      except CatchableError as error:
+        jsonResponse(request, Http500, %*{"detail": error.msg})
+  )
+
+  router.post("/api/network/local-access", proc(request: Request) {.gcsafe.} =
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    if rateLimitExceeded(request, "network:local-access", LOCAL_ACCESS_LIMIT, LOCAL_ACCESS_WINDOW):
+      jsonResponse(request, Http429, %*{"detail": "Too many attempts"})
+      return
+    {.gcsafe.}:
+      let payload = try:
+          parseJson(if request.body.strip().len == 0: "{}" else: request.body)
+        except JsonParsingError:
+          jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+          return
+      let verdict = consumeLocalAccessCode(payload{"code"}.getStr(""))
+      if not verdict.ok:
+        # Repaint either way: a spent or failed ceremony must not leave a live
+        # code on the panel for the next person walking past.
+        sendEvent("render", %*{})
+        jsonResponse(request, Http403, %*{"detail": verdict.detail})
+        return
+      try:
+        let updated = setLocalNetworkAccess(payload{"enabled"}.getBool(true))
+        sendEvent("render", %*{})
+        jsonResponse(request, Http200, updated)
       except CatchableError as error:
         jsonResponse(request, Http500, %*{"detail": error.msg})
   )

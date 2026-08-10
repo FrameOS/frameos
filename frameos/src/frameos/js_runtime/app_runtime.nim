@@ -243,19 +243,73 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
   return nimStringToJS(ctx, $response)
 
 proc assetsRoot(e: JsAppEvalEnv): string =
-  result = if e.owner.frameConfig.assetsPath == "": "/srv/assets" else: e.owner.frameConfig.assetsPath
+  ## The sandbox root for this app's asset calls.
+  ##
+  ## Default is the frame-wide assets folder: uploaded images are a shared
+  ## resource and scenes are expected to read each other's, so per-scene
+  ## isolation would break the common case. Frames that would rather have the
+  ## stricter model — every scene confined to its own subtree, the posture
+  ## cloud/docs/cloud-frames.md describes for provider-installed scenes — set
+  ## `js.assetSandbox` to "scene" in frame.json.
+  let frameConfig = e.owner.frameConfig
+  result = if frameConfig == nil or frameConfig.assetsPath == "": "/srv/assets"
+           else: frameConfig.assetsPath
   result.removeSuffix('/')
+  if frameConfig != nil and frameConfig.js != nil and frameConfig.js.assetSandbox == "scene":
+    let sceneId = if e.owner.scene == nil: "" else: e.owner.scene.id.string
+    if sceneId.len > 0:
+      # Scene ids come from the diagram and can carry slashes ("tests/js").
+      # Flatten them so one scene cannot address another's subtree.
+      var safeId = ""
+      for ch in sceneId:
+        safeId.add(if ch in {'a'..'z', 'A'..'Z', '0'..'9', '-', '_'}: ch else: '_')
+      result = result / "scenes" / safeId
+
+proc containsPathTraversal(relPath: string): bool =
+  ## True when any path *segment* is "..". A substring test would also reject
+  ## innocent names like "backup..old.json".
+  for segment in relPath.split({'/', '\\'}):
+    if segment == "..":
+      return true
+  return false
 
 proc resolveAssetPath(e: JsAppEvalEnv, relPath: string): string =
   ## Absolute path inside the assets folder, or "" when the path is empty,
   ## absolute, or escapes the folder.
-  if relPath.len == 0 or relPath.startsWith("/") or relPath.contains(".."):
+  ##
+  ## The containment check runs against the *real* path, not the lexical one:
+  ## normalizedPath does not follow symlinks, so a link planted inside the
+  ## assets folder used to be a legal way out of it.
+  if relPath.len == 0 or relPath.startsWith("/") or relPath.isAbsolute() or
+      containsPathTraversal(relPath):
     return ""
   let root = assetsRoot(e)
   let full = normalizedPath(root / relPath)
-  if full == root or full.startsWith(root & "/"):
-    return full
-  return ""
+  if not (full == root or full.startsWith(root & "/")):
+    return ""
+
+  when not defined(frameosEmbedded):
+    # Resolve the deepest ancestor that actually exists: the target itself may
+    # legitimately not exist yet (a write), but everything leading to it must
+    # still be inside the sandbox once symlinks are followed. Nothing exists
+    # to be a symlink until the root does, so an absent root skips the check.
+    if dirExists(root):
+      try:
+        let realRoot = expandFilename(root)
+        var probe = full
+        while not fileExists(probe) and not dirExists(probe):
+          let parent = probe.parentDir()
+          if parent == probe or parent.len < root.len:
+            break
+          probe = parent
+        if fileExists(probe) or dirExists(probe):
+          let realProbe = expandFilename(probe)
+          if not (realProbe == realRoot or realProbe.startsWith(realRoot & "/")):
+            return ""
+      except CatchableError:
+        return ""
+
+  return full
 
 const EmbeddedAssetReadMaxBytes = 2 * 1024 * 1024
 
@@ -910,7 +964,7 @@ proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
     dynamicApp.runtime.releaseReplacedImageRef(dynamicApp.configJson[field], nextValue)
   dynamicApp.configJson[field] = nextValue
 
-proc ensureReady(runtime: JsAppRuntime) =
+proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig) =
   if runtime.ready:
     return
 
@@ -921,7 +975,7 @@ proc ensureReady(runtime: JsAppRuntime) =
       liveJsRuntimes.add(runtime)
 
   when defined(memProbe): memProbe("    newQuickJS BEFORE")
-  runtime.js = newQuickJS()
+  runtime.js = newQuickJS(sceneJsConfig(frameConfig))
   when defined(memProbe): memProbe("    newQuickJS AFTER")
   runtime.js.registerFunction("jsAppLog", jsAppLog)
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
@@ -1239,7 +1293,7 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
   runtime.toValue(owner, context, jsValueToJson(ctx, payload), expectedType)
 
 proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string): JSValue =
-  ensureReady(runtime)
+  ensureReady(runtime, owner.frameConfig)
   let ctx = runtime.js.context
   let fnNameValue = nimStringToJS(ctx, fnName)
   defer: JS_FreeValue(ctx, fnNameValue)

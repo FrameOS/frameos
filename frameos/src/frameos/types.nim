@@ -52,6 +52,17 @@ type
     mountpoints*: MountpointsConfig
     errorBehavior*: ErrorBehaviorConfig
     palette*: PaletteConfig
+    js*: JsRuntimeConfig
+
+  # Part of FrameConfig
+  JsRuntimeConfig* = ref object
+    ## Ceilings and scoping for untrusted scene JS (cloud/docs/cloud-frames.md,
+    ## "sandbox posture"). Scene JS is user-authored at best and provider-pushed
+    ## at worst, and it runs on the render thread.
+    executionTimeoutMs*: int ## interpreter time per entry; 0 disables
+    memoryLimitMb*: int      ## JS heap ceiling; 0 leaves it unlimited
+    maxStackKb*: int         ## JS stack ceiling; 0 keeps QuickJS's default
+    assetSandbox*: string    ## "frame" (shared, default) or "scene" (per-scene subtree)
 
   # Part of FrameConfig
   TimeZoneUpdatesConfig* = ref object
@@ -380,6 +391,7 @@ type
     forceSceneReload*: bool = false
     controlCodeRender*: AppRoot
     controlCodeData*: AppRoot
+    localAccessRender*: AppRoot
 
   RunnerControl* = ref object
     start*: proc(firstSceneId: Option[SceneId])

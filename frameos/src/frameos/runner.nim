@@ -2,12 +2,14 @@ import json, pixie, times, options, asyncdispatch, strformat, strutils, tables
 import std/monotimes
 import std/atomics
 import apps/render/image/app as render_imageApp
+import apps/render/text/app as render_textApp
 import apps/data/qr/app as data_qrApp
 
 import frameos/apps
 import frameos/channels
 import frameos/config
 import frameos/driver_render_hint
+import frameos/local_access
 import frameos/logger
 import frameos/metrics
 import frameos/types
@@ -69,6 +71,26 @@ proc sceneInitErrorExport(): ExportedScene =
       initSceneInitErrorScene(sceneId, frameConfig, logger, "Scene failed to start.")
   )
 
+proc configureLocalAccessOverlay(self: RunnerThread) =
+  ## Always built, unlike the control code: a presence challenge can be raised
+  ## at any moment and the code has to be on screen for the ceremony to work.
+  self.localAccessRender = render_textApp.App(nodeName: "render/text", nodeId: -2.NodeId,
+    frameConfig: self.frameConfig, appConfig: render_textApp.AppConfig(
+    text: "",
+    richText: "disabled",
+    inputImage: none(Image),
+    position: "center",
+    vAlign: "middle",
+    offsetX: 0.0,
+    offsetY: 0.0,
+    padding: 16.0,
+    fontColor: parseHtmlColor("#ffffff"),
+    fontSize: 32.0,
+    borderColor: parseHtmlColor("#000000"),
+    borderWidth: 3,
+    overflow: "fit-bounds",
+  ))
+
 proc configureControlCode(self: RunnerThread) =
   if self.frameConfig.controlCode.enabled:
     let controlCode = self.frameConfig.controlCode
@@ -122,6 +144,14 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     if self.frameConfig.controlCode.enabled:
       render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
       render_imageApp.App(self.controlCodeRender).run(context)
+    # The local-presence code, if one is pending. Drawn last so no scene can
+    # paint over it: the whole point is that it is readable from in front of
+    # the frame, by someone the admin API cannot see.
+    let presenceCode = activeLocalAccessCode()
+    if presenceCode.len > 0:
+      render_textApp.App(self.localAccessRender).appConfig.text =
+        "Local network access\n" & presenceCode
+      render_textApp.App(self.localAccessRender).run(context)
     let image = context.image
 
     var outImage: Image
@@ -481,6 +511,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
             self.scenes = initTable[SceneId, FrameScene]()
             self.currentSceneId = getFirstSceneId()
             self.configureControlCode()
+            self.configureLocalAccessOverlay()
             self.forceSceneReload = true
             self.triggerRenderNext = true
             continue # don't dispatch this event to the scene
@@ -533,6 +564,7 @@ proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =
       logger: args[1]
     )
     runnerThread.configureControlCode()
+    runnerThread.configureLocalAccessOverlay()
 
     waitFor runnerThread.startRenderLoop() and runnerThread.startMessageLoop()
 

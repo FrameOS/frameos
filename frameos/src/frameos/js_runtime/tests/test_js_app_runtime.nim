@@ -421,6 +421,91 @@ suite "js app runtime":
     check not payload["existsAfter"].getBool()
     check not fileExists(assetsDir.parentDir() / "evil.txt")
 
+  test "a symlink out of the assets folder is not a way out of the sandbox":
+    let assetsDir = getTempDir() / "frameos-js-symlink-test"
+    let outsideDir = getTempDir() / "frameos-js-symlink-outside"
+    removeDir(assetsDir)
+    removeDir(outsideDir)
+    createDir(assetsDir)
+    createDir(outsideDir)
+    defer:
+      removeDir(assetsDir)
+      removeDir(outsideDir)
+
+    writeFile(outsideDir / "secret.txt", "top secret")
+    # The kind of link an operator might leave behind (a big media folder
+    # mounted into assets); scene JS must not be able to ride it outwards.
+    createSymlink(outsideDir, assetsDir / "escape")
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-symlink".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 25.NodeId, nodeName: "jsSymlink", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+                                   loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app, context) {
+          return {
+            readThroughLink: frameos.readAsset("escape/secret.txt"),
+            writeThroughLink: frameos.writeAsset("escape/planted.txt", "aGVsbG8="),
+            dottedName: frameos.writeAsset("backup..old.txt", "aGVsbG8="),
+          }
+        }"""
+    )
+
+    let payload = runtime.get(owner, %*{}, context).asJson()
+    check payload["readThroughLink"].kind == JNull
+    check not payload["writeThroughLink"].getBool()
+    check not fileExists(outsideDir / "planted.txt")
+    # ".." only escapes as a whole path segment; a file that merely contains
+    # two dots is an ordinary name and must still be writable.
+    check payload["dottedName"].getBool()
+    check fileExists(assetsDir / "backup..old.txt")
+
+  test "assetSandbox=scene confines a scene to its own subtree":
+    let assetsDir = getTempDir() / "frameos-js-scene-sandbox-test"
+    removeDir(assetsDir)
+    createDir(assetsDir)
+    defer: removeDir(assetsDir)
+
+    writeFile(assetsDir / "shared.txt", "frame wide")
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    config.js = JsRuntimeConfig(executionTimeoutMs: -1, memoryLimitMb: -1, maxStackKb: -1,
+                                assetSandbox: "scene")
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/scoped".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 26.NodeId, nodeName: "jsScoped", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+                                   loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app, context) {
+          return {
+            wrote: frameos.writeAsset("cache.txt", "aGVsbG8="),
+            readBack: frameos.readAsset("cache.txt"),
+            sharedVisible: frameos.assetExists("shared.txt"),
+          }
+        }"""
+    )
+
+    let payload = runtime.get(owner, %*{}, context).asJson()
+    check payload["wrote"].getBool()
+    check decode(payload["readBack"].getStr()) == "hello"
+    # Scene ids carry slashes; they are flattened so one scene cannot address
+    # another's subtree by naming it.
+    check fileExists(assetsDir / "scenes" / "tests_scoped" / "cache.txt")
+    # The frame-wide folder is outside this scene's root, so its files are not
+    # reachable by name any more.
+    check not payload["sharedVisible"].getBool()
+
   test "loads asset images within display bounds":
     let assetsDir = getTempDir() / "frameos-js-asset-image-test"
     removeDir(assetsDir)

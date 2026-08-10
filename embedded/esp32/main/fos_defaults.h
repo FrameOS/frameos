@@ -88,6 +88,11 @@
 #ifndef FRAMEOS_DEFAULT_ADMIN_AUTH_PASS
 #define FRAMEOS_DEFAULT_ADMIN_AUTH_PASS ""
 #endif
+/* Off: an enrolled frame's scenes come from the provider, so they do not get
+ * to reach the owner's LAN. See fos_netguard.h and `set allow_local_network`. */
+#ifndef FRAMEOS_DEFAULT_ALLOW_LOCAL_NETWORK
+#define FRAMEOS_DEFAULT_ALLOW_LOCAL_NETWORK 0
+#endif
 #ifndef FRAMEOS_DEFAULT_ASSETS_PATH
 #define FRAMEOS_DEFAULT_ASSETS_PATH "/srv/assets"
 #endif

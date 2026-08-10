@@ -8,12 +8,13 @@ file(GLOB NIM_GENERATED_SRCS "${CMAKE_CURRENT_LIST_DIR}/nimcache/*.c")
 
 if(NIM_GENERATED_SRCS)
     idf_component_register(
-        SRCS ${NIM_GENERATED_SRCS} "frameos_nim_glue.c"
+        SRCS ${NIM_GENERATED_SRCS} "frameos_nim_glue.c" "fos_netguard.c"
         INCLUDE_DIRS "include"
         PRIV_INCLUDE_DIRS "nimcache"
         # frameos_quickjs: the Nim js_runtime binds QuickJS (include path +
-        # fos_js_new_runtime); esp_http_client/mbedtls back the Nim HTTP HAL.
-        PRIV_REQUIRES esp_timer pthread frameos_quickjs esp_http_client esp-tls mbedtls
+        # fos_js_new_runtime); esp_http_client/mbedtls back the Nim HTTP HAL;
+        # lwip is fos_netguard.c's getaddrinfo().
+        PRIV_REQUIRES esp_timer pthread frameos_quickjs esp_http_client esp-tls mbedtls lwip
     )
     # Nim's generated C is not warning-clean; it's machine output. Nim also
     # passes long* where the overflow builtins want int* (same width on
@@ -27,9 +28,13 @@ if(NIM_GENERATED_SRCS)
         -fno-strict-aliasing -fno-lto)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE FRAMEOS_NIM_ENABLED=1)
 else()
+    # fos_netguard.c is in both branches on purpose: fos_cloud.c arms the
+    # private-network policy unconditionally, so a thin-client image that
+    # dropped this file would fail to link.
     idf_component_register(
-        SRCS "frameos_nim_stub.c"
+        SRCS "frameos_nim_stub.c" "fos_netguard.c"
         INCLUDE_DIRS "include"
+        PRIV_REQUIRES lwip
     )
     message(STATUS "frameos_nim: no nimcache/, building stub (run build_nim.sh)")
 endif()

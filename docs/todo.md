@@ -55,10 +55,16 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   and cannot say WHICH scene differs. Per-scene granularity needs the cloud to
   record what it last pushed — its equivalent of the backend's
   `last_successful_deploy.scenes`.
-- **JS-runtime capability audit** — enumerate every native binding exposed
-  to scene JS; per-scene asset sandboxes; CPU/time/memory limits per scene;
-  confirm RFC1918 fetch blocking and the local-presence elevation ceremony
-  (`cloud/docs/cloud-frames.md`, "sandbox posture").
+- **Scene origin is not tracked at runtime** — the JS-runtime capability
+  audit is done and written up in `cloud/docs/cloud-frames.md`, "sandbox
+  posture": bindings enumerated, JS time/heap/stack ceilings landed, the
+  asset sandbox made symlink-safe with an opt-in per-scene mode, RFC1918
+  blocking ported to ESP32, elevation moved behind an on-panel code. What is
+  left is the thing all of those wanted and none could have: a frame cannot
+  tell a cloud-installed scene from a locally authored one, so the store's
+  `"shell"` risk flag has nothing to refuse, and a frame demoted out of the
+  managed state keeps running the provider's last-pushed scenes with the LAN
+  deny switched off.
 - **Account hardening** — passkeys/TOTP 2FA, re-authentication for
   sensitive actions (revoking frames, bulk assignment changes, scope
   grants), per-frame audit trail surfaced in the UI.

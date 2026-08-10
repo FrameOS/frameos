@@ -657,6 +657,12 @@ proc jsExceptionDetails*(ctx: ptr JSContext): tuple[message: string, stack: stri
     result.stack = result.message
   if result.message.len == 0:
     result.message = "JavaScript error"
+  # An interrupted script reports a bare "InternalError: interrupted", which
+  # tells nobody why the scene died. Name the real cause.
+  let blownBudgetMs = clearContextDeadlineTrip(ctx)
+  if blownBudgetMs > 0:
+    result.message = "execution exceeded its " & $blownBudgetMs & "ms time budget"
+    result.stack = result.message
 
 proc mappedJsExceptionDetails*(ctx: ptr JSContext): tuple[message: string, stack: string] =
   result = jsExceptionDetails(ctx)
@@ -664,16 +670,35 @@ proc mappedJsExceptionDetails*(ctx: ptr JSContext): tuple[message: string, stack
   result.stack = mapJsErrorText(ctx, result.stack)
 
 proc callGlobalFunction*(ctx: ptr JSContext, fnName: string, args: openArray[JSValueConst] = []): JSValue =
-  let globalObj = JS_GetGlobalObject(ctx)
-  defer: JS_FreeValue(ctx, globalObj)
-  let fn = JS_GetPropertyStr(ctx, globalObj, fnName.cstring)
-  defer: JS_FreeValue(ctx, fn)
-  if args.len == 0:
-    return JS_Call(ctx, fn, globalObj, 0.cint, nil)
-  var argv = newSeq[JSValueConst](args.len)
-  for i, arg in args:
-    argv[i] = arg
-  return JS_Call(ctx, fn, globalObj, args.len.cint, addr argv[0])
+  ## Every scene-authored function — code nodes, inline expressions and JS app
+  ## init/get/run — enters the interpreter here, so this is where the
+  ## execution-time budget gets armed. Callers read the exception normally; a
+  ## budget overrun surfaces through jsExceptionDetails below.
+  withContextDeadline(ctx):
+    let globalObj = JS_GetGlobalObject(ctx)
+    defer: JS_FreeValue(ctx, globalObj)
+    let fn = JS_GetPropertyStr(ctx, globalObj, fnName.cstring)
+    defer: JS_FreeValue(ctx, fn)
+    if args.len == 0:
+      result = JS_Call(ctx, fn, globalObj, 0.cint, nil)
+    else:
+      var argv = newSeq[JSValueConst](args.len)
+      for i, arg in args:
+        argv[i] = arg
+      result = JS_Call(ctx, fn, globalObj, args.len.cint, addr argv[0])
+
+proc sceneJsConfig*(frameConfig: FrameConfig): QuickJSConfig =
+  ## Per-frame overrides for the interpreter ceilings. Anything left at -1 (or
+  ## absent from frame.json) keeps the build target's default.
+  result = defaultConfig()
+  if frameConfig == nil or frameConfig.js == nil:
+    return
+  if frameConfig.js.executionTimeoutMs >= 0:
+    result.executionTimeoutMs = frameConfig.js.executionTimeoutMs
+  if frameConfig.js.memoryLimitMb >= 0:
+    result.memoryLimitBytes = frameConfig.js.memoryLimitMb * 1024 * 1024
+  if frameConfig.js.maxStackKb >= 0:
+    result.maxStackSizeBytes = frameConfig.js.maxStackKb * 1024
 
 # -------------------------
 # Scene JS context
@@ -725,7 +750,7 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
       evictIdleSceneJs(scene)
       if not liveSceneJsScenes.contains(scene):
         liveSceneJsScenes.add(scene)
-    scene.js = newQuickJS()
+    scene.js = newQuickJS(sceneJsConfig(scene.frameConfig))
     # Register bridge functions ONCE per scene/context
     scene.js.registerFunction("getState", jsGetState)
     scene.js.registerFunction("getArg", jsGetArg)
@@ -889,6 +914,14 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
     when defined(frameosEmbedded): sceneJsStack.add(scene)
     try:
       envelopeJson = scene.js.eval(fnName & "()")
+    except JSException as err:
+      # Normally the envelope catches the node's own throws and hands back an
+      # error envelope. A blown time budget cannot go that way: QuickJS marks
+      # the interrupt uncatchable, so no JS try/catch — including the
+      # envelope's — ever sees it. Rebuild the envelope here so a runaway node
+      # is logged and defaulted like any other failing node instead of taking
+      # the render down.
+      envelopeJson = $(%*{"k": "error", "v": {"message": err.msg, "stack": err.msg}})
     finally:
       when defined(frameosEmbedded):
         if sceneJsStack.len > 0 and sceneJsStack[^1] == scene:

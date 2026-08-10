@@ -11,6 +11,7 @@ import assets/apps as appsAsset
 import drivers/drivers as drivers
 import frameos/apps
 import frameos/channels
+import frameos/local_access
 import frameos/types
 import frameos/utils/image
 import frameos/utils/font
@@ -301,6 +302,24 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
   ]:
     putJsonIfPresent(result, payload, pair[0], pair[1])
 
+  # The private-network elevation never rides along with a bulk config save.
+  # The cloud is already blocked from it by CLOUD_SETTINGS_ALLOWLIST, but the
+  # admin page came through here too, and an admin session is a password on a
+  # LAN-reachable page — not proof that anyone is standing at the frame. It
+  # moves only through the on-panel ceremony in frameos/local_access.nim now,
+  # so whatever the payload claims, the stored value wins.
+  if result{"network"} != nil and result["network"].kind == JObject:
+    let stored =
+      if existing != nil and existing.kind == JObject and
+          existing{"network"} != nil and existing["network"].kind == JObject:
+        existing["network"]{"allowLocalNetworkAccess"}
+      else:
+        nil
+    if stored != nil:
+      result["network"]["allowLocalNetworkAccess"] = copy(stored)
+    elif result["network"].hasKey("allowLocalNetworkAccess"):
+      result["network"].delete("allowLocalNetworkAccess")
+
   if payload.hasKey("frame_admin_auth"):
     putJsonIfPresent(result, payload, "frame_admin_auth", "frameAdminAuth")
   if payload.hasKey("https_proxy"):
@@ -436,6 +455,39 @@ proc persistFrameApiUpdate*(payload: JsonNode) =
     if payload.hasKey("scenes"):
       persistScenesPayload(payload["scenes"])
     writeTextFileAtomically(configPath, pretty(nextConfig, indent = 4) & "\n")
+
+proc localNetworkAccessPayload*(): JsonNode =
+  let enabled = globalFrameConfig != nil and globalFrameConfig.network != nil and
+    globalFrameConfig.network.allowLocalNetworkAccess
+  %*{
+    "allowLocalNetworkAccess": enabled,
+    "challengePending": activeLocalAccessCode().len > 0,
+    "challengeSecondsLeft": localAccessChallengeSecondsLeft(),
+  }
+
+proc setLocalNetworkAccess*(enabled: bool): JsonNode =
+  ## Applies the private-network elevation. Only ever called after the on-panel
+  ## code has been matched — see frameos/local_access.nim for why the bulk
+  ## config save is not allowed to reach this field.
+  withLock frameConfigWriteLock:
+    let configPath = getConfigFilename()
+    var configJson = loadConfigJson()
+    if configJson == nil or configJson.kind != JObject:
+      configJson = %*{}
+    if configJson{"network"} == nil or configJson["network"].kind != JObject:
+      configJson["network"] = %*{}
+    configJson["network"]["allowLocalNetworkAccess"] = %enabled
+    writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
+
+  # The hub thread re-reads this object every couple of seconds and recomputes
+  # the deny from it (hub_client.nim, refreshLocalNetworkPolicy), so the change
+  # takes effect without a restart.
+  if globalFrameConfig != nil and globalFrameConfig.network != nil:
+    globalFrameConfig.network.allowLocalNetworkAccess = enabled
+  if globalFrameOS != nil and globalFrameOS.frameConfig != nil and
+      globalFrameOS.frameConfig.network != nil:
+    globalFrameOS.frameConfig.network.allowLocalNetworkAccess = enabled
+  localNetworkAccessPayload()
 
 proc frameControlCodeJson(controlCode: ControlCode): JsonNode =
   if controlCode == nil:
