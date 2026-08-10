@@ -1,0 +1,10 @@
+{
+  "name": "Bird song journal",
+  "description": "Birds that BirdWeather's listening stations actually heard near you. Every new species gets a field-journal plate drawn by OpenAI from BirdWeather's licensed reference photo, verified for accuracy, then added to a collection that cycles on the frame. Set your latitude/longitude (or a BirdWeather station ID) and an OpenAI API key under global settings.",
+  "frameosVersion": "2026.7.5",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 480,
+  "imageHeight": 800,
+  "scenes": "./scenes.json"
+}

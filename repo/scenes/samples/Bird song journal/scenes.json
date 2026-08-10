@@ -1,0 +1,454 @@
+[
+  {
+    "apps": {
+      "birdSongJournal": {
+        "category": "data",
+        "description": "Asks BirdWeather which birds its listening stations actually heard near you. Every new species gets a field-journal plate drawn by OpenAI from BirdWeather's licensed reference photo, verified for accuracy, and saved to the asset collection. Cycles through the collection on each render.",
+        "fields": [
+          {
+            "hint": "Centre of the listening area. Leave this and the station IDs empty to pause the journal.",
+            "label": "Latitude",
+            "name": "latitude",
+            "placeholder": "50.85",
+            "type": "string",
+            "value": ""
+          },
+          {
+            "label": "Longitude",
+            "name": "longitude",
+            "placeholder": "4.35",
+            "type": "string",
+            "value": ""
+          },
+          {
+            "hint": "BirdWeather stations are sparse outside cities \u2014 widen this if nothing turns up.",
+            "label": "Radius (km)",
+            "name": "radiusKm",
+            "type": "float",
+            "value": "25"
+          },
+          {
+            "hint": "Comma-separated. Set this to follow specific stations (your own PUC, say) and the area above is ignored.",
+            "label": "BirdWeather station IDs",
+            "name": "stationIds",
+            "placeholder": "6767",
+            "type": "string",
+            "value": ""
+          },
+          {
+            "hint": "Only birds heard within this many days count.",
+            "label": "Time window (days)",
+            "name": "daysWindow",
+            "type": "integer",
+            "value": "7"
+          },
+          {
+            "hint": "How often to ask BirdWeather what it has been hearing.",
+            "label": "Poll every (minutes)",
+            "name": "pollMinutes",
+            "type": "integer",
+            "value": "60"
+          },
+          {
+            "hint": "How many of the most-heard species to take from each poll",
+            "label": "Species per poll",
+            "name": "speciesLimit",
+            "type": "integer",
+            "value": "40"
+          },
+          {
+            "hint": "Ignore species heard fewer times than this in the window \u2014 BirdNET's one-off guesses",
+            "label": "Minimum detections",
+            "name": "minDetections",
+            "type": "integer",
+            "value": "3"
+          },
+          {
+            "hint": "Comma-separated BirdWeather classifications. Leave empty for everything the stations identify.",
+            "label": "Classifications",
+            "name": "classifications",
+            "type": "string",
+            "value": "avian"
+          },
+          {
+            "label": "Plate style",
+            "name": "style",
+            "type": "text",
+            "value": "A 19th-century naturalist's field-journal plate on lightly aged cream paper: fine ink linework with soft watercolor washes. The bird perches on a small branch or stands in typical habitat, anatomically accurate, with its bill open mid-song. Around it, small pencil detail studies (head, wing or feather), a small hand-drawn sonogram or sound-wave sketch in one margin as if the bird had been logged by ear, and short handwritten-style margin notes. Neatly hand-lettered at the bottom: the common name in larger letters and the scientific name in italics beneath it."
+          },
+          {
+            "hint": "Responses API model that drives image generation and the accuracy check",
+            "label": "OpenAI model",
+            "name": "model",
+            "type": "string",
+            "value": "gpt-5.1"
+          },
+          {
+            "label": "Plate quality",
+            "name": "imageQuality",
+            "options": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "select",
+            "value": "medium"
+          },
+          {
+            "hint": "Have the model double-check each plate against the reference photo before adding it",
+            "label": "Verify plates",
+            "name": "verifyPlates",
+            "type": "boolean",
+            "value": "true"
+          },
+          {
+            "hint": "Least recently heard species (and their plates) are pruned beyond this",
+            "label": "Max species kept",
+            "name": "maxSpecies",
+            "type": "integer",
+            "value": "24"
+          },
+          {
+            "label": "Max attempts per species",
+            "name": "maxAttempts",
+            "type": "integer",
+            "value": "3"
+          },
+          {
+            "hint": "Plates are saved under this folder in the frame's assets directory",
+            "label": "Asset folder",
+            "name": "assetFolder",
+            "type": "string",
+            "value": "birdSongJournal"
+          },
+          {
+            "hint": "Scene state key holding the species log; persist it to disk in scene fields",
+            "label": "Journal state key",
+            "name": "journalStateKey",
+            "type": "string",
+            "value": "birdSongJournal"
+          },
+          {
+            "hint": "Scene state key that receives the caption / status line for a text overlay",
+            "label": "Caption state key",
+            "name": "captionStateKey",
+            "type": "string",
+            "value": "birdCaption"
+          },
+          {
+            "label": "BirdWeather API host",
+            "name": "birdweatherHost",
+            "type": "string",
+            "value": "https://app.birdweather.com"
+          },
+          {
+            "label": "OpenAI API host",
+            "name": "openaiHost",
+            "type": "string",
+            "value": "https://api.openai.com"
+          }
+        ],
+        "name": "Bird song journal (JS)",
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "settings": [
+          "openAI"
+        ],
+        "sources": {
+          "app.ts": "// Bird song journal: BirdWeather detections -> OpenAI field-journal plates -> a\n// cycling collection on the frame.\n//\n// BirdWeather is a network of listening stations that run BirdNET on live audio,\n// so this journal fills up with birds that were actually *heard* near you rather\n// than ones somebody photographed.\n//\n// Each render:\n//  1. Poll the BirdWeather GraphQL API (rate-limited by pollMinutes) for the\n//     species heard in the last daysWindow days, either inside a box around the\n//     configured spot or at specific stations, and log every species along with\n//     BirdWeather's licensed reference photo.\n//  2. If a logged species has no plate yet, draw one: the reference photo and\n//     the configured style go to the OpenAI Responses API image_generation tool,\n//     and the model then double-checks the plate against the reference.\n//     Verified plates are saved as PNG assets. One attempt per render.\n//  3. Show the next plate in the collection (first heard first) and write a\n//     caption line to scene state for a text overlay.\n//\n// The species log lives in scene state under journalStateKey; declare that key\n// as a disk-persisted scene field so the collection survives restarts.\n\nconst PAPER_COLOR = \"#f5f1e6\"\nconst REFERENCE_PHOTOS_PER_PLATE = 2\n// Recent detections are only read to learn when and where each species was last\n// heard nearby; the roster itself comes from topSpecies.\nconst RECENT_DETECTIONS = 50\n\n// One round trip: the species roster with window counts, plus the newest local\n// detections. Species.latestDetections is deliberately not used \u2014 it is global,\n// so it happily reports a station on another continent.\nconst JOURNAL_QUERY = `query FrameOSBirdSongJournal(\n  $period: InputDuration, $ne: InputLocation, $sw: InputLocation,\n  $stationIds: [ID!], $classifications: [String!], $limit: Int, $recent: Int\n) {\n  topSpecies(\n    period: $period, ne: $ne, sw: $sw, stationIds: $stationIds,\n    classifications: $classifications, limit: $limit\n  ) {\n    count\n    species { id commonName scientificName imageUrl imageCredit imageLicense }\n  }\n  detections(\n    period: $period, ne: $ne, sw: $sw, stationIds: $stationIds,\n    classifications: $classifications, first: $recent\n  ) {\n    speciesCount\n    totalCount\n    nodes { speciesId timestamp station { name } }\n  }\n}`\n\nfunction readJournal(app, key) {\n  const stored = app.state[key]\n  if (stored && typeof stored === \"object\" && stored.species) {\n    return stored\n  }\n  return { species: {}, cursor: 0, lastPollAt: 0 }\n}\n\nfunction slugify(name) {\n  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, \"-\").replace(/^-+|-+$/g, \"\")\n}\n\nfunction isoDate(millis) {\n  return new Date(millis).toISOString().slice(0, 10)\n}\n\nfunction formatCount(value) {\n  return String(Number(value) || 0).replace(/\\B(?=(\\d{3})+(?!\\d))/g, \",\")\n}\n\nfunction commaList(value) {\n  return String(value || \"\").split(\",\").map((part) => part.trim()).filter((part) => part.length > 0)\n}\n\n// Degrees per km, with the longitude span widened by latitude. The poles would\n// divide by ~0, so the cosine is clamped well before it gets there.\nfunction boundingBox(lat, lng, radiusKm) {\n  const latSpan = radiusKm / 111.32\n  const lngSpan = radiusKm / (111.32 * Math.max(0.01, Math.cos(lat * Math.PI / 180)))\n  return {\n    ne: { lat: Math.min(90, lat + latSpan), lon: Math.min(180, lng + lngSpan) },\n    sw: { lat: Math.max(-90, lat - latSpan), lon: Math.max(-180, lng - lngSpan) },\n  }\n}\n\nfunction plateSize(app, context) {\n  let width = context.imageWidth || 0\n  let height = context.imageHeight || 0\n  if (!width || !height) {\n    width = app.frame.width\n    height = app.frame.height\n    if (app.frame.rotate === 90 || app.frame.rotate === 270) {\n      const swap = width\n      width = height\n      height = swap\n    }\n  }\n  return height >= width ? \"1024x1536\" : \"1536x1024\"\n}\n\n// BirdWeather credits are HTML fragments linking the photographer.\nfunction creditLine(species) {\n  const credit = String(species.imageCredit || \"\")\n    .replace(/<[^>]*>/g, \"\")\n    .replace(/\\s+/g, \" \")\n    .trim()\n  const license = String(species.imageLicense || \"\").trim()\n  if (credit && license) {\n    return `${credit} (${license})`\n  }\n  return credit || license\n}\n\nfunction birdweatherQuery(app, variables) {\n  const res = frameos.httpRequest(`${app.config.birdweatherHost}/graphql`, {\n    method: \"POST\",\n    headers: {\n      \"Content-Type\": \"application/json\",\n      \"Accept\": \"application/json\",\n    },\n    body: JSON.stringify({ query: JOURNAL_QUERY, variables }),\n    timeoutMs: 30000,\n  })\n  if (res.status !== 200) {\n    return { error: res.error || `HTTP ${res.status}` }\n  }\n  let parsed = null\n  try {\n    parsed = JSON.parse(res.body)\n  } catch (err) {\n    return { error: \"unparseable response\" }\n  }\n  // GraphQL reports query errors with HTTP 200, so the envelope needs checking.\n  const errors = (parsed && parsed.errors) || []\n  if (errors.length) {\n    return { error: errors[0].message || \"GraphQL error\" }\n  }\n  if (!parsed || !parsed.data) {\n    return { error: \"empty response\" }\n  }\n  return { data: parsed.data }\n}\n\nfunction pollDetections(app, journal, lat, lng, stationIds, now) {\n  const cfg = app.config\n  const days = Math.max(1, Number(cfg.daysWindow) || 7)\n  const variables = {\n    period: { count: days, unit: \"day\" },\n    limit: Math.max(1, Number(cfg.speciesLimit) || 40),\n    recent: RECENT_DETECTIONS,\n    stationIds: stationIds.length ? stationIds : null,\n    classifications: commaList(cfg.classifications),\n    ne: null,\n    sw: null,\n  }\n  if (!variables.classifications.length) {\n    variables.classifications = null\n  }\n  // Stations and a location box would intersect, so following stations wins.\n  if (!stationIds.length) {\n    const box = boundingBox(lat, lng, Math.max(1, Number(cfg.radiusKm) || 25))\n    variables.ne = box.ne\n    variables.sw = box.sw\n  }\n\n  const result = birdweatherQuery(app, variables)\n  if (result.error) {\n    return { error: result.error }\n  }\n  const top = result.data.topSpecies || []\n  const recentDetections = result.data.detections || {}\n\n  // The newest detection per species. BirdWeather sorts these newest first, but\n  // a box can span time zones, so compare the parsed instants rather than trust\n  // the order or the offset-bearing strings.\n  const latest = {}\n  for (const detection of recentDetections.nodes || []) {\n    const key = String(detection.speciesId)\n    const heardAt = detection.timestamp || \"\"\n    const at = Date.parse(heardAt)\n    if (!isFinite(at)) {\n      continue\n    }\n    if (!latest[key] || at > latest[key].at) {\n      latest[key] = {\n        at,\n        heardAt,\n        station: (detection.station && detection.station.name) || \"\",\n      }\n    }\n  }\n\n  const minDetections = Math.max(1, Number(cfg.minDetections) || 1)\n  const heard = {}\n  let newSpecies = 0\n  for (const row of top) {\n    const species = row.species\n    // No reference photo means no plate can be drawn from it.\n    if (!species || !species.id || !species.imageUrl) {\n      continue\n    }\n    const count = Number(row.count) || 0\n    // BirdNET guesses at the edge of its confidence produce one-off species.\n    if (count < minDetections) {\n      continue\n    }\n    const key = String(species.id)\n    heard[key] = true\n    let entry = journal.species[key]\n    if (!entry) {\n      entry = {\n        speciesId: species.id,\n        name: species.scientificName || species.commonName,\n        commonName: species.commonName || species.scientificName,\n        firstHeard: isoDate(now),\n        detections: 0,\n        attempts: 0,\n        photos: [],\n      }\n      journal.species[key] = entry\n      newSpecies += 1\n    }\n    entry.detections = count\n    entry.photos = [{ url: species.imageUrl, attribution: creditLine(species) }]\n    entry.lastHeard = isoDate(now)\n    const recent = latest[key]\n    if (recent) {\n      entry.heardAt = recent.heardAt\n      entry.station = recent.station\n    }\n  }\n  // Counts reflect the current window, so species that dropped out of it fall\n  // back to zero and become the first candidates for pruning.\n  for (const key of Object.keys(journal.species)) {\n    if (!heard[key]) {\n      journal.species[key].detections = 0\n    }\n  }\n\n  return {\n    newSpecies,\n    speciesHeard: Number(recentDetections.speciesCount) || top.length,\n    totalDetections: Number(recentDetections.totalCount) || 0,\n  }\n}\n\nfunction openaiResponses(app, body) {\n  const apiKey = frameos.getSetting(\"openAI\", \"apiKey\") || \"\"\n  const res = frameos.httpRequest(`${app.config.openaiHost}/v1/responses`, {\n    method: \"POST\",\n    headers: {\n      \"Authorization\": `Bearer ${apiKey}`,\n      \"Content-Type\": \"application/json\",\n    },\n    body: JSON.stringify(body),\n    timeoutMs: 300000,\n  })\n  const ok = res.status === 200\n  if (!ok) {\n    let message = res.error || `HTTP ${res.status}`\n    try {\n      message = JSON.parse(res.body).error.message || message\n    } catch (err) {}\n    return { error: message }\n  }\n  try {\n    return { json: JSON.parse(res.body) }\n  } catch (err) {\n    return { error: \"unparseable response\" }\n  }\n}\n\nfunction extractGeneratedImage(json) {\n  for (const item of (json && json.output) || []) {\n    if (item.type === \"image_generation_call\" && item.result) {\n      return item.result\n    }\n  }\n  return null\n}\n\nfunction extractOutputText(json) {\n  let text = \"\"\n  for (const item of (json && json.output) || []) {\n    if (item.type === \"message\") {\n      for (const part of item.content || []) {\n        if (part.text) {\n          text += part.text\n        }\n      }\n    }\n  }\n  return text\n}\n\nfunction fetchReferenceDataUrls(app, entry) {\n  const refs = []\n  for (const photo of entry.photos || []) {\n    if (refs.length >= REFERENCE_PHOTOS_PER_PLATE) {\n      break\n    }\n    const res = frameos.httpRequest(photo.url, { base64: true, timeoutMs: 30000 })\n    if (res.status === 200 && res.bodyBase64) {\n      refs.push(`data:image/jpeg;base64,${res.bodyBase64}`)\n    }\n  }\n  return refs\n}\n\nfunction generatePlate(app, entry, size, refs) {\n  const cfg = app.config\n  const prompt = `${cfg.style}\\n\\n` +\n    `Species: ${entry.commonName} (${entry.name}).\\n` +\n    `Use the attached reference photo(s) only to get the plumage colours, bill shape, ` +\n    `eye colour and proportions right; compose an original plate, do not copy a photo.\\n` +\n    `Letter the labels exactly as \"${entry.commonName}\" and \"${entry.name}\".`\n  const content = [{ type: \"input_text\", text: prompt }]\n  for (const ref of refs) {\n    content.push({ type: \"input_image\", image_url: ref })\n  }\n  const result = openaiResponses(app, {\n    model: cfg.model,\n    input: [{ role: \"user\", content }],\n    tools: [{\n      type: \"image_generation\",\n      size,\n      quality: cfg.imageQuality || \"medium\",\n      output_format: \"png\",\n    }],\n    tool_choice: { type: \"image_generation\" },\n  })\n  if (result.error) {\n    return { error: result.error }\n  }\n  const image = extractGeneratedImage(result.json)\n  if (!image) {\n    return { error: \"no image in response\" }\n  }\n  return { image }\n}\n\nfunction verifyPlate(app, entry, plateBase64, refs) {\n  const prompt = `You are checking a generated field-journal illustration before it joins a birding collection.\\n` +\n    `Species: ${entry.commonName} (${entry.name}).\\n` +\n    `The first image is the generated plate; any further images are reference photos of the species.\\n` +\n    `Reply with strict JSON only: {\"ok\": true, \"reason\": \"...\"} or {\"ok\": false, \"reason\": \"...\"}.\\n` +\n    `Say ok=true only if the illustrated bird could reasonably be identified as this species ` +\n    `(plumage colours, bill shape, overall proportions match the references) and all lettering ` +\n    `on the plate is legible and spells the names correctly.`\n  const content = [\n    { type: \"input_text\", text: prompt },\n    { type: \"input_image\", image_url: `data:image/png;base64,${plateBase64}` },\n  ]\n  for (const ref of refs) {\n    content.push({ type: \"input_image\", image_url: ref })\n  }\n  const result = openaiResponses(app, {\n    model: app.config.model,\n    input: [{ role: \"user\", content }],\n  })\n  if (result.error) {\n    return { ok: false, reason: result.error }\n  }\n  const text = extractOutputText(result.json)\n  const match = text.match(/\\{[\\s\\S]*\\}/)\n  if (!match) {\n    return { ok: false, reason: \"unparseable verdict\" }\n  }\n  try {\n    const verdict = JSON.parse(match[0])\n    return { ok: verdict.ok === true, reason: verdict.reason || \"\" }\n  } catch (err) {\n    return { ok: false, reason: \"unparseable verdict\" }\n  }\n}\n\nfunction drawPendingPlate(app, context, journal, entry, now) {\n  const cfg = app.config\n  const refs = fetchReferenceDataUrls(app, entry)\n  if (!refs.length) {\n    entry.attempts += 1\n    entry.lastError = \"no reference photo downloadable\"\n    return { error: `${entry.commonName}: ${entry.lastError}` }\n  }\n\n  frameos.log(`Drawing plate for ${entry.commonName} (${entry.name}), attempt ${entry.attempts + 1}`)\n  const generated = generatePlate(app, entry, plateSize(app, context), refs)\n  if (generated.error) {\n    entry.attempts += 1\n    entry.lastError = generated.error\n    return { error: `${entry.commonName}: ${generated.error}` }\n  }\n\n  if (cfg.verifyPlates) {\n    const verdict = verifyPlate(app, entry, generated.image, refs.slice(0, 1))\n    if (!verdict.ok) {\n      entry.attempts += 1\n      entry.lastError = `verification failed: ${verdict.reason}`\n      frameos.log(`Plate for ${entry.commonName} rejected: ${verdict.reason}`)\n      return { error: `${entry.commonName}: ${entry.lastError}` }\n    }\n  }\n\n  const folder = cfg.assetFolder || \"birdSongJournal\"\n  const path = `${folder}/${entry.speciesId}-${slugify(entry.name)}.png`\n  if (!frameos.writeAsset(path, generated.image)) {\n    entry.attempts += 1\n    entry.lastError = \"could not save plate asset\"\n    return { error: `${entry.commonName}: ${entry.lastError}` }\n  }\n  entry.plate = path\n  entry.lastError = \"\"\n  entry.plateDrawnOn = isoDate(now)\n  frameos.log(`Added ${entry.commonName} to the journal: ${path}`)\n  return {}\n}\n\nfunction pruneCollection(app, journal) {\n  const maxSpecies = Math.max(1, Number(app.config.maxSpecies) || 24)\n  const entries = Object.values(journal.species)\n  if (entries.length <= maxSpecies) {\n    return false\n  }\n  entries.sort((a, b) => String(a.lastHeard || a.firstHeard || \"\").localeCompare(String(b.lastHeard || b.firstHeard || \"\")))\n  let toRemove = entries.length - maxSpecies\n  for (const entry of entries) {\n    if (toRemove <= 0) {\n      break\n    }\n    if (entry.plate) {\n      frameos.deleteAsset(entry.plate)\n    }\n    delete journal.species[String(entry.speciesId)]\n    toRemove -= 1\n  }\n  return true\n}\n\nexport function get(app, context) {\n  const cfg = app.config\n  const now = Date.now()\n  const journalKey = cfg.journalStateKey || \"birdSongJournal\"\n  const captionKey = cfg.captionStateKey || \"birdCaption\"\n  const journal = readJournal(app, journalKey)\n  const notes = []\n\n  const lat = parseFloat(cfg.latitude)\n  const lng = parseFloat(cfg.longitude)\n  const hasCoords = isFinite(lat) && isFinite(lng)\n  const stationIds = commaList(cfg.stationIds)\n  const canListen = stationIds.length > 0 || hasCoords\n\n  if (canListen) {\n    const pollMillis = Math.max(1, Number(cfg.pollMinutes) || 60) * 60000\n    if (now - (journal.lastPollAt || 0) >= pollMillis) {\n      const poll = pollDetections(app, journal, lat, lng, stationIds, now)\n      if (poll.error) {\n        notes.push(`BirdWeather: ${poll.error}`)\n        frameos.error(`BirdWeather poll failed: ${poll.error}`)\n      } else {\n        journal.lastPollAt = now\n        journal.lastPoll = {\n          speciesHeard: poll.speciesHeard,\n          totalDetections: poll.totalDetections,\n        }\n        if (poll.newSpecies) {\n          frameos.log(`Heard ${poll.newSpecies} new species`)\n        }\n      }\n      frameos.setState(journalKey, journal)\n    }\n  } else {\n    notes.push(\"set latitude and longitude, or a station ID, to begin\")\n  }\n\n  const maxAttempts = Math.max(1, Number(cfg.maxAttempts) || 3)\n  // Oldest discovery first, then the birds heard most \u2014 so the ones you are\n  // most likely to hear out of the window get drawn while the key is warm.\n  const pending = Object.values(journal.species)\n    .filter((e) => !e.plate && e.attempts < maxAttempts)\n    .sort((a, b) =>\n      String(a.firstHeard || \"\").localeCompare(String(b.firstHeard || \"\")) ||\n      (Number(b.detections) || 0) - (Number(a.detections) || 0))\n  const hasApiKey = (frameos.getSetting(\"openAI\", \"apiKey\") || \"\").length > 0\n\n  if (pending.length && hasApiKey) {\n    const outcome = drawPendingPlate(app, context, journal, pending[0], now)\n    if (outcome.error) {\n      notes.push(outcome.error)\n    }\n    frameos.setState(journalKey, journal)\n    if (pending.length > 1) {\n      frameos.setNextSleep(20)\n    }\n  } else if (pending.length) {\n    notes.push(`${pending.length} plate${pending.length === 1 ? \"\" : \"s\"} waiting for an OpenAI API key`)\n  }\n\n  if (pruneCollection(app, journal)) {\n    frameos.setState(journalKey, journal)\n  }\n\n  // Detection counts move with every poll, so the collection is ordered by\n  // discovery and then by name \u2014 a plate must not jump around as birds sing.\n  const plates = Object.values(journal.species)\n    .filter((e) => e.plate)\n    .sort((a, b) =>\n      String(a.firstHeard || \"\").localeCompare(String(b.firstHeard || \"\")) ||\n      String(a.commonName || \"\").localeCompare(String(b.commonName || \"\")))\n\n  if (plates.length) {\n    const index = (journal.cursor || 0) % plates.length\n    journal.cursor = index + 1\n    frameos.setState(journalKey, journal)\n    const entry = plates[index]\n    const image = frameos.loadAssetImage(entry.plate)\n    if (image) {\n      const days = Math.max(1, Number(cfg.daysWindow) || 7)\n      let caption = entry.commonName\n      if (entry.name && entry.name !== entry.commonName) {\n        caption += ` \u2014 ${entry.name}`\n      }\n      const detections = Number(entry.detections) || 0\n      if (detections) {\n        caption += ` \u00b7 heard ${formatCount(detections)}\u00d7 in ${days} day${days === 1 ? \"\" : \"s\"}`\n      } else {\n        caption += ` \u00b7 not heard in the last ${days} day${days === 1 ? \"\" : \"s\"}`\n      }\n      if (entry.station) {\n        // \"2026-08-10T18:56:33+02:00\" -> \"18:56\", in the station's own timezone.\n        const clock = String(entry.heardAt || \"\").slice(11, 16)\n        caption += clock ? ` \u00b7 last ${clock} at ${entry.station}` : ` \u00b7 last at ${entry.station}`\n      }\n      caption += ` \u00b7 ${index + 1}/${plates.length}`\n      if (notes.length) {\n        caption += `\\n${notes.join(\" \u00b7 \")}`\n      }\n      frameos.setState(captionKey, caption)\n      return image\n    }\n    notes.push(`missing plate file for ${entry.commonName}`)\n  }\n\n  const speciesCount = Object.keys(journal.species).length\n  const lastPoll = journal.lastPoll || {}\n  let status = \"Bird song journal\"\n  if (speciesCount) {\n    status += ` \u00b7 ${speciesCount} species heard, drawing plates`\n  } else if (journal.lastPollAt && !lastPoll.totalDetections) {\n    status += stationIds.length\n      ? ` \u00b7 station ${stationIds.join(\", \")} has not heard anything yet`\n      : ` \u00b7 no BirdWeather station is listening within ${Math.max(1, Number(cfg.radiusKm) || 25)} km \u2014 try a wider radius`\n  } else if (stationIds.length) {\n    status += ` \u00b7 listening in on station ${stationIds.join(\", \")}`\n  } else if (hasCoords) {\n    status += ` \u00b7 listening near ${lat.toFixed(2)}, ${lng.toFixed(2)}`\n  }\n  if (lastPoll.totalDetections) {\n    status += `\\n${formatCount(lastPoll.totalDetections)} songs from ${formatCount(lastPoll.speciesHeard)} species nearby`\n  }\n  if (notes.length) {\n    status += `\\n${notes.join(\" \u00b7 \")}`\n  }\n  frameos.setState(captionKey, status)\n  return frameos.image({ color: PAPER_COLOR })\n}\n",
+          "config.json": "{\n  \"name\": \"Bird song journal (JS)\",\n  \"category\": \"data\",\n  \"description\": \"Asks BirdWeather which birds its listening stations actually heard near you. Every new species gets a field-journal plate drawn by OpenAI from BirdWeather's licensed reference photo, verified for accuracy, and saved to the asset collection. Cycles through the collection on each render.\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"openAI\"],\n  \"fields\": [\n    {\n      \"name\": \"latitude\",\n      \"label\": \"Latitude\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"placeholder\": \"50.85\",\n      \"hint\": \"Centre of the listening area. Leave this and the station IDs empty to pause the journal.\"\n    },\n    {\n      \"name\": \"longitude\",\n      \"label\": \"Longitude\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"placeholder\": \"4.35\"\n    },\n    {\n      \"name\": \"radiusKm\",\n      \"label\": \"Radius (km)\",\n      \"type\": \"float\",\n      \"value\": \"25\",\n      \"hint\": \"BirdWeather stations are sparse outside cities \u2014 widen this if nothing turns up.\"\n    },\n    {\n      \"name\": \"stationIds\",\n      \"label\": \"BirdWeather station IDs\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"placeholder\": \"6767\",\n      \"hint\": \"Comma-separated. Set this to follow specific stations (your own PUC, say) and the area above is ignored.\"\n    },\n    {\n      \"name\": \"daysWindow\",\n      \"label\": \"Time window (days)\",\n      \"type\": \"integer\",\n      \"value\": \"7\",\n      \"hint\": \"Only birds heard within this many days count.\"\n    },\n    {\n      \"name\": \"pollMinutes\",\n      \"label\": \"Poll every (minutes)\",\n      \"type\": \"integer\",\n      \"value\": \"60\",\n      \"hint\": \"How often to ask BirdWeather what it has been hearing.\"\n    },\n    {\n      \"name\": \"speciesLimit\",\n      \"label\": \"Species per poll\",\n      \"type\": \"integer\",\n      \"value\": \"40\",\n      \"hint\": \"How many of the most-heard species to take from each poll\"\n    },\n    {\n      \"name\": \"minDetections\",\n      \"label\": \"Minimum detections\",\n      \"type\": \"integer\",\n      \"value\": \"3\",\n      \"hint\": \"Ignore species heard fewer times than this in the window \u2014 BirdNET's one-off guesses\"\n    },\n    {\n      \"name\": \"classifications\",\n      \"label\": \"Classifications\",\n      \"type\": \"string\",\n      \"value\": \"avian\",\n      \"hint\": \"Comma-separated BirdWeather classifications. Leave empty for everything the stations identify.\"\n    },\n    {\n      \"name\": \"style\",\n      \"label\": \"Plate style\",\n      \"type\": \"text\",\n      \"value\": \"A 19th-century naturalist's field-journal plate on lightly aged cream paper: fine ink linework with soft watercolor washes. The bird perches on a small branch or stands in typical habitat, anatomically accurate, with its bill open mid-song. Around it, small pencil detail studies (head, wing or feather), a small hand-drawn sonogram or sound-wave sketch in one margin as if the bird had been logged by ear, and short handwritten-style margin notes. Neatly hand-lettered at the bottom: the common name in larger letters and the scientific name in italics beneath it.\"\n    },\n    {\n      \"name\": \"model\",\n      \"label\": \"OpenAI model\",\n      \"type\": \"string\",\n      \"value\": \"gpt-5.1\",\n      \"hint\": \"Responses API model that drives image generation and the accuracy check\"\n    },\n    {\n      \"name\": \"imageQuality\",\n      \"label\": \"Plate quality\",\n      \"type\": \"select\",\n      \"options\": [\"low\", \"medium\", \"high\"],\n      \"value\": \"medium\"\n    },\n    {\n      \"name\": \"verifyPlates\",\n      \"label\": \"Verify plates\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"hint\": \"Have the model double-check each plate against the reference photo before adding it\"\n    },\n    {\n      \"name\": \"maxSpecies\",\n      \"label\": \"Max species kept\",\n      \"type\": \"integer\",\n      \"value\": \"24\",\n      \"hint\": \"Least recently heard species (and their plates) are pruned beyond this\"\n    },\n    {\n      \"name\": \"maxAttempts\",\n      \"label\": \"Max attempts per species\",\n      \"type\": \"integer\",\n      \"value\": \"3\"\n    },\n    {\n      \"name\": \"assetFolder\",\n      \"label\": \"Asset folder\",\n      \"type\": \"string\",\n      \"value\": \"birdSongJournal\",\n      \"hint\": \"Plates are saved under this folder in the frame's assets directory\"\n    },\n    {\n      \"name\": \"journalStateKey\",\n      \"label\": \"Journal state key\",\n      \"type\": \"string\",\n      \"value\": \"birdSongJournal\",\n      \"hint\": \"Scene state key holding the species log; persist it to disk in scene fields\"\n    },\n    {\n      \"name\": \"captionStateKey\",\n      \"label\": \"Caption state key\",\n      \"type\": \"string\",\n      \"value\": \"birdCaption\",\n      \"hint\": \"Scene state key that receives the caption / status line for a text overlay\"\n    },\n    {\n      \"name\": \"birdweatherHost\",\n      \"label\": \"BirdWeather API host\",\n      \"type\": \"string\",\n      \"value\": \"https://app.birdweather.com\"\n    },\n    {\n      \"name\": \"openaiHost\",\n      \"label\": \"OpenAI API host\",\n      \"type\": \"string\",\n      \"value\": \"https://api.openai.com\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n"
+        },
+        "version": "1.0.0"
+      }
+    },
+    "edges": [
+      {
+        "id": "edge-c4d8e2b6-next-b7e3f1a0-prev",
+        "source": "c4d8e2b6-8f0e-4d5b-9a3e-1c2b3d4e5f60",
+        "sourceHandle": "next",
+        "target": "b7e3f1a0-2222-4aaa-8bbb-000000000002",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "edge-b7e3f1a0-next-b7e3f1a0-prev",
+        "source": "b7e3f1a0-2222-4aaa-8bbb-000000000002",
+        "sourceHandle": "next",
+        "target": "b7e3f1a0-3333-4aaa-8bbb-000000000003",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "edge-b7e3f1a0-fieldOutput-b7e3f1a0-fieldInput_image",
+        "source": "b7e3f1a0-1111-4aaa-8bbb-000000000001",
+        "sourceHandle": "fieldOutput",
+        "target": "b7e3f1a0-2222-4aaa-8bbb-000000000002",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "edge-b7e3f1a0-fieldOutput-b7e3f1a0-fieldInput_latitude",
+        "source": "b7e3f1a0-4444-4aaa-8bbb-000000000004",
+        "sourceHandle": "fieldOutput",
+        "target": "b7e3f1a0-1111-4aaa-8bbb-000000000001",
+        "targetHandle": "fieldInput/latitude",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "edge-b7e3f1a0-fieldOutput-b7e3f1a0-fieldInput_longitude",
+        "source": "b7e3f1a0-5555-4aaa-8bbb-000000000005",
+        "sourceHandle": "fieldOutput",
+        "target": "b7e3f1a0-1111-4aaa-8bbb-000000000001",
+        "targetHandle": "fieldInput/longitude",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "edge-b7e3f1a0-fieldOutput-b7e3f1a0-fieldInput_radiusKm",
+        "source": "b7e3f1a0-6666-4aaa-8bbb-000000000006",
+        "sourceHandle": "fieldOutput",
+        "target": "b7e3f1a0-1111-4aaa-8bbb-000000000001",
+        "targetHandle": "fieldInput/radiusKm",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "edge-b7e3f1a0-fieldOutput-b7e3f1a0-fieldInput_stationIds",
+        "source": "b7e3f1a0-7777-4aaa-8bbb-000000000007",
+        "sourceHandle": "fieldOutput",
+        "target": "b7e3f1a0-1111-4aaa-8bbb-000000000001",
+        "targetHandle": "fieldInput/stationIds",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "edge-b7e3f1a0-fieldOutput-b7e3f1a0-fieldInput_daysWindow",
+        "source": "b7e3f1a0-8888-4aaa-8bbb-000000000008",
+        "sourceHandle": "fieldOutput",
+        "target": "b7e3f1a0-1111-4aaa-8bbb-000000000001",
+        "targetHandle": "fieldInput/daysWindow",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "edge-b7e3f1a0-fieldOutput-b7e3f1a0-fieldInput_text",
+        "source": "b7e3f1a0-9999-4aaa-8bbb-000000000009",
+        "sourceHandle": "fieldOutput",
+        "target": "b7e3f1a0-3333-4aaa-8bbb-000000000003",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "access": "public",
+        "label": "Latitude",
+        "name": "latitude",
+        "persist": "disk",
+        "placeholder": "50.85",
+        "type": "string",
+        "value": ""
+      },
+      {
+        "access": "public",
+        "label": "Longitude",
+        "name": "longitude",
+        "persist": "disk",
+        "placeholder": "4.35",
+        "type": "string",
+        "value": ""
+      },
+      {
+        "access": "public",
+        "label": "Radius (km)",
+        "name": "radiusKm",
+        "persist": "disk",
+        "type": "float",
+        "value": "25"
+      },
+      {
+        "access": "public",
+        "label": "BirdWeather station IDs",
+        "name": "stationIds",
+        "persist": "disk",
+        "placeholder": "6767",
+        "type": "string",
+        "value": ""
+      },
+      {
+        "access": "public",
+        "label": "Time window (days)",
+        "name": "daysWindow",
+        "persist": "disk",
+        "type": "integer",
+        "value": "7"
+      },
+      {
+        "access": "private",
+        "label": "Species log",
+        "name": "birdSongJournal",
+        "persist": "disk",
+        "type": "json"
+      },
+      {
+        "access": "private",
+        "label": "Caption",
+        "name": "birdCaption",
+        "persist": "memory",
+        "type": "string"
+      }
+    ],
+    "id": "3d6c1a54-9f2b-4c7e-8b31-5a90e4c2d7f1",
+    "name": "Bird song journal",
+    "nodes": [
+      {
+        "data": {
+          "keyword": "render"
+        },
+        "height": 161,
+        "id": "c4d8e2b6-8f0e-4d5b-9a3e-1c2b3d4e5f60",
+        "position": {
+          "x": -260,
+          "y": 120
+        },
+        "type": "event",
+        "width": 212
+      },
+      {
+        "data": {
+          "config": {},
+          "keyword": "birdSongJournal"
+        },
+        "height": 460,
+        "id": "b7e3f1a0-1111-4aaa-8bbb-000000000001",
+        "position": {
+          "x": 40,
+          "y": 420
+        },
+        "type": "app",
+        "width": 325
+      },
+      {
+        "data": {
+          "config": {
+            "placement": "cover"
+          },
+          "keyword": "render/image"
+        },
+        "height": 180,
+        "id": "b7e3f1a0-2222-4aaa-8bbb-000000000002",
+        "position": {
+          "x": 60,
+          "y": 120
+        },
+        "type": "app",
+        "width": 325
+      },
+      {
+        "data": {
+          "config": {
+            "borderColor": "#f5f1e6",
+            "borderWidth": 2,
+            "fontColor": "#1c1a15",
+            "fontSize": "20",
+            "padding": "14",
+            "position": "center",
+            "vAlign": "top"
+          },
+          "keyword": "render/text"
+        },
+        "height": 320,
+        "id": "b7e3f1a0-3333-4aaa-8bbb-000000000003",
+        "position": {
+          "x": 480,
+          "y": 120
+        },
+        "type": "app",
+        "width": 325
+      },
+      {
+        "data": {
+          "keyword": "latitude"
+        },
+        "height": 60,
+        "id": "b7e3f1a0-4444-4aaa-8bbb-000000000004",
+        "position": {
+          "x": -260,
+          "y": 440
+        },
+        "type": "state",
+        "width": 172
+      },
+      {
+        "data": {
+          "keyword": "longitude"
+        },
+        "height": 60,
+        "id": "b7e3f1a0-5555-4aaa-8bbb-000000000005",
+        "position": {
+          "x": -260,
+          "y": 520
+        },
+        "type": "state",
+        "width": 172
+      },
+      {
+        "data": {
+          "keyword": "radiusKm"
+        },
+        "height": 60,
+        "id": "b7e3f1a0-6666-4aaa-8bbb-000000000006",
+        "position": {
+          "x": -260,
+          "y": 600
+        },
+        "type": "state",
+        "width": 172
+      },
+      {
+        "data": {
+          "keyword": "stationIds"
+        },
+        "height": 60,
+        "id": "b7e3f1a0-7777-4aaa-8bbb-000000000007",
+        "position": {
+          "x": -260,
+          "y": 680
+        },
+        "type": "state",
+        "width": 172
+      },
+      {
+        "data": {
+          "keyword": "daysWindow"
+        },
+        "height": 60,
+        "id": "b7e3f1a0-8888-4aaa-8bbb-000000000008",
+        "position": {
+          "x": -260,
+          "y": 760
+        },
+        "type": "state",
+        "width": 172
+      },
+      {
+        "data": {
+          "keyword": "birdCaption"
+        },
+        "height": 60,
+        "id": "b7e3f1a0-9999-4aaa-8bbb-000000000009",
+        "position": {
+          "x": 480,
+          "y": 500
+        },
+        "type": "state",
+        "width": 172
+      }
+    ],
+    "settings": {
+      "backgroundColor": "#f5f1e6",
+      "execution": "interpreted",
+      "refreshInterval": 300
+    }
+  }
+]
