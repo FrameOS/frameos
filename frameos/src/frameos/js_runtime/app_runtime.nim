@@ -91,6 +91,24 @@ when defined(frameosEmbedded):
       if other != keep and other.ready and not jsRuntimeStack.contains(other):
         teardownJsRuntime(other)
 
+proc releaseIdleJsAppRuntimes*() =
+  ## Drop every JS app interpreter that is not mid-call. Called when a render
+  ## finishes.
+  ##
+  ## Eviction otherwise only ever runs from ensureReady — that is, when ANOTHER
+  ## JS node is about to be built. Nothing on the image path triggers it, so a
+  ## decode could be refused for want of memory that was sitting in idle
+  ## interpreters the whole time, and a frame that sleeps for five minutes
+  ## between renders sleeps holding all of them.
+  ##
+  ## Cheap to undo: teardownJsRuntime keeps transpiledCode, so rebuilding
+  ## re-evaluates the module without re-transpiling — the expensive part, ~22 s
+  ## for the bundled Weather app.
+  when defined(frameosEmbedded):
+    for runtime in liveJsRuntimes:
+      if runtime.ready and not jsRuntimeStack.contains(runtime):
+        teardownJsRuntime(runtime)
+
 proc jsFetchMaxBytes(e: JsAppEvalEnv): int =
   if e != nil:
     frameos_apps.maxHttpResponseBytes(e.owner)
