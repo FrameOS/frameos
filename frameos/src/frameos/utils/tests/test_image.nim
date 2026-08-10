@@ -1,11 +1,9 @@
-import std/[base64, options, unittest, uri]
+import std/[base64, options, os, unittest, uri]
 import pixie
 import pixie/fileformats/png
 
 import ../image
 
-when defined(frameosEmbedded):
-  import std/os
 
 proc pixel(image: Image, x, y: int): ColorRGBX =
   image.data[image.dataIndex(x, y)]
@@ -260,3 +258,60 @@ suite "image helpers":
     var bottomRightTarget = newImage(3, 3)
     bottomRightTarget.scaleAndDrawImage(anchorSrc, "bottom-right")
     check pixel(bottomRightTarget, 2, 2).r == 255
+
+suite "readImageIntoTarget streams PNGs from disk":
+  # A PNG on an SD card used to take the buffered path, which needs the whole
+  # compressed body in ONE contiguous block. On a fragmented ESP32 heap that
+  # fails with "Image file … is 1450K; only 1024K of render memory is
+  # available" while several MB sit free in smaller pieces. Streaming needs a
+  # fixed inflate window and a row instead.
+  #
+  # It is only equivalent to compositing when the source cannot be
+  # transparent, so opacity has to be PROVEN, not assumed — a PNG that might
+  # carry alpha must still take the slow path or it would overwrite the canvas
+  # behind it instead of blending over it.
+
+  proc writeTempPng(image: Image, name: string): string =
+    result = getTempDir() / name
+    writeFile(result, image.encodePng())
+
+  # pixie always encodes RGBA (colour type 6), which is precisely the case this
+  # path must decline — so the opaque fixture is a hand-built colour-type-2
+  # file. Not a contrivance: the SD-card PNG that reported this bug is
+  # 736x1325 8-bit colour type 2, straight out of a photo pipeline.
+  const opaqueRgbPngBase64 =
+    "iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAK0lEQVR42u3NMQ0AAAgDsGlC" &
+    "E2KRhQw4mvRvputExGKxWCwWi8VisVj8N149iWj7Looc9gAAAABJRU5ErkJggg=="
+
+  test "an opaque RGB png streams into the target":
+    let path = getTempDir() / "frameos-test-opaque.png"
+    writeFile(path, decode(opaqueRgbPngBase64))
+    defer: removeFile(path)
+
+    var target = newImage(20, 15)
+    check readImageIntoTarget(path, target, "cover") == true
+    # Streamed pixels landed, rather than the target staying untouched.
+    check target[10, 7].r == 200
+    check target[10, 7].g == 100
+
+  test "a png that may carry alpha is left to the buffered path":
+    var source = newImage(40, 30)
+    for y in 0 ..< source.height:
+      for x in 0 ..< source.width:
+        source[x, y] = rgbx(200, 100, 50, 128)
+    let path = writeTempPng(source, "frameos-test-alpha.png")
+    defer: removeFile(path)
+
+    var target = newImage(20, 15)
+    check readImageIntoTarget(path, target, "cover") == false
+
+  test "an unsupported scaling mode still declines":
+    var source = newImage(8, 8)
+    for y in 0 ..< source.height:
+      for x in 0 ..< source.width:
+        source[x, y] = rgbx(1, 2, 3, 255)
+    let path = writeTempPng(source, "frameos-test-mode.png")
+    defer: removeFile(path)
+
+    var target = newImage(4, 4)
+    check readImageIntoTarget(path, target, "top-left") == false

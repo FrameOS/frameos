@@ -17,15 +17,18 @@ import std/strtabs
 import frameos/utils/http_client
 import frameos/utils/memory
 import frameos/utils/font
+# pixie.nim imports the fileformat modules without re-exporting them, so every
+# format the streaming decode paths reach for has to be imported by name. Miss
+# one and its `when compiles(...)` branch below quietly evaluates false — the
+# format silently loses its file-backed decoder.
+#
+# png is unconditional: readImageIntoTarget streams opaque PNGs on every
+# target, not just embedded ones, and it needs pngSignature to recognise them.
+import pixie/fileformats/png
 when defined(frameosEmbedded):
-  # pixie.nim imports the fileformat modules without re-exporting them, so
-  # every format the streaming decode paths reach for has to be imported by
-  # name here. Miss one and its `when compiles(...)` branch below quietly
-  # evaluates false — the format silently loses its file-backed decoder.
   import pixie/blends
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
-  import pixie/fileformats/png
   import pixie/fileformats/ppm
   import pixie/inflatestream
 when not defined(frameosEmbedded) and not defined(frameosWasm):
@@ -490,6 +493,41 @@ proc probeImageFileHeader(path: string): string =
 proc isJpegHeader(data: string): bool =
   data.len > 2 and data[0] == '\xFF' and data[1] == '\xD8'
 
+proc isPngHeader(data: string): bool =
+  data.len > 8 and equalMem(data[0].unsafeAddr, pngSignature[0].unsafeAddr, 8)
+
+proc pngIsProvablyOpaque(header: string): bool =
+  ## True when a PNG cannot carry transparency, which is what makes it safe to
+  ## stream straight over a canvas: writing its pixels is then equivalent to
+  ## compositing them, exactly as for a JPEG.
+  ##
+  ## Colour types 0 (greyscale) and 2 (truecolour) have no alpha channel. A
+  ## tRNS chunk can still declare specific values transparent, so anything with
+  ## one is disqualified — as is a file whose header did not fit the probe, on
+  ## the principle that "not proven opaque" must read as "may have alpha".
+  if not isPngHeader(header) or header.len < 26:
+    return false
+  let colorType = header[25].uint8
+  if colorType != 0'u8 and colorType != 2'u8:
+    return false
+  # Walk the chunk list looking for tRNS. Reaching IDAT first proves there is
+  # none: tRNS is required to precede the image data.
+  var offset = 8
+  while offset + 8 <= header.len:
+    var length = 0'u32
+    for i in 0 .. 3:
+      length = (length shl 8) or header[offset + i].uint8.uint32
+    let chunkType = header[offset + 4 ..< min(offset + 8, header.len)]
+    if chunkType == "tRNS":
+      return false
+    if chunkType == "IDAT":
+      return true
+    if length > uint32(int32.high):
+      return false
+    offset += 12 + length.int # length + type + data + crc
+  # Ran out of probed header before the image data started.
+  false
+
 proc fileJpegSource(file: File): JpegSourceProc =
   result = proc(dst: pointer, maxBytes: int): int =
     try:
@@ -578,10 +616,16 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
   let fileSize = getFileSize(path)
   var header = probeImageFileHeader(path)
 
-  # JPEG only: it has no alpha, so writing decoded pixels straight over the
-  # canvas is equivalent to compositing. PNGs may carry transparency that
-  # must alpha-blend over the scene background via the generic path.
-  if not isJpegHeader(header):
+  # Both streaming decoders write decoded pixels straight over the canvas, so
+  # they are only equivalent to compositing when the source cannot be
+  # transparent. A JPEG never is. A PNG usually is not either, and refusing
+  # every one of them meant a PNG on an SD card took the buffered path and
+  # needed its whole compressed body in one contiguous block — which is what
+  # fails on a fragmented ESP32 heap ("Image file … is 1450K; only 1024K of
+  # render memory is available") while several MB sit free in smaller pieces.
+  let jpeg = isJpegHeader(header)
+  let streamablePng = not jpeg and pngIsProvablyOpaque(header)
+  if not jpeg and not streamablePng:
     return false
   header = ""
 
@@ -589,10 +633,18 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
   if not file.open(path):
     raise newException(PixieError, "Cannot open image file: " & path)
   try:
-    decodeJpegStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
-    return true
+    if jpeg:
+      decodeJpegStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+      return true
+    when compiles(decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
+      # Row-streamed: the compressed body is read incrementally and never held
+      # whole, so this needs a fixed inflate window plus a row, not a block the
+      # size of the file. Interlaced and 16-bit PNGs raise here and fall back.
+      decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+      return true
   except PixieError:
-    # Progressive JPEGs cannot stream; retry buffered below.
+    # Progressive JPEGs and interlaced/16-bit PNGs cannot stream; retry
+    # buffered below.
     discard
   finally:
     file.close()
