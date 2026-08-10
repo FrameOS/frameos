@@ -102,6 +102,7 @@ proc cleanupSceneRuntime*(scene: FrameScene) =
     interpreted.cacheValues = initTable[NodeId, Value]()
     interpreted.cacheTimes = initTable[NodeId, float]()
     interpreted.cacheKeys = initTable[NodeId, JsonNode]()
+    interpreted.cacheExprs = initTable[NodeId, JsonNode]()
     cleanupSceneJs(interpreted)
 
 proc cleanupSceneTableRuntime*(scenes: Table[SceneId, FrameScene]) =

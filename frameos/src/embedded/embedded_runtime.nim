@@ -243,6 +243,7 @@ proc cleanupScene(scene: FrameScene) =
   interpreted.cacheValues = initTable[NodeId, Value]()
   interpreted.cacheTimes = initTable[NodeId, float]()
   interpreted.cacheKeys = initTable[NodeId, JsonNode]()
+  interpreted.cacheExprs = initTable[NodeId, JsonNode]()
   when defined(memProbe): memProbe("  cleanupScene: tables cleared")
   cleanupSceneJs(interpreted)
   when defined(memProbe): memProbe("  cleanupScene: js closed")
@@ -453,6 +454,11 @@ proc renderCurrentScene*(): Option[Image] =
     nextSleep: -1
   )
   let image = interpreter.render(currentScene, context)
+  # The scene is done with its JS nodes until the next render, which on this
+  # board is minutes away. Hand their interpreters back now so the packing and
+  # display work below — and the next render's image decodes — see the memory.
+  releaseIdleJsAppRuntimes()
+  when defined(memProbe): memProbe("  renderCurrentScene: idle js runtimes released")
   if image.isNil:
     log("render returned no image")
     return none(Image)
