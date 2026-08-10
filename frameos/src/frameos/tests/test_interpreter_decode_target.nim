@@ -172,14 +172,14 @@ const ImageProducers = [
   "googlePhotos", "openaiImage", "wikicommons",
 ]
 
-# Apps that reach the network with default state through something OTHER than
-# the image-download seams above (their own API query, an RSS fetch). A scene
-# that needs one cannot render offline at all, so it says nothing about the
-# decode-target hint either way — and rendering them offline segfaults in the
-# code that consumes the failed fetch, which reproduces on main and is not
-# this test's business. wikicommons is here because it queries the Commons API
-# before it downloads; its image decode is seamed, its search is not.
-const OfflineBlockers = ["downloadUrl", "weather", "beRecycle", "wikicommons"]
+# Apps that reach the network through something OTHER than the image-download
+# seams above (their own API query, an RSS fetch). Those requests would be
+# real, so a scene needing one is skipped: this test must not depend on the
+# network, and a producer that never got as far as downloading says nothing
+# about the decode-target hint anyway. wikicommons is here because it queries
+# the Commons API before it downloads — its image decode is seamed, its
+# search is not.
+const UnseamedNetworkApps = ["downloadUrl", "weather", "beRecycle", "wikicommons"]
 
 proc usesImageProducer(sceneJson: string): bool =
   for producer in ImageProducers:
@@ -188,7 +188,7 @@ proc usesImageProducer(sceneJson: string): bool =
   false
 
 proc needsUnseamedNetwork(sceneJson: string): bool =
-  for app in OfflineBlockers:
+  for app in UnseamedNetworkApps:
     if sceneJson.contains(app):
       return true
   false
