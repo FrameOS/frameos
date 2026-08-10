@@ -7,8 +7,9 @@ import frameos/values
 import frameos/js_runtime/source_map
 import frameos/js_runtime/transpiler
 import frameos/js_runtime/burrito
+when defined(frameosEmbedded): import frameos/utils/memory
 import lib/tz
-import tables, json, strutils, locks
+import tables, json, strutils, locks, sequtils
 import chrono, times
 import pixie
 
@@ -43,6 +44,30 @@ var currentEvalCtx: ptr JSContext
 var currentEvalEnv: EvalEnv
 var tzName = ""
 var sceneJsLock: Lock
+
+when defined(frameosEmbedded):
+  # Scene-level interpreters, evicted under memory pressure — the same policy
+  # app_runtime applies to JS APP nodes, for the same reason and with the same
+  # safety rule.
+  #
+  # A scene builds one QuickJS (~148 KB of PSRAM) as soon as it has a single
+  # code node or inline expression. Nested scenes each get their own, so a tree
+  # that runs JS at every level multiplies that by its depth, on a board whose
+  # whole render budget is a few megabytes. Purely structural nesting already
+  # costs nothing — interpreter.init stopped building a context for scenes with
+  # no JS at all — but a deep tree that does use JS still needs a ceiling.
+  #
+  # Recompilation is what makes eviction safe: getOrCompileCodeFn and
+  # evalInline both rebuild a missing function on demand, and cleanupSceneJs
+  # clears the name tables so they will. It is not free — rebuilding
+  # re-transpiles each snippet — so this only fires when headroom is actually
+  # short, and a roomy frame never evicts.
+  var liveSceneJsScenes: seq[InterpretedFrameScene] = @[]
+  # Scenes with a JS frame on the stack right now. Freeing one of those
+  # contexts would pull it out from under a call in progress, which nested
+  # scenes make reachable: a parent's code node can render a child mid-call.
+  var sceneJsStack: seq[InterpretedFrameScene] = @[]
+  const SceneJsEvictHeadroomBytes = 2 * 1024 * 1024
 initLock(sceneJsLock)
 
 const sceneJsPrelude* = """
@@ -654,9 +679,52 @@ proc callGlobalFunction*(ctx: ptr JSContext, fnName: string, args: openArray[JSV
 # Scene JS context
 # -------------------------
 
+proc closeSceneJsLocked(scene: InterpretedFrameScene) =
+  ## Tear down one scene's JS context. Caller holds sceneJsLock.
+  ##
+  ## Reversible by design: the name tables go with the context, and both
+  ## getOrCompileCodeFn and evalInline rebuild a missing function on demand.
+  when defined(frameosEmbedded):
+    let live = liveSceneJsScenes.find(scene)
+    if live >= 0:
+      liveSceneJsScenes.delete(live)
+  if not scene.jsReady:
+    return
+  if scene.js.context != nil and currentEvalCtx == scene.js.context:
+    currentEvalCtx = nil
+    currentEvalEnv = nil
+  if scene.js.context != nil:
+    clearJsSourceMaps(scene.js.context)
+  if scene.js.runtime != nil:
+    scene.js.runPendingJobs()
+    JS_RunGC(scene.js.runtime)
+  scene.js.close()
+  scene.jsReady = false
+  scene.jsFuncNameByNode = initTable[NodeId, string]()
+  scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+  scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+
+when defined(frameosEmbedded):
+  proc evictIdleSceneJs(keep: InterpretedFrameScene) =
+    ## Reclaim other scenes' interpreters before building one more, but only
+    ## when headroom is genuinely short: rebuilding re-transpiles every code
+    ## node in the evicted scene, so a frame with room to spare should never
+    ## pay that. Mirrors evictIdleJsRuntimes in app_runtime.
+    let headroom = availableRenderBytes()
+    if headroom <= 0 or headroom >= SceneJsEvictHeadroomBytes:
+      return
+    # Iterate a copy: closeSceneJsLocked removes entries as it goes.
+    for other in liveSceneJsScenes.toSeq():
+      if other != keep and other.jsReady and not sceneJsStack.contains(other):
+        closeSceneJsLocked(other)
+
 proc ensureSceneJs*(scene: InterpretedFrameScene) =
   withLock sceneJsLock:
     if scene.jsReady: return
+    when defined(frameosEmbedded):
+      evictIdleSceneJs(scene)
+      if not liveSceneJsScenes.contains(scene):
+        liveSceneJsScenes.add(scene)
     scene.js = newQuickJS()
     # Register bridge functions ONCE per scene/context
     scene.js.registerFunction("getState", jsGetState)
@@ -818,9 +886,13 @@ proc callCompiledFn*(scene: InterpretedFrameScene,
   withLock sceneJsLock:
     currentEvalCtx = scene.js.context
     currentEvalEnv = e
+    when defined(frameosEmbedded): sceneJsStack.add(scene)
     try:
       envelopeJson = scene.js.eval(fnName & "()")
     finally:
+      when defined(frameosEmbedded):
+        if sceneJsStack.len > 0 and sceneJsStack[^1] == scene:
+          discard sceneJsStack.pop()
       if currentEvalCtx == scene.js.context:
         currentEvalCtx = nil
         currentEvalEnv = nil
@@ -947,18 +1019,4 @@ proc cleanupCompilerJs*() =
 
 proc cleanupSceneJs*(scene: InterpretedFrameScene) =
   withLock sceneJsLock:
-    if not scene.jsReady:
-      return
-    if scene.js.context != nil and currentEvalCtx == scene.js.context:
-      currentEvalCtx = nil
-      currentEvalEnv = nil
-    if scene.js.context != nil:
-      clearJsSourceMaps(scene.js.context)
-    if scene.js.runtime != nil:
-      scene.js.runPendingJobs()
-      JS_RunGC(scene.js.runtime)
-    scene.js.close()
-    scene.jsReady = false
-    scene.jsFuncNameByNode = initTable[NodeId, string]()
-    scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
-    scene.appInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()
+    closeSceneJsLocked(scene)
