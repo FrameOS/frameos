@@ -259,59 +259,55 @@ suite "image helpers":
     bottomRightTarget.scaleAndDrawImage(anchorSrc, "bottom-right")
     check pixel(bottomRightTarget, 2, 2).r == 255
 
-suite "readImageIntoTarget streams PNGs from disk":
-  # A PNG on an SD card used to take the buffered path, which needs the whole
-  # compressed body in ONE contiguous block. On a fragmented ESP32 heap that
-  # fails with "Image file … is 1450K; only 1024K of render memory is
-  # available" while several MB sit free in smaller pieces. Streaming needs a
-  # fixed inflate window and a row instead.
+suite "pngIsProvablyOpaque":
+  # Gate for streaming a PNG straight over the render canvas on embedded
+  # targets. The streaming decoder writes pixels rather than compositing them,
+  # so this must only say yes when the file CANNOT carry transparency — a
+  # wrong yes silently drops whatever was behind the image.
   #
-  # It is only equivalent to compositing when the source cannot be
-  # transparent, so opacity has to be PROVEN, not assumed — a PNG that might
-  # carry alpha must still take the slow path or it would overwrite the canvas
-  # behind it instead of blending over it.
+  # It exists because a 1450K PNG on an SD card cannot be read the buffered
+  # way on a fragmented ESP32 heap: that needs the whole compressed body in one
+  # contiguous block, and the board had 4.87MB free with a 1.95MB largest.
 
-  proc writeTempPng(image: Image, name: string): string =
-    result = getTempDir() / name
-    writeFile(result, image.encodePng())
+  proc png(colorType: int, extraChunks: seq[string] = @[], truncate = -1): string =
+    ## Minimal PNG header: signature, IHDR, then the given chunks, then IDAT.
+    proc be32(n: int): string =
+      result = newString(4)
+      for i in 0 .. 3:
+        result[i] = chr((n shr ((3 - i) * 8)) and 0xFF)
+    proc chunk(kind, data: string): string =
+      be32(data.len) & kind & data & be32(0) # CRC unchecked by the parser
+    var ihdr = be32(8) & be32(8) & chr(8) & chr(colorType) & chr(0) & chr(0) & chr(0)
+    result = "\x89PNG\r\n\x1A\n" & chunk("IHDR", ihdr)
+    for c in extraChunks:
+      result &= chunk(c, "\x00")
+    result &= chunk("IDAT", "\x00")
+    if truncate >= 0:
+      result.setLen(min(truncate, result.len))
 
-  # pixie always encodes RGBA (colour type 6), which is precisely the case this
-  # path must decline — so the opaque fixture is a hand-built colour-type-2
-  # file. Not a contrivance: the SD-card PNG that reported this bug is
-  # 736x1325 8-bit colour type 2, straight out of a photo pipeline.
-  const opaqueRgbPngBase64 =
-    "iVBORw0KGgoAAAANSUhEUgAAACgAAAAeCAIAAADRv8uKAAAAK0lEQVR42u3NMQ0AAAgDsGlC" &
-    "E2KRhQw4mvRvputExGKxWCwWi8VisVj8N149iWj7Looc9gAAAABJRU5ErkJggg=="
+  test "truecolour and greyscale without tRNS are opaque":
+    check pngIsProvablyOpaque(png(2)) == true
+    check pngIsProvablyOpaque(png(0)) == true
 
-  test "an opaque RGB png streams into the target":
-    let path = getTempDir() / "frameos-test-opaque.png"
-    writeFile(path, decode(opaqueRgbPngBase64))
-    defer: removeFile(path)
+  test "an alpha channel is never opaque":
+    check pngIsProvablyOpaque(png(6)) == false   # RGBA
+    check pngIsProvablyOpaque(png(4)) == false   # grey + alpha
 
-    var target = newImage(20, 15)
-    check readImageIntoTarget(path, target, "cover") == true
-    # Streamed pixels landed, rather than the target staying untouched.
-    check target[10, 7].r == 200
-    check target[10, 7].g == 100
+  test "palette is not opaque even without tRNS":
+    # A palette carries no alpha in IHDR, but tRNS for it is common and the
+    # decode path would have to expand it; not worth proving.
+    check pngIsProvablyOpaque(png(3)) == false
 
-  test "a png that may carry alpha is left to the buffered path":
-    var source = newImage(40, 30)
-    for y in 0 ..< source.height:
-      for x in 0 ..< source.width:
-        source[x, y] = rgbx(200, 100, 50, 128)
-    let path = writeTempPng(source, "frameos-test-alpha.png")
-    defer: removeFile(path)
+  test "tRNS disqualifies an otherwise opaque file":
+    check pngIsProvablyOpaque(png(2, @["tRNS"])) == false
+    check pngIsProvablyOpaque(png(0, @["tRNS"])) == false
 
-    var target = newImage(20, 15)
-    check readImageIntoTarget(path, target, "cover") == false
+  test "tRNS is still found behind other chunks":
+    check pngIsProvablyOpaque(png(2, @["gAMA", "cHRM"])) == true
+    check pngIsProvablyOpaque(png(2, @["gAMA", "tRNS", "cHRM"])) == false
 
-  test "an unsupported scaling mode still declines":
-    var source = newImage(8, 8)
-    for y in 0 ..< source.height:
-      for x in 0 ..< source.width:
-        source[x, y] = rgbx(1, 2, 3, 255)
-    let path = writeTempPng(source, "frameos-test-mode.png")
-    defer: removeFile(path)
-
-    var target = newImage(4, 4)
-    check readImageIntoTarget(path, target, "top-left") == false
+  test "a header that outran the probe is not proven":
+    # Never reached IDAT, so a tRNS could still be ahead: must answer no.
+    check pngIsProvablyOpaque(png(2, truncate = 30)) == false
+    check pngIsProvablyOpaque("") == false
+    check pngIsProvablyOpaque("not a png at all") == false

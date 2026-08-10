@@ -39,12 +39,17 @@ static void expect(const char *name, fos_sd_probe_verdict_t got_verdict,
                    const char *want_detail)
 {
     g_checks++;
-    if (got_verdict != want_verdict || strcmp(got_detail, want_detail) != 0) {
+    /* fos_sd_probe promises *out_detail is always set, but the compiler cannot
+     * prove the callee wrote it — GCC rejects the bare strcmp with -Wnonnull.
+     * Substituting a token keeps that a loud test failure (a NULL detail IS a
+     * broken contract) instead of a segfault or a suppressed warning. */
+    const char *got = got_detail ? got_detail : "(null detail)";
+    if (got_verdict != want_verdict || strcmp(got, want_detail) != 0) {
         g_failures++;
         printf("FAIL %-38s got verdict=%d detail=%s, want verdict=%d detail=%s\n",
-               name, (int)got_verdict, got_detail, (int)want_verdict, want_detail);
+               name, (int)got_verdict, got, (int)want_verdict, want_detail);
     } else {
-        printf("ok   %-38s verdict=%d %s\n", name, (int)got_verdict, got_detail);
+        printf("ok   %-38s verdict=%d %s\n", name, (int)got_verdict, got);
     }
 }
 

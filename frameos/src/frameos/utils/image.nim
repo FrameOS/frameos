@@ -22,8 +22,9 @@ import frameos/utils/font
 # one and its `when compiles(...)` branch below quietly evaluates false — the
 # format silently loses its file-backed decoder.
 #
-# png is unconditional: readImageIntoTarget streams opaque PNGs on every
-# target, not just embedded ones, and it needs pngSignature to recognise them.
+# png is unconditional: pngIsProvablyOpaque needs pngSignature, and it is
+# compiled (and unit-tested) everywhere even though only embedded targets act
+# on its answer.
 import pixie/fileformats/png
 when defined(frameosEmbedded):
   import pixie/blends
@@ -496,7 +497,7 @@ proc isJpegHeader(data: string): bool =
 proc isPngHeader(data: string): bool =
   data.len > 8 and equalMem(data[0].unsafeAddr, pngSignature[0].unsafeAddr, 8)
 
-proc pngIsProvablyOpaque(header: string): bool =
+proc pngIsProvablyOpaque*(header: string): bool =
   ## True when a PNG cannot carry transparency, which is what makes it safe to
   ## stream straight over a canvas: writing its pixels is then equivalent to
   ## compositing them, exactly as for a JPEG.
@@ -618,13 +619,24 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
 
   # Both streaming decoders write decoded pixels straight over the canvas, so
   # they are only equivalent to compositing when the source cannot be
-  # transparent. A JPEG never is. A PNG usually is not either, and refusing
-  # every one of them meant a PNG on an SD card took the buffered path and
-  # needed its whole compressed body in one contiguous block — which is what
-  # fails on a fragmented ESP32 heap ("Image file … is 1450K; only 1024K of
-  # render memory is available") while several MB sit free in smaller pieces.
+  # transparent. A JPEG never is, and a PNG whose header proves it has no alpha
+  # is not either.
+  #
+  # PNG streaming is embedded-only, and deliberately so. What it buys is not
+  # speed but the absence of one big contiguous allocation: the buffered path
+  # needs the whole compressed body in a single block, which is what fails on a
+  # fragmented ESP32 heap ("Image file … is 1450K; only 1024K of render memory
+  # is available") while several MB sit free in smaller pieces. A host never
+  # hits that. What it COSTS is sampling: the streaming decoder picks nearest
+  # source pixels while scaleAndDrawImage asks pixie for a smooth scale. On
+  # embedded that is no change at all — scaleAndDrawImage already routes
+  # through drawScaledNearest there — but on a host it would visibly degrade
+  # every scaled PNG, and diverge interpreted scenes (which get a decode
+  # target) from compiled ones (which do not).
   let jpeg = isJpegHeader(header)
-  let streamablePng = not jpeg and pngIsProvablyOpaque(header)
+  var streamablePng = false
+  when defined(frameosEmbedded):
+    streamablePng = not jpeg and pngIsProvablyOpaque(header)
   if not jpeg and not streamablePng:
     return false
   header = ""
