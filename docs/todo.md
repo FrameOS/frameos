@@ -85,6 +85,37 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   file-backed `InflateSegment` source in the pixie fork so spilled PNGs
   stream too; URL+ETag decode cache.
 
+### Board follow-ups (rolled in from docs/esp32-photopainter-todo.md)
+
+That file's tracked work was finished — the 13.3E6 parity push (#301-#305)
+and the `image_get` cloud verb, all hardware-verified — so the file is gone
+and its board facts now live in `embedded/esp32/README.md` next to the preset
+table. What was still open there, mostly nice-to-have:
+
+- **The 13.3E6's internal-RAM figure is stale.** It was measured at ~16-19 KB
+  free with a dozen scenes, before the Nim heap moved to PSRAM explicitly and
+  before scenes became one-file-per-scene with only the active one resident.
+  Those two changes took a PhotoPainter from ~12.5 KB to ~109 KB. Nobody has
+  re-measured the 13.3E6; do that before drawing any conclusion from the old
+  number.
+- **Battery telemetry on the 13.3E6** — it has a battery header but no
+  telemetry IC. Check the schematic for a voltage-divider ADC pin and set
+  `battery_pin` if one is there.
+- **API-key rotation without reflash.** Check first whether `set api_key ""`
+  already clears it: the console has since grown an empty-value convention
+  for `gpio_buttons` and `cloud_wsurl`, so the original "cannot unset a
+  value" may no longer be true. Not tested here — it would wipe a live
+  frame's key.
+- **Parallel firmware builds.** Build directories are per-profile now, but
+  `main/generated_config.h` and the Nim `nimcache` are still shared in-tree,
+  so builds serialise under the global build lock.
+- Portal: Wi-Fi scan list in the HTML form, AP password.
+- mDNS advertisement.
+- Log persistence across offline periods.
+- Firmware artifact GC.
+- Deep-sleep improvements (GPIO wake is moot on the 13.3E6 — no user
+  buttons).
+
 ### Startup cost
 
 - **Parse and transpile scenes at deploy time, not on every boot.** After
