@@ -1,7 +1,7 @@
 # FrameOS — consolidated remaining work
 
 One tracker for everything still open across the repo (last swept
-2026-08-09). Reference material — principles, permission scopes, store
+2026-08-10). Reference material — principles, permission scopes, store
 decisions, threat models, wire protocols — stays in the linked docs; this
 file only lists what is left to do. When an item ships, delete it here.
 
@@ -28,14 +28,33 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   provider. (The ESP32 client has been.)
 - Cloud-managed ESP32-C3 frames still have no render source (wasm harness
   is the building block; C3 boards stay out of the cloud flasher until then).
-- **Cloud OTA: confirm it works against 2026.8.13** — the first release that
-  should publish `…-esp32-s3-generic-app.bin` (an OTA slot cannot accept the
-  merged flash image, so earlier releases 404 as `ota_image_not_published`)
-  and the first to report a real `frameos_version` from an ESP32. Both want
-  checking, not assuming. Meanwhile the USB updater moves a board on.
+- **Cloud OTA: confirm it works against a published release** — the first
+  release publishing `…-esp32-s3-generic-app.bin` (an OTA slot cannot accept
+  the merged flash image, so earlier releases 404 as
+  `ota_image_not_published`) and the first to report a real `frameos_version`
+  from an ESP32. Both want checking, not assuming, and only a real release
+  tests it. Meanwhile the USB updater moves a board on.
+- **`FrameConfig.scalingMode` is hardcoded to `"cover"` on embedded** — a Pi
+  reads it from frame.json; an ESP32 cannot be configured at all. Since #321
+  it no longer decides image placement (the consuming node's own placement
+  does), but it still wants the config path `rotate` already has: NVS field,
+  console `set`, settings sync, backend/cloud plumbing.
 
 ## Cloud-managed frames
 
+- **A scene added from a template shows a blank tile.** Two independent
+  causes, both reproduced: `/api/frames/{id}/scene_images/{sceneId}` resolves
+  the runtime scene id through `frame_scene_assignments`, so a scene not yet
+  saved/pushed maps to nothing and 404s; and separately the template's own
+  stored `preview_image` is transparent, so even a successful lookup serves
+  nothing visible. Needs a decision: serve the store cover for unassigned
+  scenes, render a placeholder, or fix whatever writes transparent previews
+  at publish time.
+- **Cloud "not on the frame yet" is all-or-nothing.** #323 reads the
+  assigned_checksum/scenes_checksum pair, which covers the whole assigned set
+  and cannot say WHICH scene differs. Per-scene granularity needs the cloud to
+  record what it last pushed — its equivalent of the backend's
+  `last_successful_deploy.scenes`.
 - **JS-runtime capability audit** — enumerate every native binding exposed
   to scene JS; per-scene asset sandboxes; CPU/time/memory limits per scene;
   confirm RFC1918 fetch blocking and the local-presence elevation ceremony
@@ -66,62 +85,75 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   file-backed `InflateSegment` source in the pixie fork so spilled PNGs
   stream too; URL+ETag decode cache.
 
+### Board follow-ups (rolled in from docs/esp32-photopainter-todo.md)
+
+That file's tracked work was finished — the 13.3E6 parity push (#301-#305)
+and the `image_get` cloud verb, all hardware-verified — so the file is gone
+and its board facts now live in `embedded/esp32/README.md` next to the preset
+table. What was still open there, mostly nice-to-have:
+
+- **The 13.3E6's internal-RAM figure is stale.** It was measured at ~16-19 KB
+  free with a dozen scenes, before the Nim heap moved to PSRAM explicitly and
+  before scenes became one-file-per-scene with only the active one resident.
+  Those two changes took a PhotoPainter from ~12.5 KB to ~109 KB. Nobody has
+  re-measured the 13.3E6; do that before drawing any conclusion from the old
+  number.
+- **Battery telemetry on the 13.3E6** — it has a battery header but no
+  telemetry IC. Check the schematic for a voltage-divider ADC pin and set
+  `battery_pin` if one is there.
+- **API-key rotation without reflash.** Check first whether `set api_key ""`
+  already clears it: the console has since grown an empty-value convention
+  for `gpio_buttons` and `cloud_wsurl`, so the original "cannot unset a
+  value" may no longer be true. Not tested here — it would wipe a live
+  frame's key.
+- **Parallel firmware builds.** Build directories are per-profile now, but
+  `main/generated_config.h` and the Nim `nimcache` are still shared in-tree,
+  so builds serialise under the global build lock.
+- Portal: Wi-Fi scan list in the HTML form, AP password.
+- mDNS advertisement.
+- Log persistence across offline periods.
+- Firmware artifact GC.
+- Deep-sleep improvements (GPIO wake is moot on the 13.3E6 — no user
+  buttons).
+
+### Startup cost
+
+- **Parse and transpile scenes at deploy time, not on every boot.** After
+  #322 one app transpile is 3.3 s (11 KB source) or 10.2 s (36 KB) on an
+  ESP32-S3, and a frame pays it again on every boot and every scene reload
+  for sources that never change — it is what makes the first render after a
+  boot the worst one. Doing it upstream (the frontend already bundles
+  esbuild, the cloud has typescript) would also let the transpiler be
+  compiled out of the firmware: transpiler + tokens + parser + source_map +
+  token_processor are ~92 KB of object code, against ~420 KB left in the OTA
+  slot. Cheaper interim with no format change: cache the transpiled output on
+  flash keyed by a hash of the source, so the cost is once-ever rather than
+  once-per-boot.
+- **`compileToBytecode` serialises the wrong object.** It asked for
+  `JS_EVAL_FLAG_COMPILE_ONLY`, which burrito.nim declared one bit too high —
+  that value is `JS_EVAL_FLAG_BACKTRACE_BARRIER` in the bundled quickjs.h — so
+  the code ran and whatever came back (a value, or a Promise for a module) was
+  written out instead of bytecode. #322 fixed the constant; the function
+  itself is still unused and untested. Fix it with a test or delete it: it is
+  the prerequisite for ever shipping QuickJS bytecode instead of source.
+
 ### Memory
 
-- **One heavy scene can exhaust PSRAM and wedge the frame until it is
-  power-cycled.** Measured on an 8 MB XIAO-class board rendering the
-  "Weather" scene, via the new `heapinfo` console command:
+The Weather scene renders on an 8 MB board now (#318, #320, #322). The
+resident baseline went 2.72 MB → 1.05 MB, a render starts with 7.1 MB
+instead of 5.5 MB, and steady-state renders no longer touch the emergency
+reserve. What is left:
 
-      [36s] render #1 started            internal 154K free, psram 5.6M free
-      [80s] Dynamic Impl: alloc(4437) failed -> render #1 failed at complete
-      [84s] psram 3,952 free             abandoned, and it stays there
-      [102s+] TLS cannot allocate -> cloud link down, every later render fails
-
-  Two separate faults, and the second is the damaging one:
-  1. That scene's render needs more PSRAM than an 8 MB board has. Now
-     measured, with `-d:memProbe` (PSRAM free logged per interpreter node):
-
-         node app/render/split    psramFree=3428468   <- render starts at 3.4M
-         node app/render/image    psramFree=2804404   <- -624K background image
-         node app/data/weather    psramFree=2176420   <- -620K forecast JSON
-         node state/location      psramFree=2173684
-         heap exhausted: released 1048576 byte emergency reserve
-         render aborted: out of memory (largest PSRAM block 3072)
-
-     The frame enters the render with **3.4 MB, not 8 MB**: ~2.9 MB is already
-     held (scene payload, JS runtime, framebuffer, preview snapshot) and the
-     800x480 canvas takes 1.5 MB more. Everything then stays live at once —
-     background image 624K, forecast JSON 620K, the panel's own 921K output,
-     the band trio, the parsed XML — and the last of it lands inside
-     weatherPanel with 2.1 MB left. Roughly 4.5 MB wanted against 3.6 MB.
-
-     Banded SVG rasterisation (#315) works and engages here (40-row bands);
-     it is simply not the dominant term. The levers now worth costing, in
-     rough order of size: free the forecast JSON before the panels rasterise;
-     draw render/image straight into the canvas instead of holding a decoded
-     copy; shrink the ~2.9 MB resident baseline; drop the parsed XML earlier.
-     A host-side peak measurement predicted 3.7 MB and was wrong about the
-     device by ~1 MB, so reconcile any new host model against a memProbe run
-     before trusting it.
-  2. ~~A failed render abandons its PSRAM~~ — HANDLED: the frame now restarts
-     when PSRAM does not come back, and after two consecutive rescues pauses
-     rendering and stays online so a lighter scene can be assigned. All three
-     paths verified on hardware (restart, pause, resume-on-scene-select).
-     What remains is the cause below.
-
-  Historical note on 2: After the failure the pool sits
-     at ~4 KB indefinitely, so the frame can neither render nor open its
-     cloud link (mbedTLS allocates from PSRAM under
-     CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC). It is dead until power-cycled.
-     `FOS_NIM_OOM_ABORT_RESTART_STREAK` is 4 and only covers the longjmp
-     abort path, not this one. A frame that cannot render and cannot phone
-     home should restart itself promptly.
-
-  NOT caused by moving the Nim heap to PSRAM: that was the first suspicion,
-  and reverting it changed nothing — the same scene still exhausted PSRAM and
-  still wedged the frame, while internal RAM went back to being tight. The
-  move stays. Do not re-litigate it without re-running this measurement.
-
+- **The first render after a boot still dips into the 1 MB emergency
+  reserve** (`heap exhausted: released 1048576 byte emergency reserve`). It
+  succeeds, but that render also pays the scene parse and the app transpile,
+  so it is the one with no headroom to spare. Re-measure once that work moves
+  off the device (above).
+- **Re-size the emergency reserve.** It is now the entire resident baseline:
+  everything else at boot — wifi, scene storage, the console, HTTP, OTA —
+  costs about 2 KB of PSRAM between them. 1 MB was chosen when a render could
+  exhaust the pool; peak is much lower now, so measure whether it still needs
+  to be that large.
 - **Move QuickJS off internal RAM** — it allocates through libc malloc, and
   `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` sends everything under 16 KB to
   the internal pool, so the active scene's JS context is an internal-RAM cost
@@ -134,6 +166,13 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   workspace advisory reads device metrics, so a frame too low on internal RAM
   to connect reports nothing and cannot be flagged. Today it is preventive
   only; a frame already over the edge is visible over USB and nowhere else.
+
+How to measure, before proposing a fix: `-d:memProbe` logs PSRAM free and a
+millisecond timestamp before every interpreter node, and
+`-DFRAMEOS_BOOTMEM=1` does the same for each boot step. A host-side peak
+model once predicted 3.7 MB where the device wanted ~4.5 MB, and separately
+put the source map at 45% of a transpile when it was 5% — reconcile any host
+measurement against a device run before trusting it.
 
 ## Cloud services (scope table in CLOUD-TODO.md)
 
@@ -175,8 +214,6 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 - The frame stores its link token in plaintext (`state/cloud_link.json`,
   0600) — worth fixing when there is hardware-backed key storage, or by
   redaction if the state file ever travels (support bundles, backups).
-- `device/request` has only a per-IP rate limit — a per-account limit
-  would close online user-code enumeration.
 - Frame-side `local_login_enabled` is cosmetic — persist the flag in the
   frame's cloud-link state and enforce it in the admin login before hiding
   local login fields means anything.
@@ -184,8 +221,6 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 ## Canonical API gaps (matrix in docs/api-triality.md)
 
 - ESP32: fonts list/file routes, full web admin shell parity.
-- Pi: canonical asset upload/mkdir/delete/rename routes (exist via the
-  admin asset API, not the canonical frame API).
 - Frame import/adoption: standalone export/source payloads; backend
   adoption flow for standalone frames.
 

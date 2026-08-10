@@ -120,6 +120,17 @@ or the preset dropdown in the frontends — the authoritative table is
 | `trmnl_og_diy_kit` | S3 | EPD_7in5_V2 | Seeed XIAO ePaper Driver Board |
 | `trmnl_4in26_diy_kit` | S3 | EPD_4in26 4.26" | Seeed XIAO ePaper Driver Board |
 | `xteink_x4` | C3 | EPD_4in26 4.26" | XTEINK X4 reader; TF shares EPD SPI, SD assets off |
+
+Board facts worth knowing before reading a schematic (from the Waveshare docs),
+for the two Spectra boards most of the bench work runs on:
+
+- **13.3E6** — 32 MB flash, 16 MB PSRAM, TF slot on SPI3, MX1.25 battery
+  header. The charge IC is an ETA6098, *not* an I2C PMIC, so there is no
+  battery telemetry unless the schematic turns out to expose a voltage-divider
+  ADC pin. No RTC chip. No user buttons: BOOT and Reset only, which is why
+  GPIO wake has nothing to wake on.
+- **PhotoPainter 7.3"** — 8 MB PSRAM, PMIC power-up, TF socket, and a KEY
+  button next to BOOT (`0:BOOT`, `4:KEY1` in the preset's `gpio_buttons`).
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" | reTerminal Sticky, 32MB flash |
 | `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash |
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash |
