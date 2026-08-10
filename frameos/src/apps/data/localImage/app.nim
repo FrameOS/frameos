@@ -174,7 +174,7 @@ proc get*(self: App, context: ExecutionContext): Image =
   # Consume the decode-into-target hint up front so every path below —
   # including error frames — can reuse that target instead of allocating a
   # second full-size image.
-  let (decodeTarget, decodeScalingMode) = context.takeDecodeTarget()
+  let (decodeTarget, decodeScalingMode) = self.takeDecodeTarget(context)
 
   if self.appConfig.search != self.lastSearch or self.appConfig.path != self.lastPath:
     self.init() # re-init if the query changes

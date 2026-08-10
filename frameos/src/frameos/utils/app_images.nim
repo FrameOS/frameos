@@ -47,16 +47,23 @@ proc renderErrorForContext*(self: AppRoot, context: ExecutionContext, message: s
       return target
   renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
 
-proc takeDecodeTarget*(context: ExecutionContext): tuple[image: Image, scalingMode: string] =
-  ## Consumes the interpreter's decode-into-target hint, in either form: the
-  ## live canvas (`decodeTargetImage`), or a size the producer allocates for
-  ## itself (`decodeTargetWidth`/`Height`, used when the producer's own node
-  ## cache would otherwise end up owning the canvas). Returns (nil, "") when
-  ## there is no hint.
+proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext):
+    tuple[image: Image, scalingMode: string] =
+  ## The producer's half of the `intoTarget` handshake: consumes the target the
+  ## planner addressed to this node, in either form — the live canvas
+  ## (`decodeTargetImage`), or a size the producer allocates for itself
+  ## (`decodeTargetWidth`/`Height`, used when the producer's own node cache
+  ## would otherwise end up owning the canvas). Returns (nil, "") when there is
+  ## no target for this node.
   ##
-  ## The hint is for THIS decode only and must not leak into a sibling
-  ## producer that runs later under the same context, so it is cleared here.
+  ## Two things keep it from being a free-for-all. It is addressed: a target
+  ## planned for one edge is not handed to whichever producer happens to run
+  ## first under the same context. And it is one-shot: taken targets are
+  ## cleared, so a sibling producer later in the same render cannot inherit it.
   if context.isNil:
+    return (nil, "")
+  if context.decodeTargetNodeId != 0.NodeId and
+      (self.isNil or self.nodeId != context.decodeTargetNodeId):
     return (nil, "")
   let scalingMode = context.decodeTargetScalingMode
   if not context.decodeTargetImage.isNil:
@@ -69,6 +76,22 @@ proc takeDecodeTarget*(context: ExecutionContext): tuple[image: Image, scalingMo
   context.decodeTargetScalingMode = ""
   context.decodeTargetWidth = 0
   context.decodeTargetHeight = 0
+  context.decodeTargetNodeId = 0.NodeId
+
+proc mayMutateImageInPlace*(self: AppRoot, context: ExecutionContext): bool =
+  ## The `forwardsTarget` half of the handshake: may this app mutate the image
+  ## it was handed and return that very image, instead of copying it?
+  ##
+  ## True only when the planner put this node on a forwarding chain AND the
+  ## target has actually been taken by the producer upstream. A hint still in
+  ## flight means the chain did not fuse after all — the producer bailed, or it
+  ## served a cached value — and the image we hold may be shared with a node
+  ## cache or with the canvas. Mutating that would corrupt a later render.
+  if self.isNil or context.isNil or context.inPlaceImageNodes.len == 0:
+    return false
+  if not context.decodeTargetImage.isNil or context.decodeTargetWidth > 0:
+    return false
+  self.nodeId in context.inPlaceImageNodes
 
 proc scaledDecodeFit*(scalingMode: string): ScaledDecodeFit =
   ## Decode-time fit for a placement string, for decoding straight into a
@@ -135,7 +158,7 @@ proc downloadImageWithDataForContext*(self: AppRoot, context: ExecutionContext, 
     if maxBytes > 0: maxBytes
     else: self.maxImageResponseBytes()
 
-  let (decodeTarget, decodeScalingMode) = context.takeDecodeTarget()
+  let (decodeTarget, decodeScalingMode) = self.takeDecodeTarget(context)
 
   when defined(testing):
     if contextDownloadHook != nil:

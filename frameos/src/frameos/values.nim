@@ -72,6 +72,35 @@ proc `$`*(v: Value): string =
   of fkScene: "scene(" & $v.sId & ")"
   of fkNone: "none"
 
+proc approxByteSize*(j: JsonNode, depth = 0): int =
+  ## Roughly how much memory a JSON tree holds. Not exact — it counts payload,
+  ## not std/json's per-node overhead — and deliberately cheap, since this runs
+  ## per node per render in debug mode.
+  if j.isNil or depth > 32:
+    return 0
+  case j.kind
+  of JString: result = j.getStr().len
+  of JInt, JFloat: result = 8
+  of JBool: result = 1
+  of JNull: result = 0
+  of JArray:
+    for item in j.items:
+      result += approxByteSize(item, depth + 1)
+  of JObject:
+    for key, item in j.pairs:
+      result += key.len + approxByteSize(item, depth + 1)
+
+proc approxByteSize*(v: Value): int =
+  ## What this value costs to hold, for the memory profile in debug mode.
+  ## Images dominate everything else by orders of magnitude, which is the whole
+  ## point of measuring (docs/value-pipeline.md, phase 0).
+  case v.kind
+  of fkString, fkText: v.s.len
+  of fkJson: approxByteSize(v.j)
+  of fkImage:
+    if v.img.isNil: 0 else: v.img.width * v.img.height * 4
+  else: 0
+
 proc valueToJson*(v: Value): JsonNode =
   ## Convert interpreter Value -> JsonNode so we can write into scene.state.
   case v.kind

@@ -1,10 +1,13 @@
 import frameos/types
 import frameos/values
 from frameos/utils/image import renderError, renderErrorInto
+from frameos/utils/memory import renderMemoryInUse
 when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 import frameos/channels
+import frameos/node_config
+import frameos/planner
 import frameos/runtime_diagnostics
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
 import apps/apps
@@ -69,53 +72,6 @@ proc evalInline(scene: InterpretedFrameScene,
 # -------------------------
 # Cache utilities
 # -------------------------
-
-proc jBoolOr(j: JsonNode, key: string, default: bool): bool =
-  if j.isNil or j.kind != JObject or not j.hasKey(key): return default
-  let n = j[key]
-  case n.kind
-  of JBool: n.getBool()
-  of JString: parseBoolish(n.getStr())
-  of JInt: n.getInt() != 0
-  of JFloat: n.getFloat() != 0.0
-  else: default
-
-proc jFloatOr(j: JsonNode, key: string, default: float): float =
-  if j.isNil or j.kind != JObject or not j.hasKey(key): return default
-  let n = j[key]
-  case n.kind
-  of JFloat: n.getFloat()
-  of JInt: n.getInt().float
-  of JString:
-    try: parseFloat(n.getStr())
-    except CatchableError: default
-  else: default
-
-proc readCacheConfig(node: DiagramNode): tuple[
-    enabled, inputEnabled, durationEnabled: bool, durationSec: float,
-    expressionEnabled: bool, expression: string] =
-  var enabled = false
-  var inputEnabled = false
-  var durationEnabled = false
-  var durationSec = 0.0
-  var expressionEnabled = false
-  var expression = ""
-  if node.data.hasKey("cache") and node.data["cache"].kind == JObject:
-    let cc = node.data["cache"]
-    enabled = jBoolOr(cc, "enabled", false)
-    if enabled:
-      inputEnabled = jBoolOr(cc, "inputEnabled", false)
-      durationEnabled = jBoolOr(cc, "durationEnabled", false)
-      if durationEnabled:
-        # 60s matches the compiled codegen's default; an unparseable duration
-        # must not become 0 ("expire every render")
-        durationSec = jFloatOr(cc, "duration", 60.0)
-      expressionEnabled = jBoolOr(cc, "expressionEnabled", false)
-      if expressionEnabled:
-        expression = cc{"expression"}.getStr("").strip()
-        if expression == "":
-          expressionEnabled = false
-  (enabled, inputEnabled, durationEnabled, durationSec, expressionEnabled, expression)
 
 # Turn an interpreter Value into a stable JSON "key" snippet for cache-keying.
 proc valueToKeyJson(v: Value): JsonNode =
@@ -330,10 +286,14 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         " #" & $currentNodeId.int)
     let debugRuntime = self.frameConfig.debug
     var checkpointKeyword = ""
+    var profileStartedAt = 0.0
+    var profileMemoryBefore: tuple[known: bool, bytes: int] = (false, 0)
     if debugRuntime:
       checkpointKeyword = diagnosticKeyword(currentNode)
       markRuntimeCheckpoint("node:start", currentSceneId = self.id.string, contextEvent = context.event,
         nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword)
+      profileStartedAt = epochTime()
+      profileMemoryBefore = renderMemoryInUse()
     if TRACING:
       self.logger.log(%*{"event": "interpreter:runNode", "sceneId": self.id, "nodeId": currentNodeId.int,
         "nodeType": nodeType})
@@ -353,115 +313,50 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
       # ---- Read per-node cache config ----
       let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
-           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode)
+           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode.data)
 
-      # ---- Decode-into-canvas hint ----
-      # When this render/image node draws its image input full-frame onto
-      # the canvas (no offsets, plain blend, cover/contain/stretch) and the
-      # image comes DIRECTLY from an uncached leaf producer that understands
-      # the hint, that producer may decode straight into the canvas instead
-      # of returning a full-size intermediate. Restricting to direct, known
-      # producers keeps the hint away from transformer chains (resizeImage,
-      # rotateImage, code nodes) whose output is not the final canvas.
-      #
-      # A producer with its OWN node cache on cannot be handed the live canvas
-      # — the cache would hold it and redraw it onto itself on every hit — but
-      # it still must not decode at native resolution: every shipped photo
-      # scene (all five gallery scenes, Immich, Google Photos, XKCD) caches its
-      # producer, so that exclusion alone left them decoding 1024x1024 sources
-      # whole and blowing the ESP32 decode budget. Those get the canvas-SIZED
-      # hint instead: same fit, same result, a canvas-sized image the cache can
-      # safely own.
-      # The list also carries full-frame GENERATORS whose get() renders into
-      # the hint target (they fill their background, so the canvas contents
-      # never bleed through): a generated 1200x1600 intermediate is the same
-      # 7.7MB a decode is, and OOM'd the 16MB-PSRAM ESP32 boards the same way
-      # (render/calendar was the repro). Add producers here only after their
-      # get() consumes context.decodeTargetImage.
-      const decodeTargetProducers = [
-        "data/localImage", "render/calendar",
-        # Download-based producers: all of these go through
-        # downloadImageWithDataForContext, which consumes the hint and falls
-        # back to a display-bounded decode without one. Before they were on
-        # this list they decoded into the canvas anyway, but with the frame's
-        # scaling mode rather than the consumer's placement — the XKCD scene
-        # asked for "contain" and got "cover".
-        "data/downloadImage", "data/unsplash", "data/immich",
-        "data/googlePhotos", "data/openaiImage", "data/wikicommons",
-        "data/frameOSGallery",
-      ]
+      # ---- Negotiated decode target ----
+      # Whether this node's image input can be produced straight into a target
+      # instead of materialized whole was decided at scene load, from the
+      # capabilities the apps involved declare in their config.json. The graph
+      # shape is static between deploys; what is left here are the facts that
+      # are not — is there a canvas, is one hint already in flight, and what
+      # does a placement wired from a state field say right now.
+      # See frameos/planner.nim and docs/value-pipeline.md.
       var setDecodeTargetHint = false
-      var directImageProducer = false
-      var producerCached = false
-      if keyword == "render/image" and not asDataNode and cacheEnabled == false and
-          self.appInputsForNodeId.hasKey(currentNodeId) and
-          self.appInputsForNodeId[currentNodeId].hasKey("image"):
-        let producerId = self.appInputsForNodeId[currentNodeId]["image"]
-        if self.nodes.hasKey(producerId):
-          let producerNode = self.nodes[producerId]
-          if producerNode.nodeType == "app" and
-              producerNode.data{"keyword"}.getStr() in decodeTargetProducers:
-            let (producerCache, _, _, _, _, _) = readCacheConfig(producerNode)
-            directImageProducer = true
-            producerCached = producerCache
-      if directImageProducer and
+      if not asDataNode and self.imageFusionPlans.hasKey(currentNodeId) and
           context.hasImage and not context.image.isNil and
           context.decodeTargetImage.isNil and context.decodeTargetWidth == 0:
-        var placement = ""
-        var blend = ""
-        var fullFrameDraw = true
-        let config = currentNode.data{"config"}
-        if config != nil and config.kind == JObject:
-          placement = config{"placement"}.getStr("")
-          for offsetKey in ["offsetX", "offsetY"]:
-            let offset = config{offsetKey}
-            if offset != nil and offset.kind != JNull:
-              if (offset.kind == JString and offset.getStr() notin ["", "0"]) or
-                  (offset.kind == JInt and offset.getInt() != 0):
-                fullFrameDraw = false
-          blend = config{"blendMode"}.getStr("")
-          if blend notin ["", "normal", "overwrite"]:
-            fullFrameDraw = false
-        if self.appInputsForNodeId.hasKey(currentNodeId):
-          let connected = self.appInputsForNodeId[currentNodeId]
-          for inputName in ["offsetX", "offsetY", "blendMode", "inputImage"]:
-            if connected.hasKey(inputName):
-              fullFrameDraw = false
-          if fullFrameDraw and connected.hasKey("placement"):
-            # Placement wired from a state field is a pure read; resolve it
-            # up front. Anything else (app/code producers) disqualifies.
-            let producerId = connected["placement"]
-            if self.nodes.hasKey(producerId) and
-                self.nodes[producerId].nodeType == "state":
-              placement = runNode(self, producerId, context,
-                asDataNode = true).asString()
-            else:
-              fullFrameDraw = false
-        if self.appInlineInputsForNodeId.hasKey(currentNodeId):
-          let inline = self.appInlineInputsForNodeId[currentNodeId]
-          for inputName in ["placement", "offsetX", "offsetY", "blendMode", "inputImage"]:
-            if inline.hasKey(inputName):
-              fullFrameDraw = false
-        if placement == "":
-          # Scene JSON only stores explicitly-set config values; an absent
-          # placement means the schema default (config.json: "cover").
-          placement = "cover"
-        if fullFrameDraw and placement in ["cover", "contain", "stretch"]:
-          if not producerCached:
+        let plan = self.imageFusionPlans[currentNodeId]
+        var fit = plan.fit
+        if plan.fitFromNodeId != NoNodeId:
+          try:
+            fit = runNode(self, plan.fitFromNodeId, context, asDataNode = true).asString()
+          except CatchableError:
+            fit = ""
+          if fit.len == 0:
+            # Scene JSON only stores explicitly-set values; an empty state
+            # field means the app's config.json default.
+            fit = plan.defaultFit
+        if fit in plan.fits:
+          case plan.tier
+          of iftLiveCanvas:
             context.decodeTargetImage = context.image
-            context.decodeTargetScalingMode = placement
+            context.decodeTargetScalingMode = fit
             setDecodeTargetHint = true
-          elif not (placement == "contain" and blend == "overwrite"):
-            # Canvas-sized, allocated by the producer. render/image then draws
-            # a same-size source, which is a plain draw — identical output to
-            # fitting the native-size image here. The one shape that is NOT
-            # identical is contain + overwrite: the live-canvas path leaves the
-            # letterbox margins alone, while a scratch would carry its own
-            # transparent margins over the canvas.
-            context.decodeTargetWidth = context.image.width
-            context.decodeTargetHeight = context.image.height
-            context.decodeTargetScalingMode = placement
-            setDecodeTargetHint = true
+          of iftOwnedScratch:
+            if fit notin plan.excludedFits:
+              # Canvas-sized, allocated by the producer. The consumer then
+              # draws a same-size source, which is a plain draw — identical
+              # output to fitting a native-size image here.
+              context.decodeTargetWidth = context.image.width
+              context.decodeTargetHeight = context.image.height
+              context.decodeTargetScalingMode = fit
+              setDecodeTargetHint = true
+        if setDecodeTargetHint:
+          context.decodeTargetNodeId = plan.producerNodeId
+          if plan.inPlaceNodeIds.len > 0:
+            context.inPlaceImageNodes = plan.inPlaceNodeIds
 
       # ---- Wire inputs AND (if enabled) build an input-key JSON alongside ----
       var builtInputKey = %*{} # JObject; only meaningful when cacheInputEnabled = true and there are inputs
@@ -546,6 +441,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         context.decodeTargetScalingMode = ""
         context.decodeTargetWidth = 0
         context.decodeTargetHeight = 0
+        context.decodeTargetNodeId = 0.NodeId
+        context.inPlaceImageNodes = @[]
 
       if asDataNode and cacheEnabled:
         var cacheExprActive = false
@@ -703,7 +600,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       var defaultedArgs: seq[DefaultedArg] = @[]
 
       let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
-           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode)
+           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode.data)
 
       if self.codeInputsForNodeId.hasKey(currentNodeId):
         let connectedArgs = self.codeInputsForNodeId[currentNodeId]
@@ -923,6 +820,39 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     if debugRuntime:
       markRuntimeCheckpoint("node:done", currentSceneId = self.id.string, contextEvent = context.event,
         nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword)
+      # How big the value on this edge is, and what running the node cost in
+      # heap. Together these say where a render's peak memory actually goes,
+      # per node and per edge — the measurement phase 1's fusion rules are
+      # supposed to be aimed at (docs/value-pipeline.md, phase 0).
+      var profile = %*{
+        "event": "interpreter:node:profile",
+        "sceneId": self.id.string,
+        "nodeId": currentNodeId.int,
+        "nodeType": nodeType,
+        "keyword": checkpointKeyword,
+        "dataNode": asDataNode,
+        "durationMs": (epochTime() - profileStartedAt) * 1000.0
+      }
+      if asDataNode:
+        profile["valueKind"] = %($result.kind)
+        profile["valueBytes"] = %result.approxByteSize()
+        if result.kind == fkImage and not result.img.isNil:
+          profile["valueWidth"] = %result.img.width
+          profile["valueHeight"] = %result.img.height
+      let profileMemoryAfter = renderMemoryInUse()
+      if profileMemoryBefore.known and profileMemoryAfter.known:
+        profile["heapDeltaBytes"] = %(profileMemoryAfter.bytes - profileMemoryBefore.bytes)
+      if self.imageFusionPlans.hasKey(currentNodeId):
+        let plan = self.imageFusionPlans[currentNodeId]
+        # Name the adapter the planner chose, so memory attribution can tell a
+        # canvas that was written in place from one that was drawn onto.
+        profile["fusion"] = %*{
+          "input": plan.inputName,
+          "tier": (if plan.tier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
+          "producerNodeId": plan.producerNodeId.int,
+          "forwardedThrough": plan.inPlaceNodeIds.len
+        }
+      self.logger.log(profile)
 
     if asDataNode:
       break
@@ -1002,6 +932,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     cacheTimes: initTable[NodeId, float](),
     cacheKeys: initTable[NodeId, JsonNode](),
     cacheExprs: initTable[NodeId, JsonNode](),
+    imageFusionPlans: initTable[NodeId, ImageFusionPlan](),
   )
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =
     discard scene.runNode(nodeId, context)
@@ -1233,8 +1164,15 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         exportedChild.runEvent(child, initCtx)
 
 
+  ## Pass 4: negotiate what each image edge may skip materializing. Runs after
+  ## the apps exist, because a node whose behaviour comes from scene JSON (a
+  ## dynamic JS app) is opaque no matter what its keyword declares.
+  scene.planImageFusion(proc (nodeId: NodeId): bool {.closure, gcsafe, raises: [].} =
+    scene.appsByNodeId.getOrDefault(nodeId, nil).isDynamicJsApp())
+
   logger.log(%*{"event": "initInterpretedDone", "sceneId": sceneId.string, "nodes": scene.nodes.len,
-      "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len})
+      "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len,
+      "imageFusionPlans": scene.imageFusionPlans.len})
 
   return scene
 

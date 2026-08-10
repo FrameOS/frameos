@@ -1,0 +1,75 @@
+## Per-port execution capabilities an app declares in its config.json.
+##
+## The planner (frameos/planner.nim) reads these to decide how a value moves
+## across an edge; nothing here is visible in the editor or in scene JSON.
+## Generated into src/apps/apps.nim by backend/app/codegen/apps_nim.py — an app
+## that declares nothing gets `NoAppCapabilities`, which means "materialized",
+## the floor every edge always supports.
+##
+## See docs/value-pipeline.md for the protocol table and the planner rules.
+
+type
+  FieldConstraint* = object
+    ## `field` must statically resolve to one of `allowed` for the capability
+    ## to apply. An unset field resolves to its config.json default.
+    field*: string
+    allowed*: seq[string]
+
+  FieldMatch* = object
+    field*: string
+    value*: string
+
+  ProvidesTargetSpec* = object
+    ## An input port that can hand its producer a target to write into,
+    ## because this app is going to draw that input over the whole target
+    ## anyway. Declared on a field in config.json.
+    input*: string
+    ## Config field carrying the fit (cover/contain/stretch) the producer
+    ## should use. Resolved from config, or from a wired state node at render
+    ## time; anything else disqualifies.
+    fitFrom*: string
+    fits*: seq[string]
+    requireStatic*: seq[FieldConstraint]
+    ## Fields that must be neither configured nor wired — typically the
+    ## optional "draw on top of this image instead" input.
+    requireUnset*: seq[string]
+    ## Shapes where an app-owned scratch target would NOT produce the same
+    ## pixels as a materialized value, and so must stay unfused. Each entry is
+    ## a set of field/value pairs that all have to match. The live-canvas tier
+    ## is unaffected: it does not carry margins of its own.
+    ownedTargetExcludes*: seq[seq[FieldMatch]]
+
+  IntoTargetSpec* = object
+    ## An output port whose app writes into a caller-supplied image with the
+    ## requested fit, instead of returning a freshly allocated one.
+    output*: string
+    fits*: seq[string]
+    requireStatic*: seq[FieldConstraint]
+    requireUnset*: seq[string]
+
+  ForwardsTargetSpec* = object
+    ## An output port that passes a target request upstream to `input` and
+    ## mutates the result in place, returning the very same image.
+    output*: string
+    input*: string
+    requireStatic*: seq[FieldConstraint]
+
+  AppCapabilities* = object
+    providesTarget*: seq[ProvidesTargetSpec]
+    intoTarget*: seq[IntoTargetSpec]
+    forwardsTarget*: seq[ForwardsTargetSpec]
+    ## config.json defaults for every field any of the specs above refers to,
+    ## so the planner can tell "unset" from "explicitly set to the default".
+    fieldDefaults*: seq[FieldMatch]
+
+const NoAppCapabilities* = AppCapabilities()
+
+proc isEmpty*(caps: AppCapabilities): bool =
+  caps.providesTarget.len == 0 and caps.intoTarget.len == 0 and
+    caps.forwardsTarget.len == 0
+
+proc fieldDefault*(caps: AppCapabilities, field: string): string =
+  for entry in caps.fieldDefaults:
+    if entry.field == field:
+      return entry.value
+  ""

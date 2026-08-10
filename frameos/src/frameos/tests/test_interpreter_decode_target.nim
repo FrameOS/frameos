@@ -63,40 +63,47 @@ proc edge(id, source: int, sourceHandle: string, target: int,
   DiagramEdge(id: id.NodeId, source: source.NodeId, sourceHandle: sourceHandle,
     target: target.NodeId, targetHandle: targetHandle, data: %*{})
 
-proc galleryScene(producerCached: bool, imageConfig: JsonNode):
-    ExportedInterpretedScene =
+proc galleryScene(producerCached: bool, imageConfig: JsonNode,
+    withOpacity = false): ExportedInterpretedScene =
+  var nodes = @[
+    node(1, "event", %*{"keyword": "render"}),
+    node(2, "app", %*{"keyword": "render/image", "config": imageConfig}),
+    node(3, "app", %*{
+      "keyword": "data/frameOSGallery",
+      "config": {"category": "nature"},
+      "cache": {
+        "enabled": producerCached,
+        "inputEnabled": false,
+        "durationEnabled": producerCached,
+        "duration": "60",
+        "expressionEnabled": false
+      }
+    })
+  ]
+  var edges = @[edge(1, 1, "next", 2, "prev")]
+  if withOpacity:
+    nodes.add(node(4, "app", %*{
+      "keyword": "render/opacity", "config": {"opacity": "0.5"}}))
+    edges.add(edge(2, 3, "fieldOutput", 4, "fieldInput/image"))
+    edges.add(edge(3, 4, "fieldOutput", 2, "fieldInput/image"))
+  else:
+    edges.add(edge(2, 3, "fieldOutput", 2, "fieldInput/image"))
+
   ExportedInterpretedScene(
     name: "Decode target test",
     backgroundColor: parseHtmlColor("#000000"),
     refreshInterval: 60.0,
     publicStateFields: @[],
-    nodes: @[
-      node(1, "event", %*{"keyword": "render"}),
-      node(2, "app", %*{"keyword": "render/image", "config": imageConfig}),
-      node(3, "app", %*{
-        "keyword": "data/frameOSGallery",
-        "config": {"category": "nature"},
-        "cache": {
-          "enabled": producerCached,
-          "inputEnabled": false,
-          "durationEnabled": producerCached,
-          "duration": "60",
-          "expressionEnabled": false
-        }
-      })
-    ],
-    edges: @[
-      edge(1, 1, "next", 2, "prev"),
-      edge(2, 3, "fieldOutput", 2, "fieldInput/image")
-    ],
+    nodes: nodes,
+    edges: edges,
     apps: %*{}
   )
 
-proc renderWith(producerCached: bool, imageConfig: JsonNode = %*{}):
-    tuple[target: Image, canvas: Image, calls: int] =
+proc renderWith(producerCached: bool, imageConfig: JsonNode = %*{},
+    withOpacity = false): tuple[target: Image, canvas: Image, calls: int] =
   let sceneId = "tests/decode-target".SceneId
   var uploaded = initTable[SceneId, ExportedInterpretedScene]()
-  uploaded[sceneId] = galleryScene(producerCached, imageConfig)
+  uploaded[sceneId] = galleryScene(producerCached, imageConfig, withOpacity)
   setUploadedInterpretedScenes(uploaded)
   resetInterpretedScenes()
 
@@ -138,6 +145,28 @@ block cached_contain_over_overwrite_stays_unhinted:
   # erase what the canvas already had there.
   let (target, _, calls) = renderWith(producerCached = true,
     imageConfig = %*{"placement": "contain", "blendMode": "overwrite"})
+  doAssert calls == 1
+  doAssert target.isNil
+
+block a_transformer_in_the_middle_forwards_the_hint:
+  # The shape the old whitelist could not express: dropping a render/opacity
+  # between the producer and render/image used to cost BOTH the fusion (the
+  # producer went back to decoding at native resolution) and a full-frame copy
+  # inside opacity's get(). The producer now gets a bounded target forwarded
+  # through the transformer, which mutates it in place.
+  let (target, canvas, calls) = renderWith(producerCached = false,
+    withOpacity = true)
+  doAssert calls == 1
+  doAssert not target.isNil,
+    "a producer behind a forwarding transformer must still be bounded"
+  doAssert target.width == canvas.width and target.height == canvas.height
+  doAssert target != canvas,
+    "an in-place transformer must own what it mutates, never the live canvas"
+
+block a_transformer_over_a_cached_producer_stays_unhinted:
+  # Mutating a cached producer's value in place would poison the cache: the
+  # next render would apply the opacity a second time.
+  let (target, _, calls) = renderWith(producerCached = true, withOpacity = true)
   doAssert calls == 1
   doAssert target.isNil
 

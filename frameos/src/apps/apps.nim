@@ -1,4 +1,6 @@
 import frameos/types
+import frameos/app_capabilities
+export app_capabilities
 import apps/data/beRecycle/app_loader as data_beRecycle_loader
 import apps/data/clock/app_loader as data_clock_loader
 import apps/data/downloadImage/app_loader as data_downloadImage_loader
@@ -212,3 +214,75 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   of "render/text": render_text_loader.get(app, context)
   of "render/zoomPan": render_zoomPan_loader.get(app, context)
   else: raise newException(ValueError, "Unknown app keyword: " & keyword)
+
+proc appCapabilities*(keyword: string): AppCapabilities =
+  ## Per-port protocols this app declares in its config.json. Apps that
+  ## declare nothing are materialized-only, which every edge supports.
+  case keyword:
+  of "data/downloadImage":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      forwardsTarget: @[],
+      fieldDefaults: @[])
+  of "data/frameOSGallery":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      forwardsTarget: @[],
+      fieldDefaults: @[])
+  of "data/googlePhotos":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      forwardsTarget: @[],
+      fieldDefaults: @[])
+  of "data/immich":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      forwardsTarget: @[],
+      fieldDefaults: @[])
+  of "data/localImage":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      forwardsTarget: @[],
+      fieldDefaults: @[])
+  of "data/openaiImage":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      forwardsTarget: @[],
+      fieldDefaults: @[])
+  of "data/unsplash":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      forwardsTarget: @[],
+      fieldDefaults: @[])
+  of "data/wikicommons":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      forwardsTarget: @[],
+      fieldDefaults: @[])
+  of "render/calendar":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @["inputImage"])],
+      forwardsTarget: @[],
+      fieldDefaults: @[FieldMatch(field: "inputImage", value: "")])
+  of "render/image":
+    AppCapabilities(
+      providesTarget: @[ProvidesTargetSpec(input: "image", fitFrom: "placement", fits: @["cover", "contain", "stretch"], requireStatic: @[FieldConstraint(field: "offsetX", allowed: @["0"]), FieldConstraint(field: "offsetY", allowed: @["0"]), FieldConstraint(field: "blendMode", allowed: @["normal", "overwrite"])], requireUnset: @["inputImage"], ownedTargetExcludes: @[@[FieldMatch(field: "placement", value: "contain"), FieldMatch(field: "blendMode", value: "overwrite")]])],
+      intoTarget: @[],
+      forwardsTarget: @[],
+      fieldDefaults: @[FieldMatch(field: "placement", value: "cover"), FieldMatch(field: "offsetX", value: "0"), FieldMatch(field: "offsetY", value: "0"), FieldMatch(field: "blendMode", value: "normal"), FieldMatch(field: "inputImage", value: "")])
+  of "render/opacity":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[],
+      forwardsTarget: @[ForwardsTargetSpec(output: "image", input: "image", requireStatic: @[])],
+      fieldDefaults: @[])
+  else: NoAppCapabilities

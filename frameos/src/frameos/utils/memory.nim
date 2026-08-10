@@ -54,6 +54,27 @@ when defined(memProbe):
       c_printf("MEMPROBE %8dms %s psramFree=%d largest=%d\n",
         (esp_timer_get_time() div 1000).cint, where.cstring, free.cint, largest.cint)
 
+proc renderMemoryInUse*(): tuple[known: bool, bytes: int] =
+  ## A number that goes UP as memory is consumed, for the per-node memory
+  ## profile the interpreter logs in debug mode. **Only differences between two
+  ## samples are meaningful**: on embedded there is no total-PSRAM figure to
+  ## subtract from, so this is free space negated; on Linux it is the process
+  ## RSS. Hosts without a cheap probe report `known = false`.
+  when defined(frameosEmbedded):
+    (true, -fos_psram_free_bytes().int)
+  elif defined(linux) and not defined(frameosWasm):
+    try:
+      # /proc/self/statm: "size resident shared ..." in pages.
+      let fields = readFile("/proc/self/statm").splitWhitespace()
+      if fields.len >= 2:
+        # 4K pages on every Linux frame target we ship (armv6/armhf/arm64/amd64).
+        return (true, parseInt(fields[1]) * 4096)
+    except CatchableError, IOError, OSError:
+      discard
+    (false, 0)
+  else:
+    (false, 0)
+
 proc availableRenderBytes*(): int =
   ## Best-effort estimate of memory currently available for image-sized
   ## render allocations. 0 means "unknown"; callers treat that as unlimited.

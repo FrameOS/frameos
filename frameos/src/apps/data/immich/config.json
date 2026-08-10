@@ -74,7 +74,8 @@
   "output": [
     {
       "name": "image",
-      "type": "image"
+      "type": "image",
+      "capabilities": { "intoTarget": {} }
     }
   ],
   "cache": {

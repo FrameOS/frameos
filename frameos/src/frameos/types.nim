@@ -227,6 +227,29 @@ type
     of fkNone:
       discard
 
+  ImageFusionTier* = enum
+    ## How far a planned image edge gets to skip materialization. Ordered by
+    ## preference; the always-available floor is "no plan at all", which is a
+    ## fully materialized `Value` (docs/value-pipeline.md, principle 3).
+    iftLiveCanvas,   ## the producer writes straight into the render canvas
+    iftOwnedScratch  ## the chain allocates a canvas-sized image it alone owns
+
+  ImageFusionPlan* = ref object
+    ## Decided once per scene load by frameos/planner.nim, from the
+    ## capabilities apps declare in their config.json. Everything here is a
+    ## property of the graph's shape, which is static between deploys; the
+    ## per-render facts (is there a canvas, what does a wired state field say)
+    ## stay cheap runtime checks against this plan.
+    inputName*: string          ## the consumer input the target is offered on
+    tier*: ImageFusionTier
+    fit*: string                ## resolved fit, empty when `fitFromNodeId` is set
+    fitFromNodeId*: NodeId      ## state node to read the fit from, -1 when static
+    defaultFit*: string         ## config.json default, for an empty state read
+    fits*: seq[string]          ## fits both ends of the chain agree on
+    excludedFits*: seq[string]  ## fits the owned-scratch tier must refuse
+    inPlaceNodeIds*: seq[NodeId] ## transformers cleared to mutate in place
+    producerNodeId*: NodeId
+
   # Runtime state while running the scene (for compiled frames)
   FrameScene* = ref object of RootObj
     id*: SceneId
@@ -335,6 +358,7 @@ type
     cacheTimes*: Table[NodeId, float]
     cacheKeys*: Table[NodeId, JsonNode]
     cacheExprs*: Table[NodeId, JsonNode]
+    imageFusionPlans*: Table[NodeId, ImageFusionPlan] # consumer node -> planned image edge
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
@@ -363,6 +387,18 @@ type
     # producer never runs.
     decodeTargetWidth*: int
     decodeTargetHeight*: int
+    # The node the target is addressed to. The hint travels on the context, so
+    # without this it is a broadcast: any producer that happened to run while
+    # one was in flight could take a target meant for a different edge. The
+    # planner names the terminal producer, and `takeDecodeTarget` hands the
+    # target only to that node.
+    decodeTargetNodeId*: NodeId
+    # Transformers the planner cleared to mutate their image input in place and
+    # return the very same image, instead of copying it (the `forwardsTarget`
+    # protocol). Set alongside a decode target and cleared with it; an app must
+    # still check that the target was actually taken before trusting it, which
+    # is what `mayMutateImageInPlace` does.
+    inPlaceImageNodes*: seq[NodeId]
 
   # State field definitions. Used in interpreted scenes, and to show the right form to the user
   StateField* = ref object

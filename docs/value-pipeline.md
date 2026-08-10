@@ -6,6 +6,12 @@ fusion with a general capability-negotiation layer, so low-memory targets
 per-shape special cases. Written 2026-08-10 after an architecture review;
 open items live at the bottom, delete them as they ship.
 
+**Status (2026-08-11):** phase 0's instrumentation and phase 1 have landed —
+the whitelist is gone, apps declare capabilities in `config.json`, and
+`frameos/planner.nim` decides each image edge at scene load. What is still open
+is everything that needs a frame on a desk: the phase-0 profiling run, and the
+embedded regression pass. Phases 2–4 are untouched.
+
 ## The problem, precisely
 
 Scene graphs are already **pull-based** — `runNode(..., asDataNode = true)`
@@ -94,13 +100,29 @@ Each app declares, per image/string/json port, which protocols it
 supports — in `config.json` next to the existing `output` types (schema
 addition is backward-compatible; absent means `materialized`):
 
-| Protocol | Meaning | Examples |
-|---|---|---|
-| `materialized` | whole value returned (today's floor, always supported) | everything |
-| `intoTarget(fit)` | producer writes into a caller-supplied `Image` with cover/contain/stretch | the 8 current `decodeTargetProducers`, `render/calendar` |
-| `forwardsTarget` | transformer passes the target request upstream and mutates in place | `opacity`, `color`, rotate-180/flip, gradient-under |
-| `rowStream` | produces/consumes scanlines (phase 3) | streaming decoders → row ops → display driver |
-| `byteIter` | consumes a string as a bounded-window iterator (phase 2) | `icalJson`, `xmlToJson`, `parseJson` (maybe) |
+| Protocol | Declared on | Meaning | Examples |
+|---|---|---|---|
+| `materialized` | — | whole value returned (the floor, always supported) | everything |
+| `intoTarget(fit)` | output port | producer writes into a caller-supplied `Image` with cover/contain/stretch | the 8 former `decodeTargetProducers`, `render/calendar` |
+| `providesTarget` | input port | consumer offers its own target to whatever feeds this input | `render/image` |
+| `forwardsTarget` | output port | transformer passes the target request upstream and mutates in place | `render/opacity` |
+| `rowStream` | — | produces/consumes scanlines (phase 3) | streaming decoders → row ops → display driver |
+| `byteIter` | — | consumes a string as a bounded-window iterator (phase 2) | `icalJson`, `xmlToJson`, `parseJson` (maybe) |
+
+The declarations carry their own preconditions, so the planner stays generic
+(`frameos/app_capabilities.nim` for the types,
+`backend/app/codegen/apps_nim.py` for the emission):
+
+- `fitFrom` / `fits` — which config field carries the fit, and which fits this
+  end of the edge accepts.
+- `requireStatic` — field → the values it must statically resolve to
+  (`blendMode` ∈ {normal, overwrite}, `offsetX` = 0, …). A field wired to
+  anything but a state node never resolves, and so never satisfies this.
+- `requireUnset` — fields that must be neither configured nor wired, for the
+  "draw on top of this image instead" inputs that change what a node does.
+- `ownedTargetExcludes` — field/value combinations where an app-*owned* scratch
+  would not produce the same pixels as a materialized value. The live-canvas
+  tier is unaffected, because it carries no margins of its own.
 
 Explicitly opaque (always materialized, no exceptions): JS/QuickJS code
 nodes and inline expressions, child scenes, `render/split` cells (each
@@ -128,33 +150,97 @@ pattern-match):
 - **Opaque nodes materialize** (JS, child scenes, split).
 - **Tier selection** per principle 3, with byte-spool requiring a
   successful storage probe.
+- **A forwarding hop forces the owned tier.** A transformer that mutates in
+  place has to own what it mutates. Not the live canvas — the consumer is
+  going to composite onto it, and everything outside the fitted rect belongs
+  to whatever rendered before. Not a cached producer's value either, which is
+  shared with every later render: applying opacity to it once looks right and
+  twice looks wrong, which is exactly what the second frame of the
+  differential harness checks.
 
 Adapters (`materialize`, `spoolToDisk`, `chunkToIter`) are planner-owned
 shims, not editor nodes — but they carry node identity in debug output
 and runtime checkpoints (`markRuntimeCheckpoint` already exists) so
 memory attribution names them.
 
-### What this deletes
+### What this deleted
 
-The entire "Decode-into-canvas hint" block in `interpreter.nim`
-(whitelist, full-frame-draw detection, cached-producer variant,
-contain+overwrite carve-out) becomes: `render/image` declares it can
-*provide* a target when its own draw is full-frame; producers declare
-they *accept* one; `opacity` et al. declare they *forward* one. The
-planner wires it. `takeDecodeTarget` in `utils/app_images.nim` becomes
-the internal handshake of the `intoTarget` protocol rather than a
-context-global side channel.
+The entire "Decode-into-canvas hint" block in `interpreter.nim` — whitelist,
+full-frame-draw detection, cached-producer variant, contain+overwrite
+carve-out, ~120 lines — is gone. `render/image` declares in its `config.json`
+that it can *provide* a target when its own draw is full-frame; producers
+declare they *accept* one; `render/opacity` declares it *forwards* one. The
+planner wires it, and what is left at the node is a plan lookup plus the facts
+that genuinely vary per render. `takeDecodeTarget` in `utils/app_images.nim`
+is now the internal handshake of the `intoTarget` protocol, with
+`mayMutateImageInPlace` as the `forwardsTarget` half: it answers "yes" only
+once the producer has actually taken the target, so a chain that failed to
+fuse never has a transformer scribbling on a value it does not own.
+
+### What the differential harness found
+
+`test_interpreter_fusion_differential.nim` renders 360 graph shapes with the
+planner on and off and compares the canvases. Two divergences are real, both
+pre-existing, and neither is the planner's to fix:
+
+- **Fit boundary.** A decoder writes decoded pixels straight over its target
+  where a materialized draw composites them, and pixie's smooth draw leaves a
+  soft antialiased border a decoder never produces. So the two disagree within
+  a pixel or two of the fitted rect's edge. This is the same precondition
+  already spelled out on `readImageIntoTarget` ("only equivalent to
+  compositing when the source cannot be transparent"), now measured rather
+  than assumed. The harness holds it still by running the corpus at canvas
+  size (no fit, exact comparison over the whole frame — 339 of the 360 shapes)
+  as well as scaled (exact comparison over the interior of the fitted rect).
+- **Sampler.** Unchanged from the note above: streaming decoders sample
+  nearest. Phase 3's problem.
+
+### Transformer audit (phase 1)
+
+- `render/opacity` — **forwards**, shipped. Skips its `.copy()` when cleared to
+  mutate in place, which is what made the doc's motivating symptom (opacity
+  between producer and `render/image`) cost a full-frame copy *and* the fusion.
+- `data/rotateImage` — **no**. 90°/270° change the output's dimensions, so a
+  canvas-sized target can never be forwarded through them; 180° and flips
+  could, but the app always allocates a fresh image and would need a real
+  in-place path first. Its output is still a native-resolution intermediate,
+  so rotate scenes keep the full decode in memory — the largest remaining hole
+  phase 1 does not close.
+- `data/resizeImage` — **no**, and the design note above was too optimistic. A
+  target request cannot simply *replace* the resize: the configured `WxH` crop
+  followed by the consumer's fit is not the same picture as the consumer's fit
+  applied directly, unless the aspect ratios happen to agree. The useful move
+  here is the opposite direction — resize passing its own `WxH` *up* to the
+  producer so the decode is bounded — which is a new protocol, not this one.
+- `render/zoomPan` — **no**. Same shape as resize: its own crop.
+- `render/gradient`, `render/color` — **not yet**, and for a reason worth
+  writing down. Both fill their whole output, so they look like `intoTarget`
+  producers alongside `render/calendar`. But they already allocate exactly one
+  canvas-sized image, so the owned-scratch tier saves nothing; the only tier
+  that pays is the live canvas, and writing straight onto the canvas is only
+  equivalent to a normal-blend draw when the output is **opaque**. A
+  semi-transparent `render/color` is a plausible scene ("tint the photo"), and
+  fusing it would erase the photo instead. Doing this properly needs a
+  capability the planner can evaluate — "this output is opaque, given these
+  config fields" — which is a small schema addition, not a special case.
+  `render/calendar` already leans on the same unstated assumption today.
 
 ## Work plan
 
 ### Phase 0 — measure (do first, small)
 
-- [ ] Debug mode logging, per node per render: byte size of the produced
-      `Value` (`values.nim` `friendlyName` already sizes) + heap delta
-      across execution (embedded: `heap_caps` internal/PSRAM; host: RSS).
-      Hang it off the existing `markRuntimeCheckpoint` node:start/end.
-- [ ] Run the real photo + calendar + agenda scenes on the 13.3E6 board;
-      capture peak-memory-per-edge profiles into `docs/` or the issue.
+- [x] Debug mode logging, per node per render: byte size of the produced
+      `Value` (`values.nim` `approxByteSize`) + heap delta across execution
+      (embedded: PSRAM free, negated; Linux: RSS from `/proc/self/statm`;
+      elsewhere reported as unknown rather than guessed). Hung off the
+      existing `markRuntimeCheckpoint` node:start/done pair, and it names the
+      fusion tier the planner picked for the node so memory attribution can
+      tell a canvas written in place from one drawn onto. Event
+      `interpreter:node:profile`; costs nothing unless `debug` is on
+      (`test_interpreter_node_profile.nim` pins that).
+- [ ] Run the real photo + calendar + agenda scenes on hardware (7.3"
+      PhotoPainter to hand, 13.3E6 for the big canvas); capture
+      peak-memory-per-edge profiles into `docs/` or the issue.
 - [ ] Decision gate: confirm (or refute) that decode/render image
       intermediates dominate byte-side blobs by ~an order of magnitude.
       This orders phases 2 vs 3; the plan below assumes images dominate.
@@ -164,30 +250,40 @@ context-global side channel.
 No streaming machinery. Generalize the existing hint into declared
 capabilities + planner; teach transformers to forward targets.
 
-- [ ] `config.json` schema: optional `capabilities` on ports
-      (`intoTarget`, `forwardsTarget`); loader plumbing in the
-      interpreter's app metadata. No editor/frontend changes.
-- [ ] Planner skeleton: per-scene-load edge planning, cached; rules for
-      cache barrier, semantics-changing shapes, opaque nodes.
-- [ ] Port the 8 `decodeTargetProducers` + `render/calendar` to declared
+- [x] `config.json` schema: optional `capabilities` on ports
+      (`intoTarget`, `forwardsTarget` on outputs, `providesTarget` on inputs),
+      emitted as typed `AppCapabilities` literals into `src/apps/apps.nim` by
+      `apps_nim.py`. Apps that declare nothing do not appear in the registry at
+      all. No editor changes; `frontend/src/types.tsx` documents the schema.
+- [x] Planner (`frameos/planner.nim`): per-scene-load edge planning, cached on
+      the scene; rules for cache barrier, semantics-changing shapes, opaque
+      nodes (including dynamic JS apps, which the interpreter flags), tier
+      selection, and the forwarding-hop rule. `FRAMEOS_DISABLE_FUSION` (or
+      `imageFusionEnabled` in-process) falls the whole thing back to the
+      materialized floor.
+- [x] Port the 8 `decodeTargetProducers` + `render/calendar` to declared
       `intoTarget`; port `render/image` to a declared target provider.
-- [ ] `forwardsTarget` for pointwise transformers: `opacity`, `color`;
-      audit `rotateImage` (180°/flips forward; 90° doesn't), `resizeImage`
-      (a target request *replaces* the resize — it IS a resize),
-      `zoomPan`, `gradient` (fills its own background → can accept a
-      target like calendar does).
-- [ ] Delete the interpreter whitelist block; `takeDecodeTarget` becomes
+- [x] `forwardsTarget` for `render/opacity`; the rest audited above, with
+      reasons. `resizeImage` and `gradient`/`color` turned out not to be the
+      easy wins the design assumed.
+- [x] Delete the interpreter whitelist block; `takeDecodeTarget` is now
       protocol-internal.
-- [ ] Differential harness: for a corpus of scene graphs (e2e scenes +
-      generated permutations of producer × transformer × placement ×
-      blend × cache), assert fused output == materialized output
-      pixel-for-pixel, via a `FRAMEOS_DISABLE_FUSION`-style env switch.
-      Runs in e2e and in the wasm harness (wasm build must keep working —
-      it runs the same interpreter).
+- [x] Differential harness
+      (`src/frameos/tests/test_interpreter_fusion_differential.nim`): 360
+      generated permutations of producer × transformer × placement × blend ×
+      cache × source-size, each rendered twice per mode, asserting fused output
+      == materialized output and that the planner's decision matches the rules
+      restated independently in the test. Mutation-checked: relaxing the
+      cached-producer forwarding rule fails on both the decision and the
+      pixels.
+- [ ] Wire the harness into the wasm build too (it runs the same interpreter),
+      and add an e2e pass over the shipped scene corpus rather than only
+      generated graphs.
 - [ ] Embedded regression pass on real hardware: the five gallery scenes,
-      Immich, Google Photos, XKCD, calendar — the scenes the current
-      whitelist was grown for, plus opacity-in-the-middle variants that
-      are broken today.
+      Immich, Google Photos, XKCD, calendar — the scenes the old whitelist was
+      grown for, plus the opacity-in-the-middle variants that were broken
+      before. `test_interpreter_decode_target.nim` already pins the shipped
+      scene corpus offline (8 templates), but nothing has run on a panel.
 
 ### Phase 2 — byte-side tiering (independent of phase 1)
 

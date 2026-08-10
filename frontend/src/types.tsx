@@ -520,6 +520,50 @@ export interface AppConfigField {
   seq?: [string, number | string, number | string][]
   /** Conditions on which to show the field */
   showIf?: (ConfigFieldCondition | ConfigFieldConditionAnd)[]
+  /** Runtime-only: what this input port can negotiate. Never shown in the editor. */
+  capabilities?: InputPortCapabilities
+}
+
+/**
+ * Execution protocols a port declares, read by the frame's planner
+ * (frameos/planner.nim) and never by the editor — see docs/value-pipeline.md.
+ * Absent means "materialized", the floor every edge supports.
+ */
+export interface ProvidesTargetCapability {
+  /** Config field carrying the fit (cover/contain/stretch) to ask the producer for */
+  fitFrom?: string
+  /** Fits this port can hand upstream */
+  fits?: string[]
+  /** Field -> values it must statically resolve to for the capability to apply */
+  requireStatic?: Record<string, string[]>
+  /** Fields that must be neither configured nor wired */
+  requireUnset?: string[]
+  /** Field/value combinations where an app-owned scratch target changes the pixels */
+  ownedTargetExcludes?: Record<string, string>[]
+}
+
+export interface IntoTargetCapability {
+  fits?: string[]
+  requireStatic?: Record<string, string[]>
+  requireUnset?: string[]
+}
+
+export interface ForwardsTargetCapability {
+  /** Input port the target request is passed on to */
+  input: string
+  requireStatic?: Record<string, string[]>
+}
+
+export interface InputPortCapabilities {
+  /** This input can hand its producer an image to write into */
+  providesTarget?: ProvidesTargetCapability
+}
+
+export interface OutputPortCapabilities {
+  /** This output writes into a caller-supplied image instead of allocating one */
+  intoTarget?: IntoTargetCapability
+  /** This output passes a target request upstream and mutates the result in place */
+  forwardsTarget?: ForwardsTargetCapability
 }
 
 export interface OutputField {
@@ -529,6 +573,8 @@ export interface OutputField {
   type: FieldType
   /** Example output (stringified) */
   example?: string
+  /** Runtime-only: what this output port can negotiate. Never shown in the editor. */
+  capabilities?: OutputPortCapabilities
 }
 
 /** config.json schema */
