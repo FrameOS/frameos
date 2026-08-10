@@ -1148,9 +1148,12 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
         "targetHandle": edge.targetHandle})
 
-  ## Ensure one JS context per scene and precompile functions
-  ensureSceneJs(scene)
-
+  ## Precompile functions. The JS context is built on demand, not here:
+  ## compileAppInlineFn/compileCodeFn/evalOneShot each call ensureSceneJs
+  ## themselves, so eagerly building one here only ever cost scenes that turn
+  ## out to have no code nodes and no inline JS at all — a whole QuickJS
+  ## runtime for nothing. That matters most for nested scenes, where the
+  ## purely structural wrapper is the common case and every level used to pay.
   # Precompile functions for inline app/scene inputs (for all nodes that have them)
   for nodeId, inlineMap in scene.appInlineInputsForNodeId:
     for inputName, snippet in inlineMap.pairs:

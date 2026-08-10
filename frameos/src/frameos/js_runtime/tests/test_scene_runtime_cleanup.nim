@@ -1,6 +1,8 @@
+import pixie
 import std/[json, tables, unittest]
 
 import frameos/js_runtime/runtime
+import frameos/interpreter
 import frameos/js_runtime/app_runtime
 import frameos/values
 import frameos/scenes
@@ -111,3 +113,36 @@ suite "scene runtime cleanup":
 
     cleanupSceneRuntime(scene)
     check runtime.ready == false
+
+  test "a scene with no JS never builds a runtime":
+    # ensureSceneJs is called by compileCodeFn/compileAppInlineFn/evalOneShot,
+    # so init() building one up front only ever charged scenes that have no
+    # code nodes and no inline JS — the common shape for a scene that exists
+    # to nest others.
+    let config = FrameConfig(width: 4, height: 3, rotate: 0, scalingMode: "cover",
+      saveAssets: %*false, assetsPath: "/tmp")
+    let logger = testLogger()
+    let sceneId = "tests/no-js".SceneId
+    var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+    uploaded[sceneId] = ExportedInterpretedScene(
+      name: "No JS",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 60.0,
+      publicStateFields: @[],
+      nodes: @[
+        DiagramNode(id: 1.NodeId, nodeType: "event", data: %*{"keyword": "render"}),
+        DiagramNode(id: 2.NodeId, nodeType: "app",
+          data: %*{"keyword": "render/gradient", "config": {}})
+      ],
+      edges: @[DiagramEdge(id: 1.NodeId, source: 1.NodeId, sourceHandle: "next",
+        target: 2.NodeId, targetHandle: "prev", data: %*{})],
+      apps: %*{}
+    )
+    setUploadedInterpretedScenes(uploaded)
+    resetInterpretedScenes()
+
+    let scene = InterpretedFrameScene(interpreter.init(sceneId, config, logger, %*{}))
+    check scene.jsReady == false
+    check scene.js.runtime == nil
+
+    setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
