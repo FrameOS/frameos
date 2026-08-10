@@ -53,6 +53,20 @@ static void expect(const char *name, fos_sd_probe_verdict_t got_verdict,
     }
 }
 
+/* Run a probe and check it, with the call sequenced BEFORE the detail is read.
+ *
+ * `EXPECT_RUN(name, run(c, &d), d, ...)` looks fine and is not: C does not order
+ * function arguments, so `d` may be read before `run` writes it. clang happened
+ * to evaluate the call first, so these assertions passed for as long as this
+ * file was only ever built by hand on a Mac; under GCC all 32 of them compared
+ * against the initial NULL. Assigning to a local first is a sequence point. */
+#define EXPECT_RUN(name, call, detail_var, want_verdict, want_detail)          \
+    do {                                                                       \
+        fos_sd_probe_verdict_t got_verdict_ = (call);                          \
+        expect((name), got_verdict_, (detail_var), (want_verdict),             \
+               (want_detail));                                                 \
+    } while (0)
+
 /* --------------------------------------------------------------------- */
 /* A fake card: a flat sector array plus an optional injected read error.  */
 
@@ -214,7 +228,7 @@ static void test_blank_zero(void)
 {
     fake_card_t *c = card_new(8192, 0x00);
     const char *d = NULL;
-    expect("all-zero card", run(c, &d), d,
+    EXPECT_RUN("all-zero card", run(c, &d), d,
            FOS_SD_PROBE_BLANK_NO_FILESYSTEM, "blank_no_filesystem");
     card_free(c);
 
@@ -231,7 +245,7 @@ static void test_blank_ff(void)
 {
     fake_card_t *c = card_new(8192, 0xFF);
     const char *d = NULL;
-    expect("0xFF-filled card", run(c, &d), d,
+    EXPECT_RUN("0xFF-filled card", run(c, &d), d,
            FOS_SD_PROBE_BLANK_NO_FILESYSTEM, "blank_no_filesystem");
     card_free(c);
 }
@@ -243,7 +257,7 @@ static void test_mixed_fill_refused(void)
     fake_card_t *c = card_new(8192, 0x00);
     memset(sec_of(c, 1), 0xFF, FOS_SD_SECTOR_BYTES);
     const char *d = NULL;
-    expect("mixed 0x00/0xFF fill", run(c, &d), d,
+    EXPECT_RUN("mixed 0x00/0xFF fill", run(c, &d), d,
            FOS_SD_PROBE_REFUSE, "unrecognised_content");
     card_free(c);
 }
@@ -254,7 +268,7 @@ static void test_exfat_empty_root(void)
     exfat_geom_t g = default_geom(8192);
     build_exfat(c, 0, &g);
     const char *d = NULL;
-    expect("exFAT, empty root", run(c, &d), d, FOS_SD_PROBE_BLANK_EXFAT, "blank_exfat");
+    EXPECT_RUN("exFAT, empty root", run(c, &d), d, FOS_SD_PROBE_BLANK_EXFAT, "blank_exfat");
     card_free(c);
 }
 
@@ -265,7 +279,7 @@ static void test_exfat_empty_root_in_partition(void)
     exfat_geom_t g = default_geom(16384 - 2048);
     build_exfat(c, 2048, &g);
     const char *d = NULL;
-    expect("MBR + exFAT, empty root", run(c, &d), d, FOS_SD_PROBE_BLANK_EXFAT, "blank_exfat");
+    EXPECT_RUN("MBR + exFAT, empty root", run(c, &d), d, FOS_SD_PROBE_BLANK_EXFAT, "blank_exfat");
     card_free(c);
 }
 
@@ -277,7 +291,7 @@ static void test_exfat_with_file(void)
     /* One 0x85 file entry after the metadata: the card has contents. */
     sec_of(c, root_lba_of(0, &g))[3 * 32] = 0x85;
     const char *d = NULL;
-    expect("exFAT with one 0x85 entry", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_has_files");
+    EXPECT_RUN("exFAT with one 0x85 entry", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_has_files");
     card_free(c);
 }
 
@@ -291,7 +305,7 @@ static void test_exfat_with_file_in_partition(void)
     build_exfat(c, 2048, &g);
     sec_of(c, root_lba_of(2048, &g))[3 * 32] = 0x85;
     const char *d = NULL;
-    expect("MBR + exFAT holding photos", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_has_files");
+    EXPECT_RUN("MBR + exFAT holding photos", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_has_files");
     card_free(c);
 }
 
@@ -302,7 +316,7 @@ static void test_exfat_deleted_entry(void)
     build_exfat(c, 0, &g);
     sec_of(c, root_lba_of(0, &g))[3 * 32] = 0x05; /* in-use bit clear = deleted */
     const char *d = NULL;
-    expect("exFAT with a deleted entry", run(c, &d), d,
+    EXPECT_RUN("exFAT with a deleted entry", run(c, &d), d,
            FOS_SD_PROBE_REFUSE, "exfat_deleted_entries");
     card_free(c);
 }
@@ -314,7 +328,7 @@ static void test_exfat_unknown_entry(void)
     build_exfat(c, 0, &g);
     sec_of(c, root_lba_of(0, &g))[3 * 32] = 0xA0; /* in use, unrecognised */
     const char *d = NULL;
-    expect("exFAT with unknown in-use entry", run(c, &d), d,
+    EXPECT_RUN("exFAT with unknown in-use entry", run(c, &d), d,
            FOS_SD_PROBE_REFUSE, "exfat_unknown_entry");
     card_free(c);
 }
@@ -326,7 +340,7 @@ static void test_exfat_dirty_volume(void)
     build_exfat(c, 0, &g);
     put16(sec_of(c, 0) + 106, 0x0002); /* VolumeDirty */
     const char *d = NULL;
-    expect("exFAT flagged dirty", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_volume_dirty");
+    EXPECT_RUN("exFAT flagged dirty", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_volume_dirty");
     card_free(c);
 }
 
@@ -337,7 +351,7 @@ static void test_exfat_heap_beyond_card(void)
     build_exfat(c, 0, &g);
     put32(sec_of(c, 0) + 88, 100000); /* ClusterHeapOffset past the volume */
     const char *d = NULL;
-    expect("exFAT heap offset past card", run(c, &d), d,
+    EXPECT_RUN("exFAT heap offset past card", run(c, &d), d,
            FOS_SD_PROBE_REFUSE, "exfat_field_out_of_range");
     card_free(c);
 }
@@ -349,7 +363,7 @@ static void test_exfat_volume_longer_than_card(void)
     build_exfat(c, 0, &g);
     put64(sec_of(c, 0) + 72, 1ULL << 40); /* VolumeLength = 512 GiB */
     const char *d = NULL;
-    expect("exFAT volume longer than card", run(c, &d), d,
+    EXPECT_RUN("exFAT volume longer than card", run(c, &d), d,
            FOS_SD_PROBE_REFUSE, "exfat_volume_larger_than_card");
     card_free(c);
 }
@@ -361,7 +375,7 @@ static void test_exfat_short_fat(void)
     build_exfat(c, 0, &g);
     put32(sec_of(c, 0) + 84, 1); /* FatLength too small for cluster_count */
     const char *d = NULL;
-    expect("exFAT FAT too short", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_fat_range");
+    EXPECT_RUN("exFAT FAT too short", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_fat_range");
     card_free(c);
 }
 
@@ -372,7 +386,7 @@ static void test_exfat_bad_root_cluster(void)
     build_exfat(c, 0, &g);
     put32(sec_of(c, 0) + 96, 0); /* root cluster 0 is not addressable */
     const char *d = NULL;
-    expect("exFAT root cluster 0", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_root_cluster");
+    EXPECT_RUN("exFAT root cluster 0", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_root_cluster");
     card_free(c);
 }
 
@@ -383,7 +397,7 @@ static void test_exfat_4k_sectors(void)
     build_exfat(c, 0, &g);
     sec_of(c, 0)[108] = 12; /* 4096-byte logical sectors: we cannot address it */
     const char *d = NULL;
-    expect("exFAT with 4K logical sectors", run(c, &d), d,
+    EXPECT_RUN("exFAT with 4K logical sectors", run(c, &d), d,
            FOS_SD_PROBE_REFUSE, "exfat_sector_size");
     card_free(c);
 }
@@ -395,7 +409,7 @@ static void test_exfat_must_be_zero_dirty(void)
     build_exfat(c, 0, &g);
     sec_of(c, 0)[20] = 0x01; /* MustBeZero region carries a FAT BPB byte */
     const char *d = NULL;
-    expect("exFAT MustBeZero violated", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_bad_vbr");
+    EXPECT_RUN("exFAT MustBeZero violated", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_bad_vbr");
     card_free(c);
 }
 
@@ -410,7 +424,7 @@ static void test_exfat_chain_cycle(void)
     for (size_t i = 0; i < ((size_t)FOS_SD_SECTOR_BYTES << g.spc_shift); i += 32) root[i] = 0x83;
     put32(sec_of(c, g.fat_offset) + 2 * 4, 2); /* cluster 2 -> cluster 2 */
     const char *d = NULL;
-    expect("exFAT root chain cycles", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_chain_cycle");
+    EXPECT_RUN("exFAT root chain cycles", run(c, &d), d, FOS_SD_PROBE_REFUSE, "exfat_chain_cycle");
     card_free(c);
 }
 
@@ -423,7 +437,7 @@ static void test_exfat_free_cluster_in_chain(void)
     for (size_t i = 0; i < ((size_t)FOS_SD_SECTOR_BYTES << g.spc_shift); i += 32) root[i] = 0x83;
     put32(sec_of(c, g.fat_offset) + 2 * 4, 0); /* free cluster mid-chain */
     const char *d = NULL;
-    expect("exFAT chain into a free cluster", run(c, &d), d,
+    EXPECT_RUN("exFAT chain into a free cluster", run(c, &d), d,
            FOS_SD_PROBE_REFUSE, "exfat_bad_fat_entry");
     card_free(c);
 }
@@ -438,7 +452,7 @@ static void test_fat32(void)
     memcpy(s + 82, "FAT32   ", 8);
     s[510] = 0x55; s[511] = 0xAA;
     const char *d = NULL;
-    expect("FAT32 volume", run(c, &d), d, FOS_SD_PROBE_REFUSE, "fat_filesystem");
+    EXPECT_RUN("FAT32 volume", run(c, &d), d, FOS_SD_PROBE_REFUSE, "fat_filesystem");
     card_free(c);
 }
 
@@ -453,7 +467,7 @@ static void test_fat16_damaged_label(void)
     put16(s + 11, 512); s[13] = 4; put16(s + 14, 1); s[16] = 2;
     s[510] = 0x55; s[511] = 0xAA;
     const char *d = NULL;
-    expect("FAT with damaged label", run(c, &d), d, FOS_SD_PROBE_REFUSE, "fat_filesystem");
+    EXPECT_RUN("FAT with damaged label", run(c, &d), d, FOS_SD_PROBE_REFUSE, "fat_filesystem");
     card_free(c);
 }
 
@@ -465,7 +479,7 @@ static void test_ntfs(void)
     memcpy(s + 3, "NTFS    ", 8);
     s[510] = 0x55; s[511] = 0xAA;
     const char *d = NULL;
-    expect("NTFS volume", run(c, &d), d, FOS_SD_PROBE_REFUSE, "ntfs_filesystem");
+    EXPECT_RUN("NTFS volume", run(c, &d), d, FOS_SD_PROBE_REFUSE, "ntfs_filesystem");
     card_free(c);
 }
 
@@ -476,7 +490,7 @@ static void test_ext4(void)
     fake_card_t *c = card_new(8192, 0x00);
     put16(c->data + 0x438, 0xEF53);
     const char *d = NULL;
-    expect("ext4 with zeroed sector 0", run(c, &d), d, FOS_SD_PROBE_REFUSE, "ext_filesystem");
+    EXPECT_RUN("ext4 with zeroed sector 0", run(c, &d), d, FOS_SD_PROBE_REFUSE, "ext_filesystem");
     card_free(c);
 }
 
@@ -485,7 +499,7 @@ static void test_hfs_plus(void)
     fake_card_t *c = card_new(8192, 0x00);
     c->data[1024] = 'H'; c->data[1025] = '+';
     const char *d = NULL;
-    expect("HFS+ volume header", run(c, &d), d, FOS_SD_PROBE_REFUSE, "hfs_plus_filesystem");
+    EXPECT_RUN("HFS+ volume header", run(c, &d), d, FOS_SD_PROBE_REFUSE, "hfs_plus_filesystem");
     card_free(c);
 }
 
@@ -494,7 +508,7 @@ static void test_apfs(void)
     fake_card_t *c = card_new(8192, 0x00);
     memcpy(c->data + 32, "NXSB", 4);
     const char *d = NULL;
-    expect("APFS container superblock", run(c, &d), d, FOS_SD_PROBE_REFUSE, "apfs_filesystem");
+    EXPECT_RUN("APFS container superblock", run(c, &d), d, FOS_SD_PROBE_REFUSE, "apfs_filesystem");
     card_free(c);
 }
 
@@ -503,7 +517,7 @@ static void test_gpt(void)
     fake_card_t *c = card_new(8192, 0x00);
     write_mbr(sec_of(c, 0), 0xEE, 1, 8191, 0);
     const char *d = NULL;
-    expect("GPT protective MBR", run(c, &d), d, FOS_SD_PROBE_REFUSE, "gpt_partitioned");
+    EXPECT_RUN("GPT protective MBR", run(c, &d), d, FOS_SD_PROBE_REFUSE, "gpt_partitioned");
     card_free(c);
 }
 
@@ -516,7 +530,7 @@ static void test_two_partitions(void)
     put32(e + 8, 8192);
     put32(e + 12, 4096);
     const char *d = NULL;
-    expect("two partitions", run(c, &d), d, FOS_SD_PROBE_REFUSE, "mbr_multiple_partitions");
+    EXPECT_RUN("two partitions", run(c, &d), d, FOS_SD_PROBE_REFUSE, "mbr_multiple_partitions");
     card_free(c);
 }
 
@@ -527,7 +541,7 @@ static void test_mbr_no_partitions(void)
     sec_of(c, 0)[0] = 0x33; sec_of(c, 0)[1] = 0xC0;
     sec_of(c, 0)[510] = 0x55; sec_of(c, 0)[511] = 0xAA;
     const char *d = NULL;
-    expect("MBR with no partition entries", run(c, &d), d,
+    EXPECT_RUN("MBR with no partition entries", run(c, &d), d,
            FOS_SD_PROBE_REFUSE, "mbr_no_partitions");
     card_free(c);
 }
@@ -537,7 +551,7 @@ static void test_partition_out_of_range(void)
     fake_card_t *c = card_new(8192, 0x00);
     write_mbr(sec_of(c, 0), 0x07, 2048, 1000000, 0);
     const char *d = NULL;
-    expect("partition larger than the card", run(c, &d), d,
+    EXPECT_RUN("partition larger than the card", run(c, &d), d,
            FOS_SD_PROBE_REFUSE, "mbr_partition_out_of_range");
     card_free(c);
 }
@@ -550,7 +564,7 @@ static void test_partition_without_filesystem(void)
     fake_card_t *c = card_new(16384, 0x00);
     write_mbr(sec_of(c, 0), 0x07, 2048, 16384 - 2048, 0);
     const char *d = NULL;
-    expect("partitioned but unformatted", run(c, &d), d,
+    EXPECT_RUN("partitioned but unformatted", run(c, &d), d,
            FOS_SD_PROBE_REFUSE, "partition_without_filesystem");
     card_free(c);
 }
@@ -562,7 +576,7 @@ static void test_garbage(void)
     for (size_t i = 0; i < FOS_SD_SECTOR_BYTES; i++) s[i] = (uint8_t)(i * 7 + 13);
     s[510] = 0x00; s[511] = 0x00; /* no boot signature */
     const char *d = NULL;
-    expect("garbage sector 0", run(c, &d), d, FOS_SD_PROBE_REFUSE, "unrecognised_content");
+    EXPECT_RUN("garbage sector 0", run(c, &d), d, FOS_SD_PROBE_REFUSE, "unrecognised_content");
     card_free(c);
 }
 
@@ -573,13 +587,13 @@ static void test_read_error(void)
     build_exfat(c, 0, &g);
     c->fail_lba = (long)root_lba_of(0, &g); /* root directory unreadable */
     const char *d = NULL;
-    expect("read error walking the root", run(c, &d), d, FOS_SD_PROBE_REFUSE, "read_error");
+    EXPECT_RUN("read error walking the root", run(c, &d), d, FOS_SD_PROBE_REFUSE, "read_error");
     card_free(c);
 
     fake_card_t *c2 = card_new(8192, 0x00);
     c2->fail_lba = 0; /* even sector 0 unreadable */
     const char *d2 = NULL;
-    expect("read error on sector 0", run(c2, &d2), d2, FOS_SD_PROBE_REFUSE, "read_error");
+    EXPECT_RUN("read error on sector 0", run(c2, &d2), d2, FOS_SD_PROBE_REFUSE, "read_error");
     card_free(c2);
 }
 
