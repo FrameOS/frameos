@@ -21,6 +21,7 @@ import { embeddedUsbUploadTimeoutMs, framesModel, scheduleEmbeddedUsbFrameImageR
 import type { FrameType, FrameId } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { workspaceLogic } from './workspaceLogic'
+import { isEsp32CloudFrame } from './workspaceSurfaces'
 
 export type FlashPhase = 'idle' | 'connecting' | 'preparing' | 'flashing' | 'done' | 'error'
 type EspFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
@@ -318,6 +319,24 @@ async function downloadFirmware(downloadUrl: string): Promise<Uint8Array> {
     throw new Error('Failed to download firmware image')
   }
   return new Uint8Array(await response.arrayBuffer())
+}
+
+/**
+ * Why a cloud-managed frame never uploads scenes over USB.
+ *
+ * The USB push needs the scene BODIES — nodes, edges, app configs — which is
+ * what a backend frame carries in `frame.scenes`. The cloud's frame payload
+ * has no scenes field at all: assignments live on /api/frames/{id}/scenes and
+ * are ids and versions, not bodies, because the hub pushes the bodies to the
+ * device itself over the websocket. So there is nothing here to send, and the
+ * frame gets its scenes moments later from the cloud instead.
+ *
+ * Worth naming because the two cases look identical from the flasher's side
+ * and only one of them is a problem: an empty `frame.scenes` on a BACKEND
+ * frame really does mean nothing is configured.
+ */
+function scenesArriveFromCloud(frame: FrameType): boolean {
+  return isEsp32CloudFrame(frame)
 }
 
 async function uploadScenesOverUsbAfterFlash(
@@ -653,7 +672,14 @@ export function EmbeddedWebFlasher({
             )
           } else {
             setPhase('done')
-            setFlashMessage('Firmware flashed. No scenes configured to upload.')
+            // "No scenes configured" is false and alarming on a cloud frame,
+            // which always lands here: its scenes are on their way over the
+            // websocket, not missing.
+            const message = scenesArriveFromCloud(frame)
+              ? 'Firmware flashed. The cloud will push this frame\u2019s scenes when it reconnects.'
+              : 'Firmware flashed. No scenes configured to upload.'
+            setFlashMessage(message)
+            appendBrowserFlashLog(frame.id, message)
           }
         } catch (error) {
           setPhase('error')

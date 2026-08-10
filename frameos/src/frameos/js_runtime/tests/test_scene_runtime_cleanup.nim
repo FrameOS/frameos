@@ -146,3 +146,48 @@ suite "scene runtime cleanup":
     check scene.js.runtime == nil
 
     setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "a torn-down scene rebuilds its code functions on demand":
+    # This is the invariant that makes evicting a scene's interpreter safe at
+    # all. Under memory pressure an embedded frame drops other scenes' JS
+    # contexts to make room; getOrCompileCodeFn and evalInline then have to
+    # rebuild what they need, from name tables cleanupSceneJs deliberately
+    # cleared. If that stopped holding, eviction would turn into "the code node
+    # silently stops running" — so it is asserted here rather than assumed.
+    let config = FrameConfig(width: 4, height: 3, rotate: 0, scalingMode: "cover",
+      saveAssets: %*false, assetsPath: "/tmp")
+    let logger = testLogger()
+    let sceneId = "tests/rebuild-code-fn".SceneId
+    let codeNode = DiagramNode(id: 2.NodeId, nodeType: "code",
+      data: %*{"codeArgs": [], "codeJS": "20 + 3"})
+    var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+    uploaded[sceneId] = ExportedInterpretedScene(
+      name: "Rebuild",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 60.0,
+      publicStateFields: @[],
+      nodes: @[DiagramNode(id: 1.NodeId, nodeType: "event", data: %*{"keyword": "render"}), codeNode],
+      edges: @[],
+      apps: %*{}
+    )
+    setUploadedInterpretedScenes(uploaded)
+    resetInterpretedScenes()
+
+    let scene = InterpretedFrameScene(interpreter.init(sceneId, config, logger, %*{}))
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+      hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let before = scene.getDataNode(2.NodeId, context)
+    check before.asInt() == 23
+    check scene.jsReady == true
+
+    # What eviction does to a scene that is not currently running.
+    cleanupSceneJs(scene)
+    check scene.jsReady == false
+    check scene.jsFuncNameByNode.len == 0
+
+    let after = scene.getDataNode(2.NodeId, context)
+    check after.asInt() == 23
+    check scene.jsReady == true
+
+    setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())

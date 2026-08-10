@@ -1,11 +1,9 @@
-import std/[base64, options, unittest, uri]
+import std/[base64, options, os, unittest, uri]
 import pixie
 import pixie/fileformats/png
 
 import ../image
 
-when defined(frameosEmbedded):
-  import std/os
 
 proc pixel(image: Image, x, y: int): ColorRGBX =
   image.data[image.dataIndex(x, y)]
@@ -260,3 +258,56 @@ suite "image helpers":
     var bottomRightTarget = newImage(3, 3)
     bottomRightTarget.scaleAndDrawImage(anchorSrc, "bottom-right")
     check pixel(bottomRightTarget, 2, 2).r == 255
+
+suite "pngIsProvablyOpaque":
+  # Gate for streaming a PNG straight over the render canvas on embedded
+  # targets. The streaming decoder writes pixels rather than compositing them,
+  # so this must only say yes when the file CANNOT carry transparency — a
+  # wrong yes silently drops whatever was behind the image.
+  #
+  # It exists because a 1450K PNG on an SD card cannot be read the buffered
+  # way on a fragmented ESP32 heap: that needs the whole compressed body in one
+  # contiguous block, and the board had 4.87MB free with a 1.95MB largest.
+
+  proc png(colorType: int, extraChunks: seq[string] = @[], truncate = -1): string =
+    ## Minimal PNG header: signature, IHDR, then the given chunks, then IDAT.
+    proc be32(n: int): string =
+      result = newString(4)
+      for i in 0 .. 3:
+        result[i] = chr((n shr ((3 - i) * 8)) and 0xFF)
+    proc chunk(kind, data: string): string =
+      be32(data.len) & kind & data & be32(0) # CRC unchecked by the parser
+    var ihdr = be32(8) & be32(8) & chr(8) & chr(colorType) & chr(0) & chr(0) & chr(0)
+    result = "\x89PNG\r\n\x1A\n" & chunk("IHDR", ihdr)
+    for c in extraChunks:
+      result &= chunk(c, "\x00")
+    result &= chunk("IDAT", "\x00")
+    if truncate >= 0:
+      result.setLen(min(truncate, result.len))
+
+  test "truecolour and greyscale without tRNS are opaque":
+    check pngIsProvablyOpaque(png(2)) == true
+    check pngIsProvablyOpaque(png(0)) == true
+
+  test "an alpha channel is never opaque":
+    check pngIsProvablyOpaque(png(6)) == false   # RGBA
+    check pngIsProvablyOpaque(png(4)) == false   # grey + alpha
+
+  test "palette is not opaque even without tRNS":
+    # A palette carries no alpha in IHDR, but tRNS for it is common and the
+    # decode path would have to expand it; not worth proving.
+    check pngIsProvablyOpaque(png(3)) == false
+
+  test "tRNS disqualifies an otherwise opaque file":
+    check pngIsProvablyOpaque(png(2, @["tRNS"])) == false
+    check pngIsProvablyOpaque(png(0, @["tRNS"])) == false
+
+  test "tRNS is still found behind other chunks":
+    check pngIsProvablyOpaque(png(2, @["gAMA", "cHRM"])) == true
+    check pngIsProvablyOpaque(png(2, @["gAMA", "tRNS", "cHRM"])) == false
+
+  test "a header that outran the probe is not proven":
+    # Never reached IDAT, so a tRNS could still be ahead: must answer no.
+    check pngIsProvablyOpaque(png(2, truncate = 30)) == false
+    check pngIsProvablyOpaque("") == false
+    check pngIsProvablyOpaque("not a png at all") == false
