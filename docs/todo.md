@@ -127,17 +127,41 @@ table. What was still open there, mostly nice-to-have:
 
 ### Startup cost
 
-- **Parse and transpile scenes at deploy time, not on every boot.** After
-  #322 one app transpile is 3.3 s (11 KB source) or 10.2 s (36 KB) on an
-  ESP32-S3, and a frame pays it again on every boot and every scene reload
-  for sources that never change — it is what makes the first render after a
-  boot the worst one. Doing it upstream (the frontend already bundles
-  esbuild, the cloud has typescript) would also let the transpiler be
-  compiled out of the firmware: transpiler + tokens + parser + source_map +
-  token_processor are ~92 KB of object code, against ~420 KB left in the OTA
-  slot. Cheaper interim with no format change: cache the transpiled output on
-  flash keyed by a hash of the source, so the cost is once-ever rather than
-  once-per-boot.
+- **`-d:memProbe` prints nothing on the ESP32 — fix this before trusting any
+  transpile number below.** Built the 7.3" PhotoPainter firmware with
+  `FRAMEOS_EXTRA_NIM_FLAGS="-d:memProbe"` (2026-08-10) and got zero MEMPROBE
+  lines over a cold boot and three Weather-scene renders, despite the
+  generated C carrying 15 resolved calls to `memProbe__...` and the probe
+  strings from `app_runtime.nim:1038/1042`. Plain `printf` from C reaches the
+  console fine (`fos_client.c:447` "render #N started" shows up), so this is
+  not the console. Either the JS-app path is never entered on that scene — no
+  `NEW JsAppRuntime` probe fires either, which would mean `app:weatherPanel`
+  resolves to something other than a JS app runtime on device — or Nim's
+  `c_printf` in `utils/memory.nim:54` is being swallowed. Until this is
+  answered, the repo has no working way to time a transpile on hardware, and
+  the numbers in the next item are unverified.
+- **Parse and transpile scenes at deploy time, not on every boot.** The
+  3.3 s (11 KB) / 10.2 s (36 KB) figures quoted here since #322 are **not
+  reproducible as stated** and should be treated as suspect. On the bench
+  7.3" PhotoPainter the cold-boot Weather render minus the warm render is
+  24.8 s, but that delta is network-dominated: it is unchanged (24.7 s) after
+  a transpiler fix that cut host transpile time 3.2x, so it is not measuring
+  transpilation at all. Fix the probe above, then re-measure before using any
+  of this to justify a format change. What *is* measured: the erasure passes
+  made 724,572 heap allocations for the 36 KB `weatherPanel/app.ts` — 19.9
+  per source byte, all through ESP-IDF multi_heap against PSRAM — because
+  `startsWordAt` allocated a slice per keyword probe and the copy helpers
+  allocated per literal per pass. Removing that took it to 16,709 allocations
+  (0.46/byte) and 14.2 ms -> 4.5 ms on host, with byte-identical output.
+  If a real device measurement still shows seconds, deploy-time
+  transpilation remains the answer, and doing it upstream (the frontend
+  already bundles esbuild, the cloud has typescript) would also let the
+  transpiler be compiled out of the firmware: transpiler + tokens + parser +
+  source_map + token_processor are ~92 KB of object code (unverified — one
+  reading of `frameos_esp32.map` put the five modules at ~78 KB), against
+  ~420 KB left in the OTA slot. Cheaper interim with no format change: cache
+  the transpiled output on flash keyed by a hash of the source, so the cost
+  is once-ever rather than once-per-boot.
 - **`compileToBytecode` serialises the wrong object.** It asked for
   `JS_EVAL_FLAG_COMPILE_ONLY`, which burrito.nim declared one bit too high —
   that value is `JS_EVAL_FLAG_BACKTRACE_BARRIER` in the bundled quickjs.h — so
