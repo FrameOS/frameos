@@ -1,6 +1,8 @@
 import std/[json, tables, unittest]
 
 import frameos/js_runtime/runtime
+import frameos/js_runtime/app_runtime
+import frameos/values
 import frameos/scenes
 import frameos/types
 
@@ -71,3 +73,41 @@ suite "scene runtime cleanup":
     # Each leaked registry was ~2.5K, so 20 cycles leaked ~50K. Allow a small
     # allowance for allocator noise but nothing resembling per-cycle growth.
     check growth < 8 * 1024
+
+  test "cleanupSceneRuntime closes the QuickJS of every JS app node":
+    # A JS APP node's interpreter is separate from the scene's own, and costs
+    # far more: ~148K of PSRAM each, measured on an ESP32 with -d:memProbe.
+    # JsAppRuntime has no destructor and (on embedded) liveJsRuntimes holds a
+    # reference to every runtime it ever readied, so dropping the scene freed
+    # none of it — a frame cycling two JS scenes shed a few hundred K per
+    # switch and rebooted itself after about seven.
+    let config = FrameConfig(width: 4, height: 3, rotate: 0, scalingMode: "cover",
+      saveAssets: %*false, assetsPath: "/tmp")
+    let logger = testLogger()
+    var scene = InterpretedFrameScene(
+      id: "tests/cleanup-js-app".SceneId,
+      frameConfig: config,
+      state: %*{},
+      logger: logger,
+      appsByNodeId: initTable[NodeId, AppRoot](),
+      sceneNodes: initTable[NodeId, FrameScene](),
+      sceneExportByNodeId: initTable[NodeId, ExportedScene]()
+    )
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "text",
+      source = "export const get = () => 'hi'"
+    )
+    let app = DynamicJsApp(
+      nodeId: 1.NodeId, nodeName: "jsApp", scene: scene, frameConfig: config,
+      configJson: %*{}, runtime: runtime
+    )
+    scene.appsByNodeId[1.NodeId] = AppRoot(app)
+
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+      hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    discard runtime.get(AppRoot(app), %*{}, context)
+    check runtime.ready == true
+
+    cleanupSceneRuntime(scene)
+    check runtime.ready == false

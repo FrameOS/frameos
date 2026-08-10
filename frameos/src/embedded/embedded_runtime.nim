@@ -15,6 +15,7 @@ import frameos/channels
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/js_runtime/runtime as jsRuntime
+import frameos/js_runtime/app_runtime
 
 # ------------------------------------------------------------------ C hooks
 
@@ -216,11 +217,18 @@ proc cleanupScene(scene: FrameScene) =
   ## outside the embedded build).
   if scene.isNil or not (scene of InterpretedFrameScene):
     return
+  when defined(memProbe): memProbe("  cleanupScene: entry")
   let interpreted = InterpretedFrameScene(scene)
   for _, childScene in interpreted.sceneNodes:
     cleanupScene(childScene)
   interpreted.execNode = nil
   interpreted.getDataNode = nil
+  # Before the apps are dropped: each JS app node owns a QuickJS runtime with
+  # no destructor, and liveJsRuntimes keeps it reachable regardless, so the
+  # scene going away frees none of it.
+  for _, app in interpreted.appsByNodeId:
+    releaseJsAppRuntime(app)
+  when defined(memProbe): memProbe("  cleanupScene: js app runtimes released")
   interpreted.appsByNodeId = initTable[NodeId, AppRoot]()
   interpreted.appInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
   interpreted.appInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
@@ -235,7 +243,9 @@ proc cleanupScene(scene: FrameScene) =
   interpreted.cacheValues = initTable[NodeId, Value]()
   interpreted.cacheTimes = initTable[NodeId, float]()
   interpreted.cacheKeys = initTable[NodeId, JsonNode]()
+  when defined(memProbe): memProbe("  cleanupScene: tables cleared")
   cleanupSceneJs(interpreted)
+  when defined(memProbe): memProbe("  cleanupScene: js closed")
 
 # ------------------------------------------------------------------- scenes
 
@@ -262,8 +272,10 @@ proc loadScenes*(payload: string): int =
     cleanupScene(currentScene)
     currentScene = nil
     currentExported = nil
+    when defined(memProbe): memProbe("  loadScene: old scene dropped")
 
   replaceInterpretedScenesCache(newScenes)
+  when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
   scenesLoadedCount = newScenes.len
 
   # Keep the current scene across updates when it still exists; otherwise
@@ -351,8 +363,10 @@ proc loadScene*(payload: string): bool =
     cleanupScene(currentScene)
     currentScene = nil
     currentExported = nil
+    when defined(memProbe): memProbe("  loadScene: old scene dropped")
 
   replaceInterpretedScenesCache(newScenes)
+  when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
   scenesLoadedCount = newScenes.len
   let sceneId = inputs[0].id
   currentSceneId = some(sceneId)
@@ -404,6 +418,7 @@ proc ensureScene(): bool =
   currentExported = scenes[sceneId]
   when defined(memProbe): memProbe("  SCENE INIT " & sceneId.string)
   currentScene = interpreter.init(sceneId, frameConfig, logger, %*{})
+  when defined(memProbe): memProbe("  ensureScene: init done")
   log(&"scene \"{currentSceneName()}\" initialized")
   true
 

@@ -8,6 +8,7 @@ import frameos/hal/files as halFiles
 import frameos/types
 import frameos/interpreter
 import frameos/js_runtime/runtime
+import frameos/js_runtime/app_runtime
 
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
@@ -83,6 +84,10 @@ proc cleanupSceneRuntime*(scene: FrameScene) =
     # Break common ORC/ARC cycles before closing the JS runtime.
     interpreted.execNode = nil
     interpreted.getDataNode = nil
+    # Before the apps are dropped: each JS app node owns a QuickJS runtime
+    # with no destructor, so losing the last reference leaks it outright.
+    for _, app in interpreted.appsByNodeId:
+      releaseJsAppRuntime(app)
     interpreted.appsByNodeId = initTable[NodeId, AppRoot]()
     interpreted.appInputsForNodeId = initTable[NodeId, Table[string, NodeId]]()
     interpreted.appInlineInputsForNodeId = initTable[NodeId, Table[string, string]]()
