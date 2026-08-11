@@ -1,6 +1,7 @@
 import json, pixie, os, strutils
 import zippy
 import frameos/hal/files
+import frameos/local_access
 import frameos/types
 import frameos/utils/image
 import lib/tz
@@ -95,6 +96,22 @@ proc loadNetwork*(data: JsonNode): NetworkConfig =
       networkBackend: data{"networkBackend"}.getStr("auto"),
       allowLocalNetworkAccess: data{"allowLocalNetworkAccess"}.getBool(false),
     )
+
+proc loadJsRuntime*(data: JsonNode): JsRuntimeConfig =
+  ## Defaults live in js_runtime/burrito.nim (DefaultJs*); -1 means "keep what
+  ## this build target chose", so an unset frame.json changes nothing.
+  if data == nil or data.kind != JObject:
+    result = JsRuntimeConfig(executionTimeoutMs: -1, memoryLimitMb: -1, maxStackKb: -1,
+                             assetSandbox: "frame")
+  else:
+    result = JsRuntimeConfig(
+      executionTimeoutMs: data{"executionTimeoutMs"}.getInt(-1),
+      memoryLimitMb: data{"memoryLimitMb"}.getInt(-1),
+      maxStackKb: data{"maxStackKb"}.getInt(-1),
+      assetSandbox: data{"assetSandbox"}.getStr("frame"),
+    )
+  if result.assetSandbox notin ["frame", "scene"]:
+    result.assetSandbox = "frame"
 
 proc loadDeviceConfig*(data: JsonNode): DeviceConfig =
   var headers: seq[HttpHeaderPair] = @[]
@@ -288,10 +305,19 @@ proc loadConfig*(configPath = ""): FrameConfig =
     mountpoints: loadMountpoints(data{"mountpoints"}),
     errorBehavior: loadErrorBehavior(data{"errorBehavior"}),
     palette: loadPalette(data{"palette"}),
+    js: loadJsRuntime(data{"js"}),
   )
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
   setConfigDefaults(result)
+  # The private-network elevation lives in state/, not here — a backend deploy
+  # rewrites frame.json wholesale and would drop it. Fold the stored value in
+  # on every load, including the reload after a deploy, so the in-memory config
+  # every reader consults (the hub's policy refresh, the admin API payload)
+  # agrees with what the frame is actually enforcing.
+  if result.network != nil:
+    result.network.allowLocalNetworkAccess =
+      resolveLocalNetworkAccess(result.network.allowLocalNetworkAccess)
   setRuntimeImageEngine(result.imageEngine)
 
 proc updateSchedule(target: var FrameSchedule, source: FrameSchedule) =
@@ -341,4 +367,5 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   target.mountpoints = source.mountpoints
   target.errorBehavior = source.errorBehavior
   target.palette = source.palette
+  target.js = source.js
   updateSchedule(target.schedule, source.schedule)

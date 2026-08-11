@@ -35,6 +35,7 @@
 #include "fos_schedule.h"
 #include "fos_settings.h"
 #include "fos_wifi.h"
+#include "fos_netguard.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
 
@@ -393,6 +394,87 @@ void fos_cloud_clear_ws_url(void)
 }
 
 const char *fos_cloud_ws_url(void) { return s_ws_url; }
+
+/* --------------------------------------------- private-network egress policy */
+
+/* docs/cloud-frames.md: an enrolled frame runs scenes the *provider* installed,
+ * from inside the owner's LAN. So while the link is up, scene HTTP to
+ * private/link-local addresses is denied — otherwise a compromised provider
+ * account is an SSRF pivot onto the owner's router, NAS and IoT devices. The
+ * classifier and the enforcement live in fos_netguard.c (mirroring the native
+ * runtime's utils/http_client.nim); this file owns the *trigger*, because this
+ * is the only place that knows whether we are cloud-managed.
+ *
+ * Off whenever the frame is not enrolled. A standalone or backend-managed
+ * frame runs the owner's own scenes, where reaching the LAN is the point. */
+
+/* Exempt one provider endpoint, as "host:port" with the scheme's default port
+ * filled in — the same shape fos_netguard_url_allowed() derives from a request
+ * URL, so the two always agree. */
+static void netguard_exempt_provider_url(const char *url, bool ws)
+{
+    bool is_secure = false;
+    char hostport[FOS_URL_LEN];
+    char host[FOS_URL_LEN];
+
+    if (url == NULL || url[0] == '\0') return;
+    if (!split_scheme_url(url, ws ? "wss://" : "https://", ws ? "ws://" : "http://",
+                          &is_secure, hostport, sizeof(hostport))) {
+        return;
+    }
+    host_only(hostport, host, sizeof(host));
+    if (host[0] == '\0') return;
+
+    int port = is_secure ? 443 : 80;
+    if (hostport[0] == '[') {
+        const char *close = strchr(hostport, ']');
+        if (close != NULL && close[1] == ':') port = atoi(close + 2);
+    } else {
+        const char *colon = strrchr(hostport, ':');
+        /* Only a single colon is a port; more than one is a bare IPv6
+         * literal, which host_only() has already dealt with. */
+        if (colon != NULL && strchr(hostport, ':') == colon) port = atoi(colon + 1);
+    }
+    if (port <= 0 || port > 65535) return;
+    fos_netguard_set_exempt(host, port);
+}
+
+/* Recompute and apply. Cheap enough to call on every cloud-task tick (two URL
+ * splits and a couple of string copies), which is what keeps a console toggle
+ * of `allow_local_network` live without a restart. */
+static void apply_network_policy(void)
+{
+    static int logged_active = -1; /* -1 = nothing logged yet */
+    const fos_config_t *config = fos_config();
+    const bool managed = (s_state == FOS_CLOUD_ENROLLED);
+    const bool active = managed && !config->allow_local_network;
+
+    fos_netguard_clear_exempt();
+    if (active) {
+        /* The local admin linked this provider deliberately — possibly a dev
+         * provider on the LAN — so the provider's own endpoints must not be
+         * collateral damage. Both the API base URL and the optional ws_url
+         * override (a dev frame hub on its own port) count as "the provider". */
+        netguard_exempt_provider_url(config->cloud_url, false);
+        netguard_exempt_provider_url(s_ws_url, true);
+    }
+    fos_netguard_set_policy(active);
+
+    if ((int)active != logged_active) {
+        logged_active = (int)active;
+        if (active) {
+            ESP_LOGW(TAG, "scene HTTP to private/link-local addresses is now blocked "
+                          "(cloud-managed frame); override locally with "
+                          "`set allow_local_network 1`");
+        } else if (managed) {
+            ESP_LOGW(TAG, "scene HTTP to private/link-local addresses is ALLOWED on this "
+                          "cloud-managed frame (allow_local_network=1)");
+        } else {
+            ESP_LOGI(TAG, "scene HTTP to private addresses is allowed (frame is not "
+                          "cloud-managed)");
+        }
+    }
+}
 
 /* ------------------------------------------------------------------ crypto */
 
@@ -2318,12 +2400,17 @@ static void load_stored_state(void)
 static void cloud_task(void *arg)
 {
     (void)arg;
-    load_stored_state();
     uint32_t backoff_ms = FOS_CLOUD_BACKOFF_MIN_MS;
     bool ws_started = false;
     int64_t ws_stall_since_us = 0;
 
     while (true) {
+        /* Re-derived every tick rather than pushed from each state change: it
+         * costs two string splits, it cannot be forgotten at a new call site,
+         * and it is what makes a demotion, a fresh enrollment or a console
+         * `set allow_local_network` take effect without a restart. */
+        apply_network_policy();
+
         if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
             ws_stall_since_us = 0; /* no WiFi is not a WS stall */
             vTaskDelay(pdMS_TO_TICKS(2000));
@@ -2403,6 +2490,13 @@ static void cloud_task(void *arg)
 esp_err_t fos_cloud_start(void)
 {
     if (s_task != NULL) return ESP_OK;
+    /* Read the stored link state and arm the private-network policy here, not
+     * in the task: main() brings the render loop up immediately after this
+     * call, and an enrolled frame must not get to run even one scene HTTP
+     * request in the window before the task is first scheduled. Both are pure
+     * NVS reads plus string work — nothing that needs a task context. */
+    load_stored_state();
+    apply_network_policy();
     if (xTaskCreate(cloud_task, "fos_cloud", FOS_CLOUD_TASK_STACK, NULL, 3, &s_task) != pdPASS) {
         s_task = NULL;
         ESP_LOGE(TAG, "cloud task start failed");

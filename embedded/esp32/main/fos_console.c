@@ -34,6 +34,7 @@
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
+#include "fos_netguard.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
 
@@ -111,6 +112,12 @@ static int cmd_status(int argc, char **argv)
     if (fos_cloud_last_error()[0]) {
         printf("cloud_error: %s\n", fos_cloud_last_error());
     }
+    /* Whether scene HTTP can currently reach the LAN. Worth a line of its own:
+     * when the deny is on, a scene calling a local API fails with a message
+     * that looks like a network fault, and this is where that gets explained. */
+    printf("net_policy:  scene HTTP to private addresses %s%s\n",
+           fos_netguard_policy_active() ? "BLOCKED (cloud-managed)" : "allowed",
+           config->allow_local_network ? " [allow_local_network=1]" : "");
     printf("https:       %s port=%u cert=%s key=%s\n",
            config->tls_enable ? "enabled" : "disabled",
            (unsigned)config->tls_port,
@@ -308,7 +315,8 @@ static int cmd_set(int argc, char **argv)
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
                "cloud_wsurl|hardware|panel|render_mode|rotate|"
-               "interval|spill_force|server_send_logs|assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
+               "interval|spill_force|server_send_logs|allow_local_network|"
+               "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|wake_schedule|battery_pin|battery_divider|pins|gpio_buttons> <value...>\n");
         return 1;
@@ -490,6 +498,14 @@ static int cmd_set(int argc, char **argv)
         config->rotate = rot;
     }
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
+    /* 0 (default): while this frame is enrolled with a cloud provider, scene
+     * HTTP to private/link-local addresses is denied — the provider installs
+     * the scenes and the frame sits inside the owner's LAN. 1 lifts that, for
+     * an owner who deliberately wants cloud scenes talking to a local API.
+     * Console-only by design: see fos_config.h. Takes effect within a second,
+     * no restart. */
+    else if (strcmp(key, "allow_local_network") == 0)
+        config->allow_local_network = atoi(value) != 0;
     else if (strcmp(key, "assets_path") == 0) strlcpy(config->assets_path, value, sizeof(config->assets_path));
     else if (strcmp(key, "assets_sd") == 0) config->assets_sd.enabled = atoi(value) != 0;
     else if (strcmp(key, "assets_sd_freq") == 0) config->assets_sd.max_freq_khz = strtoul(value, NULL, 10);

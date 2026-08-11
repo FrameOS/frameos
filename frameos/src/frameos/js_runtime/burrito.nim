@@ -80,7 +80,7 @@
 ## ```
 ##
 
-import std/[tables, macros, json, strutils, os]
+import std/[tables, macros, json, strutils, os, monotimes, times]
 
 when defined(frameosEmbedded):
   # The ESP-IDF build compiles QuickJS as the frameos_quickjs component and
@@ -135,6 +135,10 @@ type
       magic: cint): JSValue {.cdecl.}
   JSCFunctionData* = proc(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint, argv: ptr JSValueConst, magic: cint,
       data: ptr JSValue): JSValue {.cdecl.}
+
+  # Called by the interpreter loop every JS_INTERRUPT_COUNTER_INIT bytecode
+  # steps. A non-zero return unwinds the running script with an InternalError.
+  JSInterruptHandler* = proc(rt: ptr JSRuntime, opaque: pointer): cint {.cdecl.}
 
 # Standard library module bindings from quickjs-libc.h (not built on embedded/wasm)
 when not defined(frameosEmbedded) and not defined(frameosWasm):
@@ -260,6 +264,12 @@ proc JS_ExecutePendingJob*(rt: ptr JSRuntime, pctx: ptr ptr JSContext): cint
 # Garbage collection
 proc JS_RunGC*(rt: ptr JSRuntime)
 
+# Resource ceilings. JS_NewRuntime leaves the malloc limit unset (unlimited)
+# and the stack at JS_DEFAULT_STACK_SIZE; newQuickJS sets both explicitly.
+proc JS_SetMemoryLimit*(rt: ptr JSRuntime, limit: csize_t)
+proc JS_SetMaxStackSize*(rt: ptr JSRuntime, stackSize: csize_t)
+proc JS_SetInterruptHandler*(rt: ptr JSRuntime, cb: JSInterruptHandler, opaque: pointer)
+
 # Bytecode serialization
 proc JS_WriteObject*(ctx: ptr JSContext, psize: ptr csize_t, obj: JSValueConst, flags: cint): ptr uint8
 proc JS_ReadObject*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: cint): JSValue
@@ -358,16 +368,38 @@ type
     of nimFunc3: func3*: NimFunction3
     of nimFuncVar: funcVar*: NimFunctionVariadic
 
+  JsExecutionGuard* = object
+    ## Runtime-level state the QuickJS interrupt handler reads to decide
+    ## whether the running script has outstayed its welcome. One per runtime,
+    ## raw memory (the handler runs on the C stack below Nim), freed in close.
+    ##
+    ## `deadline` bounds *interpreter* time, not wall time: a binding that
+    ## blocks on HTTP is not the scene spinning, so enterNativeCall /
+    ## leaveNativeCall push the deadline out by however long the native call
+    ## took. Without that, a legitimate 60s fetch would look like a runaway
+    ## loop.
+    armed*: bool
+    tripped*: bool
+    deadline*: MonoTime
+    budgetMs*: int
+    defaultBudgetMs*: int
+    nativeDepth*: int
+    nativeEnteredAt*: MonoTime
+
   # Context data to pass to C callbacks
   BurritoContextData* = object
     functions*: Table[cint, NimFunctionEntry]
     context*: ptr JSContext
+    guard*: ptr JsExecutionGuard
 
   QuickJSConfig* = object
     ## Configuration for QuickJS instance creation
     includeStdLib*: bool     ## Include std module (default: false)
     includeOsLib*: bool      ## Include os module (default: false)
     enableStdHandlers*: bool ## Enable std event handlers (default: false)
+    memoryLimitBytes*: int   ## JS heap ceiling; 0 leaves it unlimited
+    maxStackSizeBytes*: int  ## JS stack ceiling; 0 keeps QuickJS's default
+    executionTimeoutMs*: int ## Interpreter-time ceiling per entry; 0 disables
 
   QuickJS* = object
     ## QuickJS wrapper object containing runtime and context
@@ -384,9 +416,155 @@ type
     contextData*: ptr BurritoContextData
     nextFunctionId*: cint
     config*: QuickJSConfig
+    guard*: ptr JsExecutionGuard
 
   JSException* = object of CatchableError
     jsValue*: JSValue
+
+# ---- execution guard ------------------------------------------------------
+# Scene JS is untrusted: on a cloud-managed frame it arrives from the provider,
+# and even locally it is user-authored. `while (true) {}` used to wedge the
+# render thread forever — QuickJS runs to completion and the eval happens under
+# sceneJsLock on the thread that draws the panel. These ceilings turn that into
+# a scene error instead of a dead frame.
+
+const
+  DefaultJsMemoryLimitBytes* = when defined(frameosEmbedded):
+      0            # fos_js_new_runtime sets the PSRAM-sized limit itself
+    else:
+      256 * 1024 * 1024
+  DefaultJsMaxStackBytes* = when defined(frameosEmbedded):
+      0            # ditto: the render task's stack budget lives in the glue
+    else:
+      256 * 1024   # QuickJS's own JS_DEFAULT_STACK_SIZE, made explicit
+  # Deliberately generous. The job is to turn "this frame never renders again"
+  # into "one scene logged an error", not to police slow-but-honest scenes: a
+  # complex render on an ESP32-S3 is seconds of interpreter time, and a false
+  # positive here would be a worse bug than the hang it replaces. Operators who
+  # want a tighter leash set js.executionTimeoutMs in frame.json.
+  DefaultJsExecutionTimeoutMs* = when defined(frameosEmbedded):
+      20_000       # under CONFIG_ESP_TASK_WDT_TIMEOUT_S (30), which reboots
+    else:
+      30_000
+
+proc burritoInterruptHandler(rt: ptr JSRuntime, opaque: pointer): cint {.cdecl.} =
+  ## Runs on the interpreter's own stack every few thousand bytecode steps.
+  ## Must not allocate, raise, or re-enter QuickJS.
+  ##
+  ## Standing down while a native call is in flight looks odd — the handler
+  ## only ever fires from the interpreter loop, so nativeDepth > 0 means a
+  ## binding re-entered *this same context*. The deadline is stale during a
+  ## native call (leaveNativeCall has not credited the time back yet), so
+  ## judging that nested script against it would kill it for its caller's
+  ## fetch. FrameOS never re-enters a context this way — a nested JS app node
+  ## gets its own runtime, and therefore its own guard and its own budget — so
+  ## the case this gives up on does not currently exist.
+  let guard = cast[ptr JsExecutionGuard](opaque)
+  if guard == nil or not guard.armed or guard.nativeDepth > 0:
+    return 0
+  if getMonoTime() < guard.deadline:
+    return 0
+  guard.tripped = true
+  return 1
+
+proc enterNativeCall*(guard: ptr JsExecutionGuard) =
+  ## Stop the interpreter clock while a Nim binding runs.
+  if guard == nil or not guard.armed:
+    return
+  if guard.nativeDepth == 0:
+    guard.nativeEnteredAt = getMonoTime()
+  inc guard.nativeDepth
+
+proc leaveNativeCall*(guard: ptr JsExecutionGuard) =
+  if guard == nil or not guard.armed or guard.nativeDepth == 0:
+    return
+  dec guard.nativeDepth
+  if guard.nativeDepth == 0:
+    guard.deadline = guard.deadline + (getMonoTime() - guard.nativeEnteredAt)
+
+proc armGuard(guard: ptr JsExecutionGuard, timeoutMs: int): bool =
+  ## Start (or leave running) the interpreter-time budget for one entry into
+  ## JS. Returns true when this call is the one that armed it, so the matching
+  ## disarm only fires on the outermost entry — a binding that calls back into
+  ## JS must not reset its caller's budget.
+  if guard == nil:
+    return false
+  let budget = if timeoutMs >= 0: timeoutMs else: guard.defaultBudgetMs
+  if budget <= 0 or guard.armed:
+    return false
+  guard.armed = true
+  guard.tripped = false
+  guard.budgetMs = budget
+  guard.nativeDepth = 0
+  guard.deadline = getMonoTime() + initDuration(milliseconds = budget)
+  return true
+
+proc disarmGuard(guard: ptr JsExecutionGuard) =
+  if guard != nil:
+    guard.armed = false
+    guard.nativeDepth = 0
+
+proc guardForContext*(ctx: ptr JSContext): ptr JsExecutionGuard =
+  ## The guard is runtime-level state, but the only handle most call sites have
+  ## is the context, so it is mirrored into the context's opaque data.
+  if ctx == nil:
+    return nil
+  let contextData = cast[ptr BurritoContextData](JS_GetContextOpaque(ctx))
+  if contextData == nil: nil else: contextData.guard
+
+proc armDeadline*(js: QuickJS, timeoutMs: int = -1): bool {.discardable.} =
+  armGuard(js.guard, timeoutMs)
+
+proc disarmDeadline*(js: QuickJS) =
+  disarmGuard(js.guard)
+
+proc deadlineTripped*(js: QuickJS): bool =
+  js.guard != nil and js.guard.tripped
+
+proc deadlineBudgetMs*(js: QuickJS): int =
+  if js.guard == nil: 0 else: js.guard.budgetMs
+
+proc contextDeadlineTripped*(ctx: ptr JSContext): bool =
+  let guard = guardForContext(ctx)
+  guard != nil and guard.tripped
+
+proc clearContextDeadlineTrip*(ctx: ptr JSContext): int {.discardable.} =
+  ## Consume the tripped flag and report the budget that was blown, so the
+  ## caller can raise a message that names the real cause.
+  let guard = guardForContext(ctx)
+  if guard == nil or not guard.tripped:
+    return 0
+  guard.tripped = false
+  return guard.budgetMs
+
+template withContextDeadline*(ctx: ptr JSContext, body: untyped): untyped =
+  ## Bound one entry into the interpreter from a call site that only holds a
+  ## context. Re-entrant: nested uses are no-ops.
+  let ctxGuard = guardForContext(ctx)
+  let armedHere = armGuard(ctxGuard, -1)
+  try:
+    body
+  finally:
+    if armedHere:
+      disarmGuard(ctxGuard)
+
+proc raiseIfDeadlineTripped(js: QuickJS) =
+  ## QuickJS reports an interrupt as a bare InternalError; say what really
+  ## happened so the scene log names the runaway script instead of "interrupted".
+  if js.deadlineTripped():
+    let budget = js.deadlineBudgetMs()
+    js.guard.tripped = false
+    raise newException(JSException,
+      "JavaScript execution exceeded its " & $budget & "ms time budget and was interrupted")
+
+template withDeadline*(js: QuickJS, body: untyped): untyped =
+  ## Bound one entry into the interpreter. Re-entrant: nested uses are no-ops.
+  let armedHere = js.armDeadline()
+  try:
+    body
+  finally:
+    if armedHere:
+      js.disarmDeadline()
 
 # Value conversion helpers
 proc toNimString*(ctx: ptr JSContext, val: JSValueConst): string =
@@ -898,6 +1076,12 @@ proc nimFunctionTrampoline(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint
     if magic notin contextData.functions:
       return jsUndefined(ctx)
 
+    # Time spent in a binding (an HTTP fetch, an asset read) is not the script
+    # spinning, so it must not eat the interpreter-time budget.
+    let guard = contextData.guard
+    enterNativeCall(guard)
+    defer: leaveNativeCall(guard)
+
     let funcEntry = contextData.functions[magic]
 
     case funcEntry.kind
@@ -957,19 +1141,29 @@ proc nimFunctionTrampoline(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint
 # Configuration helpers
 proc defaultConfig*(): QuickJSConfig =
   ## Create default configuration (no std/os modules)
-  QuickJSConfig(includeStdLib: false, includeOsLib: false, enableStdHandlers: false)
+  QuickJSConfig(includeStdLib: false, includeOsLib: false, enableStdHandlers: false,
+                memoryLimitBytes: DefaultJsMemoryLimitBytes,
+                maxStackSizeBytes: DefaultJsMaxStackBytes,
+                executionTimeoutMs: DefaultJsExecutionTimeoutMs)
 
 proc configWithStdLib*(): QuickJSConfig =
   ## Create configuration with std module enabled
-  QuickJSConfig(includeStdLib: true, includeOsLib: false, enableStdHandlers: true)
+  result = defaultConfig()
+  result.includeStdLib = true
+  result.enableStdHandlers = true
 
 proc configWithOsLib*(): QuickJSConfig =
   ## Create configuration with os module enabled
-  QuickJSConfig(includeStdLib: false, includeOsLib: true, enableStdHandlers: true)
+  result = defaultConfig()
+  result.includeOsLib = true
+  result.enableStdHandlers = true
 
 proc configWithBothLibs*(): QuickJSConfig =
   ## Create configuration with both std and os modules enabled
-  QuickJSConfig(includeStdLib: true, includeOsLib: true, enableStdHandlers: true)
+  result = defaultConfig()
+  result.includeStdLib = true
+  result.includeOsLib = true
+  result.enableStdHandlers = true
 
 # Core QuickJS wrapper
 proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
@@ -991,10 +1185,21 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
   if rt == nil:
     raise newException(JSException, "Failed to create QuickJS runtime")
 
+  # Embedded sets both in fos_js_new_runtime, sized against PSRAM and the
+  # render task's stack; the config defaults are 0 there so we don't undo it.
+  if config.memoryLimitBytes > 0:
+    JS_SetMemoryLimit(rt, config.memoryLimitBytes.csize_t)
+  if config.maxStackSizeBytes > 0:
+    JS_SetMaxStackSize(rt, config.maxStackSizeBytes.csize_t)
+
   let ctx = JS_NewContext(rt)
   if ctx == nil:
     JS_FreeRuntime(rt)
     raise newException(JSException, "Failed to create QuickJS context")
+
+  let guard = cast[ptr JsExecutionGuard](alloc0(sizeof(JsExecutionGuard)))
+  guard.defaultBudgetMs = config.executionTimeoutMs
+  JS_SetInterruptHandler(rt, burritoInterruptHandler, guard)
 
   when not defined(frameosEmbedded) and not defined(frameosWasm):
     # Initialize standard handlers if requested
@@ -1023,17 +1228,23 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
   let contextData = cast[ptr BurritoContextData](alloc0(sizeof(BurritoContextData)))
   contextData.functions = initTable[int32, NimFunctionEntry]()
   contextData.context = ctx
+  contextData.guard = guard
 
   # Set context opaque data
   JS_SetContextOpaque(ctx, contextData)
 
-  result = QuickJS(runtime: rt, context: ctx, contextData: contextData, nextFunctionId: 1, config: config)
+  result = QuickJS(runtime: rt, context: ctx, contextData: contextData, nextFunctionId: 1, config: config,
+                   guard: guard)
 
 proc close*(js: var QuickJS) =
   ## Clean up QuickJS instance with proper sequence to avoid memory issues
   if js.context != nil and js.runtime != nil:
     # Clear context opaque data first to avoid circular references
     JS_SetContextOpaque(js.context, nil)
+
+    # Drop the interrupt handler before the guard it points at goes away:
+    # JS_FreeRuntime below still runs finalizers and pending jobs.
+    JS_SetInterruptHandler(js.runtime, nil, nil)
 
     when not defined(frameosEmbedded) and not defined(frameosWasm):
       # Process the std event loop to complete any pending operations
@@ -1062,18 +1273,24 @@ proc close*(js: var QuickJS) =
     dealloc(js.contextData)
     js.contextData = nil
 
+  if js.guard != nil:
+    dealloc(js.guard)
+    js.guard = nil
+
 proc eval*(js: QuickJS, code: string, filename: string = "<eval>"): string =
   ## Evaluate JavaScript code and return result as string
-  let val = JS_Eval(js.context, code.cstring, code.len.csize_t, filename.cstring, JS_EVAL_TYPE_GLOBAL)
-  defer: JS_FreeValue(js.context, val)
+  withDeadline(js):
+    let val = JS_Eval(js.context, code.cstring, code.len.csize_t, filename.cstring, JS_EVAL_TYPE_GLOBAL)
+    defer: JS_FreeValue(js.context, val)
 
-  if JS_IsException(val) != 0:
-    let exception = JS_GetException(js.context)
-    defer: JS_FreeValue(js.context, exception)
-    let errorMsg = toNimString(js.context, exception)
-    raise newException(JSException, "Evaluation failed: " & errorMsg)
+    if JS_IsException(val) != 0:
+      let exception = JS_GetException(js.context)
+      defer: JS_FreeValue(js.context, exception)
+      let errorMsg = toNimString(js.context, exception)
+      js.raiseIfDeadlineTripped()
+      raise newException(JSException, "Evaluation failed: " & errorMsg)
 
-  result = toNimString(js.context, val)
+    result = toNimString(js.context, val)
 
 proc evalWithGlobals*(js: QuickJS, code: string, globals: Table[string, string] = initTable[string, string]()): string =
   ## Evaluate JavaScript code with some global variables set as strings
@@ -1101,20 +1318,22 @@ proc evalModule*(js: QuickJS, code: string, filename: string = "<module>"): stri
   ## IMPORTANT: Due to QuickJS internals, using modules with std library
   ## imports may cause issues during cleanup. Consider using regular eval()
   ## for simple scripts.
-  var val = JS_Eval(js.context, code.cstring, code.len.csize_t, filename.cstring, JS_EVAL_TYPE_MODULE)
+  withDeadline(js):
+    var val = JS_Eval(js.context, code.cstring, code.len.csize_t, filename.cstring, JS_EVAL_TYPE_MODULE)
 
-  # Check if evaluation failed
-  if JS_IsException(val) != 0:
-    let exception = JS_GetException(js.context)
-    defer: JS_FreeValue(js.context, exception)
-    let errorMsg = toNimString(js.context, exception)
+    # Check if evaluation failed
+    if JS_IsException(val) != 0:
+      let exception = JS_GetException(js.context)
+      defer: JS_FreeValue(js.context, exception)
+      let errorMsg = toNimString(js.context, exception)
+      JS_FreeValue(js.context, val)
+      js.raiseIfDeadlineTripped()
+      raise newException(JSException, "Module evaluation failed: " & errorMsg)
+
+    # Modules return promises, but we just return a string representation
+    # Using js_std_await here causes reference counting issues on cleanup
+    result = toNimString(js.context, val)
     JS_FreeValue(js.context, val)
-    raise newException(JSException, "Module evaluation failed: " & errorMsg)
-
-  # Modules return promises, but we just return a string representation
-  # Using js_std_await here causes reference counting issues on cleanup
-  result = toNimString(js.context, val)
-  JS_FreeValue(js.context, val)
 
   # Run the event loop to execute the module
   when not defined(frameosEmbedded) and not defined(frameosWasm):
@@ -1157,15 +1376,19 @@ proc evalModuleNamespace*(js: QuickJS, code: string, filename: string = "<module
     raise newException(JSException, "Compiled source is not a module: " & filename)
 
   # JS_EvalFunction consumes `compiled`, so the module def pointer taken above
-  # is what keeps the module reachable afterwards.
-  let evaluated = JS_EvalFunction(ctx, compiled)
-  if JS_IsException(evaluated) != 0:
-    let exception = JS_GetException(ctx)
-    defer: JS_FreeValue(ctx, exception)
-    let errorMsg = toNimString(ctx, exception)
+  # is what keeps the module reachable afterwards. Module top level is real
+  # execution — an app that loops there hangs the render thread just as surely
+  # as one that loops inside render().
+  withDeadline(js):
+    let evaluated = JS_EvalFunction(ctx, compiled)
+    if JS_IsException(evaluated) != 0:
+      let exception = JS_GetException(ctx)
+      defer: JS_FreeValue(ctx, exception)
+      let errorMsg = toNimString(ctx, exception)
+      JS_FreeValue(ctx, evaluated)
+      js.raiseIfDeadlineTripped()
+      raise newException(JSException, errorMsg)
     JS_FreeValue(ctx, evaluated)
-    raise newException(JSException, errorMsg)
-  JS_FreeValue(ctx, evaluated)
 
   result = JS_GetModuleNamespace(ctx, moduleDef)
   if JS_IsException(result) != 0:
@@ -1413,9 +1636,13 @@ proc registerFunction*(js: var QuickJS, name: string, nimFunc: NimFunctionVariad
 proc runPendingJobs*(js: QuickJS) =
   ## Execute all pending JavaScript jobs (promises, async operations)
   ## This is needed after loading modules or running async code
-  var pctx: ptr JSContext = nil
-  while JS_ExecutePendingJob(js.runtime, addr pctx) > 0:
-    discard
+  ## Promise callbacks are ordinary script, and one that never settles would
+  ## spin here forever, so the same budget applies.
+  withDeadline(js):
+    var pctx: ptr JSContext = nil
+    while JS_ExecutePendingJob(js.runtime, addr pctx) > 0:
+      if js.deadlineTripped():
+        break
 
 proc processStdLoop*(js: QuickJS) =
   ## Process the QuickJS standard event loop once

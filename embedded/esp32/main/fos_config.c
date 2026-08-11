@@ -33,6 +33,7 @@ static void load_defaults(void)
     s_config.interval_sec = FRAMEOS_DEFAULT_INTERVAL_SEC;
     s_config.max_http_response_bytes = FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES;
     s_config.server_send_logs = FRAMEOS_DEFAULT_SERVER_SEND_LOGS;
+    s_config.allow_local_network = FRAMEOS_DEFAULT_ALLOW_LOCAL_NETWORK;
     s_config.tls_enable = FRAMEOS_DEFAULT_TLS_ENABLE;
     s_config.tls_port = FRAMEOS_DEFAULT_TLS_PORT;
     strlcpy(s_config.tls_server_cert, FRAMEOS_DEFAULT_TLS_SERVER_CERT, sizeof(s_config.tls_server_cert));
@@ -135,6 +136,7 @@ esp_err_t fos_config_init(void)
     uint8_t u8;
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
     if (nvs_get_u8(nvs, "send_logs", &u8) == ESP_OK) s_config.server_send_logs = u8 != 0;
+    if (nvs_get_u8(nvs, "allow_lan", &u8) == ESP_OK) s_config.allow_local_network = u8 != 0;
     if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
     if (nvs_get_u8(nvs, "admin_auth", &u8) == ESP_OK) s_config.admin_auth_enabled = u8 != 0;
     if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
@@ -205,6 +207,7 @@ esp_err_t fos_config_save(void)
     nvs_set_u32(nvs, "spill_force", s_config.http_spill_force_bytes);
     nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
     nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0);
+    nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0);
     nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0);
     nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0);
     nvs_set_u32(nvs, "tls_port", s_config.tls_port);

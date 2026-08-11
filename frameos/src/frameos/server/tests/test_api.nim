@@ -120,3 +120,27 @@ suite "Server API helpers":
     let invalidScenesPayload = frameApiPayload(state)
     check invalidScenesPayload{"scenes"}.kind == JArray
     check invalidScenesPayload{"scenes"}.len == 0
+
+suite "private-network elevation is not a bulk-savable setting":
+  test "a config save cannot flip allowLocalNetworkAccess either way":
+    # Both the cloud verb path and the admin page's frame save land in
+    # frontendFramePayloadToRuntimeConfig. Neither may carry this field: it
+    # only moves through the on-panel ceremony (frameos/local_access.nim).
+    let existingOff = %*{"network": {"networkCheck": true, "allowLocalNetworkAccess": false}}
+    let turnOn = %*{"network": {"networkCheck": true, "allowLocalNetworkAccess": true}}
+    let elevated = frontendFramePayloadToRuntimeConfig(turnOn, existingOff)
+    check elevated{"network"}{"allowLocalNetworkAccess"}.getBool() == false
+    # Unrelated fields in the same object still save normally.
+    check elevated{"network"}{"networkCheck"}.getBool() == true
+
+    # And it cannot be revoked that way either, so a stale payload replayed by
+    # the backend does not silently re-arm the deny mid-session.
+    let existingOn = %*{"network": {"allowLocalNetworkAccess": true}}
+    let turnOff = %*{"network": {"allowLocalNetworkAccess": false}}
+    check frontendFramePayloadToRuntimeConfig(turnOff, existingOn){"network"}{
+      "allowLocalNetworkAccess"}.getBool() == true
+
+  test "a frame with no stored value does not gain one from a payload":
+    let fresh = frontendFramePayloadToRuntimeConfig(
+      %*{"network": {"allowLocalNetworkAccess": true}}, %*{})
+    check not fresh{"network"}.hasKey("allowLocalNetworkAccess")

@@ -235,20 +235,84 @@ device's opinion of what it was granted.
 ### Interpreted scenes are still code — sandbox posture
 
 "Only interpreted scenes" is only safe if the QuickJS runtime's bindings are
-narrow. Required before launch:
+narrow. The capability audit of `frameos/src/frameos/js_runtime/` has been
+done; what it found, and where each answer lives, is below. Read this as the
+current posture, not a wish list — where something is weaker than it sounds,
+it says so.
 
-1. **Capability audit** of `frameos/src/frameos/js_runtime/` —
-   enumerate every native binding exposed to scene JS.
-2. **Cloud-installed scenes get render + HTTP only.** Apps carrying the
-   store's `"shell"` risk flag refuse to load under the cloud profile.
-   No filesystem access outside the scene's own asset sandbox.
-3. **RFC1918 / link-local HTTP is blocked by default** for cloud-installed
-   scenes. A malicious scene is *inside the owner's LAN*; without this, a
-   compromised account becomes an SSRF pivot onto routers and IoT devices —
-   exactly the outcome this design exists to prevent. Elevation (a scene
-   that legitimately needs LAN access, e.g. Home Assistant) requires a
-   **local-presence ceremony**: confirmation on the device's local admin
-   page, or a physical button press paired with a code shown on the panel.
+**Two binding surfaces, not one.** Code nodes and inline expressions
+(`runtime.nim`) get state reads, node args, context, logging and date
+formatting: no filesystem, no network. Full JS apps (`app_runtime.nim`) get
+those plus HTTP, asset file I/O, streams and `getSetting`. QuickJS's own
+`std`/`os` modules are never initialized (`defaultConfig()` in `burrito.nim`),
+so the registered Nim procs are the entire native surface — no process
+spawning, no arbitrary paths, no device control.
+
+**`getSetting` is gated by declaration, not by consent.** An app reaches
+`frameConfig.settings[namespace]` only for the namespaces its own
+`config.json` lists. That makes credential access *auditable* — you can read
+what an app will touch before installing it — but a hostile app simply
+declares what it wants. The audit trail is the mitigation.
+
+**Filesystem access is frame-wide by default, not per-scene.** Every asset
+call resolves through `resolveAssetPath`, which rejects absolute paths and
+`..` segments and then re-checks containment against the *real* path, so a
+symlink planted inside the assets folder is not a way out. But the root is the
+frame's shared assets folder: uploaded images are a shared resource and scenes
+are expected to read each other's. Frames that want the stricter model set
+`js.assetSandbox` to `"scene"` in `frame.json`, which confines each scene to
+`<assets>/scenes/<sceneId>/`.
+
+**Runaway scenes are bounded.** Scene JS runs on the render thread, so an
+infinite loop used to mean a frame that never drew again. Every entry into the
+interpreter now carries a time budget enforced by a QuickJS interrupt handler,
+and the JS heap and stack are capped (`js.executionTimeoutMs`,
+`js.memoryLimitMb`, `js.maxStackKb` in `frame.json`; defaults in
+`burrito.nim`). Time spent inside a native binding — an HTTP fetch, an asset
+read — does not count against the budget, so a slow-but-honest scene is not
+mistaken for a spinning one. A blown budget is logged as a scene error and the
+node's value is defaulted, exactly like any other failing node.
+
+**RFC1918 / link-local HTTP is blocked by default** on cloud-managed frames,
+on both the native and the ESP32 builds. A malicious scene is *inside the
+owner's LAN*; without this, a compromised account becomes an SSRF pivot onto
+routers and IoT devices — exactly the outcome this design exists to prevent.
+The check is on the resolved address rather than the hostname, so a
+DNS-rebinding answer does not slip past, and every redirect hop is re-checked.
+Native: `isPrivateNetworkAddress` / `enforceLocalNetworkPolicy` in
+`utils/http_client.nim`. ESP32: `fos_netguard.c`, enforced in
+`frameos_nim_glue.c` around each `esp_http_client_open()`. Keep the two
+classifiers in step.
+
+**Elevation requires a local-presence ceremony.** A scene that legitimately
+needs LAN access (Home Assistant, say) needs `network.allowLocalNetworkAccess`,
+and that switch is deliberately hard to reach. It is absent from
+`CLOUD_SETTINGS_ALLOWLIST`, so the provider cannot set it; it is stripped from
+the bulk config save, so neither the cloud verb nor the admin page's frame save
+can carry it. It moves only through the ceremony in `frameos/local_access.nim`:
+`POST /api/network/local-access/challenge` puts a six-digit code on the panel
+for three minutes, and `POST /api/network/local-access` applies the change only
+if that code comes back. The code is never in an API response, single-use, and
+capped at five attempts — someone who cannot see the screen cannot complete it.
+On ESP32 the equivalent is `set allow_local_network 1` on the USB console,
+which is physical presence by construction.
+
+It is persisted in `state/local_access.json`, deliberately not in `frame.json`.
+A backend deploy uploads a freshly generated `frame.json` over SSH and never
+round-trips the device's copy, so a setting stored there is quietly reset by
+the next unrelated deploy — fail-safe, but baffling to debug a week later when
+the Home Assistant scene stops working. Under `state/` it also says the right
+thing about what this is: a device-local fact established by someone standing
+in front of the frame, not fleet configuration the backend has an opinion
+about. `frame.json` is still read as a fallback so frames elevated before the
+setting moved keep working; on ESP32 the equivalent store is NVS, which deploys
+do not touch either.
+
+Still open: cloud-installed scenes are not yet distinguished from local ones at
+runtime, so the `"shell"` risk-flag refusal and any origin-specific profile
+have nothing to key off. A frame demoted out of the managed state also loses
+the deny while still running the provider's last-pushed scenes — true on both
+platforms, and worth closing in one place.
 
 ### Signed OTA
 
