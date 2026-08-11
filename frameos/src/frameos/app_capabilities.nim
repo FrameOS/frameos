@@ -62,6 +62,17 @@ type
     ## so the planner can tell "unset" from "explicitly set to the default".
     fieldDefaults*: seq[FieldMatch]
 
+const NaturalFit* = "natural"
+  ## A producer that fills exactly the target it is handed, at that size, with
+  ## no fitting of its own — a generator rather than a decoder.
+  ##
+  ## It is worth its own value because it widens what a consumer can offer. A
+  ## decoder needs to be told cover/contain/stretch, so only those placements
+  ## can hand it a target. A source that comes back at exactly the target size
+  ## draws identically under *every* placement — `center`, `top-left` and
+  ## `cover` all reduce to the same 1:1 draw — so the placement stops mattering
+  ## and only the offsets and the blend still do.
+
 const NoAppCapabilities* = AppCapabilities()
 
 proc isEmpty*(caps: AppCapabilities): bool =

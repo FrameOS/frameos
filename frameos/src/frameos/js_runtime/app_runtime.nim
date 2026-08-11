@@ -8,6 +8,7 @@ import frameos/js_runtime/source_map
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
+import frameos/utils/app_images
 import frameos/utils/image
 import frameos/utils/paths
 import frameos/utils/system
@@ -1213,7 +1214,20 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       return decodeImageWithDisplayBounds(decoded)
     let width = max(1, defaultImageWidth(owner, context, spec))
     let height = max(1, defaultImageHeight(owner, context, spec))
-    let image = newImage(width, height)
+    # The consumer's half of `intoTarget`, for a JS app that asked for a plain
+    # canvas: when the planner offered this node a target of exactly the size
+    # we were about to allocate, draw into that instead. The JS drawing calls
+    # composite onto it exactly as they would onto a fresh canvas that was
+    # afterwards drawn over the same pixels — which is why this is sound, and
+    # why it is limited to this branch. An SVG, a data URL or an
+    # explicitly-sized image is a different picture, and leaves the target
+    # unclaimed for the interpreter to discard.
+    var image: Image = nil
+    let (target, _) = owner.takeDecodeTarget(context)
+    if not target.isNil and target.width == width and target.height == height:
+      image = target
+    if image.isNil:
+      image = newImage(width, height)
     if spec.hasKey("color"):
       image.fill(colorWithOpacity(spec))
     return image

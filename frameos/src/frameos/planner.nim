@@ -93,6 +93,33 @@ proc connectedInput(scene: InterpretedFrameScene, nodeId: NodeId,
     return scene.appInputsForNodeId[nodeId][field]
   NoNodeId
 
+type
+  FusionRefusal* = enum
+    ## Why an image edge that *could* have been negotiated was left
+    ## materialized. The planner reports this rather than only deciding,
+    ## because "why is this scene slow / why did it OOM" is otherwise a
+    ## question you can only answer by reading the planner — and every answer
+    ## here is either a rule doing its job or a gap worth closing.
+    frFused = "fused"
+    frConsumerCached = "consumer node has caching on"
+    frStaticFieldWired = "a placement-affecting field is wired to something unresolvable"
+    frFieldSet = "a field that must stay unset is configured or wired"
+    frFitUnsupported = "the configured placement is not a fit the producer accepts"
+    frInputUnwired = "the image input is not connected"
+    frChainOpaque = "the producer chain runs into a node with no declared capability"
+    frNoCommonFit = "producer and consumer share no fit"
+    frForwardingOverCache = "a transformer would have to mutate a cached producer's value"
+    frOwnedTargetExcluded = "an app-owned target would change the pixels here"
+
+  EdgeDiagnosis* = object
+    nodeId*: NodeId
+    keyword*: string
+    input*: string
+    refusal*: FusionRefusal
+    ## Set when the chain walk stopped at a specific node.
+    blockedAt*: NodeId
+    blockedKeyword*: string
+
 type OpaqueCheck* = proc (nodeId: NodeId): bool {.closure, gcsafe, raises: [].}
   ## Lets the interpreter mark nodes the planner cannot see into — today the
   ## dynamic JS apps, whose behaviour comes from scene JSON rather than from
@@ -101,6 +128,9 @@ type OpaqueCheck* = proc (nodeId: NodeId): bool {.closure, gcsafe, raises: [].}
 proc resolveFit(scene: InterpretedFrameScene, node: DiagramNode,
     caps: AppCapabilities, spec: ProvidesTargetSpec,
     fit: var string, fitFromNodeId: var NodeId): bool =
+  ## Resolves *where* the fit comes from. Whether the value is one the producer
+  ## accepts is decided later, once the chain is known — a natural-size
+  ## producer accepts any placement, so the answer depends on both ends.
   ## Where the fit (cover/contain/stretch) comes from. A literal in the config
   ## resolves now; a field wired to a state node is a pure read, so it resolves
   ## per render; anything else — an app output, a code node, inline JS — could
@@ -122,11 +152,11 @@ proc resolveFit(scene: InterpretedFrameScene, node: DiagramNode,
   if not known:
     return false
   fit = value
-  fit in spec.fits
+  true
 
 proc walkProducerChain(scene: InterpretedFrameScene, startId: NodeId,
     isOpaque: OpaqueCheck, hops: var seq[NodeId],
-    producerFits: var seq[string]): NodeId =
+    producerFits: var seq[string], diagnosis: var EdgeDiagnosis): NodeId =
   ## Follows `forwardsTarget` hops from a consumer's input until it reaches an
   ## app whose output declares `intoTarget`. Returns that producer, or
   ## NoNodeId when the chain runs into anything opaque.
@@ -141,10 +171,25 @@ proc walkProducerChain(scene: InterpretedFrameScene, startId: NodeId,
     if visited.containsOrIncl(currentId):
       return NoNodeId
     let node = scene.nodes[currentId]
+    diagnosis.blockedAt = currentId
+    diagnosis.blockedKeyword = node.appKeyword()
     if node.nodeType != "app":
+      diagnosis.blockedKeyword = node.nodeType
       return NoNodeId # code nodes, state reads and child scenes are opaque
     if isOpaque != nil and isOpaque(currentId):
-      return NoNodeId
+      # A JS app does not make its own pixels: it asks the runtime for an image
+      # (js_runtime/app_runtime.nim `imageFromSpec`) whose default size is the
+      # context's, and draws into that with normal-blend operations. Handing it
+      # the target instead of a fresh canvas is the `intoTarget` protocol with
+      # a natural fit — not "streaming through JS", which stays a non-goal.
+      #
+      # It is a promise the app cannot make in advance, because the same entry
+      # point also returns decoded SVG, data URLs and explicitly-sized images.
+      # So this is offered, not assumed: the runtime takes the target only in
+      # the branch where it would have allocated a target-sized canvas, and an
+      # unclaimed target simply goes unused.
+      producerFits = @[NaturalFit]
+      return currentId
     let caps = appCapabilities(node.appKeyword())
     if caps.isEmpty:
       return NoNodeId
@@ -212,38 +257,58 @@ proc excludedOwnedFits(scene: InterpretedFrameScene, node: DiagramNode,
 
 proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
     caps: AppCapabilities, spec: ProvidesTargetSpec,
-    isOpaque: OpaqueCheck): ImageFusionPlan =
+    isOpaque: OpaqueCheck, diagnosis: var EdgeDiagnosis): ImageFusionPlan =
+  diagnosis = EdgeDiagnosis(nodeId: node.id, keyword: node.appKeyword(),
+                            input: spec.input, refusal: frFused,
+                            blockedAt: NoNodeId)
   # The consumer's own cache is a materialization barrier: a cached render
   # cannot be the thing that owns the canvas it is drawn onto.
   if readCacheConfig(node.data).enabled:
+    diagnosis.refusal = frConsumerCached
     return nil
   if not constraintsHold(scene, node, caps, spec.requireStatic):
+    diagnosis.refusal = frStaticFieldWired
     return nil
   if not unsetHolds(scene, node, spec.requireUnset):
+    diagnosis.refusal = frFieldSet
     return nil
 
   var fit = ""
   var fitFromNodeId = NoNodeId
   if not resolveFit(scene, node, caps, spec, fit, fitFromNodeId):
+    diagnosis.refusal = frFitUnsupported
     return nil
 
   let inputId = connectedInput(scene, node.id, spec.input)
   if inputId == NoNodeId:
+    diagnosis.refusal = frInputUnwired
     return nil
 
   var hops: seq[NodeId] = @[]
   var producerFits: seq[string] = @[]
-  let producerId = walkProducerChain(scene, inputId, isOpaque, hops, producerFits)
+  let producerId = walkProducerChain(scene, inputId, isOpaque, hops, producerFits, diagnosis)
   if producerId == NoNodeId:
+    diagnosis.refusal = frChainOpaque
     return nil
 
   var fits: seq[string] = @[]
-  for candidate in spec.fits:
-    if candidate in producerFits:
-      fits.add(candidate)
+  let naturalProducer = NaturalFit in producerFits
+  if naturalProducer:
+    # Its output is target-sized whatever we ask for, so every placement the
+    # consumer might be configured with reduces to the same 1:1 draw. The
+    # offsets and blend still matter and are already covered by requireStatic.
+    fits = spec.fits
+    if fit.len > 0 and fit notin fits:
+      fits.add(fit)
+  else:
+    for candidate in spec.fits:
+      if candidate in producerFits:
+        fits.add(candidate)
   if fits.len == 0:
+    diagnosis.refusal = frNoCommonFit
     return nil
   if fitFromNodeId == NoNodeId and fit notin fits:
+    diagnosis.refusal = frNoCommonFit
     return nil
 
   let producerCached = readCacheConfig(scene.nodes[producerId].data).enabled
@@ -262,6 +327,7 @@ proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
     # regions belong to whatever rendered before), and not a cached producer's
     # value (which is shared with every later render).
     if producerCached:
+      diagnosis.refusal = frForwardingOverCache
       return nil
     tier = iftOwnedScratch
 
@@ -269,8 +335,10 @@ proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
   let excluded = excludedOwnedFits(scene, node, caps, spec, blockedOutright)
   if tier == iftOwnedScratch:
     if blockedOutright:
+      diagnosis.refusal = frOwnedTargetExcluded
       return nil
     if fitFromNodeId == NoNodeId and fit in excluded:
+      diagnosis.refusal = frOwnedTargetExcluded
       return nil
     var anyAllowed = false
     for candidate in fits:
@@ -278,6 +346,7 @@ proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
         anyAllowed = true
         break
     if not anyAllowed:
+      diagnosis.refusal = frOwnedTargetExcluded
       return nil
 
   ImageFusionPlan(
@@ -293,9 +362,13 @@ proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
     ownedForCache: ownedForCache
   )
 
-proc planImageFusion*(scene: InterpretedFrameScene, isOpaque: OpaqueCheck = nil) =
+proc planImageFusion*(scene: InterpretedFrameScene, isOpaque: OpaqueCheck = nil,
+    diagnoses: ptr seq[EdgeDiagnosis] = nil) =
   ## Fills `scene.imageFusionPlans`. Called once per scene load, after the
   ## edges are wired and the apps are initialized.
+  ##
+  ## `diagnoses`, when given, collects one entry per candidate edge including
+  ## the ones that were refused and why — see `FusionRefusal`.
   scene.imageFusionPlans = initTable[NodeId, ImageFusionPlan]()
   if not imageFusionEnabled:
     return
@@ -308,7 +381,10 @@ proc planImageFusion*(scene: InterpretedFrameScene, isOpaque: OpaqueCheck = nil)
     if caps.providesTarget.len == 0:
       continue
     for spec in caps.providesTarget:
-      let plan = planImageEdge(scene, node, caps, spec, isOpaque)
+      var diagnosis: EdgeDiagnosis
+      let plan = planImageEdge(scene, node, caps, spec, isOpaque, diagnosis)
+      if diagnoses != nil:
+        diagnoses[].add(diagnosis)
       if plan != nil:
         # One target per node: the hint is a single slot on the context, and a
         # consumer with two fusible image inputs would have to hand out two.

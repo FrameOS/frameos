@@ -241,6 +241,55 @@ scaled into a target, which needs a scene whose source does not change between
 renders and whose materialized path still fits in the decode budget. The
 gallery scenes pick randomly and XKCD's materialized path does not fit.
 
+### Do the scenes we ship actually work in this system?
+
+`test_repo_scenes_fusion.nim` answers that with data rather than opinion: it
+loads every scene under `repo/scenes/samples`, runs the planner, and prints
+every image edge with the tier it got or the reason it was refused. Run it with
+`FRAMEOS_FUSION_INVENTORY=1`. The planner reports refusals (`FusionRefusal`)
+instead of only deciding, so "why is this scene not fusing" stops being a
+question you can only answer by reading the planner.
+
+**26 scenes, 19 image edges, 17 fused.** The two refusals left are
+`data/chromiumScreenshot` and `data/rstpSnapshot` — host-only apps, excluded
+from embedded builds entirely, and host-side fusion is a standing non-goal
+until a quality-preserving streaming scaler exists. Declaring a capability they
+cannot honour would be exactly the bespoke hack this design exists to avoid, so
+they stay refused and the inventory says why.
+
+Getting from 14 to 17 took two general mechanisms and no special cases:
+
+- **A `natural` fit.** A decoder has to be told cover/contain/stretch, so only
+  those placements could offer it a target. A source that comes back at exactly
+  the target size draws identically under *every* placement — `center`,
+  `top-left` and `cover` all reduce to the same 1:1 draw — so for a producer
+  that fills whatever it is handed, the placement stops mattering and only the
+  offsets and the blend still do. That is what unblocked the three Weather
+  edges, which use `placement: "center"`.
+- **JS apps are natural-size producers, not opaque walls.** A JS app does not
+  make its own pixels: it asks the runtime for an image whose default size is
+  the context's (`imageFromSpec`) and draws into it with normal-blend
+  operations. Handing it the target instead of a fresh canvas is `intoTarget`
+  with a natural fit — not "streaming through JS", which stays a non-goal. It
+  is offered rather than assumed, because the same entry point also returns
+  decoded SVG, data URLs and explicitly-sized images; the runtime takes the
+  target only in the branch where it would have allocated a target-sized
+  canvas, and an unclaimed offer costs nothing because `takeDecodeTarget`
+  allocates lazily.
+
+Verified on hardware: the Weather scene renders **0 of 192,000 packed bytes
+different** fused versus materialized, with both `render/image` nodes reporting
+`liveCanvas … fit: center`.
+
+**But Weather's memory did not drop, and it is worth being precise about why.**
+`weatherPanel` builds SVG and returns it, so it rasterizes through
+`decodeSvgWithFallback` into an image of its own and never reaches the branch
+that would take the target. The offer is correct, harmless and free — it just
+is not claimed. Making it claimable needs pixie to rasterize an SVG into a
+caller-supplied image, which is the same class of change as the split-cell
+image view: a fork change, and now the second piece of evidence pointing at
+the same place.
+
 ### Transformer audit (phase 1)
 
 - `render/opacity` — **forwards**, shipped. Skips its `.copy()` when cleared to
