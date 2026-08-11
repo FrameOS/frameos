@@ -390,6 +390,52 @@ capabilities + planner; teach transformers to forward targets.
 The prize: a 4000×3000 JPEG onto an 800×480 canvas in a few hundred KB.
 Build only if phase-0/phase-1 data shows remaining chains that matter.
 
+**Gate result (2026-08-11, 7.3" PhotoPainter): not yet — and the measurement
+says the next win is a different mechanism.** After phases 0–1 plus the
+cached-producer fix below, the per-render profile on every scene the frame
+carries shows the image edges already costing either nothing (the producer
+writes into the live canvas) or one canvas-sized value that a row stream could
+not remove:
+
+| remaining cost | scene | bytes | can a row stream help? |
+|---|---|---|---|
+| JS panel output inside a split cell | Weather | 921,600 + 614,400 | **No** — JS is opaque by design (non-goals) |
+| `render/split` cell buffers | Weather, XKCD | same values | **No** — needs an image *view*, not a stream |
+| producer → canvas | Calendar, XKCD, SD card | ~0 | already fused |
+
+So the chains row streams were designed for — uncached producer → pointwise
+transformer → canvas — **do not occur in any shipped scene**. Building the
+protocol now would be machinery with no consumer.
+
+What would reopen it: a scene with a transformer mid-chain (the shape phase 1
+made work but nothing ships yet), or a panel where the canvas alone is the
+problem — on the 13.3E6 the canvas is 7.7MB, where one avoided intermediate
+matters far more than at 800x480.
+
+**The larger remaining win is elsewhere.** `render/split` gives each cell a
+`subImage` **copy** of its region and draws it back (`apps/render/split/app.nim`
+says why: "pixie has no image view"). On the Weather scene those copies are the
+two largest values in the whole render. A windowed `Image` view in the pixie
+fork would remove them outright, and would help every split scene rather than
+the transformer chains nobody has drawn. That is a cross-repo change and a
+bigger piece than row streams, but it is where the bytes actually are.
+
+#### What did land instead (measured, shipped)
+
+A cached producer used to force the owned-scratch tier so its cache could never
+end up holding the live canvas. But `withCache` on embedded **refuses to store
+frame-sized images** (over 1MB), so above that size the cache stores nothing,
+nothing aliases the canvas, and the scratch was a whole canvas of PSRAM bought
+to protect an entry that is never written. The plan now records *why* it chose
+the owned tier, and the runtime upgrades back to the live canvas when the cache
+will refuse the value. Every shipped photo scene caches its producer, so this
+is the common path — on XKCD it is 1MB of PSRAM per render on a frame with
+about 6MB free.
+
+A scratch chosen because a *transformer* mutates it in place is never upgraded:
+that one is not about the cache. `test_interpreter_decode_target.nim` pins the
+distinction.
+
 - [ ] Row-stream protocol: producer emits scanlines of the *target*
       resolution (decoders already scale-on-decode); consumers are the
       canvas draw and pointwise ops (`opacity`, `color`, row-aligned

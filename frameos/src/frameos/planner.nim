@@ -248,11 +248,13 @@ proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
 
   let producerCached = readCacheConfig(scene.nodes[producerId].data).enabled
   var tier: ImageFusionTier
+  var ownedForCache = false
   if hops.len == 0:
     # Today's two shapes: an uncached producer decodes straight into the live
     # canvas; a cached one gets a canvas-sized image of its own, because a
     # cache holding the live canvas would redraw it onto itself forever.
     tier = if producerCached: iftOwnedScratch else: iftLiveCanvas
+    ownedForCache = producerCached
   else:
     # Forwarding means a transformer mutates the image in place on the way
     # back down. It must therefore own what it mutates: not the live canvas
@@ -287,7 +289,8 @@ proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
     fits: fits,
     excludedFits: (if tier == iftOwnedScratch: excluded else: @[]),
     inPlaceNodeIds: hops,
-    producerNodeId: producerId
+    producerNodeId: producerId,
+    ownedForCache: ownedForCache
   )
 
 proc planImageFusion*(scene: InterpretedFrameScene, isOpaque: OpaqueCheck = nil) =

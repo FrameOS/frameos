@@ -529,6 +529,36 @@ proc pngIsProvablyOpaque*(header: string): bool =
   # Ran out of probed header before the image data started.
   false
 
+proc isBmpHeader(data: string): bool =
+  data.len > 2 and data[0] == 'B' and data[1] == 'M'
+
+proc isPpmHeader(data: string): bool =
+  ## P6 is the binary variant; P3 is ASCII and has no streaming decoder.
+  data.len > 2 and data[0] == 'P' and data[1] == '6'
+
+proc bmpIsProvablyOpaque*(header: string): bool =
+  ## Same question as `pngIsProvablyOpaque`, for BMP: can this file carry
+  ## transparency? If it cannot, streaming its pixels straight over a canvas is
+  ## equivalent to compositing them.
+  ##
+  ## Bit depths up to 24 have no alpha channel at all. 32-bit BMPs usually
+  ## carry an ignored padding byte rather than real alpha, but BI_ALPHABITFIELDS
+  ## and the V4/V5 headers can declare a genuine alpha mask — and "usually" is
+  ## not a basis for overwriting a canvas, so 32-bit is simply not proven.
+  if not isBmpHeader(header) or header.len < 34:
+    return false
+  var bitCount = 0
+  for i in 0 .. 1: # DIB header offset 14 + 14 = bit count, little endian
+    bitCount = bitCount or (header[28 + i].uint8.int shl (8 * i))
+  var compression = 0
+  for i in 0 .. 3:
+    compression = compression or (header[30 + i].uint8.int shl (8 * i))
+  # BI_RGB (0) and BI_RLE8/4 (1/2) carry no alpha mask; BI_BITFIELDS (3) and
+  # BI_ALPHABITFIELDS (6) can.
+  if compression != 0 and compression != 1 and compression != 2:
+    return false
+  bitCount in [1, 4, 8, 16, 24]
+
 proc fileJpegSource(file: File): JpegSourceProc =
   result = proc(dst: pointer, maxBytes: int): int =
     try:
@@ -635,9 +665,21 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
   # target) from compiled ones (which do not).
   let jpeg = isJpegHeader(header)
   var streamablePng = false
+  var streamableBmp = false
+  var streamablePpm = false
   when defined(frameosEmbedded):
     streamablePng = not jpeg and pngIsProvablyOpaque(header)
-  if not jpeg and not streamablePng:
+    # BMP and PPM already stream in `decodeSpilledImageInto` — a download too
+    # big for PSRAM has streamed from storage since Aug 2026. A file on the SD
+    # card is the same problem with the same answer, and until now it did not
+    # get it: an 800x480 24-bit BMP is 1.1MB of file for a 1.5MB image, and
+    # `ensureFileReadBudget` refused to buffer it ("only 1952K of render memory
+    # is available") on a frame that could render it perfectly well a row at a
+    # time. Every BMP on the Waveshare demo card is one of these.
+    streamableBmp = not jpeg and bmpIsProvablyOpaque(header)
+    # PPM P6 has no alpha channel at all, so there is nothing to prove.
+    streamablePpm = not jpeg and isPpmHeader(header)
+  if not jpeg and not streamablePng and not streamableBmp and not streamablePpm:
     return false
   header = ""
 
@@ -648,15 +690,26 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
     if jpeg:
       decodeJpegStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
       return true
-    when compiles(decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
-      # Row-streamed: the compressed body is read incrementally and never held
-      # whole, so this needs a fixed inflate window plus a row, not a block the
-      # size of the file. Interlaced and 16-bit PNGs raise here and fall back.
-      decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
-      return true
+    if streamablePng:
+      when compiles(decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
+        # Row-streamed: the compressed body is read incrementally and never held
+        # whole, so this needs a fixed inflate window plus a row, not a block the
+        # size of the file. Interlaced and 16-bit PNGs raise here and fall back.
+        decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+        return true
+    if streamableBmp:
+      when compiles(decodeBmpStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
+        # Uncompressed fixed-stride rows: one source row in RAM at a time, and
+        # rows outside the fitted rect are skipped without being converted.
+        decodeBmpStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+        return true
+    if streamablePpm:
+      when compiles(decodePpmStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
+        decodePpmStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+        return true
   except PixieError:
-    # Progressive JPEGs and interlaced/16-bit PNGs cannot stream; retry
-    # buffered below.
+    # Progressive JPEGs, interlaced/16-bit PNGs and RLE BMPs cannot stream;
+    # retry buffered below.
     discard
   finally:
     file.close()

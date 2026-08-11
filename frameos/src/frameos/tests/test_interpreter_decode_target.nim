@@ -170,6 +170,40 @@ block a_transformer_over_a_cached_producer_stays_unhinted:
   doAssert calls == 1
   doAssert target.isNil
 
+block the_plan_records_why_it_chose_an_owned_target:
+  # The distinction the embedded runtime acts on: a scratch chosen only to keep
+  # a cached producer off the live canvas can be upgraded back to the canvas
+  # when the cache would refuse to store the value anyway (frame-sized images
+  # on embedded). A scratch chosen because a transformer needs something of its
+  # own to mutate can never be.
+  let sceneId = "tests/decode-target".SceneId
+  proc planFor(producerCached: bool, withOpacity: bool): ImageFusionPlan =
+    var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+    uploaded[sceneId] = galleryScene(producerCached, %*{}, withOpacity)
+    setUploadedInterpretedScenes(uploaded)
+    resetInterpretedScenes()
+    let config = testConfig()
+    let scene = InterpretedFrameScene(init(sceneId, config, testLogger(config), %*{}))
+    for _, plan in scene.imageFusionPlans:
+      return plan
+    nil
+
+  let cachedPlan = planFor(producerCached = true, withOpacity = false)
+  doAssert not cachedPlan.isNil
+  doAssert cachedPlan.tier == iftOwnedScratch
+  doAssert cachedPlan.ownedForCache
+
+  let uncachedPlan = planFor(producerCached = false, withOpacity = false)
+  doAssert not uncachedPlan.isNil
+  doAssert uncachedPlan.tier == iftLiveCanvas
+  doAssert not uncachedPlan.ownedForCache
+
+  let forwardedPlan = planFor(producerCached = false, withOpacity = true)
+  doAssert not forwardedPlan.isNil
+  doAssert forwardedPlan.tier == iftOwnedScratch
+  doAssert not forwardedPlan.ownedForCache,
+    "a scratch a transformer mutates in place must never be upgraded away"
+
 block offset_draw_stays_unhinted:
   # Not a full-frame draw: render/image has to do a real placed draw, so the
   # producer cannot be handed the canvas it would be drawn onto.

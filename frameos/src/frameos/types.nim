@@ -258,6 +258,12 @@ type
     excludedFits*: seq[string]  ## fits the owned-scratch tier must refuse
     inPlaceNodeIds*: seq[NodeId] ## transformers cleared to mutate in place
     producerNodeId*: NodeId
+    ## True when the owned-scratch tier was chosen *only* because the terminal
+    ## producer has a node cache — not because a transformer needs something of
+    ## its own to mutate. That distinction matters at render time: an embedded
+    ## cache refuses to store frame-sized images, so above that size there is no
+    ## cache to protect and the live canvas is safe after all.
+    ownedForCache*: bool
 
   # Runtime state while running the scene (for compiled frames)
   FrameScene* = ref object of RootObj

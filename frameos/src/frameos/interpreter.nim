@@ -290,6 +290,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     var profileMemoryBefore: tuple[known: bool, bytes: int] = (false, 0)
     # The fit actually handed to a producer this pass, for the profile log.
     var plannedFit = ""
+    # The tier actually used, which can differ from the planned one.
+    var plannedTier = iftLiveCanvas
     if debugRuntime:
       checkpointKeyword = diagnosticKeyword(currentNode)
       markRuntimeCheckpoint("node:start", currentSceneId = self.id.string, contextEvent = context.event,
@@ -341,7 +343,21 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             # field means the app's config.json default.
             fit = plan.defaultFit
         if fit in plan.fits:
-          case plan.tier
+          var tier = plan.tier
+          when defined(frameosEmbedded):
+            if tier == iftOwnedScratch and plan.ownedForCache and
+                context.image.width * context.image.height * 4 >
+                  EmbeddedMaxCachedImageBytes:
+              # The scratch exists so a cached producer never ends up owning the
+              # live canvas. But the embedded cache refuses to store
+              # frame-sized images (see withCache), so past that size it stores
+              # nothing, nothing aliases the canvas across renders, and the
+              # scratch is a whole canvas of PSRAM bought to protect a cache
+              # entry that is never written. Every shipped photo scene caches
+              # its producer, so this is the common case, not the exception.
+              tier = iftLiveCanvas
+          plannedTier = tier
+          case tier
           of iftLiveCanvas:
             context.decodeTargetImage = context.image
             context.decodeTargetScalingMode = fit
@@ -856,7 +872,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         # canvas that was written in place from one that was drawn onto.
         profile["fusion"] = %*{
           "input": plan.inputName,
-          "tier": (if plan.tier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
+          "tier": (if plannedTier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
+          "plannedTier": (if plan.tier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
           "producerNodeId": plan.producerNodeId.int,
           "forwardedThrough": plan.inPlaceNodeIds.len,
           # The fit the producer was actually asked for. This is the field that
