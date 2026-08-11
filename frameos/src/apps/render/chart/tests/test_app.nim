@@ -37,7 +37,7 @@ proc newTestApp(data: JsonNode, chartType: string, logs: LogStore): App =
   result.init()
 
 proc drawnPixels(image: Image): int =
-  for p in image.data:
+  for p in image:
     if p.a > 0:
       inc result
 
@@ -198,7 +198,7 @@ suite "render/chart config and rendering":
     let image = app.get(ExecutionContext(image: newImage(40, 30), hasImage: true))
     check drawnPixels(image) == 40 * 30
     var nonWhite = 0
-    for p in image.data:
+    for p in image:
       if p.r != 255 or p.g != 255 or p.b != 255:
         inc nonWhite
     check nonWhite > 0

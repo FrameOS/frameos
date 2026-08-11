@@ -51,7 +51,7 @@ proc maxChannelDiff(a, b: Image): (int, int) =
   doAssert a.width == b.width and a.height == b.height
   var worst = 0
   var differing = 0
-  for i in 0 ..< a.data.len:
+  for i in 0 ..< a.dataLen:
     let
       p = a.data[i]
       q = b.data[i]

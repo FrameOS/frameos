@@ -172,10 +172,10 @@ proc logProcessExit(logger: DriverLogger, process: Process, context: string) =
     discard logger.safeLog(fmt"{context} exited with status {exitCode}")
 
 proc render*(self: Driver, image: Image) =
-  if self.lastImageData == image.data:
+  if self.lastImageData == image.toContiguousSeq():
     discard self.logger.safeLog("Skipping render. Identical to last render.")
     return
-  self.lastImageData = image.data
+  self.lastImageData = image.toContiguousSeq()
 
   var imageData: seq[uint8]
   var extraArgs: seq[string] = @[]

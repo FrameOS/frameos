@@ -13,7 +13,7 @@ proc alphaAt(image: Image, x, y: int): uint8 =
 suite "render/opacity app":
   test "get applies partial opacity to a copy of configured image":
     let source = newImage(2, 1)
-    for i in 0 ..< source.data.len:
+    for i in 0 ..< source.dataLen:
       source.data[i] = rgbx(120, 60, 30, 255)
     let app = App(
       frameConfig: makeConfig(),
@@ -29,7 +29,7 @@ suite "render/opacity app":
 
   test "run applies partial opacity to context image":
     let context = ExecutionContext(image: newImage(2, 2), hasImage: true)
-    for i in 0 ..< context.image.data.len:
+    for i in 0 ..< context.image.dataLen:
       context.image.data[i] = rgbx(200, 100, 50, 255)
     let app = App(frameConfig: makeConfig(), appConfig: AppConfig(opacity: 0.25))
     check app.appConfig.opacity == 0.25

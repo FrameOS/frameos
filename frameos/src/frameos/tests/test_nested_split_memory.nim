@@ -115,19 +115,33 @@ doAssert topLeft.r > 200 and topLeft.g < 60, "inner top cell should be red, got 
 doAssert bottomLeft.g > 200 and bottomLeft.r < 60, "inner bottom cell should be green, got " & $bottomLeft
 doAssert right.b > 200 and right.r < 60, "outer right cell should be blue, got " & $right
 
-# What the nesting costs, stated rather than assumed. Each level holds a copy
-# of its region while the level below renders, so the live set is the canvas
-# plus one buffer per level on the deepest path — not the canvas alone.
+# A cell is a view now, so the colours above landing on the canvas IS the
+# write-through: nothing copied them back. Pin the property directly too, so a
+# regression to copying fails here rather than only showing up as memory.
+block:
+  let parent = newImage(20, 10)
+  parent.fill(rgbx(0, 0, 0, 255))
+  let cell = parent.view(4, 2, 6, 4)
+  cell.fill(rgbx(255, 0, 0, 255))
+  doAssert parent.unsafe[5, 3].r == 255, "a view must write through to its parent"
+  doAssert parent.unsafe[1, 1].r == 0, "and must not touch anything outside itself"
+  let nested = cell.view(1, 1, 2, 2)
+  nested.fill(rgbx(0, 255, 0, 255))
+  doAssert parent.unsafe[5, 3].g == 255,
+    "a view of a view must land in the original, not in an intermediate"
+
+# What the nesting costs now. Each level used to hold a copy of its region
+# while the level below rendered, so the live set was the canvas plus one
+# buffer per level on the deepest path. Views borrow, so it is the canvas.
 let canvasBytes = CanvasWidth * CanvasHeight * 4
-let outerCellBytes = (CanvasWidth div 2) * CanvasHeight * 4
-let innerCellBytes = (CanvasWidth div 2) * (CanvasHeight div 2) * 4
-let liveAtDeepest = canvasBytes + outerCellBytes + innerCellBytes
+let wasOuterCell = (CanvasWidth div 2) * CanvasHeight * 4
+let wasInnerCell = (CanvasWidth div 2) * (CanvasHeight div 2) * 4
+let wasLive = canvasBytes + wasOuterCell + wasInnerCell
 
 echo "test_nested_split_memory: nested split renders correctly"
-echo "  canvas            ", canvasBytes, " B"
-echo "  + outer cell copy ", outerCellBytes, " B"
-echo "  + inner cell copy ", innerCellBytes, " B"
-echo "  live at the deepest cell = ", liveAtDeepest, " B (",
-  formatFloat(liveAtDeepest / canvasBytes, ffDecimal, 2), "x the canvas)"
+echo "  canvas                     ", canvasBytes, " B"
+echo "  live at the deepest cell   ", canvasBytes, " B (1.00x the canvas)"
+echo "  was, with per-cell copies  ", wasLive, " B (",
+  formatFloat(wasLive / canvasBytes, ffDecimal, 2), "x)"
 
 setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())

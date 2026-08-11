@@ -375,7 +375,7 @@ suite "interpreter error paths":
       check sawDetail
       # ...and the canvas shows the error image, not the plain background
       var nonBackground = 0
-      for pixel in rendered.data:
+      for pixel in rendered:
         if pixel.r.int + pixel.g.int + pixel.b.int > 96:
           inc nonBackground
-      check nonBackground > rendered.data.len div 2
+      check nonBackground > rendered.dataLen div 2

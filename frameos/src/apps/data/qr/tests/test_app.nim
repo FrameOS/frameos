@@ -28,7 +28,7 @@ proc makeApp(config: AppConfig, frameConfig: FrameConfig): App =
   App(appConfig: config, frameConfig: frameConfig)
 
 proc darkPixelCount(image: Image): int =
-  for px in image.data:
+  for px in image:
     if px.r < 128'u8 and px.g < 128'u8 and px.b < 128'u8 and px.a > 0:
       inc result
 

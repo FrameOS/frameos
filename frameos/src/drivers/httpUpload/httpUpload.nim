@@ -32,7 +32,7 @@ proc init*(frameOS: DriverContext): Driver =
   )
 
 proc toPng(image: Image): string =
-  var pixels = image.data
+  var pixels = image.toContiguousSeq()
   if pixels.len == 0:
     return ""
   return encodePng(image.width, image.height, 4, pixels[0].addr, pixels.len * 4)

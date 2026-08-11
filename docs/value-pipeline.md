@@ -361,7 +361,34 @@ A view fixes it outright and, unlike the SVG trade above, has **no fidelity
 question**: a cell that borrows its parent's pixels is the same pixels by
 construction, and the whole nested stack collapses to the canvas.
 
-**Why it is not done yet.** pixie's `Image` owns its buffer —
+**Done (2026-08-12).** pixie gained `view(image, x, y, w, h)`, `render/split`
+uses it, and a cell now writes straight into the canvas with no copy out and no
+draw back. Measured on the frame, the Weather scene (one split, two cells):
+
+| | min free PSRAM | peak used |
+|---|---|---|
+| copies | 3,440,476 | 3,503,880 |
+| views | **3,966,192** | **2,975,916** |
+
+**516KB less peak PSRAM** on a single level. `test_nested_split_memory.nim`
+reports the nested case going from **1.75x the canvas to 1.00x**, and pins the
+write-through directly so a regression to copying fails there rather than only
+showing up as memory.
+
+The cost of the pointer indirection, which was the thing to check before
+committing to this: **none measurable.** `tests/bench_view_cost.nim` in the
+fork has fill, draws, per-pixel access and fillPath all within noise of the
+buffer-owning build, while taking a quarter-canvas region goes from 0.032ms to
+nothing at all. Views are free to make and free to use.
+
+Five pre-existing bugs fell out of the conversion, all listed in the pixie
+commit — the sharpest being `isOpaqueSse2` answering for the wrong range
+whenever `start != 0`, and `applyOpacityNeon`'s scalar tail wrapping a
+`uint8 * uint8` so that 240 at half opacity came out 0.
+
+<details><summary>The original design note, kept for the reasoning</summary>
+
+**Why it was not done sooner.** pixie's `Image` owns its buffer —
 `data*: seq[ColorRGBX]`, with `dataIndex` as `width * y + x`. A view has to
 share the parent's buffer, and a Nim `seq` cannot be aliased. The contained
 shape looks like this:
@@ -386,9 +413,14 @@ rows are contiguous across the whole buffer; each needs auditing, and a view
 must be refused where it cannot hold.
 
 It is a change to the core type of the library every frame renders through, and
-the per-pixel `ref seq` indirection needs measuring on the ESP32 before it
-ships. Worth doing, worth doing carefully, and not worth starting at the tail
-of a long session — so it is written down here rather than half-applied.
+the per-pixel indirection needs measuring before it ships.
+
+In the event the shape that landed was slightly different and better: `data`
+became a raw pointer rather than a `ref seq`, so there is no extra dereference
+at all, and `forEachSpan` gave the flat operations one span for an owner —
+which is why the benchmark came back flat.
+
+</details>
 
 ### Transformer audit (phase 1)
 

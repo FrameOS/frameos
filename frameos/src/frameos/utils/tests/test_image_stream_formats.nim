@@ -92,7 +92,7 @@ suite "file-backed streaming decoders pixie must keep providing":
       decodeBmpStreamScaledInto(fileSource(file), getFileSize(path).int, target, fit)
       file.close()
       var painted = 0
-      for pixel in target.data:
+      for pixel in target:
         if pixel.a > 0: painted += 1
       check painted > 0
 
@@ -106,7 +106,7 @@ suite "file-backed streaming decoders pixie must keep providing":
     decodePpmStreamScaledInto(fileSource(file), getFileSize(path).int, target, fitCover)
     file.close()
     var painted = 0
-    for pixel in target.data:
+    for pixel in target:
       if pixel.a > 0: painted += 1
     check painted > 0
 

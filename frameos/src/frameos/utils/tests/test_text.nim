@@ -65,7 +65,7 @@ suite "text layout helpers":
       let layout = typesetIntoBounds(opts, image.width, image.height)
       drawText(layout, image)
 
-      check image.data.anyIt(it != rgbx(255, 255, 255, 255))
+      check toSeq(image.items).anyIt(it != rgbx(255, 255, 255, 255))
 
   test "approximate stroke fallback draws border text":
     let image = newImage(120, 60)
@@ -75,4 +75,4 @@ suite "text layout helpers":
 
     fillTextApproxStroke(image, arranged, vec2(0, 0), 2)
 
-    check image.data.anyIt(it != rgbx(255, 255, 255, 255))
+    check toSeq(image.items).anyIt(it != rgbx(255, 255, 255, 255))

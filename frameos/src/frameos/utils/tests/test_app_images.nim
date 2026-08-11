@@ -8,7 +8,7 @@ import ../app_images
 proc pngDataUrl(width, height: int): string =
   let source = newImage(width, height)
   source.fill(rgba(255, 0, 0, 255))
-  let pngData = encodePng(source.width, source.height, 4, source.data[0].addr, source.data.len * 4)
+  let pngData = encodePng(source.width, source.height, 4, source.data[0].addr, source.dataLen * 4)
   "data:image/png;base64," & encode(pngData)
 
 suite "app image helpers":

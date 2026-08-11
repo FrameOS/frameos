@@ -426,7 +426,7 @@ proc getLastImagePng*(): string =
   var copy: seq[ColorRGBX]
   var width, height: int
   withLock lastImageLock:
-    copy = lastImage.data
+    copy = lastImage.toContiguousSeq()
     width = lastImage.width
     height = lastImage.height
   return encodePng(width, height, 4, copy[0].addr, copy.len * 4)

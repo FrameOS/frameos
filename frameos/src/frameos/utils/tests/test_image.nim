@@ -44,7 +44,7 @@ suite "image helpers":
 
   test "display-bounded decode scales PNGs and releases source bytes":
     let source = testImage(32, 16)
-    var data = encodePng(source.width, source.height, 4, source.data[0].addr, source.data.len * 4)
+    var data = encodePng(source.width, source.height, 4, source.data[0].addr, source.dataLen * 4)
     let image = decodeImageWithDisplayBounds(data, maxEdge = 8, maxPixels = 64)
     check image.width == 8
     check image.height == 4
@@ -53,7 +53,7 @@ suite "image helpers":
   test "decodeDataUrl supports base64 and plain payloads and rejects invalid urls":
     let source = newImage(1, 1)
     source.fill(rgba(255, 0, 0, 255))
-    let pngData = encodePng(source.width, source.height, 4, source.data[0].addr, source.data.len * 4)
+    let pngData = encodePng(source.width, source.height, 4, source.data[0].addr, source.dataLen * 4)
     let pngBase64 = encode(pngData)
     let base64Image = decodeDataUrl("data:image/png;base64," & pngBase64)
     check base64Image.width == 1
@@ -79,7 +79,7 @@ suite "image helpers":
           elif x < 4: rgbx(0, 255, 0, 255)
           else: rgbx(0, 0, 255, 255)
         source.data[source.dataIndex(x, y)] = color
-    let pngData = encodePng(source.width, source.height, 4, source.data[0].addr, source.data.len * 4)
+    let pngData = encodePng(source.width, source.height, 4, source.data[0].addr, source.dataLen * 4)
     let url = "data:image/png;base64," & encode(pngData)
     let yellow = rgbx(255, 255, 0, 255)
 
@@ -194,7 +194,7 @@ suite "image helpers":
     check pixel(restoredBoth, 1, 1).r == pixel(original, 1, 1).r
 
     var unchanged = testImage()
-    check unchanged.previewTransform(0, "unknown").data == original.data
+    check unchanged.previewTransform(0, "unknown").pixelsEqual(original)
 
   test "previewTransform handles inverse rotation before preview flip":
     let original = testImage(2, 3)
@@ -205,7 +205,7 @@ suite "image helpers":
 
     check preview.width == original.width
     check preview.height == original.height
-    check preview.data == original.data
+    check preview.pixelsEqual(original)
 
   test "previewSourceIndex matches previewTransform coordinates":
     for width in [2, 3]:

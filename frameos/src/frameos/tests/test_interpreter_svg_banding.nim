@@ -59,7 +59,7 @@ doAssert onePass.width == 800 and onePass.height == 480
 
 # The scene really did draw something (a blank frame would compare equal).
 var inked = 0
-for color in onePass.data:
+for color in onePass:
   if color.r.int + color.g.int + color.b.int > 60:
     inc inked
 doAssert inked > 20000, "weatherStacked drew only " & $inked & " bright pixels"
@@ -72,7 +72,7 @@ doAssert banded.width == 800 and banded.height == 480
 
 var worst = 0
 var differing = 0
-for i in 0 ..< onePass.data.len:
+for i in 0 ..< onePass.dataLen:
   let
     p = onePass.data[i]
     q = banded.data[i]
@@ -85,12 +85,12 @@ for i in 0 ..< onePass.data.len:
 # Only float32 rounding of the band-shifted shape coordinates may move an
 # antialiased edge sample; nothing structural may change.
 doAssert worst <= 8, "banded weatherStacked differs by " & $worst & " (max channel)"
-doAssert differing * 100 <= onePass.data.len,
+doAssert differing * 100 <= onePass.dataLen,
   "banded weatherStacked differs in " & $differing & " of " &
-  $onePass.data.len & " pixels"
+  $onePass.dataLen & " pixels"
 
 availableRenderBytesOverride = 0
 refreshDecodeBudget()
 
 echo "test_interpreter_svg_banding: worstDiff=", worst, " differingPixels=",
-  differing, "/", onePass.data.len
+  differing, "/", onePass.dataLen
