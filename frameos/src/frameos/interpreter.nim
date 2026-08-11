@@ -288,6 +288,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     var checkpointKeyword = ""
     var profileStartedAt = 0.0
     var profileMemoryBefore: tuple[known: bool, bytes: int] = (false, 0)
+    # The fit actually handed to a producer this pass, for the profile log.
+    var plannedFit = ""
     if debugRuntime:
       checkpointKeyword = diagnosticKeyword(currentNode)
       markRuntimeCheckpoint("node:start", currentSceneId = self.id.string, contextEvent = context.event,
@@ -354,6 +356,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               context.decodeTargetScalingMode = fit
               setDecodeTargetHint = true
         if setDecodeTargetHint:
+          plannedFit = fit
           context.decodeTargetNodeId = plan.producerNodeId
           if plan.inPlaceNodeIds.len > 0:
             context.inPlaceImageNodes = plan.inPlaceNodeIds
@@ -850,7 +853,12 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           "input": plan.inputName,
           "tier": (if plan.tier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
           "producerNodeId": plan.producerNodeId.int,
-          "forwardedThrough": plan.inPlaceNodeIds.len
+          "forwardedThrough": plan.inPlaceNodeIds.len,
+          # The fit the producer was actually asked for. This is the field that
+          # would have caught the XKCD regression on sight: the scene asks for
+          # "contain" and a producer decoding with the frame's scaling mode
+          # would say "cover" right here.
+          "fit": plannedFit
         }
       self.logger.log(profile)
 

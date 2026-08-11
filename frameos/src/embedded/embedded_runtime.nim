@@ -14,6 +14,7 @@ import frameos/types
 import frameos/channels
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
+import frameos/planner
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_runtime
 
@@ -131,6 +132,16 @@ proc fos_nim_send_event_impl*(eventName: cstring, payloadJson: cstring): bool {.
 
 proc getFrameConfig*(): FrameConfig =
   frameConfig
+
+proc fos_nim_set_debug_impl(enabled: cint) {.exportc, cdecl.} =
+  ## Turns the interpreter's per-node memory profile on and off at runtime
+  ## (`set debug 1` on the console). It logs a line per node per render — the
+  ## byte size of the value on that edge, the heap delta across the node, and
+  ## which fusion tier the planner picked — which is how you find out where a
+  ## render's peak memory actually goes. Off by default: on a memory-tight
+  ## device the answer matters, but so does not paying for it every render.
+  if not frameConfig.isNil:
+    frameConfig.debug = enabled != 0
 
 proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
     rotate = 0) =
@@ -422,6 +433,27 @@ proc ensureScene(): bool =
   when defined(memProbe): memProbe("  ensureScene: init done")
   log(&"scene \"{currentSceneName()}\" initialized")
   true
+
+proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
+  ## Test hook for the value-pipeline differential (docs/value-pipeline.md,
+  ## principle 4): with fusion off, every image edge falls back to a fully
+  ## materialized `Value` — and the panel must come out identical. Rendering the
+  ## same scene both ways and comparing the two previews is the on-hardware
+  ## version of the host harness, and the only way to check the claim against
+  ## the real decoders rather than a test seam.
+  ##
+  ## Plans are built when a scene loads, so the flag alone would not take
+  ## effect: drop the live scene and let the next render re-plan it.
+  let wanted = enabled != 0
+  if imageFusionEnabled == wanted:
+    return
+  imageFusionEnabled = wanted
+  if not currentScene.isNil:
+    cleanupScene(currentScene)
+    currentScene = nil
+    currentExported = nil
+  renderRequested = true
+  log("image fusion " & (if wanted: "enabled" else: "disabled") & "; scene will re-plan")
 
 proc sceneRefreshSeconds*(): float =
   if not currentScene.isNil and currentScene.refreshInterval > 0:

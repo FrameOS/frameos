@@ -195,6 +195,51 @@ pre-existing, and neither is the planner's to fix:
 - **Sampler.** Unchanged from the note above: streaming decoders sample
   nearest. Phase 3's problem.
 
+### What the hardware said
+
+Run on a 7.3" PhotoPainter (ESP32-S3, `EPD_7in3e` 800x480) on 2026-08-11, with
+`set fusion 0|1` re-planning the live scene so the same scene renders both
+ways, and the 4bpp panel preview pulled over the USB console for comparison.
+A control (two renders, both fused) differs in **0 of 192,000** packed bytes,
+so the pipeline is deterministic and any difference below is real.
+
+| scene | tier | fit | fused | materialized | panel |
+|---|---|---|---|---|---|
+| Calendar (`render/calendar`) | liveCanvas | cover | 47.6s | 16.8s | **identical** |
+| XKCD (`downloadImage`, split cell) | ownedScratch | contain | 21.4s | 48.9s | see below |
+| SD card image (`localImage`) | liveCanvas | cover | 411ms in the producer, 912 B allocated | 2846ms, 508 KB allocated | not comparable |
+
+Three things worth keeping:
+
+1. **The XKCD regression is fixed, and provably so.** The profile logs the fit
+   the producer was actually handed: `"fit": "contain"`. That single field is
+   what would have caught the original bug on sight, where the frame's
+   scaling mode said `cover` and the node had asked for `contain`.
+2. **On this device fusion is not an optimisation, it is the difference
+   between rendering and not.** With `set fusion 0` the XKCD scene does not
+   render at all — it puts up an error frame reading *"PNG decode of 615x416
+   needs 1069K of decode buffers, over the 752K memory budget"*. The
+   materialized floor is a graceful failure here, not a slower success, which
+   is exactly the pressure the tiering exists for. The 9,332 differing bytes
+   on that row are a comic versus an error box.
+3. **Calendar is the clean pixel-for-pixel result**: a full-frame generator
+   writing straight into the live canvas, byte-identical to allocating its own
+   canvas-sized image and drawing it. That is principle 4 holding on real
+   hardware, through the real panel pipeline, including the dither.
+
+The SD card row is not a fusion comparison: `data/localImage` was configured
+with random image order, so the two renders picked different files. What it
+does show is the shape of the win — the fused producer wrote into the canvas
+for **912 bytes and 411 ms**, against **508 KB and 2.8 s** to decode natively
+and scale afterwards. (It also turned up an unrelated pre-existing nuisance:
+a junk `sys_decode.bmp` on the card that `localImage` cannot decode, which
+renders an error frame whenever the rotation lands on it.)
+
+Left open by the hardware pass: a genuine pixel A/B of a *downloaded photo*
+scaled into a target, which needs a scene whose source does not change between
+renders and whose materialized path still fits in the decode budget. The
+gallery scenes pick randomly and XKCD's materialized path does not fit.
+
 ### Transformer audit (phase 1)
 
 - `render/opacity` — **forwards**, shipped. Skips its `.copy()` when cleared to
@@ -238,12 +283,24 @@ pre-existing, and neither is the planner's to fix:
       tell a canvas written in place from one drawn onto. Event
       `interpreter:node:profile`; costs nothing unless `debug` is on
       (`test_interpreter_node_profile.nim` pins that).
-- [ ] Run the real photo + calendar + agenda scenes on hardware (7.3"
-      PhotoPainter to hand, 13.3E6 for the big canvas); capture
-      peak-memory-per-edge profiles into `docs/` or the issue.
-- [ ] Decision gate: confirm (or refute) that decode/render image
-      intermediates dominate byte-side blobs by ~an order of magnitude.
-      This orders phases 2 vs 3; the plan below assumes images dominate.
+- [x] Run the real scenes on hardware and capture peak-memory-per-edge
+      profiles. Done 2026-08-11 on the 7.3" PhotoPainter (ESP32-S3,
+      `EPD_7in3e` 800x480, 8MB flash layout). Console `set debug 1` turns the
+      profile on; `set fusion 0|1` toggles the planner so a scene can be
+      rendered both ways and the panels compared.
+- [x] Decision gate: **images dominate, decisively.** Per-render peak value on
+      the byte side vs the image side:
+
+      | scene | peak image value | peak byte-side value | ratio |
+      |---|---|---|---|
+      | Weather (2 JS panels via `render/split`) | 921,600 | 19,845 (`weatherIcons` JSON) | 46x |
+      | XKCD (RSS -> `downloadImage`) | 1,028,160 | 3,574 (`xmlToJson`) | 288x |
+      | SD card image (`localImage`) | 1,536,000 | 11 | — |
+
+      So phase 3 (row streams) is worth more than phase 2 (byte-side tiering)
+      on this hardware, as the plan assumed. Phase 2 is still worth doing —
+      `icalJson`'s *input* is the multi-MB side and none of these scenes
+      exercise it — but it is not what decides whether a photo scene renders.
 
 ### Phase 1 — target-passing everywhere (kills the whitelist)
 
@@ -279,11 +336,12 @@ capabilities + planner; teach transformers to forward targets.
 - [ ] Wire the harness into the wasm build too (it runs the same interpreter),
       and add an e2e pass over the shipped scene corpus rather than only
       generated graphs.
-- [ ] Embedded regression pass on real hardware: the five gallery scenes,
-      Immich, Google Photos, XKCD, calendar — the scenes the old whitelist was
-      grown for, plus the opacity-in-the-middle variants that were broken
-      before. `test_interpreter_decode_target.nim` already pins the shipped
-      scene corpus offline (8 templates), but nothing has run on a panel.
+- [x] Embedded regression pass on real hardware (2026-08-11, 7.3"
+      PhotoPainter). See "What the hardware said" below.
+- [ ] Opacity-in-the-middle on hardware. The host differential covers it over
+      360 shapes and `test_interpreter_decode_target.nim` pins the hint
+      forwarding, but no scene on the device has a transformer in the chain —
+      it needs a scene uploaded for the purpose.
 
 ### Phase 2 — byte-side tiering (independent of phase 1)
 

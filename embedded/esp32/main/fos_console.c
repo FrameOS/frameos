@@ -142,6 +142,8 @@ static int cmd_status(int argc, char **argv)
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
     printf("rotate:      %u\n", (unsigned)config->rotate);
     printf("send_logs:   %d\n", (int)config->server_send_logs);
+    printf("debug:       %d\n", (int)config->debug_logging);
+    printf("fusion:      %d\n", (int)config->image_fusion);
     printf("assets:      path=%s sd=%d mounted=%d pins=%s freq=%lu kHz autoformat=%d\n",
            config->assets_path, (int)config->assets_sd.enabled,
            (int)fos_assets_sd_mounted(), sd_pins,
@@ -315,7 +317,7 @@ static int cmd_set(int argc, char **argv)
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
                "cloud_wsurl|hardware|panel|render_mode|rotate|"
-               "interval|spill_force|server_send_logs|allow_local_network|"
+               "interval|spill_force|debug|fusion|server_send_logs|allow_local_network|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|wake_schedule|battery_pin|battery_divider|pins|gpio_buttons> <value...>\n");
@@ -498,6 +500,8 @@ static int cmd_set(int argc, char **argv)
         config->rotate = rot;
     }
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
+    else if (strcmp(key, "debug") == 0) config->debug_logging = atoi(value) != 0;
+    else if (strcmp(key, "fusion") == 0) config->image_fusion = atoi(value) != 0;
     /* 0 (default): while this frame is enrolled with a cloud provider, scene
      * HTTP to private/link-local addresses is denied — the provider installs
      * the scenes and the frame sits inside the owner's LAN. 1 lifts that, for
