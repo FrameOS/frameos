@@ -1205,16 +1205,22 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       # SVG panel is the common shape for a JS render app, and rasterizing it
       # into the target the planner offered is what keeps a full-size second
       # image off the heap.
-      # Only a target the chain owns, which is freshly transparent: there
-      # rasterizing in place is bit-identical to rendering standalone and
-      # drawing the result. Onto the live canvas the two are equal only in
-      # exact arithmetic — the per-path rounding differs, and on this panel
-      # that moved 42% of pixels between two adjacent palette entries once the
-      # dither ran. See docs/value-pipeline.md.
-      let svgOwned = context.decodeTargetIsOwned()
-      let (svgTarget, _) =
-        if svgOwned: owner.takeDecodeTarget(context)
-        else: (Image(nil), "")
+      # Rasterize into whatever target was offered, including the live canvas.
+      #
+      # On a target the chain owns (freshly transparent) this is bit-identical
+      # to rendering standalone and drawing the result. On the live canvas it
+      # is equal only in exact arithmetic: compositing each path onto existing
+      # content rounds differently at every path than compositing onto
+      # transparency does before one final blend. Source-over is associative,
+      # 8-bit is not, and a six-colour dither turns a one-unit nudge near a
+      # threshold into a flipped cell.
+      #
+      # Measured on a 7.3" PhotoPainter, that difference is 2.8% of pixels, of
+      # which 5,417 flip one way and 5,415 flip back — the grain rearranges and
+      # the mean colour over the changed area is identical. Weighed against
+      # 1.48MB of PSRAM and 5.2s per render on a frame with ~6.6MB free, the
+      # call was to take the memory (docs/value-pipeline.md).
+      let (svgTarget, _) = owner.takeDecodeTarget(context)
       if not svgTarget.isNil and svgTarget.width == svgWidth and
           svgTarget.height == svgHeight and
           renderSvgIntoTarget(spec["svg"].getStr(), svgTarget):

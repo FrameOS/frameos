@@ -321,12 +321,27 @@ Measured on the frame, claiming the live canvas for Weather's SVG panels:
   changing phase, not the picture changing;
 - saving would have been **614KB + 921KB** per render.
 
-That is a real trade and not one to take quietly, so it is not taken: principle
-4 exists because fusion has already changed output once. The owned-target gate
-keeps the capability provably exact, which today means it does not fire for the
-JS panels (they get the live-canvas tier, where nothing is allocated to save).
-Reopening it is a one-line change to the gate if the dither phase shift is
-judged acceptable — the numbers above are what that decision costs.
+**Decision (2026-08-11): take the memory.** Reviewed side by side off the
+frame, the difference is indistinguishable — 1.48MB of PSRAM and 5.2s per
+render, on a frame with about 6.6MB free, against a rearrangement of dither
+grain in two gradients. The SVG path now claims whatever target it is offered,
+including the live canvas.
+
+That deliberately spends some of principle 4, so the check that principle
+protects had to become sharper rather than looser. Comparing raw bytes would
+now fail on every run for a reason nobody cares about, and a test that always
+fails protects nothing. The panel comparison instead classifies the difference:
+
+- **Do the flips cancel?** Every `i -> j` should have a matching `j -> i`. A
+  dither phase shift is symmetric by construction; an area that genuinely got
+  lighter or darker is not.
+- **Did the mean colour move?** Averaged over the changed pixels, a phase shift
+  leaves it identical.
+
+Both hold and it is grain; either fails and it is content, which is what a
+wrong fit, a missed draw or an error frame all look like. Measured on Weather:
+5,417 flips one way against 5,415 the other, mean colour `rgb(101,138,172)` in
+both.
 
 Still standing as the larger remaining win: `render/split` gives each cell a
 `subImage` **copy**. That one needs an image *view* in pixie rather than a
