@@ -200,3 +200,49 @@ def test_output_capabilities_and_the_materialized_default(tmp_path):
 
     capabilities_section = apps_nim.split("proc appCapabilities*")[1]
     assert '"data/clock"' not in capabilities_section
+
+
+def test_byte_iter_ports_convert_at_the_compiled_scene_boundary(tmp_path):
+    """A compiled scene is statically typed and has no planner to negotiate with.
+
+    An app declaring `byteIter` hands out (or takes) a Spool, so the generated
+    scene has to convert at the boundary — otherwise the app's real signature
+    and the type the codegen derived from config.json disagree, and the scene
+    fails to compile. That is exactly how this broke: `data/downloadUrl` started
+    returning a Spool and every compiled scene using it stopped building.
+    """
+    from app.codegen.scene_nim import app_output_is_byte_iter, declares_byte_iter
+
+    producer = {"output": [{"name": "result", "type": "string",
+                            "capabilities": {"byteIter": {}}}]}
+    assert app_output_is_byte_iter(producer)
+    assert not app_output_is_byte_iter({"output": [{"name": "result", "type": "string"}]})
+    assert not app_output_is_byte_iter({})
+    assert not app_output_is_byte_iter({"output": []})
+
+    assert declares_byte_iter({"name": "ical", "capabilities": {"byteIter": {}}})
+    assert not declares_byte_iter({"name": "ical"})
+    assert not declares_byte_iter({"name": "ical", "capabilities": {"intoTarget": {}}})
+    assert not declares_byte_iter(None)
+
+
+def test_shipped_byte_iter_apps_stay_declared():
+    """The declaration is what keeps the two codegens agreeing, so pin it.
+
+    `icalJson.ical` is generated as a Spool by the app loader; `downloadUrl`'s
+    output is one. If either declaration is dropped, the app loader and the
+    scene codegen disagree about the type and compiled scenes break — which no
+    unit test would otherwise notice.
+    """
+    import json
+    from pathlib import Path
+    from app.codegen.scene_nim import app_output_is_byte_iter, declares_byte_iter
+
+    apps = Path(__file__).resolve().parents[4] / "frameos" / "src" / "apps"
+
+    ical = json.loads((apps / "data" / "icalJson" / "config.json").read_text())
+    ical_field = next(f for f in ical["fields"] if f.get("name") == "ical")
+    assert declares_byte_iter(ical_field), "icalJson.ical must declare byteIter"
+
+    download = json.loads((apps / "data" / "downloadUrl" / "config.json").read_text())
+    assert app_output_is_byte_iter(download), "downloadUrl's output must declare byteIter"
