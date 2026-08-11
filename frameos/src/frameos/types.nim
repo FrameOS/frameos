@@ -408,6 +408,12 @@ type
     # planner names the terminal producer, and `takeDecodeTarget` hands the
     # target only to that node.
     decodeTargetNodeId*: NodeId
+    # True when the target is one the chain allocated for itself, and so is
+    # freshly transparent. It matters to producers that COMPOSITE rather than
+    # overwrite — an SVG rasterizer, say: onto transparency it is bit-identical
+    # to rendering standalone, while onto a canvas that already has content the
+    # per-path rounding differs and, after dithering, moves a lot of pixels.
+    decodeTargetOwned*: bool
     # Transformers the planner cleared to mutate their image input in place and
     # return the very same image, instead of copying it (the `forwardsTarget`
     # protocol). Set alongside a decode target and cleared with it; an app must

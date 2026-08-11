@@ -47,6 +47,11 @@ proc renderErrorForContext*(self: AppRoot, context: ExecutionContext, message: s
       return target
   renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
 
+proc decodeTargetIsOwned*(context: ExecutionContext): bool =
+  ## Whether the pending target is one the chain allocated (and so is
+  ## transparent), rather than the live render canvas.
+  not context.isNil and context.decodeTargetOwned
+
 proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext):
     tuple[image: Image, scalingMode: string] =
   ## The producer's half of the `intoTarget` handshake: consumes the target the
@@ -77,6 +82,7 @@ proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext):
   context.decodeTargetWidth = 0
   context.decodeTargetHeight = 0
   context.decodeTargetNodeId = 0.NodeId
+  context.decodeTargetOwned = false
 
 proc mayMutateImageInPlace*(self: AppRoot, context: ExecutionContext): bool =
   ## The `forwardsTarget` half of the handshake: may this app mutate the image

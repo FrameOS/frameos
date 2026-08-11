@@ -290,6 +290,49 @@ caller-supplied image, which is the same class of change as the split-cell
 image view: a fork change, and now the second piece of evidence pointing at
 the same place.
 
+### The pixie side: `renderInto`, and a trade we did not take
+
+`newImage(svg)` allocates the image it rasterizes into, so a caller that
+already owns a correctly sized buffer had to take a second full-size
+allocation and then blend it away. The fork gained `renderInto(svg, target)`
+(pixie `b31eefe`) — the same rasterization with the destination supplied.
+`newImage` keeps its overwrite-first start, which is only an optimisation for
+the fresh transparent image it just allocated; `renderInto` composites from the
+first path, because its target may already have content and there the two
+differ.
+
+`renderSvgIntoTarget` in `utils/image.nim` plumbs it through, and the JS
+runtime claims a target for an SVG panel the same way it does for a plain
+canvas. **But only a target the chain owns** — and that gate is the interesting
+part.
+
+On a freshly allocated (transparent) target, rasterizing in place is
+**bit-identical** to rendering standalone and drawing the result; pixie's test
+pins that. On the **live canvas** the two are equal only in exact arithmetic:
+compositing each path onto existing content rounds differently at every path
+than compositing onto transparency does before one final blend. Associativity
+of source-over says they agree; 8-bit quantization says not quite.
+
+Measured on the frame, claiming the live canvas for Weather's SVG panels:
+
+- content, layout and mean colour **identical**;
+- **42% of pixels** moved between two adjacent palette entries — 98% of the
+  differences were a single index pair swapping, i.e. the dither pattern
+  changing phase, not the picture changing;
+- saving would have been **614KB + 921KB** per render.
+
+That is a real trade and not one to take quietly, so it is not taken: principle
+4 exists because fusion has already changed output once. The owned-target gate
+keeps the capability provably exact, which today means it does not fire for the
+JS panels (they get the live-canvas tier, where nothing is allocated to save).
+Reopening it is a one-line change to the gate if the dither phase shift is
+judged acceptable — the numbers above are what that decision costs.
+
+Still standing as the larger remaining win: `render/split` gives each cell a
+`subImage` **copy**. That one needs an image *view* in pixie rather than a
+rasterize-into-target, and unlike this it has no fidelity question attached —
+a view is the same pixels by construction.
+
 ### Transformer audit (phase 1)
 
 - `render/opacity` — **forwards**, shipped. Skips its `.copy()` when cleared to

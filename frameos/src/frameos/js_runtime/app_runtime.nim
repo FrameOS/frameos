@@ -1199,7 +1199,28 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
   of "image":
     if spec.hasKey("svg"):
       when defined(memProbe): memProbe("    svg decode src=" & $spec["svg"].getStr().len & "B BEFORE")
-      let image = decodeSvgWithFallback(spec["svg"].getStr(), defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
+      let svgWidth = defaultImageWidth(owner, context, spec)
+      let svgHeight = defaultImageHeight(owner, context, spec)
+      # The same `intoTarget` handshake as the plain-canvas branch below: an
+      # SVG panel is the common shape for a JS render app, and rasterizing it
+      # into the target the planner offered is what keeps a full-size second
+      # image off the heap.
+      # Only a target the chain owns, which is freshly transparent: there
+      # rasterizing in place is bit-identical to rendering standalone and
+      # drawing the result. Onto the live canvas the two are equal only in
+      # exact arithmetic — the per-path rounding differs, and on this panel
+      # that moved 42% of pixels between two adjacent palette entries once the
+      # dither ran. See docs/value-pipeline.md.
+      let svgOwned = context.decodeTargetIsOwned()
+      let (svgTarget, _) =
+        if svgOwned: owner.takeDecodeTarget(context)
+        else: (Image(nil), "")
+      if not svgTarget.isNil and svgTarget.width == svgWidth and
+          svgTarget.height == svgHeight and
+          renderSvgIntoTarget(spec["svg"].getStr(), svgTarget):
+        when defined(memProbe): memProbe("    svg decode AFTER (into target)")
+        return svgTarget
+      let image = decodeSvgWithFallback(spec["svg"].getStr(), svgWidth, svgHeight)
       when defined(memProbe): memProbe("    svg decode AFTER")
       if image.isSome:
         return image.get()

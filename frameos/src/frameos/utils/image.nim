@@ -286,6 +286,26 @@ proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image]
   except CatchableError:
     return none(Image)
 
+proc renderSvgIntoTarget*(svg: string, target: Image): bool =
+  ## Rasterizes an SVG straight into a buffer the caller already owns, rather
+  ## than allocating one and blending it away afterwards. Returns false when
+  ## this path does not apply, and the caller falls back to
+  ## `decodeSvgWithFallback`.
+  ##
+  ## Compositing, not overwriting: the target may already have content, and a
+  ## semi-transparent first path must blend with it rather than replace it —
+  ## `renderInto` in the pixie fork is the half of that contract living there.
+  if target.isNil or target.width <= 0 or target.height <= 0:
+    return false
+  if useImageMagick():
+    # Keep the configured engine in charge.
+    return false
+  try:
+    parseSvg(svg, target.width, target.height).renderInto(target)
+    true
+  except CatchableError:
+    false
+
 proc decodeImageWithFallback*(data: string): Image =
   if useImageMagick():
     let converted = decodeImageWithImageMagick(data)

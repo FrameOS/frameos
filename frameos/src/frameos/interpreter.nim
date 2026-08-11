@@ -370,6 +370,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
               context.decodeTargetWidth = context.image.width
               context.decodeTargetHeight = context.image.height
               context.decodeTargetScalingMode = fit
+              context.decodeTargetOwned = true
               setDecodeTargetHint = true
         if setDecodeTargetHint:
           plannedFit = fit
@@ -461,6 +462,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         context.decodeTargetWidth = 0
         context.decodeTargetHeight = 0
         context.decodeTargetNodeId = 0.NodeId
+        context.decodeTargetOwned = false
         context.inPlaceImageNodes = @[]
 
       if asDataNode and cacheEnabled:
