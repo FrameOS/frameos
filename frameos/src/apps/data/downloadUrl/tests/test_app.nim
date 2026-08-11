@@ -2,6 +2,7 @@ import std/[json, strutils, unittest]
 
 import ../app
 import frameos/types
+import frameos/spool
 
 type LogStore = ref object
   items: seq[JsonNode]
@@ -27,4 +28,4 @@ suite "data/downloadUrl app":
     check output.len > 0
     check logs.items.len == 1
     check logs.items[0]["event"].getStr().contains("error:17:data/downloadUrl")
-    check logs.items[0]["error"].getStr() == output
+    check logs.items[0]["error"].getStr() == output.materialize()

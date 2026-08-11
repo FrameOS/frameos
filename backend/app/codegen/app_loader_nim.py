@@ -42,6 +42,22 @@ def _as_float(v: Scalar, default: float) -> float:
             pass
     return default
 
+def _accepts_byte_iter(field: Dict[str, Any]) -> bool:
+    """
+    True when a string field declared the `byteIter` capability in config.json.
+
+    Such a field is generated as a `Spool` instead of a `string`: the bytes may
+    live in a file rather than in memory, and the app folds over them a window
+    at a time (frameos/spool.nim). The editor still sees a plain string field —
+    capabilities are a runtime contract, not an editor one
+    (docs/value-pipeline.md, principle 1).
+    """
+    if field.get("type") not in ("string", "text"):
+        return False
+    capabilities = field.get("capabilities")
+    return isinstance(capabilities, dict) and isinstance(capabilities.get("byteIter"), dict)
+
+
 def _default_literal(field_name: str, field_type: str, default: Scalar, required: bool) -> str:
     """Return a Nim literal/expression usable as the fallback/default element value."""
     if field_type in ("string", "text", "select", "font", "date"):
@@ -606,6 +622,17 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
             app_config_lines.append(_format_field_block(field_name, field_getter_lines))
             # setField: accept JSON array(s)
             app_set_lines.extend(_set_field_seq_case(field))
+            continue
+
+        if _accepts_byte_iter(field):
+            # The config default is a literal string; anything larger arrives
+            # through setField, which is where a file-backed spool can appear.
+            literal = _nim_quote(field_default if isinstance(field_default, str) else "")
+            app_config_lines.append(
+                f'    {field_name}: newMemorySpool(params{{"{field_name}"}}.getStr({literal})),'
+            )
+            app_set_lines.append(f'  of "{field_name}":')
+            app_set_lines.append(f"    app.appConfig.{field_name} = value.asSpool()")
             continue
 
         # Scalars

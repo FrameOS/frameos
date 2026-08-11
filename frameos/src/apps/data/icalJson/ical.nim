@@ -8,6 +8,7 @@ import std/lists
 import system
 import tables
 import lib/tz
+import frameos/spool
 
 # Key missing event features (none used by Google/Apple calendar):
 # - HOURLY, MINUTELY, SECONDLY frequencies
@@ -610,13 +611,21 @@ proc processLine*(self: var ParsedCalendar, line: string) =
 
 proc reconcileRecurringSeries*(self: var ParsedCalendar)
 
-proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
+proc parseICalendar*(ical: Spool, timeZone = ""): ParsedCalendar =
+  ## Folds an ICS feed into the events it contains, a line at a time.
+  ##
+  ## ICS is line-oriented with folded continuations, so the whole document
+  ## never has to be resident: a multi-MB calendar costs one window plus the
+  ## line being accumulated, and what comes out is a small list of events.
+  ## That asymmetry — big input, small output — is the whole reason the byte
+  ## side of the pipeline is a fold rather than a stream-through
+  ## (docs/value-pipeline.md, phase 2).
   result = ParsedCalendar(timeZone: normalizeTimeZone(timeZone))
   result.timeZone = normalizeTimeZone(timeZone) # Default. Will be overridden by X-WR-TIMEZONE if given
   result.masterTzByUid = initTable[string, string]()
   result.staleSeriesCutoff = initTable[string, Timestamp]()
   var accumulator = ""
-  for line in content.splitLines():
+  for line in ical.lines():
     if line.len > 0 and (line[0] == ' ' or line[0] == '\t'):
       accumulator.add(line[1..^1])
       continue
@@ -629,6 +638,11 @@ proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
 
   result.events.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTs, b.startTs))
   result.reconcileRecurringSeries()
+
+proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
+  ## Convenience for callers that already hold the whole document (tests, and
+  ## any consumer that has not been taught the spool).
+  parseICalendar(newMemorySpool(content), timeZone)
 
 ####################################################################################################
 # Querying

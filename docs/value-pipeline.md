@@ -6,11 +6,12 @@ fusion with a general capability-negotiation layer, so low-memory targets
 per-shape special cases. Written 2026-08-10 after an architecture review;
 open items live at the bottom, delete them as they ship.
 
-**Status (2026-08-11):** phase 0's instrumentation and phase 1 have landed —
-the whitelist is gone, apps declare capabilities in `config.json`, and
-`frameos/planner.nim` decides each image edge at scene load. What is still open
-is everything that needs a frame on a desk: the phase-0 profiling run, and the
-embedded regression pass. Phases 2–4 are untouched.
+**Status (2026-08-11):** phases 0, 1 and most of 2 have landed. The whitelist
+is gone, apps declare capabilities in `config.json`, `frameos/planner.nim`
+decides each image edge at scene load, and the byte side has a spool tier that
+`icalJson` folds over without materializing. The hardware pass ran on a 7.3"
+PhotoPainter — see "What the hardware said". Phases 3 and 4 are untouched, and
+the measurement says phase 3 is where the remaining memory is.
 
 ## The problem, precisely
 
@@ -345,21 +346,44 @@ capabilities + planner; teach transformers to forward targets.
 
 ### Phase 2 — byte-side tiering (independent of phase 1)
 
-- [ ] `Value` string variant backed by a spool: in-memory below a
-      threshold, SD/disk file above it (embedded: probe SD first — reuse
-      `fos_assets_sd` plumbing; host: scratch dir). Iterator/window read
-      API; transparent `asString()` fallback that materializes (tier
-      floor) or errors past the byte limit.
-- [ ] `downloadUrl` streams the response body into the spool instead of
-      `boundedGetContent`'s whole-body buffer.
-- [ ] `icalJson`: incremental line-window parser over the iterator
-      (ICS is line-oriented + folded continuations — windowing is
-      natural). Output stays small JSON; no downstream changes.
-- [ ] Audit `xmlToJson` / `parseJson` / `prettyJson`: document as
-      materialized (fine — their outputs, not inputs, are usually the
-      small side) unless phase-0 data says otherwise.
-- [ ] Planner rule: spool tier only when the in-memory tier would exceed
-      budget AND storage probe succeeds; log the tier choice.
+- [x] `Value` gains an `fkSpool` variant backed by `frameos/spool.nim`:
+      in-memory below a threshold, a file above it, `windows`/`lines`
+      iteration that never holds more than a window, and `materialize` as the
+      floor — which raises past a byte limit rather than attempting an
+      allocation that would take the device down. `asString()` materializes,
+      so every existing consumer is unchanged; `asSpool()` works on a plain
+      string too, so a new consumer never has to branch on the tier.
+      The backing file's lifetime is the value's: a `=destroy` hook removes it,
+      rather than relying on a sweep.
+- [x] `byteIter` on a config.json field, plumbed through
+      `app_loader_nim.py`: a string field so declared is generated as a
+      `Spool` and set with `asSpool()`. The editor still sees a plain string —
+      capabilities stay a runtime contract (principle 1).
+- [x] `icalJson` folds over the spool a line at a time, folded continuations
+      and all. `test_spooled_ical.nim` pins that a file-backed feed parses to
+      exactly what the in-memory one does across window boundaries, and that
+      the "you passed a URL" check stays a prefix test rather than becoming
+      the thing that materializes a 4MB body.
+- [x] Planner/tier rule + logging: the threshold comes from live memory
+      (`availableRenderBytes() div 4`, clamped), a failed storage probe
+      **degrades to memory instead of raising** — a frame with no SD card must
+      not start failing downloads that used to work — and both `downloadUrl`
+      and the node profile report the tier actually reached, not the one
+      asked for.
+- [ ] `downloadUrl` still buffers the whole body once. It hands the graph a
+      spool, so the *edge* costs a window and `icalJson` folds without ever
+      materializing — but the HTTP client returns a `string`, so peak memory
+      still includes one whole-body buffer. Closing that means adopting the
+      spill file `boundedRequestBuffer` already produces on embedded
+      (`spillPath`, built for images) instead of copying out of it, and an
+      incremental writer on the host path.
+- [ ] Audit `xmlToJson` / `parseJson` / `prettyJson`. Left materialized on
+      purpose for now: phase-0 measured their inputs at 2.5–20 KB on real
+      scenes, three orders of magnitude below the image side, so there is
+      nothing to buy yet.
+- [ ] Exercise the byte side on hardware. None of the nine scenes on the
+      bench frame feeds a large document through `downloadUrl` → `icalJson`,
+      so the tier has host tests only.
 
 ### Phase 3 — row streams for images (after phase 1, gated on data)
 

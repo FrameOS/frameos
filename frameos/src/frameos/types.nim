@@ -7,6 +7,8 @@ else:
   import json, pixie, locks, tables, options, asyncdispatch, mummy
 import frameos/ids
 export ids
+import frameos/spool
+export spool
 import frameos/js_runtime/burrito
 
 const DefaultMaxHttpResponseBytes* = 64 * 1024 * 1024
@@ -201,13 +203,20 @@ type
     logger*: Logger
 
   FieldKind* = enum
-    fkString, fkText, fkFloat, fkInteger, fkBoolean, fkColor, fkJson, fkImage, fkNode, fkScene, fkNone
+    fkString, fkText, fkFloat, fkInteger, fkBoolean, fkColor, fkJson, fkImage, fkNode, fkScene,
+    fkSpool, fkNone
 
   ## A compact tagged union for interpreter values.
   Value* = object
     case kind*: FieldKind
     of fkString, fkText:
       s*: string    ## same storage, different semantics via kind
+    of fkSpool:
+      ## A string whose bytes may live outside memory (frameos/spool.nim).
+      ## Reads as a string everywhere through `asString`, which materializes
+      ## it; consumers that can fold incrementally iterate it instead and
+      ## never hold the whole thing.
+      sp*: Spool
     of fkFloat:
       f*: float64
     of fkInteger:

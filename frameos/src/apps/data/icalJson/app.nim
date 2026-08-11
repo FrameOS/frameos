@@ -12,7 +12,11 @@ import ./ical
 
 type
   AppConfig* = object
-    ical*: string
+    ## `ical` is a Spool, not a string: an ICS feed is the one input in the
+    ## app library that is routinely multi-MB while its output is a handful of
+    ## events. Declaring `byteIter` in config.json is what makes the loader
+    ## hand it over without materializing (docs/value-pipeline.md, phase 2).
+    ical*: Spool
     exportFrom*: string
     exportUntil*: string
     exportCount*: int
@@ -27,11 +31,13 @@ type
 
 proc get*(self: App; context: ExecutionContext): JsonNode =
   result = %*[]
-  if self.appConfig.iCal.startsWith("http"):
-    self.logError "Pass in iCal data as a string, not a URL."
-    return
-  if self.appConfig.iCal == "":
+  if self.appConfig.iCal.len == 0:
     self.logError "No iCal data provided."
+    return
+  # A URL instead of a document is the classic misconfiguration; catching it
+  # needs the first few bytes, never the whole body.
+  if self.appConfig.iCal.startsWithBytes("http"):
+    self.logError "Pass in iCal data as a string, not a URL."
     return
 
   let timezone = if self.frameConfig.timeZone != "": self.frameConfig.timeZone else: "UTC"

@@ -2,6 +2,7 @@ import std/[json, strutils, unittest]
 
 import ../app
 import frameos/types
+import frameos/spool
 
 type LogStore = ref object
   items: seq[JsonNode]
@@ -20,7 +21,7 @@ suite "data/icalJson app":
       nodeName: "data/icalJson",
       scene: FrameScene(logger: newLogger(logs)),
       frameConfig: FrameConfig(timeZone: "UTC"),
-      appConfig: AppConfig(ical: "http://example.com/calendar.ics")
+      appConfig: AppConfig(ical: newMemorySpool("http://example.com/calendar.ics"))
     )
 
     let payload = app.get(ExecutionContext())
@@ -38,7 +39,7 @@ suite "data/icalJson app":
       nodeName: "data/icalJson",
       scene: FrameScene(logger: newLogger(logs)),
       frameConfig: FrameConfig(timeZone: "UTC"),
-      appConfig: AppConfig(ical: "")
+      appConfig: AppConfig(ical: newMemorySpool(""))
     )
 
     let payload = app.get(ExecutionContext())
@@ -57,7 +58,7 @@ suite "data/icalJson app":
       scene: FrameScene(logger: newLogger(logs)),
       frameConfig: FrameConfig(timeZone: "UTC"),
       appConfig: AppConfig(
-        ical: "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:1\nDTSTART:20000101\nDTEND:20000102\nSUMMARY:Past Event\nEND:VEVENT\nEND:VCALENDAR",
+        ical: newMemorySpool("BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:1\nDTSTART:20000101\nDTEND:20000102\nSUMMARY:Past Event\nEND:VEVENT\nEND:VCALENDAR"),
         exportFrom: "2100-01-01",
         exportUntil: "2100-01-02"
       )

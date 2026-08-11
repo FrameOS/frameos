@@ -842,6 +842,11 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         if result.kind == fkImage and not result.img.isNil:
           profile["valueWidth"] = %result.img.width
           profile["valueHeight"] = %result.img.height
+        if result.kind == fkSpool:
+          # Which byte-side tier this edge is carrying, so a profile shows a
+          # spooled body as the window it costs and says why.
+          profile["valueTier"] = %(if result.sp.isFileBacked(): "storage" else: "memory")
+          profile["valueTotalBytes"] = %result.sp.len
       let profileMemoryAfter = renderMemoryInUse()
       if profileMemoryBefore.known and profileMemoryAfter.known:
         profile["heapDeltaBytes"] = %(profileMemoryAfter.bytes - profileMemoryBefore.bytes)

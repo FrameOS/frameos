@@ -809,6 +809,10 @@ proc jsAppValueToJson(runtime: JsAppRuntime, value: Value): JsonNode =
   case value.kind
   of fkString, fkText:
     return %* value.s
+  of fkSpool:
+    # Same as valueToJS: a JS app is opaque, so the bytes materialize on the
+    # way in.
+    return %* value.sp.materialize()
   of fkFloat:
     return %* value.f
   of fkInteger:

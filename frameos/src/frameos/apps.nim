@@ -25,6 +25,22 @@ proc maxHttpResponseBytes*(self: AppRoot): int {.inline.} =
   else:
     DefaultMaxHttpResponseBytes
 
+proc spoolDir*(self: AppRoot): string =
+  ## Where this app should put a body too large to hold in memory.
+  ##
+  ## The assets directory first — on an embedded frame that is the SD card
+  ## when one is mounted, which is both roomier and kinder to the internal
+  ## flash than the filesystem the firmware lives on. `.cache` marks it as
+  ## disposable, matching the sweep the firmware already does for spilled
+  ## downloads. Empty means "no preference", and the spool falls back to the
+  ## platform temp dir.
+  if self.isNil or self.frameConfig.isNil:
+    return ""
+  let assets = self.frameConfig.assetsPath
+  if assets.len == 0:
+    return ""
+  assets & "/.cache"
+
 when defined(frameosEmbedded):
   const EmbeddedMinImageResponseBytes* = 6 * 1024 * 1024
 
