@@ -343,10 +343,52 @@ wrong fit, a missed draw or an error frame all look like. Measured on Weather:
 5,417 flips one way against 5,415 the other, mean colour `rgb(101,138,172)` in
 both.
 
-Still standing as the larger remaining win: `render/split` gives each cell a
-`subImage` **copy**. That one needs an image *view* in pixie rather than a
-rasterize-into-target, and unlike this it has no fidelity question attached —
-a view is the same pixels by construction.
+### `render/split` and the case for an image view
+
+`render/split` gives each cell a `subImage` — a **copy** of that region of its
+parent — lets the child render into it, and draws it back. One level is one
+cell-sized buffer live at a time. Nesting stacks them: while an inner cell
+renders, its parent's cell buffer is still live, and its parent's, up to the
+canvas. `test_nested_split_memory.nim` pins both that a nested split renders
+correctly and what it costs — at two levels the live set is **1.75x the
+canvas**.
+
+That is fine at 800x480 (672KB against a 384KB canvas). It is not fine on the
+13.3E6, where the canvas alone is 7.7MB and the same shape needs about 13.5MB
+of the 16MB PSRAM, next to everything else a render is holding.
+
+A view fixes it outright and, unlike the SVG trade above, has **no fidelity
+question**: a cell that borrows its parent's pixels is the same pixels by
+construction, and the whole nested stack collapses to the canvas.
+
+**Why it is not done yet.** pixie's `Image` owns its buffer —
+`data*: seq[ColorRGBX]`, with `dataIndex` as `width * y + x`. A view has to
+share the parent's buffer, and a Nim `seq` cannot be aliased. The contained
+shape looks like this:
+
+```nim
+Image* = ref object
+  width*, height*: int
+  buffer: ref seq[ColorRGBX]   # shared between an image and its views
+  stride*: int                 # parent's width for a view, own width otherwise
+  origin*: int                 # index of the view's top-left in the buffer
+
+template data*(image: Image): var seq[ColorRGBX] = image.buffer[]
+template dataIndex*(image: Image, x, y: int): int =
+  image.origin + image.stride * y + x
+```
+
+Keeping `data` as a template means all 238 existing `.data[...]` sites compile
+unchanged, and everything already routed through `dataIndex` or `unsafe[]`
+becomes view-correct for free. What does **not** come for free is the ~25 flat
+loops over `data.len` and the 7 `copyMem`/`addr data[...]` sites that assume
+rows are contiguous across the whole buffer; each needs auditing, and a view
+must be refused where it cannot hold.
+
+It is a change to the core type of the library every frame renders through, and
+the per-pixel `ref seq` indirection needs measuring on the ESP32 before it
+ships. Worth doing, worth doing carefully, and not worth starting at the tail
+of a long session — so it is written down here rather than half-applied.
 
 ### Transformer audit (phase 1)
 
