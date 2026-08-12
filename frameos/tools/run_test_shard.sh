@@ -91,6 +91,29 @@ run_testament() {
   fi
 }
 
+diagnose_timeout() {
+  # A testament timeout is a single opaque kill: nothing says whether the
+  # compiler or the test binary was the thing that hung. Re-run once with the
+  # phases split and capped, so the CI log answers that on the machine where
+  # it actually happens.
+  local test_file="$1"
+  local bin="/tmp/frameos-test-timeout-diagnosis"
+  echo "--- timeout diagnosis: compiling ${test_file} separately (cap ${test_timeout_seconds}s)"
+  if ! timeout "${test_timeout_seconds}s" \
+      nim c --hints:off -d:testing -o:"$bin" "./${test_file}"; then
+    echo "--- timeout diagnosis: the COMPILE phase did not finish"
+    return
+  fi
+  echo "--- timeout diagnosis: compile finished; running the binary (cap 120s)"
+  local run_status=0
+  timeout 120s "$bin" || run_status=$?
+  if (( run_status == 124 )); then
+    echo "--- timeout diagnosis: the RUN phase hung"
+  else
+    echo "--- timeout diagnosis: split run exited with status ${run_status}"
+  fi
+}
+
 for test_file in "${tests[@]}"; do
   echo "==> ${test_file}"
   set +e
@@ -100,6 +123,9 @@ for test_file in "${tests[@]}"; do
   if (( status != 0 )); then
     if (( status == 124 )); then
       echo "Timed out after ${test_timeout_seconds}s: ${test_file}" >&2
+      set +e
+      diagnose_timeout "$test_file"
+      set -e
     fi
     exit "$status"
   fi
