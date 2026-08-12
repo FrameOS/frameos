@@ -67,23 +67,38 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      # nim-lang.org drops connections and serves 503s often enough to fail
+      # real runs — one observed window outlasted curl's five retries AND a
+      # spaced second attempt. Cache the installed toolchain: on a hit the
+      # host is never contacted at all; the download (with its one retry
+      # below) only runs when this key has never been populated.
+      - name: Cache Nim toolchain
+        id: cache_nim_toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.choosenim
+            ~/.nimble/bin
+          key: ${{ runner.os }}-nim-toolchain-2.2.4
+
       - uses: jiro4989/setup-nim-action@v1
+        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true'
         id: setup_nim
         continue-on-error: true
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # nim-lang.org drops connections often enough that a single attempt
-      # fails real runs (curl retries inside the action already lost once).
-      # One spaced second attempt is the difference between a flaky job and
-      # a quiet one.
       - name: Retry Nim setup once
-        if: steps.setup_nim.outcome == 'failure'
+        if: steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
         uses: jiro4989/setup-nim-action@v1
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add cached Nim to PATH
+        if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
+        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
 
       - uses: mymindstorm/setup-emsdk@v14
         with:
