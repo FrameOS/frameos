@@ -587,6 +587,17 @@ capabilities + planner; teach transformers to forward targets.
       purpose for now: phase-0 measured their inputs at 2.5–20 KB on real
       scenes, three orders of magnitude below the image side, so there is
       nothing to buy yet.
+- [ ] Progressive JPEG's buffered decode is not fully budget-guarded (pixie
+      fork). Found by the all-scenes sweep: the Wikimedia picture-of-the-day
+      was a progressive 960px JPEG, and after ~40 minutes of renders the
+      decode attempted one 1,705,604-byte contiguous allocation with
+      1,703,936 as the largest free block — an OOM-aborted render instead of
+      the graceful "over the memory budget" error the PNG path raises. The
+      sampling clamp in `decodeJpegState` is budget-aware, so the untracked
+      allocation is in the progressive coefficient path. Same scene renders
+      clean on a fresh heap (baseline JPEGs stream and never buffer). Fix
+      belongs in the fork: route the progressive path's allocations through
+      the same `decodeBudgetBytes` clamp the rest of the decoder uses.
 - Not planned, written down so the reasoning survives: folding the ICS
   *as the socket delivers it*, with no spool file at all. The parse never
   needs the file — but the file is not there for the parse. It is what makes
