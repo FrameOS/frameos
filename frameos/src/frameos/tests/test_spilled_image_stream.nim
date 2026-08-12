@@ -51,7 +51,7 @@ suite "spilled PNG file-backed streaming decode":
       decodePngStreamScaledInto(fileSource(file), encoded.len, target, fit)
       file.close()
 
-      for i in 0 ..< target.data.len:
+      for i in 0 ..< target.dataLen:
         check target.data[i] == expected.data[i]
 
   test "truncated spill files fail with a catchable error":
@@ -85,7 +85,7 @@ suite "spilled BMP file-backed streaming decode":
       decodeBmpStreamScaledInto(fileSource(file), encoded.len, target, fit)
       file.close()
 
-      for i in 0 ..< target.data.len:
+      for i in 0 ..< target.dataLen:
         check target.data[i] == expected.data[i]
 
   test "truncated spill files fail with a catchable error":
@@ -131,5 +131,5 @@ suite "spilled PPM file-backed streaming decode":
       decodePpmStreamScaledInto(fileSource(file), encoded.len, target, fit)
       file.close()
 
-      for i in 0 ..< target.data.len:
+      for i in 0 ..< target.dataLen:
         check target.data[i] == expected.data[i]

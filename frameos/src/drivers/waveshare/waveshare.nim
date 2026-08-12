@@ -19,13 +19,18 @@ type PackedChangeBounds = object
   yStart: int
   yEnd: int
 
-proc hashImageData(data: seq[ColorRGBX]): Hash =
-  var h = hash(data.len)
-  for pixel in data:
-    h = h !& hash(pixel.r)
-    h = h !& hash(pixel.g)
-    h = h !& hash(pixel.b)
-    h = h !& hash(pixel.a)
+proc hashImageData(image: Image): Hash =
+  # `image.data` is a pointer now (pixie views), so hash through the span seam
+  # rather than a flat seq — no copy, and correct even for a non-contiguous
+  # view.
+  var h = hash(image.dataLen)
+  image.forEachSpan:
+    for i in spanStart ..< spanStart + spanLen:
+      let pixel = image.data[i]
+      h = h !& hash(pixel.r)
+      h = h !& hash(pixel.g)
+      h = h !& hash(pixel.b)
+      h = h !& hash(pixel.a)
   !$h
 
 proc logGrayBuffer(self: Driver, mode: string, pixelCount: int, grayBytes: int, previewBytes: int, packedBytes: int) =
@@ -453,7 +458,7 @@ proc renderBlack*(self: Driver, image: Image) =
       blackImage[index div 8] = blackImage[index div 8] or (bw shl (7 - (index mod 8)))
   self.logGrayBuffer("Black", image.width * image.height, gray.len * sizeof(float), levels.len, blackImage.len)
   if self.partialEnabled:
-    self.renderBlackPartial(blackImage, image.data, image.width, image.height)
+    self.renderBlackPartial(blackImage, image.toContiguousSeq(), image.width, image.height)
   else:
     waveshareDriver.renderImage(blackImage)
 
@@ -564,9 +569,9 @@ proc renderForColor(self: Driver, image: Image) =
     self.renderBlackWhiteYellowRed(image)
 
 proc render*(self: Driver, image: Image) =
-  let currentImageHash = hashImageData(image.data)
+  let currentImageHash = hashImageData(image)
   let now = epochTime()
-  let imageUnchanged = self.lastImageBytes == image.data.len and self.lastImageHash == currentImageHash
+  let imageUnchanged = self.lastImageBytes == image.dataLen and self.lastImageHash == currentImageHash
   let needsPreservationRefresh = imageUnchanged and self.lastRenderAt <= now - DEFAULT_FULL_REFRESH_INTERVAL_SECONDS
   if imageUnchanged and not needsPreservationRefresh:
     self.logger.log(%*{"event": "driver:waveshare",
@@ -575,7 +580,7 @@ proc render*(self: Driver, image: Image) =
   if needsPreservationRefresh:
     self.invalidatePartialBase()
 
-  self.lastImageBytes = image.data.len
+  self.lastImageBytes = image.dataLen
   self.lastImageHash = currentImageHash
   self.lastRenderAt = now
   self.logger.log(%*{"event": "driver:waveshare", "render": "starting", "color": waveshareDriver.colorOption})

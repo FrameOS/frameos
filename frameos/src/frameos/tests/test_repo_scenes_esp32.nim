@@ -211,7 +211,7 @@ for kind, templateDir in walkDir(SamplesDir):
       # The demo data must produce chart marks, not a "no data" message:
       # count pixels that differ from the black background
       var inked = 0
-      for color in image.data:
+      for color in image:
         if color.r.int + color.g.int + color.b.int > 60:
           inc inked
       doAssert inked > 5000, "chart sample drew only " & $inked & " bright pixels"

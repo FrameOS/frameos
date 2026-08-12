@@ -8,6 +8,7 @@ import std/lists
 import system
 import tables
 import lib/tz
+import frameos/spool
 
 # Key missing event features (none used by Google/Apple calendar):
 # - HOURLY, MINUTELY, SECONDLY frequencies
@@ -76,6 +77,13 @@ type
     splitCutoff*: Table[string, Timestamp]
     masterTzByUid*: Table[string, string]
     staleSeriesCutoff*: Table[string, Timestamp]
+    ## Keep-window for the fold, 0 = unbounded. A plain event entirely outside
+    ## it is dropped the moment it is parsed, so the resident set is the
+    ## window's events — not the feed's history. Recurring masters and series
+    ## overrides are kept regardless: a rule dated years ago still generates
+    ## instances inside the window.
+    keepFrom*: Timestamp
+    keepUntil*: Timestamp
 
 const MAX_RESULT_COUNT = 100000
 
@@ -568,6 +576,19 @@ proc processCurrentFields*(self: var ParsedCalendar) =
   if event.recurrenceId.len == 0 and event.uid.len > 0:
     self.masterTzByUid[event.uid] = event.timeZone
 
+  # The keep-window filter, applied as the fold runs. Without it a multi-year
+  # subscribed feed parses whole into memory and the "big input, small output"
+  # asymmetry only holds for the raw bytes — on a 3MB feed with every event
+  # parsed, the VEvent set itself OOMed a 16MB-PSRAM frame. Only a plain
+  # one-off event can be dropped early: recurring masters generate instances
+  # anywhere, and an override (RECURRENCE-ID) can move an instance into the
+  # window from outside it.
+  if event.rrules.len == 0 and event.recurrenceId.len == 0:
+    let eventEnd = if event.endTs.float > 0: event.endTs else: event.startTs
+    if (self.keepFrom.float > 0 and eventEnd.float < self.keepFrom.float) or
+        (self.keepUntil.float > 0 and event.startTs.float > self.keepUntil.float):
+      return
+
   self.events.add(event)
 
 proc processLine*(self: var ParsedCalendar, line: string) =
@@ -610,13 +631,25 @@ proc processLine*(self: var ParsedCalendar, line: string) =
 
 proc reconcileRecurringSeries*(self: var ParsedCalendar)
 
-proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
-  result = ParsedCalendar(timeZone: normalizeTimeZone(timeZone))
+proc parseICalendar*(ical: Spool, timeZone = "",
+    keepFrom = 0.Timestamp, keepUntil = 0.Timestamp): ParsedCalendar =
+  ## Folds an ICS feed into the events it contains, a line at a time.
+  ##
+  ## ICS is line-oriented with folded continuations, so the whole document
+  ## never has to be resident: a multi-MB calendar costs one window plus the
+  ## line being accumulated, and what comes out is a small list of events.
+  ## That asymmetry — big input, small output — is the whole reason the byte
+  ## side of the pipeline is a fold rather than a stream-through
+  ## (docs/value-pipeline.md, phase 2). `keepFrom`/`keepUntil` (0 = unbounded)
+  ## make the *parsed* set honour the same asymmetry: one-off events outside
+  ## the window are dropped as they are parsed rather than held.
+  result = ParsedCalendar(timeZone: normalizeTimeZone(timeZone),
+    keepFrom: keepFrom, keepUntil: keepUntil)
   result.timeZone = normalizeTimeZone(timeZone) # Default. Will be overridden by X-WR-TIMEZONE if given
   result.masterTzByUid = initTable[string, string]()
   result.staleSeriesCutoff = initTable[string, Timestamp]()
   var accumulator = ""
-  for line in content.splitLines():
+  for line in ical.lines():
     if line.len > 0 and (line[0] == ' ' or line[0] == '\t'):
       accumulator.add(line[1..^1])
       continue
@@ -629,6 +662,12 @@ proc parseICalendar*(content: string, timeZone = ""): ParsedCalendar =
 
   result.events.sort(proc (a: VEvent, b: VEvent): int = cmp(a.startTs, b.startTs))
   result.reconcileRecurringSeries()
+
+proc parseICalendar*(content: string, timeZone = "",
+    keepFrom = 0.Timestamp, keepUntil = 0.Timestamp): ParsedCalendar =
+  ## Convenience for callers that already hold the whole document (tests, and
+  ## any consumer that has not been taught the spool).
+  parseICalendar(newMemorySpool(content), timeZone, keepFrom, keepUntil)
 
 ####################################################################################################
 # Querying

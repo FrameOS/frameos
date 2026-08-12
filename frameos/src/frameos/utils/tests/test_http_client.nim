@@ -1,5 +1,6 @@
 import std/[httpclient, net, os, strutils, times, unittest]
 
+import ../../spool
 import ../http_client
 
 ## A tiny blocking HTTP server on a thread that routes canned responses by
@@ -69,6 +70,15 @@ proc serverLoop() {.thread.} =
       respond(client, "HTTP/1.1 302 Found\r\nLocation: /redirect-loop\r\nContent-Length: 0\r\n\r\n")
     of "/big":
       respond(client, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n" & "x".repeat(1000))
+    of "/spool-large":
+      var body = newStringOfCap(200_000)
+      for i in 0 ..< 200_000:
+        body.add(chr(ord('a') + i mod 26))
+      respond(client, "HTTP/1.1 200 OK\r\nContent-Length: " & $body.len & "\r\n\r\n" & body)
+    of "/spool-redirect":
+      # The 302 carries a body of its own; none of it may end up in the spool.
+      respond(client, "HTTP/1.1 302 Found\r\nLocation: /spool-large\r\n" &
+        "Content-Length: 22\r\n\r\nredirect body, not you")
     of "/slow":
       # Accept, then never send anything: the client's IO timeout must fire.
       sleep(3000)
@@ -166,6 +176,63 @@ suite "bounded http client":
     check boundedRequestContent(baseUrl() & "/redirect-other-origin", headers = headers) == ""
     # The header the caller passed in is untouched for its own next use.
     check headers["Authorization"] == "Bearer secret-token"
+
+  test "a large body streams into a file-backed spool":
+    # The whole point of boundedGetSpool: past the threshold the body lands in
+    # a file as it comes off the socket, and never exists whole in memory.
+    let dir = getTempDir() / "frameos-http-spool-test"
+    removeDir(dir)
+    var expected = newStringOfCap(200_000)
+    for i in 0 ..< 200_000:
+      expected.add(chr(ord('a') + i mod 26))
+    let spooled = boundedGetSpool(baseUrl() & "/spool-large",
+      spoolThresholdBytes = 16 * 1024, spoolDir = dir)
+    check spooled.isFileBacked()
+    check spooled.len == 200_000
+    check spooled.materialize() == expected
+
+  test "a small body stays an in-memory spool":
+    let spooled = boundedGetSpool(baseUrl() & "/content-length",
+      spoolThresholdBytes = 16 * 1024)
+    check not spooled.isFileBacked()
+    check spooled.materialize() == "hello world"
+
+  test "chunked transfer streams into the spool too":
+    let spooled = boundedGetSpool(baseUrl() & "/chunked",
+      spoolThresholdBytes = 4,
+      spoolDir = getTempDir() / "frameos-http-spool-test")
+    check spooled.isFileBacked()
+    check spooled.materialize() == "hello world"
+
+  test "a redirect hop's own body never reaches the spool":
+    let spooled = boundedGetSpool(baseUrl() & "/spool-redirect",
+      spoolThresholdBytes = 16 * 1024,
+      spoolDir = getTempDir() / "frameos-http-spool-test")
+    check spooled.len == 200_000
+    check spooled.materialize().startsWith("abcdefgh")
+
+  test "4xx raises with the error body and leaves no spool file behind":
+    let dir = getTempDir() / "frameos-http-spool-404"
+    removeDir(dir)
+    expect HttpRequestError:
+      discard boundedGetSpool(baseUrl() & "/not-found",
+        spoolThresholdBytes = 4, spoolDir = dir)
+    # The sink only sees 2xx bodies, so nothing was ever written.
+    var leftovers = 0
+    if dirExists(dir):
+      for _ in walkDirRec(dir): inc leftovers
+    check leftovers == 0
+
+  test "maxBytes aborts a streaming spool and cleans up its file":
+    let dir = getTempDir() / "frameos-http-spool-capped"
+    removeDir(dir)
+    expect IOError:
+      discard boundedGetSpool(baseUrl() & "/spool-large",
+        maxBytes = 50_000, spoolThresholdBytes = 4 * 1024, spoolDir = dir)
+    var leftovers = 0
+    if dirExists(dir):
+      for _ in walkDirRec(dir): inc leftovers
+    check leftovers == 0
 
   test "stops test server":
     try:

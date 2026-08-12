@@ -26,13 +26,18 @@ var
   lastPreviewWidth = 0
   lastPreviewHeight = 0
 
-proc hashImageData(data: seq[ColorRGBX]): Hash =
-  var h = hash(data.len)
-  for pixel in data:
-    h = h !& hash(pixel.r)
-    h = h !& hash(pixel.g)
-    h = h !& hash(pixel.b)
-    h = h !& hash(pixel.a)
+proc hashImageData(image: Image): Hash =
+  # `image.data` is a pointer now (pixie views), so hash through the span seam
+  # rather than a flat seq — no copy, and correct even for a non-contiguous
+  # view.
+  var h = hash(image.dataLen)
+  image.forEachSpan:
+    for i in spanStart ..< spanStart + spanLen:
+      let pixel = image.data[i]
+      h = h !& hash(pixel.r)
+      h = h !& hash(pixel.g)
+      h = h !& hash(pixel.b)
+      h = h !& hash(pixel.a)
   !$h
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
@@ -175,13 +180,13 @@ proc render*(self: Driver, image: Image) =
       return
 
   let panelImage = self.imageForPanel(image)
-  let currentImageHash = hashImageData(panelImage.data)
-  if self.lastImageBytes == panelImage.data.len and self.lastImageHash == currentImageHash and
+  let currentImageHash = hashImageData(panelImage)
+  if self.lastImageBytes == panelImage.dataLen and self.lastImageHash == currentImageHash and
       self.lastRenderAt > epochTime() - 12 * 60 * 60:
     self.logger.log(%*{"event": "driver:inky", "info": "Skipping render, image data is the same"})
     return
 
-  self.lastImageBytes = panelImage.data.len
+  self.lastImageBytes = panelImage.dataLen
   self.lastImageHash = currentImageHash
   self.lastRenderAt = epochTime()
   lastPreviewColor = self.panel.colorOption

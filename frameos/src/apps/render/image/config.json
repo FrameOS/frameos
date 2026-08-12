@@ -20,7 +20,23 @@
       "name": "image",
       "type": "image",
       "required": true,
-      "label": "Image"
+      "label": "Image",
+      "capabilities": {
+        "providesTarget": {
+          "fitFrom": "placement",
+          "fits": ["cover", "contain", "stretch"],
+          "requireStatic": {
+            "offsetX": ["0"],
+            "offsetY": ["0"],
+            "blendMode": ["normal", "overwrite"]
+          },
+          "compositingRequireStatic": {
+            "blendMode": ["normal"]
+          },
+          "requireUnset": ["inputImage"],
+          "ownedTargetExcludes": [{ "placement": "contain", "blendMode": "overwrite" }]
+        }
+      }
     },
     {
       "name": "placement",

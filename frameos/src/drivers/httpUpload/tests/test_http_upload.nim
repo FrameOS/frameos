@@ -40,29 +40,6 @@ suite "httpUpload driver":
     check requestCount == 0
     check sink.entries.len == 0
 
-  test "render returns early when image has no pixels":
-    let sink = LogSink(entries: @[])
-    var requestCount = 0
-    requestHook = proc(url: string, body: string, headers: HttpHeaders): tuple[status: int, body: string] =
-      requestCount.inc
-      (200, "")
-
-    let driver = Driver(
-      name: "httpUpload",
-      logger: makeLogger(sink),
-      url: "https://example.com/upload",
-      headers: @[],
-      lastHash: ""
-    )
-
-    var image = makeImage()
-    image.data.setLen(0)
-    driver.render(image)
-
-    check requestCount == 0
-    check driver.lastHash == ""
-    check sink.entries.len == 0
-
   test "render sets default content type and skips duplicate hash":
     let sink = LogSink(entries: @[])
     var requestCount = 0

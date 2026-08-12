@@ -101,6 +101,27 @@ proc frameos_scene_export*(): pointer {{.cdecl, exportc, dynlib.}} =
 """
 
 
+def declares_byte_iter(field: dict) -> bool:
+    """True when a port declares the `byteIter` capability in config.json.
+
+    Such a port carries a `Spool` — a string whose bytes may live in a file
+    rather than in memory (frameos/spool.nim). A compiled scene is statically
+    typed and has no planner to negotiate with, so it converts at the boundary
+    instead: a producer materializes, a consumer wraps. That is the same
+    materialized floor every edge always has, and it keeps compiled output
+    typed exactly as it was before spools existed.
+    """
+    if not isinstance(field, dict):
+        return False
+    capabilities = field.get("capabilities")
+    return isinstance(capabilities, dict) and isinstance(capabilities.get("byteIter"), dict)
+
+
+def app_output_is_byte_iter(app_config: dict) -> bool:
+    outputs = (app_config or {}).get("output") or []
+    return bool(outputs) and declares_byte_iter(outputs[0])
+
+
 def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
     if field_type in ('select', 'text', 'string', 'font'):
         return 'string'
@@ -234,6 +255,8 @@ class SceneWriter:
         self.field_inputs = {}
         self.required_fields: dict[str, dict[str, bool]] = {}
         self.field_types: dict[str, dict[str, str]] = {}
+        # Fields declaring `byteIter`; see declares_byte_iter.
+        self.byte_iter_fields: dict[str, dict[str, bool]] = {}
         self.app_sources: dict[str, list[str]] = {}
         self.app_capabilities: dict[str, set[str]] = {}
         self.app_get_returns_value: dict[str, bool] = {}
@@ -469,6 +492,11 @@ class SceneWriter:
         self.app_configs[node_id] = config
         self.required_fields[node_id] = {}
         self.field_types[node_id] = {}
+        self.byte_iter_fields[node_id] = {
+            field.get("name"): True
+            for field in (config.get("fields") or [])
+            if isinstance(field, dict) and declares_byte_iter(field)
+        }
 
         js_source_filename = None
         js_sources = sources if is_js_app else {}
@@ -892,6 +920,9 @@ class SceneWriter:
                         field_type,
                         required,
                     )
+                elif self.byte_iter_fields.get(node_id, {}).get(key, False):
+                    run_lines += [
+                        f"  {fieldAssignment} = newMemorySpool({value_lines[0]})"]
                 else:
                     run_lines += [f"  {fieldAssignment} = {value_lines[0]}"]
         next_node_id = self.next_nodes.get(node_id, None)
@@ -907,6 +938,12 @@ class SceneWriter:
         elif case_or_block == "block" or case_or_block == "blockWithVars":
             if is_js_app:
                 run_lines += [f"  {app_module}.getDynamicJsApp(self.{app_id}, context)"]
+            elif app_output_is_byte_iter(self.app_configs.get(node_id, {})):
+                # Compiled scenes are statically typed against the declared
+                # output type, so the spool comes back as the string it says
+                # it is. The fold that makes spools worth having lives in the
+                # interpreter, which is the only scheduler embedded targets use.
+                run_lines += [f"  self.{app_id}.get(context).materialize()"]
             else:
                 run_lines += [f"  self.{app_id}.get(context)"]
 

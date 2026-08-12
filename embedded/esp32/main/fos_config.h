@@ -80,6 +80,12 @@ typedef struct {
     uint32_t http_spill_force_bytes; /* debug: HTTP bodies over this many buffered
                                       * bytes spill to storage even with PSRAM
                                       * free (0 = off, spill on pressure only) */
+    bool image_fusion;             /* debug: 0 materializes every image edge so
+                                    * the panel can be compared against the
+                                    * fused render (docs/value-pipeline.md) */
+    bool debug_logging;            /* debug: per-node memory profile from the
+                                    * interpreter (value bytes, heap delta,
+                                    * fusion tier) — see docs/value-pipeline.md */
     bool server_send_logs;         /* upload runtime/render logs to backend */
     /* Escape hatch for the cloud-managed private-network deny
      * (components/frameos_nim/include/fos_netguard.h), matching

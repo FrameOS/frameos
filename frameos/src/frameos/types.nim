@@ -7,6 +7,8 @@ else:
   import json, pixie, locks, tables, options, asyncdispatch, mummy
 import frameos/ids
 export ids
+import frameos/spool
+export spool
 import frameos/js_runtime/burrito
 
 const DefaultMaxHttpResponseBytes* = 64 * 1024 * 1024
@@ -201,13 +203,20 @@ type
     logger*: Logger
 
   FieldKind* = enum
-    fkString, fkText, fkFloat, fkInteger, fkBoolean, fkColor, fkJson, fkImage, fkNode, fkScene, fkNone
+    fkString, fkText, fkFloat, fkInteger, fkBoolean, fkColor, fkJson, fkImage, fkNode, fkScene,
+    fkSpool, fkNone
 
   ## A compact tagged union for interpreter values.
   Value* = object
     case kind*: FieldKind
     of fkString, fkText:
       s*: string    ## same storage, different semantics via kind
+    of fkSpool:
+      ## A string whose bytes may live outside memory (frameos/spool.nim).
+      ## Reads as a string everywhere through `asString`, which materializes
+      ## it; consumers that can fold incrementally iterate it instead and
+      ## never hold the whole thing.
+      sp*: Spool
     of fkFloat:
       f*: float64
     of fkInteger:
@@ -226,6 +235,35 @@ type
       sId*: SceneId ## custom scene type (ref object)
     of fkNone:
       discard
+
+  ImageFusionTier* = enum
+    ## How far a planned image edge gets to skip materialization. Ordered by
+    ## preference; the always-available floor is "no plan at all", which is a
+    ## fully materialized `Value` (docs/value-pipeline.md, principle 3).
+    iftLiveCanvas,   ## the producer writes straight into the render canvas
+    iftOwnedScratch  ## the chain allocates a canvas-sized image it alone owns
+
+  ImageFusionPlan* = ref object
+    ## Decided once per scene load by frameos/planner.nim, from the
+    ## capabilities apps declare in their config.json. Everything here is a
+    ## property of the graph's shape, which is static between deploys; the
+    ## per-render facts (is there a canvas, what does a wired state field say)
+    ## stay cheap runtime checks against this plan.
+    inputName*: string          ## the consumer input the target is offered on
+    tier*: ImageFusionTier
+    fit*: string                ## resolved fit, empty when `fitFromNodeId` is set
+    fitFromNodeId*: NodeId      ## state node to read the fit from, -1 when static
+    defaultFit*: string         ## config.json default, for an empty state read
+    fits*: seq[string]          ## fits both ends of the chain agree on
+    excludedFits*: seq[string]  ## fits the owned-scratch tier must refuse
+    inPlaceNodeIds*: seq[NodeId] ## transformers cleared to mutate in place
+    producerNodeId*: NodeId
+    ## True when the owned-scratch tier was chosen *only* because the terminal
+    ## producer has a node cache — not because a transformer needs something of
+    ## its own to mutate. That distinction matters at render time: an embedded
+    ## cache refuses to store frame-sized images, so above that size there is no
+    ## cache to protect and the live canvas is safe after all.
+    ownedForCache*: bool
 
   # Runtime state while running the scene (for compiled frames)
   FrameScene* = ref object of RootObj
@@ -335,6 +373,7 @@ type
     cacheTimes*: Table[NodeId, float]
     cacheKeys*: Table[NodeId, JsonNode]
     cacheExprs*: Table[NodeId, JsonNode]
+    imageFusionPlans*: Table[NodeId, ImageFusionPlan] # consumer node -> planned image edge
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
@@ -363,6 +402,24 @@ type
     # producer never runs.
     decodeTargetWidth*: int
     decodeTargetHeight*: int
+    # The node the target is addressed to. The hint travels on the context, so
+    # without this it is a broadcast: any producer that happened to run while
+    # one was in flight could take a target meant for a different edge. The
+    # planner names the terminal producer, and `takeDecodeTarget` hands the
+    # target only to that node.
+    decodeTargetNodeId*: NodeId
+    # True when the target is one the chain allocated for itself, and so is
+    # freshly transparent. It matters to producers that COMPOSITE rather than
+    # overwrite — an SVG rasterizer, say: onto transparency it is bit-identical
+    # to rendering standalone, while onto a canvas that already has content the
+    # per-path rounding differs and, after dithering, moves a lot of pixels.
+    decodeTargetOwned*: bool
+    # Transformers the planner cleared to mutate their image input in place and
+    # return the very same image, instead of copying it (the `forwardsTarget`
+    # protocol). Set alongside a decode target and cleared with it; an app must
+    # still check that the target was actually taken before trusting it, which
+    # is what `mayMutateImageInPlace` does.
+    inPlaceImageNodes*: seq[NodeId]
 
   # State field definitions. Used in interpreted scenes, and to show the right form to the user
   StateField* = ref object

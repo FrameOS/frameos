@@ -62,6 +62,10 @@ int frameos_nim_load_scene(const char *scene_json);
  * `403 insufficient_scope` means. Values never appear in a log line. */
 void frameos_nim_apply_service_settings(const char *json);
 /* Refresh interval requested by the active scene, seconds; 0 = no opinion. */
+/* Per-node memory profile in the interpreter (console `set debug 1`). */
+void frameos_nim_set_debug(int enabled);
+/* Value-pipeline differential: 0 materializes every image edge. */
+void frameos_nim_set_fusion(int enabled);
 double frameos_nim_scene_interval(void);
 /* Sleep override from the scene's last render (logic/nextSleepDuration);
  * negative = no override. Consult only right after a successful render. */

@@ -618,7 +618,7 @@ proc get*(self: App, context: ExecutionContext): Image =
       # render/image directly, so draw into the target it named instead of
       # allocating a second full-frame image (render() fills the background
       # first). Consume it so nothing downstream reuses the live canvas.
-      let (target, _) = context.takeDecodeTarget()
+      let (target, _) = self.takeDecodeTarget(context)
       if not target.isNil:
         target
       elif context.hasImage:

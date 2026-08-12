@@ -16,6 +16,7 @@ proc VBool*(x: bool): Value {.inline.} = Value(kind: fkBoolean, b: x)
 proc VColor*(c: Color): Value = Value(kind: fkColor, col: c)
 proc VJson*(n: JsonNode): Value {.inline.} = Value(kind: fkJson, j: n)
 proc VImage*(im: Image): Value {.inline.} = Value(kind: fkImage, img: im)
+proc VSpool*(sp: Spool): Value {.inline.} = Value(kind: fkSpool, sp: sp)
 proc VNode*(nodeId: NodeId): Value {.inline.} = Value(kind: fkNode, nId: nodeId)
 proc VScene*(sceneId: SceneId): Value {.inline.} = Value(kind: fkScene, sId: sceneId)
 proc VNone*(): Value {.inline.} = Value(kind: fkNone)
@@ -28,6 +29,7 @@ converter toValue*(x: bool): Value = VBool(x)
 converter toValue*(c: Color): Value = VColor(c)
 converter toValue*(j: JsonNode): Value = VJson(j)
 converter toValue*(im: Image): Value = VImage(im)
+converter toValue*(sp: Spool): Value = VSpool(sp)
 converter toValue*(n: NodeId): Value = VNode(n)
 converter toValue*(s: SceneId): Value = VScene(s)
 
@@ -36,10 +38,25 @@ template expectKind(v: Value; k: FieldKind) =
   if v.kind != k:
     raise newException(ValueError, "Value is " & $v.kind & ", expected " & $k)
 
-proc asString*(v: Value): string {.inline.} =
+proc asString*(v: Value): string =
+  ## Materializes a spooled value, which is the tier floor: every existing
+  ## consumer keeps working unchanged, it just pays for the bytes. Consumers
+  ## that can fold incrementally should reach for `asSpool` instead.
+  if v.kind == fkSpool:
+    return v.sp.materialize()
   if v.kind notin {fkString, fkText}:
     raise newException(ValueError, "Value is " & $v.kind & ", expected fkString or fkText")
   v.s
+
+proc asSpool*(v: Value): Spool =
+  ## The bytes without materializing them. A plain string value answers as an
+  ## in-memory spool, so a consumer written against this API does not have to
+  ## care which tier it got.
+  case v.kind
+  of fkSpool: v.sp
+  of fkString, fkText: newMemorySpool(v.s)
+  else:
+    raise newException(ValueError, "Value is " & $v.kind & ", expected a string or spool")
 proc asFloat*(v: Value): float64 {.inline.} =
   case v.kind
   of fkFloat:
@@ -61,6 +78,7 @@ proc isNone*(v: Value): bool {.inline.} = v.kind == fkNone
 proc `$`*(v: Value): string =
   case v.kind
   of fkString: "string(" & $min(v.s.len, 64) & " chars)"
+  of fkSpool: "spool(" & $v.sp.len & " bytes, " & (if v.sp.isFileBacked(): "file" else: "memory") & ")"
   of fkText: "text(" & $min(v.s.len, 64) & " chars)"
   of fkFloat: "float(" & $v.f & ")"
   of fkInteger: "integer(" & $v.i & ")"
@@ -72,10 +90,44 @@ proc `$`*(v: Value): string =
   of fkScene: "scene(" & $v.sId & ")"
   of fkNone: "none"
 
+proc approxByteSize*(j: JsonNode, depth = 0): int =
+  ## Roughly how much memory a JSON tree holds. Not exact — it counts payload,
+  ## not std/json's per-node overhead — and deliberately cheap, since this runs
+  ## per node per render in debug mode.
+  if j.isNil or depth > 32:
+    return 0
+  case j.kind
+  of JString: result = j.getStr().len
+  of JInt, JFloat: result = 8
+  of JBool: result = 1
+  of JNull: result = 0
+  of JArray:
+    for item in j.items:
+      result += approxByteSize(item, depth + 1)
+  of JObject:
+    for key, item in j.pairs:
+      result += key.len + approxByteSize(item, depth + 1)
+
+proc approxByteSize*(v: Value): int =
+  ## What this value costs to hold, for the memory profile in debug mode.
+  ## Images dominate everything else by orders of magnitude, which is the whole
+  ## point of measuring (docs/value-pipeline.md, phase 0).
+  case v.kind
+  of fkString, fkText: v.s.len
+  of fkSpool:
+    # What it costs to HOLD, which for a file-backed spool is a window, not the
+    # body — that is the whole point of the tier.
+    if v.sp.isFileBacked(): DefaultWindowBytes else: v.sp.len
+  of fkJson: approxByteSize(v.j)
+  of fkImage:
+    if v.img.isNil: 0 else: v.img.width * v.img.height * 4
+  else: 0
+
 proc valueToJson*(v: Value): JsonNode =
   ## Convert interpreter Value -> JsonNode so we can write into scene.state.
   case v.kind
   of fkString, fkText: %* v.s
+  of fkSpool: %* v.sp.materialize()
   of fkFloat: %* v.f
   of fkInteger: %* v.i
   of fkBoolean: %* v.b

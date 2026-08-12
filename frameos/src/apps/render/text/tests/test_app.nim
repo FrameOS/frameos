@@ -33,7 +33,7 @@ suite "render/text app":
     let config = makeConfig(3, 2)
     let app = makeTextApp(config, "")
     let context = ExecutionContext(image: newImage(3, 2), hasImage: true)
-    for i in 0 ..< context.image.data.len:
+    for i in 0 ..< context.image.dataLen:
       context.image.data[i] = rgbx(15, 25, 35, 255)
     let before = context.image.data
 

@@ -47,7 +47,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
       self.node2.appConfig.text = block:
         if cache0.isNone() or epochTime() > cache0Time + 900.0:
           cache0 = some(block:
-            self.node1.get(context))
+            self.node1.get(context).materialize())
           cache0Time = epochTime()
         cache0.get()
       self.node2.run(context)
@@ -59,7 +59,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
       self.node4.appConfig.text = block:
         if cache1.isNone() or epochTime() > cache1Time + 900.0:
           cache1 = some(block:
-            self.node5.get(context))
+            self.node5.get(context).materialize())
           cache1Time = epochTime()
         cache1.get()
       self.node4.run(context)
@@ -120,7 +120,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     text: block:
       if cache0.isNone() or epochTime() > cache0Time + 900.0:
         cache0 = some(block:
-          self.node1.get(context))
+          self.node1.get(context).materialize())
         cache0Time = epochTime()
       cache0.get(),
     richText: "disabled",
@@ -158,7 +158,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     text: block:
       if cache1.isNone() or epochTime() > cache1Time + 900.0:
         cache1 = some(block:
-          self.node5.get(context))
+          self.node5.get(context).materialize())
         cache1Time = epochTime()
       cache1.get(),
     richText: "disabled",

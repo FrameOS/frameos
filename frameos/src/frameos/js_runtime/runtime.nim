@@ -415,6 +415,13 @@ proc valueToJS*(ctx: ptr JSContext, v: Value): JSValue =
   case v.kind
   of fkString, fkText:
     return nimStringToJS(ctx, v.s)
+  of fkSpool:
+    # JS is opaque by design (docs/value-pipeline.md, non-goals): a spooled
+    # body crossing into QuickJS has to become a real JS string, so it
+    # materializes here. That is the tier floor doing its job, not a leak —
+    # but it does mean routing a multi-MB feed through a code node costs what
+    # it always did.
+    return nimStringToJS(ctx, v.sp.materialize())
   of fkFloat:
     return nimFloatToJS(ctx, v.f)
   of fkInteger:

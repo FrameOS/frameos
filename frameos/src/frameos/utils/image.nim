@@ -286,6 +286,26 @@ proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image]
   except CatchableError:
     return none(Image)
 
+proc renderSvgIntoTarget*(svg: string, target: Image): bool =
+  ## Rasterizes an SVG straight into a buffer the caller already owns, rather
+  ## than allocating one and blending it away afterwards. Returns false when
+  ## this path does not apply, and the caller falls back to
+  ## `decodeSvgWithFallback`.
+  ##
+  ## Compositing, not overwriting: the target may already have content, and a
+  ## semi-transparent first path must blend with it rather than replace it —
+  ## `renderInto` in the pixie fork is the half of that contract living there.
+  if target.isNil or target.width <= 0 or target.height <= 0:
+    return false
+  if useImageMagick():
+    # Keep the configured engine in charge.
+    return false
+  try:
+    parseSvg(svg, target.width, target.height).renderInto(target)
+    true
+  except CatchableError:
+    false
+
 proc decodeImageWithFallback*(data: string): Image =
   if useImageMagick():
     let converted = decodeImageWithImageMagick(data)
@@ -293,11 +313,33 @@ proc decodeImageWithFallback*(data: string): Image =
       return converted.get()
   return decodeImage(data)
 
+proc looksLikeSvg(data: string): bool =
+  data.len > 5 and (data.startsWith("<?xml") or data.startsWith("<svg"))
+
 proc decodeImageWithDisplayBounds*(data: var string,
     maxEdge = DisplayDecodeMaxEdge,
     maxPixels = DisplayDecodeMaxPixels): Image =
   refreshDecodeBudget()
-  # Formats without a dimension prober (e.g. SVG) decode unscaled below.
+  # SVG has no compressed-dimensions probe, but its DECLARED size is right
+  # there in the document, and rasterizing at that size is an unbounded
+  # allocation: a 1KB placeholder declaring 1024x1024 is a 4MB image, which on
+  # a fragmented ESP32 heap was an unrecoverable OOM that aborted the render.
+  # Parse for the declared size and bound it exactly like a raster decode —
+  # it is being rasterized for this display either way.
+  if looksLikeSvg(data):
+    try:
+      let parsed = parseSvg(data)
+      if parsed.width > 0 and parsed.height > 0:
+        let bounded = displayDecodeDimensions(
+          ImageDimensions(width: parsed.width, height: parsed.height),
+          maxEdge, maxPixels)
+        let image = decodeSvgWithFallback(data, bounded.width, bounded.height)
+        if image.isSome:
+          data = ""
+          return image.get()
+    except CatchableError:
+      discard # not actually decodable as SVG; the generic decoder gets to say so
+  # Formats without a dimension prober decode unscaled below.
   var dimensions = ImageDimensions(width: 0, height: 0)
   try:
     dimensions = decodeImageDimensions(data)
@@ -529,6 +571,36 @@ proc pngIsProvablyOpaque*(header: string): bool =
   # Ran out of probed header before the image data started.
   false
 
+proc isBmpHeader(data: string): bool =
+  data.len > 2 and data[0] == 'B' and data[1] == 'M'
+
+proc isPpmHeader(data: string): bool =
+  ## P6 is the binary variant; P3 is ASCII and has no streaming decoder.
+  data.len > 2 and data[0] == 'P' and data[1] == '6'
+
+proc bmpIsProvablyOpaque*(header: string): bool =
+  ## Same question as `pngIsProvablyOpaque`, for BMP: can this file carry
+  ## transparency? If it cannot, streaming its pixels straight over a canvas is
+  ## equivalent to compositing them.
+  ##
+  ## Bit depths up to 24 have no alpha channel at all. 32-bit BMPs usually
+  ## carry an ignored padding byte rather than real alpha, but BI_ALPHABITFIELDS
+  ## and the V4/V5 headers can declare a genuine alpha mask — and "usually" is
+  ## not a basis for overwriting a canvas, so 32-bit is simply not proven.
+  if not isBmpHeader(header) or header.len < 34:
+    return false
+  var bitCount = 0
+  for i in 0 .. 1: # DIB header offset 14 + 14 = bit count, little endian
+    bitCount = bitCount or (header[28 + i].uint8.int shl (8 * i))
+  var compression = 0
+  for i in 0 .. 3:
+    compression = compression or (header[30 + i].uint8.int shl (8 * i))
+  # BI_RGB (0) and BI_RLE8/4 (1/2) carry no alpha mask; BI_BITFIELDS (3) and
+  # BI_ALPHABITFIELDS (6) can.
+  if compression != 0 and compression != 1 and compression != 2:
+    return false
+  bitCount in [1, 4, 8, 16, 24]
+
 proc fileJpegSource(file: File): JpegSourceProc =
   result = proc(dst: pointer, maxBytes: int): int =
     try:
@@ -585,10 +657,6 @@ proc readImageWithDisplayBounds*(path: string,
   var data = readFile(path)
   decodeImageWithDisplayBounds(data, maxEdge, maxPixels)
 
-proc looksLikeSvg(data: string): bool =
-  ## SVG has no dimensions probe; callers keep it on the generic decoder.
-  data.len > 5 and (data.startsWith("<?xml") or data.startsWith("<svg"))
-
 proc scalingModeToFit(scalingMode: string): Option[ScaledDecodeFit] =
   case scalingMode
   of "cover": some(fitCover)
@@ -635,9 +703,21 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
   # target) from compiled ones (which do not).
   let jpeg = isJpegHeader(header)
   var streamablePng = false
+  var streamableBmp = false
+  var streamablePpm = false
   when defined(frameosEmbedded):
     streamablePng = not jpeg and pngIsProvablyOpaque(header)
-  if not jpeg and not streamablePng:
+    # BMP and PPM already stream in `decodeSpilledImageInto` — a download too
+    # big for PSRAM has streamed from storage since Aug 2026. A file on the SD
+    # card is the same problem with the same answer, and until now it did not
+    # get it: an 800x480 24-bit BMP is 1.1MB of file for a 1.5MB image, and
+    # `ensureFileReadBudget` refused to buffer it ("only 1952K of render memory
+    # is available") on a frame that could render it perfectly well a row at a
+    # time. Every BMP on the Waveshare demo card is one of these.
+    streamableBmp = not jpeg and bmpIsProvablyOpaque(header)
+    # PPM P6 has no alpha channel at all, so there is nothing to prove.
+    streamablePpm = not jpeg and isPpmHeader(header)
+  if not jpeg and not streamablePng and not streamableBmp and not streamablePpm:
     return false
   header = ""
 
@@ -648,15 +728,26 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
     if jpeg:
       decodeJpegStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
       return true
-    when compiles(decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
-      # Row-streamed: the compressed body is read incrementally and never held
-      # whole, so this needs a fixed inflate window plus a row, not a block the
-      # size of the file. Interlaced and 16-bit PNGs raise here and fall back.
-      decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
-      return true
+    if streamablePng:
+      when compiles(decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
+        # Row-streamed: the compressed body is read incrementally and never held
+        # whole, so this needs a fixed inflate window plus a row, not a block the
+        # size of the file. Interlaced and 16-bit PNGs raise here and fall back.
+        decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+        return true
+    if streamableBmp:
+      when compiles(decodeBmpStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
+        # Uncompressed fixed-stride rows: one source row in RAM at a time, and
+        # rows outside the fitted rect are skipped without being converted.
+        decodeBmpStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+        return true
+    if streamablePpm:
+      when compiles(decodePpmStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
+        decodePpmStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+        return true
   except PixieError:
-    # Progressive JPEGs and interlaced/16-bit PNGs cannot stream; retry
-    # buffered below.
+    # Progressive JPEGs, interlaced/16-bit PNGs and RLE BMPs cannot stream;
+    # retry buffered below.
     discard
   finally:
     file.close()
@@ -834,6 +925,13 @@ when defined(frameosEmbedded):
       headers: seq[SimpleHttpHeader] = @[], fit = fitCover):
       tuple[image: Image, data: string] =
     var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
+    # The budget must reflect the heap the decode is about to run on, not the
+    # one some earlier render saw. This path never went through the
+    # display-bounds helpers that refresh it, so a decoder's "over the memory
+    # budget" plan check ran against a stale number — and a progressive JPEG
+    # that passed it then OOM-aborted the render on a fragmented heap where
+    # the largest free block was 1,668 bytes smaller than its allocation.
+    refreshDecodeBudget()
     try:
       if response.code >= 400:
         raise newException(HttpRequestError, "HTTP " & response.status & httpErrorDetail(response))

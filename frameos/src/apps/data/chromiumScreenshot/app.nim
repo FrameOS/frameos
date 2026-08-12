@@ -93,6 +93,20 @@ var
   chromiumEnsureVenvExistsHook*: ChromiumEnsureVenvExistsHook = nil
   chromiumEnsureBackgroundBrowserHook*: ChromiumEnsureBackgroundBrowserHook = nil
 
+when defined(testing):
+  # Under -d:testing the bootstrap seams default to no-ops instead of nil.
+  # init() otherwise apt-installs Chromium (30-minute timeout per attempt),
+  # builds a pip venv and launches a headless browser. On a dev laptop all of
+  # that fails in milliseconds (no sudo, no apt) and nobody notices; on a CI
+  # runner with passwordless sudo it all genuinely runs — which is how a
+  # planner test that merely INITS every repo scene spent its entire CI budget
+  # inside apt-get. A test that wants the real bootstrap sets a hook back to
+  # nil; a test that wants to observe it sets its own, as tests/test_app.nim
+  # does.
+  chromiumEnsureSystemDependenciesHook = proc(self: App) = discard
+  chromiumEnsureVenvExistsHook = proc(self: App): string = ""
+  chromiumEnsureBackgroundBrowserHook = proc(self: App, width, height: int): bool = false
+
 proc ensureVenvExists(self: App): string
 proc ensureBackgroundBrowser(self: App, width: int = 800, height: int = 600): bool
 proc stopBackgroundBrowser(self: App)

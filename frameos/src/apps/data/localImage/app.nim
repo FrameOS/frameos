@@ -75,6 +75,17 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
   # (`.thumbs`, `.frameos`, `@eaDir`, `System Volume Information`, …).
   for file in walkDirRecNoJunk(folder, relative = true):
     if isImage(file) and (searchQuery == "" or file.toLower().contains(searchQuery)):
+      # An empty file is not an image, whatever it is called. The Waveshare
+      # demo card ships a zero-byte `sys_decode.bmp`, and enumerating it meant
+      # the rotation landed on an error frame every Nth render for a file that
+      # never contained anything.
+      var size = 0'i64
+      try:
+        size = getFileSize(folder / file)
+      except CatchableError:
+        size = 0
+      if size <= 0:
+        continue
       images.add(file)
   return images
 
@@ -174,7 +185,7 @@ proc get*(self: App, context: ExecutionContext): Image =
   # Consume the decode-into-target hint up front so every path below —
   # including error frames — can reuse that target instead of allocating a
   # second full-size image.
-  let (decodeTarget, decodeScalingMode) = context.takeDecodeTarget()
+  let (decodeTarget, decodeScalingMode) = self.takeDecodeTarget(context)
 
   if self.appConfig.search != self.lastSearch or self.appConfig.path != self.lastPath:
     self.init() # re-init if the query changes

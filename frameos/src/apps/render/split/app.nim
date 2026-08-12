@@ -137,13 +137,32 @@ proc render*(self: App, context: ExecutionContext, image: var Image) =
       let renderer: NodeId = if row >= 0 and row < renderFunctions.len and column >= 0 and column < renderFunctions[
           row].len and renderFunctions[row][column] == 0: renderFunction else: renderFunctions[row][column]
       if renderer != 0:
-        # Cells already render at cell size, not canvas size: the child sees a
+        # Cells render at cell size, not canvas size: the child sees a
         # cellWidth x cellHeight context and everything downstream (JS apps,
-        # render/image, nested splits) sizes itself from context.image. The
-        # copy is what carries the parent's pixels under a cell that draws
-        # with alpha; pixie has no image view, so a real sub-region render
-        # would need one buffer per cell either way.
-        let img = image.subImage(cellX.toInt, cellY.toInt, cellWidth, cellHeight)
+        # render/image, nested splits) sizes itself from context.image.
+        #
+        # That context is now a VIEW onto this image rather than a copy of the
+        # region, so the child draws straight into the canvas and there is
+        # nothing to draw back. It is what a cell always meant; it just used to
+        # cost a buffer to say it. Nesting is where it tells: a view of a view
+        # flattens onto the original owner, so a split inside a split inside a
+        # split costs the canvas and nothing else, where copies stacked one
+        # region per level for as long as the innermost cell was rendering.
+        #
+        # One semantic edge moved with it: a child using an ERASING blend
+        # (overwrite/mask) over a transparent source now punches that alpha
+        # into the canvas, where the copy path flattened it on the normal-blend
+        # draw back. That matches what the same node does outside a split;
+        # docs/value-pipeline.md carries the full reasoning.
+        #
+        # Margins, gaps and ratios are floats, so a cell can round to a rect a
+        # pixel outside the parent. A view has to fit exactly, so clamp rather
+        # than let a rounding edge become a render error.
+        let viewX = clamp(cellX.toInt, 0, max(0, image.width - 1))
+        let viewY = clamp(cellY.toInt, 0, max(0, image.height - 1))
+        let viewW = clamp(cellWidth, 1, image.width - viewX)
+        let viewH = clamp(cellHeight, 1, image.height - viewY)
+        let img = image.view(viewX, viewY, viewW, viewH)
         var cellContext = ExecutionContext(
             scene: context.scene,
             image: img,
@@ -158,7 +177,11 @@ proc render*(self: App, context: ExecutionContext, image: var Image) =
         self.scene.execNode(renderer, cellContext)
         if cellContext.nextSleep != context.nextSleep:
           context.nextSleep = cellContext.nextSleep
-        image.draw(cellContext.image, translate(vec2(cellX, cellY)))
+        if cellContext.image != img:
+          # The child swapped its context image for one of its own instead of
+          # drawing into what it was given. Nothing wrote through, so it still
+          # has to be composited into place.
+          image.draw(cellContext.image, translate(vec2(viewX.float32, viewY.float32)))
 
       cellX += cellWidth.toFloat + gapHorizontal
       if column == columns - 1:

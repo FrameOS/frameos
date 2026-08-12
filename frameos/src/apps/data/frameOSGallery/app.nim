@@ -37,7 +37,7 @@ proc get*(self: App, context: ExecutionContext): Image =
   # says the consumer will draw this full-frame, and with the placement it
   # asked for. Taking context.image plus the frame's scaling mode instead
   # meant a node asking for "contain" silently got the frame default.
-  let (target, targetScalingMode) = context.takeDecodeTarget()
+  let (target, targetScalingMode) = self.takeDecodeTarget(context)
   try:
     result = galleryDownloadHook(url, self.maxImageResponseBytes(), target,
         scaledDecodeFit(targetScalingMode))

@@ -8,7 +8,8 @@
       "name": "ical",
       "type": "string",
       "required": true,
-      "label": "iCal file contents"
+      "label": "iCal file contents",
+      "capabilities": { "byteIter": {} }
     },
     {
       "name": "exportFrom",

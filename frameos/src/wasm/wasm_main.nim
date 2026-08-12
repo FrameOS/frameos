@@ -358,13 +358,13 @@ proc frameos_wasm_render(): cint {.exportc, cdecl.} =
       2
 
 proc frameos_wasm_buffer(): pointer {.exportc, cdecl.} =
-  if lastImage.isNil or lastImage.data.len == 0:
+  if lastImage.isNil or lastImage.dataLen == 0 or not lastImage.isContiguous:
     return nil
   addr lastImage.data[0]
 
 proc frameos_wasm_buffer_len(): cint {.exportc, cdecl.} =
   if lastImage.isNil: 0.cint
-  else: (lastImage.data.len * 4).cint
+  else: (lastImage.dataLen * 4).cint
 
 proc frameos_wasm_width(): cint {.exportc, cdecl.} =
   if lastImage.isNil: 0.cint else: lastImage.width.cint

@@ -83,6 +83,156 @@ def _app_capabilities(app_dir: Path, config: dict) -> set[str]:
     return capabilities
 
 
+DEFAULT_TARGET_FITS = ["cover", "contain", "stretch"]
+
+
+def _nim_str(value) -> str:
+    text = "" if value is None else str(value)
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _nim_str_seq(values) -> str:
+    return "@[" + ", ".join(_nim_str(v) for v in values) + "]"
+
+
+def _nim_constraints(raw) -> str:
+    """`{"blendMode": ["normal", "overwrite"]}` -> a seq[FieldConstraint] literal."""
+    if not isinstance(raw, dict):
+        return "@[]"
+    parts = []
+    for field, allowed in raw.items():
+        if isinstance(allowed, (str, int, float, bool)):
+            allowed = [allowed]
+        parts.append(
+            f"FieldConstraint(field: {_nim_str(field)}, allowed: {_nim_str_seq(allowed)})"
+        )
+    return "@[" + ", ".join(parts) + "]"
+
+
+def _nim_matches(raw) -> str:
+    """`[{"placement": "contain", "blendMode": "overwrite"}]` -> seq[seq[FieldMatch]]."""
+    if not isinstance(raw, list):
+        return "@[]"
+    clauses = []
+    for clause in raw:
+        if not isinstance(clause, dict):
+            continue
+        pairs = ", ".join(
+            f"FieldMatch(field: {_nim_str(f)}, value: {_nim_str(v)})" for f, v in clause.items()
+        )
+        clauses.append("@[" + pairs + "]")
+    return "@[" + ", ".join(clauses) + "]"
+
+
+def _capability_fields(spec: dict) -> list[str]:
+    """Every config field a capability spec refers to, in declaration order."""
+    names: list[str] = []
+
+    def add(name):
+        if isinstance(name, str) and name and name not in names:
+            names.append(name)
+
+    add(spec.get("fitFrom"))
+    for field in (spec.get("requireStatic") or {}):
+        add(field)
+    for field in (spec.get("compositingRequireStatic") or {}):
+        add(field)
+    for field in (spec.get("requireUnset") or []):
+        add(field)
+    for clause in (spec.get("ownedTargetExcludes") or []):
+        if isinstance(clause, dict):
+            for field in clause:
+                add(field)
+    return names
+
+
+def _field_default(fields: list, name: str) -> str:
+    for field in fields:
+        if isinstance(field, dict) and field.get("name") == name:
+            value = field.get("value")
+            if value is None or isinstance(value, (dict, list)):
+                return ""
+            if isinstance(value, bool):
+                return "true" if value else "false"
+            return str(value)
+    return ""
+
+
+def _app_capability_literal(config: dict) -> Optional[str]:
+    """
+    Nim `AppCapabilities(...)` literal for an app's declared port capabilities,
+    or None when the app declares none (the materialized floor).
+
+    Input ports declare `providesTarget`, output ports declare `intoTarget` or
+    `forwardsTarget`; see frameos/app_capabilities.nim.
+    """
+    fields = [f for f in (config.get("fields") or []) if isinstance(f, dict)]
+    outputs = [o for o in (config.get("output") or []) if isinstance(o, dict)]
+
+    provides: list[str] = []
+    into: list[str] = []
+    forwards: list[str] = []
+    referenced: list[str] = []
+
+    def note(spec: dict):
+        for name in _capability_fields(spec):
+            if name not in referenced:
+                referenced.append(name)
+
+    for field in fields:
+        spec = (field.get("capabilities") or {}).get("providesTarget")
+        if not isinstance(spec, dict):
+            continue
+        note(spec)
+        provides.append(
+            "ProvidesTargetSpec("
+            f"input: {_nim_str(field.get('name'))}, "
+            f"fitFrom: {_nim_str(spec.get('fitFrom'))}, "
+            f"fits: {_nim_str_seq(spec.get('fits') or DEFAULT_TARGET_FITS)}, "
+            f"requireStatic: {_nim_constraints(spec.get('requireStatic'))}, "
+            f"compositingRequireStatic: {_nim_constraints(spec.get('compositingRequireStatic'))}, "
+            f"requireUnset: {_nim_str_seq(spec.get('requireUnset') or [])}, "
+            f"ownedTargetExcludes: {_nim_matches(spec.get('ownedTargetExcludes'))})"
+        )
+
+    for output in outputs:
+        capabilities = output.get("capabilities") or {}
+        spec = capabilities.get("intoTarget")
+        if isinstance(spec, dict):
+            note(spec)
+            into.append(
+                "IntoTargetSpec("
+                f"output: {_nim_str(output.get('name'))}, "
+                f"fits: {_nim_str_seq(spec.get('fits') or DEFAULT_TARGET_FITS)}, "
+                f"requireStatic: {_nim_constraints(spec.get('requireStatic'))}, "
+                f"requireUnset: {_nim_str_seq(spec.get('requireUnset') or [])})"
+            )
+        spec = capabilities.get("forwardsTarget")
+        if isinstance(spec, dict):
+            note(spec)
+            forwards.append(
+                "ForwardsTargetSpec("
+                f"output: {_nim_str(output.get('name'))}, "
+                f"input: {_nim_str(spec.get('input'))}, "
+                f"requireStatic: {_nim_constraints(spec.get('requireStatic'))})"
+            )
+
+    if not provides and not into and not forwards:
+        return None
+
+    defaults = ", ".join(
+        f"FieldMatch(field: {_nim_str(name)}, value: {_nim_str(_field_default(fields, name))})"
+        for name in referenced
+    )
+    return (
+        "AppCapabilities(\n"
+        f"      providesTarget: @[{', '.join(provides)}],\n"
+        f"      intoTarget: @[{', '.join(into)}],\n"
+        f"      forwardsTarget: @[{', '.join(forwards)}],\n"
+        f"      fieldDefaults: @[{defaults}])"
+    )
+
+
 def _app_call_case(app_id: str, call: str) -> str:
     if app_id not in EMBEDDED_UNAVAILABLE_APPS:
         return f'  of "{app_id}": {call}'
@@ -128,6 +278,8 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     # 1) Imports
     imports: list[str] = [
         "import frameos/types",
+        "import frameos/app_capabilities",
+        "export app_capabilities",
     ]
     embedded_unavailable_imports: list[str] = []
     used_aliases: set[str] = set()
@@ -160,6 +312,12 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     set_cases  = []
     run_cases  = []
     get_cases  = []
+    capability_cases = []
+
+    for app_id, cfg in sorted(all_apps.items(), key=lambda kv: kv[0]):
+        literal = _app_capability_literal(cfg)
+        if literal:
+            capability_cases.append(f'  of "{app_id}":\n    {literal}')
 
     for app_id, alias, capabilities in items:
         init_cases.append(_app_call_case(app_id, f"{alias}.init(node, scene)"))
@@ -175,6 +333,8 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     get_cases.append('  else: raise newException(ValueError, "Unknown app keyword: " & keyword)')
     # run: include a helpful default error
     run_cases.append('  else: raise newException(Exception, "App \'" & keyword & "\' cannot be run; use get().")')
+
+    capability_cases.append("  else: NoAppCapabilities")
 
     # 3) Compose Nim
     nl = "\n"
@@ -195,5 +355,11 @@ proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
 proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   case keyword:
 {nl.join(get_cases)}
+
+proc appCapabilities*(keyword: string): AppCapabilities =
+  ## Per-port protocols this app declares in its config.json. Apps that
+  ## declare nothing are materialized-only, which every edge supports.
+  case keyword:
+{nl.join(capability_cases)}
 """
     return code

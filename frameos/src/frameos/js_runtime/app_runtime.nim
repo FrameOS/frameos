@@ -8,6 +8,7 @@ import frameos/js_runtime/source_map
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
+import frameos/utils/app_images
 import frameos/utils/image
 import frameos/utils/paths
 import frameos/utils/system
@@ -809,6 +810,10 @@ proc jsAppValueToJson(runtime: JsAppRuntime, value: Value): JsonNode =
   case value.kind
   of fkString, fkText:
     return %* value.s
+  of fkSpool:
+    # Same as valueToJS: a JS app is opaque, so the bytes materialize on the
+    # way in.
+    return %* value.sp.materialize()
   of fkFloat:
     return %* value.f
   of fkInteger:
@@ -1194,7 +1199,34 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
   of "image":
     if spec.hasKey("svg"):
       when defined(memProbe): memProbe("    svg decode src=" & $spec["svg"].getStr().len & "B BEFORE")
-      let image = decodeSvgWithFallback(spec["svg"].getStr(), defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
+      let svgWidth = defaultImageWidth(owner, context, spec)
+      let svgHeight = defaultImageHeight(owner, context, spec)
+      # The same `intoTarget` handshake as the plain-canvas branch below: an
+      # SVG panel is the common shape for a JS render app, and rasterizing it
+      # into the target the planner offered is what keeps a full-size second
+      # image off the heap.
+      # Rasterize into whatever target was offered, including the live canvas.
+      #
+      # On a target the chain owns (freshly transparent) this is bit-identical
+      # to rendering standalone and drawing the result. On the live canvas it
+      # is equal only in exact arithmetic: compositing each path onto existing
+      # content rounds differently at every path than compositing onto
+      # transparency does before one final blend. Source-over is associative,
+      # 8-bit is not, and a six-colour dither turns a one-unit nudge near a
+      # threshold into a flipped cell.
+      #
+      # Measured on a 7.3" PhotoPainter, that difference is 2.8% of pixels, of
+      # which 5,417 flip one way and 5,415 flip back — the grain rearranges and
+      # the mean colour over the changed area is identical. Weighed against
+      # 1.48MB of PSRAM and 5.2s per render on a frame with ~6.6MB free, the
+      # call was to take the memory (docs/value-pipeline.md).
+      let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
+      if offeredWidth == svgWidth and offeredHeight == svgHeight:
+        let (svgTarget, _) = owner.takeDecodeTarget(context)
+        if not svgTarget.isNil and renderSvgIntoTarget(spec["svg"].getStr(), svgTarget):
+          when defined(memProbe): memProbe("    svg decode AFTER (into target)")
+          return svgTarget
+      let image = decodeSvgWithFallback(spec["svg"].getStr(), svgWidth, svgHeight)
       when defined(memProbe): memProbe("    svg decode AFTER")
       if image.isSome:
         return image.get()
@@ -1209,9 +1241,33 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       return decodeImageWithDisplayBounds(decoded)
     let width = max(1, defaultImageWidth(owner, context, spec))
     let height = max(1, defaultImageHeight(owner, context, spec))
-    let image = newImage(width, height)
-    if spec.hasKey("color"):
-      image.fill(colorWithOpacity(spec))
+    # The consumer's half of `intoTarget`, for a JS app that asked for a plain
+    # canvas: when the planner offered this node a target of exactly the size
+    # we were about to allocate, draw into that instead. The JS drawing calls
+    # composite onto it exactly as they would onto a fresh canvas that was
+    # afterwards drawn over the same pixels — which is why this is sound, and
+    # why it is limited to this branch. An SVG, a data URL or an
+    # explicitly-sized image is a different picture, and leaves the target
+    # unclaimed for the interpreter to discard.
+    var image: Image = nil
+    let hasFill = spec.hasKey("color")
+    var fillColor: Color
+    if hasFill:
+      fillColor = colorWithOpacity(spec)
+    # A fill is a SET, not a composite. On a target the chain owns it lands on
+    # fresh transparency, exactly like on the canvas we were about to allocate;
+    # on the live render canvas it is only equivalent when the color is opaque
+    # — a semi-transparent fill would replace the scene's pixels where the
+    # materialized path composites over them.
+    let fillSafe = not hasFill or fillColor.a >= 1.0 or context.decodeTargetIsOwned()
+    let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
+    if fillSafe and offeredWidth == width and offeredHeight == height:
+      let (target, _) = owner.takeDecodeTarget(context)
+      image = target
+    if image.isNil:
+      image = newImage(width, height)
+    if hasFill:
+      image.fill(fillColor)
     return image
   else:
     return nil

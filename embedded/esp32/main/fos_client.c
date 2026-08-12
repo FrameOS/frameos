@@ -929,6 +929,10 @@ static void client_task(void *arg)
 
         /* A console `set spill_force` may have changed it since last pass. */
         fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);
+        /* Same for `set debug`: the per-node memory profile is meant to be
+         * switched on over the console mid-flight, without a rebuild. */
+        frameos_nim_set_debug(config->debug_logging ? 1 : 0);
+        frameos_nim_set_fusion(config->image_fusion ? 1 : 0);
 
         /* Battery guardrail: when the cell is nearly empty, skip the (costly)
          * render + panel refresh and sleep long so a low battery can't keep
