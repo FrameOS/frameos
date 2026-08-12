@@ -722,9 +722,19 @@ distinction.
 
 ### Phase 4 — parity wins (after phase 1 proves out)
 
-- [ ] Compiled scenes: emit the same negotiation at codegen time in
-      `scene_nim.py` (static graph → static plan; no runtime planner
-      needed). Closes the interpreted/compiled behavior gap on hosts.
+- [x] Compiled scenes emit the same negotiation at codegen time
+      (`scene_nim.py` `plan_decode_target`/`wrap_with_decode_target`): the
+      planner's rules applied where the graph is static, producing the same
+      hint block around the producer call that the interpreter builds at
+      scene load — live canvas for an uncached producer, canvas-sized owned
+      scratch for a cached one, the same refusals for erasing blends, wired
+      placements, cached consumers and the contain+overwrite scratch shape.
+      Apps consume it through the identical `takeDecodeTarget` handshake, so
+      nothing app-side changed. Scoped deliberately: direct producer →
+      consumer edges with fully static configs; forwarding chains, JS
+      producers and state-wired fits stay interpreted-only (no shipped scene
+      compiles those shapes). Pinned by codegen tests over fusible and
+      refused shapes, and the generated scene compiles clean.
 - [ ] Cloud: nothing to do at the control-plane level (interpreted
       scenes ship the runtime's planner), but verify cloud-deployed
       scenes.json on an ESP32 exercises the new path in the WS test rig.

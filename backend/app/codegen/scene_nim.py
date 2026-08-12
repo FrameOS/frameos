@@ -122,6 +122,37 @@ def app_output_is_byte_iter(app_config: dict) -> bool:
     return bool(outputs) and declares_byte_iter(outputs[0])
 
 
+def app_field_default(app_config: dict, name: str) -> str:
+    for field in (app_config or {}).get("fields") or []:
+        if isinstance(field, dict) and field.get("name") == name:
+            value = field.get("value")
+            if value is None or isinstance(value, (dict, list)):
+                return ""
+            if isinstance(value, bool):
+                return "true" if value else "false"
+            return str(value)
+    return ""
+
+
+def provides_target_spec(app_config: dict, field: str) -> dict | None:
+    for entry in (app_config or {}).get("fields") or []:
+        if isinstance(entry, dict) and entry.get("name") == field:
+            capabilities = entry.get("capabilities") or {}
+            spec = capabilities.get("providesTarget")
+            return spec if isinstance(spec, dict) else None
+    return None
+
+
+def into_target_spec(app_config: dict) -> dict | None:
+    for output in (app_config or {}).get("output") or []:
+        if isinstance(output, dict):
+            capabilities = output.get("capabilities") or {}
+            spec = capabilities.get("intoTarget")
+            if isinstance(spec, dict):
+                return spec
+    return None
+
+
 def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
     if field_type in ('select', 'text', 'string', 'font'):
         return 'string'
@@ -825,11 +856,15 @@ class SceneWriter:
 
             if key in code_fields_for_node:
                 source_node_id = code_fields_for_node[key]
+                value_lines = self.get_code_field_value(source_node_id)
+                decode_plan = self.plan_decode_target(node_id, key, source_node_id)
+                if decode_plan is not None:
+                    value_lines = self.wrap_with_decode_target(decode_plan, value_lines)
                 code_lines = self.coerce_code_field_lines(
                     node_id=node_id,
                     key=key,
                     source_node_id=source_node_id,
-                    code_lines=self.get_code_field_value(source_node_id),
+                    code_lines=value_lines,
                     field_types=field_types_for_node,
                     required_fields=self.required_fields[node_id],
                 )
@@ -1642,6 +1677,150 @@ var exportedScene* = ExportedScene(
                 result = self.wrap_code_with_logging(node_id, result)
 
         return result
+
+    def plan_decode_target(self, node_id: str, field: str, source_node_id: str) -> dict | None:
+        """The interpreted planner's rules, applied at codegen where the graph
+        is static (docs/value-pipeline.md, phase 4). Compiled scenes get the
+        same decode-target negotiation for the same shapes — the parity the
+        design promised — with everything dynamic refused conservatively: a
+        wired or inline field on either end means the materialized floor,
+        exactly what compiled scenes always did.
+
+        Direct producer -> consumer edges only. Forwarding chains and dynamic
+        JS producers stay interpreted-only for now; no shipped scene uses
+        either shape compiled.
+        """
+        consumer = self.nodes_by_id.get(node_id)
+        producer = self.nodes_by_id.get(source_node_id)
+        if not consumer or not producer:
+            return None
+        if producer.get("type") != "app" or self.is_js_app_node(producer):
+            return None
+
+        consumer_config = self.app_configs.get(node_id, {})
+        producer_config = self.app_configs.get(source_node_id, {})
+        spec = provides_target_spec(consumer_config, field)
+        into = into_target_spec(producer_config)
+        # An empty dict is a valid declaration meaning "all defaults".
+        if spec is None or into is None:
+            return None
+
+        def node_config(node: dict) -> dict:
+            config = node.get("data", {}).get("config", {})
+            return config if isinstance(config, dict) else {}
+
+        def wired(target_id: str, name: str) -> bool:
+            return (name in (self.field_inputs.get(target_id) or {}) or
+                    name in (self.source_field_inputs.get(target_id) or {}))
+
+        def static_value(target_id: str, node: dict, app_config: dict, name: str) -> str | None:
+            if wired(target_id, name):
+                return None
+            value = node_config(node).get(name)
+            if value is None or value == "":
+                return app_field_default(app_config, name)
+            if isinstance(value, bool):
+                return "true" if value else "false"
+            return str(value)
+
+        def constraints_hold(target_id: str, node: dict, app_config: dict, raw) -> bool:
+            for name, allowed in (raw or {}).items():
+                if isinstance(allowed, (str, int, float, bool)):
+                    allowed = [allowed]
+                value = static_value(target_id, node, app_config, name)
+                if value is None or value not in [str(a) for a in allowed]:
+                    return False
+            return True
+
+        def unset_holds(target_id: str, node: dict, names) -> bool:
+            for name in names or []:
+                if wired(target_id, name):
+                    return False
+                value = node_config(node).get(name)
+                if value is not None and value != "":
+                    return False
+            return True
+
+        # Cache is a materialization barrier for the consumer.
+        if consumer.get("data", {}).get("cache", {}).get("enabled", False):
+            return None
+        if not constraints_hold(node_id, consumer, consumer_config, spec.get("requireStatic")):
+            return None
+        if not unset_holds(node_id, consumer, spec.get("requireUnset")):
+            return None
+
+        fit_from = spec.get("fitFrom") or ""
+        fit = static_value(node_id, consumer, consumer_config, fit_from) if fit_from else ""
+        if fit_from and (fit is None or fit == ""):
+            return None  # wired or unresolvable placement: the floor
+
+        into_fits = into.get("fits") or ["cover", "contain", "stretch"]
+        spec_fits = spec.get("fits") or ["cover", "contain", "stretch"]
+        if fit not in into_fits or fit not in spec_fits:
+            return None
+
+        if not constraints_hold(source_node_id, producer, producer_config, into.get("requireStatic")):
+            return None
+        if not unset_holds(source_node_id, producer, into.get("requireUnset")):
+            return None
+
+        producer_cached = producer.get("data", {}).get("cache", {}).get("enabled", False)
+        tier = "ownedScratch" if producer_cached else "liveCanvas"
+        if tier == "ownedScratch":
+            # An app-owned scratch carries margins of its own; shapes where
+            # that changes the pixels stay unfused (contain + overwrite).
+            for clause in spec.get("ownedTargetExcludes") or []:
+                if not isinstance(clause, dict):
+                    continue
+                matches = True
+                for name, value in clause.items():
+                    actual = fit if name == fit_from else \
+                        static_value(node_id, consumer, consumer_config, name)
+                    if actual is None or actual != str(value):
+                        matches = False
+                        break
+                if matches:
+                    return None
+
+        return {"tier": tier, "fit": fit,
+                "producer": self.node_id_to_integer(source_node_id)}
+
+    def wrap_with_decode_target(self, plan: dict, value_lines: list[str]) -> list[str]:
+        ## The compiled twin of the interpreter's hint block: offer the target,
+        ## run the producer (which consumes it through the same
+        ## takeDecodeTarget handshake apps already use), then clear whatever
+        ## was not taken so nothing leaks to a sibling edge.
+        set_lines = [
+            "  if context.hasImage and not context.image.isNil and",
+            "      context.decodeTargetImage.isNil and context.decodeTargetWidth == 0:",
+        ]
+        if plan["tier"] == "liveCanvas":
+            set_lines += ["    context.decodeTargetImage = context.image"]
+        else:
+            set_lines += [
+                "    context.decodeTargetWidth = context.image.width",
+                "    context.decodeTargetHeight = context.image.height",
+                "    context.decodeTargetOwned = true",
+            ]
+        set_lines += [
+            f"    context.decodeTargetScalingMode = {nim_string_literal(plan['fit'])}",
+            f"    context.decodeTargetNodeId = {plan['producer']}.NodeId",
+            "    context.decodeTargetClaimedBy = 0.NodeId",
+        ]
+        wrapped = ["block:"] + set_lines
+        wrapped += ["  let frameosFusedValue = block:"]
+        for line in value_lines:
+            wrapped.append(f"    {line}")
+        wrapped += [
+            "  context.decodeTargetImage = nil",
+            "  context.decodeTargetScalingMode = \"\"",
+            "  context.decodeTargetWidth = 0",
+            "  context.decodeTargetHeight = 0",
+            "  context.decodeTargetNodeId = 0.NodeId",
+            "  context.decodeTargetOwned = false",
+            "  frameosFusedValue",
+        ]
+        return wrapped
 
     def wrap_code_with_logging(self, node_id: str, code_lines: list[str]) -> list[str]:
         node_integer = self.node_id_to_integer(node_id)
