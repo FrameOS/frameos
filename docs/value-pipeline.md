@@ -325,7 +325,9 @@ scenes.json — all rendered through it on the ESP32.
   divergences: the fit-boundary (a decoder overwrites where a materialized
   draw composites, so the two disagree within a pixel of the fitted rect's
   edge — held still by comparing exactly at canvas size and over the fitted
-  interior when scaled) and the nearest-sampling of streaming decoders.
+  interior when scaled) and the sampling of streaming decoders — nearest
+  when this was written; a box filter since 2026-08-12 (below), which keeps
+  the same property: exact at canvas size, resampled when scaled.
 - `test_repo_scenes_differential.nim`: the same A/B over every offline-safe
   shipped sample scene — **9 scenes pixel-exact**, with a bracketed
   self-determinism probe so a clock or a random picker (Ken Burns) is
@@ -462,8 +464,15 @@ down.
   now works, fused, without streams), or a panel where the canvas alone is
   the problem — on the 13.3E6 the canvas is 7.7MB. If built: producer emits
   scanlines at target resolution, consumers are the canvas draw and
-  pointwise ops, fallback points materialize automatically, embedded-only
-  until a quality-preserving streaming scaler exists.
+  pointwise ops, fallback points materialize automatically. The
+  quality-preserving streaming scaler this was gated on **exists as of
+  2026-08-12**: pixie's scaled decodes box-average each target pixel's exact
+  source footprint (JPEG through banded accumulators, WebP over its resident
+  buffers), byte-identical at 1:1 and on upscales, and the sample walk no
+  longer wobbles through image coordinates. Built because Wikimedia started
+  serving 960px thumbs for 800px requests, which turned the wikicommons
+  scene's designed 1:1 decode into a 5/6 nearest downscale — visibly ragged
+  through the panel dither, before/after verified on the 7.3" PhotoPainter.
 - **Pico thin-client wire format** — behind phase 3; its row-stream protocol
   would be the natural wire format for host-rendered scanlines.
 - **`requestedBounds`: bounding decodes from the consumer side.** The one
@@ -503,5 +512,7 @@ down.
 - Streaming through JS/QuickJS code nodes. Opaque forever until proven
   necessary.
 - Editor-visible pipeline configuration of any kind.
-- Host-side streaming decode before a quality-preserving scaler exists.
+- Host-side streaming decode. (Its old precondition — a quality-preserving
+  scaler — exists since 2026-08-12; what still gates it is a shipped scene
+  that needs it.)
 - Image proxies. (Standing hard rule — the fix is always on-device.)
