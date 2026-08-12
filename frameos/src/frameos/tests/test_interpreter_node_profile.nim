@@ -122,6 +122,12 @@ block every_node_reports_its_value_and_cost:
       doAssert profile{"fusion"}{"tier"}.getStr() == "liveCanvas"
       doAssert profile{"fusion"}{"input"}.getStr() == "image"
       doAssert profile{"fusion"}{"producerNodeId"}.getInt() == 3
+      doAssert profile{"fusion"}{"applied"}.getBool()
+      # Applied is the offer; claimed is the producer actually taking it. The
+      # test decoder consumes the target, so both must hold — a producer that
+      # allocates its own value while planned "fused" shows up as
+      # applied-without-claimed (how wikicommons hid a 1.7MB allocation).
+      doAssert profile{"fusion"}{"claimed"}.getBool()
     else:
       doAssert false, "unexpected node in profile: " & $profile
 

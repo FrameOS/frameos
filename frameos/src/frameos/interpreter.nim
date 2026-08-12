@@ -387,6 +387,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         if setDecodeTargetHint:
           plannedFit = fit
           context.decodeTargetNodeId = plan.producerNodeId
+          context.decodeTargetClaimedBy = 0.NodeId
           if plan.inPlaceNodeIds.len > 0:
             context.inPlaceImageNodes = plan.inPlaceNodeIds
 
@@ -896,6 +897,12 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           # on the context, another hint in flight, or a state-wired fit that
           # resolved outside the plan. `tier` is only meaningful when true.
           "applied": plannedFit.len > 0,
+          # Applied means the offer was made; claimed means the planned
+          # producer actually took it. A persistent applied-but-unclaimed edge
+          # is a producer allocating its own value while the inventory says
+          # "fused" — the wikicommons failure shape, now one log field.
+          "claimed": plannedFit.len > 0 and
+            context.decodeTargetClaimedBy == plan.producerNodeId,
           "tier": (if plannedTier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
           "plannedTier": (if plan.tier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
           "producerNodeId": plan.producerNodeId.int,

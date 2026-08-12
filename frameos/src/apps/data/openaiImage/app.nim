@@ -195,13 +195,26 @@ proc get*(self: App, context: ExecutionContext): Image =
       GC_fullCollect()
       let bytes = cast[ptr UncheckedArray[uint8]](unsafeAddr imageDataBody[0])
       if imageDataBody.len > 2 and bytes[0] == 0xFF'u8 and bytes[1] == 0xD8'u8:
-        let target = context.contextImage()
+        # The planner's offered target first — it carries the fit the consumer
+        # actually asked for and only arrives on shapes where writing into it
+        # equals the materialized draw. The bare context canvas below is the
+        # older OOM containment for unplanned shapes; it decodes with a
+        # hardcoded stretch, which is why it must stay the fallback and not
+        # the first choice.
+        var target: Image
+        var fit = fitStretch
+        let (offered, offeredScalingMode) = self.takeDecodeTarget(context)
+        if not offered.isNil:
+          target = offered
+          fit = scaledDecodeFit(offeredScalingMode)
+        else:
+          target = context.contextImage()
         if not target.isNil:
-          when compiles(decodeJpegScaledInto(imageDataBody, target)):
-            decodeJpegScaledInto(imageDataBody, target)
+          when compiles(decodeJpegScaledInto(imageDataBody, target, fit)):
+            decodeJpegScaledInto(imageDataBody, target, fit)
             result = target
           else:
-            result = decodeImageWithFallback(unsafeAddr imageDataBody[0], imageDataBody.len, target)
+            result = decodeImageWithFallback(unsafeAddr imageDataBody[0], imageDataBody.len, target, fit)
         else:
           when compiles(decodeJpegScaled(imageDataBody, imageWidth, imageHeight)):
             result = decodeJpegScaled(

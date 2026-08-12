@@ -420,6 +420,13 @@ type
     # still check that the target was actually taken before trusting it, which
     # is what `mayMutateImageInPlace` does.
     inPlaceImageNodes*: seq[NodeId]
+    # Who actually took the target this pass (0 = nobody). The plan is an
+    # offer, and an unclaimed offer is free by design — which also makes a
+    # producer that silently ignores it invisible. wikicommons allocated its
+    # own 1.7MB target for months of "fused: liveCanvas" inventory rows before
+    # a fragmented heap exposed it; this field is what lets the node profile
+    # say claimed, not just planned.
+    decodeTargetClaimedBy*: NodeId
 
   # State field definitions. Used in interpreted scenes, and to show the right form to the user
   StateField* = ref object
