@@ -588,8 +588,15 @@ capabilities + planner; teach transformers to forward targets.
       scenes, three orders of magnitude below the image side, so there is
       nothing to buy yet.
 - [ ] Exercise the byte side on hardware. None of the nine scenes on the
-      bench frame feeds a large document through `downloadUrl` → `icalJson`,
-      so the tier has host tests only.
+      bench frame feeds a large document through `downloadUrl` → `icalJson`.
+      The host side now covers the whole graph rather than units:
+      `test_byte_tier_scene.nim` renders the Calendar shape against a real
+      HTTP server with an ESP32-sized budget and pins that a 2.4MB ICS
+      crosses the edge as a `.cache` spool file and folds to 500 events.
+      What is left for the frame itself: the Calendar scene's `url` state
+      pointed at a multi-MB ICS, with `set spill_force` low enough that the
+      C side spills the body — the spool then *adopts* that file, the path
+      only hardware runs.
 
 ### Phase 3 — row streams for images (after phase 1, gated on data)
 
