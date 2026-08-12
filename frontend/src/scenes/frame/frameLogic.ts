@@ -203,7 +203,10 @@ function defaultFrameSyncViews(sync: FrameSyncStatus | null): FrameSyncViews {
   return views
 }
 
-export type DeployDrawerView = 'main' | 'sdCard' | 'script' | 'embedded'
+// 'cloudOta' / 'cloudUsb' are the cloud drawer's two deploy paths (over the
+// frame's own cloud connection vs. over a USB cable to this computer); the
+// rest are backend views.
+export type DeployDrawerView = 'main' | 'sdCard' | 'script' | 'embedded' | 'cloudOta' | 'cloudUsb'
 
 export interface FrameLogicProps {
   frameId: FrameId

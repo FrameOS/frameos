@@ -61,7 +61,10 @@ origins.
 
 `src/components/AddFramePanel.tsx` (+ `SdImageBuilder`, `Esp32CloudFlasher`,
 `lib/sd-image-patch.ts`) is the one enrollment UI: install script, SD image,
-link code, ESP32 browser flashing. `frontend/` must not import this package,
+link code, ESP32 browser flashing, and reconnecting a wiped board to an
+existing frame (the flasher's `reenrollFrame` mode — a claim token bound to
+that frame, so the board comes back as the same row instead of a duplicate).
+`frontend/` must not import this package,
 so `src/main.tsx` registers the drawer through
 `frontend/src/scenes/workspace/addFramePanelRegistry.ts`, and FramesHome
 opens it because `workspaceSurfaces.addFrameFlows.cloud === 'cloudPanel'`.

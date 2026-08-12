@@ -132,6 +132,10 @@ export function parseLogEntries(
 export const maxStateBytes = 64 * 1024;
 export const maxMetricsBytes = 16 * 1024;
 export const maxChecksumChars = 128;
+// Same ceiling the enroll route's parseHardware applies (auth-web
+// enroll/route.ts), so a hardware report the hub refreshes on hello can never
+// be larger than one enrollment would have accepted.
+export const maxHardwareBytes = 4 * 1024;
 
 export function jsonByteLength(value: unknown) {
   try {

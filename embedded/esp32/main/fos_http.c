@@ -445,18 +445,6 @@ static esp_err_t send_option(httpd_req_t *req, const char *value, const char *la
     return sendstr(req, "</option>");
 }
 
-typedef struct {
-    uint32_t flash_bytes;
-    uint32_t nvs_bytes;
-    uint32_t otadata_bytes;
-    uint32_t phy_bytes;
-    uint32_t factory_slot_bytes;
-    uint32_t ota_slots;
-    uint32_t ota_slot_bytes;
-    uint32_t ota_bytes;
-    uint32_t state_bytes;
-} fos_storage_info_t;
-
 static uint32_t partition_size(esp_partition_type_t type, esp_partition_subtype_t subtype,
                                const char *label)
 {
@@ -464,7 +452,7 @@ static uint32_t partition_size(esp_partition_type_t type, esp_partition_subtype_
     return partition ? partition->size : 0;
 }
 
-static void collect_storage_info(fos_storage_info_t *info)
+void fos_http_collect_storage_info(fos_storage_info_t *info)
 {
     memset(info, 0, sizeof(*info));
     if (esp_flash_get_size(NULL, &info->flash_bytes) != ESP_OK) {
@@ -710,7 +698,7 @@ char *fos_http_status_json(void)
     const char *scene_json = frameos_nim_scene_info_json();
     if (!scene_json || !scene_json[0]) scene_json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
     fos_storage_info_t storage;
-    collect_storage_info(&storage);
+    fos_http_collect_storage_info(&storage);
 
     char *cloud_url = json_escape_dup(config->cloud_url);
     char *cloud_frame_id = json_escape_dup(fos_cloud_frame_id());

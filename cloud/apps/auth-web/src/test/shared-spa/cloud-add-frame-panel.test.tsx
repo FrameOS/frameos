@@ -276,4 +276,61 @@ describe("AddFramePanel", () => {
 
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  // Re-enrollment used to live in the deploy drawer of the frame being
+  // repaired, which meant finding the right frame first — backwards for the
+  // actual situation ("I have a wiped board in my hand"). It is enrollment,
+  // so it lives here: pick the frame, then the flasher runs with a claim
+  // token bound to it.
+  it("reconnects a wiped board through a frame picker", async () => {
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/frames/claim-tokens")) {
+        return Promise.resolve(
+          Response.json({ claim_token: "FRCT_from_server" }),
+        );
+      }
+      if (url.includes("/api/frames")) {
+        return Promise.resolve(
+          Response.json({
+            frames: [
+              // Only esp32 frames qualify — a Pi's identity is not in
+              // flashable NVS, so it must not be offered.
+              { id: "f-1", name: "Kitchen", hardware: { platform: "esp32-s3", panel: "EPD_7in3e" }, connected: false },
+              { id: "f-2", name: "Hallway Pi", hardware: { platform: "pi-zero2w" }, connected: true },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(Response.json({}));
+    });
+    renderPanel();
+
+    openPath(/reconnect a board/i);
+    // The flasher only mounts once a target frame is chosen: it mints a
+    // token bound to that frame, so there is no meaningful "unbound" state.
+    expect(screen.queryByTestId("esp32-flasher")).toBeNull();
+    const kitchen = await screen.findByRole("button", { name: /Kitchen/ });
+    expect(screen.queryByRole("button", { name: /Hallway Pi/ })).toBeNull();
+
+    fireEvent.click(kitchen);
+    expect(screen.getByTestId("esp32-flasher")).toBeDefined();
+  });
+
+  it("points a fleet with no esp32 frames at plain enrollment instead", async () => {
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/api/frames/claim-tokens")) {
+        return Promise.resolve(
+          Response.json({ claim_token: "FRCT_from_server" }),
+        );
+      }
+      return Promise.resolve(Response.json({ frames: [] }));
+    });
+    renderPanel();
+
+    openPath(/reconnect a board/i);
+    await screen.findByText(/no ESP32 frames to reconnect to/i);
+    expect(screen.queryByTestId("esp32-flasher")).toBeNull();
+  });
 });

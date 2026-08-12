@@ -59,7 +59,18 @@ function StatusRow({ label, value }: { label: string; value: string }): JSX.Elem
   )
 }
 
-export function EmbeddedUsbSetup({ frame }: { frame: FrameType }): JSX.Element | null {
+export function EmbeddedUsbSetup({
+  frame,
+  title = 'USB setup',
+  description = 'Provision the board over its USB serial console: check its status, join a Wi-Fi network, or reset it — no network connection needed.',
+}: {
+  frame: FrameType
+  // The card names itself for its context: the backend embedded view mounts
+  // it as the generic "USB setup", while the cloud deploy drawer's USB view —
+  // where everything is USB — labels it by what it actually does.
+  title?: string
+  description?: string
+}): JSX.Element | null {
   const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
   const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
   const usbLogStreamState = usbLogStreamStatesByFrameId[frame.id]
@@ -204,11 +215,8 @@ export function EmbeddedUsbSetup({ frame }: { frame: FrameType }): JSX.Element |
   return (
     <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
       <div>
-        <div className="text-sm font-semibold text-[color:var(--tool-strong)]">USB setup</div>
-        <div className="frame-tool-muted mt-1 text-sm leading-5">
-          Provision the board over its USB serial console: check its status, join a Wi-Fi network, or reset it — no
-          network connection needed.
-        </div>
+        <div className="text-sm font-semibold text-[color:var(--tool-strong)]">{title}</div>
+        <div className="frame-tool-muted mt-1 text-sm leading-5">{description}</div>
       </div>
 
       {!webSerialSupported ? (

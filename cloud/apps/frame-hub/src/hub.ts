@@ -59,6 +59,7 @@ import {
   frameUpdateEvent,
   isAcceptableChecksum,
   isRecord,
+  maxHardwareBytes,
   maxMetricsBytes,
   maxSceneIdChars,
   maxStateBytes,
@@ -532,6 +533,13 @@ export async function startFrameHub(
         ...(isAcceptableChecksum(hello.scenes_checksum)
           ? { scenesChecksum: hello.scenes_checksum }
           : {}),
+        // The device reports its hardware facts (panel, memory, partition
+        // sizes) on every hello; without this refresh the enrollment-time
+        // snapshot goes stale the first time the panel or firmware changes.
+        ...(isRecord(hello.hardware) &&
+        withinJsonByteLimit(hello.hardware, maxHardwareBytes)
+          ? { hardware: hello.hardware }
+          : {}),
       })
       .where(eq(frames.id, frameId));
 
@@ -989,6 +997,7 @@ export async function startFrameHub(
           ...(typeof msg.scenes_checksum === "string"
             ? { scenes_checksum: msg.scenes_checksum }
             : {}),
+          ...(isRecord(msg.hardware) ? { hardware: msg.hardware } : {}),
         };
       } else if (msg.type === "auth") {
         const signature =

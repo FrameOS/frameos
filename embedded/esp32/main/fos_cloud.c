@@ -13,9 +13,11 @@
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
+#include "esp_chip_info.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
+#include "esp_mac.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_system.h"
@@ -26,6 +28,7 @@
 #include "nvs.h"
 
 #include "fos_assets.h"
+#include "fos_assets_sd.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_mem.h"
@@ -546,6 +549,58 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddStringToObject(hw, "panel", config->panel);
     cJSON_AddNumberToObject(hw, "width", fos_display_present() ? fos_display_width() : 0);
     cJSON_AddNumberToObject(hw, "height", fos_display_present() ? fos_display_height() : 0);
+
+    /* Board facts for the cloud deploy drawer, mirroring the USB console's
+     * status JSON (fos_http_status_json). Sent on hello, so the control
+     * plane's copy refreshes on every connect — a firmware update or a
+     * `set panel` over USB shows up after the next reboot, not never.
+     * Totals only: free-heap style numbers travel as metrics. */
+    uint8_t mac[6];
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
+        char mac_str[18];
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        cJSON_AddStringToObject(hw, "mac", mac_str);
+    }
+    esp_chip_info_t chip;
+    esp_chip_info(&chip);
+    /* revision is major*100 + minor (esp_chip_info.h) */
+    cJSON_AddNumberToObject(hw, "chipRevision", chip.revision);
+    cJSON_AddNumberToObject(hw, "chipCores", chip.cores);
+
+    cJSON *memory = cJSON_AddObjectToObject(hw, "memory");
+    if (memory) {
+        cJSON_AddNumberToObject(memory, "internalHeapBytes",
+                                (double)heap_caps_get_total_size(MALLOC_CAP_INTERNAL));
+        cJSON_AddNumberToObject(memory, "psramBytes",
+                                (double)heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
+    }
+
+    fos_storage_info_t info;
+    fos_http_collect_storage_info(&info);
+    cJSON *storage = cJSON_AddObjectToObject(hw, "storage");
+    if (storage) {
+        cJSON_AddNumberToObject(storage, "flashBytes", info.flash_bytes);
+        cJSON_AddNumberToObject(storage, "nvsBytes", info.nvs_bytes);
+        cJSON_AddNumberToObject(storage, "otadataBytes", info.otadata_bytes);
+        cJSON_AddNumberToObject(storage, "phyBytes", info.phy_bytes);
+        cJSON_AddNumberToObject(storage, "factorySlotBytes", info.factory_slot_bytes);
+        cJSON_AddNumberToObject(storage, "otaSlots", info.ota_slots);
+        cJSON_AddNumberToObject(storage, "otaSlotBytes", info.ota_slot_bytes);
+        cJSON_AddNumberToObject(storage, "otaBytes", info.ota_bytes);
+        cJSON_AddNumberToObject(storage, "stateBytes", info.state_bytes);
+    }
+    cJSON *ota = cJSON_AddObjectToObject(hw, "ota");
+    if (ota) {
+        cJSON_AddBoolToObject(ota, "supported", info.ota_slots > 0);
+        cJSON_AddNumberToObject(ota, "slotBytes", info.ota_slot_bytes);
+    }
+    cJSON *sd = cJSON_AddObjectToObject(hw, "sd");
+    if (sd) {
+        cJSON_AddBoolToObject(sd, "enabled", config->assets_sd.enabled);
+        cJSON_AddBoolToObject(sd, "mounted", fos_assets_sd_mounted());
+        cJSON_AddNumberToObject(sd, "capacityBytes", (double)fos_assets_sd_capacity_bytes());
+    }
 }
 
 /* Build the /api/frames/enroll body. Caller frees with cJSON_free(). */

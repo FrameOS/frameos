@@ -56,7 +56,14 @@ function frameToolFromSearch(search: Record<string, unknown>): WorkspaceUtilityP
 
 function deployDrawerViewFromSearch(search: Record<string, unknown>): DeployDrawerView | undefined {
   const view = searchValue(search, 'deployView')
-  return view === 'sdCard' || view === 'script' || view === 'main' || view === 'embedded' ? view : undefined
+  return view === 'sdCard' ||
+    view === 'script' ||
+    view === 'main' ||
+    view === 'embedded' ||
+    view === 'cloudOta' ||
+    view === 'cloudUsb'
+    ? view
+    : undefined
 }
 
 export function frameToolScrollKey(frameId: FrameId, panel: WorkspaceUtilityPanel): string {

@@ -57,10 +57,15 @@ const releasePlatformByHardware: Record<string, string> = {
   'esp32-c3': 'esp32-c3-generic',
 }
 
-interface ReleaseFirmwareAsset {
+export interface ReleaseFirmwareAsset {
   name: string
   platform: string
   size: number
+}
+
+export interface ReleaseFirmwareListing {
+  assets?: ReleaseFirmwareAsset[]
+  release?: string
 }
 
 /** Which published asset fits the hardware the device reported at enrollment. */
@@ -69,15 +74,22 @@ export function releaseFirmwarePlatform(frame: FrameType): string {
   return releasePlatformByHardware[platform] ?? 'esp32-s3-generic'
 }
 
-async function downloadReleaseFirmware(
-  platform: string,
-  log: (message: string) => void
-): Promise<{ bytes: Uint8Array; name: string; release: string }> {
+/** The published release and its assets — also how the deploy drawer learns
+ * "latest is vY" to compare against the device-reported frameos_version.
+ * Note `release` keeps its "v" prefix; device versions do not. */
+export async function fetchReleaseFirmwareListing(): Promise<ReleaseFirmwareListing> {
   const listingResponse = await apiFetch(firmwareListingUrl)
   if (!listingResponse.ok) {
     throw new Error('Could not look up the latest FrameOS release.')
   }
-  const listing = (await listingResponse.json()) as { assets?: ReleaseFirmwareAsset[]; release?: string }
+  return (await listingResponse.json()) as ReleaseFirmwareListing
+}
+
+async function downloadReleaseFirmware(
+  platform: string,
+  log: (message: string) => void
+): Promise<{ bytes: Uint8Array; name: string; release: string }> {
+  const listing = await fetchReleaseFirmwareListing()
   const asset = listing.assets?.find((entry) => entry.platform === platform)
   if (!asset) {
     throw new Error(`Release ${listing.release || '?'} publishes no ${platform} firmware to update to.`)

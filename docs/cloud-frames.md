@@ -235,6 +235,12 @@ profile they target rather than relying on the cap.
    it is how a frame whose enrollment response under-reported the grant
    learns it may send logs and metrics without re-enrolling.
 
+The hello's `hardware` object is the same shape enrollment sends; a provider
+should persist it on each successful session start so its copy tracks the
+device (cloud.frameos.net does, size-capped at the same 4 KiB the enroll
+route applies). Without that refresh the enrollment-time snapshot goes stale
+the first time the panel or firmware changes.
+
 The provider must verify the signature against the enrolled public key and
 close the socket on mismatch, with WebSocket close code **4401** (also used
 when a frame is revoked mid-session). A challenge that simply goes
@@ -641,7 +647,14 @@ device key / access token) back. Enrollment state is surfaced as
 The ESP32 `hardware` object sends the chip as `platform` (`"esp32-s3"` or
 `"esp32-c3"`; older firmware sent the plain `"esp32"`, and consumers
 prefix-match) with the panel driver name as both `device` and `panel`, plus
-`width`/`height`; a permanent
+`width`/`height`. 2026.8+ firmware adds the board facts the USB console's
+status JSON already reported, so the cloud deploy drawer can show them
+without a cable: `mac`, `chipRevision` (major×100+minor), `chipCores`,
+`memory` (`internalHeapBytes`, `psramBytes` — totals; free values travel as
+metrics), `storage` (partition-map byte counts: `flashBytes`, `nvsBytes`,
+`otadataBytes`, `phyBytes`, `factorySlotBytes`, `otaSlots`, `otaSlotBytes`,
+`otaBytes`, `stateBytes`), `ota` (`supported`, `slotBytes`) and `sd`
+(`enabled`, `mounted`, `capacityBytes`). A permanent
 enrollment rejection (HTTP 400) erases the claim token on-device and shows
 `error` until a fresh token is provisioned. `set cloud_url` refuses a
 provider URL that would carry the claim token in the clear (see "The

@@ -55,10 +55,13 @@ export interface FrameType {
    * owner toggles it per frame; absent means "not reported" (hub broadcasts
    * that do not carry the link), never "off". */
   service_settings_enabled?: boolean
-  /** The hardware object the device reported at cloud enrollment (frames.hardware
-   * jsonb on the cloud; absent on backend-managed frames). `platform` drives the
-   * device-profile capability gating in workspaceSurfaces.ts: an "esp32" frame
-   * implements only a subset of the management verbs (docs/cloud-frames.md). */
+  /** The hardware object the device reported at cloud enrollment and on every
+   * hub hello (frames.hardware jsonb on the cloud; absent on backend-managed
+   * frames). `platform` drives the device-profile capability gating in
+   * workspaceSurfaces.ts: an "esp32" frame implements only a subset of the
+   * management verbs (docs/cloud-frames.md). Everything past `color` arrived
+   * with 2026.8 firmware (fos_cloud.c add_hardware_json) — older devices
+   * report only the first six fields, so all of it stays optional. */
   hardware?: {
     platform?: string | null
     device?: string | null
@@ -66,7 +69,42 @@ export interface FrameType {
     width?: number | null
     height?: number | null
     color?: string | null
+    mac?: string | null
+    /** major*100 + minor, as esp_chip_info reports it */
+    chipRevision?: number | null
+    chipCores?: number | null
+    memory?: {
+      internalHeapBytes?: number | null
+      psramBytes?: number | null
+    } | null
+    /** Partition-map byte counts, mirroring the USB console's status JSON. */
+    storage?: {
+      flashBytes?: number | null
+      nvsBytes?: number | null
+      otadataBytes?: number | null
+      phyBytes?: number | null
+      factorySlotBytes?: number | null
+      otaSlots?: number | null
+      otaSlotBytes?: number | null
+      otaBytes?: number | null
+      stateBytes?: number | null
+    } | null
+    ota?: {
+      supported?: boolean | null
+      slotBytes?: number | null
+    } | null
+    sd?: {
+      enabled?: boolean | null
+      mounted?: boolean | null
+      capacityBytes?: number | null
+    } | null
   } | null
+  /** Cloud only: the firmware version the device itself reports, refreshed on
+   * every hub hello/state. Compare against the latest published release
+   * (GET /api/frames/firmware, whose `release` keeps its "v" prefix). */
+  frameos_version?: string | null
+  /** Cloud only: bumped whenever the hub hears from the device. */
+  last_seen_at?: string | null
   frame_host: string
   frame_port: number
   frame_access_key: string

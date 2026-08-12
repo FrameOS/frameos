@@ -11,6 +11,7 @@ import {
   CloudArrowUpIcon,
   ClipboardDocumentIcon,
   CommandLineIcon,
+  CpuChipIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
@@ -32,7 +33,13 @@ import {
   partialRefreshDefaultsByDevice,
   partialRefreshDevices,
 } from '../../devices'
-import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
+import { embeddedUsbUploadTimeoutMs, framesModel, type RemoteTaskTransport } from '../../models/framesModel'
+import {
+  embeddedUsbApiCanUse,
+  embeddedUsbLogsModel,
+  isEmbeddedUsbLogStreamOpen,
+  runEmbeddedUsbApiCommand,
+} from '../../models/embeddedUsbLogsModel'
 import type {
   FrameOSSettings,
   FrameSyncChoice,
@@ -63,10 +70,13 @@ import { buildRemoteUpgradeNotice, frameosGitHubReleaseUrl, type RemoteUpgradeNo
 import { frameCompilationModeOptions } from '../../utils/frameBuildOptions'
 import { logsLogic } from '../frame/panels/Logs/logsLogic'
 import { settingsLogic } from '../settings/settingsLogic'
-import { EmbeddedUsbFirmwareUpdate } from './EmbeddedUsbFirmwareUpdate'
-import { registeredReenrollFramePanel } from './reenrollFramePanelRegistry'
+import {
+  EmbeddedUsbFirmwareUpdate,
+  fetchReleaseFirmwareListing,
+  releaseFirmwarePlatform,
+} from './EmbeddedUsbFirmwareUpdate'
 import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
-import { EmbeddedWebFlasher } from './EmbeddedWebFlasher'
+import { EmbeddedUsbConnectionButton, EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { workspaceLogic } from './workspaceLogic'
 import {
@@ -2008,136 +2018,831 @@ function EmbeddedFirmwareSection({
   )
 }
 
+/* ------------------------------------------------------------------ cloud */
+
+function normalizedFirmwareVersion(value?: string | null): string | null {
+  const trimmed = (value ?? '').trim().replace(/^v/i, '')
+  return trimmed || null
+}
+
+interface CloudFirmwareReleaseInfo {
+  loading: boolean
+  error: string | null
+  /** Latest published release, normalized without the "v" prefix so it
+   * compares against the device-reported frameos_version. */
+  release: string | null
+  /** Byte size of this frame's published firmware asset. */
+  assetSize: number | null
+}
+
+function useCloudFirmwareRelease(frame: FrameType, enabled: boolean): CloudFirmwareReleaseInfo {
+  const [info, setInfo] = useState<CloudFirmwareReleaseInfo>({
+    loading: enabled,
+    error: null,
+    release: null,
+    assetSize: null,
+  })
+  useEffect(() => {
+    if (!enabled) {
+      return
+    }
+    let cancelled = false
+    setInfo({ loading: true, error: null, release: null, assetSize: null })
+    fetchReleaseFirmwareListing()
+      .then((listing) => {
+        if (cancelled) {
+          return
+        }
+        const platform = releaseFirmwarePlatform(frame)
+        const asset = listing.assets?.find((entry) => entry.platform === platform)
+        setInfo({
+          loading: false,
+          error: null,
+          release: normalizedFirmwareVersion(listing.release),
+          assetSize: asset?.size ?? null,
+        })
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return
+        }
+        setInfo({
+          loading: false,
+          error: error instanceof Error ? error.message : String(error),
+          release: null,
+          assetSize: null,
+        })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [frame.id, enabled])
+  return info
+}
+
+function formatUptime(seconds?: number | null): string | null {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) {
+    return null
+  }
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (days > 0) {
+    return `${days}d ${hours}h`
+  }
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`
+  }
+  return `${minutes}m`
+}
+
+type CloudStatusTone = 'ok' | 'warn' | 'muted'
+
+function CloudStatusRow({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string
+  value: ReactNode
+  detail?: ReactNode
+  tone: CloudStatusTone
+}): JSX.Element {
+  return (
+    <div className="flex gap-2.5 text-sm">
+      <span
+        className={clsx(
+          'mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full',
+          tone === 'ok' ? 'bg-emerald-400' : tone === 'warn' ? 'bg-amber-400' : 'bg-slate-300/80'
+        )}
+      />
+      <div className="min-w-0 flex-1">
+        <span className="frame-tool-muted mr-2 text-xs font-semibold uppercase tracking-wide">{label}</span>
+        <span className="font-semibold text-[color:var(--tool-strong)]">{value}</span>
+        {detail ? <div className="frame-tool-muted mt-0.5 text-xs leading-4">{detail}</div> : null}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The "what is there to update" summary every cloud deploy view opens with:
+ * connection, firmware version vs. the published release, and whether the
+ * scenes/settings on the device match what this account has assigned.
+ */
+function CloudDeployStatus({
+  frame,
+  isEsp32,
+  releaseInfo,
+}: {
+  frame: FrameType
+  isEsp32: boolean
+  releaseInfo: CloudFirmwareReleaseInfo
+}): JSX.Element {
+  const { frameForm, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
+  const scenes = frameForm?.scenes ?? frame.scenes ?? []
+  const offline = frame.connected === false
+  const neverEnrolled = frame.status === 'pending'
+  const deviceVersion = normalizedFirmwareVersion(frame.frameos_version)
+
+  let connection: JSX.Element
+  if (neverEnrolled) {
+    connection = (
+      <CloudStatusRow
+        label="Connection"
+        value="No board enrolled"
+        detail="No device has claimed this frame yet — only the USB path below can reach it."
+        tone="warn"
+      />
+    )
+  } else if (offline) {
+    connection = (
+      <CloudStatusRow
+        label="Connection"
+        value="Offline"
+        detail={
+          frame.last_seen_at
+            ? `Last seen ${formatSyncTimestamp(
+                frame.last_seen_at
+              )}. Pushes queue on the account and apply when it reconnects.`
+            : 'Pushes queue on the account and apply when it reconnects.'
+        }
+        tone="warn"
+      />
+    )
+  } else {
+    connection = (
+      <CloudStatusRow
+        label="Connection"
+        value="Online"
+        detail="Connected to the cloud right now — pushes apply immediately."
+        tone="ok"
+      />
+    )
+  }
+
+  let firmware: JSX.Element | null = null
+  if (isEsp32) {
+    if (deviceVersion && releaseInfo.release) {
+      firmware =
+        deviceVersion === releaseInfo.release ? (
+          <CloudStatusRow
+            label="Firmware"
+            value={deviceVersion}
+            detail="Up to date with the latest release."
+            tone="ok"
+          />
+        ) : (
+          <CloudStatusRow
+            label="Firmware"
+            value={`${deviceVersion} → ${releaseInfo.release}`}
+            detail="A newer firmware release is published."
+            tone="warn"
+          />
+        )
+    } else if (deviceVersion) {
+      firmware = (
+        <CloudStatusRow
+          label="Firmware"
+          value={deviceVersion}
+          detail={
+            releaseInfo.loading
+              ? 'Checking the latest published release…'
+              : releaseInfo.error ?? 'Could not determine the latest published release.'
+          }
+          tone="muted"
+        />
+      )
+    } else {
+      firmware = (
+        <CloudStatusRow
+          label="Firmware"
+          value="Not reported yet"
+          detail="The device reports its firmware version when it connects."
+          tone="muted"
+        />
+      )
+    }
+  }
+
+  const scenesValue = `${scenes.length} scene${scenes.length === 1 ? '' : 's'}`
+  let scenesRow: JSX.Element
+  if (unsavedChangeDetails.length > 0) {
+    scenesRow = (
+      <CloudStatusRow
+        label="Scenes & settings"
+        value={`${scenesValue} · ${unsavedChangeDetails.length} unsaved change${
+          unsavedChangeDetails.length === 1 ? '' : 's'
+        }`}
+        detail={unsavedChangeDetails.map((change) => change.label).join(', ')}
+        tone="warn"
+      />
+    )
+  } else if (!frame.scenes_checksum) {
+    scenesRow = (
+      <CloudStatusRow
+        label="Scenes & settings"
+        value={scenesValue}
+        detail="The device has not confirmed receiving any scenes yet."
+        tone="muted"
+      />
+    )
+  } else if (frame.assigned_checksum && frame.assigned_checksum === frame.scenes_checksum) {
+    scenesRow = (
+      <CloudStatusRow
+        label="Scenes & settings"
+        value={scenesValue}
+        detail="No unsaved changes; the device has applied the last push."
+        tone="ok"
+      />
+    )
+  } else {
+    scenesRow = (
+      <CloudStatusRow
+        label="Scenes & settings"
+        value={scenesValue}
+        detail="The device has not confirmed the last push yet."
+        tone="warn"
+      />
+    )
+  }
+
+  return (
+    <section className="space-y-2">
+      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>What's on the frame</DrawerHeading>
+      <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+        {connection}
+        {firmware}
+        {scenesRow}
+      </div>
+    </section>
+  )
+}
+
+function CloudDeployChoiceButton({
+  icon,
+  title,
+  description,
+  onClick,
+}: {
+  icon: JSX.Element
+  title: string
+  description: string
+  onClick: () => void
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="frame-tool-card w-full rounded-[22px] p-4 text-left transition hover:border-blue-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <div className="flex items-start gap-3">
+        <span className="frameos-primary-text mt-0.5 shrink-0">{icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1 text-sm font-semibold text-[color:var(--tool-strong)]">
+            {title}
+            <ChevronRightIcon className="h-4 w-4 shrink-0" />
+          </span>
+          <span className="frame-tool-muted mt-1 block text-sm leading-5">{description}</span>
+        </span>
+      </div>
+    </button>
+  )
+}
+
+/**
+ * The push half of a cloud deploy: settings save + one checksummed
+ * set_scenes (frameLogic's cloudSaveAndDeploy). Shared between the esp32
+ * over-the-air view and the plain view non-esp32 cloud frames get.
+ */
+function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: () => void }): JSX.Element {
+  const { unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
+  const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
+  const offline = frame.connected === false
+
+  return (
+    <section className="space-y-2">
+      <DrawerHeading>Scenes &amp; settings</DrawerHeading>
+      <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+        <div className="frame-tool-muted text-sm leading-5">
+          Saves this frame's settings and scenes to your cloud account, then pushes the scene list to the device.{' '}
+          {offline
+            ? 'The frame is offline right now — the push is queued and applied when it reconnects.'
+            : 'The frame applies them as soon as it syncs.'}
+        </div>
+        <SummaryRows
+          items={[
+            {
+              label: 'This push sends',
+              value:
+                unsavedChangeDetails.length === 0
+                  ? 'No unsaved changes — this re-sends the current scenes'
+                  : unsavedChangeDetails.map((change) => change.label).join(', '),
+            },
+          ]}
+        />
+        <button
+          type="button"
+          title="Save this frame's settings and push its scenes to the device"
+          onClick={() => {
+            saveAndDeployFrame()
+            onPushed()
+          }}
+          className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <CloudArrowUpIcon className="h-4 w-4" />
+          Push scenes &amp; settings
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function CloudOtaDeployView({
+  frame,
+  releaseInfo,
+  onBack,
+  onPushed,
+}: {
+  frame: FrameType
+  releaseInfo: CloudFirmwareReleaseInfo
+  onBack: () => void
+  onPushed: () => void
+}): JSX.Element {
+  const { updateFrameFirmware } = useActions(framesModel)
+  const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
+  const mode = workspaceMode()
+  const canUpdateFirmware = frameMenuActionIsAllowed(mode, 'updateFirmware', frame)
+  const firmwareDisabledReason = frameMenuActionDisabledReason(mode, 'updateFirmware', frame)
+  const deviceVersion = normalizedFirmwareVersion(frame.frameos_version)
+  const upToDate = Boolean(deviceVersion && releaseInfo.release && deviceVersion === releaseInfo.release)
+
+  return (
+    <>
+      <section className="space-y-2">
+        <DrawerHeading>
+          <span className="inline-flex items-center gap-2">
+            <BackToDeployButton onClick={onBack} />
+            <span>Over the air</span>
+          </span>
+        </DrawerHeading>
+        <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+          <div className="frame-tool-muted text-sm leading-5">
+            The frame keeps an outbound connection open to your cloud account — the cloud never connects in to it.
+            Everything you deploy here is saved to the account first, then delivered over that connection: immediately
+            while the frame is online, otherwise queued until it next reconnects. The frame confirms every push, which
+            is what the sync state above reflects.
+          </div>
+          <button
+            type="button"
+            onClick={() => openFrameToolBehindDrawer(frame.id, 'logs')}
+            className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <CommandLineIcon className="h-4 w-4" />
+            Follow along in Logs
+          </button>
+        </div>
+      </section>
+
+      <CloudScenesPushCard frame={frame} onPushed={onPushed} />
+
+      {canUpdateFirmware ? (
+        <section className="space-y-2">
+          <DrawerHeading>Firmware</DrawerHeading>
+          <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+            <div className="frame-tool-muted text-sm leading-5">
+              Queues an update notification for the frame (it stays valid for 24 hours). When the frame picks it up, it
+              downloads the latest released image from the cloud, verifies the signature on the device itself, installs
+              it into the spare OTA slot and reboots. Progress shows up in Logs as <code>ota:cloud</code> lines.
+            </div>
+            {upToDate ? (
+              <div className="frame-tool-muted text-xs leading-4">
+                The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
+              </div>
+            ) : null}
+            <button
+              type="button"
+              title={firmwareDisabledReason ?? 'Queue a firmware update notification'}
+              disabled={Boolean(firmwareDisabledReason)}
+              onClick={() => updateFrameFirmware(frame.id)}
+              className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+            >
+              <CloudArrowDownIcon className="h-4 w-4" />
+              Update firmware
+            </button>
+          </div>
+        </section>
+      ) : null}
+    </>
+  )
+}
+
+/**
+ * The USB counterpart of CloudScenesPushCard: `usb_api upload-scenes` with
+ * the same scene bodies the over-the-air push sends (the workspace hydrates
+ * them into frameForm.scenes). For a board that cannot reach the cloud this
+ * is the only way to get scenes onto it; the cloud remains the authority —
+ * when the frame reconnects, its hello reports a different checksum and the
+ * hub re-pushes the assigned set.
+ */
+function CloudUsbScenesPushCard({ frame }: { frame: FrameType }): JSX.Element {
+  const { frameForm } = useValues(frameLogic({ frameId: frame.id }))
+  const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
+  const usbLogStreamOpen = isEmbeddedUsbLogStreamOpen(usbLogStreamStatesByFrameId[frame.id])
+  const usbConnected = usbLogStreamOpen || embeddedUsbApiCanUse(frame.id)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const scenes = frameForm?.scenes ?? frame.scenes ?? []
+
+  const pushScenes = async (): Promise<void> => {
+    setBusy(true)
+    setMessage(null)
+    setError(null)
+    try {
+      const payload = new TextEncoder().encode(JSON.stringify(scenes))
+      await runEmbeddedUsbApiCommand(frame.id, 'upload-scenes', {
+        payload,
+        timeoutMs: embeddedUsbUploadTimeoutMs(payload.byteLength),
+      })
+      setMessage(
+        `Pushed ${scenes.length} scene${scenes.length === 1 ? '' : 's'} over USB. ` +
+          'The cloud reconciles the sync state when the frame next connects.'
+      )
+    } catch (pushError) {
+      setError(pushError instanceof Error ? pushError.message : String(pushError))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="space-y-2">
+      <DrawerHeading>Push scenes &amp; settings</DrawerHeading>
+      <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+        <div className="frame-tool-muted text-sm leading-5">
+          Copies the workspace's current scenes onto the board over the cable, so it can render them with no network at
+          all. Settings stay cloud-delivered: the frame picks them up — and confirms the scene push — the next time it
+          connects.
+        </div>
+        {!usbConnected ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <EmbeddedUsbConnectionButton frame={frame} />
+            <span className="frame-tool-muted text-xs leading-4">Connect the board over USB to push scenes.</span>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={pushScenes}
+            disabled={busy || scenes.length === 0}
+            title={scenes.length === 0 ? 'This frame has no scenes to push' : 'Send the current scenes over USB'}
+            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+          >
+            {busy ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
+            {busy ? 'Pushing scenes' : 'Push scenes over USB'}
+          </button>
+        )}
+        {message ? <div className="text-xs font-semibold text-green-600">{message}</div> : null}
+        {error ? <div className="text-xs font-semibold text-red-500">{error}</div> : null}
+      </div>
+    </section>
+  )
+}
+
+function CloudUsbDeployView({ frame, onBack }: { frame: FrameType; onBack?: () => void }): JSX.Element {
+  const showUsbJtagPortGuidance = needsEsp32UsbJtagPortGuidance(frame)
+
+  return (
+    <>
+      <section className="space-y-2">
+        <DrawerHeading>
+          <span className="inline-flex items-center gap-2">
+            {onBack ? <BackToDeployButton onClick={onBack} /> : null}
+            <span>Over USB</span>
+          </span>
+        </DrawerHeading>
+        <div className="frame-tool-card space-y-2 rounded-[22px] p-4">
+          <div className="frame-tool-muted text-sm leading-5">
+            Everything here talks to the board over its USB serial port, straight from this browser — it works with no
+            network at all.
+          </div>
+          {showUsbJtagPortGuidance ? (
+            <div className="frame-tool-muted text-xs leading-4">
+              This board can appear as two serial ports. Choose{' '}
+              <span className="font-semibold text-[color:var(--tool-strong)]">USB JTAG/serial debug unit</span>; a{' '}
+              <span className="font-semibold text-[color:var(--tool-strong)]">USB Single Serial</span> port can flash
+              but not provision.
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      {/* Mirrors the over-the-air view's order: firmware and scenes first —
+          the two things a deploy is — then Wi-Fi repair as the maintenance
+          card. Re-linking a wiped board is enrollment, not deployment, so it
+          lives in the "Add frame" panel. */}
+      <section className="space-y-2">
+        <DrawerHeading>Update firmware</DrawerHeading>
+        <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+          <div className="frame-tool-muted text-sm leading-5">
+            Flashes the latest released firmware around the board's settings partition: it keeps its Wi-Fi credentials,
+            its settings and its link to this account. No re-enrollment needed.
+          </div>
+          <EmbeddedUsbFirmwareUpdate frame={frame} />
+        </div>
+      </section>
+
+      <CloudUsbScenesPushCard frame={frame} />
+
+      <EmbeddedUsbSetup
+        frame={frame}
+        title="Wi-Fi & device status"
+        description="Check the board over its serial console, join a different Wi-Fi network, or restart it."
+      />
+
+      <div className="frame-tool-muted text-xs leading-4">
+        A board that was factory-reset or fully erased has lost its link to this frame — re-connect it from the "Add
+        frame" panel, which can bind it back to an existing frame.
+      </div>
+    </>
+  )
+}
+
+const cloudFlashSegmentColors: Record<string, string> = {
+  nvs: '#0f766e',
+  otadata: '#7c3aed',
+  phy: '#0369a1',
+  factory: '#64748b',
+  ota_0: '#16a34a',
+  ota_1: '#2563eb',
+  state: '#b45309',
+  free: '#e2e8f0',
+}
+
+interface CloudFlashSegment {
+  label: string
+  bytes: number
+  color: string
+}
+
+function cloudFlashSegments(storage: NonNullable<NonNullable<FrameType['hardware']>['storage']>): CloudFlashSegment[] {
+  const segments: CloudFlashSegment[] = []
+  const push = (label: string, bytes?: number | null): void => {
+    if (typeof bytes === 'number' && bytes > 0) {
+      segments.push({ label, bytes, color: cloudFlashSegmentColors[label] ?? '#64748b' })
+    }
+  }
+  push('nvs', storage.nvsBytes)
+  push('otadata', storage.otadataBytes)
+  push('phy', storage.phyBytes)
+  push('factory', storage.factorySlotBytes)
+  const otaSlots = storage.otaSlots ?? 0
+  for (let slot = 0; slot < otaSlots; slot += 1) {
+    push(`ota_${slot}`, storage.otaSlotBytes)
+  }
+  push('state', storage.stateBytes)
+  const flashBytes = storage.flashBytes ?? 0
+  const known = segments.reduce((total, segment) => total + segment.bytes, 0)
+  // The remainder is the bootloader, the partition table and any unallocated
+  // tail — the device reports partition sizes, not offsets.
+  push('free', flashBytes - known)
+  return flashBytes > 0 ? segments : []
+}
+
+/**
+ * Everything the cloud knows about the physical board, in one place: the
+ * hardware facts the device reports on every connect (fos_cloud.c
+ * add_hardware_json — full detail needs 2026.8+ firmware) plus the live
+ * numbers from its newest metrics sample.
+ */
+function CloudHardwareDetails({
+  frame,
+  releaseInfo,
+}: {
+  frame: FrameType
+  releaseInfo: CloudFirmwareReleaseInfo
+}): JSX.Element {
+  const hardware = frame.hardware ?? {}
+  const metrics = frame.last_metrics ?? {}
+  const memory = hardware.memory
+  const storage = hardware.storage
+  const sd = hardware.sd
+  const segments = storage ? cloudFlashSegments(storage) : []
+  const flashBytes = storage?.flashBytes ?? 0
+  const chipRevision =
+    typeof hardware.chipRevision === 'number' && Number.isFinite(hardware.chipRevision)
+      ? `rev ${Math.floor(hardware.chipRevision / 100)}.${hardware.chipRevision % 100}`
+      : null
+  const chipCores = typeof hardware.chipCores === 'number' && hardware.chipCores > 0 ? hardware.chipCores : null
+  const boardDetail = [chipRevision, chipCores ? `${chipCores} core${chipCores === 1 ? '' : 's'}` : null]
+    .filter(Boolean)
+    .join(' · ')
+  const uptime = formatUptime(typeof metrics.uptimeSeconds === 'number' ? metrics.uptimeSeconds : null)
+  const wifiRssi = typeof metrics.wifiRssi === 'number' ? metrics.wifiRssi : null
+  const freeHeapKB = typeof metrics.freeHeapKB === 'number' ? metrics.freeHeapKB : null
+  const freePsramKB = typeof metrics.freePsramKB === 'number' ? metrics.freePsramKB : null
+  const batteryPercent = typeof metrics.batteryPercent === 'number' ? metrics.batteryPercent : null
+  const sdValue = !sd
+    ? null
+    : !sd.enabled
+    ? 'not configured'
+    : sd.mounted
+    ? typeof sd.capacityBytes === 'number' && sd.capacityBytes > 0
+      ? `${formatFirmwareBytes(sd.capacityBytes)} mounted`
+      : 'mounted'
+    : 'enabled, not mounted'
+  const otaSlotBytes = storage?.otaSlotBytes ?? 0
+
+  return (
+    <section className="space-y-2">
+      <DrawerHeading>Hardware</DrawerHeading>
+      <div className="frame-tool-card space-y-5 rounded-[22px] p-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <FirmwareStat
+            label="Board"
+            value={hardware.platform || 'esp32'}
+            detail={boardDetail || (hardware.mac ? undefined : 'reported at enrollment')}
+          />
+          <FirmwareStat
+            label="Panel"
+            value={hardware.panel || hardware.device || 'none'}
+            detail={hardware.width && hardware.height ? `${hardware.width}×${hardware.height}` : undefined}
+          />
+          {hardware.mac ? <FirmwareStat label="MAC" value={hardware.mac} /> : null}
+          {memory?.psramBytes ? (
+            <FirmwareStat
+              label="PSRAM"
+              value={formatFirmwareBytes(memory.psramBytes)}
+              detail={freePsramKB !== null ? `${formatFirmwareBytes(freePsramKB * 1024)} free now` : undefined}
+            />
+          ) : null}
+          {memory?.internalHeapBytes ? (
+            <FirmwareStat
+              label="Internal heap"
+              value={formatFirmwareBytes(memory.internalHeapBytes)}
+              detail={freeHeapKB !== null ? `${formatFirmwareBytes(freeHeapKB * 1024)} free now` : undefined}
+            />
+          ) : null}
+          {flashBytes > 0 ? <FirmwareStat label="Flash" value={formatFirmwareBytes(flashBytes)} /> : null}
+          {sdValue ? <FirmwareStat label="SD card" value={sdValue} /> : null}
+          {uptime ? <FirmwareStat label="Uptime" value={uptime} detail="since last boot" /> : null}
+          {wifiRssi !== null ? <FirmwareStat label="Wi-Fi signal" value={`${wifiRssi} dBm`} /> : null}
+          {batteryPercent !== null ? <FirmwareStat label="Battery" value={`${batteryPercent}%`} /> : null}
+        </div>
+
+        {segments.length > 0 ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
+                Flash layout
+              </div>
+              <div className="frame-tool-muted truncate text-xs">{formatFirmwareBytes(flashBytes)}</div>
+            </div>
+            <div className="frameos-inset flex h-9 overflow-hidden rounded-lg border">
+              {segments.map((segment) => {
+                const width = percentOf(segment.bytes, flashBytes)
+                return (
+                  <div
+                    key={segment.label}
+                    title={`${segment.label}: ${formatFirmwareBytes(segment.bytes)}`}
+                    className={clsx(
+                      'relative min-w-[2px] border-r border-white/60 last:border-r-0',
+                      segment.label === 'free' ? 'text-slate-700' : 'text-white'
+                    )}
+                    style={{ width: `${width}%`, backgroundColor: segment.color }}
+                  >
+                    {width >= 9 ? (
+                      <span className="absolute inset-x-1 top-1/2 -translate-y-1/2 truncate text-center text-[10px] font-semibold">
+                        {segment.label}
+                      </span>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-xs">
+              {segments.map((segment) => (
+                <div key={`${segment.label}-row`} className="contents">
+                  <div className="min-w-0 truncate text-[color:var(--tool-strong)]">
+                    <span
+                      className="mr-2 inline-block h-2.5 w-2.5 rounded-sm"
+                      style={{ backgroundColor: segment.color }}
+                    />
+                    {segment.label === 'free' ? 'bootloader + unallocated' : segment.label}
+                  </div>
+                  <div className="text-right text-[color:var(--tool-strong)]">{formatFirmwareBytes(segment.bytes)}</div>
+                </div>
+              ))}
+            </div>
+            {releaseInfo.assetSize && otaSlotBytes > 0 ? (
+              <div className="frame-tool-muted text-xs leading-4">
+                The latest published image is {formatFirmwareBytes(releaseInfo.assetSize)}
+                {` — ${formatPercent(releaseInfo.assetSize, otaSlotBytes)} of an OTA slot.`}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="frame-tool-muted text-xs leading-4">
+            Memory and flash-layout details are reported by 2026.8+ firmware; they fill in the next time the board
+            connects after a firmware update.
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 /**
  * The deploy dialog for a cloud-managed frame.
  *
- * Nothing the backend drawer shows applies here: there is no build host, no
- * SSH transport to pick, no fast/full distinction (cloud frames are
- * interpreted-only), no SD-card image and no deploy plan endpoint. What the
- * cloud DOES have is three deploy-shaped actions that used to live in three
- * different places (a dialog-less sidebar button, the "…" menu, and nowhere
- * at all), so they are collected here:
+ * Nothing the backend drawer shows applies here: no build host, no SSH
+ * transport, no fast/full distinction (cloud frames are interpreted-only),
+ * no SD-card image and no deploy plan endpoint. The cloud has exactly two
+ * transports to a frame, so that is the choice this drawer opens with:
  *
- *   1. Push scenes      the settings push + one checksummed set_scenes
- *                       (frameLogic's cloudSaveAndDeploy) — the footer's
- *                       primary button.
- *   2. Update firmware  two paths to the same released image:
- *                       notify_update_available over the wire (the device
- *                       fetches and signature-verifies it itself), and
- *                       EmbeddedUsbFirmwareUpdate over WebSerial for a board
- *                       plugged into this computer — the latter also being
- *                       the only route for a board that cannot reach the
- *                       network.
- *   3. USB setup        WebSerial provisioning for esp32 boards, the same
- *                       component the backend's embedded view mounts. It
- *                       speaks only to the serial port, so it works
- *                       identically on a control plane with no device HTTP
- *                       API at all — and it is the only way to fix the Wi-Fi
- *                       credentials of a board that cannot reach the cloud.
+ *   Over the air   the frame's own outbound cloud connection — the scenes +
+ *                  settings push (frameLogic's cloudSaveAndDeploy) and the
+ *                  notify_update_available firmware nudge (the device
+ *                  fetches and signature-verifies the image itself).
  *
- *   4. Re-enroll        the cloud bundle's flasher in re-enrollment mode
- *                       (reenrollFramePanelRegistry): a claim token bound to
- *                       THIS frame, so a board that lost its NVS — factory
- *                       reset, full 0x0 flash — comes back as this row
- *                       instead of a duplicate. Updating firmware does not
- *                       need it: the USB updater writes around the NVS.
+ *   Over USB       WebSerial to a board plugged into this computer — the
+ *                  NVS-sparing firmware update, the same scene bodies
+ *                  pushed over the cable (usb_api upload-scenes), and
+ *                  Wi-Fi/status repair (EmbeddedUsbSetup). The only path
+ *                  that works when the board cannot reach the network,
+ *                  which is why a frame no board has enrolled as yet skips
+ *                  the choice and lands here directly. Re-enrolling a WIPED
+ *                  board is enrollment, not deployment — that flow lives in
+ *                  the "Add frame" panel (AddFramePanel's reconnect path).
+ *
+ * Both views open with the same status summary (connection, firmware
+ * version vs. the published release, scenes sync) and close with the
+ * hardware panel built from what the device reports on every hello.
  *
  * Deliberately absent: the firmware BUILD controls (EmbeddedWebFlasher,
  * OTA-from-this-backend, esptool command, footprint chart). Those all read
  * frame.embedded.firmware, which the backend builds and cloud frames do not
  * have — the cloud only ever installs published release binaries.
  */
-function CloudDeploySection({ frame }: { frame: FrameType }): JSX.Element {
-  const { frameForm, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
-  const { updateFrameFirmware } = useActions(framesModel)
-  const ReenrollFramePanel = registeredReenrollFramePanel()
+function CloudDeploySection({
+  frame,
+  view,
+  onSelectView,
+  onClose,
+}: {
+  frame: FrameType
+  view: DeployDrawerView
+  onSelectView: (view: DeployDrawerView) => void
+  onClose: () => void
+}): JSX.Element {
   const mode = workspaceMode()
   const isEsp32 = isEsp32CloudFrame(frame, mode)
-  const canUpdateFirmware = isEsp32 && frameMenuActionIsAllowed(mode, 'updateFirmware', frame)
-  const firmwareDisabledReason = frameMenuActionDisabledReason(mode, 'updateFirmware', frame)
-  const scenes = frameForm?.scenes ?? frame.scenes ?? []
-  const offline = frame.connected === false
+  const releaseInfo = useCloudFirmwareRelease(frame, isEsp32)
+  // A frame no board has enrolled as cannot be reached over the air at all
+  // (its command queue 409s), so the OTA/USB choice would be a trick
+  // question — land on USB directly.
+  const usbOnly = isEsp32 && frame.status === 'pending'
+  const activeView: 'main' | 'cloudOta' | 'cloudUsb' = !isEsp32
+    ? 'main'
+    : usbOnly
+    ? 'cloudUsb'
+    : view === 'cloudOta' || view === 'cloudUsb'
+    ? view
+    : 'main'
 
   return (
     <div className="space-y-5">
-      <section className="space-y-2">
-        <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Push to frame</DrawerHeading>
-        <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
-          <div className="frame-tool-muted text-sm leading-5">
-            Saves this frame's settings and scenes to your cloud account, then pushes the scene list to the device.{' '}
-            {offline
-              ? 'The frame is offline right now — the push is queued and applied when it reconnects.'
-              : 'The frame applies them as soon as it syncs.'}
-          </div>
-          <SummaryRows
-            items={[
-              { label: 'Scenes', value: `${scenes.length} scene${scenes.length === 1 ? '' : 's'}` },
-              {
-                label: 'Unsaved changes',
-                value:
-                  unsavedChangeDetails.length === 0
-                    ? 'None — this re-sends the current scenes'
-                    : unsavedChangeDetails.map((change) => change.label).join(', '),
-              },
-            ]}
-          />
-        </div>
-      </section>
-      {isEsp32 ? (
+      <CloudDeployStatus frame={frame} isEsp32={isEsp32} releaseInfo={releaseInfo} />
+      {!isEsp32 ? (
+        <CloudScenesPushCard frame={frame} onPushed={onClose} />
+      ) : activeView === 'main' ? (
         <section className="space-y-2">
-          <DrawerHeading>Firmware</DrawerHeading>
-          {canUpdateFirmware ? (
-            <div className="frame-tool-card flex flex-wrap items-start justify-between gap-3 rounded-[22px] p-4">
-              <div className="frame-tool-muted min-w-0 flex-1 text-sm leading-5">
-                <span className="font-semibold text-[color:var(--tool-strong)]">Over the air.</span> Ask the frame to
-                check for new firmware and install it in the background. The device downloads the image and verifies its
-                signature itself. It needs to be online and reachable.
-              </div>
-              <button
-                type="button"
-                title={firmwareDisabledReason ?? 'Queue a firmware update notification'}
-                disabled={Boolean(firmwareDisabledReason)}
-                onClick={() => updateFrameFirmware(frame.id)}
-                className="frameos-secondary-button inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
-              >
-                <CloudArrowDownIcon className="h-4 w-4" />
-                Update firmware
-              </button>
-            </div>
-          ) : null}
-          {/* The USB path, for a board that is plugged into this computer:
-              writes the published image around the settings partition, so the
-              frame keeps its Wi-Fi and its cloud enrollment and comes back as
-              itself. Works on a board that cannot reach the network at all —
-              which is exactly when the OTA nudge above cannot help. */}
-          {/* Stacked, not side by side like the OTA row: this control grows a
-              progress bar and status lines while it runs. */}
-          <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
-            <div className="frame-tool-muted text-sm leading-5">
-              <span className="font-semibold text-[color:var(--tool-strong)]">Over USB.</span> Flash the latest released
-              firmware straight from this browser. The frame keeps its Wi-Fi credentials, its settings and its link to
-              this account — no re-enrollment, and no network needed.
-            </div>
-            <EmbeddedUsbFirmwareUpdate frame={frame} />
-          </div>
-          {/* Re-enrollment, not an update: this one erases the board and
-              rebuilds its identity against THIS frame row. Only offered when
-              the cloud bundle registered a panel (the backend has its own
-              flashing surfaces). */}
-          {ReenrollFramePanel ? (
-            <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
-              <div className="frame-tool-muted text-sm leading-5">
-                <span className="font-semibold text-[color:var(--tool-strong)]">Re-enroll over USB.</span> For a board
-                whose settings were wiped — a factory reset, or a full flash from the "Add frame" panel. It writes the
-                firmware and links the board back to <em>this</em> frame, keeping its scenes, assets and logs. Wi-Fi has
-                to be entered again.
-              </div>
-              <ReenrollFramePanel frameId={frame.id} frameName={frame.name} />
-            </div>
-          ) : null}
+          <DrawerHeading>Deploy</DrawerHeading>
+          <CloudDeployChoiceButton
+            icon={<CloudArrowUpIcon className="h-6 w-6" />}
+            title="Over the air"
+            description="Use the frame's own cloud connection: push scenes and settings, or start a firmware update. Nothing to plug in."
+            onClick={() => onSelectView('cloudOta')}
+          />
+          <CloudDeployChoiceButton
+            icon={<CpuChipIcon className="h-6 w-6" />}
+            title="Over USB"
+            description="For a board plugged into this computer: update its firmware, push scenes over the cable, or fix Wi-Fi credentials. Works with no network."
+            onClick={() => onSelectView('cloudUsb')}
+          />
         </section>
-      ) : null}
-      {isEsp32 ? <EmbeddedUsbSetup frame={frame} /> : null}
+      ) : activeView === 'cloudOta' ? (
+        <CloudOtaDeployView
+          frame={frame}
+          releaseInfo={releaseInfo}
+          onBack={() => onSelectView('main')}
+          onPushed={onClose}
+        />
+      ) : (
+        <CloudUsbDeployView frame={frame} onBack={usbOnly ? undefined : () => onSelectView('main')} />
+      )}
+      {isEsp32 ? <CloudHardwareDetails frame={frame} releaseInfo={releaseInfo} /> : null}
     </div>
   )
 }
@@ -2172,7 +2877,6 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
     loadDeployPlans,
     loadFrameSyncStatus,
     restartRemote,
-    saveAndDeployFrame,
     saveAndFastDeployFrame,
     saveAndFullDeployFrame,
     setFrameSyncItemChoice,
@@ -2301,7 +3005,12 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {isCloud ? (
-            <CloudDeploySection frame={frame} />
+            <CloudDeploySection
+              frame={frame}
+              view={deployDrawerView}
+              onSelectView={showDeployDrawerView}
+              onClose={closeDrawer}
+            />
           ) : activeDeployDrawerView === 'embedded' ? (
             <EmbeddedFirmwareSection
               frame={frame}
@@ -2468,23 +3177,16 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
         </div>
         <div className="frameos-divider flex flex-wrap justify-end gap-2 border-t border-slate-200/80 px-5 py-4">
           {isCloud ? (
-            <>
-              <button
-                type="button"
-                onClick={closeDrawer}
-                className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                title="Save this frame's settings and push its scenes to the device"
-                onClick={() => closeAndRun(saveAndDeployFrame)}
-                className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                Push scenes
-              </button>
-            </>
+            // The deploy actions live in the body next to their explanations
+            // (a bare footer "Push scenes" button was unexplainable); the
+            // footer only closes.
+            <button
+              type="button"
+              onClick={closeDrawer}
+              className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Close
+            </button>
           ) : (frameForm.embedded?.platform ?? frame.embedded?.platform) === 'virtual' ? (
             <>
               <button
