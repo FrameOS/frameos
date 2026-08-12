@@ -28,6 +28,7 @@
 ## See docs/value-pipeline.md for the design and the protocol table.
 
 import tables, json, os, sets
+import chroma
 import frameos/types
 import frameos/node_config
 import frameos/app_capabilities
@@ -74,6 +75,33 @@ proc constraintsHold(scene: InterpretedFrameScene, node: DiagramNode,
   for constraint in constraints:
     let (known, value) = staticFieldValue(scene, node, caps, constraint.field)
     if not known or value notin constraint.allowed:
+      return false
+  true
+
+proc opaqueColorsHold(scene: InterpretedFrameScene, node: DiagramNode,
+    caps: AppCapabilities, fields: seq[string]): bool =
+  ## The "output is opaque given these fields" promise. A generator whose
+  ## paint is fully opaque overwrites every pixel it fills, so a set and a
+  ## composite are the same picture and it may claim the live canvas. Any
+  ## alpha below 1 makes the fused fill an erase where the materialized floor
+  ## composites — "tint the photo" must never delete the photo — and a wired
+  ## color could be anything, so both stay on the floor.
+  ##
+  ## Only a value that provably parses to alpha 1 passes. A string that does
+  ## not parse falls to the materialized floor rather than to a guess about
+  ## the app's fallback — parseHtmlColor throws a Defect (not a
+  ## CatchableError) on an empty string, which is exactly the kind of crack a
+  ## "mirror the app's parse" rule would fall through.
+  for field in fields:
+    let (known, value) = staticFieldValue(scene, node, caps, field)
+    if not known:
+      return false
+    var color: Color
+    try:
+      color = parseHtmlColor(value)
+    except Exception:
+      return false
+    if color.a < 1.0:
       return false
   true
 
@@ -206,6 +234,7 @@ proc walkProducerChain(scene: InterpretedFrameScene, startId: NodeId,
     for into in caps.intoTarget:
       if not constraintsHold(scene, node, caps, into.requireStatic): continue
       if not unsetHolds(scene, node, into.requireUnset): continue
+      if not opaqueColorsHold(scene, node, caps, into.requireOpaqueColor): continue
       producerFits = into.fits
       terminal = true
       break

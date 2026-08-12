@@ -27,7 +27,14 @@
   "output": [
     {
       "name": "image",
-      "type": "image"
+      "type": "image",
+      "capabilities": {
+        "intoTarget": {
+          "fits": ["natural"],
+          "requireUnset": ["inputImage"],
+          "requireOpaqueColor": ["color"]
+        }
+      }
     }
   ]
 }

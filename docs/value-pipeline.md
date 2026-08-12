@@ -66,7 +66,7 @@ schema; `frameos/app_capabilities.nim` holds the types.
 | Protocol | Declared on | Meaning | Used by |
 |---|---|---|---|
 | `materialized` | — | whole value returned (the floor) | everything |
-| `intoTarget(fit)` | output port | producer writes into a caller-supplied `Image` with the requested fit | the 8 former whitelist producers, `render/calendar` |
+| `intoTarget(fit)` | output port | producer writes into a caller-supplied `Image` with the requested fit | the 8 former whitelist producers, `render/calendar`, `render/gradient`, `render/color` |
 | `providesTarget` | input port | consumer offers a target to whatever feeds this input | `render/image` |
 | `forwardsTarget` | output port | transformer passes the target request upstream and mutates in place | `render/opacity`, `data/rotateImage` at 180° |
 | `byteIter` | input port | consumes a string as a bounded-window `Spool` | `icalJson` |
@@ -88,6 +88,12 @@ The declarations carry their own preconditions, so the planner stays generic:
   materialized image is not the same picture as a composite.
 - `requireUnset` — fields that must be neither configured nor wired, for the
   "draw on top of this image instead" inputs that change what a node does.
+- `requireOpaqueColor` — fields whose statically-resolved color must provably
+  parse fully opaque. The "output is opaque given these fields" promise that
+  lets a generator (`render/gradient`, `render/color`) fill its target in
+  place: opaque paint makes a set and a composite the same picture. Anything
+  else — semi-transparent, wired, unparseable — stays on the floor, because
+  "tint the photo" must never erase the photo.
 - `ownedTargetExcludes` — field/value combinations where an app-*owned*
   scratch would not produce the same pixels as a materialized value
   (contain+overwrite: the scratch's transparent letterbox margins would be
@@ -296,8 +302,11 @@ and the contain+overwrite scratch shape. Apps consume the offer through the
 identical `takeDecodeTarget` handshake, so nothing app-side changed. Scoped
 deliberately to direct producer → consumer edges with fully static configs;
 forwarding chains, JS producers and state-wired fits stay interpreted-only —
-no shipped scene compiles those shapes. Spool ports convert at the compiled
-boundary (`materialize` / wrap), keeping compiled output typed as before.
+no shipped scene compiles those shapes. Declared natural-fit producers
+(gradient/color) do compile, with the opaque check held narrower than the
+interpreter's: hex-only, which is all a compiled config can hold anyway.
+Spool ports convert at the compiled boundary (`materialize` / wrap), keeping
+compiled output typed as before.
 
 The cloud path needed nothing, as predicted: interpreted scenes ship the
 runtime's planner, and the bench frame's nine scenes — prod-cloud-deployed
@@ -422,12 +431,21 @@ operations one span for an owner — which is why the benchmark came back flat.
   followed by the consumer's fit is not the consumer's fit applied directly.
   The useful move is the opposite direction — passing bounds *up* so the
   decode is bounded — which is the `requestedBounds` idea below.
-- `render/gradient`, `render/color` — **not yet**: they already allocate
-  exactly one canvas-sized image, so only the live-canvas tier would pay,
-  and writing onto the canvas is only equivalent when the output is opaque.
-  A semi-transparent `render/color` ("tint the photo") would erase the photo
-  instead. Doing it properly needs an "output is opaque given these fields"
-  capability — a small schema addition, not a special case.
+- `render/gradient`, `render/color` — **shipped 2026-08-12** as the first
+  *declared* natural-fit producers, via the "output is opaque given these
+  fields" capability the audit called for: `requireOpaqueColor` on
+  `intoTarget`. An opaque fill overwrites every pixel of its target, so a
+  set and a composite are the same picture and the generator may paint the
+  live canvas in place — under *every* static placement, since its output is
+  target-sized. Only a value that provably parses opaque fuses; a
+  semi-transparent color ("tint the photo" — `rgba(...)`, since 8-digit hex
+  does not parse), a wired color, or an unparseable one stays on the floor,
+  where render/image composites it. Compiled scenes apply the same rule with
+  a narrower check (hex-only; configs there can only hold opaque 6-digit hex
+  anyway, so the compiled hazard is exclusively a wired color). Pinned by
+  `test_planner_rules.nim` (decisions), `test_opaque_fill_fusion.nim`
+  (fused == floor pixels, and the semi-transparent floor still tints), and
+  `test_scene_nim.py` (compiled parity).
 
 ## What remains
 
@@ -455,7 +473,6 @@ down.
   It carries a real design question — a bounded decode changes pixels versus
   the floor on hosts (on embedded the floor already budget-resamples, so it
   is consistent there) — so it is a design-then-build piece, not a patch.
-- **Opaque-output capability** for `render/gradient`/`render/color` (above).
 - **`xmlToJson` / `parseJson` / `prettyJson` stay materialized on purpose**:
   phase 0 measured their inputs at 2.5–20KB on real scenes, three orders of
   magnitude below the image side. Nothing to buy yet.

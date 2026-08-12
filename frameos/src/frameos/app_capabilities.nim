@@ -53,6 +53,15 @@ type
     fits*: seq[string]
     requireStatic*: seq[FieldConstraint]
     requireUnset*: seq[string]
+    ## Fields whose statically-resolved color must be fully opaque for the
+    ## capability to apply. The "output is opaque given these fields" promise:
+    ## a generator that fills every pixel of its target with opaque paint may
+    ## claim the live canvas, because a set of opaque pixels and a composite of
+    ## them are the same picture. A semi-transparent fill is a set where the
+    ## materialized floor composites — "tint the photo" must never erase the
+    ## photo — so it stays on the floor. A wired color never resolves and
+    ## never satisfies this, like requireStatic.
+    requireOpaqueColor*: seq[string]
 
   ForwardsTargetSpec* = object
     ## An output port that passes a target request upstream to `input` and

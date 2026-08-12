@@ -485,3 +485,44 @@ def test_compiled_scene_refuses_wired_placement_and_cached_consumer():
     scene["nodes"][1]["data"]["cache"] = {"enabled": True}
     source = write_scene_nim(_frame(), scene)
     assert "decodeTarget" not in source
+
+
+def _color_fill_scene(color, consumer_config=None, producer_cache=False):
+    scene = _fusion_scene(consumer_config=consumer_config, producer_cache=producer_cache)
+    scene["nodes"][2] = {"id": "dl", "type": "app", "data": {"keyword": "render/color",
+        "config": {"color": color}, "cache": {"enabled": producer_cache}},
+        "position": {"x": 2, "y": 2}}
+    return scene
+
+
+def test_compiled_scene_fuses_an_opaque_color_fill():
+    # The opaque-output capability (requireOpaqueColor): a generator whose
+    # paint is provably opaque overwrites every pixel, so it may claim the
+    # live canvas. Its fit is natural — target-sized under every placement —
+    # so a non-decoder placement like center fuses too.
+    source = write_scene_nim(_frame(), _color_fill_scene("#336699"))
+    assert "context.decodeTargetImage = context.image" in source
+
+    source = write_scene_nim(_frame(), _color_fill_scene(
+        "#336699", consumer_config={"placement": "center"}))
+    assert "context.decodeTargetImage = context.image" in source
+
+    # Cached, it gets a scratch of its own, never the canvas.
+    source = write_scene_nim(_frame(), _color_fill_scene("#336699", producer_cache=True))
+    assert "context.decodeTargetWidth = context.image.width" in source
+    assert "context.decodeTargetImage = context.image" not in source
+
+
+def test_compiled_scene_keeps_a_wired_fill_color_on_the_floor():
+    # A compiled scene config can only hold opaque 6-digit hex (wrap_color
+    # rejects anything else at codegen), so the shape requireOpaqueColor
+    # guards here is a WIRED color: it could resolve semi-transparent at
+    # render time, and "tint the photo" must never erase the photo.
+    scene = _color_fill_scene("#336699")
+    scene["nodes"].append({"id": "st", "type": "state", "data": {"keyword": "tint"},
+                           "position": {"x": 3, "y": 3}})
+    scene["edges"].append({"source": "st", "sourceHandle": "fieldOutput",
+                           "target": "dl", "targetHandle": "fieldInput/color"})
+    scene["fields"] = [{"name": "tint", "type": "string", "value": "#336699"}]
+    source = write_scene_nim(_frame(), scene)
+    assert "decodeTarget" not in source

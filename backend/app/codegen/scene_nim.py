@@ -153,6 +153,34 @@ def into_target_spec(app_config: dict) -> dict | None:
     return None
 
 
+def opaque_colors_hold(target_id: str, node: dict, app_config: dict,
+                       names, static_value) -> bool:
+    """The compiled twin of the planner's requireOpaqueColor check, held
+    deliberately narrower: only hex forms we can prove opaque pass, and
+    anything else (named colors, rgba(), a wired field) falls back to the
+    materialized floor — never to wrong pixels. The interpreted planner
+    additionally fuses unparseable colors as the app's own opaque-black
+    fallback; refusing them here just means the compiled edge materializes."""
+    for name in names or []:
+        value = static_value(target_id, node, app_config, name)
+        if value is None:
+            return False
+        v = str(value).strip()
+        if not v.startswith("#"):
+            return False
+        v = v[1:]
+        if not all(c in "0123456789abcdefABCDEF" for c in v):
+            return False
+        if len(v) in (3, 6):
+            continue
+        if len(v) == 4 and v[3].lower() == "f":
+            continue
+        if len(v) == 8 and v[6:8].lower() == "ff":
+            continue
+        return False
+    return True
+
+
 def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
     if field_type in ('select', 'text', 'string', 'font'):
         return 'string'
@@ -1756,12 +1784,20 @@ var exportedScene* = ExportedScene(
 
         into_fits = into.get("fits") or ["cover", "contain", "stretch"]
         spec_fits = spec.get("fits") or ["cover", "contain", "stretch"]
-        if fit not in into_fits or fit not in spec_fits:
-            return None
+        if "natural" not in into_fits:
+            if fit not in into_fits or fit not in spec_fits:
+                return None
+        # A natural producer's output is target-sized under every placement,
+        # so any static consumer fit reduces to the same 1:1 draw and the
+        # intersection check does not apply (the interpreted planner widens
+        # the same way).
 
         if not constraints_hold(source_node_id, producer, producer_config, into.get("requireStatic")):
             return None
         if not unset_holds(source_node_id, producer, into.get("requireUnset")):
+            return None
+        if not opaque_colors_hold(source_node_id, producer, producer_config,
+                                  into.get("requireOpaqueColor"), static_value):
             return None
 
         producer_cached = producer.get("data", {}).get("cache", {}).get("enabled", False)
