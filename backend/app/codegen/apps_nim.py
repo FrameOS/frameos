@@ -135,6 +135,8 @@ def _capability_fields(spec: dict) -> list[str]:
     add(spec.get("fitFrom"))
     for field in (spec.get("requireStatic") or {}):
         add(field)
+    for field in (spec.get("compositingRequireStatic") or {}):
+        add(field)
     for field in (spec.get("requireUnset") or []):
         add(field)
     for clause in (spec.get("ownedTargetExcludes") or []):
@@ -188,6 +190,7 @@ def _app_capability_literal(config: dict) -> Optional[str]:
             f"fitFrom: {_nim_str(spec.get('fitFrom'))}, "
             f"fits: {_nim_str_seq(spec.get('fits') or DEFAULT_TARGET_FITS)}, "
             f"requireStatic: {_nim_constraints(spec.get('requireStatic'))}, "
+            f"compositingRequireStatic: {_nim_constraints(spec.get('compositingRequireStatic'))}, "
             f"requireUnset: {_nim_str_seq(spec.get('requireUnset') or [])}, "
             f"ownedTargetExcludes: {_nim_matches(spec.get('ownedTargetExcludes'))})"
         )

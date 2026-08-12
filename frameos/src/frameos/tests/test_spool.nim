@@ -60,6 +60,41 @@ suite "spool tiers":
       lines.add(line)
     check lines == @["a", "b", "c"]
 
+  test "bare-CR and mixed terminators split like splitLines did":
+    # Consumers folded over strutils.splitLines before the spool existed, and
+    # that accepts \n, \r\n and a lone \r. A classic-Mac ICS feed must not
+    # collapse into one giant line.
+    let body = "a\rb\r\nc\nd\r\re"
+    var fromMemory: seq[string] = @[]
+    for line in newMemorySpool(body).lines():
+      fromMemory.add(line)
+    check fromMemory == @["a", "b", "c", "d", "", "e"]
+    let path = writeFixture("cr.txt", body)
+    var fromFile: seq[string] = @[]
+    for line in newFileSpool(path, body.len, owned = false).lines(windowBytes = 2):
+      fromFile.add(line)
+    check fromFile == fromMemory
+    removeFile(path)
+
+  test "a CRLF split across a window boundary is one terminator":
+    # Window sized so the \r lands as the last byte of a window and the \n
+    # opens the next one; the pair must not read as two line breaks.
+    let body = "ab\r\ncd"
+    let path = writeFixture("crlf.txt", body)
+    var fromFile: seq[string] = @[]
+    for line in newFileSpool(path, body.len, owned = false).lines(windowBytes = 3):
+      fromFile.add(line)
+    check fromFile == @["ab", "cd"]
+    removeFile(path)
+
+  test "an in-memory spool yields bounded windows, not the whole body":
+    # `lines` accumulates windows; if the memory tier yielded the body whole,
+    # parsing would hold two copies of a document the tier exists to bound.
+    var biggest = 0
+    for window in newMemorySpool(repeat('m', 5000)).windows(windowBytes = 512):
+      biggest = max(biggest, window.len)
+    check biggest <= 512
+
   test "windows never exceed the requested size":
     let body = repeat('z', 5000)
     let path = writeFixture("windows.txt", body)
@@ -117,6 +152,29 @@ suite "spool writer":
     check w.spilled() == s.isFileBacked()
     if s.isFileBacked():
       removeFile(s.path())
+
+  test "successive spills under the same name never share a file":
+    # The name a caller passes is stable across renders (it names the node,
+    # for attribution), but the previous render's spool may still be alive —
+    # in a node cache, or in an app's config field until setField replaces it.
+    # If both writers used the name verbatim, the second would truncate the
+    # file the first still reads, and destroying the first would delete the
+    # second's bytes.
+    const bodyA = "AAAA past the threshold AAAA"
+    const bodyB = "BBBB past the threshold BBBB"
+    var wA = initSpoolWriter(thresholdBytes = 8, dir = ScratchDir)
+    wA.add(bodyA, "collide.tmp")
+    var sA = wA.finish()
+    var wB = initSpoolWriter(thresholdBytes = 8, dir = ScratchDir)
+    wB.add(bodyB, "collide.tmp")
+    let sB = wB.finish()
+    check sA.isFileBacked() and sB.isFileBacked()
+    check sA.path() != sB.path()
+    check sA.materialize() == bodyA
+    # Dropping the first spool deletes its own file and nobody else's.
+    sA = nil
+    GC_fullCollect()
+    check sB.materialize() == bodyB
 
   test "a threshold of zero never spills":
     var w = initSpoolWriter(thresholdBytes = 0, dir = ScratchDir)

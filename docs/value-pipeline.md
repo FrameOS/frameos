@@ -144,10 +144,15 @@ pattern-match):
 - **Cache is a materialization barrier.** A cached node can't own the
   live canvas and can't be a one-shot stream. But cache the
   *canvas-sized* render, not the native-resolution intermediate — the
-  generalization of today's `decodeTargetWidth` variant.
+  generalization of today's `decodeTargetWidth` variant. A placement wired
+  from a state field can't feed a cached producer either: the cache would
+  bake in a fit that changes per render and keep serving the stale one.
 - **Semantics-changing shapes don't fuse.** contain+overwrite; any
   wired/inline input on placement-affecting fields that can't be resolved
-  to a pure state read; blend modes beyond normal/overwrite.
+  to a pure state read; blend modes beyond normal/overwrite; a
+  *compositing* producer (a JS app draws source-over, it doesn't overwrite
+  its fitted rect) under any consumer blend but plain normal
+  (`compositingRequireStatic` in the capability schema).
 - **Opaque nodes materialize** (JS, child scenes, split).
 - **Tier selection** per principle 3, with byte-spool requiring a
   successful storage probe.
@@ -357,9 +362,23 @@ That is fine at 800x480 (672KB against a 384KB canvas). It is not fine on the
 13.3E6, where the canvas alone is 7.7MB and the same shape needs about 13.5MB
 of the 16MB PSRAM, next to everything else a render is holding.
 
-A view fixes it outright and, unlike the SVG trade above, has **no fidelity
-question**: a cell that borrows its parent's pixels is the same pixels by
-construction, and the whole nested stack collapses to the canvas.
+A view fixes it outright and, unlike the SVG trade above, has almost no
+fidelity question: a cell that borrows its parent's pixels is the same pixels
+by construction, and the whole nested stack collapses to the canvas.
+
+**Almost** — review found the one exception, and it is a real semantic change,
+not grain. A child that draws with an *erasing* blend (`overwrite`, `mask`,
+`inverse-mask`) over a source with transparency now writes that transparency
+through to the canvas, where the copy path flattened it against the parent's
+pixels on the draw back (the cell copy carried those pixels; the final
+composite was a normal blend). The new behaviour is what the very same node
+does **outside** a split — erasing blends have always punched through the live
+canvas — so cells are now consistent with the top level instead of quietly
+different. But a scene that relied on the old flattening (a transparent logo
+overwrite-drawn inside a cell, expecting the background to survive) renders
+differently, the display path flattens the punched alpha to black, and unlike
+the fusion tiers this has no kill switch. If that scene turns up, the fix is a
+planner-style rule for cells, not a revert.
 
 **Done (2026-08-12).** pixie gained `view(image, x, y, w, h)`, `render/split`
 uses it, and a cell now writes straight into the canvas with no copy out and no

@@ -5,6 +5,7 @@ import math
 import os
 import checksums/md5
 import frameos/types
+import frameos/utils/memory
 import frameos/utils/system
 
 proc renderWidth*(config: FrameConfig): int {.inline.} =
@@ -24,6 +25,30 @@ proc maxHttpResponseBytes*(self: AppRoot): int {.inline.} =
     self.frameConfig.maxHttpResponseBytes()
   else:
     DefaultMaxHttpResponseBytes
+
+const
+  MinSpoolThresholdBytes = 256 * 1024
+    ## Below this a body is never worth a file: the syscalls and the flash wear
+    ## cost more than the memory does.
+  MaxSpoolThresholdBytes = 8 * 1024 * 1024
+    ## And above it, a host with gigabytes free should still not sit on an
+    ## unbounded body just because it can.
+
+proc spoolThreshold*(): int =
+  ## How large a body may get before it goes to storage instead of memory.
+  ## Policy of the spool tier, not of any one app — every byte producer that
+  ## spools (docs/value-pipeline.md, phase 2) shares this number, next to
+  ## `spoolDir` below which says where the file goes.
+  ##
+  ## Derived from live memory rather than fixed, because the same number is
+  ## wrong at both ends: a quarter of what a device can still allocate is
+  ## generous on a host and appropriately mean on an ESP32 whose PSRAM is
+  ## already carrying a canvas. `availableRenderBytes` returns 0 when it does
+  ## not know, which means "no spooling" — the same behaviour as before.
+  let available = availableRenderBytes()
+  if available <= 0:
+    return 0
+  clamp(available div 4, MinSpoolThresholdBytes, MaxSpoolThresholdBytes)
 
 proc spoolDir*(self: AppRoot): string =
   ## Where this app should put a body too large to hold in memory.

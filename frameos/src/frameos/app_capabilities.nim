@@ -30,6 +30,13 @@ type
     fitFrom*: string
     fits*: seq[string]
     requireStatic*: seq[FieldConstraint]
+    ## Extra constraints that apply only when the terminal producer COMPOSITES
+    ## into the target (a dynamic JS app drawing source-over) instead of
+    ## overwriting every pixel it fits. A compositing producer on the live
+    ## canvas is only equivalent to a materialized draw when the consumer's own
+    ## draw is a plain composite too — an `overwrite` blend of a possibly
+    ## transparent materialized image erases what a composite leaves visible.
+    compositingRequireStatic*: seq[FieldConstraint]
     ## Fields that must be neither configured nor wired — typically the
     ## optional "draw on top of this image instead" input.
     requireUnset*: seq[string]

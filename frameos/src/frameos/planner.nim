@@ -110,6 +110,8 @@ type
     frNoCommonFit = "producer and consumer share no fit"
     frForwardingOverCache = "a transformer would have to mutate a cached producer's value"
     frOwnedTargetExcluded = "an app-owned target would change the pixels here"
+    frDynamicFitOverCache = "a state-wired placement would be baked into a cached producer's value"
+    frCompositeBlend = "the producer composites into its target and the consumer's draw is not a plain composite"
 
   EdgeDiagnosis* = object
     nodeId*: NodeId
@@ -128,13 +130,12 @@ type OpaqueCheck* = proc (nodeId: NodeId): bool {.closure, gcsafe, raises: [].}
 proc resolveFit(scene: InterpretedFrameScene, node: DiagramNode,
     caps: AppCapabilities, spec: ProvidesTargetSpec,
     fit: var string, fitFromNodeId: var NodeId): bool =
-  ## Resolves *where* the fit comes from. Whether the value is one the producer
-  ## accepts is decided later, once the chain is known — a natural-size
-  ## producer accepts any placement, so the answer depends on both ends.
-  ## Where the fit (cover/contain/stretch) comes from. A literal in the config
-  ## resolves now; a field wired to a state node is a pure read, so it resolves
-  ## per render; anything else — an app output, a code node, inline JS — could
-  ## be any value and disqualifies the edge.
+  ## Resolves *where* the fit comes from: a literal in the config resolves now;
+  ## a field wired to a state node is a pure read, so it resolves per render;
+  ## anything else — an app output, a code node, inline JS — could be any value
+  ## and disqualifies the edge. Whether the value is one the producer accepts
+  ## is decided later, once the chain is known — a natural-size producer
+  ## accepts any placement, so the answer depends on both ends.
   fit = ""
   fitFromNodeId = NoNodeId
   if spec.fitFrom.len == 0:
@@ -156,14 +157,20 @@ proc resolveFit(scene: InterpretedFrameScene, node: DiagramNode,
 
 proc walkProducerChain(scene: InterpretedFrameScene, startId: NodeId,
     isOpaque: OpaqueCheck, hops: var seq[NodeId],
-    producerFits: var seq[string], diagnosis: var EdgeDiagnosis): NodeId =
+    producerFits: var seq[string], producerComposites: var bool,
+    diagnosis: var EdgeDiagnosis): NodeId =
   ## Follows `forwardsTarget` hops from a consumer's input until it reaches an
   ## app whose output declares `intoTarget`. Returns that producer, or
   ## NoNodeId when the chain runs into anything opaque.
+  ##
+  ## `producerComposites` distinguishes the two ways a producer can honour a
+  ## target: a decoder or generator overwrites every pixel of its fitted rect,
+  ## while a dynamic JS app draws source-over onto whatever is already there.
   var currentId = startId
   var visited = initHashSet[NodeId]()
   hops = @[]
   producerFits = @[]
+  producerComposites = false
 
   for _ in 0 .. MaxForwardHops:
     if currentId == NoNodeId or not scene.nodes.hasKey(currentId):
@@ -189,6 +196,7 @@ proc walkProducerChain(scene: InterpretedFrameScene, startId: NodeId,
       # the branch where it would have allocated a target-sized canvas, and an
       # unclaimed target simply goes unused.
       producerFits = @[NaturalFit]
+      producerComposites = true
       return currentId
     let caps = appCapabilities(node.appKeyword())
     if caps.isEmpty:
@@ -286,9 +294,20 @@ proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
 
   var hops: seq[NodeId] = @[]
   var producerFits: seq[string] = @[]
-  let producerId = walkProducerChain(scene, inputId, isOpaque, hops, producerFits, diagnosis)
+  var producerComposites = false
+  let producerId = walkProducerChain(scene, inputId, isOpaque, hops, producerFits,
+      producerComposites, diagnosis)
   if producerId == NoNodeId:
     diagnosis.refusal = frChainOpaque
+    return nil
+  if producerComposites and
+      not constraintsHold(scene, node, caps, spec.compositingRequireStatic):
+    # A compositing producer leaves the target's existing pixels visible under
+    # everything it does not paint. That equals the materialized result only
+    # when the consumer's draw is itself a plain composite; an `overwrite`
+    # blend of the materialized (possibly transparent) image would have erased
+    # them.
+    diagnosis.refusal = frCompositeBlend
     return nil
 
   var fits: seq[string] = @[]
@@ -312,6 +331,15 @@ proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
     return nil
 
   let producerCached = readCacheConfig(scene.nodes[producerId].data).enabled
+  if producerCached and fitFromNodeId != NoNodeId and not naturalProducer:
+    # A cached producer bakes the fit it was handed into the canvas-sized value
+    # it caches. A placement wired from a state field can change between
+    # renders, and every cache hit would keep serving the old fit — the
+    # materialized floor re-fits per render, so this shape must too. A natural
+    # producer is exempt: its output is target-sized under every placement, so
+    # there is no fit to go stale.
+    diagnosis.refusal = frDynamicFitOverCache
+    return nil
   var tier: ImageFusionTier
   var ownedForCache = false
   if hops.len == 0:

@@ -82,7 +82,7 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
       var size = 0'i64
       try:
         size = getFileSize(folder / file)
-      except CatchableError, OSError:
+      except CatchableError:
         size = 0
       if size <= 0:
         continue

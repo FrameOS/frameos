@@ -52,6 +52,26 @@ proc decodeTargetIsOwned*(context: ExecutionContext): bool =
   ## transparent), rather than the live render canvas.
   not context.isNil and context.decodeTargetOwned
 
+proc offeredDecodeTargetSize*(self: AppRoot, context: ExecutionContext):
+    tuple[width, height: int] =
+  ## The size of the target currently addressed to this node, without taking
+  ## it — (0, 0) when there is none. For producers that can only claim a
+  ## target of one specific size (the JS runtime's natural-size branches):
+  ## taking first and checking after would consume the offer — and, on the
+  ## owned tier, allocate a canvas-sized image — only to throw both away on a
+  ## mismatch.
+  if context.isNil:
+    return (0, 0)
+  if context.decodeTargetNodeId != 0.NodeId and
+      (self.isNil or self.nodeId != context.decodeTargetNodeId):
+    return (0, 0)
+  if not context.decodeTargetImage.isNil:
+    (context.decodeTargetImage.width, context.decodeTargetImage.height)
+  elif context.decodeTargetWidth > 0 and context.decodeTargetHeight > 0:
+    (context.decodeTargetWidth, context.decodeTargetHeight)
+  else:
+    (0, 0)
+
 proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext):
     tuple[image: Image, scalingMode: string] =
   ## The producer's half of the `intoTarget` handshake: consumes the target the

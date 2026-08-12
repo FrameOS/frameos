@@ -30,6 +30,9 @@
             "offsetY": ["0"],
             "blendMode": ["normal", "overwrite"]
           },
+          "compositingRequireStatic": {
+            "blendMode": ["normal"]
+          },
           "requireUnset": ["inputImage"],
           "ownedTargetExcludes": [{ "placement": "contain", "blendMode": "overwrite" }]
         }

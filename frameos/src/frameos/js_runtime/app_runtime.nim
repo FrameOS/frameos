@@ -1220,12 +1220,12 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       # the mean colour over the changed area is identical. Weighed against
       # 1.48MB of PSRAM and 5.2s per render on a frame with ~6.6MB free, the
       # call was to take the memory (docs/value-pipeline.md).
-      let (svgTarget, _) = owner.takeDecodeTarget(context)
-      if not svgTarget.isNil and svgTarget.width == svgWidth and
-          svgTarget.height == svgHeight and
-          renderSvgIntoTarget(spec["svg"].getStr(), svgTarget):
-        when defined(memProbe): memProbe("    svg decode AFTER (into target)")
-        return svgTarget
+      let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
+      if offeredWidth == svgWidth and offeredHeight == svgHeight:
+        let (svgTarget, _) = owner.takeDecodeTarget(context)
+        if not svgTarget.isNil and renderSvgIntoTarget(spec["svg"].getStr(), svgTarget):
+          when defined(memProbe): memProbe("    svg decode AFTER (into target)")
+          return svgTarget
       let image = decodeSvgWithFallback(spec["svg"].getStr(), svgWidth, svgHeight)
       when defined(memProbe): memProbe("    svg decode AFTER")
       if image.isSome:
@@ -1250,13 +1250,24 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     # explicitly-sized image is a different picture, and leaves the target
     # unclaimed for the interpreter to discard.
     var image: Image = nil
-    let (target, _) = owner.takeDecodeTarget(context)
-    if not target.isNil and target.width == width and target.height == height:
+    let hasFill = spec.hasKey("color")
+    var fillColor: Color
+    if hasFill:
+      fillColor = colorWithOpacity(spec)
+    # A fill is a SET, not a composite. On a target the chain owns it lands on
+    # fresh transparency, exactly like on the canvas we were about to allocate;
+    # on the live render canvas it is only equivalent when the color is opaque
+    # — a semi-transparent fill would replace the scene's pixels where the
+    # materialized path composites over them.
+    let fillSafe = not hasFill or fillColor.a >= 1.0 or context.decodeTargetIsOwned()
+    let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
+    if fillSafe and offeredWidth == width and offeredHeight == height:
+      let (target, _) = owner.takeDecodeTarget(context)
       image = target
     if image.isNil:
       image = newImage(width, height)
-    if spec.hasKey("color"):
-      image.fill(colorWithOpacity(spec))
+    if hasFill:
+      image.fill(fillColor)
     return image
   else:
     return nil

@@ -85,6 +85,18 @@ proc valueToKeyJson(v: Value): JsonNode =
   of fkJson:
     if v.asJson().isNil: result = %* {}
     else: result = v.asJson()
+  of fkSpool:
+    # Key by size + a content hash computed a window at a time. The whole point
+    # of a file-backed spool is that the body is not resident; the cache key
+    # must not be the thing that pulls a 4MB feed back into memory and parks it
+    # in cacheKeys for the cache's lifetime. Byte-wise FNV-1a so the key
+    # depends only on the bytes, not on how the tier happened to chunk them —
+    # the same body can sit in memory one render and in a file the next.
+    var h = 14695981039346656037'u64
+    for window in v.sp.windows():
+      for c in window:
+        h = (h xor uint64(c)) * 1099511628211'u64
+    result = %* {"__spool": {"len": v.sp.len, "hash": $h}}
   else:
     # string/text/float/int/bool/node/scene/none
     result = valueToJson(v)
@@ -402,6 +414,12 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                 "error": $e.msg,
                 "stacktrace": e.getStackTrace()
               })
+              # The producer may have consumed the decode target before it
+              # failed, which is the exact state mayMutateImageInPlace reads as
+              # "the chain fused". It did not — and the substitute image below
+              # can be the LIVE CANVAS on embedded builds, which a forwarding
+              # transformer must never mutate in place. Withdraw the clearance.
+              context.inPlaceImageNodes = @[]
               # If this input takes an image, hand the consumer an image with
               # the producer's error on it ("response too large", HTTP errors,
               # …) — a nil image would only render as "No image provided".
@@ -874,6 +892,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         # canvas that was written in place from one that was drawn onto.
         profile["fusion"] = %*{
           "input": plan.inputName,
+          # False when the plan existed but nothing fused this pass — no canvas
+          # on the context, another hint in flight, or a state-wired fit that
+          # resolved outside the plan. `tier` is only meaningful when true.
+          "applied": plannedFit.len > 0,
           "tier": (if plannedTier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
           "plannedTier": (if plan.tier == iftLiveCanvas: "liveCanvas" else: "ownedScratch"),
           "producerNodeId": plan.producerNodeId.int,

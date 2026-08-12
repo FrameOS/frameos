@@ -3,7 +3,6 @@ import frameos/apps
 import frameos/spool
 import frameos/types
 import frameos/utils/http_client
-import frameos/utils/memory
 
 type
   AppConfig* = object
@@ -11,27 +10,6 @@ type
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
-
-const
-  MinSpoolThresholdBytes = 256 * 1024
-    ## Below this a body is never worth a file: the syscalls and the flash wear
-    ## cost more than the memory does.
-  MaxSpoolThresholdBytes = 8 * 1024 * 1024
-    ## And above it, a host with gigabytes free should still not sit on an
-    ## unbounded body just because it can.
-
-proc spoolThreshold*(): int =
-  ## How large a body may get before it goes to storage instead of memory.
-  ##
-  ## Derived from live memory rather than fixed, because the same number is
-  ## wrong at both ends: a quarter of what a device can still allocate is
-  ## generous on a host and appropriately mean on an ESP32 whose PSRAM is
-  ## already carrying a canvas. `availableRenderBytes` returns 0 when it does
-  ## not know, which means "no spooling" — the same behaviour as before.
-  let available = availableRenderBytes()
-  if available <= 0:
-    return 0
-  clamp(available div 4, MinSpoolThresholdBytes, MaxSpoolThresholdBytes)
 
 proc get*(self: App, context: ExecutionContext): Spool =
   let url = self.appConfig.url

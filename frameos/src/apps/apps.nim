@@ -275,7 +275,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       fieldDefaults: @[FieldMatch(field: "inputImage", value: "")])
   of "render/image":
     AppCapabilities(
-      providesTarget: @[ProvidesTargetSpec(input: "image", fitFrom: "placement", fits: @["cover", "contain", "stretch"], requireStatic: @[FieldConstraint(field: "offsetX", allowed: @["0"]), FieldConstraint(field: "offsetY", allowed: @["0"]), FieldConstraint(field: "blendMode", allowed: @["normal", "overwrite"])], requireUnset: @["inputImage"], ownedTargetExcludes: @[@[FieldMatch(field: "placement", value: "contain"), FieldMatch(field: "blendMode", value: "overwrite")]])],
+      providesTarget: @[ProvidesTargetSpec(input: "image", fitFrom: "placement", fits: @["cover", "contain", "stretch"], requireStatic: @[FieldConstraint(field: "offsetX", allowed: @["0"]), FieldConstraint(field: "offsetY", allowed: @["0"]), FieldConstraint(field: "blendMode", allowed: @["normal", "overwrite"])], compositingRequireStatic: @[FieldConstraint(field: "blendMode", allowed: @["normal"])], requireUnset: @["inputImage"], ownedTargetExcludes: @[@[FieldMatch(field: "placement", value: "contain"), FieldMatch(field: "blendMode", value: "overwrite")]])],
       intoTarget: @[],
       forwardsTarget: @[],
       fieldDefaults: @[FieldMatch(field: "placement", value: "cover"), FieldMatch(field: "offsetX", value: "0"), FieldMatch(field: "offsetY", value: "0"), FieldMatch(field: "blendMode", value: "normal"), FieldMatch(field: "inputImage", value: "")])

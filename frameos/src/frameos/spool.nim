@@ -49,7 +49,7 @@ proc `=destroy`(spool: SpoolObj) =
   if spool.kind == skFile and spool.owned and spool.path.len > 0:
     try:
       removeFile(spool.path)
-    except CatchableError, OSError:
+    except CatchableError:
       discard
 
 proc newMemorySpool*(data: sink string): Spool =
@@ -82,14 +82,19 @@ proc disown*(spool: Spool) =
     spool.owned = false
 
 iterator windows*(spool: Spool, windowBytes = DefaultWindowBytes): string =
-  ## Successive chunks of the bytes. Never holds more than one window for a
-  ## file-backed spool; yields the whole string in one go when in memory,
-  ## since there is nothing to save by slicing it.
+  ## Successive chunks of the bytes, never more than `windowBytes` at a time.
+  ## A file-backed spool holds one window of the file; an in-memory one yields
+  ## bounded slices too, so a consumer accumulating windows (`lines` does)
+  ## never ends up holding a second copy of the whole body.
   if not spool.isNil:
     case spool.kind
     of skMemory:
-      if spool.data.len > 0:
-        yield spool.data
+      var offset = 0
+      let step = max(1, windowBytes)
+      while offset < spool.data.len:
+        let stop = min(offset + step, spool.data.len)
+        yield spool.data[offset ..< stop]
+        offset = stop
     of skFile:
       var file: File
       if not file.open(spool.path):
@@ -109,27 +114,46 @@ iterator lines*(spool: Spool, windowBytes = DefaultWindowBytes): string =
   ## Carries at most one window plus the partial line across reads, so a 4MB
   ## calendar costs the window, not 4MB.
   ##
-  ## `\r\n` and `\n` both terminate a line; a trailing line without a newline
-  ## is yielded too.
+  ## `\r\n`, `\n` and a bare `\r` all terminate a line — the same three
+  ## `strutils.splitLines` accepts, which is what consumers folded over before
+  ## the spool existed. A trailing line without a terminator is yielded too.
   var pending = ""
   for window in spool.windows(windowBytes):
     pending.add(window)
     var start = 0
-    while true:
-      let idx = pending.find('\n', start)
-      if idx < 0:
-        break
-      var stop = idx
-      if stop > start and pending[stop - 1] == '\r':
-        dec stop
-      yield pending[start ..< stop]
-      start = idx + 1
+    var i = 0
+    while i < pending.len:
+      case pending[i]
+      of '\n':
+        yield pending[start ..< i]
+        inc i
+        start = i
+      of '\r':
+        if i == pending.high:
+          # Could be the first half of a \r\n split across windows; wait for
+          # the next window to decide. The flush below settles a final \r.
+          break
+        yield pending[start ..< i]
+        i += (if pending[i + 1] == '\n': 2 else: 1)
+        start = i
+      else:
+        inc i
     if start > 0:
       pending = pending[start .. ^1]
-  if pending.len > 0:
-    if pending.endsWith("\r"):
-      pending.setLen(pending.len - 1)
-    yield pending
+  var start = 0
+  var i = 0
+  while i < pending.len:
+    if pending[i] in {'\r', '\n'}:
+      yield pending[start ..< i]
+      if pending[i] == '\r' and i < pending.high and pending[i + 1] == '\n':
+        i += 2
+      else:
+        inc i
+      start = i
+    else:
+      inc i
+  if start < pending.len:
+    yield pending[start .. ^1]
 
 proc startsWithBytes*(spool: Spool, prefix: string): bool =
   ## Prefix test that reads only as far as it has to. "Is this a URL rather
@@ -176,13 +200,13 @@ proc spoolScratchDir*(preferred = ""): string =
     try:
       createDir(preferred)
       return preferred
-    except CatchableError, OSError:
+    except CatchableError:
       discard
   let fallback = getTempDir() / "frameos-spool"
   try:
     createDir(fallback)
     return fallback
-  except CatchableError, OSError:
+  except CatchableError:
     discard
   ""
 
@@ -202,6 +226,23 @@ type SpoolWriter* = object
 proc initSpoolWriter*(thresholdBytes: int, dir = ""): SpoolWriter =
   SpoolWriter(threshold: max(0, thresholdBytes), dir: dir)
 
+var spoolSequence: int
+  ## Spill files need names no live spool can share. The obvious name — the
+  ## node that produced the body — is stable across renders and across scenes,
+  ## so reusing it verbatim would truncate a file the previous render's spool
+  ## still reads, and deleting that spool would then remove the new spool's
+  ## bytes. A process-wide counter keeps the node name for attribution while
+  ## making every file its own.
+
+proc dropSpillFile(writer: var SpoolWriter) =
+  writer.file.close()
+  writer.opened = false
+  try:
+    removeFile(writer.path)
+  except CatchableError:
+    discard
+  writer.path = ""
+
 proc spillNow(writer: var SpoolWriter, name: string): bool {.discardable.} =
   ## Tries to move to the storage tier. Returns false when there is nowhere to
   ## write — no SD card, a read-only or full filesystem — and the writer just
@@ -219,15 +260,45 @@ proc spillNow(writer: var SpoolWriter, name: string): bool {.discardable.} =
   let dir = spoolScratchDir(writer.dir)
   if dir.len == 0:
     return false
-  let path = dir / name
+  let path = dir / ($atomicInc(spoolSequence) & "-" & name)
   if not writer.file.open(path, fmWrite):
     return false
   writer.path = path
   writer.opened = true
   if writer.buffer.len > 0:
-    writer.file.write(writer.buffer)
+    # The buffered prefix is still intact until this write succeeds, so a disk
+    # that fills right here degrades cleanly: drop the file, keep the memory
+    # tier.
+    if writer.file.writeBuffer(addr writer.buffer[0], writer.buffer.len) != writer.buffer.len:
+      writer.dropSpillFile()
+      return false
     writer.buffer.setLen(0)
   true
+
+proc unspill(writer: var SpoolWriter, keepBytes: int) =
+  ## The storage tier failed mid-body — card full, pulled, gone read-only.
+  ## Fall back to the memory tier by reading back what made it to the file;
+  ## that is at most threshold-plus-a-chunk bytes, which is what the memory
+  ## tier would have held anyway. Raises only when the read-back fails too,
+  ## because then there is no tier left that has the bytes.
+  writer.file.close()
+  writer.opened = false
+  var recovered = ""
+  try:
+    recovered = readFile(writer.path)
+  except CatchableError:
+    recovered = ""
+  try:
+    removeFile(writer.path)
+  except CatchableError:
+    discard
+  writer.path = ""
+  if recovered.len < keepBytes:
+    raise newException(IOError,
+      "Spool storage failed mid-write and only " & $recovered.len & " of " &
+      $keepBytes & " bytes could be recovered")
+  recovered.setLen(keepBytes)
+  writer.buffer = recovered
 
 proc add*(writer: var SpoolWriter, data: openArray[char], name = "body.tmp") =
   if data.len == 0:
@@ -236,11 +307,15 @@ proc add*(writer: var SpoolWriter, data: openArray[char], name = "body.tmp") =
   if not writer.opened and writer.threshold > 0 and writer.written > writer.threshold:
     discard writer.spillNow(name)
   if writer.opened:
-    discard writer.file.writeBuffer(unsafeAddr data[0], data.len)
-  else:
-    let start = writer.buffer.len
-    writer.buffer.setLen(start + data.len)
-    copyMem(addr writer.buffer[start], unsafeAddr data[0], data.len)
+    # A short write is a wrong answer, not a smaller one: pretending the chunk
+    # landed would hand the consumer a silently truncated body. Degrade to the
+    # memory tier instead, chunk included.
+    if writer.file.writeBuffer(unsafeAddr data[0], data.len) == data.len:
+      return
+    writer.unspill(writer.written - data.len)
+  let start = writer.buffer.len
+  writer.buffer.setLen(start + data.len)
+  copyMem(addr writer.buffer[start], unsafeAddr data[0], data.len)
 
 proc add*(writer: var SpoolWriter, data: string, name = "body.tmp") =
   writer.add(data.toOpenArray(0, data.high), name)

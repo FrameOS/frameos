@@ -32,7 +32,7 @@ elif defined(linux) and not defined(frameosWasm):
           let parts = line.splitWhitespace()
           if parts.len >= 2:
             return parseInt(parts[1]) * 1024
-    except CatchableError, IOError, OSError:
+    except CatchableError:
       discard
     0
 
@@ -69,7 +69,7 @@ proc renderMemoryInUse*(): tuple[known: bool, bytes: int] =
       if fields.len >= 2:
         # 4K pages on every Linux frame target we ship (armv6/armhf/arm64/amd64).
         return (true, parseInt(fields[1]) * 4096)
-    except CatchableError, IOError, OSError:
+    except CatchableError:
       discard
     (false, 0)
   else:

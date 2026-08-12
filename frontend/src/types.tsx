@@ -536,6 +536,11 @@ export interface ProvidesTargetCapability {
   fits?: string[]
   /** Field -> values it must statically resolve to for the capability to apply */
   requireStatic?: Record<string, string[]>
+  /**
+   * Extra requireStatic constraints applied when the producer composites into the
+   * target (a JS app drawing source-over) instead of overwriting every fitted pixel
+   */
+  compositingRequireStatic?: Record<string, string[]>
   /** Fields that must be neither configured nor wired */
   requireUnset?: string[]
   /** Field/value combinations where an app-owned scratch target changes the pixels */

@@ -149,6 +149,12 @@ proc render*(self: App, context: ExecutionContext, image: var Image) =
         # split costs the canvas and nothing else, where copies stacked one
         # region per level for as long as the innermost cell was rendering.
         #
+        # One semantic edge moved with it: a child using an ERASING blend
+        # (overwrite/mask) over a transparent source now punches that alpha
+        # into the canvas, where the copy path flattened it on the normal-blend
+        # draw back. That matches what the same node does outside a split;
+        # docs/value-pipeline.md carries the full reasoning.
+        #
         # Margins, gaps and ratios are floats, so a cell can round to a rect a
         # pixel outside the parent. A view has to fit exactly, so clamp rather
         # than let a rounding edge become a render error.
