@@ -526,24 +526,31 @@ down.
   magnitude below the image side. Nothing to buy yet.
 - **The socket-fold** for byte inputs — trigger: a frame with no writable
   storage (reasoning under "The byte side").
-- **The image cache disk tier on hardware — checklist run 2026-08-12**, and
-  it earned its keep by finding three things rather than confirming one.
-  (1) The tier was refusing *silently*: nothing said why a scene
-  re-downloaded every render — spill decisions are log lines now, reasons
-  and numbers included, which is how the rest was found. (2) The headroom
-  predicate asked its coexistence question against `availableRenderBytes` —
-  the largest-contiguous-block answer — and the bench frame runs fragmented
-  enough (~1.7MB blocks inside 5MB free) that no spill it could afford ever
-  passed; the check now splits into contiguous-for-the-scratch plus
-  total-free-for-the-headroom. (3) The shipped corpus barely exercises the
-  tier at all: the Wikimedia sample's producer declares
-  `cache.enabled: false`, and XKCD's split-cell scratch lands 14KB *under*
-  the 1MB in-memory limit — the memory tier legitimately holds it. A
-  dedicated over-limit cached scene verified the spill path end to end on
-  the frame. Still open: the mid-life card-pull degradation is host-pinned
-  only (the USB asset API refuses writes to dot-paths by design, so the
-  file cannot be deleted remotely), and the 13.3E6's upgrade-to-live-canvas
-  is arithmetic (7.7MB scratch against ~5MB headroom), not yet observed.
+- **The image cache disk tier on hardware — verified 2026-08-12**, three
+  found-and-fixed bugs deep. The tier refused silently, so refusals became
+  log lines (offer-time and store-time, reasons and numbers) — and each log
+  line then exposed the next bug. (1) `headroom 1696K is under 2x the 1500K
+  scratch` on a board with 5.1MB free: the coexistence question was asked
+  against `availableRenderBytes`, the largest-contiguous-block answer, and
+  this heap fragments to ~1.7MB blocks — the check now splits into
+  contiguous-for-the-scratch plus total-free-for-the-headroom
+  (`availableRenderHeadroomBytes`). (2) `no writable spill storage` with a
+  mounted card and an existing `.cache`: Nim's `createDir` mkdirs every
+  path component and the ESP32 VFS mount prefix (`/srv`) is not a directory
+  anything can create — the probe now checks existence first, then a
+  leaf-only mkdir, which also fixes the byte side's Nim spill path (only
+  ever hardware-proven through the C adopt path before). (3) The shipped
+  corpus barely exercises the tier: the Wikimedia sample's producer
+  declares `cache.enabled: false`, and XKCD's split-cell scratch lands 14KB
+  *under* the 1MB in-memory limit — the memory tier legitimately holds it.
+  End state on the frame, via a dedicated over-limit cached scene:
+  `imageSpill bytes=1536000 path=/srv/assets/.cache/2-node3-cache.rgbx`,
+  the replaced entry's file deleted by ownership, the hit render at 7.0s
+  against the 22.8s miss with the producer not re-run, and the panel
+  byte-identical across both. Still open: the mid-life card-pull
+  degradation is host-pinned only (the USB asset API refuses writes to
+  dot-paths by design), and the 13.3E6's upgrade-to-live-canvas is
+  arithmetic (7.7MB scratch), not yet observed.
 - **Streaming a spooled cache hit into the offered target.** A hit today
   costs one transient canvas-sized allocation; reading the file row-by-row
   into the offer would make it window-resident. Deliberately not built: the
