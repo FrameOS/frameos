@@ -255,6 +255,12 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
       forwardsTarget: @[],
       fieldDefaults: @[])
+  of "data/rotateImage":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[],
+      forwardsTarget: @[ForwardsTargetSpec(output: "image", input: "image", requireStatic: @[FieldConstraint(field: "rotationDegree", allowed: @["180", "180.0", "-180", "-180.0", "540", "540.0"])])],
+      fieldDefaults: @[FieldMatch(field: "rotationDegree", value: "0")])
   of "data/unsplash":
     AppCapabilities(
       providesTarget: @[],

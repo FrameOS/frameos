@@ -101,6 +101,35 @@ suite "planner rules":
     check refusal == frFused
     check scene.imageFusionPlans[2.NodeId].tier == iftLiveCanvas
 
+  test "rotate at 180 forwards the target; the chain owns a scratch":
+    # 180 preserves dimensions, so rotateImage declares forwardsTarget gated
+    # on exactly that config. A forwarding hop forces the owned tier: the
+    # transformer mutates in place, and it must own what it mutates.
+    let scene = sceneWith(
+      @[consumer(2, %*{}),
+        node(4, "app", %*{"keyword": "data/rotateImage",
+          "config": {"rotationDegree": 180}}),
+        producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 1
+    check refusal == frFused
+    let plan = scene.imageFusionPlans[2.NodeId]
+    check plan.tier == iftOwnedScratch
+    check plan.inPlaceNodeIds == @[4.NodeId]
+    check plan.producerNodeId == 3.NodeId
+
+  test "rotate at 90 is opaque — its output has different dimensions":
+    let scene = sceneWith(
+      @[consumer(2, %*{}),
+        node(4, "app", %*{"keyword": "data/rotateImage",
+          "config": {"rotationDegree": 90}}),
+        producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 0
+    check refusal == frChainOpaque
+
   test "an overwriting producer keeps its overwrite blend":
     # The rule must not over-reach: a decoder overwrites every pixel it fits,
     # so the consumer's overwrite blend stays fusible.
