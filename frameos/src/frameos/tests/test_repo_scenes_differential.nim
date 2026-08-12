@@ -123,15 +123,17 @@ for kind, templateDir in walkDir(SamplesDir):
         %*{"imageFolder": fixtureDir, "cycleSeconds": 3600}
       else: %*{}
 
-    # Self-determinism probe: two fresh materialized renders must agree,
-    # or the scene cannot be differentialed at all.
+    # Self-determinism probe BRACKETS the fused render: a time-dependent
+    # scene (Ken Burns' pan) can agree with itself across two quick renders
+    # and still drift by the third — only if the two materialized renders on
+    # either side of the fused one agree is the comparison meaningful.
     let a1 = renderOnce(sceneInput.id, fixtureDir, fused = false, persistedState)
+    let fusedImage = renderOnce(sceneInput.id, fixtureDir, fused = true, persistedState)
     let a2 = renderOnce(sceneInput.id, fixtureDir, fused = false, persistedState)
     if maxChannelDelta(a1, a2) > 0:
       skipped.add(sceneLabel)
       continue
 
-    let fusedImage = renderOnce(sceneInput.id, fixtureDir, fused = true, persistedState)
     let delta = maxChannelDelta(a1, fusedImage)
     doAssert delta == 0,
       sceneLabel & ": fused render differs from materialized (max channel delta " &
