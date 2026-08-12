@@ -534,9 +534,18 @@ capabilities + planner; teach transformers to forward targets.
       restated independently in the test. Mutation-checked: relaxing the
       cached-producer forwarding rule fails on both the decision and the
       pixels.
-- [ ] Wire the harness into the wasm build too (it runs the same interpreter),
-      and add an e2e pass over the shipped scene corpus rather than only
-      generated graphs.
+- [x] The differential now runs over the shipped corpus and over the wasm
+      runtime, not only generated graphs.
+      `test_repo_scenes_differential.nim` renders every offline-safe sample
+      scene with the planner on and off and demands pixel equality — 9 scenes
+      exact, with a self-determinism probe so a clock or a random picker is
+      skipped by name rather than silently (Ken Burns is the one). The same
+      A/B runs through the emscripten build via
+      `tools/wasm_differential.py` (`frameos_wasm_set_fusion` +
+      `disableFusion` in the render harness): 9 scenes byte-identical in the
+      browser-preview runtime too. Both comparisons also count fused edges,
+      so a capability regression that silently unfuses everything fails
+      loudly instead of comparing two materialized renders.
 - [x] Embedded regression pass on real hardware (2026-08-11, 7.3"
       PhotoPainter). See "What the hardware said" below.
 - [ ] Opacity-in-the-middle on hardware. The host differential covers it over

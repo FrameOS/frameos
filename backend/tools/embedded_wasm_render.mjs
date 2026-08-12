@@ -169,6 +169,12 @@ const ok = call(
 )
 if (!ok) fail(`init failed: ${lastError()}`)
 
+// The corpus differential renders each scene with the planner on and off and
+// compares the pixels; plans are built at scene init, so the toggle must land
+// before the scene is selected.
+if (request.disableFusion) {
+  call('frameos_wasm_set_fusion', null, ['boolean'], [false])
+}
 const loaded = call('frameos_wasm_load_scenes', 'number', ['string'], [request.scenesJson || '[]'])
 if (!loaded) fail(`no scenes loaded: ${lastError()}`)
 
