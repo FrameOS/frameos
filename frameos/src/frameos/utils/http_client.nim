@@ -24,6 +24,8 @@ const
   DefaultFetchMaxSeconds* = 35.0
   DefaultFetchMaxRedirects* = 5
 
+import frameos/spool
+
 type
   SimpleHttpHeader* = tuple[name: string, value: string]
 
@@ -275,6 +277,64 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     boundedRequestContent(url, httpMethod = "POST", body = body,
                           timeoutMs = timeoutMs, maxBytes = maxBytes,
                           maxSeconds = maxSeconds, headers = headers)
+
+  proc bufferChunksToString(response: BoundedHttpBufferResponse): string =
+    result = newString(response.bodyLen)
+    var pos = 0
+    for chunk in response.chunks:
+      if chunk.len > 0:
+        copyMem(addr result[pos], chunk.data, chunk.len)
+        pos += chunk.len
+
+  proc boundedGetSpool*(
+      url: string,
+      timeoutMs = DefaultFetchTimeoutMs,
+      maxBytes = DefaultFetchMaxBytes,
+      maxSeconds = DefaultFetchMaxSeconds,
+      headers: seq[SimpleHttpHeader] = @[],
+      spoolThresholdBytes = 0,
+      spoolDir = "",
+      spoolName = "body.tmp"
+    ): Spool =
+    ## GET whose 2xx body lands in a Spool without a whole-body copy.
+    ##
+    ## A body the C side already spilled to storage (PSRAM could not buffer
+    ## it) is ADOPTED as the spool's backing file — the download that used to
+    ## be refused outright ("too large to load into memory") now costs a
+    ## window to consume. A body still sitting in PSRAM chunks is either
+    ## windowed into the spool writer past the threshold or assembled into an
+    ## in-memory spool below it, which is exactly what today's string path
+    ## paid.
+    var response = boundedRequestBuffer(
+      url, httpMethod = "GET", timeoutMs = timeoutMs, maxBytes = maxBytes,
+      maxSeconds = maxSeconds, headers = headers)
+    try:
+      if response.code >= 400:
+        # Error bodies become the error message; a spilled error body (odd,
+        # but possible) is not worth pulling back into memory for one.
+        let detail =
+          if response.spillPath.len == 0 and response.bodyLen > 0:
+            ": " & bufferChunksToString(response)
+          else:
+            ""
+        raise newException(HttpRequestError, "HTTP " & response.status & detail)
+      if response.spillPath.len > 0:
+        # Take ownership: the spill file IS the spool's file. Clearing
+        # spillPath keeps freeHttpBufferResponse from deleting it; the spool's
+        # destructor inherits that job.
+        let path = response.spillPath
+        response.spillPath = ""
+        return newFileSpool(path, response.bodyLen)
+      if spoolThresholdBytes > 0 and response.bodyLen > spoolThresholdBytes:
+        var writer = initSpoolWriter(spoolThresholdBytes, spoolDir)
+        for chunk in response.chunks:
+          if chunk.len > 0:
+            writer.add(toOpenArray(cast[ptr UncheckedArray[char]](chunk.data),
+              0, chunk.len - 1), spoolName)
+        return writer.finish()
+      newMemorySpool(bufferChunksToString(response))
+    finally:
+      response.freeHttpBufferResponse()
 
   proc boundedRequestWithHeaders*(
       url: string,
@@ -565,17 +625,29 @@ else:
       raise newException(IOError, "HTTP request exceeded time limit")
     min(timeoutMs, remaining)
 
-  proc recvExact(socket: Socket, n: int, timeoutMs: int, deadline: float): string =
-    result = newStringOfCap(n)
-    while result.len < n:
-      let chunk = socket.recv(min(n - result.len, RecvChunkBytes),
-                              timeout = ioTimeoutMs(timeoutMs, deadline))
-      if chunk.len == 0:
-        raise newException(IOError, "Connection closed mid HTTP response body")
-      result.add(chunk)
+  type HttpBodySink* = proc(chunk: string) {.closure, gcsafe.}
+    ## Receives body bytes as they come off the socket. What makes the byte
+    ## side of the value pipeline work: a consumer that folds (a SpoolWriter,
+    ## a hash) never needs the body to exist whole in memory.
 
-  proc readBoundedBody(socket: Socket, headers: HttpHeaders, timeoutMs: int,
-                       deadline: float, maxBytes: int): string =
+  proc readBodyToSink(socket: Socket, headers: HttpHeaders, timeoutMs: int,
+                      deadline: float, maxBytes: int, sink: HttpBodySink) =
+    var received = 0
+    proc push(chunk: string) =
+      received += chunk.len
+      if maxBytes > 0 and received > maxBytes:
+        raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
+      sink(chunk)
+    proc recvExactToSink(n: int) =
+      var remaining = n
+      while remaining > 0:
+        let chunk = socket.recv(min(remaining, RecvChunkBytes),
+                                timeout = ioTimeoutMs(timeoutMs, deadline))
+        if chunk.len == 0:
+          raise newException(IOError, "Connection closed mid HTTP response body")
+        remaining -= chunk.len
+        push(chunk)
+
     let contentLengthValue = headerValue(headers, "Content-Length")
     if "chunked" in headerValue(headers, "Transfer-Encoding").toLowerAscii():
       while true:
@@ -592,27 +664,33 @@ else:
             if trailer == "\r\n" or trailer.len == 0:
               break
           break
-        if maxBytes > 0 and result.len + chunkSize > maxBytes:
+        if maxBytes > 0 and received + chunkSize > maxBytes:
           raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
-        result.add(recvExact(socket, chunkSize, timeoutMs, deadline))
+        recvExactToSink(chunkSize)
     elif contentLengthValue.len > 0:
       let contentLength = parseInt(contentLengthValue)
       if maxBytes > 0 and contentLength > maxBytes:
         raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
-      result = recvExact(socket, contentLength, timeoutMs, deadline)
+      recvExactToSink(contentLength)
     else:
       # No length information: we always send Connection: close, so read to EOF.
       while true:
         let chunk = socket.recv(RecvChunkBytes, timeout = ioTimeoutMs(timeoutMs, deadline))
         if chunk.len == 0:
           break
-        result.add(chunk)
-        if maxBytes > 0 and result.len > maxBytes:
-          raise newException(IOError, &"HTTP response exceeded {maxBytes} bytes")
+        push(chunk)
+
+  proc readBoundedBody(socket: Socket, headers: HttpHeaders, timeoutMs: int,
+                       deadline: float, maxBytes: int): string =
+    var accumulated = ""
+    readBodyToSink(socket, headers, timeoutMs, deadline, maxBytes,
+      proc(chunk: string) = accumulated.add(chunk))
+    accumulated
 
   proc singleBoundedRequest(url: string, httpMethod: HttpMethod, body: string,
                             headers: HttpHeaders, timeoutMs: int, maxBytes: int,
-                            deadline: float): BoundedHttpResponse =
+                            deadline: float,
+                            bodySink: HttpBodySink = nil): BoundedHttpResponse =
     let parsed = parseUri(url)
     let isSsl = parsed.scheme.toLowerAscii() == "https"
     let port =
@@ -677,7 +755,14 @@ else:
           break
 
       if httpMethod != HttpHead and result.code notin [204, 304]:
-        result.body = readBoundedBody(socket, result.headers, timeoutMs, deadline, maxBytes)
+        if bodySink != nil and result.code div 100 == 2:
+          # The caller folds the body as it arrives; `result.body` stays empty
+          # on purpose. Only success bodies stream — a redirect or error body
+          # is small and is about to become a Location header read or an error
+          # message, both of which want a materialized string.
+          readBodyToSink(socket, result.headers, timeoutMs, deadline, maxBytes, bodySink)
+        else:
+          result.body = readBoundedBody(socket, result.headers, timeoutMs, deadline, maxBytes)
     finally:
       socket.close()
       if sslContext != nil:
@@ -691,11 +776,16 @@ else:
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
       maxSeconds = DefaultFetchMaxSeconds,
-      maxRedirects = DefaultFetchMaxRedirects
+      maxRedirects = DefaultFetchMaxRedirects,
+      bodySink: HttpBodySink = nil
     ): BoundedHttpResponse =
     ## HTTP request with every phase bounded. Each redirect is a fresh connect
     ## (and a fresh resolution for a new host), so callers that talk to a known
     ## endpoint should keep `maxRedirects` low.
+    ##
+    ## With `bodySink`, a 2xx body is handed to the sink chunk by chunk as it
+    ## comes off the socket and `result.body` stays empty; everything else
+    ## (redirect hops, error bodies) materializes as before.
     validateHttpUrl(url)
     let deadline = if maxSeconds > 0: epochTime() + maxSeconds else: 0.0
     var currentUrl = url
@@ -704,7 +794,7 @@ else:
     var currentHeaders = headers
     for _ in 0 .. max(maxRedirects, 0):
       result = singleBoundedRequest(currentUrl, currentMethod, currentBody, currentHeaders,
-                                    timeoutMs, maxBytes, deadline)
+                                    timeoutMs, maxBytes, deadline, bodySink)
       if result.code notin [301, 302, 303, 307, 308]:
         return result
       let location = headerValue(result.headers, "Location")
@@ -827,3 +917,34 @@ else:
       maxSeconds = maxSeconds,
       maxRedirects = maxRedirects
     )
+
+  proc boundedGetSpool*(
+      url: string,
+      timeoutMs = DefaultFetchTimeoutMs,
+      maxBytes = DefaultFetchMaxBytes,
+      maxSeconds = DefaultFetchMaxSeconds,
+      headers: seq[SimpleHttpHeader] = @[],
+      spoolThresholdBytes = 0,
+      spoolDir = "",
+      spoolName = "body.tmp"
+    ): Spool =
+    ## GET whose 2xx body lands in a Spool without ever existing whole in
+    ## memory: chunks stream off the socket into a SpoolWriter, which buffers
+    ## a small body and spills a large one past the threshold
+    ## (frameos/spool.nim). Peak memory is the window, not the document.
+    ## Redirects and error bodies still materialize — they are about to become
+    ## a Location hop or an error message.
+    var writer = initSpoolWriter(spoolThresholdBytes, spoolDir)
+    try:
+      let response = boundedRequest(url, HttpGet, "", simpleHeaders(headers),
+        timeoutMs, maxBytes, maxSeconds, DefaultFetchMaxRedirects,
+        bodySink = proc(chunk: string) = writer.add(chunk, spoolName))
+      if response.code >= 400:
+        let detail = if response.body.len > 0: ": " & response.body else: ""
+        raise newException(HttpRequestError, "HTTP " & response.status & detail)
+      writer.finish()
+    except CatchableError:
+      # Close and drop whatever was written; a dropped file-backed spool
+      # removes its own file.
+      discard writer.finish()
+      raise

@@ -570,13 +570,19 @@ capabilities + planner; teach transformers to forward targets.
       not start failing downloads that used to work — and both `downloadUrl`
       and the node profile report the tier actually reached, not the one
       asked for.
-- [ ] `downloadUrl` still buffers the whole body once. It hands the graph a
-      spool, so the *edge* costs a window and `icalJson` folds without ever
-      materializing — but the HTTP client returns a `string`, so peak memory
-      still includes one whole-body buffer. Closing that means adopting the
-      spill file `boundedRequestBuffer` already produces on embedded
-      (`spillPath`, built for images) instead of copying out of it, and an
-      incremental writer on the host path.
+- [x] `downloadUrl` no longer buffers the whole body at all.
+      `boundedGetSpool` in `utils/http_client.nim` closes it on every target:
+      hosts stream the 2xx body off the socket into the `SpoolWriter` chunk by
+      chunk (`HttpBodySink` threaded through `singleBoundedRequest`; redirect
+      hops and error bodies still materialize, they are about to become a
+      Location read or an error message); embedded **adopts the spill file
+      `boundedRequestBuffer` already produced** as the spool's backing file —
+      the download that used to be refused outright ("too large to load into
+      memory") now costs a window to consume — and windows PSRAM-chunked
+      bodies into the writer past the threshold. Peak memory on the edge is
+      the window, not the download. Pinned by six cases in
+      `test_http_client.nim`, including that a redirect hop's own body never
+      reaches the spool and that an aborted stream leaves no file behind.
 - [ ] Audit `xmlToJson` / `parseJson` / `prettyJson`. Left materialized on
       purpose for now: phase-0 measured their inputs at 2.5–20 KB on real
       scenes, three orders of magnitude below the image side, so there is
