@@ -23,6 +23,12 @@ import ../../apps/data/frameOSGallery/app as galleryApp
 
 const ScratchDir = "tmp/cache-spool-tests"
 
+# The spill-directory probe creates only the `.cache` leaf — on the device
+# the assets root is the SD mount itself and always exists. The test models
+# that contract by creating its assets root up front; without it, the probe
+# correctly reports no storage and spills fall back to the temp dir.
+createDir(ScratchDir)
+
 let callColors = [
   rgbx(255, 0, 0, 255), # first compute: red
   rgbx(0, 255, 0, 255), # second compute: green

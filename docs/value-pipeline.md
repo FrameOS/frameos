@@ -1,11 +1,11 @@
 # Value pipeline: capability-negotiated execution
 
 How FrameOS decides, per edge of a scene graph, whether a value has to exist
-whole in memory — and what happens when it doesn't have to. Written 2026-08-10
-as a design + work tracker; **shipped 2026-08-12** (image side, byte side, and
-compiled-scene parity, all hardware-verified on a 7.3" PhotoPainter). This is
-now the design record: what the system is, what the measurements said, the
-judgment calls with their reasoning, and the short list of what remains.
+whole in memory — and what happens when it doesn't have to. The design
+record for the shipped system (image side, byte side, compiled-scene parity,
+the cache's disk tier, requestedBounds — all hardware-verified on a 7.3"
+PhotoPainter): what it is, what the measurements said, the judgment calls
+with their reasoning, and the short list of what remains.
 
 ## The problem it replaced
 
@@ -240,7 +240,7 @@ plan is not the claim; now one log field says which you have.
   body today degrades back to being held whole. That frame appearing is the
   trigger to build it.
 
-### The image cache disk tier (2026-08-12, post-ship follow-up)
+### The image cache disk tier
 
 The byte spool's question, asked for pixels: does a cached image have to be
 *in memory* to be cached? On embedded the answer used to be a forced trade —
@@ -277,6 +277,23 @@ Three rules make it correct rather than merely plausible:
   latches the tier off until scenes reload, so a full card is probed once,
   not per render.
 
+The offer-time headroom question is asked in two parts, because they have
+different answers on a fragmented heap: the scratch itself needs one
+contiguous block (`availableRenderBytes`, which is the largest-free-block
+answer), while the decode intermediates it lives next to need not be
+contiguous (`availableRenderHeadroomBytes`, total free minus the reserve).
+The bench frame keeps ~1.7MB blocks inside 5MB free; asking the coexistence
+question against the block answer refused every spill the board could
+afford. The storage probe likewise checks the spill directory by existence
+before attempting a leaf-only mkdir — never a recursive `createDir`. On the
+ESP32 the SD card is mounted wholesale at `/srv/assets`, so `/srv` is not a
+directory in any filesystem, just the name prefix the VFS matches — and
+`createDir`'s component-by-component mkdir fails on it, which made a
+mounted card read as "no storage". Every refusal,
+offer-time and store-time, is a log line with its reason and numbers — the
+same rule the planner's refusals follow, and how both of those bugs were
+found.
+
 What a hit costs: one canvas-sized allocation for the length of the consumer's
 draw (freed with the render), against a re-download, a decode and its
 intermediates. What a miss adds: one sequential file write of `w×h×4` bytes.
@@ -290,9 +307,15 @@ budget refusal) and `test_interpreter_cache_spool.nim` (the producer paints a
 different colour per call, so "served from disk" and "recomputed" are
 distinguishable in the canvas itself; plus the swept-file miss, the
 no-headroom upgrade, and the under-limit memory path staying untouched).
-Not yet hardware-verified — the checklist is in "What remains".
+On the frame: the spill lands on the real SD (1.5MB of raw RGBX in
+`.cache`), a replaced entry's file is deleted by ownership, and the hit
+render serves from the file at a third of the miss's time with the panel
+byte-identical across both. The shipped sample corpus barely exercises the
+tier — the Wikimedia sample's producer does not cache, and XKCD's
+split-cell scratch lands just under the in-memory limit, where the memory
+tier legitimately holds it.
 
-### requestedBounds (2026-08-12, post-ship follow-up)
+### requestedBounds
 
 The last ungated item, shipped. An image edge the fusion planner leaves
 materialized — a 90/270 rotation mid-chain, a resize, a refused blend —
@@ -305,10 +328,10 @@ canvas's cover scale.
 The protocol mirrors the decode target deliberately: bounds ride the
 context, addressed to the planner-named producer, one-shot, free if
 unclaimed, reported claimed-vs-applied in the node profile. What differs is
-the contract's strength, and the design question the doc recorded resolves
+the contract's strength, and the design question the doc carried resolves
 exactly here: a bounded decode **resamples where the floor decodes native**,
 so bounded output is *equivalent, not byte-identical* — accepted on all
-platforms (2026-08-12 decision) now that the scaled decoders box-filter.
+platforms, because the scaled decoders box-filter.
 Consequences of that weaker contract:
 
 - **Bounds are an upper limit with cover semantics** — enough pixels for any
@@ -329,6 +352,29 @@ Consequences of that weaker contract:
 Pinned by eight planner-rule cases and the end-to-end interpreter test;
 `data/rotateImage` and `data/resizeImage` declare, no app code changed —
 producers pick bounds up through the shared download funnel.
+
+### The scaled decoders
+
+Everything above leans on pixie's scaled decodes being safe to point at a
+canvas, and their sampling is part of the contract. Every format decodes
+each target pixel as the rounded average of its exact source footprint — a
+proper area filter on downscale axes — while 1:1 axes are the identity and
+upscale axes keep nearest replication, byte for byte. JPEG folds inside the
+decoder through per-component banded accumulators (box in the YUV domain,
+with box-downsampled chroma interpolated back up); WebP samples its
+resident YUV/ARGB buffers; PNG, BMP and PPM feed a shared row sampler
+(`RowBoxSampler`) that accepts scanlines in either vertical order and
+carries partial footprints across band boundaries. Peak memory grows by
+two target-width accumulator rows, counted in each decoder's budget plan.
+
+Nearest sampling was not a cosmetic defect. A 960px Wikimedia thumb
+cover-fitted onto an 800px panel dropped one column in six and turned
+feathers ragged; an XKCD comic — PNG line art through a contain fit —
+lost letter stems outright. Both are the same failure: non-integer
+decimation deletes whole source columns, and one-pixel strokes live in
+exactly one column. The fitted-rect walk also no longer round-trips
+through image coordinates (the old double floor division duplicated some
+sample columns and skipped others — worse than plain nearest).
 
 ### Compiled scenes (parity)
 
@@ -364,9 +410,9 @@ scenes.json — all rendered through it on the ESP32.
   divergences: the fit-boundary (a decoder overwrites where a materialized
   draw composites, so the two disagree within a pixel of the fitted rect's
   edge — held still by comparing exactly at canvas size and over the fitted
-  interior when scaled) and the sampling of streaming decoders — nearest
-  when this was written; a box filter since 2026-08-12 (below), which keeps
-  the same property: exact at canvas size, resampled when scaled.
+  interior when scaled) and the sampling of streaming decoders — a box
+  filter (see "The scaled decoders"), exact at canvas size, resampled when
+  scaled.
 - `test_repo_scenes_differential.nim`: the same A/B over every offline-safe
   shipped sample scene — **9 scenes pixel-exact**, with a bracketed
   self-determinism probe so a clock or a random picker (Ken Burns) is
@@ -401,6 +447,9 @@ difference below is real.
 | SD card image producer | fused: **912 B / 411 ms**; materialized: 508 KB / 2.8 s |
 | Byte tier (3.24MB / 11,000-event ICS, forced spill) | spool **adopted the C spill file**; the edge held **8,192 bytes**; 35KB of events out; calendar on the panel |
 | Opacity mid-chain (uploaded scene) | fused + claimed + in-place; **byte-identical across reboots and repeats**; ~10KB heap vs 2.4MB materialized |
+| Disk tier (over-limit cached scene) | **spill: 1,536,000 B to SD `.cache`**; replaced entry's file deleted by ownership; hit **7.0s vs 22.8s miss**, producer not re-run, panel byte-identical |
+| requestedBounds (resize chain, 1920×1280 source) | node profile: bounds **applied + claimed** (400×300); producer decoded at **450×300 — 540KB vs 9.8MB native** |
+| Box sampler (XKCD PNG line art, contain into a split cell) | letter stems intact where nearest decimation swallowed them; panel matches the smooth floor |
 | All 9 shipped scenes | render clean on the final firmware |
 
 Two lessons from the passes that changed the code:
@@ -430,7 +479,7 @@ pixels moved between two adjacent palette entries, 98% of them a single
 index pair swapping — the dither pattern changing phase; and the saving was
 **614KB + 921KB and 5.2s per render** on a frame with ~6.6MB free.
 
-Decision (2026-08-11): take the memory. The SVG path claims whatever target
+Decision: take the memory. The SVG path claims whatever target
 it is offered, including the live canvas. This deliberately spends some of
 principle 4, so the check became sharper rather than looser: the panel
 comparison classifies grain vs content (flip symmetry + mean colour), rather
@@ -472,9 +521,9 @@ operations one span for an owner — which is why the benchmark came back flat.
   followed by the consumer's fit is not the consumer's fit applied directly.
   The useful move is the opposite direction — passing bounds *up* so the
   decode is bounded — which is the `requestedBounds` idea below.
-- `render/gradient`, `render/color` — **shipped 2026-08-12** as the first
-  *declared* natural-fit producers, via the "output is opaque given these
-  fields" capability the audit called for: `requireOpaqueColor` on
+- `render/gradient`, `render/color` — **shipped** as the first *declared*
+  natural-fit producers, via the "output is opaque given these fields"
+  capability the audit called for: `requireOpaqueColor` on
   `intoTarget`. An opaque fill overwrites every pixel of its target, so a
   set and a composite are the same picture and the generator may paint the
   live canvas in place — under *every* static placement, since its output is
@@ -495,62 +544,28 @@ down.
 
 - **Phase 3: row streams.** The prize is a 4000×3000 JPEG onto an 800×480
   canvas in a few hundred KB of row buffers. The gate was checked twice and
-  says no: after phases 0–1, every image edge on the bench frame costs
-  either nothing (fused into the canvas) or one canvas-sized value a row
-  stream could not remove, and the chains row streams were designed for —
-  uncached producer → pointwise transformer → canvas — occur in no shipped
-  scene. **Reopens when**: a transformer-mid-chain scene ships (the shape
-  now works, fused, without streams), or a panel where the canvas alone is
-  the problem — on the 13.3E6 the canvas is 7.7MB. If built: producer emits
+  says no: every image edge on the bench frame costs either nothing (fused
+  into the canvas) or one canvas-sized value a row stream could not remove,
+  and the chains row streams were designed for — uncached producer →
+  pointwise transformer → canvas — occur in no shipped scene. **Reopens
+  when**: a transformer-mid-chain scene ships (the shape works today,
+  fused, without streams), or a panel where the canvas alone is the
+  problem — on the 13.3E6 the canvas is 7.7MB. If built: producer emits
   scanlines at target resolution, consumers are the canvas draw and
   pointwise ops, fallback points materialize automatically. The
-  quality-preserving streaming scaler this was gated on **exists as of
-  2026-08-12**: pixie's scaled decodes box-average each target pixel's exact
-  source footprint (JPEG through banded accumulators, WebP over its resident
-  buffers), byte-identical at 1:1 and on upscales, and the sample walk no
-  longer wobbles through image coordinates. Built because Wikimedia started
-  serving 960px thumbs for 800px requests, which turned the wikicommons
-  scene's designed 1:1 decode into a 5/6 nearest downscale — visibly ragged
-  through the panel dither, before/after verified on the 7.3" PhotoPainter.
+  quality-preserving streaming scaler it needs exists (see "The scaled
+  decoders").
 - **Pico thin-client wire format** — behind phase 3; its row-stream protocol
   would be the natural wire format for host-rendered scanlines.
-- **`requestedBounds` — shipped 2026-08-12** (see "What shipped"). The
-  design question it carried was answered "everywhere": bounded output is
-  equivalent rather than byte-identical on hosts too, acceptable once the
-  scaled decoders box-filter. What remains of it: `render/zoomPan` declares
-  no bounds (its useful input resolution scales with the zoom factor —
-  needs a multiplier field in the schema if a scene ever needs it), and
-  compiled scenes stay on the floor like every dynamic shape.
+- **`render/zoomPan` bounds.** It declares no `forwardsBounds`: its useful
+  input resolution scales with the zoom factor, which needs a multiplier
+  field in the schema. Trigger: a zoomPan scene that keeps a
+  native-resolution intermediate anyone notices.
 - **`xmlToJson` / `parseJson` / `prettyJson` stay materialized on purpose**:
-  phase 0 measured their inputs at 2.5–20KB on real scenes, three orders of
+  their inputs measured at 2.5–20KB on real scenes, three orders of
   magnitude below the image side. Nothing to buy yet.
 - **The socket-fold** for byte inputs — trigger: a frame with no writable
   storage (reasoning under "The byte side").
-- **The image cache disk tier on hardware — verified 2026-08-12**, three
-  found-and-fixed bugs deep. The tier refused silently, so refusals became
-  log lines (offer-time and store-time, reasons and numbers) — and each log
-  line then exposed the next bug. (1) `headroom 1696K is under 2x the 1500K
-  scratch` on a board with 5.1MB free: the coexistence question was asked
-  against `availableRenderBytes`, the largest-contiguous-block answer, and
-  this heap fragments to ~1.7MB blocks — the check now splits into
-  contiguous-for-the-scratch plus total-free-for-the-headroom
-  (`availableRenderHeadroomBytes`). (2) `no writable spill storage` with a
-  mounted card and an existing `.cache`: Nim's `createDir` mkdirs every
-  path component and the ESP32 VFS mount prefix (`/srv`) is not a directory
-  anything can create — the probe now checks existence first, then a
-  leaf-only mkdir, which also fixes the byte side's Nim spill path (only
-  ever hardware-proven through the C adopt path before). (3) The shipped
-  corpus barely exercises the tier: the Wikimedia sample's producer
-  declares `cache.enabled: false`, and XKCD's split-cell scratch lands 14KB
-  *under* the 1MB in-memory limit — the memory tier legitimately holds it.
-  End state on the frame, via a dedicated over-limit cached scene:
-  `imageSpill bytes=1536000 path=/srv/assets/.cache/2-node3-cache.rgbx`,
-  the replaced entry's file deleted by ownership, the hit render at 7.0s
-  against the 22.8s miss with the producer not re-run, and the panel
-  byte-identical across both. Still open: the mid-life card-pull
-  degradation is host-pinned only (the USB asset API refuses writes to
-  dot-paths by design), and the 13.3E6's upgrade-to-live-canvas is
-  arithmetic (7.7MB scratch), not yet observed.
 - **Streaming a spooled cache hit into the offered target.** A hit today
   costs one transient canvas-sized allocation; reading the file row-by-row
   into the offer would make it window-resident. Deliberately not built: the
@@ -558,11 +573,16 @@ down.
   decode peaks, and writing into the *live canvas* form of the offer is only
   correct for full-overwrite fits — the same fit-rect reasoning that keeps
   canvas snapshots out of the cache. Trigger: a panel where the transient
-  alone breaks the render (a 13.3E6-class canvas after its upgrade predicate
-  is met some other way), and then only for the owned-scratch offer form
-  unless the fit question is settled.
+  alone breaks the render (a 13.3E6-class canvas), and then only for the
+  owned-scratch offer form unless the fit question is settled.
 - **The split erasing-blend caveat** — watch item, not work: fix is a
   planner-style rule for cells if a relying scene appears.
+- **Hardware coverage gaps, for the record.** The disk tier's mid-life
+  file-loss degradation is host-pinned only — the USB asset API refuses
+  writes to dot-paths by design, so simulating a pulled card remotely is
+  impossible; pull the card for real to observe it. The 13.3E6's
+  upgrade-to-live-canvas is arithmetic (a 7.7MB scratch can never find 2×
+  headroom), not yet observed on that panel.
 
 ## Non-goals
 
@@ -570,6 +590,5 @@ down.
   necessary.
 - Editor-visible pipeline configuration of any kind.
 - Host-side streaming decode. (Its old precondition — a quality-preserving
-  scaler — exists since 2026-08-12; what still gates it is a shipped scene
-  that needs it.)
+  scaler — exists; what gates it now is a shipped scene that needs it.)
 - Image proxies. (Standing hard rule — the fix is always on-device.)

@@ -231,11 +231,12 @@ proc materialize*(spool: Spool, maxBytes = 0): string =
 
 proc usableScratchDir(path: string): bool =
   ## Existence first, then a leaf-only mkdir. Never `createDir`: it mkdirs
-  ## every path component, and on the ESP32 VFS the mount prefix ("/srv" of
-  ## "/srv/assets") is not a directory anything can create — the recursive
-  ## walk fails on it and a perfectly writable, already-existing spill dir
-  ## reads as "no storage". Found live by the disk tier's refusal log; the
-  ## leaf mkdir under a mounted parent is what the VFS actually supports.
+  ## every path component, and on the ESP32 the SD card is mounted wholesale
+  ## at "/srv/assets" — "/srv" is not a directory in any filesystem, just
+  ## the name prefix the VFS matches — so the recursive walk fails on it and
+  ## a perfectly writable, already-existing spill dir reads as "no storage".
+  ## Found live by the disk tier's refusal log; the leaf mkdir under the
+  ## mount point is what the filesystem actually supports.
   if path.len == 0:
     return false
   try:
