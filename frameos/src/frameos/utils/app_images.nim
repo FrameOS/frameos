@@ -97,6 +97,8 @@ proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext):
     result = (newImage(context.decodeTargetWidth, context.decodeTargetHeight), scalingMode)
   else:
     return (nil, "")
+  if not self.isNil:
+    context.decodeTargetClaimedBy = self.nodeId
   context.decodeTargetImage = nil
   context.decodeTargetScalingMode = ""
   context.decodeTargetWidth = 0

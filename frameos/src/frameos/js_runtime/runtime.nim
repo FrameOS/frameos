@@ -438,7 +438,7 @@ proc valueToJS*(ctx: ptr JSContext, v: Value): JSValue =
     return nimIntToJS(ctx, v.nId.int32)
   of fkScene:
     return nimStringToJS(ctx, v.sId.string)
-  of fkImage, fkNone:
+  of fkImage, fkImageSpool, fkNone:
     return jsNull(ctx)
 
 proc jsGetState(ctx: ptr JSContext, k: JSValue): JSValue {.nimcall.} =

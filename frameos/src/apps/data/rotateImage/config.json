@@ -17,7 +17,15 @@
   "output": [
     {
       "name": "image",
-      "type": "image"
+      "type": "image",
+      "capabilities": {
+        "forwardsTarget": {
+          "input": "image",
+          "requireStatic": {
+            "rotationDegree": ["180", "180.0", "-180", "-180.0", "540", "540.0"]
+          }
+        }
+      }
     }
   ]
 }

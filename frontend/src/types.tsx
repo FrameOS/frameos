@@ -551,6 +551,12 @@ export interface IntoTargetCapability {
   fits?: string[]
   requireStatic?: Record<string, string[]>
   requireUnset?: string[]
+  /**
+   * Color fields that must statically resolve to a fully opaque color for the
+   * capability to apply — the "output is opaque given these fields" promise
+   * that lets a generator (gradient, solid color) fill the target in place.
+   */
+  requireOpaqueColor?: string[]
 }
 
 export interface ForwardsTargetCapability {

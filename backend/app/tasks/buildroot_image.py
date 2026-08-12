@@ -40,7 +40,11 @@ from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_remote import RemoteDeployer
 from app.tasks.precompiled_remote import download_precompiled_remote_release
-from app.tasks.precompiled_frameos import frame_compiled_scene_count, release_version
+from app.tasks.precompiled_frameos import (
+    download_release_file,
+    frame_compiled_scene_count,
+    release_version,
+)
 from app.tasks.sd_image_blob_patch import (
     build_setup_blob_payload,
     patch_setup_blob_into_image,
@@ -408,11 +412,26 @@ def _frameos_version() -> str:
 
 
 async def _remote_buildroot_base_manifest() -> dict[str, Any]:
+    # Same transient-failure story as the release downloads: one dropped
+    # connection must not fail a whole image build over a 2KB manifest.
     manifest_url = urljoin(_normalize_url_base(BUILDROOT_ARCHIVE_BASE_URL), BUILDROOT_BASE_MANIFEST_PATH)
-    async with httpx.AsyncClient(timeout=BUILDROOT_BASE_TIMEOUT) as client:
-        response = await client.get(manifest_url)
-        response.raise_for_status()
-        return response.json()
+    last_error: Exception | None = None
+    for attempt in range(3):
+        if attempt:
+            await asyncio.sleep(2 ** attempt)
+        try:
+            async with httpx.AsyncClient(timeout=BUILDROOT_BASE_TIMEOUT) as client:
+                response = await client.get(manifest_url)
+                response.raise_for_status()
+                return response.json()
+        except httpx.TransportError as exc:
+            last_error = exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code < 500:
+                raise
+            last_error = exc
+    assert last_error is not None
+    raise last_error
 
 
 async def _buildroot_base_manifest() -> dict[str, Any]:
@@ -473,15 +492,13 @@ async def download_precompiled_buildroot_sd_image(
         ) as temp_file:
             temp_path = Path(temp_file.name)
 
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            async with client.stream("GET", url) as response:
-                if response.status_code == 404:
-                    await logger("stdout", f"No full precompiled Buildroot SD image release found for {platform}")
-                    return None
-                response.raise_for_status()
-                with temp_path.open("wb") as output:
-                    async for chunk in response.aiter_bytes():
-                        output.write(chunk)
+        try:
+            await download_release_file(url, temp_path, timeout)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                await logger("stdout", f"No full precompiled Buildroot SD image release found for {platform}")
+                return None
+            raise
 
         if not temp_path.is_file() or temp_path.stat().st_size == 0:
             await logger("stderr", "Downloaded full precompiled Buildroot SD image release was empty")

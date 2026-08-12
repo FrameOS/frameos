@@ -222,57 +222,75 @@ proc appCapabilities*(keyword: string): AppCapabilities =
   of "data/downloadImage":
     AppCapabilities(
       providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       fieldDefaults: @[])
   of "data/frameOSGallery":
     AppCapabilities(
       providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       fieldDefaults: @[])
   of "data/googlePhotos":
     AppCapabilities(
       providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       fieldDefaults: @[])
   of "data/immich":
     AppCapabilities(
       providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       fieldDefaults: @[])
   of "data/localImage":
     AppCapabilities(
       providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       fieldDefaults: @[])
   of "data/openaiImage":
     AppCapabilities(
       providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       fieldDefaults: @[])
+  of "data/rotateImage":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[],
+      forwardsTarget: @[ForwardsTargetSpec(output: "image", input: "image", requireStatic: @[FieldConstraint(field: "rotationDegree", allowed: @["180", "180.0", "-180", "-180.0", "540", "540.0"])])],
+      fieldDefaults: @[FieldMatch(field: "rotationDegree", value: "0")])
   of "data/unsplash":
     AppCapabilities(
       providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       fieldDefaults: @[])
   of "data/wikicommons":
     AppCapabilities(
       providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[])],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       fieldDefaults: @[])
   of "render/calendar":
     AppCapabilities(
       providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @["inputImage"])],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: "")])
+  of "render/color":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["natural"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @["color"])],
+      forwardsTarget: @[],
+      fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "color", value: "#ffffff")])
+  of "render/gradient":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["natural"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @["startColor", "endColor"])],
+      forwardsTarget: @[],
+      fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "startColor", value: "#800080"), FieldMatch(field: "endColor", value: "#ffc0cb")])
   of "render/image":
     AppCapabilities(
       providesTarget: @[ProvidesTargetSpec(input: "image", fitFrom: "placement", fits: @["cover", "contain", "stretch"], requireStatic: @[FieldConstraint(field: "offsetX", allowed: @["0"]), FieldConstraint(field: "offsetY", allowed: @["0"]), FieldConstraint(field: "blendMode", allowed: @["normal", "overwrite"])], compositingRequireStatic: @[FieldConstraint(field: "blendMode", allowed: @["normal"])], requireUnset: @["inputImage"], ownedTargetExcludes: @[@[FieldMatch(field: "placement", value: "contain"), FieldMatch(field: "blendMode", value: "overwrite")]])],

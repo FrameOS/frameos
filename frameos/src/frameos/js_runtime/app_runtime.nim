@@ -830,7 +830,9 @@ proc jsAppValueToJson(runtime: JsAppRuntime, value: Value): JsonNode =
     return %* value.nId.int
   of fkScene:
     return %* value.sId.string
-  of fkNone:
+  of fkImageSpool, fkNone:
+    # A spooled image is a cache-internal tier; the interpreter materializes
+    # it to fkImage before any app — JS included — can see the value.
     return newJNull()
 
 const JsAppSourceNames = ["app.ts", "app.js", "app.tsx", "app.jsx"]

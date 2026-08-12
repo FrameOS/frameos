@@ -15,6 +15,7 @@ import pixie
 import frameos/types
 import frameos/channels
 import frameos/interpreter
+import frameos/planner
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/js_runtime/runtime as jsRuntime
@@ -300,6 +301,13 @@ proc frameos_wasm_set_scene_state(sceneId: cstring, stateJson: cstring): bool {.
   except Exception as e:
     setLastError("setSceneState failed: " & e.msg)
     false
+
+proc frameos_wasm_set_fusion(enabled: bool) {.exportc, cdecl.} =
+  ## The differential's kill switch, same contract as the device console's
+  ## `set fusion 0|1`: with fusion off every image edge falls back to the
+  ## materialized floor, and the rendered pixels must not change. Plans are
+  ## built at scene init, so call this before selecting the scene.
+  imageFusionEnabled = enabled
 
 proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
   try:

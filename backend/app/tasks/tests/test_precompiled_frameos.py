@@ -149,3 +149,133 @@ async def test_download_precompiled_frameos_release_reuses_cached_archive(
     assert second.scene_library_names == ["scenes.so"]
     assert [Path(path).read_bytes() for path in second.scene_library_paths] == [b"scenes"]
     assert any("Using cached precompiled FrameOS release" in message for _level, message in logs)
+
+
+class _FakeStreamResponse:
+    def __init__(self, status_code: int, body: bytes = b"") -> None:
+        self.status_code = status_code
+        self._body = body
+
+    def raise_for_status(self) -> None:
+        import httpx
+
+        if self.status_code >= 400:
+            request = httpx.Request("GET", "https://github.com/release")
+            response = httpx.Response(self.status_code, request=request)
+            raise httpx.HTTPStatusError("error", request=request, response=response)
+
+    async def aiter_bytes(self):
+        yield self._body
+
+
+class _FakeStream:
+    def __init__(self, outcome) -> None:
+        self._outcome = outcome
+
+    async def __aenter__(self):
+        if isinstance(self._outcome, Exception):
+            raise self._outcome
+        return self._outcome
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+
+def _fake_async_client(outcomes: list):
+    """An httpx.AsyncClient stand-in that pops one scripted outcome per GET."""
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc) -> bool:
+            return False
+
+        def stream(self, _method: str, _url: str):
+            return _FakeStream(outcomes.pop(0))
+
+    return FakeAsyncClient
+
+
+@pytest.mark.asyncio
+async def test_download_retries_transient_disconnects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The CI-observed flake: GitHub drops the connection before sending a
+    # response. One attempt used to fail the whole build; the downloader now
+    # retries and the third attempt's bytes land on disk.
+    import httpx
+
+    from app.tasks import precompiled_frameos
+
+    outcomes = [
+        httpx.RemoteProtocolError("Server disconnected without sending a response."),
+        httpx.ConnectError("connection reset"),
+        _FakeStreamResponse(200, b"release bytes"),
+    ]
+    monkeypatch.setattr(precompiled_frameos.httpx, "AsyncClient", _fake_async_client(outcomes))
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(precompiled_frameos.asyncio, "sleep", no_sleep)
+
+    destination = tmp_path / "release.tar.gz"
+    await precompiled_frameos._download("https://github.com/release", destination, timeout=1.0)
+
+    assert destination.read_bytes() == b"release bytes"
+    assert not outcomes, "every scripted attempt should have been consumed"
+
+
+@pytest.mark.asyncio
+async def test_download_does_not_retry_missing_releases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # A 404 is an answer, not a flake: retrying it would just hammer the
+    # release host and delay the fallback to a source build.
+    import httpx
+
+    from app.tasks import precompiled_frameos
+
+    outcomes = [_FakeStreamResponse(404)]
+    monkeypatch.setattr(precompiled_frameos.httpx, "AsyncClient", _fake_async_client(outcomes))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await precompiled_frameos._download(
+            "https://github.com/release", tmp_path / "missing.tar.gz", timeout=1.0
+        )
+
+    assert not outcomes
+
+
+@pytest.mark.asyncio
+async def test_download_gives_up_after_the_last_attempt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import httpx
+
+    from app.tasks import precompiled_frameos
+
+    outcomes = [
+        httpx.RemoteProtocolError("Server disconnected without sending a response.")
+        for _ in range(precompiled_frameos.RELEASE_DOWNLOAD_ATTEMPTS)
+    ]
+    monkeypatch.setattr(precompiled_frameos.httpx, "AsyncClient", _fake_async_client(outcomes))
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(precompiled_frameos.asyncio, "sleep", no_sleep)
+
+    with pytest.raises(httpx.RemoteProtocolError):
+        await precompiled_frameos._download(
+            "https://github.com/release", tmp_path / "flaky.tar.gz", timeout=1.0
+        )
+
+    assert not outcomes

@@ -139,6 +139,8 @@ def _capability_fields(spec: dict) -> list[str]:
         add(field)
     for field in (spec.get("requireUnset") or []):
         add(field)
+    for field in (spec.get("requireOpaqueColor") or []):
+        add(field)
     for clause in (spec.get("ownedTargetExcludes") or []):
         if isinstance(clause, dict):
             for field in clause:
@@ -205,7 +207,8 @@ def _app_capability_literal(config: dict) -> Optional[str]:
                 f"output: {_nim_str(output.get('name'))}, "
                 f"fits: {_nim_str_seq(spec.get('fits') or DEFAULT_TARGET_FITS)}, "
                 f"requireStatic: {_nim_constraints(spec.get('requireStatic'))}, "
-                f"requireUnset: {_nim_str_seq(spec.get('requireUnset') or [])})"
+                f"requireUnset: {_nim_str_seq(spec.get('requireUnset') or [])}, "
+                f"requireOpaqueColor: {_nim_str_seq(spec.get('requireOpaqueColor') or [])})"
             )
         spec = capabilities.get("forwardsTarget")
         if isinstance(spec, dict):

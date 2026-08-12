@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -25,6 +26,7 @@ RELEASE_BASE_URL = os.environ.get(
     "https://github.com/FrameOS/frameos/releases/download/",
 )
 RELEASE_TIMEOUT = float(os.environ.get("FRAMEOS_PRECOMPILED_TIMEOUT", "60"))
+RELEASE_DOWNLOAD_ATTEMPTS = max(1, int(os.environ.get("FRAMEOS_RELEASE_DOWNLOAD_ATTEMPTS", "4")))
 SAFE_RELEASE_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
 SAFE_CACHE_FILENAME = re.compile(r"[^A-Za-z0-9_.-]+")
 
@@ -205,12 +207,44 @@ def _has_cached_archive(path: Path) -> bool:
 
 
 async def _download(url: str, destination: Path, timeout: float) -> None:
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        async with client.stream("GET", url) as response:
-            response.raise_for_status()
-            with destination.open("wb") as fh:
-                async for chunk in response.aiter_bytes():
-                    fh.write(chunk)
+    """Streams `url` into `destination`, retrying transient failures.
+
+    A single GET against a release host is a coin flip on CI runners and
+    home networks alike — GitHub drops connections before sending headers
+    often enough that one attempt fails real builds ("Server disconnected
+    without sending a response"). Transport errors and 5xx responses retry
+    with a short backoff; a 4xx is an answer (the release is not there),
+    not a flake, and raises immediately. Each attempt rewrites the
+    destination from scratch, so a mid-stream disconnect never leaves a
+    truncated file behind.
+    """
+    last_error: Exception | None = None
+    for attempt in range(RELEASE_DOWNLOAD_ATTEMPTS):
+        if attempt:
+            await asyncio.sleep(min(2 ** attempt, 8))
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                async with client.stream("GET", url) as response:
+                    response.raise_for_status()
+                    with destination.open("wb") as fh:
+                        async for chunk in response.aiter_bytes():
+                            fh.write(chunk)
+            return
+        except httpx.TransportError as exc:
+            last_error = exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code < 500:
+                raise
+            last_error = exc
+    assert last_error is not None
+    raise last_error
+
+
+# The retrying release downloader, importable by name for the other release
+# artifact fetches (the precompiled Buildroot SD image shares the same flaky
+# host). Tests monkeypatch `_download`; call sites in this module resolve the
+# global at call time, so both names stay patchable.
+download_release_file = _download
 
 
 def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:

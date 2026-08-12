@@ -101,6 +101,35 @@ suite "planner rules":
     check refusal == frFused
     check scene.imageFusionPlans[2.NodeId].tier == iftLiveCanvas
 
+  test "rotate at 180 forwards the target; the chain owns a scratch":
+    # 180 preserves dimensions, so rotateImage declares forwardsTarget gated
+    # on exactly that config. A forwarding hop forces the owned tier: the
+    # transformer mutates in place, and it must own what it mutates.
+    let scene = sceneWith(
+      @[consumer(2, %*{}),
+        node(4, "app", %*{"keyword": "data/rotateImage",
+          "config": {"rotationDegree": 180}}),
+        producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 1
+    check refusal == frFused
+    let plan = scene.imageFusionPlans[2.NodeId]
+    check plan.tier == iftOwnedScratch
+    check plan.inPlaceNodeIds == @[4.NodeId]
+    check plan.producerNodeId == 3.NodeId
+
+  test "rotate at 90 is opaque — its output has different dimensions":
+    let scene = sceneWith(
+      @[consumer(2, %*{}),
+        node(4, "app", %*{"keyword": "data/rotateImage",
+          "config": {"rotationDegree": 90}}),
+        producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 0
+    check refusal == frChainOpaque
+
   test "an overwriting producer keeps its overwrite blend":
     # The rule must not over-reach: a decoder overwrites every pixel it fits,
     # so the consumer's overwrite blend stays fusible.
@@ -110,3 +139,105 @@ suite "planner rules":
     let (plans, refusal) = scene.plan()
     check plans == 1
     check refusal == frFused
+
+suite "opaque-output producers":
+  # render/color and render/gradient declare intoTarget with
+  # requireOpaqueColor (docs/value-pipeline.md, transformer audit): an opaque
+  # fill overwrites every pixel of its target, so a set and a composite are
+  # the same picture and the generator may paint the canvas in place. Any
+  # alpha below 1 makes that an erase where the floor composites.
+
+  proc colorProducer(id: int, config: JsonNode): DiagramNode =
+    node(id, "app", %*{"keyword": "render/color", "config": config})
+
+  test "an opaque color fill claims the live canvas":
+    let scene = sceneWith(
+      @[consumer(2, %*{}), colorProducer(3, %*{"color": "#336699"})],
+      [(2, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 1
+    check refusal == frFused
+    check scene.imageFusionPlans[2.NodeId].tier == iftLiveCanvas
+
+  test "the unset color falls back to the opaque config default and fuses":
+    let scene = sceneWith(
+      @[consumer(2, %*{}), colorProducer(3, %*{})],
+      [(2, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 1
+    check refusal == frFused
+
+  test "every placement fuses: a generator's output is target-sized":
+    let scene = sceneWith(
+      @[consumer(2, %*{"placement": "center"}),
+        colorProducer(3, %*{"color": "#336699"})],
+      [(2, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 1
+    check refusal == frFused
+
+  test "a semi-transparent fill stays on the floor — tint must not erase":
+    # Fused, the fill would SET half-transparent pixels over the canvas;
+    # materialized, render/image composites them over what is already there.
+    # Those are different pictures, so the edge must not fuse.
+    let scene = sceneWith(
+      @[consumer(2, %*{}),
+        colorProducer(3, %*{"color": "rgba(51, 102, 153, 0.5)"})],
+      [(2, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 0
+    check refusal == frChainOpaque
+
+  test "a wired color never resolves and never fuses":
+    let scene = sceneWith(
+      @[consumer(2, %*{}), colorProducer(3, %*{}), node(5, "state", %*{})],
+      [(2, "image", 3), (3, "color", 5)])
+    let (plans, refusal) = scene.plan()
+    check plans == 0
+    check refusal == frChainOpaque
+
+  test "an unparseable color stays on the floor":
+    # Only a value that provably parses opaque may fuse. (An empty string —
+    # scene JSON's way of saying "use the default" — never reaches the parse;
+    # a missing *default* would, and parseHtmlColor throws a Defect on "",
+    # which the same except-and-refuse path absorbs.)
+    let scene = sceneWith(
+      @[consumer(2, %*{}), colorProducer(3, %*{"color": "not-a-color"})],
+      [(2, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 0
+    check refusal == frChainOpaque
+
+  test "drawing over an input image is a different node; it stays unfused":
+    let scene = sceneWith(
+      @[consumer(2, %*{}), colorProducer(3, %*{"color": "#336699"}),
+        producer(6, cached = false)],
+      [(2, "image", 3), (3, "inputImage", 6)])
+    let (plans, refusal) = scene.plan()
+    check plans == 0
+    check refusal == frChainOpaque
+
+  test "a cached gradient gets a scratch of its own, never the canvas":
+    let scene = sceneWith(
+      @[consumer(2, %*{}),
+        node(3, "app", %*{"keyword": "render/gradient",
+          "config": {"startColor": "#800080", "endColor": "#ffc0cb"},
+          "cache": {"enabled": true}})],
+      [(2, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 1
+    check refusal == frFused
+    let gradientPlan = scene.imageFusionPlans[2.NodeId]
+    check gradientPlan.tier == iftOwnedScratch
+    check gradientPlan.ownedForCache
+
+  test "one semi-transparent gradient stop is enough to refuse":
+    let scene = sceneWith(
+      @[consumer(2, %*{}),
+        node(3, "app", %*{"keyword": "render/gradient",
+          "config": {"startColor": "#800080",
+                     "endColor": "rgba(255, 192, 203, 0.9)"}})],
+      [(2, "image", 3)])
+    let (plans, refusal) = scene.plan()
+    check plans == 0
+    check refusal == frChainOpaque

@@ -50,8 +50,8 @@ proc spoolThreshold*(): int =
     return 0
   clamp(available div 4, MinSpoolThresholdBytes, MaxSpoolThresholdBytes)
 
-proc spoolDir*(self: AppRoot): string =
-  ## Where this app should put a body too large to hold in memory.
+proc spoolDir*(frameConfig: FrameConfig): string =
+  ## Where a value too large to hold in memory should spill.
   ##
   ## The assets directory first — on an embedded frame that is the SD card
   ## when one is mounted, which is both roomier and kinder to the internal
@@ -59,12 +59,18 @@ proc spoolDir*(self: AppRoot): string =
   ## disposable, matching the sweep the firmware already does for spilled
   ## downloads. Empty means "no preference", and the spool falls back to the
   ## platform temp dir.
-  if self.isNil or self.frameConfig.isNil:
+  if frameConfig.isNil:
     return ""
-  let assets = self.frameConfig.assetsPath
+  let assets = frameConfig.assetsPath
   if assets.len == 0:
     return ""
   assets & "/.cache"
+
+proc spoolDir*(self: AppRoot): string =
+  ## The app-side view of the same policy.
+  if self.isNil:
+    return ""
+  self.frameConfig.spoolDir()
 
 when defined(frameosEmbedded):
   const EmbeddedMinImageResponseBytes* = 6 * 1024 * 1024
