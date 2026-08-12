@@ -1,7 +1,9 @@
 import frameos/types
 import frameos/values
-from frameos/utils/image import renderError, renderErrorInto
-from frameos/utils/memory import renderMemoryInUse
+import frameos/spool
+from frameos/apps as frameos_apps import spoolDir
+from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool
+from frameos/utils/memory import renderMemoryInUse, availableRenderBytes
 when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
@@ -15,6 +17,76 @@ import apps/apps
 const TRACING = false
 when defined(frameosEmbedded):
   const EmbeddedMaxCachedImageBytes = 1024 * 1024
+
+when defined(testing):
+  var cachedImageMemoryLimitOverride* = 0
+    ## Lets host tests exercise the embedded cache-image tiers (the disk spill
+    ## and the live-canvas upgrade) without an embedded build.
+
+proc cachedImageMemoryLimit(): int =
+  ## Above this many bytes the node cache does not hold an image in memory: it
+  ## goes to the disk tier instead, or is not stored at all when there is no
+  ## disk to take it. 0 means no limit, which is the host behavior — a host
+  ## can afford to keep what it cached.
+  when defined(testing):
+    if cachedImageMemoryLimitOverride > 0:
+      return cachedImageMemoryLimitOverride
+  when defined(frameosEmbedded):
+    EmbeddedMaxCachedImageBytes
+  else:
+    0
+
+var imageSpillDisabled = false
+  ## Latched on the first failed spill write, so a full or vanished card is
+  ## probed once instead of on every render. Reset when scenes reload.
+
+proc imageSpillWorthAScratch(frameConfig: FrameConfig, scratchBytes: int): bool =
+  ## Whether an over-limit cached producer should still get an owned scratch,
+  ## because the disk tier can store what the memory cache would refuse. Two
+  ## conditions: somewhere to write, and room to live — the scratch is PSRAM
+  ## held for the whole render next to the canvas and the producer's decode
+  ## intermediates, so demand an equal share of headroom beyond the scratch
+  ## itself. On a 7.3" frame (1.5MB canvas, ~6.6MB free) this passes; on a
+  ## 13.3E6 (7.7MB canvas) it fails and the live-canvas upgrade keeps the
+  ## device rendering, exactly as before the disk tier existed.
+  if imageSpillDisabled:
+    return false
+  let available = availableRenderBytes()
+  if available <= 0 or available < 2 * scratchBytes:
+    return false
+  spoolScratchDir(spoolDir(frameConfig)).len > 0
+
+proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
+    image: Image, context: ExecutionContext): ImageSpool =
+  ## The store side of the cache's disk tier. Returns nil whenever spilling
+  ## would be unsafe or storage will not take it — every nil means "store
+  ## nothing", which is yesterday's behavior.
+  ##
+  ## The safety rule: only pixels the producer alone wrote may be snapshotted.
+  ## An owned scratch or a self-allocated image is exactly the value a memory
+  ## cache would have held, so the file is pixel-exact by construction. The
+  ## live canvas is not: a contain fit leaves the margins holding whatever
+  ## rendered before the producer this pass, and a compositing producer (JS,
+  ## SVG) blends over the same — baking either into the cache would replay a
+  ## stale background over later renders.
+  if imageSpillDisabled:
+    return nil
+  if context != nil and context.hasImage and not context.image.isNil and
+      image.data == context.image.data:
+    return nil
+  # The disk tier exists for canvas-shaped values. A native-resolution decode
+  # that some unfused shape materialized (tens of MB) would cost a huge write
+  # on every miss and could never be read back under the render budget anyway.
+  let bytes = image.width * image.height * 4
+  var cap = 4 * cachedImageMemoryLimit()
+  if context != nil and context.hasImage and not context.image.isNil:
+    cap = max(cap, context.image.width * context.image.height * 4)
+  if bytes > cap:
+    return nil
+  result = spillImageToSpool(image, "node" & $nodeId.int & "-cache.rgbx",
+    spoolDir(scene.frameConfig))
+  if result.isNil:
+    imageSpillDisabled = true
 
 proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
   if scene of InterpretedFrameScene:
@@ -80,6 +152,10 @@ proc valueToKeyJson(v: Value): JsonNode =
     # Images aren't JSON; key by dimensions (pointer identity would be fragile).
     let im = v.asImage()
     result = %* {"__image": {"w": im.width, "h": im.height}}
+  of fkImageSpool:
+    # Same identity as an in-memory image: the tier a value happens to sit in
+    # must never change what it keys as.
+    result = %* {"__image": {"w": v.imgSp.width, "h": v.imgSp.height}}
   of fkColor:
     result = %* v.asColor().toHtmlHex
   of fkJson:
@@ -103,6 +179,7 @@ proc valueToKeyJson(v: Value): JsonNode =
 
 proc withCache(scene: InterpretedFrameScene,
                nodeId: NodeId,
+               context: ExecutionContext,
                cacheEnabled, cacheInputEnabled, cacheDurationEnabled: bool, cacheDurationSec: float,
                builtAnyInput: bool, builtInputKey: JsonNode,
                cacheExprActive: bool, cacheExprValue: JsonNode,
@@ -115,6 +192,9 @@ proc withCache(scene: InterpretedFrameScene,
   ## write the freshly computed value back. Used when the computation ran on
   ## degraded inputs (a producer failed and was zero-filled): that result must
   ## never be pinned in the cache as though it were real data.
+  ##
+  ## `context` is only read by the image disk tier: to refuse snapshotting the
+  ## live canvas on store, and to size the spill cap.
   if not cacheEnabled:
     return compute()
 
@@ -144,16 +224,33 @@ proc withCache(scene: InterpretedFrameScene,
         useCached = false
 
   if useCached:
-    var payload = %*{
-      "event": "interpreter:cache:hit",
-      "sceneId": scene.id.string,
-      "nodeId": nodeId.int
-    }
-    if extraLog.kind == JObject:
-      for k in extraLog.keys: payload[k] = extraLog[k]
-    if TRACING:
-      scene.logger.log(payload)
-    return scene.cacheValues[nodeId]
+    var served = scene.cacheValues[nodeId]
+    var tier = "memory"
+    if served.kind == fkImageSpool:
+      # The disk tier: read the pixels back, whole. Exact by construction —
+      # the file is byte-for-byte the image a memory cache would have held.
+      let img = materializeImageSpool(served.imgSp)
+      if img.isNil:
+        # File swept, card pulled, or no memory to read it back into. An entry
+        # that cannot be served IS a miss; drop it (its file goes with it) and
+        # recompute below, which is what an empty cache would have done.
+        scene.cacheValues.del(nodeId)
+        useCached = false
+      else:
+        served = VImage(img)
+        tier = "storage"
+    if useCached:
+      var payload = %*{
+        "event": "interpreter:cache:hit",
+        "sceneId": scene.id.string,
+        "nodeId": nodeId.int,
+        "tier": tier
+      }
+      if extraLog.kind == JObject:
+        for k in extraLog.keys: payload[k] = extraLog[k]
+      if TRACING:
+        scene.logger.log(payload)
+      return served
 
   # Miss -> compute and write-back
   var payload = %*{
@@ -173,18 +270,24 @@ proc withCache(scene: InterpretedFrameScene,
     # can still hit it, and a stale-but-real value is never replaced by one
     # computed from zero-filled data.
     return fresh
-  when defined(frameosEmbedded):
-    # Never retain frame-sized images in the node cache on embedded: image
-    # producers decode straight into the render canvas, so the cached value
-    # aliases a canvas-sized RGBA buffer (7.7MB at 1200x1600). Pinning it
-    # across renders means the next render needs a second canvas and OOMs
-    # the module (and a cache hit would draw the aliased, since-overwritten
-    # canvas anyway). Re-running the producer costs a re-download; small
-    # images still cache.
-    if fresh.kind == fkImage and not fresh.img.isNil and
-        fresh.img.width * fresh.img.height * 4 > EmbeddedMaxCachedImageBytes:
+  var toStore = fresh
+  let memoryLimit = cachedImageMemoryLimit()
+  if memoryLimit > 0 and fresh.kind == fkImage and not fresh.img.isNil and
+      fresh.img.width * fresh.img.height * 4 > memoryLimit:
+    # Never retain a frame-sized image in memory on embedded: pinning a
+    # canvas-sized RGBA buffer (7.7MB at 1200x1600) across renders means the
+    # next render needs a second canvas and OOMs the module — and when the
+    # value aliases the live canvas, a hit would redraw the since-overwritten
+    # canvas onto itself anyway. The disk tier takes what memory refuses:
+    # spill the pixels to storage and cache a file-backed value instead.
+    # When there is nothing to spill to (or the pixels are not the producer's
+    # alone — see trySpillCachedImage), store nothing: re-running the producer
+    # costs a re-download, which is what this cache did before the disk tier.
+    let spool = trySpillCachedImage(scene, nodeId, fresh.img, context)
+    if spool.isNil:
       return fresh
-  scene.cacheValues[nodeId] = fresh
+    toStore = VImageSpool(spool)
+  scene.cacheValues[nodeId] = toStore
   if cacheDurationEnabled:
     scene.cacheTimes[nodeId] = epochTime()
   if cacheExprActive:
@@ -206,6 +309,9 @@ var uploadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 
 proc resetInterpretedScenes*() =
   allScenesLoaded = false
+  # A card that was full or missing may have been swapped along with the
+  # scenes; give the disk tier another chance.
+  imageSpillDisabled = false
   loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var compiledSceneExports = initTable[SceneId, ExportedScene]()
 
@@ -356,17 +462,22 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             fit = plan.defaultFit
         if fit in plan.fits:
           var tier = plan.tier
-          when defined(frameosEmbedded):
-            if tier == iftOwnedScratch and plan.ownedForCache and
-                context.image.width * context.image.height * 4 >
-                  EmbeddedMaxCachedImageBytes:
-              # The scratch exists so a cached producer never ends up owning the
-              # live canvas. But the embedded cache refuses to store
-              # frame-sized images (see withCache), so past that size it stores
-              # nothing, nothing aliases the canvas across renders, and the
-              # scratch is a whole canvas of PSRAM bought to protect a cache
-              # entry that is never written. Every shipped photo scene caches
-              # its producer, so this is the common case, not the exception.
+          if tier == iftOwnedScratch and plan.ownedForCache:
+            # The scratch exists so a cached producer never ends up owning the
+            # live canvas. Past the in-memory limit the cache cannot hold the
+            # value, so the scratch is only worth its PSRAM if the disk tier
+            # will take the pixels instead (withCache spills the scratch, and
+            # later renders serve it back from the file). When it will not —
+            # no storage, no headroom — nothing gets stored, nothing aliases
+            # the canvas across renders, and the scratch would be a whole
+            # canvas of PSRAM bought to protect a cache entry that is never
+            # written: decode into the live canvas instead. Every shipped
+            # photo scene caches its producer, so this branch is the common
+            # case, not the exception.
+            let memoryLimit = cachedImageMemoryLimit()
+            let scratchBytes = context.image.width * context.image.height * 4
+            if memoryLimit > 0 and scratchBytes > memoryLimit and
+                not imageSpillWorthAScratch(self.frameConfig, scratchBytes):
               tier = iftLiveCanvas
           plannedTier = tier
           case tier
@@ -490,7 +601,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         if cacheExpressionEnabled:
           (cacheExprActive, cacheExprValue) =
             evalCacheExpression(self, context, currentNodeId, cacheExpression)
-        result = withCache(self, currentNodeId,
+        result = withCache(self, currentNodeId, context,
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
                            cacheExprActive, cacheExprValue,
@@ -731,7 +842,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         if cacheExpressionEnabled:
           (cacheExprActive, cacheExprValue) =
             evalCacheExpression(self, context, currentNodeId, cacheExpression)
-        result = withCache(self, currentNodeId,
+        result = withCache(self, currentNodeId, context,
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
                            cacheExprActive, cacheExprValue,

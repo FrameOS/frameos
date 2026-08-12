@@ -14,6 +14,7 @@ import std/xmlparser
 import std/xmltree
 import std/strtabs
 
+import frameos/spool
 import frameos/utils/http_client
 import frameos/utils/memory
 import frameos/utils/font
@@ -1231,6 +1232,69 @@ proc writeError*(image: Image, width, height: int, message: string) =
       )
     image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2)
     image.fillText(types, translate(vec2(padding, padding)))
+
+proc spillImageToSpool*(image: Image, name: string, preferredDir = ""): ImageSpool =
+  ## The disk tier of the image side: write the image's pixels to a spill file
+  ## as raw premultiplied RGBX rows, so a cache can hold them without holding
+  ## memory. Returns nil when there is nowhere to write or the write fails —
+  ## the caller keeps yesterday's behavior instead of raising (principle 3,
+  ## docs/value-pipeline.md).
+  ##
+  ## Stride-aware: a view spills exactly its own rectangle, one row per span,
+  ## so what lands in the file is always width*height*4 bytes of this image
+  ## and nothing of the buffer around it.
+  if image.isNil or image.width <= 0 or image.height <= 0:
+    return nil
+  let path = newSpillFilePath(name, preferredDir)
+  if path.len == 0:
+    return nil
+  var file: File
+  if not file.open(path, fmWrite):
+    return nil
+  var ok = true
+  try:
+    image.forEachSpan:
+      if ok:
+        let bytes = spanLen * 4
+        if file.writeBuffer(addr image.data[spanStart], bytes) != bytes:
+          ok = false
+  except CatchableError:
+    ok = false
+  file.close()
+  if not ok:
+    # A partial file is a wrong answer waiting to be read back; degrade to
+    # "no disk tier" rather than storing it.
+    try:
+      removeFile(path)
+    except CatchableError:
+      discard
+    return nil
+  newImageSpool(path, image.width, image.height)
+
+proc materializeImageSpool*(spool: ImageSpool): Image =
+  ## The floor read of the disk tier: the whole image back in memory, byte for
+  ## byte what was spilled. Returns nil when the file is gone or truncated —
+  ## the storage got pulled or swept — or when the allocation itself would not
+  ## fit in live memory; the caller treats any nil as a cache miss and
+  ## recomputes, which is exactly what a cache with no entry would have done.
+  if spool.isNil or spool.width <= 0 or spool.height <= 0:
+    return nil
+  let bytes = spool.byteSize()
+  let available = availableRenderBytes()
+  if available > 0 and bytes > available:
+    return nil
+  var file: File
+  if not file.open(spool.path):
+    return nil
+  defer: file.close()
+  var image: Image
+  try:
+    image = newImage(spool.width, spool.height)
+  except CatchableError:
+    return nil
+  if file.readBuffer(addr image.data[0], bytes) != bytes:
+    return nil
+  image
 
 proc renderErrorInto*(image: Image, width, height: int, message: string) =
   image.fill(parseHtmlColor("#ffffff"))

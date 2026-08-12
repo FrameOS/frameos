@@ -17,6 +17,7 @@ proc VColor*(c: Color): Value = Value(kind: fkColor, col: c)
 proc VJson*(n: JsonNode): Value {.inline.} = Value(kind: fkJson, j: n)
 proc VImage*(im: Image): Value {.inline.} = Value(kind: fkImage, img: im)
 proc VSpool*(sp: Spool): Value {.inline.} = Value(kind: fkSpool, sp: sp)
+proc VImageSpool*(sp: ImageSpool): Value {.inline.} = Value(kind: fkImageSpool, imgSp: sp)
 proc VNode*(nodeId: NodeId): Value {.inline.} = Value(kind: fkNode, nId: nodeId)
 proc VScene*(sceneId: SceneId): Value {.inline.} = Value(kind: fkScene, sId: sceneId)
 proc VNone*(): Value {.inline.} = Value(kind: fkNone)
@@ -86,6 +87,7 @@ proc `$`*(v: Value): string =
   of fkColor: "color(rgb:" & $v.col.r & "," & $v.col.g & "," & $v.col.b & ")"
   of fkJson: "json(" & $v.j.kind & ")"
   of fkImage: "image(" & $v.img.width & "x" & $v.img.height & ")"
+  of fkImageSpool: "imageSpool(" & $v.imgSp.width & "x" & $v.imgSp.height & ", file)"
   of fkNode: "node(" & $v.nId & ")"
   of fkScene: "scene(" & $v.sId & ")"
   of fkNone: "none"
@@ -121,6 +123,9 @@ proc approxByteSize*(v: Value): int =
   of fkJson: approxByteSize(v.j)
   of fkImage:
     if v.img.isNil: 0 else: v.img.width * v.img.height * 4
+  of fkImageSpool:
+    # Pixels on disk cost nothing to hold; that is the tier's whole point.
+    0
   else: 0
 
 proc valueToJson*(v: Value): JsonNode =
@@ -136,6 +141,8 @@ proc valueToJson*(v: Value): JsonNode =
   of fkNode: %* v.nId.int # store node ids as ints
   of fkScene: %* v.sId.string # store scene ids as strings
   of fkImage: # images cannot be serialized to json; log and drop
+    newJNull()
+  of fkImageSpool:
     newJNull()
   of fkNone:
     newJNull()

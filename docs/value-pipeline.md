@@ -41,9 +41,10 @@ That block is gone. Apps declare capabilities; a generic planner decides.
 3. **Tiered fallback, always terminating in yesterday's behavior.** Every
    negotiation has a materialized floor. Images: fused-into-target >
    canvas-sized scratch > budgeted materialize. Bytes: in-memory > spool to
-   SD/disk > bounded error. A failed storage probe degrades to memory rather
-   than raising — a frame with no SD card must not start failing downloads
-   that used to work.
+   SD/disk > bounded error. The node cache mirrors it for what it *holds*:
+   in-memory > spool to SD/disk > store nothing. A failed storage probe
+   degrades to memory rather than raising — a frame with no SD card must not
+   start failing downloads that used to work.
 4. **Fused output == materialized output.** Anything that would change pixels
    is either encoded as a planner rule or stays unfused — enforced by
    differential harnesses, not by review. Where a measured trade deliberately
@@ -128,13 +129,16 @@ The rules, each one declarative check:
   wrong, which is exactly what the differential's second frame checks).
 - **The embedded cache upgrade.** A cached producer forces the owned tier so
   its cache never holds the canvas — but embedded `withCache` refuses to
-  store frame-sized images, so above that size the cache stores nothing and
-  the scratch was a canvas of PSRAM bought to protect an entry never
-  written. The plan records *why* it chose the owned tier, and the runtime
-  upgrades back to the live canvas when the cache will refuse the value.
-  Every shipped photo scene caches its producer, so this is the common path
-  (~1MB of PSRAM per render on XKCD). A scratch owed to a *transformer* is
-  never upgraded; `test_interpreter_decode_target.nim` pins the distinction.
+  hold frame-sized images in *memory*, so above that size the entry either
+  spills to storage (see "the image cache disk tier") or is not stored at
+  all. The scratch is only worth its PSRAM in the first case: when there is
+  no storage, or no headroom to carry a scratch next to the canvas
+  (`availableRenderBytes < 2×scratch` — the 13.3E6, whose canvas is 7.7MB),
+  the runtime upgrades back to the live canvas and the cache stores nothing,
+  yesterday's behavior exactly. The plan records *why* it chose the owned
+  tier so the runtime can make that call per render. A scratch owed to a
+  *transformer* is never upgraded; `test_interpreter_decode_target.nim` pins
+  the distinction.
 
 ### The handshake, and claimed vs. applied
 
@@ -228,6 +232,58 @@ plan is not the claim; now one log field says which you have.
   memory is a frame with **no writable storage**, where the over-threshold
   body today degrades back to being held whole. That frame appearing is the
   trigger to build it.
+
+### The image cache disk tier (2026-08-12, post-ship follow-up)
+
+The byte spool's question, asked for pixels: does a cached image have to be
+*in memory* to be cached? On embedded the answer used to be a forced trade —
+`withCache` refused frame-sized images, so every shipped photo scene's
+4-hour cache stored nothing and the producer re-downloaded on every render.
+The cache's duration setting silently meant nothing above 1MB.
+
+`Value` gained `fkImageSpool`: an image whose pixels sit in a spill file as
+raw premultiplied RGBX rows (`ImageSpool` in `frameos/spool.nim`, pixel IO in
+`utils/image.nim`). `withCache` stores one when the fresh image is over the
+in-memory limit, and a hit materializes it back — the same swept `.cache`
+directory, naming scheme and ownership rules as the byte spool (`=destroy`
+removes the file; a replaced entry deletes its predecessor's).
+
+Three rules make it correct rather than merely plausible:
+
+- **Only pixels the producer alone wrote are spilled.** An owned scratch or a
+  self-allocated image is exactly the value a memory cache would have held,
+  so the file is pixel-exact *by construction* — principle 4 with nothing to
+  verify. The live canvas is never spilled: a contain fit leaves margins
+  holding whatever rendered before the producer that pass, and a compositing
+  producer (JS, SVG) blends over the same, so a canvas snapshot would replay
+  a stale background over later renders. `withCache` refuses by buffer
+  identity, which also catches error frames painted into the canvas.
+- **A hit that cannot be served is a miss.** File swept, card pulled,
+  truncated write, or no memory to read it back into (the floor read checks
+  `availableRenderBytes` before allocating) — the entry is dropped, its file
+  with it, and the producer recomputes. Every failure lands on yesterday's
+  behavior; nothing raises.
+- **The disk tier is why the scratch exists.** The offer-time upgrade (see
+  the planner rules) now keeps the owned scratch when storage and headroom
+  are there, so the miss decodes into a scratch the cache can actually keep —
+  and upgrades to the live canvas when they are not. One failed spill write
+  latches the tier off until scenes reload, so a full card is probed once,
+  not per render.
+
+What a hit costs: one canvas-sized allocation for the length of the consumer's
+draw (freed with the render), against a re-download, a decode and its
+intermediates. What a miss adds: one sequential file write of `w×h×4` bytes.
+Streaming a hit straight into the offered target — window-resident, no
+transient allocation — is deliberately not built; its trigger is written
+under "What remains".
+
+Pinned by `test_image_spool.nim` (roundtrip byte-exactness for owners *and*
+strided views — a split cell's canvas is a view — ownership, truncation, the
+budget refusal) and `test_interpreter_cache_spool.nim` (the producer paints a
+different colour per call, so "served from disk" and "recomputed" are
+distinguishable in the canvas itself; plus the swept-file miss, the
+no-headroom upgrade, and the under-limit memory path staying untouched).
+Not yet hardware-verified — the checklist is in "What remains".
 
 ### Compiled scenes (parity)
 
@@ -405,6 +461,23 @@ down.
   magnitude below the image side. Nothing to buy yet.
 - **The socket-fold** for byte inputs — trigger: a frame with no writable
   storage (reasoning under "The byte side").
+- **The image cache disk tier on hardware.** Built and test-pinned
+  2026-08-12, not yet on a frame. The checklist: XKCD-style cached scene
+  over the limit spills to the SD `.cache` and the second render serves
+  from the file with the producer not re-run (`interpreter:cache:hit` with
+  `tier: storage`); pull the card mid-life and the next render recomputes
+  instead of erroring; the 13.3E6 still upgrades to the live canvas
+  (headroom check) and stores nothing.
+- **Streaming a spooled cache hit into the offered target.** A hit today
+  costs one transient canvas-sized allocation; reading the file row-by-row
+  into the offer would make it window-resident. Deliberately not built: the
+  transient is freed within the render and is far below the miss path's
+  decode peaks, and writing into the *live canvas* form of the offer is only
+  correct for full-overwrite fits — the same fit-rect reasoning that keeps
+  canvas snapshots out of the cache. Trigger: a panel where the transient
+  alone breaks the render (a 13.3E6-class canvas after its upgrade predicate
+  is met some other way), and then only for the owned-scratch offer form
+  unless the fit question is settled.
 - **The split erasing-blend caveat** — watch item, not work: fix is a
   planner-style rule for cells if a relying scene appears.
 

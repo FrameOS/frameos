@@ -204,7 +204,7 @@ type
 
   FieldKind* = enum
     fkString, fkText, fkFloat, fkInteger, fkBoolean, fkColor, fkJson, fkImage, fkNode, fkScene,
-    fkSpool, fkNone
+    fkSpool, fkImageSpool, fkNone
 
   ## A compact tagged union for interpreter values.
   Value* = object
@@ -229,6 +229,12 @@ type
       j*: JsonNode  ## std/json node (ref object)
     of fkImage:
       img*: Image   ## pixie image (ref object)
+    of fkImageSpool:
+      ## An image whose pixels live on disk (frameos/spool.nim). The disk tier
+      ## of the interpreter's node cache: it is stored and resolved inside
+      ## withCache and never handed to an app — consumers always receive a
+      ## materialized fkImage.
+      imgSp*: ImageSpool
     of fkNode:
       nId*: NodeId  ## custom node type (ref object)
     of fkScene:

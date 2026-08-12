@@ -52,6 +52,44 @@ proc `=destroy`(spool: SpoolObj) =
     except CatchableError:
       discard
 
+type
+  ImageSpoolObj = object
+    ## An image whose pixels live in a file as raw premultiplied RGBX rows —
+    ## the disk tier of the image side (docs/value-pipeline.md). This object is
+    ## only the claim ticket: dimensions and the file. The pixel IO lives in
+    ## utils/image.nim, next to everything else that touches an Image's buffer.
+    path: string
+    width, height: int
+    owned: bool
+
+  ImageSpool* = ref ImageSpoolObj
+
+proc `=destroy`(spool: ImageSpoolObj) =
+  ## Same lifetime rule as a byte spool: the file belongs to the value. A cache
+  ## entry that gets replaced or a scene that unloads drops the last reference,
+  ## and the pixels leave the disk with it.
+  if spool.owned and spool.path.len > 0:
+    try:
+      removeFile(spool.path)
+    except CatchableError:
+      discard
+
+proc newImageSpool*(path: string, width, height: int, owned = true): ImageSpool =
+  ImageSpool(path: path, width: width, height: height, owned: owned)
+
+proc path*(spool: ImageSpool): string =
+  if spool.isNil: "" else: spool.path
+
+proc width*(spool: ImageSpool): int =
+  if spool.isNil: 0 else: spool.width
+
+proc height*(spool: ImageSpool): int =
+  if spool.isNil: 0 else: spool.height
+
+proc byteSize*(spool: ImageSpool): int =
+  ## What materializing it would cost, which is also exactly the file's size.
+  if spool.isNil: 0 else: spool.width * spool.height * 4
+
 proc newMemorySpool*(data: sink string): Spool =
   Spool(kind: skMemory, data: data)
 
@@ -234,6 +272,16 @@ var spoolSequence: int
   ## bytes. A process-wide counter keeps the node name for attribution while
   ## making every file its own.
 
+proc newSpillFilePath*(name: string, preferred = ""): string =
+  ## A fresh, unique path in the spill scratch dir for `name` to be written to,
+  ## or "" when there is no writable storage. Shared by the byte writer below
+  ## and the image spill in utils/image.nim, so every spilled value lands in
+  ## the same swept directory under the same naming scheme.
+  let dir = spoolScratchDir(preferred)
+  if dir.len == 0:
+    return ""
+  dir / ($atomicInc(spoolSequence) & "-" & name)
+
 proc dropSpillFile(writer: var SpoolWriter) =
   writer.file.close()
   writer.opened = false
@@ -257,10 +305,9 @@ proc spillNow(writer: var SpoolWriter, name: string): bool {.discardable.} =
   if writer.probed:
     return false
   writer.probed = true
-  let dir = spoolScratchDir(writer.dir)
-  if dir.len == 0:
+  let path = newSpillFilePath(name, writer.dir)
+  if path.len == 0:
     return false
-  let path = dir / ($atomicInc(spoolSequence) & "-" & name)
   if not writer.file.open(path, fmWrite):
     return false
   writer.path = path
