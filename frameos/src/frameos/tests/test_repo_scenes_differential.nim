@@ -2,6 +2,10 @@ import std/[json, os, sets, strutils, tables]
 import pixie
 import ../interpreter
 import ../planner
+
+# Bounded decodes are equivalent, not byte-identical; the pixel-exact A/B
+# runs with requestedBounds off (it has its own classified test).
+imageBoundsEnabled = false
 import ../types
 import ../utils/memory
 

@@ -4,7 +4,12 @@
   "category": "data",
   "version": "1.0.0",
   "fields": [
-    { "name": "image", "type": "image", "required": true, "label": "Image" },
+    {
+      "name": "image",
+      "type": "image",
+      "required": true,
+      "label": "Image"
+    },
     {
       "name": "rotationDegree",
       "type": "float",
@@ -22,7 +27,44 @@
         "forwardsTarget": {
           "input": "image",
           "requireStatic": {
-            "rotationDegree": ["180", "180.0", "-180", "-180.0", "540", "540.0"]
+            "rotationDegree": [
+              "180",
+              "180.0",
+              "-180",
+              "-180.0",
+              "540",
+              "540.0"
+            ]
+          }
+        },
+        "forwardsBounds": {
+          "input": "image",
+          "swapWhen": {
+            "field": "rotationDegree",
+            "swap": [
+              "90",
+              "90.0",
+              "270",
+              "270.0",
+              "-90",
+              "-90.0",
+              "-270",
+              "-270.0",
+              "450",
+              "450.0"
+            ],
+            "keep": [
+              "0",
+              "0.0",
+              "180",
+              "180.0",
+              "-180",
+              "-180.0",
+              "360",
+              "360.0",
+              "540",
+              "540.0"
+            ]
           }
         }
       }

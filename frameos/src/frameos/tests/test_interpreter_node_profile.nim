@@ -16,7 +16,7 @@ import ../utils/image
 var logs: seq[JsonNode] = @[]
 
 proc recordingDownload(url: string, maxBytes: int, target: Image,
-    fit: ScaledDecodeFit): tuple[image: Image, data: string] =
+    fit: ScaledDecodeFit, boundWidth: int, boundHeight: int): tuple[image: Image, data: string] =
   if target.isNil:
     return (newImage(64, 64), "")
   scaleAndDrawImage(target, newImage(64, 64), scaledFitPlacement(fit),

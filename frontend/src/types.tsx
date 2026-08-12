@@ -570,11 +570,27 @@ export interface InputPortCapabilities {
   providesTarget?: ProvidesTargetCapability
 }
 
+export interface ForwardsBoundsCapability {
+  /** Input port the consumer's useful-resolution bounds are passed on to */
+  input: string
+  /**
+   * Field controlling the geometry (a rotation degree): values in `swap`
+   * exchange width and height, values in `keep` pass them through, anything
+   * else refuses the bounds plan.
+   */
+  swapWhen?: { field: string; swap: string[]; keep: string[] }
+  /** Or replace the bounds with these fields' static values (a resize) */
+  widthFrom?: string
+  heightFrom?: string
+}
+
 export interface OutputPortCapabilities {
   /** This output writes into a caller-supplied image instead of allocating one */
   intoTarget?: IntoTargetCapability
   /** This output passes a target request upstream and mutates the result in place */
   forwardsTarget?: ForwardsTargetCapability
+  /** This output passes useful-resolution bounds upstream (requestedBounds) */
+  forwardsBounds?: ForwardsBoundsCapability
 }
 
 export interface OutputField {

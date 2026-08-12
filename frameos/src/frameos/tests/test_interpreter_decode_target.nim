@@ -257,7 +257,7 @@ proc needsUnseamedNetwork(sceneJson: string): bool =
   false
 
 proc recordingContextDownload(url: string, maxBytes: int, target: Image,
-    fit: ScaledDecodeFit): tuple[image: Image, data: string] =
+    fit: ScaledDecodeFit, boundWidth: int, boundHeight: int): tuple[image: Image, data: string] =
   (recordingDownload(url, maxBytes, target, fit), "")
 
 contextDownloadHook = recordingContextDownload

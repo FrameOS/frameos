@@ -106,25 +106,26 @@ suite "spilled PPM file-backed streaming decode":
   writeFile(path, encoded)
   defer: removeFile(path)
 
-  test "streams from a file source, pixel-identical to buffered decode":
+  test "streams from a file source, matching the shared box sampler":
     # PPM has no buffered scaled decoder to compare against (decodeImageScaled
     # would fall back to decode-then-resize, which interpolates), so the
-    # reference is the full decode sampled with the same nearest-neighbour
-    # mapping the streaming engine uses. Pixels outside the fitted rect stay
-    # untouched by contract — both images start zeroed, so a whole-buffer
-    # comparison still pins that.
+    # reference is the full decode folded through the same RowBoxSampler the
+    # streaming engine uses. Pixels outside the fitted rect stay untouched
+    # by contract — both images start zeroed, so a whole-buffer comparison
+    # still pins that.
     let full = decodePpm(encoded)
     for fit in [fitCover, fitContain, fitStretch]:
       let expected = newImage(120, 90)
-      let rects = scaledFitRects(full.width, full.height,
+      var rowRgbx = newSeq[ColorRGBX](full.width)
+      var sampler = initRowBoxSampler(full.width, full.height,
         expected.width, expected.height, fit)
-      for y in rects.dstY ..< rects.dstY + rects.dstH:
-        let srcY = min(rects.srcY + ((y - rects.dstY) * rects.srcH) div
-          rects.dstH, full.height - 1)
-        for x in rects.dstX ..< rects.dstX + rects.dstW:
-          let srcX = min(rects.srcX + ((x - rects.dstX) * rects.srcW) div
-            rects.dstW, full.width - 1)
-          expected.unsafe[x, y] = full.unsafe[srcX, srcY]
+      for y in 0 ..< full.height:
+        if not sampler.wantsRow(y):
+          continue
+        for x in 0 ..< full.width:
+          rowRgbx[x] = full.unsafe[x, y]
+        sampler.feedRow(expected, y, rowRgbx)
+      sampler.finish(expected)
 
       var file: File
       check file.open(path)

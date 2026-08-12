@@ -13,6 +13,10 @@ import ../utils/memory
 
 const ScratchDir = "tmp/image-spool-tests"
 
+# The spill probe creates only the leaf directory (the on-device assets root
+# is the SD mount and always exists); give the tests theirs deterministically.
+createDir(ScratchDir)
+
 proc patterned(width, height: int): Image =
   ## Every pixel distinct, so a stride bug cannot cancel out.
   result = newImage(width, height)

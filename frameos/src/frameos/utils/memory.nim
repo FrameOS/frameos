@@ -97,6 +97,28 @@ proc availableRenderBytes*(): int =
     # Development hosts: plenty of memory, keep decodes bounded anyway.
     1024 * 1024 * 1024
 
+proc availableRenderHeadroomBytes*(): int =
+  ## Total free render memory minus the reserve, ignoring fragmentation —
+  ## the answer to "can these allocations coexist", where the pieces need
+  ## not be contiguous. `availableRenderBytes` stays the answer for a single
+  ## image-sized allocation; measured on the 7.3" bench frame, the largest
+  ## contiguous block sits near 1.7MB while over 5MB is free, and a headroom
+  ## question asked against the block answer refuses everything.
+  when defined(testing):
+    if availableRenderBytesOverride > 0:
+      return availableRenderBytesOverride
+  when defined(frameosEmbedded):
+    max(0, fos_psram_free_bytes().int - EmbeddedReserveBytes)
+  elif defined(linux) and not defined(frameosWasm):
+    let available = memAvailableBytes()
+    if available <= 0:
+      0
+    else:
+      max(0, available - LinuxReserveBytes)
+  else:
+    # Development hosts: plenty of memory, keep decodes bounded anyway.
+    1024 * 1024 * 1024
+
 proc refreshDecodeBudget*() =
   ## Updates pixie's per-decode budget from live memory. Decode
   ## intermediates may take roughly half of what is available, leaving the
