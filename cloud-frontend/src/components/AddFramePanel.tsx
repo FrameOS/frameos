@@ -65,11 +65,14 @@ type AddFramePath = 'script' | 'sd' | 'link' | 'esp32' | 'reenroll'
 
 // The frames listing rows the reconnect path needs — GET /api/frames serves
 // the full summary; only these fields are read here.
+// `| undefined` spelled out: auth-web compiles these shared sources with
+// exactOptionalPropertyTypes, where a bare `panel?: string` refuses the
+// explicit undefined the frames-listing map produces.
 interface ReenrollFrameChoice {
   id: string
   name: string
-  panel?: string
-  connected?: boolean
+  panel?: string | undefined
+  connected?: boolean | undefined
 }
 
 // Stage one: one button per enrollment path, each with a single line saying
