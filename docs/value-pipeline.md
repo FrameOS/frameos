@@ -587,17 +587,23 @@ capabilities + planner; teach transformers to forward targets.
       purpose for now: phase-0 measured their inputs at 2.5–20 KB on real
       scenes, three orders of magnitude below the image side, so there is
       nothing to buy yet.
-- [ ] Progressive JPEG's buffered decode is not fully budget-guarded (pixie
-      fork). Found by the all-scenes sweep: the Wikimedia picture-of-the-day
-      was a progressive 960px JPEG, and after ~40 minutes of renders the
-      decode attempted one 1,705,604-byte contiguous allocation with
-      1,703,936 as the largest free block — an OOM-aborted render instead of
-      the graceful "over the memory budget" error the PNG path raises. The
-      sampling clamp in `decodeJpegState` is budget-aware, so the untracked
-      allocation is in the progressive coefficient path. Same scene renders
-      clean on a fresh heap (baseline JPEGs stream and never buffer). Fix
-      belongs in the fork: route the progressive path's allocations through
-      the same `decodeBudgetBytes` clamp the rest of the decoder uses.
+- [x] What the all-scenes sweep's one failure actually was — and the first
+      diagnosis written here (progressive JPEG budget gap in the fork) was
+      **wrong**; the numbers led somewhere better. The 1,705,604-byte
+      allocation that missed a 1,703,936-byte largest free block was
+      `wikicommons`' own `newImage(800x533)`: on embedded the app **ignored
+      the planner's offered decode target** and allocated a source-aspect
+      target of its own, unguarded, before the download even started. The
+      "fused: liveCanvas" rows this scene showed in every inventory were the
+      plan, never the claim — an unclaimed offer is harmless by design,
+      which is also what made this invisible. Fixed twice over: the app now
+      takes the offered target first (the decode lands in the live canvas,
+      no allocation at all), and the own-target fallback goes through
+      `ensureRenderAllocation`, so a heap that cannot serve it produces the
+      catchable error frame instead of an OOM-aborted render. The buffered
+      download decode path also refreshes the decode budget now — it never
+      did, so pixie's plan checks on that path ran against whatever number
+      some earlier render had left behind.
 - Not planned, written down so the reasoning survives: folding the ICS
   *as the socket delivers it*, with no spool file at all. The parse never
   needs the file — but the file is not there for the parse. It is what makes

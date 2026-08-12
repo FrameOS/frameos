@@ -925,6 +925,13 @@ when defined(frameosEmbedded):
       headers: seq[SimpleHttpHeader] = @[], fit = fitCover):
       tuple[image: Image, data: string] =
     var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
+    # The budget must reflect the heap the decode is about to run on, not the
+    # one some earlier render saw. This path never went through the
+    # display-bounds helpers that refresh it, so a decoder's "over the memory
+    # budget" plan check ran against a stale number — and a progressive JPEG
+    # that passed it then OOM-aborted the render on a fragmented heap where
+    # the largest free block was 1,668 bytes smaller than its allocation.
+    refreshDecodeBudget()
     try:
       if response.code >= 400:
         raise newException(HttpRequestError, "HTTP " & response.status & httpErrorDetail(response))

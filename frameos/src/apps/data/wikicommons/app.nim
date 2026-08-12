@@ -9,6 +9,7 @@ import frameos/utils/image
 
 when defined(frameosEmbedded):
   import std/math
+  import frameos/utils/memory
 
 const
   CommonsApiUrl = "https://commons.wikimedia.org/w/api.php"
@@ -292,7 +293,27 @@ when defined(frameosEmbedded):
 proc downloadCommonsImage(self: App, context: ExecutionContext, image: CommonsImage,
     fallbackWidth, fallbackHeight: int): tuple[image: Image, data: string] =
   when defined(frameosEmbedded):
+    # The planner's offered target first: this app declares `intoTarget`, and
+    # decoding into the live canvas (or the chain's scratch) costs nothing
+    # here. Until now the offer was silently ignored — the app allocated its
+    # own source-aspect target below, and on a fragmented long-uptime heap
+    # that raw newImage (800x533 = 1.7MB for a 960px source) was an
+    # OOM-aborted render, not even an error frame.
+    let (decodeTarget, decodeScalingMode) = self.takeDecodeTarget(context)
+    if not decodeTarget.isNil:
+      return downloadImageWithDataInto(
+        image.imageUrl,
+        decodeTarget,
+        maxBytes = self.maxImageResponseBytes(),
+        headers = imageHeaders(),
+        fit = scaledDecodeFit(decodeScalingMode)
+      )
     let dimensions = embeddedDecodeDimensions(image, fallbackWidth, fallbackHeight)
+    # Unclaimed offer or none planned: the app owns its target, so the
+    # allocation must answer to the render budget — a heap that cannot serve
+    # it deserves the catchable error the caller turns into an error frame.
+    ensureRenderAllocation(dimensions.width.int64 * dimensions.height.int64 * 4,
+      "Wikimedia Commons decode of " & $dimensions.width & "x" & $dimensions.height)
     let target = newImage(dimensions.width, dimensions.height)
     return downloadImageWithDataInto(
       image.imageUrl,
