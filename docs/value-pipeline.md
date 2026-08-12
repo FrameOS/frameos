@@ -735,9 +735,12 @@ distinction.
       producers and state-wired fits stay interpreted-only (no shipped scene
       compiles those shapes). Pinned by codegen tests over fusible and
       refused shapes, and the generated scene compiles clean.
-- [ ] Cloud: nothing to do at the control-plane level (interpreted
-      scenes ship the runtime's planner), but verify cloud-deployed
-      scenes.json on an ESP32 exercises the new path in the WS test rig.
+- [x] Cloud: verified the strong way rather than in the WS rig — the bench
+      frame's nine scenes ARE cloud-deployed scenes.json (prod cloud
+      assignment), and the 2026-08-12 all-scenes sweep rendered every one of
+      them through the planner on the ESP32, fused where planned, with the
+      per-edge profile as evidence. The control plane needed nothing, as
+      predicted: interpreted scenes ship the runtime's planner.
 - [ ] Revisit Pico thin-client: the row-stream protocol is the natural
       wire format for host-rendered → device-pushed scanlines; check
       whether `embedded/pico` can consume it instead of its own format.
