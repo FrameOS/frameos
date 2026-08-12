@@ -548,10 +548,20 @@ capabilities + planner; teach transformers to forward targets.
       loudly instead of comparing two materialized renders.
 - [x] Embedded regression pass on real hardware (2026-08-11, 7.3"
       PhotoPainter). See "What the hardware said" below.
-- [ ] Opacity-in-the-middle on hardware. The host differential covers it over
-      360 shapes and `test_interpreter_decode_target.nim` pins the hint
-      forwarding, but no scene on the device has a transformer in the chain —
-      it needs a scene uploaded for the purpose.
+- [x] Opacity-in-the-middle on hardware (2026-08-12, 7.3" PhotoPainter): a
+      purpose-built `localImage → render/opacity → render/image` scene
+      uploaded over USB, driven with `set fusion 0|1`. The chain fuses and is
+      **claimed** (the profile's new field, live), tier ownedScratch with the
+      opacity node in `inPlaceNodeIds`; fused renders are **byte-identical
+      across reboots and repeats (0 of 192,000 packed bytes)** — the in-place
+      mutation neither double-fades nor poisons anything — and the fused
+      producer+transformer cost ~10KB of heap where the materialized pass
+      allocated 2.4MB. One honest limit surfaced: byte-parity *against the
+      floor* is unattainable on the device for any non-tiny source, because
+      the floor itself budget-resamples (an 800×480 source decoded at
+      703×421 here) — which is precisely the cost fusion removes. The A/B
+      classifies as dither grain by the same test the SVG decision used:
+      means equal within 0.25/255, 93% symmetric palette flips.
 
 ### Phase 2 — byte-side tiering (independent of phase 1)
 
