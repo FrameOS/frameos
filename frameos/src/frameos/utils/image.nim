@@ -313,11 +313,33 @@ proc decodeImageWithFallback*(data: string): Image =
       return converted.get()
   return decodeImage(data)
 
+proc looksLikeSvg(data: string): bool =
+  data.len > 5 and (data.startsWith("<?xml") or data.startsWith("<svg"))
+
 proc decodeImageWithDisplayBounds*(data: var string,
     maxEdge = DisplayDecodeMaxEdge,
     maxPixels = DisplayDecodeMaxPixels): Image =
   refreshDecodeBudget()
-  # Formats without a dimension prober (e.g. SVG) decode unscaled below.
+  # SVG has no compressed-dimensions probe, but its DECLARED size is right
+  # there in the document, and rasterizing at that size is an unbounded
+  # allocation: a 1KB placeholder declaring 1024x1024 is a 4MB image, which on
+  # a fragmented ESP32 heap was an unrecoverable OOM that aborted the render.
+  # Parse for the declared size and bound it exactly like a raster decode —
+  # it is being rasterized for this display either way.
+  if looksLikeSvg(data):
+    try:
+      let parsed = parseSvg(data)
+      if parsed.width > 0 and parsed.height > 0:
+        let bounded = displayDecodeDimensions(
+          ImageDimensions(width: parsed.width, height: parsed.height),
+          maxEdge, maxPixels)
+        let image = decodeSvgWithFallback(data, bounded.width, bounded.height)
+        if image.isSome:
+          data = ""
+          return image.get()
+    except CatchableError:
+      discard # not actually decodable as SVG; the generic decoder gets to say so
+  # Formats without a dimension prober decode unscaled below.
   var dimensions = ImageDimensions(width: 0, height: 0)
   try:
     dimensions = decodeImageDimensions(data)
@@ -634,10 +656,6 @@ proc readImageWithDisplayBounds*(path: string,
   ensureFileReadBudget(path, fileSize)
   var data = readFile(path)
   decodeImageWithDisplayBounds(data, maxEdge, maxPixels)
-
-proc looksLikeSvg(data: string): bool =
-  ## SVG has no dimensions probe; callers keep it on the generic decoder.
-  data.len > 5 and (data.startsWith("<?xml") or data.startsWith("<svg"))
 
 proc scalingModeToFit(scalingMode: string): Option[ScaledDecodeFit] =
   case scalingMode

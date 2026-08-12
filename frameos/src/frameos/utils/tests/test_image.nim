@@ -50,6 +50,25 @@ suite "image helpers":
     check image.height == 4
     check data.len == 0
 
+  test "display-bounded decode rasterizes SVG at bounded size, not declared size":
+    # A 1KB SVG declaring 1024x1024 is a 4MB image if rasterized as declared —
+    # on a fragmented ESP32 heap that was an unrecoverable OOM that aborted the
+    # render (a Waveshare demo-card placeholder.svg found it). SVG gets the
+    # same display bounds as every raster format.
+    var svg = """<svg viewBox="0 0 1024 1024" width="1024" height="1024" """ &
+      """xmlns="http://www.w3.org/2000/svg"><rect width="1024" height="1024" fill="#123456"/></svg>"""
+    let image = decodeImageWithDisplayBounds(svg, maxEdge = 256, maxPixels = 65_536)
+    check image.width == 256
+    check image.height == 256
+    check pixel(image, 128, 128).r == 0x12
+
+    # An SVG already within bounds keeps its declared size.
+    var small = """<svg viewBox="0 0 20 10" width="20" height="10" """ &
+      """xmlns="http://www.w3.org/2000/svg"><rect width="20" height="10" fill="#ff0000"/></svg>"""
+    let smallImage = decodeImageWithDisplayBounds(small, maxEdge = 256, maxPixels = 65_536)
+    check smallImage.width == 20
+    check smallImage.height == 10
+
   test "decodeDataUrl supports base64 and plain payloads and rejects invalid urls":
     let source = newImage(1, 1)
     source.fill(rgba(255, 0, 0, 255))
