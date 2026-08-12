@@ -32,6 +32,7 @@ when defined(frameosEmbedded):
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
   import pixie/fileformats/ppm
+  import pixie/fileformats/webp
   import pixie/inflatestream
 when not defined(frameosEmbedded) and not defined(frameosWasm):
   # No child processes on FreeRTOS or WebAssembly: ImageMagick/exiftool
@@ -891,6 +892,16 @@ when defined(frameosEmbedded):
       when compiles(decodePpmStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
         # P6 only — ASCII P3 raises rather than buffering the file back.
         decodePpmStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
+        return target
+    if format == "WEBP" and not target.isNil and target.width > 0 and target.height > 0:
+      file.setFilePos(0)
+      GC_fullCollect()
+      when compiles(decodeWebpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
+        # A WebP bitstream cannot be windowed (VP8 partitions interleave
+        # macroblock rows; VP8L's LZ77 window is the whole image), so pixie
+        # holds the compressed body — budget-checked, refusing catchably —
+        # while the full-size RGBA intermediate still never exists.
+        decodeWebpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
         return target
     raise newException(PixieError,
       &"Spilled {format} download ({totalLen div 1024}K) has no file-backed streaming decoder")

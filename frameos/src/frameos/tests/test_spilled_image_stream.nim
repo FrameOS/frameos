@@ -14,6 +14,7 @@ import pixie/fileformats/bmp as pixie_bmp
 import pixie/fileformats/jpeg as pixie_jpeg
 import pixie/fileformats/png as pixie_png
 import pixie/fileformats/ppm as pixie_ppm
+import pixie/fileformats/webp as pixie_webp
 
 proc fileSource(file: File): JpegSourceProc =
   # Mirrors fileJpegSource in utils/image.nim (private there)
@@ -133,3 +134,43 @@ suite "spilled PPM file-backed streaming decode":
 
       for i in 0 ..< target.dataLen:
         check target.data[i] == expected.data[i]
+
+suite "spilled WEBP file-backed streaming decode":
+  # pixie cannot encode WebP, so the sources are checked-in fixtures — one
+  # plain lossy, one lossy with a losslessly-compressed alpha plane, the two
+  # halves of the format a gallery is likely to serve.
+  for fixture in ["lossy.webp", "lossy-alpha.webp"]:
+    let encoded = readFile("src/frameos/tests/fixtures" / fixture)
+    let path = getTempDir() / ("frameos_test_spilled_" & fixture)
+    writeFile(path, encoded)
+    defer: removeFile(path)
+
+    test "streams " & fixture & " from a file source, pixel-identical to buffered decode":
+      for fit in [fitCover, fitContain, fitStretch]:
+        let expected = newImage(120, 90)
+        var buffered = encoded
+        discard decodeImageScaledInto(buffered, expected, fit)
+
+        var file: File
+        check file.open(path)
+        # The call shape decodeSpilledImageInto makes under `when compiles`:
+        # a JpegSourceProc satisfying the WebP source parameter. A re-typed
+        # pixie proc would silently compile the device branch out; this is
+        # what catches that.
+        let target = newImage(120, 90)
+        decodeWebpStreamScaledInto(fileSource(file), encoded.len, target, fit)
+        file.close()
+
+        for i in 0 ..< target.dataLen:
+          check target.data[i] == expected.data[i]
+
+    test "truncated " & fixture & " spill fails with a catchable error":
+      let truncatedPath = getTempDir() / ("frameos_test_spilled_truncated_" & fixture)
+      writeFile(truncatedPath, encoded[0 ..< encoded.len div 2])
+      defer: removeFile(truncatedPath)
+      var file: File
+      check file.open(truncatedPath)
+      defer: file.close()
+      let target = newImage(64, 48)
+      expect PixieError:
+        decodeWebpStreamScaledInto(fileSource(file), encoded.len, target, fitCover)
