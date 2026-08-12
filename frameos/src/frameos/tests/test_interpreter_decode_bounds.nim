@@ -83,10 +83,32 @@ proc boundsScene(rotationDegree: string, imageConfig: JsonNode): ExportedInterpr
     apps: %*{}
   )
 
-proc renderWith(rotationDegree: string, imageConfig: JsonNode = %*{}): Image =
+proc zoomScene(zoomEnd: string): ExportedInterpretedScene =
+  ExportedInterpretedScene(
+    name: "Zoom bounds test",
+    backgroundColor: parseHtmlColor("#000000"),
+    refreshInterval: 60.0,
+    publicStateFields: @[],
+    nodes: @[
+      node(1, "event", %*{"keyword": "render"}),
+      node(2, "app", %*{"keyword": "render/zoomPan",
+        "config": {"motion": "zoomIn", "zoomStart": "1.0", "zoomEnd": zoomEnd}}),
+      node(3, "app", %*{
+        "keyword": "data/downloadImage",
+        "config": {"url": "https://example.invalid/photo.jpg"}
+      })
+    ],
+    edges: @[
+      edge(1, 1, "next", 2, "prev"),
+      edge(2, 3, "fieldOutput", 2, "fieldInput/image")
+    ],
+    apps: %*{}
+  )
+
+proc renderScene(exported: ExportedInterpretedScene): Image =
   let sceneId = "tests/decode-bounds".SceneId
   var uploaded = initTable[SceneId, ExportedInterpretedScene]()
-  uploaded[sceneId] = boundsScene(rotationDegree, imageConfig)
+  uploaded[sceneId] = exported
   setUploadedInterpretedScenes(uploaded)
   resetInterpretedScenes()
   hookBounds = @[]
@@ -98,6 +120,9 @@ proc renderWith(rotationDegree: string, imageConfig: JsonNode = %*{}): Image =
     loopIndex: 0, loopKey: ".", nextSleep: 0.0
   )
   render(scene, context)
+
+proc renderWith(rotationDegree: string, imageConfig: JsonNode = %*{}): Image =
+  renderScene(boundsScene(rotationDegree, imageConfig))
 
 block a_rotate_90_chain_offers_swapped_canvas_bounds:
   discard renderWith("90")
@@ -118,6 +143,16 @@ block a_refused_blend_still_offers_bounds:
   doAssert hookBounds.len == 1
   doAssert hookTargets[0].isNil
   doAssert hookBounds[0] == (width: 8, height: 4)
+
+block a_zoom_consumer_offers_multiplied_canvas_bounds:
+  # zoomPan can never fuse — its draw is a per-render crop — but the largest
+  # crop it will ever show uses at most zoomEnd times the canvas resolution,
+  # rounded up, from the source.
+  discard renderScene(zoomScene("1.5"))
+  doAssert hookBounds.len == 1
+  doAssert hookTargets[0].isNil, "zoomPan never offers a target"
+  doAssert hookBounds[0] == (width: 12, height: 6),
+    "the 8x4 canvas times 1.5: " & $hookBounds[0]
 
 block the_kill_switch_returns_everything_to_the_floor:
   imageBoundsEnabled = false

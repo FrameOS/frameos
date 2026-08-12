@@ -77,6 +77,29 @@ proc staticFieldValue(scene: InterpretedFrameScene, node: DiagramNode,
   else:
     (true, caps.fieldDefault(field))
 
+proc staticBoundsMultiplier(scene: InterpretedFrameScene, node: DiagramNode,
+    caps: AppCapabilities, fields: seq[string]): tuple[known: bool, scale: float] =
+  ## The bounds multiplier a set of zoom fields resolves to: the maximum of
+  ## their static values, floored at 1.0 — the same clamp the app applies to
+  ## its effective zoom, and a multiplier must never shrink a bound. An empty
+  ## value means "the app's own default", which the floor already covers; a
+  ## wired or unparseable field refuses, never guesses.
+  var scale = 1.0
+  for field in fields:
+    let (known, value) = staticFieldValue(scene, node, caps, field)
+    if not known:
+      return (false, 0.0)
+    if value.len == 0:
+      continue
+    var parsed: float
+    try:
+      parsed = parseFloat(value)
+    except CatchableError:
+      return (false, 0.0)
+    if parsed > scale:
+      scale = parsed
+  (true, scale)
+
 proc constraintsHold(scene: InterpretedFrameScene, node: DiagramNode,
     caps: AppCapabilities, constraints: seq[FieldConstraint]): bool =
   for constraint in constraints:
@@ -427,19 +450,19 @@ proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
   )
 
 proc planImageBoundsEdge(scene: InterpretedFrameScene, node: DiagramNode,
-    caps: AppCapabilities, spec: ProvidesTargetSpec,
+    input: string, requireUnset: seq[string], originScale: float,
     isOpaque: OpaqueCheck): ImageBoundsPlan =
   ## The requestedBounds walk. Bounds are an upper limit, so the consumer's
   ## blend, offsets and fit do not matter (any placement into the canvas uses
   ## at most canvas-resolution pixels at cover scale); only inputs that
   ## change what the node draws (`requireUnset`, e.g. "draw onto this image
   ## instead") disqualify. The chain walks `forwardsBounds` hops — each one
-  ## either swaps, keeps or replaces the bounds, all statically — and
+  ## swaps, keeps, replaces or multiplies the bounds, all statically — and
   ## terminates at a producer whose `intoTarget` says it can decode to a
   ## requested resolution. A hop whose geometry cannot be known statically
-  ## (an arbitrary rotation angle, a wired resize width) refuses: a missing
-  ## bound is the floor, a wrong bound is a bug.
-  if not unsetHolds(scene, node, spec.requireUnset):
+  ## (an arbitrary rotation angle, a wired resize width, a wired zoom)
+  ## refuses: a missing bound is the floor, a wrong bound is a bug.
+  if not unsetHolds(scene, node, requireUnset):
     return nil
 
   var
@@ -447,7 +470,8 @@ proc planImageBoundsEdge(scene: InterpretedFrameScene, node: DiagramNode,
     fixedWidth = 0
     fixedHeight = 0
     swapped = false
-    currentId = connectedInput(scene, node.id, spec.input)
+    scale = originScale
+    currentId = connectedInput(scene, node.id, input)
     visited = initHashSet[NodeId]()
 
   if currentId == NoNodeId:
@@ -477,12 +501,13 @@ proc planImageBoundsEdge(scene: InterpretedFrameScene, node: DiagramNode,
       break
     if terminal:
       return ImageBoundsPlan(
-        inputName: spec.input,
+        inputName: input,
         producerNodeId: currentId,
         fromCanvas: fromCanvas,
         fixedWidth: fixedWidth,
         fixedHeight: fixedHeight,
-        swapped: swapped
+        swapped: swapped,
+        scale: scale
       )
 
     var hopped = false
@@ -500,10 +525,13 @@ proc planImageBoundsEdge(scene: InterpretedFrameScene, node: DiagramNode,
           return nil
         if w <= 0 or h <= 0:
           return nil
+        # A replace discards everything downstream of this hop, the
+        # accumulated multiplier included.
         fromCanvas = false
         fixedWidth = w
         fixedHeight = h
         swapped = false
+        scale = 1.0
       elif bounds.boundsField.len > 0:
         let (known, value) = staticFieldValue(scene, chainNode, chainCaps, bounds.boundsField)
         if not known:
@@ -514,6 +542,12 @@ proc planImageBoundsEdge(scene: InterpretedFrameScene, node: DiagramNode,
           discard
         else:
           return nil
+      if bounds.multiplyFrom.len > 0:
+        let (known, hopScale) = staticBoundsMultiplier(
+          scene, chainNode, chainCaps, bounds.multiplyFrom)
+        if not known:
+          return nil
+        scale = scale * hopScale
       let upstream = connectedInput(scene, currentId, bounds.input)
       if upstream == NoNodeId:
         return nil
@@ -540,8 +574,26 @@ proc planImageBounds*(scene: InterpretedFrameScene, isOpaque: OpaqueCheck = nil)
     if isOpaque != nil and isOpaque(nodeId):
       continue
     let caps = appCapabilities(node.appKeyword())
+    var planned = false
     for spec in caps.providesTarget:
-      let plan = planImageBoundsEdge(scene, node, caps, spec, isOpaque)
+      let plan = planImageBoundsEdge(scene, node, spec.input,
+        spec.requireUnset, 1.0, isOpaque)
+      if plan != nil:
+        scene.imageBoundsPlans[nodeId] = plan
+        planned = true
+        break
+    if planned:
+      continue
+    for spec in caps.requestsBounds:
+      # A bounds-only consumer (zoomPan): it can never hand its producer a
+      # target — its draw is a per-render crop — but the crop shown at zoom Z
+      # uses at most Z times the canvas resolution from the source.
+      let (known, originScale) = staticBoundsMultiplier(
+        scene, node, caps, spec.multiplyFrom)
+      if not known:
+        continue
+      let plan = planImageBoundsEdge(scene, node, spec.input,
+        spec.requireUnset, originScale, isOpaque)
       if plan != nil:
         scene.imageBoundsPlans[nodeId] = plan
         break

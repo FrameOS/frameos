@@ -255,6 +255,7 @@ type
     fixedWidth*: int            ## a transformer pinned them instead (resize)
     fixedHeight*: int
     swapped*: bool              ## a 90/270 rotation sits mid-chain
+    scale*: float               ## static zoom multiplier (zoomPan), >= 1.0
 
   ImageFusionTier* = enum
     ## How far a planned image edge gets to skip materialization. Ordered by

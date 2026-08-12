@@ -146,6 +146,8 @@ def _capability_fields(spec: dict) -> list[str]:
         add(swap_when.get("field"))
     add(spec.get("widthFrom"))
     add(spec.get("heightFrom"))
+    for field in (spec.get("multiplyFrom") or []):
+        add(field)
     for clause in (spec.get("ownedTargetExcludes") or []):
         if isinstance(clause, dict):
             for field in clause:
@@ -180,6 +182,7 @@ def _app_capability_literal(config: dict) -> Optional[str]:
     into: list[str] = []
     forwards: list[str] = []
     bounds: list[str] = []
+    requests: list[str] = []
     referenced: list[str] = []
 
     def note(spec: dict):
@@ -188,20 +191,30 @@ def _app_capability_literal(config: dict) -> Optional[str]:
                 referenced.append(name)
 
     for field in fields:
-        spec = (field.get("capabilities") or {}).get("providesTarget")
-        if not isinstance(spec, dict):
-            continue
-        note(spec)
-        provides.append(
-            "ProvidesTargetSpec("
-            f"input: {_nim_str(field.get('name'))}, "
-            f"fitFrom: {_nim_str(spec.get('fitFrom'))}, "
-            f"fits: {_nim_str_seq(spec.get('fits') or DEFAULT_TARGET_FITS)}, "
-            f"requireStatic: {_nim_constraints(spec.get('requireStatic'))}, "
-            f"compositingRequireStatic: {_nim_constraints(spec.get('compositingRequireStatic'))}, "
-            f"requireUnset: {_nim_str_seq(spec.get('requireUnset') or [])}, "
-            f"ownedTargetExcludes: {_nim_matches(spec.get('ownedTargetExcludes'))})"
-        )
+        capabilities = field.get("capabilities") or {}
+        spec = capabilities.get("providesTarget")
+        if isinstance(spec, dict):
+            note(spec)
+            provides.append(
+                "ProvidesTargetSpec("
+                f"input: {_nim_str(field.get('name'))}, "
+                f"fitFrom: {_nim_str(spec.get('fitFrom'))}, "
+                f"fits: {_nim_str_seq(spec.get('fits') or DEFAULT_TARGET_FITS)}, "
+                f"requireStatic: {_nim_constraints(spec.get('requireStatic'))}, "
+                f"compositingRequireStatic: {_nim_constraints(spec.get('compositingRequireStatic'))}, "
+                f"requireUnset: {_nim_str_seq(spec.get('requireUnset') or [])}, "
+                f"ownedTargetExcludes: {_nim_matches(spec.get('ownedTargetExcludes'))})"
+            )
+
+        spec = capabilities.get("requestsBounds")
+        if isinstance(spec, dict):
+            note(spec)
+            requests.append(
+                "RequestsBoundsSpec("
+                f"input: {_nim_str(field.get('name'))}, "
+                f"requireUnset: {_nim_str_seq(spec.get('requireUnset') or [])}, "
+                f"multiplyFrom: {_nim_str_seq(spec.get('multiplyFrom') or [])})"
+            )
 
     for output in outputs:
         capabilities = output.get("capabilities") or {}
@@ -238,10 +251,11 @@ def _app_capability_literal(config: dict) -> Optional[str]:
                 f"swapValues: {_nim_str_seq(swap_when.get('swap') or [])}, "
                 f"keepValues: {_nim_str_seq(swap_when.get('keep') or [])}, "
                 f"widthFrom: {_nim_str(spec.get('widthFrom'))}, "
-                f"heightFrom: {_nim_str(spec.get('heightFrom'))})"
+                f"heightFrom: {_nim_str(spec.get('heightFrom'))}, "
+                f"multiplyFrom: {_nim_str_seq(spec.get('multiplyFrom') or [])})"
             )
 
-    if not provides and not into and not forwards and not bounds:
+    if not provides and not into and not forwards and not bounds and not requests:
         return None
 
     defaults = ", ".join(
@@ -254,6 +268,7 @@ def _app_capability_literal(config: dict) -> Optional[str]:
         f"      intoTarget: @[{', '.join(into)}],\n"
         f"      forwardsTarget: @[{', '.join(forwards)}],\n"
         f"      forwardsBounds: @[{', '.join(bounds)}],\n"
+        f"      requestsBounds: @[{', '.join(requests)}],\n"
         f"      fieldDefaults: @[{defaults}])"
     )
 

@@ -341,3 +341,85 @@ suite "requested bounds":
           "config": {"color": "#336699"}})],
       [(2, "image", 3)])
     check plans(scene).len == 0
+
+  proc zoomPan(id: int, config: JsonNode): DiagramNode =
+    node(id, "app", %*{"keyword": "render/zoomPan", "config": config})
+
+  test "a zoomPan consumer multiplies the canvas bounds by its zoom":
+    # A bounds-only consumer: it can never hand its producer a target — its
+    # draw is a per-render crop — but the largest crop it will ever show uses
+    # at most zoom times the canvas resolution from the source.
+    let scene = sceneWith(
+      @[zoomPan(2, %*{"zoomStart": "1.0", "zoomEnd": "2.0"}),
+        producer(3, cached = false)],
+      [(2, "image", 3)])
+    let boundsPlans = plans(scene)
+    check boundsPlans.len == 1
+    let plan = boundsPlans[2.NodeId]
+    check plan.producerNodeId == 3.NodeId
+    check plan.fromCanvas
+    check plan.scale == 2.0
+
+  test "an unset zoom is the config default, not a refusal":
+    let scene = sceneWith(
+      @[zoomPan(2, %*{}), producer(3, cached = false)],
+      [(2, "image", 3)])
+    let boundsPlans = plans(scene)
+    check boundsPlans.len == 1
+    check boundsPlans[2.NodeId].scale == 1.4
+
+  test "the multiplier is the maximum zoom, floored at one":
+    # zoomInOut visits every zoom between start and end; a zoom under 1.0 is
+    # clamped by the app, so the floor covers it.
+    let scene = sceneWith(
+      @[zoomPan(2, %*{"zoomStart": "3.0", "zoomEnd": "0.5"}),
+        producer(3, cached = false)],
+      [(2, "image", 3)])
+    check plans(scene)[2.NodeId].scale == 3.0
+
+  test "a wired zoom refuses — a wrong bound is a bug":
+    let scene = sceneWith(
+      @[zoomPan(2, %*{}), producer(3, cached = false), node(5, "state", %*{})],
+      [(2, "image", 3), (2, "zoomEnd", 5)])
+    check plans(scene).len == 0
+
+  test "drawing over an input image is a different node; no zoomPan bounds":
+    # The inputImage's size, not the canvas's, would define the useful
+    # resolution — and it is not statically knowable.
+    let scene = sceneWith(
+      @[zoomPan(2, %*{}), producer(3, cached = false),
+        producer(6, cached = false)],
+      [(2, "image", 3), (2, "inputImage", 6)])
+    check plans(scene).len == 0
+
+  test "a zoomPan mid-chain multiplies what the consumer requested":
+    # Both the render/image edge (through the forwardsBounds hop) and the
+    # zoomPan node's own origin resolve to the same producer; the offer is
+    # made by whichever runs as the render node.
+    let scene = sceneWith(
+      @[consumer(2, %*{}), zoomPan(4, %*{"zoomEnd": "1.5"}),
+        producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    let boundsPlans = plans(scene)
+    check boundsPlans.len == 2
+    for nodeId in [2.NodeId, 4.NodeId]:
+      let plan = boundsPlans[nodeId]
+      check plan.producerNodeId == 3.NodeId
+      check plan.fromCanvas
+      check plan.scale == 1.5
+
+  test "a resize above a zoomPan discards the accumulated multiplier":
+    # A replace means "what is downstream no longer matters": the resize's
+    # output is its configured size no matter what the zoom shows of it.
+    let scene = sceneWith(
+      @[zoomPan(2, %*{"zoomEnd": "2.0"}),
+        node(4, "app", %*{"keyword": "data/resizeImage",
+          "config": {"width": 300, "height": 200}}),
+        producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    let boundsPlans = plans(scene)
+    check boundsPlans.len == 1
+    let plan = boundsPlans[2.NodeId]
+    check not plan.fromCanvas
+    check plan.fixedWidth == 300 and plan.fixedHeight == 200
+    check plan.scale == 1.0

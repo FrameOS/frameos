@@ -88,12 +88,33 @@ type
     ## resize's own dimensions — what is downstream no longer matters).
     widthFrom*: string
     heightFrom*: string
+    ## Fields whose statically-resolved maximum multiplies the bounds on the
+    ## way up (a zoom factor: the crop shown at zoom Z uses Z times the
+    ## consumer's resolution from the source). The floor is 1.0 — a
+    ## multiplier never shrinks a bound — and a wired field refuses, never
+    ## guesses.
+    multiplyFrom*: seq[string]
+
+  RequestsBoundsSpec* = object
+    ## An input port whose consumer draws it at target resolution times a
+    ## static multiplier, but can never hand its producer a target — its
+    ## draw is a per-render crop, not a fit. Bounds-only participation in
+    ## the pipeline (render/zoomPan): the planner starts a requestedBounds
+    ## walk here exactly as it does at a `providesTarget` consumer whose
+    ## edge stayed materialized.
+    input*: string
+    ## Typically the optional "draw onto this image instead" input: its size,
+    ## not the canvas's, would define the useful resolution.
+    requireUnset*: seq[string]
+    ## Same contract as the ForwardsBoundsSpec field above.
+    multiplyFrom*: seq[string]
 
   AppCapabilities* = object
     providesTarget*: seq[ProvidesTargetSpec]
     intoTarget*: seq[IntoTargetSpec]
     forwardsTarget*: seq[ForwardsTargetSpec]
     forwardsBounds*: seq[ForwardsBoundsSpec]
+    requestsBounds*: seq[RequestsBoundsSpec]
     ## config.json defaults for every field any of the specs above refers to,
     ## so the planner can tell "unset" from "explicitly set to the default".
     fieldDefaults*: seq[FieldMatch]
@@ -113,7 +134,8 @@ const NoAppCapabilities* = AppCapabilities()
 
 proc isEmpty*(caps: AppCapabilities): bool =
   caps.providesTarget.len == 0 and caps.intoTarget.len == 0 and
-    caps.forwardsTarget.len == 0 and caps.forwardsBounds.len == 0
+    caps.forwardsTarget.len == 0 and caps.forwardsBounds.len == 0 and
+    caps.requestsBounds.len == 0
 
 proc fieldDefault*(caps: AppCapabilities, field: string): string =
   for entry in caps.fieldDefaults:

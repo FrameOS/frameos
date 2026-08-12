@@ -12,7 +12,7 @@ import frameos/channels
 import frameos/node_config
 import frameos/planner
 import frameos/runtime_diagnostics
-import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times
+import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
 
 const TRACING = false
@@ -569,6 +569,12 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           else: boundsPlan.fixedHeight
         if boundsPlan.swapped:
           swap(boundWidth, boundHeight)
+        if boundsPlan.scale > 1.0:
+          # A static zoom multiplier (zoomPan): the largest crop the consumer
+          # will ever show needs scale times its own resolution, rounded up —
+          # a bound must never come in under what the draw can use.
+          boundWidth = int(ceil(boundWidth.float * boundsPlan.scale))
+          boundHeight = int(ceil(boundHeight.float * boundsPlan.scale))
         if boundWidth > 0 and boundHeight > 0:
           context.decodeBoundsWidth = boundWidth
           context.decodeBoundsHeight = boundHeight

@@ -339,9 +339,9 @@ Consequences of that weaker contract:
   consumer's blend and offsets don't matter, only inputs that change what
   the node draws (`requireUnset`).
 - **Geometry is static or absent.** `forwardsBounds` hops either swap
-  (90/270), keep (0/180), or replace (a resize's own dimensions); an
-  arbitrary angle or a wired field refuses the plan. A missing bound is the
-  floor; a wrong bound would be a bug.
+  (90/270), keep (0/180), replace (a resize's own dimensions), or multiply
+  (a zoom factor); an arbitrary angle or a wired field refuses the plan. A
+  missing bound is the floor; a wrong bound would be a bug.
 - **Its own kill switch** (`FRAMEOS_DISABLE_BOUNDS`), separate from fusion's,
   because the pixel-exact differentials run with bounds off — the bounded
   behavior gets a classified comparison instead (geometry and mean color
@@ -349,9 +349,21 @@ Consequences of that weaker contract:
 - Natural producers have nothing to bound; fused edges already have a
   target, which is stronger. Interpreted-only, like forwarding chains.
 
-Pinned by eight planner-rule cases and the end-to-end interpreter test;
-`data/rotateImage` and `data/resizeImage` declare, no app code changed —
-producers pick bounds up through the shared download funnel.
+A consumer does not need to offer a target to originate bounds.
+`render/zoomPan` can never hand its producer one — its draw is a per-render
+crop, not a fit — but the largest crop it will ever show uses at most zoom
+times the canvas resolution from the source, so it declares
+`requestsBounds`: bounds-only participation, the multiplier the statically
+resolved maximum of its zoom fields floored at 1.0 (the same clamp the app
+applies to its effective zoom, and a multiplier must never shrink a bound).
+The same `multiplyFrom` rides its output as a `forwardsBounds` hop for the
+mid-chain shape, where a replace upstream — a resize's own dimensions —
+discards whatever multiplier had accumulated below it.
+
+Pinned by the planner-rule bounds suite and the end-to-end interpreter
+tests; `data/rotateImage`, `data/resizeImage` and `render/zoomPan` declare,
+no app code changed — producers pick bounds up through the shared download
+funnel.
 
 ### The scaled decoders
 
@@ -449,6 +461,7 @@ difference below is real.
 | Opacity mid-chain (uploaded scene) | fused + claimed + in-place; **byte-identical across reboots and repeats**; ~10KB heap vs 2.4MB materialized |
 | Disk tier (over-limit cached scene) | **spill: 1,536,000 B to SD `.cache`**; replaced entry's file deleted by ownership; hit **7.0s vs 22.8s miss**, producer not re-run, panel byte-identical |
 | requestedBounds (resize chain, 1920×1280 source) | node profile: bounds **applied + claimed** (400×300); producer decoded at **450×300 — 540KB vs 9.8MB native** |
+| zoomPan bounds (same source, zoom 1.05) | offer **840×504 = canvas × zoom, ceiled**, claimed; producer at **840×560 — 1.88MB vs 9.8MB native**, panel refreshed. At zoom 1.4 the bounded value (3.3MB) exceeds this board's largest PSRAM block — the render fails exactly as the floor would, which is the fragmented-heap arithmetic again, not a bounds cost |
 | Box sampler (XKCD PNG line art, contain into a split cell) | letter stems intact where nearest decimation swallowed them; panel matches the smooth floor |
 | All 9 shipped scenes | render clean on the final firmware |
 
@@ -520,7 +533,7 @@ operations one span for an owner — which is why the benchmark came back flat.
 - `data/resizeImage`, `render/zoomPan` — **no**: their configured crop
   followed by the consumer's fit is not the consumer's fit applied directly.
   The useful move is the opposite direction — passing bounds *up* so the
-  decode is bounded — which is the `requestedBounds` idea below.
+  decode is bounded — and both now do exactly that (see `requestedBounds`).
 - `render/gradient`, `render/color` — **shipped** as the first *declared*
   natural-fit producers, via the "output is opaque given these fields"
   capability the audit called for: `requireOpaqueColor` on
@@ -557,10 +570,6 @@ down.
   decoders").
 - **Pico thin-client wire format** — behind phase 3; its row-stream protocol
   would be the natural wire format for host-rendered scanlines.
-- **`render/zoomPan` bounds.** It declares no `forwardsBounds`: its useful
-  input resolution scales with the zoom factor, which needs a multiplier
-  field in the schema. Trigger: a zoomPan scene that keeps a
-  native-resolution intermediate anyone notices.
 - **`xmlToJson` / `parseJson` / `prettyJson` stay materialized on purpose**:
   their inputs measured at 2.5–20KB on real scenes, three orders of
   magnitude below the image side. Nothing to buy yet.

@@ -225,6 +225,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[])
   of "data/frameOSGallery":
     AppCapabilities(
@@ -232,6 +233,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[])
   of "data/googlePhotos":
     AppCapabilities(
@@ -239,6 +241,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[])
   of "data/immich":
     AppCapabilities(
@@ -246,6 +249,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[])
   of "data/localImage":
     AppCapabilities(
@@ -253,6 +257,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[])
   of "data/openaiImage":
     AppCapabilities(
@@ -260,20 +265,23 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[])
   of "data/resizeImage":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[],
       forwardsTarget: @[],
-      forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "", swapValues: @[], keepValues: @[], widthFrom: "width", heightFrom: "height")],
+      forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "", swapValues: @[], keepValues: @[], widthFrom: "width", heightFrom: "height", multiplyFrom: @[])],
+      requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "width", value: ""), FieldMatch(field: "height", value: "")])
   of "data/rotateImage":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[],
       forwardsTarget: @[ForwardsTargetSpec(output: "image", input: "image", requireStatic: @[FieldConstraint(field: "rotationDegree", allowed: @["180", "180.0", "-180", "-180.0", "540", "540.0"])])],
-      forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "rotationDegree", swapValues: @["90", "90.0", "270", "270.0", "-90", "-90.0", "-270", "-270.0", "450", "450.0"], keepValues: @["0", "0.0", "180", "180.0", "-180", "-180.0", "360", "360.0", "540", "540.0"], widthFrom: "", heightFrom: "")],
+      forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "rotationDegree", swapValues: @["90", "90.0", "270", "270.0", "-90", "-90.0", "-270", "-270.0", "450", "450.0"], keepValues: @["0", "0.0", "180", "180.0", "-180", "-180.0", "360", "360.0", "540", "540.0"], widthFrom: "", heightFrom: "", multiplyFrom: @[])],
+      requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "rotationDegree", value: "0")])
   of "data/unsplash":
     AppCapabilities(
@@ -281,6 +289,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[])
   of "data/wikicommons":
     AppCapabilities(
@@ -288,6 +297,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[])
   of "render/calendar":
     AppCapabilities(
@@ -295,6 +305,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: "")])
   of "render/color":
     AppCapabilities(
@@ -302,6 +313,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["natural"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @["color"])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "color", value: "#ffffff")])
   of "render/gradient":
     AppCapabilities(
@@ -309,6 +321,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["natural"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @["startColor", "endColor"])],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "startColor", value: "#800080"), FieldMatch(field: "endColor", value: "#ffc0cb")])
   of "render/image":
     AppCapabilities(
@@ -316,6 +329,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[],
       forwardsTarget: @[],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "placement", value: "cover"), FieldMatch(field: "offsetX", value: "0"), FieldMatch(field: "offsetY", value: "0"), FieldMatch(field: "blendMode", value: "normal"), FieldMatch(field: "inputImage", value: "")])
   of "render/opacity":
     AppCapabilities(
@@ -323,5 +337,14 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       intoTarget: @[],
       forwardsTarget: @[ForwardsTargetSpec(output: "image", input: "image", requireStatic: @[])],
       forwardsBounds: @[],
+      requestsBounds: @[],
       fieldDefaults: @[])
+  of "render/zoomPan":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[],
+      forwardsTarget: @[],
+      forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "", swapValues: @[], keepValues: @[], widthFrom: "", heightFrom: "", multiplyFrom: @["zoomStart", "zoomEnd"])],
+      requestsBounds: @[RequestsBoundsSpec(input: "image", requireUnset: @["inputImage"], multiplyFrom: @["zoomStart", "zoomEnd"])],
+      fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "zoomStart", value: "1.0"), FieldMatch(field: "zoomEnd", value: "1.4")])
   else: NoAppCapabilities

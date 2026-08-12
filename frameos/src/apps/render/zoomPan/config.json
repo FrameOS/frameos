@@ -20,7 +20,13 @@
       "name": "image",
       "type": "image",
       "required": true,
-      "label": "Image"
+      "label": "Image",
+      "capabilities": {
+        "requestsBounds": {
+          "multiplyFrom": ["zoomStart", "zoomEnd"],
+          "requireUnset": ["inputImage"]
+        }
+      }
     },
     {
       "name": "motion",
@@ -123,7 +129,13 @@
   "output": [
     {
       "name": "image",
-      "type": "image"
+      "type": "image",
+      "capabilities": {
+        "forwardsBounds": {
+          "input": "image",
+          "multiplyFrom": ["zoomStart", "zoomEnd"]
+        }
+      }
     }
   ]
 }
