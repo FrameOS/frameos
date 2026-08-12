@@ -56,7 +56,10 @@ proc get*(self: App; context: ExecutionContext): JsonNode =
 
   var parsedCalendar: ParsedCalendar
   try:
-    parsedCalendar = parseICalendar(self.appConfig.iCal, timezone)
+    # The export window doubles as the fold's keep-window: a multi-year feed
+    # keeps only the window's events (plus recurring masters) resident.
+    parsedCalendar = parseICalendar(self.appConfig.iCal, timezone,
+      keepFrom = startTs, keepUntil = endTs)
   except CatchableError as e:
     self.logError "Error parsing iCal: " & $e.msg
     return

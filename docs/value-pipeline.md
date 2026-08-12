@@ -587,16 +587,40 @@ capabilities + planner; teach transformers to forward targets.
       purpose for now: phase-0 measured their inputs at 2.5–20 KB on real
       scenes, three orders of magnitude below the image side, so there is
       nothing to buy yet.
-- [ ] Exercise the byte side on hardware. None of the nine scenes on the
-      bench frame feeds a large document through `downloadUrl` → `icalJson`.
-      The host side now covers the whole graph rather than units:
-      `test_byte_tier_scene.nim` renders the Calendar shape against a real
-      HTTP server with an ESP32-sized budget and pins that a 2.4MB ICS
-      crosses the edge as a `.cache` spool file and folds to 500 events.
-      What is left for the frame itself: the Calendar scene's `url` state
-      pointed at a multi-MB ICS, with `set spill_force` low enough that the
-      C side spills the body — the spool then *adopts* that file, the path
-      only hardware runs.
+- Not planned, written down so the reasoning survives: folding the ICS
+  *as the socket delivers it*, with no spool file at all. The parse never
+  needs the file — but the file is not there for the parse. It is what makes
+  the edge a re-readable **Value** (cacheable, two consumers, a JS code node
+  can still `asString` it), it decouples transport speed from parse speed
+  (the socket closes as fast as the server sends; the slow 100k-line fold
+  happens without holding a connection against server timeouts), and its
+  memory cost over a socket fold is zero — one window either way. A
+  socket-fold would be a new one-shot edge protocol (sole reader, no cache,
+  no state write — the planner has this vocabulary from the image side) and
+  would buy flash wear and latency, not bytes. The one case where it buys
+  memory: a frame with **no writable storage**, where the over-threshold body
+  today degrades back to being held whole. If that frame shows up, that is
+  the trigger.
+- [x] Exercised on hardware (2026-08-12, 7.3" PhotoPainter): the Calendar
+      scene's `url` state pointed at a 3.24MB / 11,000-event ICS, with
+      `set spill_force 1MB` so the C side genuinely spilled. Measured:
+      the spool **adopted the C spill file**
+      (`tier: storage, path: /srv/assets/.cache/http-spill-0.tmp`), the
+      `downloadUrl` edge held **8,192 bytes** for a 3,397,563-byte body,
+      `icalJson` folded it into 35KB of events JSON, and the calendar
+      rendered to the panel. The host side also covers the whole graph:
+      `test_byte_tier_scene.nim` renders the same shape against a real HTTP
+      server under an ESP32-sized budget.
+
+      The first hardware run found the next honesty gap and it is fixed:
+      with every event inside the export window, the **parsed VEvent set**
+      (not the raw bytes) OOM-aborted the render — ~3.5MB of parsed events
+      from a 3.4MB feed. `parseICalendar` now takes the export window as a
+      keep-window and drops out-of-window one-off events *during* the fold
+      (recurring masters and RECURRENCE-ID overrides are kept regardless —
+      their instances can land inside the window). Same feed after the fix:
+      **622KB** parse heap delta, render ok. Pinned in
+      `test_spooled_ical.nim`.
 
 ### Phase 3 — row streams for images (after phase 1, gated on data)
 

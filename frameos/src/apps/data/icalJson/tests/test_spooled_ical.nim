@@ -3,8 +3,10 @@ import frameos/apps
 import frameos/spool
 import frameos/types
 import frameos/values
+import chrono
 import ../app as icalApp
 import ../app_loader as icalLoader
+import ../ical
 
 # The byte-side fold (docs/value-pipeline.md, phase 2).
 #
@@ -80,6 +82,43 @@ suite "icalJson over a spool":
     check materialized.approxByteSize() == body.len
     check spooled.approxByteSize() * 10 < materialized.approxByteSize()
     removeFile(path)
+
+  test "the keep-window drops out-of-range one-offs during the fold":
+    # A 3MB feed on the frame OOMed not on the raw bytes but on the parsed
+    # VEvent set. With the export window applied DURING the fold, a
+    # multi-year feed keeps only the window's events resident — while a
+    # recurring master and a series override survive regardless of their own
+    # dates, because their instances can land inside the window.
+    let body = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:ancient@t", "DTSTART:20200101T100000Z", "DTEND:20200101T110000Z",
+      "SUMMARY:ancient one-off", "END:VEVENT",
+      "BEGIN:VEVENT",
+      "UID:future@t", "DTSTART:20990101T100000Z", "DTEND:20990101T110000Z",
+      "SUMMARY:distant one-off", "END:VEVENT",
+      "BEGIN:VEVENT",
+      "UID:inside@t", "DTSTART:20260815T100000Z", "DTEND:20260815T110000Z",
+      "SUMMARY:in window", "END:VEVENT",
+      "BEGIN:VEVENT",
+      "UID:weekly@t", "DTSTART:20200106T090000Z", "DTEND:20200106T093000Z",
+      "RRULE:FREQ=WEEKLY", "SUMMARY:old recurring master", "END:VEVENT",
+      "BEGIN:VCALENDAR",
+    ].join("\r\n")
+    let fromTs = Timestamp(1785542400.0)  # 2026-08-01T00:00:00Z
+    let untilTs = Timestamp(1788220800.0) # 2026-09-01T00:00:00Z
+    let bounded = parseICalendar(body, "UTC", keepFrom = fromTs, keepUntil = untilTs)
+    var kept: seq[string] = @[]
+    for event in bounded.events:
+      kept.add(event.summary)
+    check "ancient one-off" notin kept
+    check "distant one-off" notin kept
+    check "in window" in kept
+    check "old recurring master" in kept
+
+    # Unbounded parse keeps everything, so callers without a window lose nothing.
+    let unbounded = parseICalendar(body, "UTC")
+    check unbounded.events.len == 4
 
   test "a URL instead of a document is caught without reading the body":
     # The misconfiguration check has to be a prefix test; if it materialized,
