@@ -27,7 +27,7 @@
 ##
 ## See docs/value-pipeline.md for the design and the protocol table.
 
-import tables, json, os, sets
+import tables, json, os, sets, strutils
 import chroma
 import frameos/types
 import frameos/node_config
@@ -44,6 +44,13 @@ var imageFusionEnabled* = getEnv("FRAMEOS_DISABLE_FUSION").len == 0
   ## Kill switch for the differential harness: with fusion off every edge falls
   ## back to the materialized floor, and the rendered pixels must not change.
   ## Anything that diverges is a planner bug, not a rendering preference.
+
+var imageBoundsEnabled* = getEnv("FRAMEOS_DISABLE_BOUNDS").len == 0
+  ## Separate switch for the requestedBounds protocol, because its contract is
+  ## deliberately weaker than fusion's: a bounded decode resamples where the
+  ## materialized floor decodes native, so bounded output is *equivalent*, not
+  ## byte-identical. The pixel-exact differentials run with this off and the
+  ## bounds behavior gets its own classified comparison instead.
 
 proc appKeyword(node: DiagramNode): string =
   if node.data.isNil or node.data.kind != JObject: return ""
@@ -418,6 +425,126 @@ proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
     producerNodeId: producerId,
     ownedForCache: ownedForCache
   )
+
+proc planImageBoundsEdge(scene: InterpretedFrameScene, node: DiagramNode,
+    caps: AppCapabilities, spec: ProvidesTargetSpec,
+    isOpaque: OpaqueCheck): ImageBoundsPlan =
+  ## The requestedBounds walk. Bounds are an upper limit, so the consumer's
+  ## blend, offsets and fit do not matter (any placement into the canvas uses
+  ## at most canvas-resolution pixels at cover scale); only inputs that
+  ## change what the node draws (`requireUnset`, e.g. "draw onto this image
+  ## instead") disqualify. The chain walks `forwardsBounds` hops — each one
+  ## either swaps, keeps or replaces the bounds, all statically — and
+  ## terminates at a producer whose `intoTarget` says it can decode to a
+  ## requested resolution. A hop whose geometry cannot be known statically
+  ## (an arbitrary rotation angle, a wired resize width) refuses: a missing
+  ## bound is the floor, a wrong bound is a bug.
+  if not unsetHolds(scene, node, spec.requireUnset):
+    return nil
+
+  var
+    fromCanvas = true
+    fixedWidth = 0
+    fixedHeight = 0
+    swapped = false
+    currentId = connectedInput(scene, node.id, spec.input)
+    visited = initHashSet[NodeId]()
+
+  if currentId == NoNodeId:
+    return nil
+
+  for _ in 0 .. MaxForwardHops:
+    if currentId == NoNodeId or not scene.nodes.hasKey(currentId):
+      return nil
+    if visited.containsOrIncl(currentId):
+      return nil
+    let chainNode = scene.nodes[currentId]
+    if chainNode.nodeType != "app":
+      return nil
+    if isOpaque != nil and isOpaque(currentId):
+      # A JS app sizes its own output; nothing upstream of it is bounded by
+      # the consumer anymore.
+      return nil
+    let chainCaps = appCapabilities(chainNode.appKeyword())
+
+    var terminal = false
+    for into in chainCaps.intoTarget:
+      if NaturalFit in into.fits:
+        # A generator's output is target-sized by construction; bounds have
+        # nothing to bound.
+        return nil
+      terminal = true
+      break
+    if terminal:
+      return ImageBoundsPlan(
+        inputName: spec.input,
+        producerNodeId: currentId,
+        fromCanvas: fromCanvas,
+        fixedWidth: fixedWidth,
+        fixedHeight: fixedHeight,
+        swapped: swapped
+      )
+
+    var hopped = false
+    for bounds in chainCaps.forwardsBounds:
+      if bounds.widthFrom.len > 0:
+        let (wKnown, wValue) = staticFieldValue(scene, chainNode, chainCaps, bounds.widthFrom)
+        let (hKnown, hValue) = staticFieldValue(scene, chainNode, chainCaps, bounds.heightFrom)
+        if not wKnown or not hKnown:
+          return nil
+        var w, h: int
+        try:
+          w = int(parseFloat(wValue))
+          h = int(parseFloat(hValue))
+        except CatchableError:
+          return nil
+        if w <= 0 or h <= 0:
+          return nil
+        fromCanvas = false
+        fixedWidth = w
+        fixedHeight = h
+        swapped = false
+      elif bounds.boundsField.len > 0:
+        let (known, value) = staticFieldValue(scene, chainNode, chainCaps, bounds.boundsField)
+        if not known:
+          return nil
+        if value in bounds.swapValues:
+          swapped = not swapped
+        elif value in bounds.keepValues:
+          discard
+        else:
+          return nil
+      let upstream = connectedInput(scene, currentId, bounds.input)
+      if upstream == NoNodeId:
+        return nil
+      currentId = upstream
+      hopped = true
+      break
+    if not hopped:
+      return nil
+
+  nil
+
+proc planImageBounds*(scene: InterpretedFrameScene, isOpaque: OpaqueCheck = nil) =
+  ## Fills `scene.imageBoundsPlans` for the consumer edges the fusion planner
+  ## left materialized. Fused edges already carry a target, which is a
+  ## stronger promise than a bound.
+  scene.imageBoundsPlans = initTable[NodeId, ImageBoundsPlan]()
+  if not imageFusionEnabled or not imageBoundsEnabled:
+    return
+  for nodeId, node in scene.nodes:
+    if node.nodeType != "app":
+      continue
+    if scene.imageFusionPlans.hasKey(nodeId):
+      continue
+    if isOpaque != nil and isOpaque(nodeId):
+      continue
+    let caps = appCapabilities(node.appKeyword())
+    for spec in caps.providesTarget:
+      let plan = planImageBoundsEdge(scene, node, caps, spec, isOpaque)
+      if plan != nil:
+        scene.imageBoundsPlans[nodeId] = plan
+        break
 
 proc planImageFusion*(scene: InterpretedFrameScene, isOpaque: OpaqueCheck = nil,
     diagnoses: ptr seq[EdgeDiagnosis] = nil) =

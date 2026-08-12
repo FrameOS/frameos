@@ -241,3 +241,103 @@ suite "opaque-output producers":
     let (plans, refusal) = scene.plan()
     check plans == 0
     check refusal == frChainOpaque
+
+suite "requested bounds":
+  # The requestedBounds protocol (docs/value-pipeline.md): edges the fusion
+  # planner leaves materialized still pass the consumer's useful resolution
+  # upstream — statically or not at all. Each case builds the smallest graph
+  # that could get a bound wrong.
+
+  proc plans(scene: InterpretedFrameScene): Table[NodeId, ImageBoundsPlan] =
+    scene.planImageFusion()
+    scene.planImageBounds()
+    scene.imageBoundsPlans
+
+  proc rotate(id: int, degree: string): DiagramNode =
+    node(id, "app", %*{"keyword": "data/rotateImage",
+      "config": {"rotationDegree": degree}})
+
+  test "a 90-degree rotation swaps the canvas bounds":
+    let scene = sceneWith(
+      @[consumer(2, %*{}), rotate(4, "90"), producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    let boundsPlans = plans(scene)
+    check boundsPlans.len == 1
+    let plan = boundsPlans[2.NodeId]
+    check plan.producerNodeId == 3.NodeId
+    check plan.fromCanvas
+    check plan.swapped
+
+  test "a 180-degree rotation fuses instead; bounds stay out of the way":
+    # forwardsTarget wins: the chain mutates a scratch in place, which is a
+    # stronger promise than a bound.
+    let scene = sceneWith(
+      @[consumer(2, %*{}), rotate(4, "180"), producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    scene.planImageFusion()
+    scene.planImageBounds()
+    check scene.imageFusionPlans.len == 1
+    check scene.imageBoundsPlans.len == 0
+
+  test "an arbitrary rotation angle refuses — a wrong bound is a bug":
+    let scene = sceneWith(
+      @[consumer(2, %*{}), rotate(4, "45"), producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    check plans(scene).len == 0
+
+  test "a wired rotation degree refuses":
+    let scene = sceneWith(
+      @[consumer(2, %*{}), rotate(4, "90"), producer(3, cached = false),
+        node(5, "state", %*{})],
+      [(2, "image", 4), (4, "image", 3), (4, "rotationDegree", 5)])
+    check plans(scene).len == 0
+
+  test "a resize pins the bounds to its own dimensions":
+    let scene = sceneWith(
+      @[consumer(2, %*{}),
+        node(4, "app", %*{"keyword": "data/resizeImage",
+          "config": {"width": 300, "height": 200}}),
+        producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    let boundsPlans = plans(scene)
+    check boundsPlans.len == 1
+    let plan = boundsPlans[2.NodeId]
+    check not plan.fromCanvas
+    check plan.fixedWidth == 300
+    check plan.fixedHeight == 200
+    check not plan.swapped
+
+  test "a rotation above a resize swaps what the resize pinned":
+    let scene = sceneWith(
+      @[consumer(2, %*{}),
+        node(4, "app", %*{"keyword": "data/resizeImage",
+          "config": {"width": 300, "height": 200}}),
+        rotate(6, "270"),
+        producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 6), (6, "image", 3)])
+    let boundsPlans = plans(scene)
+    check boundsPlans.len == 1
+    let plan = boundsPlans[2.NodeId]
+    check not plan.fromCanvas
+    check plan.fixedWidth == 300 and plan.fixedHeight == 200
+    check plan.swapped
+
+  test "a refused direct shape still gets bounds":
+    # blendMode mask keeps the edge off the fusion tiers, but the consumer's
+    # useful resolution is a property of the draw, not the blend.
+    let scene = sceneWith(
+      @[consumer(2, %*{"blendMode": "mask"}), producer(3, cached = false)],
+      [(2, "image", 3)])
+    scene.planImageFusion()
+    scene.planImageBounds()
+    check scene.imageFusionPlans.len == 0
+    check scene.imageBoundsPlans.len == 1
+    check scene.imageBoundsPlans[2.NodeId].producerNodeId == 3.NodeId
+
+  test "a natural producer has nothing to bound":
+    let scene = sceneWith(
+      @[consumer(2, %*{"blendMode": "mask"}),
+        node(3, "app", %*{"keyword": "render/color",
+          "config": {"color": "#336699"}})],
+      [(2, "image", 3)])
+    check plans(scene).len == 0

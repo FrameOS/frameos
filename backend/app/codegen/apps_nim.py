@@ -141,6 +141,11 @@ def _capability_fields(spec: dict) -> list[str]:
         add(field)
     for field in (spec.get("requireOpaqueColor") or []):
         add(field)
+    swap_when = spec.get("swapWhen")
+    if isinstance(swap_when, dict):
+        add(swap_when.get("field"))
+    add(spec.get("widthFrom"))
+    add(spec.get("heightFrom"))
     for clause in (spec.get("ownedTargetExcludes") or []):
         if isinstance(clause, dict):
             for field in clause:
@@ -174,6 +179,7 @@ def _app_capability_literal(config: dict) -> Optional[str]:
     provides: list[str] = []
     into: list[str] = []
     forwards: list[str] = []
+    bounds: list[str] = []
     referenced: list[str] = []
 
     def note(spec: dict):
@@ -220,7 +226,22 @@ def _app_capability_literal(config: dict) -> Optional[str]:
                 f"requireStatic: {_nim_constraints(spec.get('requireStatic'))})"
             )
 
-    if not provides and not into and not forwards:
+        spec = capabilities.get("forwardsBounds")
+        if isinstance(spec, dict):
+            note(spec)
+            swap_when = spec.get("swapWhen") or {}
+            bounds.append(
+                "ForwardsBoundsSpec("
+                f"output: {_nim_str(output.get('name'))}, "
+                f"input: {_nim_str(spec.get('input'))}, "
+                f"boundsField: {_nim_str(swap_when.get('field'))}, "
+                f"swapValues: {_nim_str_seq(swap_when.get('swap') or [])}, "
+                f"keepValues: {_nim_str_seq(swap_when.get('keep') or [])}, "
+                f"widthFrom: {_nim_str(spec.get('widthFrom'))}, "
+                f"heightFrom: {_nim_str(spec.get('heightFrom'))})"
+            )
+
+    if not provides and not into and not forwards and not bounds:
         return None
 
     defaults = ", ".join(
@@ -232,6 +253,7 @@ def _app_capability_literal(config: dict) -> Optional[str]:
         f"      providesTarget: @[{', '.join(provides)}],\n"
         f"      intoTarget: @[{', '.join(into)}],\n"
         f"      forwardsTarget: @[{', '.join(forwards)}],\n"
+        f"      forwardsBounds: @[{', '.join(bounds)}],\n"
         f"      fieldDefaults: @[{defaults}])"
     )
 

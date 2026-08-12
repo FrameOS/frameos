@@ -242,6 +242,20 @@ type
     of fkNone:
       discard
 
+  ImageBoundsPlan* = ref object
+    ## Decided once per scene load, like the fusion plans: an image edge that
+    ## cannot fuse still carries the consumer's useful resolution upstream,
+    ## so the terminal producer decodes bounded instead of at native
+    ## resolution (the `requestedBounds` protocol, docs/value-pipeline.md).
+    ## Static shapes only: a wired rotation degree or resize dimension means
+    ## no plan, never a wrong bound.
+    inputName*: string          ## the consumer input the bounds derive from
+    producerNodeId*: NodeId     ## who may take them
+    fromCanvas*: bool           ## bounds follow the render canvas dimensions
+    fixedWidth*: int            ## a transformer pinned them instead (resize)
+    fixedHeight*: int
+    swapped*: bool              ## a 90/270 rotation sits mid-chain
+
   ImageFusionTier* = enum
     ## How far a planned image edge gets to skip materialization. Ordered by
     ## preference; the always-available floor is "no plan at all", which is a
@@ -380,6 +394,7 @@ type
     cacheKeys*: Table[NodeId, JsonNode]
     cacheExprs*: Table[NodeId, JsonNode]
     imageFusionPlans*: Table[NodeId, ImageFusionPlan] # consumer node -> planned image edge
+    imageBoundsPlans*: Table[NodeId, ImageBoundsPlan] # consumer node -> bounded unfused edge
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object
@@ -433,6 +448,17 @@ type
     # a fragmented heap exposed it; this field is what lets the node profile
     # say claimed, not just planned.
     decodeTargetClaimedBy*: NodeId
+    # The requestedBounds protocol (docs/value-pipeline.md): when an image
+    # edge cannot fuse — a 90° rotation between producer and consumer, a
+    # resize, a refused shape — the consumer's useful resolution still
+    # travels up so the producer decodes bounded instead of at native
+    # resolution. Bounds are an upper limit with cover semantics (enough
+    # pixels for any placement into the box, aspect preserved, never
+    # upscaled), addressed and one-shot like the decode target.
+    decodeBoundsWidth*: int
+    decodeBoundsHeight*: int
+    decodeBoundsNodeId*: NodeId
+    decodeBoundsClaimedBy*: NodeId
 
   # State field definitions. Used in interpreted scenes, and to show the right form to the user
   StateField* = ref object

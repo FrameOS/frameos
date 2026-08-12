@@ -67,7 +67,7 @@ var currentSource = makeSource(CanvasWidth, CanvasHeight)
 var hookTargetsSeen = 0
 
 proc idealDecoder(url: string, maxBytes: int, target: Image,
-    fit: ScaledDecodeFit): tuple[image: Image, data: string] =
+    fit: ScaledDecodeFit, boundWidth: int, boundHeight: int): tuple[image: Image, data: string] =
   ## What decode-into-target does: fit the source into the caller's image,
   ## overwriting rather than compositing. Without a target the caller gets the
   ## source at its native resolution, which is the materialized floor.
@@ -78,6 +78,7 @@ proc idealDecoder(url: string, maxBytes: int, target: Image,
     blendMode = OverwriteBlend)
   (target, "")
 
+imageBoundsEnabled = false
 contextDownloadHook = idealDecoder
 
 proc testConfig(): FrameConfig =

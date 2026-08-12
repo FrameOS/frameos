@@ -70,6 +70,7 @@ schema; `frameos/app_capabilities.nim` holds the types.
 | `providesTarget` | input port | consumer offers a target to whatever feeds this input | `render/image` |
 | `forwardsTarget` | output port | transformer passes the target request upstream and mutates in place | `render/opacity`, `data/rotateImage` at 180° |
 | `byteIter` | input port | consumes a string as a bounded-window `Spool` | `icalJson` |
+| `forwardsBounds` | output port | passes the consumer's useful-resolution bounds upstream, transformed (swap for 90/270 rotations, replace for resizes) | `data/rotateImage`, `data/resizeImage` |
 | `rowStream` | — | reserved for phase 3 (gated; see "What remains") | — |
 
 The declarations carry their own preconditions, so the planner stays generic:
@@ -291,6 +292,44 @@ distinguishable in the canvas itself; plus the swept-file miss, the
 no-headroom upgrade, and the under-limit memory path staying untouched).
 Not yet hardware-verified — the checklist is in "What remains".
 
+### requestedBounds (2026-08-12, post-ship follow-up)
+
+The last ungated item, shipped. An image edge the fusion planner leaves
+materialized — a 90/270 rotation mid-chain, a resize, a refused blend —
+still carries the consumer's useful resolution *up*, so the terminal
+producer decodes bounded instead of at native resolution. A rotate-90 scene
+used to decode a 4000×3000 source whole (48MB of RGBA on a Pi, a budget
+refusal on an ESP32) to feed an 800×480 canvas; it now decodes at the
+canvas's cover scale.
+
+The protocol mirrors the decode target deliberately: bounds ride the
+context, addressed to the planner-named producer, one-shot, free if
+unclaimed, reported claimed-vs-applied in the node profile. What differs is
+the contract's strength, and the design question the doc recorded resolves
+exactly here: a bounded decode **resamples where the floor decodes native**,
+so bounded output is *equivalent, not byte-identical* — accepted on all
+platforms (2026-08-12 decision) now that the scaled decoders box-filter.
+Consequences of that weaker contract:
+
+- **Bounds are an upper limit with cover semantics** — enough pixels for any
+  placement into the box, aspect preserved, never upscaled — so the
+  consumer's blend and offsets don't matter, only inputs that change what
+  the node draws (`requireUnset`).
+- **Geometry is static or absent.** `forwardsBounds` hops either swap
+  (90/270), keep (0/180), or replace (a resize's own dimensions); an
+  arbitrary angle or a wired field refuses the plan. A missing bound is the
+  floor; a wrong bound would be a bug.
+- **Its own kill switch** (`FRAMEOS_DISABLE_BOUNDS`), separate from fusion's,
+  because the pixel-exact differentials run with bounds off — the bounded
+  behavior gets a classified comparison instead (geometry and mean color
+  against the native decode, `test_interpreter_decode_bounds.nim`).
+- Natural producers have nothing to bound; fused edges already have a
+  target, which is stronger. Interpreted-only, like forwarding chains.
+
+Pinned by eight planner-rule cases and the end-to-end interpreter test;
+`data/rotateImage` and `data/resizeImage` declare, no app code changed —
+producers pick bounds up through the shared download funnel.
+
 ### Compiled scenes (parity)
 
 `scene_nim.py` applies the planner's rules at codegen, where the graph is
@@ -475,13 +514,13 @@ down.
   through the panel dither, before/after verified on the 7.3" PhotoPainter.
 - **Pico thin-client wire format** — behind phase 3; its row-stream protocol
   would be the natural wire format for host-rendered scanlines.
-- **`requestedBounds`: bounding decodes from the consumer side.** The one
-  ungated code item. rotate-90/270 scenes and `resizeImage` chains still keep
-  a native-resolution intermediate; the fix is a new protocol where the
-  consumer passes its useful resolution *up* so the producer decodes bounded.
-  It carries a real design question — a bounded decode changes pixels versus
-  the floor on hosts (on embedded the floor already budget-resamples, so it
-  is consistent there) — so it is a design-then-build piece, not a patch.
+- **`requestedBounds` — shipped 2026-08-12** (see "What shipped"). The
+  design question it carried was answered "everywhere": bounded output is
+  equivalent rather than byte-identical on hosts too, acceptable once the
+  scaled decoders box-filter. What remains of it: `render/zoomPan` declares
+  no bounds (its useful input resolution scales with the zoom factor —
+  needs a multiplier field in the schema if a scene ever needs it), and
+  compiled scenes stay on the floor like every dynamic shape.
 - **`xmlToJson` / `parseJson` / `prettyJson` stay materialized on purpose**:
   phase 0 measured their inputs at 2.5–20KB on real scenes, three orders of
   magnitude below the image side. Nothing to buy yet.

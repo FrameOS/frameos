@@ -40,21 +40,27 @@ var imageSpillDisabled = false
   ## Latched on the first failed spill write, so a full or vanished card is
   ## probed once instead of on every render. Reset when scenes reload.
 
-proc imageSpillWorthAScratch(frameConfig: FrameConfig, scratchBytes: int): bool =
+proc imageSpillRefusalReason(frameConfig: FrameConfig, scratchBytes: int): string =
   ## Whether an over-limit cached producer should still get an owned scratch,
-  ## because the disk tier can store what the memory cache would refuse. Two
-  ## conditions: somewhere to write, and room to live — the scratch is PSRAM
-  ## held for the whole render next to the canvas and the producer's decode
-  ## intermediates, so demand an equal share of headroom beyond the scratch
-  ## itself. On a 7.3" frame (1.5MB canvas, ~6.6MB free) this passes; on a
-  ## 13.3E6 (7.7MB canvas) it fails and the live-canvas upgrade keeps the
-  ## device rendering, exactly as before the disk tier existed.
+  ## because the disk tier can store what the memory cache would refuse — and
+  ## when not, *why* not, because "why is this scene re-downloading every
+  ## render" must be a log line, not an archaeology project (the same rule
+  ## the planner's refusals follow). Two conditions: somewhere to write, and
+  ## room to live — the scratch is PSRAM held for the whole render next to
+  ## the canvas and the producer's decode intermediates, so demand an equal
+  ## share of headroom beyond the scratch itself. Returns "" when the disk
+  ## tier can take the value.
   if imageSpillDisabled:
-    return false
+    return "spill disabled after an earlier storage failure"
   let available = availableRenderBytes()
-  if available <= 0 or available < 2 * scratchBytes:
-    return false
-  spoolScratchDir(spoolDir(frameConfig)).len > 0
+  if available <= 0:
+    return "available render memory unknown"
+  if available < 2 * scratchBytes:
+    return "headroom " & $(available div 1024) & "K is under 2x the " &
+      $(scratchBytes div 1024) & "K scratch"
+  if spoolScratchDir(spoolDir(frameConfig)).len == 0:
+    return "no writable spill storage"
+  ""
 
 proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
     image: Image, context: ExecutionContext): ImageSpool =
@@ -69,11 +75,20 @@ proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
   ## rendered before the producer this pass, and a compositing producer (JS,
   ## SVG) blends over the same — baking either into the cache would replay a
   ## stale background over later renders.
+  proc refuse(reason: string): ImageSpool =
+    scene.logger.log(%*{
+      "event": "interpreter:cache:imageSpill:refused",
+      "sceneId": scene.id.string,
+      "nodeId": nodeId.int,
+      "reason": reason
+    })
+    nil
+
   if imageSpillDisabled:
-    return nil
+    return refuse("spill disabled after an earlier storage failure")
   if context != nil and context.hasImage and not context.image.isNil and
       image.data == context.image.data:
-    return nil
+    return refuse("value aliases the live canvas")
   # The disk tier exists for canvas-shaped values. A native-resolution decode
   # that some unfused shape materialized (tens of MB) would cost a huge write
   # on every miss and could never be read back under the render budget anyway.
@@ -82,11 +97,20 @@ proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
   if context != nil and context.hasImage and not context.image.isNil:
     cap = max(cap, context.image.width * context.image.height * 4)
   if bytes > cap:
-    return nil
+    return refuse($(bytes div 1024) & "K is over the " &
+      $(cap div 1024) & "K spill cap")
   result = spillImageToSpool(image, "node" & $nodeId.int & "-cache.rgbx",
     spoolDir(scene.frameConfig))
   if result.isNil:
     imageSpillDisabled = true
+    return refuse("storage write failed; disk tier disabled until scenes reload")
+  scene.logger.log(%*{
+    "event": "interpreter:cache:imageSpill",
+    "sceneId": scene.id.string,
+    "nodeId": nodeId.int,
+    "bytes": bytes,
+    "path": result.path()
+  })
 
 proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
   if scene of InterpretedFrameScene:
@@ -410,6 +434,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     var plannedFit = ""
     # The tier actually used, which can differ from the planned one.
     var plannedTier = iftLiveCanvas
+    # The bounds actually offered this pass, for the profile log.
+    var offeredBoundsWidth = 0
+    var offeredBoundsHeight = 0
     if debugRuntime:
       checkpointKeyword = diagnosticKeyword(currentNode)
       markRuntimeCheckpoint("node:start", currentSceneId = self.id.string, contextEvent = context.event,
@@ -476,9 +503,17 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
             # case, not the exception.
             let memoryLimit = cachedImageMemoryLimit()
             let scratchBytes = context.image.width * context.image.height * 4
-            if memoryLimit > 0 and scratchBytes > memoryLimit and
-                not imageSpillWorthAScratch(self.frameConfig, scratchBytes):
-              tier = iftLiveCanvas
+            if memoryLimit > 0 and scratchBytes > memoryLimit:
+              let refusal = imageSpillRefusalReason(self.frameConfig, scratchBytes)
+              if refusal.len > 0:
+                tier = iftLiveCanvas
+                self.logger.log(%*{
+                  "event": "interpreter:cache:imageTier",
+                  "sceneId": self.id.string,
+                  "nodeId": plan.producerNodeId.int,
+                  "tier": "liveCanvas",
+                  "reason": refusal
+                })
           plannedTier = tier
           case tier
           of iftLiveCanvas:
@@ -501,6 +536,36 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           context.decodeTargetClaimedBy = 0.NodeId
           if plan.inPlaceNodeIds.len > 0:
             context.inPlaceImageNodes = plan.inPlaceNodeIds
+
+      # ---- Requested bounds ----
+      # The consumer's useful resolution for an edge that could not fuse: a
+      # 90/270 rotation or a resize mid-chain, or a refused direct shape. The
+      # terminal producer decodes bounded instead of at native resolution;
+      # everything about the offer mirrors the decode target — addressed,
+      # one-shot, and free if unclaimed.
+      var setDecodeBoundsHint = false
+      if not asDataNode and imageBoundsEnabled and
+          self.imageBoundsPlans.hasKey(currentNodeId) and
+          context.hasImage and not context.image.isNil and
+          not setDecodeTargetHint and
+          context.decodeBoundsNodeId == 0.NodeId:
+        let boundsPlan = self.imageBoundsPlans[currentNodeId]
+        var boundWidth =
+          if boundsPlan.fromCanvas: context.image.width
+          else: boundsPlan.fixedWidth
+        var boundHeight =
+          if boundsPlan.fromCanvas: context.image.height
+          else: boundsPlan.fixedHeight
+        if boundsPlan.swapped:
+          swap(boundWidth, boundHeight)
+        if boundWidth > 0 and boundHeight > 0:
+          context.decodeBoundsWidth = boundWidth
+          context.decodeBoundsHeight = boundHeight
+          context.decodeBoundsNodeId = boundsPlan.producerNodeId
+          context.decodeBoundsClaimedBy = 0.NodeId
+          setDecodeBoundsHint = true
+          offeredBoundsWidth = boundWidth
+          offeredBoundsHeight = boundHeight
 
       # ---- Wire inputs AND (if enabled) build an input-key JSON alongside ----
       var builtInputKey = %*{} # JObject; only meaningful when cacheInputEnabled = true and there are inputs
@@ -594,6 +659,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         context.decodeTargetNodeId = 0.NodeId
         context.decodeTargetOwned = false
         context.inPlaceImageNodes = @[]
+      if setDecodeBoundsHint:
+        context.decodeBoundsWidth = 0
+        context.decodeBoundsHeight = 0
+        context.decodeBoundsNodeId = 0.NodeId
 
       if asDataNode and cacheEnabled:
         var cacheExprActive = false
@@ -1024,6 +1093,19 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           # would say "cover" right here.
           "fit": plannedFit
         }
+      if self.imageBoundsPlans.hasKey(currentNodeId):
+        let boundsPlan = self.imageBoundsPlans[currentNodeId]
+        profile["bounds"] = %*{
+          "input": boundsPlan.inputName,
+          "applied": offeredBoundsWidth > 0,
+          # Same lesson as fusion's claimed-vs-applied: an offer nobody takes
+          # is free, but a producer that quietly ignores it decodes native.
+          "claimed": offeredBoundsWidth > 0 and
+            context.decodeBoundsClaimedBy == boundsPlan.producerNodeId,
+          "producerNodeId": boundsPlan.producerNodeId.int,
+          "width": offeredBoundsWidth,
+          "height": offeredBoundsHeight
+        }
       self.logger.log(profile)
 
     if asDataNode:
@@ -1339,12 +1421,17 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   ## Pass 4: negotiate what each image edge may skip materializing. Runs after
   ## the apps exist, because a node whose behaviour comes from scene JSON (a
   ## dynamic JS app) is opaque no matter what its keyword declares.
-  scene.planImageFusion(proc (nodeId: NodeId): bool {.closure, gcsafe, raises: [].} =
-    scene.appsByNodeId.getOrDefault(nodeId, nil).isDynamicJsApp())
+  let opaqueCheck: OpaqueCheck = proc (nodeId: NodeId): bool {.closure, gcsafe, raises: [].} =
+    scene.appsByNodeId.getOrDefault(nodeId, nil).isDynamicJsApp()
+  scene.planImageFusion(opaqueCheck)
+  # Pass 5: the edges the fusion planner left materialized still get the
+  # consumer's useful resolution passed upstream (requestedBounds).
+  scene.planImageBounds(opaqueCheck)
 
   logger.log(%*{"event": "initInterpretedDone", "sceneId": sceneId.string, "nodes": scene.nodes.len,
       "edges": scene.edges.len, "eventListeners": scene.eventListeners.len, "apps": scene.appsByNodeId.len,
-      "imageFusionPlans": scene.imageFusionPlans.len})
+      "imageFusionPlans": scene.imageFusionPlans.len,
+      "imageBoundsPlans": scene.imageBoundsPlans.len})
 
   return scene
 

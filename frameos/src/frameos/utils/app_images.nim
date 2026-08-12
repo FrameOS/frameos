@@ -106,6 +106,27 @@ proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext):
   context.decodeTargetNodeId = 0.NodeId
   context.decodeTargetOwned = false
 
+proc takeDecodeBounds*(self: AppRoot, context: ExecutionContext):
+    tuple[width, height: int] =
+  ## The producer's half of the requestedBounds protocol: the consumer's
+  ## useful resolution for a chain that could not fuse. Addressed and
+  ## one-shot like `takeDecodeTarget`; (0, 0) when there are none. Bounds are
+  ## an upper limit with cover semantics — decode with enough pixels for any
+  ## placement into the box, aspect preserved, never upscaled.
+  if context.isNil:
+    return (0, 0)
+  if context.decodeBoundsNodeId != 0.NodeId and
+      (self.isNil or self.nodeId != context.decodeBoundsNodeId):
+    return (0, 0)
+  if context.decodeBoundsWidth <= 0 or context.decodeBoundsHeight <= 0:
+    return (0, 0)
+  result = (context.decodeBoundsWidth, context.decodeBoundsHeight)
+  if not self.isNil:
+    context.decodeBoundsClaimedBy = self.nodeId
+  context.decodeBoundsWidth = 0
+  context.decodeBoundsHeight = 0
+  context.decodeBoundsNodeId = 0.NodeId
+
 proc mayMutateImageInPlace*(self: AppRoot, context: ExecutionContext): bool =
   ## The `forwardsTarget` half of the handshake: may this app mutate the image
   ## it was handed and return that very image, instead of copying it?
@@ -157,7 +178,7 @@ when defined(testing):
   ## the invariant worth pinning, since an unhinted producer decodes at native
   ## resolution on embedded. Compiled out of real builds.
   type ContextDownloadHook* = proc(url: string, maxBytes: int, target: Image,
-    fit: ScaledDecodeFit): tuple[image: Image, data: string]
+    fit: ScaledDecodeFit, boundWidth: int, boundHeight: int): tuple[image: Image, data: string]
   var contextDownloadHook*: ContextDownloadHook = nil
 
 proc downloadImageWithDataForContext*(self: AppRoot, context: ExecutionContext, url: string,
@@ -187,19 +208,26 @@ proc downloadImageWithDataForContext*(self: AppRoot, context: ExecutionContext, 
     else: self.maxImageResponseBytes()
 
   let (decodeTarget, decodeScalingMode) = self.takeDecodeTarget(context)
+  let (boundWidth, boundHeight) =
+    if decodeTarget.isNil: self.takeDecodeBounds(context)
+    else: (0, 0)
 
   when defined(testing):
     if contextDownloadHook != nil:
       return contextDownloadHook(url, byteLimit, decodeTarget,
-        scaledDecodeFit(decodeScalingMode))
+        scaledDecodeFit(decodeScalingMode), boundWidth, boundHeight)
 
-  if decodeTarget.isNil:
-    return downloadImageWithData(url, maxBytes = byteLimit, headers = headers)
+  if not decodeTarget.isNil:
+    return downloadImageWithDataInto(
+      url,
+      decodeTarget,
+      maxBytes = byteLimit,
+      headers = headers,
+      fit = scaledDecodeFit(decodeScalingMode)
+    )
 
-  downloadImageWithDataInto(
-    url,
-    decodeTarget,
-    maxBytes = byteLimit,
-    headers = headers,
-    fit = scaledDecodeFit(decodeScalingMode)
-  )
+  if boundWidth > 0 and boundHeight > 0:
+    return downloadImageWithDataBounded(
+      url, boundWidth, boundHeight, maxBytes = byteLimit, headers = headers)
+
+  downloadImageWithData(url, maxBytes = byteLimit, headers = headers)

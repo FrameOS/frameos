@@ -843,6 +843,48 @@ proc embeddedSizedRemoteImageUrl*(url: string, target: Image): string =
   else:
     return url
 
+proc boundedDecodeDims*(srcWidth, srcHeight, boundWidth, boundHeight: int):
+    tuple[width, height: int] =
+  ## The smallest aspect-preserving size that still covers the bounds box —
+  ## enough pixels for any placement into it — and never an upscale. Sources
+  ## already inside the box come back unchanged.
+  result = (srcWidth, srcHeight)
+  if srcWidth <= 0 or srcHeight <= 0 or boundWidth <= 0 or boundHeight <= 0:
+    return
+  if srcWidth <= boundWidth or srcHeight <= boundHeight:
+    # The cover scale would be >= 1 on at least one axis: nothing to shrink
+    # without dropping below the consumer's useful resolution.
+    return
+  if srcWidth.int64 * boundHeight.int64 >= boundWidth.int64 * srcHeight.int64:
+    # Height is the binding axis of the cover scale.
+    result.height = boundHeight
+    result.width = max(1, (
+      (srcWidth.int64 * boundHeight.int64 + srcHeight.int64 - 1) div
+      srcHeight.int64).int)
+  else:
+    result.width = boundWidth
+    result.height = max(1, (
+      (srcHeight.int64 * boundWidth.int64 + srcWidth.int64 - 1) div
+      srcWidth.int64).int)
+
+proc decodeImageBounded*(content: string, boundWidth, boundHeight: int): Image =
+  ## Decodes with at most the useful resolution for a (boundWidth,
+  ## boundHeight) consumer: cover-scaled, aspect-preserved, never upscaled.
+  ## The requestedBounds floor read — the caller has no target to offer, only
+  ## an upper limit on what resolution can matter downstream.
+  if looksLikeSvg(content):
+    return decodeImageWithFallback(content)
+  let dims = decodeImageDimensions(content)
+  let target = boundedDecodeDims(dims.width, dims.height, boundWidth, boundHeight)
+  if target.width >= dims.width and target.height >= dims.height:
+    var native = content
+    return decodeImageWithDisplayBounds(native, maxEdge = 0, maxPixels = 0)
+  let image = newImage(target.width, target.height)
+  # Same-aspect dimensions make stretch a pure scale (within a pixel of
+  # rounding); the box-filtered scaled decoders keep it clean.
+  discard decodeImageScaledInto(content, image, fitStretch)
+  image
+
 when defined(frameosEmbedded):
   proc decodeSpilledImageInto(path: string, totalLen: int, target: Image,
       fit: ScaledDecodeFit): Image =
@@ -933,8 +975,29 @@ when defined(frameosEmbedded):
       return decodeImageWithFallback(data, target, fit)
     decodeImageWithFallback(data)
 
+  proc decodeBodyBounded(data: pointer, len: int,
+      boundWidth, boundHeight: int): Image =
+    ## The embedded half of requestedBounds for a contiguous body: probe the
+    ## dimensions, decode straight into a bounded target when the source is
+    ## larger than useful, and fall back to the display-bounded native decode
+    ## when it is not (or when the probe cannot say).
+    var
+      dims: ImageDimensions
+      probed = true
+    try:
+      dims = decodeImageDimensions(data, len)
+    except CatchableError:
+      probed = false
+    if probed:
+      let bounded = boundedDecodeDims(dims.width, dims.height, boundWidth, boundHeight)
+      if bounded.width < dims.width or bounded.height < dims.height:
+        let target = newImage(bounded.width, bounded.height)
+        return decodeImageWithFallback(data, len, target, fitStretch)
+    decodeImageWithFallback(data, len)
+
   proc downloadImageFromResolvedBuffer(url: string, maxBytes: int, target: Image = nil,
-      headers: seq[SimpleHttpHeader] = @[], fit = fitCover):
+      headers: seq[SimpleHttpHeader] = @[], fit = fitCover,
+      boundWidth = 0, boundHeight = 0):
       tuple[image: Image, data: string] =
     var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
     # The budget must reflect the heap the decode is about to run on, not the
@@ -954,11 +1017,19 @@ when defined(frameosEmbedded):
           decodeImageChunks(response.chunks, response.bodyLen, target, fit)
         elif not target.isNil:
           decodeImageWithFallback(response.body, response.bodyLen, target, fit)
+        elif boundWidth > 0 and boundHeight > 0:
+          decodeBodyBounded(response.body, response.bodyLen, boundWidth, boundHeight)
         else:
           decodeImageWithFallback(response.body, response.bodyLen)
       result = (image, "")
     finally:
       response.freeHttpBufferResponse()
+
+  proc downloadImageFromBufferBounded(url: string, boundWidth, boundHeight,
+      maxBytes: int, headers: seq[SimpleHttpHeader]):
+      tuple[image: Image, data: string] =
+    downloadImageFromResolvedBuffer(url, maxBytes, nil, headers, fitCover,
+      boundWidth, boundHeight)
 
   proc downloadImageFromBuffer(url: string, maxBytes: int, target: Image = nil,
       headers: seq[SimpleHttpHeader] = @[], fit = fitCover):
@@ -980,6 +1051,23 @@ proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes, headers: seq[
       return decodeImageWithFallback(content)
     # Full decode when memory allows; the budget scales oversized decodes
     result = decodeImageWithDisplayBounds(content, maxEdge = 0, maxPixels = 0)
+
+proc downloadImageWithDataBounded*(url: string, boundWidth, boundHeight: int,
+    maxBytes = MaxImageDownloadBytes,
+    headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =
+  ## The requestedBounds download: fetch, then decode bounded.
+  if url.startsWith("data:"):
+    # Data URLs are small by construction; decode them as-is.
+    return (decodeDataUrl(url), "")
+  when defined(frameosEmbedded):
+    return downloadImageFromBufferBounded(url, boundWidth, boundHeight,
+      maxBytes, headers)
+  else:
+    let response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
+    if response.code >= 400:
+      raise newException(IOError, response.status)
+    let content = response.body
+    (decodeImageBounded(content, boundWidth, boundHeight), content)
 
 proc downloadImageWithData*(url: string, maxBytes = MaxImageDownloadBytes,
     headers: seq[SimpleHttpHeader] = @[]): tuple[image: Image, data: string] =

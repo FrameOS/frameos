@@ -70,10 +70,30 @@ type
     input*: string
     requireStatic*: seq[FieldConstraint]
 
+  ForwardsBoundsSpec* = object
+    ## An output port that passes the consumer's useful-resolution *bounds*
+    ## upstream to `input` — the requestedBounds protocol, for transformers
+    ## that cannot forward a target (their output is not their input's
+    ## buffer) but whose geometry is still statically knowable.
+    output*: string
+    input*: string
+    ## The field that decides how bounds transform (a rotation degree).
+    ## Statically resolving to a `swapValues` entry swaps width and height;
+    ## a `keepValues` entry passes them unchanged; anything else — an
+    ## arbitrary angle, a wired field — refuses the plan, never guesses.
+    boundsField*: string
+    swapValues*: seq[string]
+    keepValues*: seq[string]
+    ## Or: replace the bounds outright with these fields' static values (a
+    ## resize's own dimensions — what is downstream no longer matters).
+    widthFrom*: string
+    heightFrom*: string
+
   AppCapabilities* = object
     providesTarget*: seq[ProvidesTargetSpec]
     intoTarget*: seq[IntoTargetSpec]
     forwardsTarget*: seq[ForwardsTargetSpec]
+    forwardsBounds*: seq[ForwardsBoundsSpec]
     ## config.json defaults for every field any of the specs above refers to,
     ## so the planner can tell "unset" from "explicitly set to the default".
     fieldDefaults*: seq[FieldMatch]
@@ -93,7 +113,7 @@ const NoAppCapabilities* = AppCapabilities()
 
 proc isEmpty*(caps: AppCapabilities): bool =
   caps.providesTarget.len == 0 and caps.intoTarget.len == 0 and
-    caps.forwardsTarget.len == 0
+    caps.forwardsTarget.len == 0 and caps.forwardsBounds.len == 0
 
 proc fieldDefault*(caps: AppCapabilities, field: string): string =
   for entry in caps.fieldDefaults:

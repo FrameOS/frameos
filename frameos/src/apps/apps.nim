@@ -224,83 +224,104 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[])
   of "data/frameOSGallery":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[])
   of "data/googlePhotos":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[])
   of "data/immich":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[])
   of "data/localImage":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[])
   of "data/openaiImage":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[])
+  of "data/resizeImage":
+    AppCapabilities(
+      providesTarget: @[],
+      intoTarget: @[],
+      forwardsTarget: @[],
+      forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "", swapValues: @[], keepValues: @[], widthFrom: "width", heightFrom: "height")],
+      fieldDefaults: @[FieldMatch(field: "width", value: ""), FieldMatch(field: "height", value: "")])
   of "data/rotateImage":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[],
       forwardsTarget: @[ForwardsTargetSpec(output: "image", input: "image", requireStatic: @[FieldConstraint(field: "rotationDegree", allowed: @["180", "180.0", "-180", "-180.0", "540", "540.0"])])],
+      forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "rotationDegree", swapValues: @["90", "90.0", "270", "270.0", "-90", "-90.0", "-270", "-270.0", "450", "450.0"], keepValues: @["0", "0.0", "180", "180.0", "-180", "-180.0", "360", "360.0", "540", "540.0"], widthFrom: "", heightFrom: "")],
       fieldDefaults: @[FieldMatch(field: "rotationDegree", value: "0")])
   of "data/unsplash":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[])
   of "data/wikicommons":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[])
   of "render/calendar":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @[])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: "")])
   of "render/color":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["natural"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @["color"])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "color", value: "#ffffff")])
   of "render/gradient":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["natural"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @["startColor", "endColor"])],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "startColor", value: "#800080"), FieldMatch(field: "endColor", value: "#ffc0cb")])
   of "render/image":
     AppCapabilities(
       providesTarget: @[ProvidesTargetSpec(input: "image", fitFrom: "placement", fits: @["cover", "contain", "stretch"], requireStatic: @[FieldConstraint(field: "offsetX", allowed: @["0"]), FieldConstraint(field: "offsetY", allowed: @["0"]), FieldConstraint(field: "blendMode", allowed: @["normal", "overwrite"])], compositingRequireStatic: @[FieldConstraint(field: "blendMode", allowed: @["normal"])], requireUnset: @["inputImage"], ownedTargetExcludes: @[@[FieldMatch(field: "placement", value: "contain"), FieldMatch(field: "blendMode", value: "overwrite")]])],
       intoTarget: @[],
       forwardsTarget: @[],
+      forwardsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "placement", value: "cover"), FieldMatch(field: "offsetX", value: "0"), FieldMatch(field: "offsetY", value: "0"), FieldMatch(field: "blendMode", value: "normal"), FieldMatch(field: "inputImage", value: "")])
   of "render/opacity":
     AppCapabilities(
       providesTarget: @[],
       intoTarget: @[],
       forwardsTarget: @[ForwardsTargetSpec(output: "image", input: "image", requireStatic: @[])],
+      forwardsBounds: @[],
       fieldDefaults: @[])
   else: NoAppCapabilities

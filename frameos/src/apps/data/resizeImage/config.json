@@ -4,13 +4,35 @@
   "category": "data",
   "version": "1.0.0",
   "fields": [
-    { "name": "image", "type": "image", "required": true, "label": "Image" },
-    { "name": "width", "type": "integer", "required": true, "label": "New Width", "placeholder": "e.g., 1024" },
-    { "name": "height", "type": "integer", "required": true, "label": "New Height", "placeholder": "e.g., 1024" },
+    {
+      "name": "image",
+      "type": "image",
+      "required": true,
+      "label": "Image"
+    },
+    {
+      "name": "width",
+      "type": "integer",
+      "required": true,
+      "label": "New Width",
+      "placeholder": "e.g., 1024"
+    },
+    {
+      "name": "height",
+      "type": "integer",
+      "required": true,
+      "label": "New Height",
+      "placeholder": "e.g., 1024"
+    },
     {
       "name": "scalingMode",
       "type": "select",
-      "options": ["cover", "contain", "stretch", "center"],
+      "options": [
+        "cover",
+        "contain",
+        "stretch",
+        "center"
+      ],
       "value": "contain",
       "required": true,
       "label": "Scaling mode"
@@ -19,7 +41,14 @@
   "output": [
     {
       "name": "image",
-      "type": "image"
+      "type": "image",
+      "capabilities": {
+        "forwardsBounds": {
+          "input": "image",
+          "widthFrom": "width",
+          "heightFrom": "height"
+        }
+      }
     }
   ]
 }
