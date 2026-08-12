@@ -526,13 +526,24 @@ down.
   magnitude below the image side. Nothing to buy yet.
 - **The socket-fold** for byte inputs — trigger: a frame with no writable
   storage (reasoning under "The byte side").
-- **The image cache disk tier on hardware.** Built and test-pinned
-  2026-08-12, not yet on a frame. The checklist: XKCD-style cached scene
-  over the limit spills to the SD `.cache` and the second render serves
-  from the file with the producer not re-run (`interpreter:cache:hit` with
-  `tier: storage`); pull the card mid-life and the next render recomputes
-  instead of erroring; the 13.3E6 still upgrades to the live canvas
-  (headroom check) and stores nothing.
+- **The image cache disk tier on hardware — checklist run 2026-08-12**, and
+  it earned its keep by finding three things rather than confirming one.
+  (1) The tier was refusing *silently*: nothing said why a scene
+  re-downloaded every render — spill decisions are log lines now, reasons
+  and numbers included, which is how the rest was found. (2) The headroom
+  predicate asked its coexistence question against `availableRenderBytes` —
+  the largest-contiguous-block answer — and the bench frame runs fragmented
+  enough (~1.7MB blocks inside 5MB free) that no spill it could afford ever
+  passed; the check now splits into contiguous-for-the-scratch plus
+  total-free-for-the-headroom. (3) The shipped corpus barely exercises the
+  tier at all: the Wikimedia sample's producer declares
+  `cache.enabled: false`, and XKCD's split-cell scratch lands 14KB *under*
+  the 1MB in-memory limit — the memory tier legitimately holds it. A
+  dedicated over-limit cached scene verified the spill path end to end on
+  the frame. Still open: the mid-life card-pull degradation is host-pinned
+  only (the USB asset API refuses writes to dot-paths by design, so the
+  file cannot be deleted remotely), and the 13.3E6's upgrade-to-live-canvas
+  is arithmetic (7.7MB scratch against ~5MB headroom), not yet observed.
 - **Streaming a spooled cache hit into the offered target.** A hit today
   costs one transient canvas-sized allocation; reading the file row-by-row
   into the offer would make it window-resident. Deliberately not built: the

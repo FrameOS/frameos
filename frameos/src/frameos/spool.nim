@@ -229,23 +229,33 @@ proc materialize*(spool: Spool, maxBytes = 0): string =
     for window in spool.windows():
       result.add(window)
 
+proc usableScratchDir(path: string): bool =
+  ## Existence first, then a leaf-only mkdir. Never `createDir`: it mkdirs
+  ## every path component, and on the ESP32 VFS the mount prefix ("/srv" of
+  ## "/srv/assets") is not a directory anything can create — the recursive
+  ## walk fails on it and a perfectly writable, already-existing spill dir
+  ## reads as "no storage". Found live by the disk tier's refusal log; the
+  ## leaf mkdir under a mounted parent is what the VFS actually supports.
+  if path.len == 0:
+    return false
+  try:
+    if dirExists(path):
+      return true
+    discard existsOrCreateDir(path)
+    true
+  except CatchableError:
+    false
+
 proc spoolScratchDir*(preferred = ""): string =
   ## Where a file-backed spool lives. `preferred` is the caller's storage of
-  ## choice — the SD card's `.cache` on embedded — and is used only if it can
-  ## actually be created; otherwise the platform temp dir, which on a host is
-  ## always there and on embedded is the internal filesystem.
-  if preferred.len > 0:
-    try:
-      createDir(preferred)
-      return preferred
-    except CatchableError:
-      discard
+  ## choice — the SD card's `.cache` on embedded — and is used only if it is
+  ## or can be made usable; otherwise the platform temp dir, which on a host
+  ## is always there and on embedded is the internal filesystem.
+  if usableScratchDir(preferred):
+    return preferred
   let fallback = getTempDir() / "frameos-spool"
-  try:
-    createDir(fallback)
+  if usableScratchDir(fallback):
     return fallback
-  except CatchableError:
-    discard
   ""
 
 type SpoolWriter* = object
