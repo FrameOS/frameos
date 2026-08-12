@@ -3,7 +3,8 @@ import frameos/values
 import frameos/spool
 from frameos/apps as frameos_apps import spoolDir
 from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool
-from frameos/utils/memory import renderMemoryInUse, availableRenderBytes
+from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
+  availableRenderHeadroomBytes
 when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
@@ -52,11 +53,21 @@ proc imageSpillRefusalReason(frameConfig: FrameConfig, scratchBytes: int): strin
   ## tier can take the value.
   if imageSpillDisabled:
     return "spill disabled after an earlier storage failure"
-  let available = availableRenderBytes()
-  if available <= 0:
+  let contiguous = availableRenderBytes()
+  if contiguous <= 0:
     return "available render memory unknown"
-  if available < 2 * scratchBytes:
-    return "headroom " & $(available div 1024) & "K is under 2x the " &
+  if contiguous < scratchBytes:
+    # The scratch is one allocation; it needs one block.
+    return "largest free block " & $(contiguous div 1024) &
+      "K cannot hold the " & $(scratchBytes div 1024) & "K scratch"
+  let headroom = availableRenderHeadroomBytes()
+  if headroom < 2 * scratchBytes:
+    # The scratch lives next to the canvas and the producer's decode
+    # intermediates for the whole render; those pieces need not be
+    # contiguous, so this is a total-free question, not a block question —
+    # the bench frame keeps ~1.7MB blocks inside 5MB free, and asking the
+    # block answer here refused every spill the board could afford.
+    return "headroom " & $(headroom div 1024) & "K is under 2x the " &
       $(scratchBytes div 1024) & "K scratch"
   if spoolScratchDir(spoolDir(frameConfig)).len == 0:
     return "no writable spill storage"
