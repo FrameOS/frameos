@@ -63,9 +63,14 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 /**
- * Browser-rendered stand-in for a tile with no device-sourced image: asks
- * wasmPreviewModel for a one-shot render of the scene once the tile is
- * actually visible (a big fleet page must not render everything on load).
+ * Browser-rendered stand-in for a tile with no device-sourced image.
+ *
+ * Never renders on its own: a scene render runs the scene's data apps with
+ * the account's real settings, and some of those calls cost money (an OpenAI
+ * image node, for example). Rendering only happens when the user clicks the
+ * tile's "Preview in browser" action — the same deliberate act as the
+ * editor's preview modal — and the result is cached, so one click is one
+ * render.
  */
 function WasmScenePreviewFallback({
   frame,
@@ -80,40 +85,15 @@ function WasmScenePreviewFallback({
 }): JSX.Element {
   const { scenePreviews } = useValues(wasmPreviewModel)
   const { requestScenePreview } = useActions(wasmPreviewModel)
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const [visible, setVisible] = useState(false)
+  const [requested, setRequested] = useState(false)
   const cacheKey = wasmPreviewCacheKey(frame, sceneId)
   const dataUrl = scenePreviews[cacheKey]
   // A null entry is a tombstone (failed render): show nothing, don't retry.
-  const needsRender = !(cacheKey in scenePreviews)
-
-  useEffect(() => {
-    const node = containerRef.current
-    if (!node) {
-      return
-    }
-    if (typeof IntersectionObserver === 'undefined') {
-      setVisible(true)
-      return
-    }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setVisible(true)
-      }
-    })
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [])
-
-  useEffect(() => {
-    if (visible && needsRender) {
-      requestScenePreview(frame.id, sceneId)
-    }
-  }, [visible, needsRender, cacheKey])
+  const rendered = cacheKey in scenePreviews
+  const pending = requested && !rendered
 
   return (
     <div
-      ref={containerRef}
       className="relative flex h-full max-h-full w-full max-w-full items-center justify-center"
       title="Browser-rendered preview (device image unavailable)"
     >
@@ -124,6 +104,20 @@ function WasmScenePreviewFallback({
             Preview
           </span>
         </>
+      ) : !rendered ? (
+        <button
+          type="button"
+          className="z-10 rounded-lg bg-white/60 px-2 py-1 text-[10px] font-medium text-slate-500 shadow-sm ring-1 ring-slate-200/70 backdrop-blur transition hover:bg-white/90 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-default disabled:opacity-60"
+          disabled={pending}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            setRequested(true)
+            requestScenePreview(frame.id, sceneId)
+          }}
+        >
+          {pending ? 'Rendering…' : 'Preview in browser'}
+        </button>
       ) : null}
     </div>
   )

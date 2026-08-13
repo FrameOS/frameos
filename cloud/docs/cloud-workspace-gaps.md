@@ -56,10 +56,13 @@ Beyond the original list: **wasm fleet previews** (2026-08-13) — when a
 fleet tile's device snapshot and store cover both fail, the assigned scene
 renders in-browser via the frameos-wasm worker and the captured bitmap
 fills the tile (`frontend/src/models/wasmPreviewModel.tsx` +
-`utils/wasmScenePreview.ts`; serial one-worker queue, IntersectionObserver
-lazy mount, 30-entry bitmap cache with failure tombstones, "Preview" badge;
-device-sourced images always win, cloud mode only, no proxies beyond the
-existing `/api/store/preview-proxy`). The Assets panel is read-write on cloud
+`utils/wasmScenePreview.ts`; serial one-worker queue, 30-entry bitmap cache
+with failure tombstones, "Preview" badge; device-sourced images always win,
+cloud mode only, no proxies beyond the existing
+`/api/store/preview-proxy`). Renders ONLY on the tile's explicit
+"Preview in browser" click, never automatically — a scene render runs data
+apps with the account's real settings and can hit paid APIs (OpenAI image
+nodes), so bulk auto-rendering would spend the owner's money. The Assets panel is read-write on cloud
 (`asset_put` / `asset_mkdir` / `asset_delete` / `asset_rename` wire verbs
 — `docs/cloud-frames.md` — behind `/api/frames/{id}/assets/*` routes;
 dot-directories refused, 2.5 MiB single-frame upload cap), asset browsing
