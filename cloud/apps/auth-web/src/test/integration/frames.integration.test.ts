@@ -1030,6 +1030,22 @@ describe("frame management API", () => {
     expect(commandPayload.checksum).toBe(assignPayload.assigned_checksum);
     expect(commandPayload.scenes).toHaveLength(1);
 
+    // The per-scene ledger: one slice per assigned store scene, stamped with
+    // the version that produced the bytes. deployed_scene_state stays empty
+    // until the hub sees the device ack this checksum.
+    const [frameRow] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    const sceneStates = frameRow?.assignedSceneState as Record<
+      string,
+      { version: number; checksum: string }
+    >;
+    expect(Object.keys(sceneStates ?? {})).toEqual([scene.id]);
+    expect(sceneStates[scene.id]?.version).toBe(1);
+    expect(sceneStates[scene.id]?.checksum).toMatch(/^[0-9a-f]{64}$/);
+    expect(frameRow?.deployedSceneState).toBeNull();
+
     const listed = await getFrameScenes(
       getRequest(`/api/frames/${frame_id}/scenes`),
       routeParams(frame_id),

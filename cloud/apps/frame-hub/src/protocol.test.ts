@@ -332,6 +332,8 @@ describe("browser event shaping", () => {
       publicKey: "pk",
       schedule: { events: [] },
       scenesChecksum: "have",
+      assignedSceneState: { "store-a": { checksum: "aaa", version: 1 } },
+      deployedSceneState: { "store-a": { checksum: "aaa", version: 1 } },
       // Denormalized scene-declared service settings groups. Group NAMES
       // travel to the browser (so the workspace can say which keys this
       // frame's scenes want); no field or value ever does.
@@ -342,8 +344,10 @@ describe("browser event shaping", () => {
     } satisfies FrameRow;
     expect(frameUpdateEvent(frame)).toEqual({
       assigned_checksum: "want",
+      assigned_scene_state: { "store-a": { checksum: "aaa", version: 1 } },
       connected: true,
       created_at: now,
+      deployed_scene_state: { "store-a": { checksum: "aaa", version: 1 } },
       frameos_version: "2026.8.1",
       hardware: { platform: "pi-zero2w" },
       id: "frame-uuid",
@@ -382,6 +386,8 @@ describe("browser event shaping", () => {
       publicKey: "pk",
       schedule: null,
       scenesChecksum: null,
+      assignedSceneState: null,
+      deployedSceneState: null,
       serviceSettingGroups: null,
       settings: null,
       status: "active",

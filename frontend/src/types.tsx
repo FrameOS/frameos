@@ -37,6 +37,20 @@ export interface FrameErrorBehavior {
   show_error_retry_seconds?: number
 }
 
+/** One store scene's slice of a cloud assignment push: the version that
+ * produced the bytes and the checksum of just that scene's runtime scenes
+ * (cloud/apps/auth-web/src/lib/frames.ts buildScenesPayloadForFrame). */
+export interface CloudSceneDeployState {
+  version?: number | null
+  checksum?: string
+}
+
+/** Which store-scene assignment a hydrated runtime scene came from. */
+export interface CloudSceneSource {
+  scene_id: string
+  scene_version?: number | null
+}
+
 export interface FrameType {
   id: FrameId
   project_id: number
@@ -220,6 +234,17 @@ export interface FrameType {
    * last_successful_deploy_at on this control plane). */
   assigned_checksum?: string | null
   scenes_checksum?: string | null
+  /** Cloud only: per-STORE-scene deploy ledger ({storeSceneId: {version,
+   * checksum}}). assigned_scene_state describes the last assignment push;
+   * deployed_scene_state is the hub's copy of it from the moment the device
+   * acked the matching set checksum. Null/absent on frames that predate the
+   * ledger — per-scene sync state then falls back to all-or-nothing. */
+  assigned_scene_state?: Record<string, CloudSceneDeployState> | null
+  deployed_scene_state?: Record<string, CloudSceneDeployState> | null
+  /** Cloud only, client-side: which store scene each hydrated RUNTIME scene
+   * came from, recorded while fetching scenes.json per assignment
+   * (framesModel.hydrateCloudFrameScenes). Keyed by runtime scene id. */
+  cloud_scene_sources?: Record<string, CloudSceneSource>
   /** Cloud only: the newest metrics sample the device sent. Read for the
    * memory advisory (utils/frameMemory.ts) — an embedded frame can render
    * fine while having too little internal RAM left to open its TLS link. */
