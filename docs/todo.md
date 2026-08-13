@@ -68,9 +68,7 @@ reserve. What is left:
 - **The first render after a boot still dips into the 1 MB emergency
   reserve** (`heap exhausted: released 1048576 byte emergency reserve`). It
   succeeds, but that render also pays the scene parse and the app transpile,
-  so it is the one with no headroom to spare. Re-measure now that the
-  per-source-digest transpile cache (2026-08-13) halves what a Weather cold
-  boot transpiles.
+  so it is the one with no headroom to spare.
 - **Re-size the emergency reserve.** It is now the entire resident baseline:
   everything else at boot — wifi, scene storage, the console, HTTP, OTA —
   costs about 2 KB of PSRAM between them. 1 MB was chosen when a render could
@@ -158,6 +156,14 @@ measurement against a device run before trusting it.
 
 ## Ideas parking lot (unscheduled)
 
+- **quickts: parse TypeScript straight into QuickJS.** Teach the engine to
+  strip/ignore TS syntax while parsing, so apps ship `.ts` source and the
+  separate token-transpiler pass — and the transpiled copy every runtime
+  keeps for it — disappear entirely. Would obsolete the parked deploy-time
+  idea below. Context: a per-source-digest transpile-output cache was built
+  and removed the same day (2026-08-13) — pinning ~50 KB per unique source
+  in PSRAM with no pressure-driven eviction is the wrong trade on a board
+  that counts bytes.
 - **ESP32: parse/transpile scenes at deploy time, not on boot.** Decided
   2026-08-13 to shelve: after the allocation fix (#329) a cold boot pays
   only ~3.3 s of transpile (weatherIcons 0.55 s + weatherPanel 1.38 s×2,
