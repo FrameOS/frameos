@@ -933,6 +933,9 @@ static void client_task(void *arg)
          * switched on over the console mid-flight, without a rebuild. */
         frameos_nim_set_debug(config->debug_logging ? 1 : 0);
         frameos_nim_set_fusion(config->image_fusion ? 1 : 0);
+        /* Fallback fit for consumers without their own placement — settings
+         * sync, cloud set_settings and the console all write it live. */
+        frameos_nim_set_scaling_mode(config->scaling_mode);
 
         /* Battery guardrail: when the cell is nearly empty, skip the (costly)
          * render + panel refresh and sleep long so a low battery can't keep

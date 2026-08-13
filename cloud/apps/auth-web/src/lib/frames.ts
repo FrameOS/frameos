@@ -175,14 +175,20 @@ export function validateFrameSettings(
 
 // The subset the ESP32 firmware really applies in its `set_settings` handler
 // (embedded/esp32/main/fos_cloud.c ws_handle_set_settings): `interval`
-// (interval_sec), `name` (the DHCP hostname) and `rotate` (validated with
-// the same 0/90/180/270 normalization the backend settings poll uses, then
-// deferred-rebooted so the renderer re-inits). Everything else has no
-// on-device consumer — `scaling_mode` and `debug` are not even fields of
-// fos_config_t, and `timezone` is unimplementable without a tz database —
-// so the firmware refuses the WHOLE verb on them and the route refuses them
-// up front instead of half-applying a push.
-export const esp32SettableKeys = new Set(["interval", "name", "rotate"]);
+// (interval_sec), `name` (the DHCP hostname), `rotate` (validated with the
+// same 0/90/180/270 normalization the backend settings poll uses, then
+// deferred-rebooted so the renderer re-inits) and `scaling_mode`
+// (contain/cover/stretch/center, applied live — a per-decode fallback, no
+// reboot). Everything else has no on-device consumer — `debug` is not a
+// field of fos_config_t and `timezone` is unimplementable without a tz
+// database — so the firmware refuses the WHOLE verb on them and the route
+// refuses them up front instead of half-applying a push.
+export const esp32SettableKeys = new Set([
+  "interval",
+  "name",
+  "rotate",
+  "scaling_mode",
+]);
 
 // The settings frames.settings mirrors, in the device's spelling. `name` is
 // excluded on purpose: frames.name is the authoritative display name, and a

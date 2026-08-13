@@ -66,6 +66,10 @@ void frameos_nim_apply_service_settings(const char *json);
 void frameos_nim_set_debug(int enabled);
 /* Value-pipeline differential: 0 materializes every image edge. */
 void frameos_nim_set_fusion(int enabled);
+/* Fallback fit for image consumers without their own placement
+ * (contain/cover/stretch/center; console `set scaling_mode`, settings sync,
+ * cloud set_settings). Applied live — no restart. */
+void frameos_nim_set_scaling_mode(const char *mode);
 double frameos_nim_scene_interval(void);
 /* Sleep override from the scene's last render (logic/nextSleepDuration);
  * negative = no override. Consult only right after a successful render. */

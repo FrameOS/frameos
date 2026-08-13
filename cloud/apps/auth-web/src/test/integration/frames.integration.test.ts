@@ -1341,7 +1341,7 @@ describe("frame management API", () => {
     // The ESP32 profile is a strict subset of that list: exactly what
     // ws_handle_set_settings in embedded/esp32/main/fos_cloud.c applies.
     expect([...esp32SettableKeys].sort()).toEqual(
-      ["interval", "name", "rotate"].sort(),
+      ["interval", "name", "rotate", "scaling_mode"].sort(),
     );
     for (const key of esp32SettableKeys) {
       expect(allowedFrameSettings.has(key)).toBe(true);
@@ -1426,10 +1426,11 @@ describe("frame management API", () => {
     expect(commands.filter((c) => c.type === "set_settings")).toHaveLength(0);
   });
 
-  it("queues set_settings toward an esp32 for its interval/name/rotate subset", async () => {
+  it("queues set_settings toward an esp32 for its settable subset", async () => {
     // The firmware's set_settings applies interval (render cadence), name
-    // (hostname) and rotate (renderer canvas, deferred reboot); the provider
-    // enqueues those and refuses the rest.
+    // (hostname), rotate (renderer canvas, deferred reboot) and scaling_mode
+    // (per-decode fallback fit, applied live); the provider enqueues those
+    // and refuses the rest.
     const keys = deviceKeypair();
     await signIn();
     const claimToken = await mintToken("Desk esp32");
@@ -1445,7 +1446,7 @@ describe("frame management API", () => {
     const response = await pushFrameSettings(
       postJson(
         `/api/frames/${frame_id}/settings`,
-        { settings: { interval: 600, name: "Desk, renamed", rotate: 90 } },
+        { settings: { interval: 600, name: "Desk, renamed", rotate: 90, scaling_mode: "contain" } },
         { origin: baseUrl },
       ),
       routeParams(frame_id),
@@ -1465,7 +1466,7 @@ describe("frame management API", () => {
     const settingsCommands = commands.filter((c) => c.type === "set_settings");
     expect(settingsCommands).toHaveLength(1);
     expect(settingsCommands[0]?.payload).toEqual({
-      settings: { interval: 600, name: "Desk, renamed", rotate: 90 },
+      settings: { interval: 600, name: "Desk, renamed", rotate: 90, scaling_mode: "contain" },
     });
     // The rename also applied provider-side, and the device-side keys are
     // mirrored into frames.settings (never the name — frames.name owns it).
@@ -1474,7 +1475,7 @@ describe("frame management API", () => {
       .from(frames)
       .where(eq(frames.id, frame_id));
     expect(frame?.name).toBe("Desk, renamed");
-    expect(frame?.settings).toEqual({ interval: 600, rotate: 90 });
+    expect(frame?.settings).toEqual({ interval: 600, rotate: 90, scaling_mode: "contain" });
 
     // …and GET /api/frames/{id} hands them back as top-level fields, which
     // is what the Settings panel hydrates from. Without this the Interval
@@ -1505,15 +1506,16 @@ describe("frame management API", () => {
       .select()
       .from(frames)
       .where(eq(frames.id, frame_id));
-    expect(merged?.settings).toEqual({ interval: 600, rotate: 270 });
+    expect(merged?.settings).toEqual({ interval: 600, rotate: 270, scaling_mode: "contain" });
   });
 
   it("refuses the settings an esp32 has no consumer for", async () => {
-    // scaling_mode and debug are not fields of fos_config_t at all, and
-    // timezone is unimplementable on a device with no tz database (its only
-    // timezone concept is the utcOffsetMinutes riding with set_schedule).
-    // The firmware refuses the whole verb on any of them; the route says so
-    // first, so nothing is half-applied.
+    // debug is not a field of fos_config_t, and timezone is unimplementable
+    // on a device with no tz database (its only timezone concept is the
+    // utcOffsetMinutes riding with set_schedule). The firmware refuses the
+    // whole verb on either; the route says so first, so nothing is
+    // half-applied. (scaling_mode joined the settable set when the firmware
+    // grew a consumer for it.)
     const keys = deviceKeypair();
     await signIn();
     const claimToken = await mintToken("Desk esp32");
@@ -1527,7 +1529,6 @@ describe("frame management API", () => {
     );
 
     for (const settings of [
-      { scaling_mode: "cover" },
       { debug: true },
       { timezone: "Europe/Tallinn" },
     ]) {
@@ -1578,7 +1579,7 @@ describe("frame management API", () => {
     const refused = await pushFrameSettings(
       postJson(
         `/api/frames/${frame_id}/settings`,
-        { settings: { name: "Half-applied", scaling_mode: "cover" } },
+        { settings: { name: "Half-applied", debug: true } },
         { origin: baseUrl },
       ),
       routeParams(frame_id),

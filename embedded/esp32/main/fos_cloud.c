@@ -1811,10 +1811,11 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * profile persists the subset that maps onto fos_config: `interval`
  * (interval_sec, picked up by the render loop's next pass, no reboot),
  * `name` (the DHCP hostname — the provider-side display name stays
- * authoritative on the provider) and `rotate` (the renderer sizes its canvas
- * once at init, so this one costs a reboot). Any other key refuses the WHOLE
- * verb with setting_not_allowed, mirroring the Nim runtime, so the provider
- * never half-applies a settings push. */
+ * authoritative on the provider), `rotate` (the renderer sizes its canvas
+ * once at init, so this one costs a reboot) and `scaling_mode` (a per-decode
+ * fallback fit, applied live on the next render pass). Any other key refuses
+ * the WHOLE verb with setting_not_allowed, mirroring the Nim runtime, so the
+ * provider never half-applies a settings push. */
 static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
 {
     const cJSON *settings = cJSON_GetObjectItem(root, "settings");
@@ -1826,7 +1827,7 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     cJSON_ArrayForEach(entry, settings) {
         const char *key = entry->string ? entry->string : "";
         if (strcmp(key, "interval") != 0 && strcmp(key, "name") != 0 &&
-            strcmp(key, "rotate") != 0) {
+            strcmp(key, "rotate") != 0 && strcmp(key, "scaling_mode") != 0) {
             ESP_LOGW(TAG, "ws: set_settings key \"%s\" not supported on the esp32 profile", key);
             ws_ack(id, false, "setting_not_allowed");
             return;
@@ -1867,6 +1868,19 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         }
         rotate_changed = config->rotate != normalized;
         config->rotate = normalized;
+    }
+    const cJSON *scaling = cJSON_GetObjectItem(settings, "scaling_mode");
+    if (scaling != NULL) {
+        char normalized[16];
+        if (!cJSON_IsString(scaling) ||
+            !fos_config_normalize_scaling_mode(scaling->valuestring, normalized,
+                                               sizeof(normalized))) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        /* No reboot: a per-decode fallback, pushed into the Nim runtime by
+         * fos_client on the next pass. */
+        strlcpy(config->scaling_mode, normalized, sizeof(config->scaling_mode));
     }
     if (fos_config_save() != ESP_OK) {
         ws_ack(id, false, "persist_failed");

@@ -76,6 +76,10 @@ typedef struct {
     fos_render_mode_t render_mode;
     uint32_t interval_sec;         /* refresh interval */
     uint16_t rotate;               /* 0/90/180/270 — scenes render rotated, packers map to panel */
+    char scaling_mode[16];         /* contain/cover/stretch/center — the FALLBACK
+                                    * fit for image consumers that do not place
+                                    * the image themselves (since #321 a node's
+                                    * own placement wins); "cover" by default */
     uint32_t max_http_response_bytes;
     uint32_t http_spill_force_bytes; /* debug: HTTP bodies over this many buffered
                                       * bytes spill to storage even with PSRAM
@@ -127,6 +131,11 @@ bool fos_config_wifi_ready(void);
  * backend settings poll and the cloud set_settings verb — goes through this
  * so they cannot drift apart. */
 bool fos_config_normalize_rotate(double value, uint16_t *out);
+/* Normalize a scaling mode onto the four the renderer supports
+ * (contain/cover/stretch/center, case-insensitive). Same contract as
+ * normalize_rotate: every writer — USB console, backend settings poll,
+ * cloud set_settings — goes through this so they cannot drift apart. */
+bool fos_config_normalize_scaling_mode(const char *value, char *out, size_t out_len);
 /* "rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1" (any subset) */
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins);
 void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len);
