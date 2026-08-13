@@ -10,36 +10,22 @@ stable. Consolidated tracker: `docs/todo.md` at the repo root.
 
 ## Remaining
 
-- **6. FrameOS updates (OTA) from the cloud** — the one open item.
-  `notify_update_available` is answered `unsupported_verb` on esp32 and no
-  update flow exists for buildroot frames. Work: signed OTA (the standing
-  blocker — design in `cloud/docs/cloud-frames.md`, "Signed OTA"), an
-  `ota` verb (esp32: pull the published generic image; buildroot: release
-  tarball swap via the frameos binary), and an Update button gated on the
-  fleet's reported `frameos_version`.
-
-Loose ends:
-
-- ~~Item 1's full loop~~ — DONE 2026-08-09: `image_get` was acked
-  end to end by frame 02e05f35 (a cloud-managed PhotoPainter) against
-  production, so the device → cloud → UI path is exercised, not just the
-  device-side BMP pack.
-- Bench finding: the PhotoPainter gallery scene OOMs downloading a ~3 MB
-  image (`total=2686976 psram_free≈894k`; 12 resident scenes ate the old
-  headroom). NOTE 2026-08-09: "12 resident scenes" is no longer how the
-  firmware behaves — scenes are stored per file and only the active one is
-  resident, and the Nim heap moved to PSRAM, so the headroom figure in this
-  finding is stale and the OOM wants re-measuring before more work goes in. The fix is spilling large HTTP bodies to SD/flash plus
-  streaming decode — design + inert prototype in
-  `esp32-large-image-spill.md`; firmware wiring and hardware validation
-  are left. NOT proxy resizing (hard rule: no image proxies, ever).
-- Cosmetic: ESP32 asset listings show 8.3 FAT short names (`02_SYS~1`) —
-  enable long filenames in the FAT config.
+- **6. FrameOS updates (OTA) from the cloud — buildroot half.** The esp32
+  half shipped (see the ledger); on buildroot/Pi the Nim client answers
+  `notify_update_available` with an audit log and nothing else, while the
+  signed upgrade flow it should trigger already exists on-device
+  (`frameos/src/frameos/upgrade.nim`, `POST /api/upgrade`). Wire the verb
+  (or a cloud UI action) to that flow so cloud-managed Pi frames can
+  actually update. The esp32 path was confirmed against production on
+  2026-08-13: a real frame OTA'd to release 2026.8.19 (download → signed
+  apply → reboot → `frameos_version` reported from the running app
+  descriptor).
 
 ## Shipped (ledger — item numbers referenced from code)
 
 1. **Current frame image** — `image_get` wire verb +
-   `GET /api/frames/{id}/image` (full-loop verification pending, above).
+   `GET /api/frames/{id}/image`; full loop verified against production by
+   frame 02e05f35 (a cloud-managed PhotoPainter) on 2026-08-09.
 2. **Scene previews** — `GET /api/frames/{id}/scene_images/{sceneId}`
    serves the device's own per-scene snapshot (the runner writes
    `{assets}/.frameos/scene_images/{name}-{md5}.png` on every scene
@@ -54,7 +40,11 @@ Loose ends:
 4. **Scene upload events** — `POST /api/frames/{id}/event/{name}` shim
    maps render / setCurrentScene / uploadScenes onto queue verbs.
 5. **`GET /api/cloud/status`** — handled by `cloudEmptyCatalogs`.
-6. — remains open, above.
+6. **FrameOS updates (OTA), esp32 half** — `notify_update_available`
+   triggers a signed cloud OTA on-device (`main/fos_ota.c`: fetch the
+   manifest, verify the minisign signature, apply); `unsupported_verb`
+   retired with it. Buildroot half + real-release confirmation remain,
+   above.
 7. **Live updates in dev** — the shell injects the LAN hub origin and the
    hub accepts private-network browser origins outside production.
 8. **Scene tiles** hydrate from `GET /api/frames/{id}/scenes`.
@@ -62,7 +52,21 @@ Loose ends:
    `/metrics/recent` in the panel's shape, live samples merged from
    `new_metrics`.
 
-Beyond the original list: the Assets panel is read-write on cloud
+Beyond the original list: **wasm fleet previews** (2026-08-13) — when a
+fleet tile's device snapshot and store cover both fail, the assigned scene
+renders in-browser via the frameos-wasm worker and the captured bitmap
+fills the tile (`frontend/src/models/wasmPreviewModel.tsx` +
+`utils/wasmScenePreview.ts`; serial one-worker queue, 30-entry bitmap cache
+with failure tombstones, "Preview" badge; device-sourced images always
+win). Works on the cloud AND the self-hosted backend — settings and proxy
+resolve per mode exactly like livePreviewLogic (`/api/settings` +
+`/api/store/preview-proxy` on cloud, `scene_preview_settings` +
+`scene_preview_proxy` per frame on a backend); frame-control mode is out.
+Wired into the fleet tiles, preview panels, sidebar preview, and the
+scene-control drawer. Renders ONLY on the tile's explicit
+"Preview in browser" click, never automatically — a scene render runs data
+apps with the account's real settings and can hit paid APIs (OpenAI image
+nodes), so bulk auto-rendering would spend the owner's money. The Assets panel is read-write on cloud
 (`asset_put` / `asset_mkdir` / `asset_delete` / `asset_rename` wire verbs
 — `docs/cloud-frames.md` — behind `/api/frames/{id}/assets/*` routes;
 dot-directories refused, 2.5 MiB single-frame upload cap), asset browsing

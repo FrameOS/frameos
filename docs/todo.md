@@ -23,99 +23,33 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   provider. (The ESP32 client has been.)
 - Cloud-managed ESP32-C3 frames still have no render source (wasm harness
   is the building block; C3 boards stay out of the cloud flasher until then).
-- **Cloud OTA: confirm it works against a published release** — the first
-  release publishing `…-esp32-s3-generic-app.bin` (an OTA slot cannot accept
-  the merged flash image, so earlier releases 404 as
-  `ota_image_not_published`) and the first to report a real `frameos_version`
-  from an ESP32. Both want checking, not assuming, and only a real release
-  tests it. Meanwhile the USB updater moves a board on.
+
 ## Cloud-managed frames
 
-- **Run `scene:scrub-transparent-previews --apply` on prod** once the
-  transparent-preview fix deploys (dry-run first; `scene:sync-preview` per
-  affected slug afterwards rebuilds the zips).
 - **Account hardening** — passkeys/TOTP 2FA, re-authentication for
   sensitive actions (revoking frames, bulk assignment changes, scope
   grants), per-frame audit trail surfaced in the UI.
 - **Panel-displayed link code** — show the enrollment code/QR on the e-ink
   panel itself (proof of possession), not just the portal/admin page.
-- **wasm fleet previews** in the cloud UI — browser-rendered, keeping the
-  no-image-proxy rule.
+- **Buildroot cloud OTA** — the Nim client answers
+  `notify_update_available` with an audit log and nothing else, while the
+  signed upgrade flow it should trigger already exists on-device
+  (`frameos/src/frameos/upgrade.nim`, `POST /api/upgrade`). Wire the verb
+  to that flow so cloud-managed Pi frames can update like the esp32s do.
 - **Backend↔cloud promotion/demotion ceremony** — the explicit local
   action that moves a frame between control planes without a reset (exact
   UX still an open design question).
 - **Free-tier quotas** — pick numbers (frame count, backup size, private
   scene count) when provisioning starts, not before.
-- **Fleet extras** (design phase 4): offline alerting/notifications,
-  backups integration, paid-tier gating.
 
 ## ESP32
 
-- Spill follow-ups (optional): proactive Content-Length trigger; URL+ETag
-  decode cache. (Spilled PNGs stream already; the 13.3E6 forced-spill bench
-  ran 2026-08-13 — 4.4 MB JPEG spilled to SD `.cache` and decoded with a
-  ~5.2 MB PSRAM floor after the decode-budget fixes.)
+Bench/flash gotchas (wrong app offset fails silently, serial drops lines
+under CPU load) moved to `embedded/esp32/README.md` — they are facts, not
+work. The photopainter-todo nice-to-haves (parallel builds, portal polish,
+mDNS, log persistence, artifact GC, deep sleep) and the optional spill
+follow-ups moved to the parking lot.
 
-### Board follow-ups (rolled in from docs/esp32-photopainter-todo.md)
-
-That file's tracked work was finished — the 13.3E6 parity push (#301-#305)
-and the `image_get` cloud verb, all hardware-verified — so the file is gone
-and its board facts now live in `embedded/esp32/README.md` next to the preset
-table. What was still open there, mostly nice-to-have:
-
-- **Parallel firmware builds.** Build directories are per-profile now, but
-  `main/generated_config.h` and the Nim `nimcache` are still shared in-tree,
-  so builds serialise under the global build lock.
-- Portal: Wi-Fi scan list in the HTML form, AP password.
-- mDNS advertisement.
-- Log persistence across offline periods.
-- Firmware artifact GC.
-- Deep-sleep improvements (GPIO wake is moot on the 13.3E6 — no user
-  buttons).
-
-### Startup cost
-
-- **Flashing the bench 7.3" PhotoPainter: use 0x10000, not 0x20000.** That
-  board carries the **8 MB** layout (`partitions.csv`: otadata 0xd000, ota_0
-  0x10000, ota_1 0x380000) while `build-pp73` is configured for
-  `partitions_ota_16mb.csv` (otadata 0xf000, ota_0 0x20000). An app-only
-  `write_flash 0x20000` lands in the middle of ota_0, the image is never
-  found, and the bootloader silently keeps running the *old* app from ota_1 —
-  esptool reports "Hash of data verified" either way. This cost a full day of
-  measurement in 2026-08: two firmwares were "flashed" and compared, and both
-  runs were the same untouched binary, which then read as "the fix does
-  nothing" and "`-d:memProbe` is broken". **After every flash, check the boot
-  log for `boot: Loaded app from partition at offset ...` and confirm the
-  slot.** `esp_image: image at 0x10000 has invalid magic byte` in that log
-  means the write went to the wrong offset.
-- **Serial drops output during CPU-bound bursts.** The USB-Serial-JTAG
-  console loses lines while `fos_client` holds the CPU — the transpile window
-  in a cold boot comes back as a 16 s gap with corrupted joins
-  (`MEMMEMPROBE`, `MEMrender`). Absence of a probe line is not evidence the
-  probe did not fire. Read with a tight poll loop and expect to repeat the
-  capture.
-- **Parse and transpile scenes at deploy time, not on every boot.** Measured
-  on the bench 7.3" PhotoPainter with `-d:memProbe`, after the allocation fix
-  (#329): weatherIcons 11 KB = **0.55 s**, weatherPanel 36 KB = **1.38 s**,
-  and the panel is transpiled twice because each node builds its own runtime
-  — **~3.3 s per boot**, then `transpile CACHED` on every later render. The
-  older 3.3 s / 10.2 s figures look like genuine measurements of the *pre-fix*
-  transpiler (2 x 10.2 + 3.3 lands on the ~24 s cold-vs-warm delta that
-  firmware showed), so the fix appears to be worth roughly 7x on device — but
-  the old binary was overwritten before it could be re-instrumented, so treat
-  the comparison as inferred rather than measured. What is measured on the
-  host: 724,572 heap allocations for the 36 KB app (19.9 per source byte, all
-  through ESP-IDF multi_heap against PSRAM) down to 16,709 (0.46/byte), and
-  14.2 ms -> 4.5 ms, with byte-identical output.
-  **This changes the case for deploy-time transpilation**: it now saves ~3 s
-  per boot, not ~24 s, against ~92 KB of transpiler object code (unverified —
-  one reading of `frameos_esp32.map` put the five modules nearer 78 KB) and
-  ~420 KB left in the OTA slot. Cheapest win left is free: the two
-  weatherPanel nodes transpile the same source twice, so caching per source
-  hash halves what remains. For scale, a cold boot only costs ~6 s more than a
-  warm render (3.3 s transpile + ~1.7 s Open-Meteo fetch + ~0.6 s scene load);
-  the real per-render costs are SVG rasterization (7-8 s for the two weather
-  SVGs), dither+pack (3.2 s) and the panel refresh (~29 s).
 - **`compileToBytecode` serialises the wrong object.** It asked for
   `JS_EVAL_FLAG_COMPILE_ONLY`, which burrito.nim declared one bit too high —
   that value is `JS_EVAL_FLAG_BACKTRACE_BARRIER` in the bundled quickjs.h — so
@@ -134,21 +68,12 @@ reserve. What is left:
 - **The first render after a boot still dips into the 1 MB emergency
   reserve** (`heap exhausted: released 1048576 byte emergency reserve`). It
   succeeds, but that render also pays the scene parse and the app transpile,
-  so it is the one with no headroom to spare. Re-measure once that work moves
-  off the device (above).
+  so it is the one with no headroom to spare.
 - **Re-size the emergency reserve.** It is now the entire resident baseline:
   everything else at boot — wifi, scene storage, the console, HTTP, OTA —
   costs about 2 KB of PSRAM between them. 1 MB was chosen when a render could
   exhaust the pool; peak is much lower now, so measure whether it still needs
   to be that large.
-- **Move QuickJS off internal RAM** — it allocates through libc malloc, and
-  `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` sends everything under 16 KB to
-  the internal pool, so the active scene's JS context is an internal-RAM cost
-  (`JS_NewRuntime2` with PSRAM-backed `js_malloc_functions`). Bounded to one
-  scene, so only worth doing if internal RAM gets tight again.
-- **Same for cJSON** — WS frames and settings payloads parse in internal
-  RAM. `cJSON_InitHooks` with PSRAM allocators moves the lot, but it is
-  broad enough to want its own measurement first.
 - **Surface memory over a channel that survives the link being down** — the
   workspace advisory reads device metrics, so a frame too low on internal RAM
   to connect reports nothing and cannot be flagged. Today it is preventive
@@ -231,6 +156,22 @@ measurement against a device run before trusting it.
 
 ## Ideas parking lot (unscheduled)
 
+- **quickts: parse TypeScript straight into QuickJS.** Teach the engine to
+  strip/ignore TS syntax while parsing, so apps ship `.ts` source and the
+  separate token-transpiler pass — and the transpiled copy every runtime
+  keeps for it — disappear entirely. Would obsolete the parked deploy-time
+  idea below. Context: a per-source-digest transpile-output cache was built
+  and removed the same day (2026-08-13) — pinning ~50 KB per unique source
+  in PSRAM with no pressure-driven eviction is the wrong trade on a board
+  that counts bytes.
+- **ESP32: parse/transpile scenes at deploy time, not on boot.** Decided
+  2026-08-13 to shelve: after the allocation fix (#329) a cold boot pays
+  only ~3.3 s of transpile (weatherIcons 0.55 s + weatherPanel 1.38 s×2,
+  bench 7.3" PhotoPainter, `-d:memProbe`), and dropping the ~80–92 KB
+  transpiler from the image is not worth it — shipping readable TS source
+  to the device is a feature. Per-render costs live elsewhere anyway (SVG
+  raster 7–8 s, dither+pack 3.2 s, panel refresh ~29 s). Revisit only if
+  boot time or flash budget becomes a real constraint.
 - Fleet features: one cloud account administering many backends
   (installer / digital-signage); cloud-side "all my frames" dashboard.
 - Shared household access: invite a second account to a backend with a
@@ -241,3 +182,17 @@ measurement against a device run before trusting it.
   scope for the cloud-frames design; separate product if ever).
 - E-ink-friendly weather/calendar data proxy (normalized upstream APIs,
   one key, cached) so users don't need per-service API keys.
+- Fleet extras (cloud-frames design phase 4): offline
+  alerting/notifications, backups integration, paid-tier gating.
+- ESP32 spill follow-ups: proactive Content-Length trigger; URL+ETag decode
+  cache. (Spilled PNGs stream already; the 13.3E6 forced-spill bench ran
+  2026-08-13 — 4.4 MB JPEG spilled to SD `.cache`, ~5.2 MB PSRAM floor.)
+- ESP32 board nice-to-haves: parallel firmware builds (shared
+  `generated_config.h` + nimcache serialise under the build lock), portal
+  Wi-Fi scan list + AP password, mDNS advertisement, log persistence across
+  offline periods, firmware artifact GC, deep-sleep improvements.
+- ESP32 internal-RAM headroom, only if it gets tight again: move QuickJS
+  allocations to PSRAM (`JS_NewRuntime2` with PSRAM-backed
+  `js_malloc_functions`; `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` sends
+  sub-16 KB mallocs internal) and cJSON likewise (`cJSON_InitHooks`;
+  measure first, it is broad).

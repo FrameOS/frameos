@@ -407,6 +407,7 @@ function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameSce
           refreshable={false}
           objectFit="cover"
           className="h-full w-full rounded-none"
+          wasmFallback={{ sceneId: scene.id }}
         />
         {active ? (
           <div className="frameos-primary-fill absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm">
@@ -675,6 +676,7 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
 function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: boolean }): JSX.Element {
   const { openFrameTool } = useActions(workspaceLogic)
   const { hideForm } = useActions(newFrameForm)
+  const activeScene = frame.scenes?.find((scene) => sceneIsActive(scene, frame.active_scene_id))
   const openPreview = (): void => {
     hideForm()
     openFrameTool(frame.id, 'preview')
@@ -690,7 +692,13 @@ function CurrentSnapshotCard({ frame, active }: { frame: FrameType; active: bool
       )}
     >
       <div className="frameos-card-media relative flex h-[24rem] max-h-[75vh] min-h-0 items-center justify-center overflow-hidden bg-slate-100">
-        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full rounded-none" />
+        <FrameImage
+          frameId={frame.id}
+          refreshable={false}
+          objectFit="contain"
+          className="h-full w-full rounded-none"
+          wasmFallback={activeScene ? { sceneId: activeScene.id } : undefined}
+        />
         <button
           type="button"
           aria-label="Open preview"
@@ -947,6 +955,7 @@ function SceneControlPanelContent({
                   loadFullSizeAfterThumb
                   className="h-full w-full"
                   imageClassName="h-full w-full rounded-md object-contain"
+                  wasmFallback={{ sceneId: scene.id }}
                 />
                 {selectedSceneIsActive ? <FrameImageOverlayControls frame={frame} sceneId={scene.id} /> : null}
                 {sceneIsCompiledForFrame(scene, frame.mode) ? (

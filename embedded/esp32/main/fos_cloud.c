@@ -13,6 +13,7 @@
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
+#include "esp_ota_ops.h"
 #include "esp_chip_info.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
@@ -2009,14 +2010,23 @@ static void ws_handle_message(const char *data, size_t len)
          * is the first thing to check when a frame "sends no logs", and an
          * INFO line is compiled out at CONFIG_LOG_MAXIMUM_LEVEL=WARN. The
          * hook prints to the console, so the answer is on the USB serial
-         * stream even in the not-granted case that keeps it off the wire. */
-        char event[192];
+         * stream even in the not-granted case that keeps it off the wire.
+         *
+         * Version and boot slot ride along because this is the first line
+         * of a boot that can reach cloud retention at all: the bootup event
+         * fires before the session exists and the tap drops it, so without
+         * this an OTA reboot never echoes what it now runs. */
+        const esp_partition_t *running_part = esp_ota_get_running_partition();
+        char event[256];
         snprintf(event, sizeof(event),
                  "{\"event\":\"cloud:session_ready\",\"source\":\"esp32\","
-                 "\"logs\":%s,\"metrics\":%s,\"serviceSettings\":%s}",
+                 "\"logs\":%s,\"metrics\":%s,\"serviceSettings\":%s,"
+                 "\"version\":\"%s\",\"bootedFrom\":\"%s\"}",
                  logs_granted ? "true" : "false",
                  metrics_granted ? "true" : "false",
-                 service_settings_granted ? "true" : "false");
+                 service_settings_granted ? "true" : "false",
+                 esp_app_get_description()->version,
+                 running_part ? running_part->label : "?");
         frameos_nim_log_hook(event);
     } else if (strcmp(type, "get_state") == 0) {
         ws_ack(id, true, NULL);

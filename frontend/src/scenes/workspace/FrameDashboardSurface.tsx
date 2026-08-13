@@ -249,7 +249,13 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
         )}
         style={previewSizing?.imageStyle}
       >
-        <FrameImage frameId={frame.id} refreshable={false} objectFit="contain" className="h-full w-full rounded-none" />
+        <FrameImage
+          frameId={frame.id}
+          refreshable={false}
+          objectFit="contain"
+          className="h-full w-full rounded-none"
+          wasmFallback={activeScene ? { sceneId: activeScene.id } : undefined}
+        />
         <button
           type="button"
           aria-label="Open scene preview"
@@ -465,6 +471,7 @@ function FrameSceneTile({
           refreshable={false}
           objectFit="cover"
           className="h-full w-full rounded-none"
+          wasmFallback={{ sceneId: scene.id }}
         />
       </div>
       <div className="w-full px-3 py-2">
