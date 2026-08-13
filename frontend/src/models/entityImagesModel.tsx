@@ -6,6 +6,7 @@ import { getBasePath } from '../utils/getBasePath'
 import { projectApiPathFromCache } from '../utils/projectApi'
 import { apiFetch } from '../utils/apiFetch'
 import { isInFrameAdminMode } from '../utils/frameAdmin'
+import { isCloudMode } from '../utils/cloudMode'
 import type { FrameType } from '../types'
 
 const uploadedScenePrefix = 'uploaded/'
@@ -83,7 +84,7 @@ export const entityImagesModel = kea<entityImagesModelType>([
       },
     ],
   }),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions, values, cache }) => ({
     updateEntityImage: async ({ entity, subentity, force }) => {
       if (!entity) {
         return
@@ -132,6 +133,29 @@ export const entityImagesModel = kea<entityImagesModelType>([
     },
     [socketLogic.actionTypes.newSceneImage]: ({ frameId, sceneId }) => {
       actions.updateEntityImage(`frames/${frameId}`, `scene_images/${sceneId}`)
+    },
+    [socketLogic.actionTypes.newMetrics]: ({ metrics }) => {
+      // Cloud only: the hub has no frame_rendered event, but the ESP32
+      // pushes a metrics sample after every render pass, so a rising
+      // `renders` counter is the "there is a new image" signal. Bumping the
+      // timestamp makes the image route wait for the device's fresh
+      // image_get instead of re-serving its cache. The first sample after
+      // connect only records the counter — refreshing on it would stampede
+      // the fleet page with one device round-trip per tile.
+      if (!isCloudMode()) {
+        return
+      }
+      const frameId = metrics?.frame_id
+      const renders = metrics?.metrics?.renders
+      if (!frameId || typeof renders !== 'number') {
+        return
+      }
+      const counts: Record<string, number> = cache.lastRenderCounts ?? (cache.lastRenderCounts = {})
+      const previous = counts[String(frameId)]
+      counts[String(frameId)] = renders
+      if (previous !== undefined && renders > previous) {
+        actions.updateEntityImage(`frames/${frameId}`, 'image')
+      }
     },
     [socketLogic.actionTypes.frameRendered]: ({ frameId }) => {
       actions.updateEntityImage(`frames/${frameId}`, 'image')
