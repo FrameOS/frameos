@@ -666,6 +666,45 @@ proc scalingModeToFit(scalingMode: string): Option[ScaledDecodeFit] =
   of "stretch": some(fitStretch)
   else: none(ScaledDecodeFit)
 
+proc decodeIntoTargetWithDegrade*(target: Image, fit: ScaledDecodeFit,
+    decode: proc(dst: Image)): Image =
+  ## Runs an into-target decode; when the decoder's plan check refuses for
+  ## lack of memory ("over the … memory budget"), retries the same decode at
+  ## reduced resolution into a temporary image and upscales the result onto
+  ## the target. A blurrier render always beats an error frame — the budget
+  ## refusal is a planning answer, so degrading the plan is the fix, not
+  ## surfacing the message. Non-budget errors pass through untouched.
+  try:
+    decode(target)
+    return target
+  except PixieError as refusal:
+    if not refusal.msg.contains("memory budget"):
+      raise
+    let refusalMsg = refusal.msg
+    # Halving the target quarters the plan's channel buffers; two rungs cover
+    # everything short of a heap that cannot hold even a quarter-res frame.
+    for divisor in [2, 4]:
+      var temp: Image
+      try:
+        temp = newImage(max(1, target.width div divisor),
+                        max(1, target.height div divisor))
+      except CatchableError:
+        continue
+      # The temp allocation itself changed the heap; re-plan against it.
+      refreshDecodeBudgetInto()
+      try:
+        decode(temp)
+        # temp shares the target's aspect and the fit was applied during the
+        # decode, so the upscale is a pure stretch.
+        target.scaleAndDrawImage(temp, "stretch")
+        refreshDecodeBudgetInto()
+        return target
+      except PixieError as retryRefusal:
+        if not retryRefusal.msg.contains("memory budget"):
+          raise
+        continue
+    raise newException(PixieError, refusalMsg)
+
 proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): bool =
   ## Decodes an image file directly into an existing target image (usually
   ## the render canvas) with aspect-correct fit, keeping peak memory at the
@@ -683,7 +722,9 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
     return false
   let fit = fitOption.get()
 
-  refreshDecodeBudget()
+  # Into-target decode: the output is the pre-allocated canvas, so the
+  # decode plan may use the whole headroom (see refreshDecodeBudgetInto).
+  refreshDecodeBudgetInto()
   let fileSize = getFileSize(path)
   var header = probeImageFileHeader(path)
 
@@ -728,14 +769,21 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
     raise newException(PixieError, "Cannot open image file: " & path)
   try:
     if jpeg:
-      decodeJpegStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+      # A budget refusal degrades to a reduced-resolution decode inside the
+      # helper; only non-budget errors (progressive JPEGs) reach the buffered
+      # retry below.
+      discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+        file.setFilePos(0)
+        decodeJpegStreamScaledInto(fileJpegSource(file), fileSize.int, dst, fit))
       return true
     if streamablePng:
       when compiles(decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
         # Row-streamed: the compressed body is read incrementally and never held
         # whole, so this needs a fixed inflate window plus a row, not a block the
         # size of the file. Interlaced and 16-bit PNGs raise here and fall back.
-        decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
+        discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+          file.setFilePos(0)
+          decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, dst, fit))
         return true
     if streamableBmp:
       when compiles(decodeBmpStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
@@ -903,23 +951,24 @@ when defined(frameosEmbedded):
     header.setLen(max(0, got))
     let format = embeddedImageFormat(header.cstring, header.len)
     if format == "JPEG" and not target.isNil and target.width > 0 and target.height > 0:
-      file.setFilePos(0)
-      GC_fullCollect()
       when compiles(decodeJpegStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
         # Progressive JPEGs raise here; the buffered retry other paths use is
         # exactly the allocation that could not be made, so let it surface.
-        decodeJpegStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
-        return target
+        # Budget refusals degrade to a reduced-resolution decode instead.
+        return decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+          file.setFilePos(0)
+          GC_fullCollect()
+          decodeJpegStreamScaledInto(fileJpegSource(file), totalLen, dst, fit))
     if format == "PNG" and not target.isNil and target.width > 0 and target.height > 0:
-      file.setFilePos(0)
-      GC_fullCollect()
       when compiles(decodePngStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
         # Row-streamed chunk walk over the spilled file: a small read buffer
         # plus pixie's fixed inflate window, never the whole compressed body.
         # Interlaced/16-bit PNGs raise here — decoding those would need the
         # buffered copy the spill exists to avoid, so let it surface.
-        decodePngStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
-        return target
+        return decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+          file.setFilePos(0)
+          GC_fullCollect()
+          decodePngStreamScaledInto(fileJpegSource(file), totalLen, dst, fit))
     if format == "BMP" and not target.isNil and target.width > 0 and target.height > 0:
       file.setFilePos(0)
       GC_fullCollect()
@@ -936,15 +985,16 @@ when defined(frameosEmbedded):
         decodePpmStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
         return target
     if format == "WEBP" and not target.isNil and target.width > 0 and target.height > 0:
-      file.setFilePos(0)
-      GC_fullCollect()
       when compiles(decodeWebpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
         # A WebP bitstream cannot be windowed (VP8 partitions interleave
         # macroblock rows; VP8L's LZ77 window is the whole image), so pixie
         # holds the compressed body — budget-checked, refusing catchably —
-        # while the full-size RGBA intermediate still never exists.
-        decodeWebpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
-        return target
+        # while the full-size RGBA intermediate still never exists. Budget
+        # refusals degrade to a reduced-resolution decode.
+        return decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+          file.setFilePos(0)
+          GC_fullCollect()
+          decodeWebpStreamScaledInto(fileJpegSource(file), totalLen, dst, fit))
     raise newException(PixieError,
       &"Spilled {format} download ({totalLen div 1024}K) has no file-backed streaming decoder")
 
@@ -1006,15 +1056,30 @@ when defined(frameosEmbedded):
     # budget" plan check ran against a stale number — and a progressive JPEG
     # that passed it then OOM-aborted the render on a fragmented heap where
     # the largest free block was 1,668 bytes smaller than its allocation.
-    refreshDecodeBudget()
+    # With a target the decode streams into the existing canvas, so the
+    # output half of the budget split does not apply.
+    if not target.isNil and target.width > 0 and target.height > 0:
+      refreshDecodeBudgetInto()
+    else:
+      refreshDecodeBudget()
     try:
       if response.code >= 400:
         raise newException(HttpRequestError, "HTTP " & response.status & httpErrorDetail(response))
+      let intoTarget = not target.isNil and target.width > 0 and target.height > 0
       let image =
         if response.spillPath.len > 0:
           decodeSpilledImageInto(response.spillPath, response.bodyLen, target, fit)
         elif response.chunks.len > 1:
-          decodeImageChunks(response.chunks, response.bodyLen, target, fit)
+          if intoTarget:
+            # Budget refusals degrade to a reduced-resolution decode rather
+            # than reaching the scene as an error frame.
+            decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+              discard decodeImageChunks(response.chunks, response.bodyLen, dst, fit))
+          else:
+            decodeImageChunks(response.chunks, response.bodyLen, target, fit)
+        elif intoTarget:
+          decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+            discard decodeImageWithFallback(response.body, response.bodyLen, dst, fit))
         elif not target.isNil:
           decodeImageWithFallback(response.body, response.bodyLen, target, fit)
         elif boundWidth > 0 and boundHeight > 0:
