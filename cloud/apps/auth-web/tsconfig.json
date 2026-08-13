@@ -32,6 +32,10 @@
     // Same story: mounts EmbeddedWebFlasher, whose import graph reaches the
     // legacy workspace components (bare JSX namespace, pre-strict typing).
     // Vitest still runs it; only tsc leaves it out.
-    "src/test/shared-spa/embedded-web-flasher.test.tsx"
+    "src/test/shared-spa/embedded-web-flasher.test.tsx",
+    // Same story: frameStatusGroups imports decorators/frame.tsx, which
+    // renders the legacy connection dot/spinner components (bare JSX
+    // namespace). Vitest still runs it; only tsc leaves it out.
+    "src/test/shared-spa/frame-status-groups.test.ts"
   ]
 }
