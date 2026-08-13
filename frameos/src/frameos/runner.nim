@@ -481,8 +481,18 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
               payload["x"] = %*((self.frameConfig.width.float * payload["x"].getInt().float / 32767.0).int)
               payload["y"] = %*((self.frameConfig.height.float * payload["y"].getInt().float / 32767.0).int)
           of "setCurrentScene":
-            let sceneId = SceneId(payload["sceneId"].getStr())
-            let exportedScene = findExportedScene(sceneId)
+            var sceneId = SceneId(payload["sceneId"].getStr())
+            var exportedScene = findExportedScene(sceneId)
+            if exportedScene.isNone and not sceneId.string.startsWith("uploaded/"):
+              # Cloud pushes register every scene as "uploaded/<id>", but the
+              # provider's set_current_scene (and workspace-authored schedules)
+              # carry the public id — resolve it before declaring it missing,
+              # like the esp32 profile's fos_scenes_select does.
+              let uploadedSceneId = SceneId("uploaded/" & sceneId.string)
+              exportedScene = findExportedScene(uploadedSceneId)
+              if exportedScene.isSome:
+                sceneId = uploadedSceneId
+                payload["sceneId"] = %sceneId.string
             if exportedScene.isNone:
               self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
                   "event": event, "payload": payload})
