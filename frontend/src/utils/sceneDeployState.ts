@@ -10,14 +10,17 @@ import type { WorkspaceMode } from '../scenes/workspace/workspaceSurfaces'
 //
 //   * backend  — the frame row carries `last_successful_deploy.scenes`, the
 //     exact graphs SSH last installed, so the comparison is per scene.
-//   * cloud    — there is no such field, and nothing writes one. A cloud
-//     deploy is a checksummed `set_scenes` push: `assigned_checksum` is what
-//     the account assigned, `scenes_checksum` is what the device acknowledged
-//     (the same pair the account frames table renders as "in sync" /
-//     "sync pending"). Reading `last_successful_deploy` there compared every
-//     scene against an empty list, so all of them were permanently pending.
-//     A single checksum covers the whole set, so this is all-or-nothing: it
-//     cannot say WHICH scene differs, only that the device is behind.
+//   * cloud    — a cloud deploy is a checksummed `set_scenes` push:
+//     `assigned_checksum` is what the account assigned, `scenes_checksum` is
+//     what the device acknowledged (the same pair the account frames table
+//     renders as "in sync" / "sync pending"). When they differ, the
+//     per-scene ledger narrows the blame: `assigned_scene_state` holds each
+//     store scene's slice of the last push, `deployed_scene_state` the copy
+//     the hub took when the device last acked a push, and
+//     `cloud_scene_sources` (hydration-owned) maps runtime scene ids back to
+//     their store scenes. Only scenes whose slice changed are flagged.
+//     Frames that predate the ledger (null maps) fall back to the old
+//     all-or-nothing answer: every scene pending until the checksums agree.
 //   * frameAdmin — the frame is the thing being edited; there is nowhere to
 //     deploy to.
 export function undeployedSceneIdsFor({
@@ -48,6 +51,24 @@ export function undeployedSceneIdsFor({
     // dirty before the user has done anything.
     if (!assigned && !reported) {
       return new Set<string>()
+    }
+    // Per-scene ledger: flag only the store scenes whose assigned slice
+    // differs from the last device-acked push. Needs the hydration-recorded
+    // runtime→store mapping; a runtime scene with no known source (a stub
+    // tile, an ad-hoc preview) counts as pending.
+    const assignedState = frame?.assigned_scene_state
+    const sources = frame?.cloud_scene_sources
+    if (assignedState && sources) {
+      const deployedState = frame?.deployed_scene_state ?? {}
+      const undeployed = new Set<string>()
+      scenes.forEach((scene) => {
+        const source = sources[scene.id]
+        const assignedSlice = source ? assignedState[source.scene_id] : undefined
+        if (!assignedSlice || assignedSlice.checksum !== deployedState[source!.scene_id]?.checksum) {
+          undeployed.add(scene.id)
+        }
+      })
+      return undeployed
     }
     return new Set(scenes.map((scene) => scene.id))
   }

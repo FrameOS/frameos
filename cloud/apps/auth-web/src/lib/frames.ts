@@ -426,11 +426,17 @@ export function frameSummary(
     // provider-owned fields below always win, `name` above all.
     ...readFrameSettings(frame.settings),
     assigned_checksum: frame.assignedChecksum,
+    // Per-scene deploy ledger ({storeSceneId: {version, checksum}}): what
+    // the last assignment push contained vs what the device has acked. NULL
+    // on frames that predate the columns — the SPA then falls back to the
+    // all-or-nothing checksum comparison.
+    assigned_scene_state: frame.assignedSceneState,
     connected: frame.connected,
     created_at: frame.createdAt,
     frameos_version: frame.frameosVersion,
     hardware: frame.hardware,
     id: frame.id,
+    deployed_scene_state: frame.deployedSceneState,
     last_seen_at: frame.lastSeenAt,
     linked_client_id: frame.linkedClientId,
     name: frame.name,
@@ -774,14 +780,26 @@ export async function pinnedSceneVersion(
   return row;
 }
 
+// One store scene's slice of an assignment push: the version that produced
+// the bytes and the checksum of just that scene's runtime scenes. Stored on
+// the frame as assigned_scene_state / deployed_scene_state so sync state can
+// be answered per scene, not only for the set as a whole.
+export type SceneDeployState = { version: number; checksum: string };
+
 // Build the interpreted-scene payload for a frame from its assignments. The
 // payload shape matches the device's uploaded-scenes path ({"scenes": […]});
-// the checksum lets the device and the fleet UI agree on sync state.
+// the checksum lets the device and the fleet UI agree on sync state, and
+// sceneStates carries the same information per store scene.
 export async function buildScenesPayloadForFrame(
   db: FramesDatabase,
   frameId: string,
 ): Promise<
-  | { scenes: unknown[]; checksum: string; sceneNames: string[] }
+  | {
+      scenes: unknown[];
+      checksum: string;
+      sceneNames: string[];
+      sceneStates: Record<string, SceneDeployState>;
+    }
   | { error: string }
 > {
   const assignments = await db
@@ -798,6 +816,7 @@ export async function buildScenesPayloadForFrame(
 
   const scenes: unknown[] = [];
   const sceneNames: string[] = [];
+  const sceneStates: Record<string, SceneDeployState> = {};
   let rawBytes = 0;
   for (const assignment of assignments) {
     if (assignment.sceneStatus !== "active") {
@@ -845,6 +864,15 @@ export async function buildScenesPayloadForFrame(
     }
     scenes.push(...extracted.scenes);
     sceneNames.push(assignment.sceneName);
+    // The digest of just this assignment's slice of the payload. Comparing
+    // it against the copy stored at the last device-acked push is what lets
+    // the workspace flag the one edited scene instead of all of them.
+    sceneStates[assignment.sceneId] = {
+      checksum: createHash("sha256")
+        .update(JSON.stringify(extracted.scenes))
+        .digest("hex"),
+      version: versionRow.version,
+    };
   }
 
   const serialized = JSON.stringify(scenes);
@@ -852,7 +880,7 @@ export async function buildScenesPayloadForFrame(
     return { error: "scenes_payload_too_large" };
   }
   const checksum = createHash("sha256").update(serialized).digest("hex");
-  return { checksum, sceneNames, scenes };
+  return { checksum, sceneNames, sceneStates, scenes };
 }
 
 // Store one batch of shipped logs, enforcing the per-frame retention cap in

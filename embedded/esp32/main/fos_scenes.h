@@ -16,6 +16,17 @@
 #include <stdint.h>
 #include "esp_err.h"
 
+/* Who installed the scenes a frame is holding. Not cosmetic: fos_cloud.c keys
+ * the RFC1918 LAN deny (fos_netguard) on this, so provider-pushed scenes stay
+ * fenced off the owner's LAN even after the frame is demoted from cloud
+ * management. Persisted in /state/scene-index.json (top-level "source") and
+ * mirrored in NVS so the answer survives reboots and the store→apply window. */
+typedef enum {
+    FOS_SCENES_SOURCE_LOCAL = 0,   /* HTTP POST /uploadScenes, USB console, portal */
+    FOS_SCENES_SOURCE_BACKEND,     /* fos_scenes_sync() from the configured backend */
+    FOS_SCENES_SOURCE_CLOUD,       /* cloud provider's set_scenes over the WS link */
+} fos_scenes_source_t;
+
 /* Mount /state and mark any cached scenes.json for loading. */
 esp_err_t fos_scenes_init(void);
 
@@ -25,8 +36,19 @@ esp_err_t fos_scenes_sync(bool force);
 bool fos_scenes_state_mounted(void);
 
 /* Persist a scenes JSON payload (local push, e.g. POST /api/scenes) and mark
- * it pending. Safe from any task; trigger a render to apply. */
+ * it pending. Safe from any task; trigger a render to apply.
+ * fos_scenes_set_json() means FOS_SCENES_SOURCE_LOCAL; every non-local caller
+ * must declare itself via fos_scenes_set_json_from(). */
 esp_err_t fos_scenes_set_json(const char *json, size_t len);
+esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
+                                   fos_scenes_source_t source);
+
+/* Source of the stored scenes. Safe to read from any task (plain volatile
+ * int, same convention as the other fos_scenes flags; it changes only when a
+ * new payload is stored or applied). Defaults to LOCAL on a pre-upgrade
+ * store whose index has no "source" key. */
+fos_scenes_source_t fos_scenes_source(void);
+bool fos_scenes_from_cloud(void);
 
 /* Last storage/sync error detail, suitable for HTTP/USB responses. */
 const char *fos_scenes_last_error(void);

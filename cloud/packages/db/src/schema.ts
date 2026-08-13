@@ -661,6 +661,15 @@ export const frames = pgTable(
     // Desired vs device-acked interpreted-scene payload checksums.
     assignedChecksum: text("assigned_checksum"),
     scenesChecksum: text("scenes_checksum"),
+    // Per-scene deploy ledger: {storeSceneId: {version, checksum}}.
+    // assigned_scene_state is rewritten with every assignment push (the
+    // per-scene slices of the payload assigned_checksum covers);
+    // deployed_scene_state is the hub's copy of it, taken when the device
+    // acks the matching set checksum — the cloud's equivalent of the
+    // backend's last_successful_deploy.scenes, so the workspace can say
+    // WHICH scene is not on the frame yet instead of flagging all of them.
+    assignedSceneState: jsonb("assigned_scene_state"),
+    deployedSceneState: jsonb("deployed_scene_state"),
     ...timestamps,
   },
   (table) => ({

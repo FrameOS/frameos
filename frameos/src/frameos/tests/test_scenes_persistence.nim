@@ -127,3 +127,49 @@ suite "scene persistence helpers":
     let first = getFirstSceneId()
     check first != missingUploaded
     check first.string.len > 0
+
+  test "uploaded payloads record their runtime origin":
+    # hub_client stamps source=cloud on the set_scenes verb; a local admin
+    # upload carries no source. The stamp keys the post-demotion LAN deny.
+    let scenes = %*[{
+      "id": "origin-test", "name": "Origin",
+      "nodes": [{"id": "1", "type": "app", "data": {"keyword": "data/clock"}}],
+      "edges": [],
+    }]
+    var hookFired = 0
+    uploadedScenesChangedHook = proc() {.gcsafe.} = inc hookFired
+    defer: uploadedScenesChangedHook = nil
+
+    let (cloudMain, _) = updateUploadedScenesFromPayload(
+      %*{"scenes": scenes, "source": "cloud"}, persistPayload = true)
+    check cloudMain.isSome
+    check cloudUploadedScenesResident()
+    check hookFired == 1
+    # The stamp survives in the persisted payload (what a reboot rehydrates).
+    check parseJson(readFile(uploadedFile)){"source"}.getStr("") == "cloud"
+
+    let (localMain, _) = updateUploadedScenesFromPayload(
+      %*{"scenes": scenes}, persistPayload = false)
+    check localMain.isSome
+    check not cloudUploadedScenesResident()
+    check hookFired == 2
+
+  test "cloud-origin payloads are re-checked for refused apps at load time":
+    # The verb dispatcher refuses these at transport time; the load-time
+    # re-check covers payloads edited on disk or persisted before a keyword
+    # joined the list. Local payloads with the same app still load.
+    let scenes = %*[{
+      "id": "refused-test", "name": "Refused",
+      "nodes": [{"id": "1", "type": "app",
+                 "data": {"keyword": "data/chromiumScreenshot"}}],
+      "edges": [],
+    }]
+    let (cloudMain, cloudIds) = updateUploadedScenesFromPayload(
+      %*{"scenes": scenes, "source": "cloud"}, persistPayload = false)
+    check cloudMain.isNone
+    check cloudIds.len == 0
+    check not cloudUploadedScenesResident()
+
+    let (localMain, _) = updateUploadedScenesFromPayload(
+      %*{"scenes": scenes}, persistPayload = false)
+    check localMain.isSome

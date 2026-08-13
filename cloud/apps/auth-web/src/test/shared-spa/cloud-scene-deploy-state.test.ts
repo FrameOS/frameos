@@ -66,6 +66,107 @@ describe("undeployedSceneIdsFor — cloud", () => {
     expect(ids.size).toBe(0);
   });
 
+  it("flags only the scene whose assigned slice differs from the acked push", () => {
+    const ids = undeployedSceneIdsFor({
+      mode: "cloud",
+      scenes,
+      frame: frame({
+        assigned_checksum: "new",
+        scenes_checksum: "old",
+        assigned_scene_state: {
+          "store-a": { version: 2, checksum: "aaa2" },
+          "store-b": { version: 1, checksum: "bbb1" },
+        },
+        deployed_scene_state: {
+          "store-a": { version: 1, checksum: "aaa1" },
+          "store-b": { version: 1, checksum: "bbb1" },
+        },
+        cloud_scene_sources: {
+          "scene-a": { scene_id: "store-a", scene_version: null },
+          "scene-b": { scene_id: "store-b", scene_version: null },
+        },
+      }),
+      scenesEqual,
+    });
+    expect([...ids]).toEqual(["scene-a"]);
+  });
+
+  it("counts a scene the device never acked as pending", () => {
+    // store-b was assigned for the first time; the deployed ledger has no
+    // entry for it yet.
+    const ids = undeployedSceneIdsFor({
+      mode: "cloud",
+      scenes,
+      frame: frame({
+        assigned_checksum: "new",
+        scenes_checksum: "old",
+        assigned_scene_state: {
+          "store-a": { version: 1, checksum: "aaa1" },
+          "store-b": { version: 1, checksum: "bbb1" },
+        },
+        deployed_scene_state: {
+          "store-a": { version: 1, checksum: "aaa1" },
+        },
+        cloud_scene_sources: {
+          "scene-a": { scene_id: "store-a", scene_version: null },
+          "scene-b": { scene_id: "store-b", scene_version: null },
+        },
+      }),
+      scenesEqual,
+    });
+    expect([...ids]).toEqual(["scene-b"]);
+  });
+
+  it("counts a runtime scene with no known store source as pending", () => {
+    const ids = undeployedSceneIdsFor({
+      mode: "cloud",
+      scenes,
+      frame: frame({
+        assigned_checksum: "new",
+        scenes_checksum: "old",
+        assigned_scene_state: { "store-a": { version: 1, checksum: "aaa1" } },
+        deployed_scene_state: { "store-a": { version: 1, checksum: "aaa1" } },
+        cloud_scene_sources: { "scene-a": { scene_id: "store-a", scene_version: null } },
+      }),
+      scenesEqual,
+    });
+    expect([...ids]).toEqual(["scene-b"]);
+  });
+
+  it("falls back to all-or-nothing when the ledger predates the columns", () => {
+    const ids = undeployedSceneIdsFor({
+      mode: "cloud",
+      scenes,
+      frame: frame({
+        assigned_checksum: "new",
+        scenes_checksum: "old",
+        assigned_scene_state: null,
+        deployed_scene_state: null,
+      }),
+      scenesEqual,
+    });
+    expect([...ids].sort()).toEqual(["scene-a", "scene-b"]);
+  });
+
+  it("trusts the set checksum over a stale ledger once the device is in sync", () => {
+    // scene_ack promotes the ledger in the same UPDATE that stores the
+    // checksum, but a hello-path race must never make an in-sync frame look
+    // dirty: equal checksums win outright.
+    const ids = undeployedSceneIdsFor({
+      mode: "cloud",
+      scenes,
+      frame: frame({
+        assigned_checksum: "abc",
+        scenes_checksum: "abc",
+        assigned_scene_state: { "store-a": { version: 2, checksum: "aaa2" } },
+        deployed_scene_state: { "store-a": { version: 1, checksum: "aaa1" } },
+        cloud_scene_sources: { "scene-a": { scene_id: "store-a", scene_version: null } },
+      }),
+      scenesEqual,
+    });
+    expect(ids.size).toBe(0);
+  });
+
   it("ignores last_successful_deploy, which the cloud never writes", () => {
     // The old code path: with this field absent every scene looked undeployed.
     // Present-but-stale must not override the checksums either.

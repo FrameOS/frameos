@@ -656,6 +656,48 @@ describe("command redelivery", () => {
     second.ws.close();
   });
 
+  it("promotes the per-scene ledger only on an ack of the assigned checksum", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const ledger = {
+      "store-a": { checksum: "aaa", version: 3 },
+      "store-b": { checksum: "bbb", version: 1 },
+    };
+    await db
+      .update(frames)
+      .set({ assignedChecksum: "sum-assigned", assignedSceneState: ledger })
+      .where(eq(frames.id, frame.id));
+
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    // An ack for some other payload (an ad-hoc preview push, a stale set)
+    // must not claim the assigned scenes were delivered.
+    device.send({ checksum: "sum-preview", id: randomUUID(), type: "scene_ack" });
+    await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frames)
+        .where(eq(frames.id, frame.id));
+      return row?.scenesChecksum === "sum-preview" ? row : undefined;
+    }, "preview checksum stored");
+    let [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.deployedSceneState).toBeNull();
+
+    // The matching ack copies the assigned ledger to deployed in the same
+    // UPDATE that stores the checksum.
+    device.send({ checksum: "sum-assigned", id: randomUUID(), type: "scene_ack" });
+    await waitFor(async () => {
+      const [updated] = await db
+        .select()
+        .from(frames)
+        .where(eq(frames.id, frame.id));
+      return updated?.scenesChecksum === "sum-assigned" ? updated : undefined;
+    }, "assigned checksum stored");
+    [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(row?.deployedSceneState).toEqual(ledger);
+    device.ws.close();
+  });
+
   it("expires a sent command whose TTL passed instead of redelivering it", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
     // Straight into the table as "sent": a five-minute-old reboot the device

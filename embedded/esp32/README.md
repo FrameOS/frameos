@@ -125,10 +125,16 @@ Board facts worth knowing before reading a schematic (from the Waveshare docs),
 for the two Spectra boards most of the bench work runs on:
 
 - **13.3E6** — 32 MB flash, 16 MB PSRAM, TF slot on SPI3, MX1.25 battery
-  header. The charge IC is an ETA6098, *not* an I2C PMIC, so there is no
-  battery telemetry unless the schematic turns out to expose a voltage-divider
-  ADC pin. No RTC chip. No user buttons: BOOT and Reset only, which is why
-  GPIO wake has nothing to wake on.
+  header. The charge IC is an ETA6098, *not* an I2C PMIC, but VBAT is on
+  **ADC1_CH7 = GPIO8 through a 1/3 divider** (Waveshare's own `01_ADC_Test`
+  examples read CHANNEL_7 and multiply the calibrated voltage by 3), so
+  `battery_pin 8` + `battery_divider 3` gives voltage telemetry; the backend
+  preset bakes both. No RTC chip. No user buttons: BOOT and Reset only,
+  which is why GPIO wake has nothing to wake on. Internal RAM on 2026.8.17
+  firmware idles at **~103 KB free** (47 KB largest block) with a scene
+  resident and the cloud link up — the old ~16-19 KB figure predates the
+  PSRAM Nim heap and one-file-per-scene. `set api_key ""` clears a stored
+  key (the console's empty-value convention covers it now).
 - **PhotoPainter 7.3"** — 8 MB PSRAM, PMIC power-up, TF socket, and a KEY
   button next to BOOT (`0:BOOT`, `4:KEY1` in the preset's `gpio_buttons`).
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" | reTerminal Sticky, 32MB flash |
@@ -279,7 +285,13 @@ into `/state/scene-<slot>.json` plus `/state/scene-index.json`, the combined
 file is deleted (the `state` partition is 1M and a payload may be 512K, so
 both do not fit), and only the **active** scene is parsed and resident. The
 index carries ids, names and refresh intervals, so the frame can list and
-switch scenes without holding them.
+switch scenes without holding them. It also carries a top-level
+`"source": "local" | "backend" | "cloud"` key recording who installed the
+payload (missing = `local` on pre-upgrade stores); `fos_cloud.c` keys the
+private-network egress deny on it, so provider-pushed scenes stay fenced off
+the owner's LAN even after the frame is demoted from cloud management. The
+source is mirrored in NVS so it survives the store→apply window across a
+reboot.
 
 Slot numbers rather than scene ids, because `CONFIG_SPIFFS_OBJ_NAME_LEN` is
 32 and a scene id is a 36-character uuid: `/<uuid>.json` cannot be opened at

@@ -408,8 +408,13 @@ const char *fos_cloud_ws_url(void) { return s_ws_url; }
  * runtime's utils/http_client.nim); this file owns the *trigger*, because this
  * is the only place that knows whether we are cloud-managed.
  *
- * Off whenever the frame is not enrolled. A standalone or backend-managed
- * frame runs the owner's own scenes, where reaching the LAN is the point. */
+ * Off whenever the frame is not enrolled AND not rendering provider scenes. A
+ * standalone or backend-managed frame runs the owner's own scenes, where
+ * reaching the LAN is the point. But enrollment alone is the wrong key: a
+ * demotion (cloud_demote) keeps rendering the last provider-pushed scenes, and
+ * those must not gain LAN access just because the link died — so the deny also
+ * keys on fos_scenes_from_cloud(), the persisted record of who installed the
+ * resident scenes (see fos_scenes.h). */
 
 /* Exempt one provider endpoint, as "host:port" with the scheme's default port
  * filled in — the same shape fos_netguard_url_allowed() derives from a request
@@ -447,13 +452,16 @@ static void netguard_exempt_provider_url(const char *url, bool ws)
  * of `allow_local_network` live without a restart. */
 static void apply_network_policy(void)
 {
-    static int logged_active = -1; /* -1 = nothing logged yet */
+    /* 0 = deny off, 1 = deny on (enrolled), 2 = deny on (demoted but still
+     * rendering cloud scenes), -1 = nothing logged yet. */
+    static int logged_state = -1;
     const fos_config_t *config = fos_config();
     const bool managed = (s_state == FOS_CLOUD_ENROLLED);
-    const bool active = managed && !config->allow_local_network;
+    const bool cloud_scenes = fos_scenes_from_cloud();
+    const bool active = (managed || cloud_scenes) && !config->allow_local_network;
 
     fos_netguard_clear_exempt();
-    if (active) {
+    if (active && managed) {
         /* The local admin linked this provider deliberately — possibly a dev
          * provider on the LAN — so the provider's own endpoints must not be
          * collateral damage. Both the API base URL and the optional ws_url
@@ -461,14 +469,25 @@ static void apply_network_policy(void)
         netguard_exempt_provider_url(config->cloud_url, false);
         netguard_exempt_provider_url(s_ws_url, true);
     }
+    /* Not enrolled but still holding cloud scenes: the link (and its URLs)
+     * are gone, so there is no provider host to exempt — exempts stay clear
+     * and the deny covers everything private. */
     fos_netguard_set_policy(active);
 
-    if ((int)active != logged_active) {
-        logged_active = (int)active;
-        if (active) {
+    const int state = active ? (managed ? 1 : 2) : 0;
+    if (state != logged_state) {
+        logged_state = state;
+        if (state == 1) {
             ESP_LOGW(TAG, "scene HTTP to private/link-local addresses is now blocked "
                           "(cloud-managed frame); override locally with "
                           "`set allow_local_network 1`");
+        } else if (state == 2) {
+            /* ESP_LOGW, not LOGI: LOGI is compiled out in every profile and
+             * this state must be visible on the serial stream. */
+            ESP_LOGW(TAG, "scene HTTP to private/link-local addresses stays blocked: "
+                          "frame is no longer cloud-managed but the resident scenes "
+                          "were pushed by the provider; upload scenes locally, sync "
+                          "from a backend, or `set allow_local_network 1` to lift");
         } else if (managed) {
             ESP_LOGW(TAG, "scene HTTP to private/link-local addresses is ALLOWED on this "
                           "cloud-managed frame (allow_local_network=1)");
@@ -1647,7 +1666,11 @@ static void ws_handle_set_scenes(const cJSON *root, const cJSON *id)
         return;
     }
     uint32_t generation = fos_scenes_apply_generation();
-    esp_err_t err = fos_scenes_set_json(payload, strlen(payload));
+    /* Declared CLOUD so the store remembers who installed these scenes:
+     * apply_network_policy() keeps the RFC1918 deny alive on that flag even
+     * after a demotion drops FOS_CLOUD_ENROLLED. */
+    esp_err_t err = fos_scenes_set_json_from(payload, strlen(payload),
+                                             FOS_SCENES_SOURCE_CLOUD);
     cJSON_free(payload);
     if (err != ESP_OK) {
         const char *detail = fos_scenes_last_error();
@@ -2414,7 +2437,15 @@ static void ws_clear_demote_request(void) {}
 /* Return to standalone: drop the provider credentials, keep the device key
  * (docs/cloud-frames.md — a revoked frame still needs a fresh claim token to
  * re-enroll) and keep rendering the last pushed scenes. Local admin surfaces
- * are untouched, so this can never lock the owner out of the device. */
+ * are untouched, so this can never lock the owner out of the device.
+ *
+ * The RFC1918 LAN deny intentionally SURVIVES this: the scenes still rendering
+ * were installed by the provider, and losing the link must not hand them the
+ * owner's LAN. apply_network_policy() keys on fos_scenes_from_cloud() as well
+ * as enrollment, and the scene source is persisted, so the deny holds across
+ * reboots too. Pushing scenes locally (HTTP/USB upload) or a backend sync
+ * replaces the cloud-sourced store and lifts the deny on the next policy
+ * tick; `set allow_local_network 1` overrides it immediately. */
 static void cloud_demote(const char *reason)
 {
     ws_stop();

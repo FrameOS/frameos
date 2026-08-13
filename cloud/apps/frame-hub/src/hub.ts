@@ -531,7 +531,10 @@ export async function startFrameHub(
           ? { lastState: hello.states }
           : {}),
         ...(isAcceptableChecksum(hello.scenes_checksum)
-          ? { scenesChecksum: hello.scenes_checksum }
+          ? {
+              scenesChecksum: hello.scenes_checksum,
+              deployedSceneState: promotedSceneState(hello.scenes_checksum),
+            }
           : {}),
         // The device reports its hardware facts (panel, memory, partition
         // sizes) on every hello; without this refresh the enrollment-time
@@ -675,6 +678,16 @@ export async function startFrameHub(
     return false;
   }
 
+  // Promote the last assignment push's per-scene ledger to "deployed" the
+  // moment the device reports the matching set checksum. Any other reported
+  // checksum — an ad-hoc preview push, a stale set — leaves the ledger
+  // untouched: deployed_scene_state always describes the last ACKED
+  // assignment push, the cloud's equivalent of the backend's
+  // last_successful_deploy.scenes.
+  function promotedSceneState(reportedChecksum: string) {
+    return sql`case when ${reportedChecksum} = ${frames.assignedChecksum} then ${frames.assignedSceneState} else ${frames.deployedSceneState} end`;
+  }
+
   // Checksums are hex digests; an over-long one is malformed, and storing a
   // truncated copy would leave the frame permanently "out of sync" in the UI.
   function acceptChecksum(frameId: string, value: unknown) {
@@ -705,7 +718,12 @@ export async function startFrameHub(
       .set({
         lastSeenAt: now,
         updatedAt: now,
-        ...(checksum !== undefined ? { scenesChecksum: checksum } : {}),
+        ...(checksum !== undefined
+          ? {
+              scenesChecksum: checksum,
+              deployedSceneState: promotedSceneState(checksum),
+            }
+          : {}),
         ...(activeScene !== undefined
           ? {
               lastState: sql`coalesce(${frames.lastState}, '{}'::jsonb) || jsonb_build_object('active_scene', ${activeScene}::text)`,
@@ -735,7 +753,12 @@ export async function startFrameHub(
         ...(typeof rest.frameos_version === "string"
           ? { frameosVersion: rest.frameos_version.slice(0, 64) }
           : {}),
-        ...(checksum !== undefined ? { scenesChecksum: checksum } : {}),
+        ...(checksum !== undefined
+          ? {
+              scenesChecksum: checksum,
+              deployedSceneState: promotedSceneState(checksum),
+            }
+          : {}),
       })
       .where(eq(frames.id, session.frame.id));
     await broadcastFrameUpdate(session.frame.id);

@@ -340,7 +340,7 @@ lines), nothing retained across disconnects, and error acks are ignored.
 | `state` | `hello`-shaped | sent on scene change / significant events |
 | `log_batch` | `{"logs": [{"timestamp", "scene"?, "payload"}…]}` | only with `telemetry:logs`; batched (device: ≤2 s / ≤100 lines); provider stores with a hard per-frame retention cap and counts retained bytes toward the account's storage usage |
 | `metrics` | `{"metrics": {…}}` | only with `telemetry:metrics` |
-| `scene_ack` | `{"checksum", "active_scene"}` | after a successful `set_scenes`, drives provider-side sync state |
+| `scene_ack` | `{"checksum", "active_scene"}` | after a successful `set_scenes`, drives provider-side sync state. When the acked checksum matches the provider's current assigned set, the provider also promotes its per-scene deploy ledger (`assigned_scene_state` → `deployed_scene_state` on the frame row) so the workspace can name WHICH scene is still pending on later edits |
 | `assets` | `{"id", "assets": […], "truncated"?}` | reply to `assets_list`; the provider caches the latest listing per frame (the reference provider rejects listings over **256 KiB** of JSON rather than truncating them) |
 | `asset_chunk` | `{"id", "seq", "data", "done", …}` | reply stream to `asset_get`; the provider reassembles in order, bounds the total at its per-file cap, and discards the partial file on a chunk carrying `"error"` or on disconnect |
 
@@ -801,8 +801,17 @@ in the scene logs. Two exceptions:
   elevation for scenes that legitimately need LAN access (e.g. Home
   Assistant).
 
-Standalone and backend-managed frames are unaffected; the deny is active only
-in managed mode.
+Standalone and backend-managed frames are unaffected. The deny keys on
+*provider-origin scenes*, not on the link alone: the device stamps every
+`set_scenes` payload with a runtime origin as it stores it (Pi/Linux:
+`"source": "cloud"` persisted with `state/uploaded.json`; ESP32: a top-level
+`"source"` in `/state/scene-index.json`), and a frame demoted out of the
+managed state keeps the deny for as long as those scenes remain resident.
+Replacing them — a local upload, a backend deploy — lifts it; the
+`allowLocalNetworkAccess` elevation above overrides in either state. The
+origin stamp is also re-checked at scene load time against the refused-app
+list, so a persisted cloud payload can never reach a process-spawning app by
+being replayed at boot.
 
 ## Compatibility
 

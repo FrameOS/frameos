@@ -122,10 +122,28 @@ proc availableRenderHeadroomBytes*(): int =
 proc refreshDecodeBudget*() =
   ## Updates pixie's per-decode budget from live memory. Decode
   ## intermediates may take roughly half of what is available, leaving the
-  ## other half for the decoded output and the canvas.
-  let available = availableRenderBytes()
+  ## other half for the decoded output and the canvas. The intermediates are
+  ## many separate buffers (channel bands, accumulator rows, block streams),
+  ## so this is the headroom question — can the allocations coexist — not
+  ## the contiguous-block one: with the render canvas allocated the 13.3E6
+  ## sits at ~5.2MB free with a ~2.7MB largest block, and halving the block
+  ## answer refused a 1.4MB streamed-JPEG working set the heap held with
+  ## room to spare (spill bench, 2026-08). Single image-sized buffers keep
+  ## checking availableRenderBytes at their own call sites.
+  let available = availableRenderHeadroomBytes()
   if available > 0:
     setDecodeBudgetBytes(available div 2)
+
+proc refreshDecodeBudgetInto*() =
+  ## refreshDecodeBudget for decodes that stream into an existing target
+  ## (readImageIntoTarget, the spilled/chunked download paths): the decoded
+  ## output already exists as the canvas, so no second half needs reserving
+  ## and the whole headroom may hold the decode plan. The emergency reserve
+  ## sits outside the headroom either way. On the 13.3E6 the halved budget
+  ## refused a spilled 4.4MB JPEG whose ~1.8MB plan fit the heap twice over.
+  let available = availableRenderHeadroomBytes()
+  if available > 0:
+    setDecodeBudgetBytes(available)
 
 proc ensureRenderAllocation*(bytes: int64, what: string) =
   ## Raises a catchable error when an allocation plan clearly exceeds the

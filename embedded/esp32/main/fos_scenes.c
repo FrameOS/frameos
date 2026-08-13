@@ -52,6 +52,17 @@ static const char *TAG = "fos_scenes";
 
 static bool s_mounted = false;
 static volatile bool s_pending = false;
+/* Who installed the scenes. s_source is the RESIDENT store's source (what the
+ * index on flash says, i.e. what the frame is rendering); s_pending_source is
+ * the source declared by the producer of a stored-but-not-yet-applied payload,
+ * promoted into s_source (and the index) when the apply succeeds. Plain
+ * volatile ints, like the rest of the cross-task flags here: they change only
+ * when a payload is stored/applied and single-word reads are atomic. The
+ * pending source is mirrored to NVS so a reboot inside the store→apply window
+ * (or before a combined scenes.json is first split) cannot launder a cloud
+ * payload into "local" — fos_cloud.c keys the LAN deny on this. */
+static volatile int s_source = FOS_SCENES_SOURCE_LOCAL;
+static volatile int s_pending_source = FOS_SCENES_SOURCE_LOCAL;
 /* Bumped once per pending-payload apply attempt by the render task; producers
  * poll it to learn whether their payload went live (see fos_scenes.h). */
 static volatile uint32_t s_apply_generation = 0;
@@ -389,6 +400,53 @@ static void persist_last_scene(const char *scene_id)
     nvs_close(nvs);
 }
 
+/* ----------------------------------------------------------- scene source */
+
+#define SCENE_SOURCE_NVS_KEY "scene_source"
+
+static const char *scene_source_str(int source)
+{
+    switch (source) {
+    case FOS_SCENES_SOURCE_BACKEND: return "backend";
+    case FOS_SCENES_SOURCE_CLOUD: return "cloud";
+    default: return "local";
+    }
+}
+
+/* Unknown or missing means LOCAL: pre-upgrade index files carry no "source"
+ * key, and those frames were never under cloud management on this firmware. */
+static int scene_source_from_str(const char *s)
+{
+    if (s != NULL) {
+        if (strcmp(s, "backend") == 0) return FOS_SCENES_SOURCE_BACKEND;
+        if (strcmp(s, "cloud") == 0) return FOS_SCENES_SOURCE_CLOUD;
+    }
+    return FOS_SCENES_SOURCE_LOCAL;
+}
+
+static void persist_scene_source(int source)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    uint8_t current = 0xff;
+    if (nvs_get_u8(nvs, SCENE_SOURCE_NVS_KEY, &current) != ESP_OK ||
+        current != (uint8_t)source) {
+        nvs_set_u8(nvs, SCENE_SOURCE_NVS_KEY, (uint8_t)source);
+        nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+}
+
+fos_scenes_source_t fos_scenes_source(void)
+{
+    return (fos_scenes_source_t)s_source;
+}
+
+bool fos_scenes_from_cloud(void)
+{
+    return s_source == FOS_SCENES_SOURCE_CLOUD;
+}
+
 /* True once the boot-time restore succeeded or an explicit selection made
  * it moot. Until then every scene load retries: the first payload after
  * boot can be the baked single-scene default (fresh /state), and the
@@ -548,6 +606,9 @@ static esp_err_t split_scenes(const char *json, size_t len)
         return ESP_ERR_NO_MEM;
     }
     cJSON_AddItemToObject(index, "scenes", scenes);
+    /* The producer declared this when it stored the payload; the index is
+     * written at apply time, so the value rode across in s_pending_source. */
+    cJSON_AddStringToObject(index, "source", scene_source_str(s_pending_source));
 
     esp_err_t err = ESP_OK;
     int written = 0;
@@ -618,6 +679,12 @@ static int load_scene_index(void)
         return 0;
     }
     cJSON *index = cJSON_ParseWithLength(index_json, len);
+    if (index != NULL) {
+        /* Missing key = pre-upgrade index = local. */
+        const cJSON *source = cJSON_GetObjectItem(index, "source");
+        s_source = scene_source_from_str(
+            cJSON_IsString(source) ? source->valuestring : NULL);
+    }
     const cJSON *scenes = cJSON_GetObjectItem(index, "scenes");
     if (cJSON_IsArray(scenes)) {
         const cJSON *entry = NULL;
@@ -748,6 +815,9 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
     size_t internal_cost = internal_before > internal_after
                                ? internal_before - internal_after : 0;
     s_loaded = count;
+    /* Whole-payload path (no index to carry it): the loaded payload's source
+     * becomes the resident source. The split path does this via the index. */
+    s_source = s_pending_source;
     ESP_LOGI(TAG, "%d scene(s) live; internal RAM %u -> %u (%u B for %d scenes, ~%u B each)",
              count, (unsigned)internal_before, (unsigned)internal_after,
              (unsigned)internal_cost, count,
@@ -965,6 +1035,25 @@ esp_err_t fos_scenes_init(void)
     esp_err_t err = mount_state();
     if (err != ESP_OK) return err;
     load_etag();
+    /* Restore the stored scenes' source BEFORE any task can ask: main() calls
+     * fos_cloud_start() after this, and its boot-time apply_network_policy()
+     * must see "cloud" on a demoted frame that still holds provider-pushed
+     * scenes — the LAN deny has to come up armed, not after the first apply.
+     * NVS is written at store time and always matches what the index (or the
+     * still-pending combined payload) carries; the first apply re-reads the
+     * index and corrects any divergence. Missing key = pre-upgrade = local. */
+    {
+        nvs_handle_t nvs;
+        if (nvs_open("frameos", NVS_READONLY, &nvs) == ESP_OK) {
+            uint8_t stored = 0;
+            if (nvs_get_u8(nvs, SCENE_SOURCE_NVS_KEY, &stored) == ESP_OK &&
+                stored <= FOS_SCENES_SOURCE_CLOUD) {
+                s_source = (int)stored;
+                s_pending_source = (int)stored;
+            }
+            nvs_close(nvs);
+        }
+    }
     struct stat st;
     if (stat(SCENES_PATH, &st) == 0 && st.st_size > 2) {
         ESP_LOGI(TAG, "cached scenes.json (%ld bytes, etag %s)", (long)st.st_size,
@@ -984,8 +1073,10 @@ esp_err_t fos_scenes_init(void)
 
 /* ------------------------------------------------------------ local push */
 
-esp_err_t fos_scenes_set_json(const char *json, size_t len)
+esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
+                                   fos_scenes_source_t source)
 {
+    const char *origin = scene_source_str((int)source);
     s_last_error[0] = '\0';
     if (json == NULL || len == 0 || len > SCENES_MAX_BYTES) {
         set_scene_simple_error("invalid scenes payload length", len);
@@ -995,18 +1086,30 @@ esp_err_t fos_scenes_set_json(const char *json, size_t len)
     if (err != ESP_OK) return err;
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, json, len);
     if (err != ESP_OK) {
-        log_scene_event("event:uploadScenes", "error", "local", "",
+        log_scene_event("event:uploadScenes", "error", origin, "",
                         s_last_error[0] ? s_last_error : "store-failed",
                         len, 0, 0, err);
         return err;
     }
     s_last_error[0] = '\0';
+    /* "local" etag for cloud pushes too: it means "not the backend's payload,
+     * do not clobber on the next backend sync pass" (see fos_scenes_sync). */
     save_etag("local");
+    /* Recorded only after the payload is on flash, so a failed store cannot
+     * relabel whatever is still resident. */
+    s_pending_source = (int)source;
+    persist_scene_source((int)source);
     s_pending = true;
-    ESP_LOGI(TAG, "scenes payload stored (%u bytes), pending apply", (unsigned)len);
-    log_scene_event("event:uploadScenes", "stored", "local", "", "pending-apply",
+    ESP_LOGI(TAG, "scenes payload stored (%u bytes, source %s), pending apply",
+             (unsigned)len, origin);
+    log_scene_event("event:uploadScenes", "stored", origin, "", "pending-apply",
                     len, 0, 0, ESP_OK);
     return ESP_OK;
+}
+
+esp_err_t fos_scenes_set_json(const char *json, size_t len)
+{
+    return fos_scenes_set_json_from(json, len, FOS_SCENES_SOURCE_LOCAL);
 }
 
 /* ------------------------------------------------------------- backend */
@@ -1154,6 +1257,12 @@ esp_err_t fos_scenes_sync(bool force)
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, buf, total);
     if (err == ESP_OK) {
         save_etag(response_etag);
+        /* Backend-served payload: declare it before load_into_nim promotes
+         * the pending source, and persist it so the boot-time split (this
+         * path leaves the combined file for the next apply to split) records
+         * "backend" in the index. */
+        s_pending_source = FOS_SCENES_SOURCE_BACKEND;
+        persist_scene_source(FOS_SCENES_SOURCE_BACKEND);
         ESP_LOGI(TAG, "scenes updated from backend (%u bytes, etag %s)",
                  (unsigned)total, response_etag[0] ? response_etag : "none");
         log_scene_event("scenes:sync", "updated", "backend", "", "stored",

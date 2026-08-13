@@ -1,6 +1,6 @@
 import { actions, afterMount, beforeUnmount, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
-import { FrameScene, FrameType, FrameId } from '../types'
+import { CloudSceneSource, FrameScene, FrameType, FrameId } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
 import type { framesModelType } from './framesModelType'
 import { router } from 'kea-router'
@@ -145,9 +145,16 @@ export function clearCloudSceneJsonCache(storeSceneId: string): void {
   }
 }
 
-async function fetchCloudFrameScenes(frameId: FrameId): Promise<FrameScene[]> {
+async function fetchCloudFrameScenes(
+  frameId: FrameId
+): Promise<{ scenes: FrameScene[]; sources: Record<string, CloudSceneSource> }> {
   const rows = await listCloudFrameScenes(frameId)
   const scenes: FrameScene[] = []
+  // Runtime scene id → the store-scene assignment it came from. This is the
+  // only place both id spaces are visible at once, and the per-scene deploy
+  // ledger (assigned_scene_state / deployed_scene_state) is keyed by store
+  // scene id while the tiles are runtime scenes.
+  const sources: Record<string, CloudSceneSource> = {}
   for (const row of rows) {
     const cacheKey = cloudSceneCacheKey(row)
     let sceneJson = cloudSceneJsonCache.get(cacheKey)
@@ -164,9 +171,13 @@ async function fetchCloudFrameScenes(frameId: FrameId): Promise<FrameScene[]> {
         // a transient error heals on the next hydration pass.
       }
     }
-    scenes.push(...(sceneJson ?? [cloudSceneStub(row)]))
+    const rowScenes = sceneJson ?? [cloudSceneStub(row)]
+    for (const scene of rowScenes) {
+      sources[scene.id] = { scene_id: row.scene_id, scene_version: row.scene_version ?? null }
+    }
+    scenes.push(...rowScenes)
   }
-  return scenes
+  return { scenes, sources }
 }
 
 /**
@@ -179,7 +190,9 @@ function withStoredCloudScenes(next: FrameType, previous?: FrameType): FrameType
   if (!isCloudMode() || next.scenes?.length || !previous?.scenes?.length) {
     return next
   }
-  return { ...next, scenes: previous.scenes }
+  // cloud_scene_sources is hydration-owned client state; a frameSummary
+  // refetch never carries it, so keep it alongside the scenes it describes.
+  return { ...next, scenes: previous.scenes, cloud_scene_sources: previous.cloud_scene_sources }
 }
 
 const pendingSdCardImageDownloads = new Set<FrameId>()
@@ -591,7 +604,11 @@ export const framesModel = kea<framesModelType>([
     // frame.scenes so the tiles survive a reload. `force` skips the
     // once-a-minute throttle (used right after an install).
     hydrateCloudFrameScenes: (id: FrameId, force?: boolean) => ({ id, force: force || false }),
-    setCloudFrameScenes: (id: FrameId, scenes: FrameScene[]) => ({ id, scenes }),
+    setCloudFrameScenes: (id: FrameId, scenes: FrameScene[], sources?: Record<string, CloudSceneSource>) => ({
+      id,
+      scenes,
+      sources,
+    }),
     deployRemote: (id: FrameId, recompile?: boolean, transport: RemoteTaskTransport = 'auto') => ({
       id,
       recompile: recompile || false,
@@ -698,12 +715,16 @@ export const framesModel = kea<framesModelType>([
           ...state,
           [frame.id]: sanitizeFrameForStore(frame),
         }),
-        setCloudFrameScenes: (state, { id, scenes }) => {
+        setCloudFrameScenes: (state, { id, scenes, sources }) => {
           const frame = state[id]
           if (!frame) return state
           return {
             ...state,
-            [id]: sanitizeFrameForStore({ ...frame, scenes }),
+            [id]: sanitizeFrameForStore({
+              ...frame,
+              scenes,
+              ...(sources ? { cloud_scene_sources: sources } : {}),
+            }),
           }
         },
         setDeployWithAgent: (state, { id, deployWithAgent }) => {
@@ -1388,7 +1409,7 @@ export const framesModel = kea<framesModelType>([
       }
       cloudFrameSceneHydrationsInFlight.add(id)
       try {
-        const scenes = await fetchCloudFrameScenes(id)
+        const { scenes, sources } = await fetchCloudFrameScenes(id)
         cloudFrameScenesHydratedAt.set(id, Date.now())
         const frame = values.frames[id]
         if (!frame) {
@@ -1399,8 +1420,11 @@ export const framesModel = kea<framesModelType>([
         // reset) and re-renders every tile — needless churn on a poll where
         // nothing moved.
         const sanitized = scenes.map((scene) => sanitizeScene(scene, frame))
-        if (JSON.stringify(frame.scenes ?? []) !== JSON.stringify(sanitized)) {
-          actions.setCloudFrameScenes(id, scenes)
+        if (
+          JSON.stringify(frame.scenes ?? []) !== JSON.stringify(sanitized) ||
+          JSON.stringify(frame.cloud_scene_sources ?? {}) !== JSON.stringify(sources)
+        ) {
+          actions.setCloudFrameScenes(id, scenes, sources)
         }
       } catch (error) {
         console.error(error)

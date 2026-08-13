@@ -308,11 +308,28 @@ about. `frame.json` is still read as a fallback so frames elevated before the
 setting moved keep working; on ESP32 the equivalent store is NVS, which deploys
 do not touch either.
 
-Still open: cloud-installed scenes are not yet distinguished from local ones at
-runtime, so the `"shell"` risk-flag refusal and any origin-specific profile
-have nothing to key off. A frame demoted out of the managed state also loses
-the deny while still running the provider's last-pushed scenes — true on both
-platforms, and worth closing in one place.
+Scene origin is now tracked at runtime, on both platforms, and the device
+stamps it itself — a payload key is never trusted. On Pi/Linux the hub
+client's `set_scenes` handler marks the uploadScenes event `source: "cloud"`;
+the payload persists verbatim to `state/uploaded.json`, so the stamp survives
+reboots, and every rehydrate funnels through the same
+`updateUploadedScenesFromPayload` chokepoint. On ESP32 the scene index
+(`/state/scene-index.json`) records a top-level `source` of
+`local` / `backend` / `cloud`. Two things key off it:
+
+- **The private-network deny follows the scenes, not the link.** A frame
+  demoted out of the managed state keeps rendering the provider's last-pushed
+  scenes, and now keeps the deny with them (`refreshLocalNetworkPolicy` on
+  Pi, `apply_network_policy` on ESP32). Replacing the scenes locally or via a
+  backend deploy is what lifts it; the local elevation ceremony still
+  overrides.
+- **The refused-app check runs at load time, not only at transport time.** A
+  persisted cloud-origin payload is re-checked against
+  `CLOUD_REFUSED_APP_KEYWORDS` (`cloud/scene_guard.nim`) on every load, so a
+  file edited on disk — or written before a keyword joined the list — cannot
+  reach those apps by being replayed at boot. (On ESP32 the two refused apps
+  are not compiled into the firmware at all, so transport/load refusal is
+  structural there.)
 
 ### Signed OTA
 

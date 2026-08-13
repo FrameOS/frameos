@@ -66,7 +66,12 @@ import frameos/utils/http_client
 import ./enrollment
 import ./identity
 import ./link_state
+import ./scene_guard
 import ./service_settings
+
+# Tests and other importers keep reaching CLOUD_REFUSED_APP_KEYWORDS /
+# refusedCloudAppKeyword through this module.
+export scene_guard
 
 const
   HubBackoffMinSeconds = 3.0
@@ -131,27 +136,10 @@ const CLOUD_SETTINGS_ALLOWLIST* = [
   "name", "rotate", "interval", "scaling_mode", "timezone", "debug",
 ]
 
-# Built-in apps a provider-pushed scene may not reference. Everything else on a
-# managed frame reaches the network through utils/http_client, where
-# `enforceLocalNetworkPolicy` denies private addresses; these two do not, so a
-# `set_scenes` push naming them would walk straight around that chokepoint.
-# Locally authored scenes are unaffected — this list is only consulted by the
-# cloud verb dispatcher (handleSetScenes).
-#
-# Derived by grepping src/apps for child-process spawning
-# (`utils/process`, `hal/processes`, `runProcess`, `osproc`): those two files
-# are the complete set on this branch. Legacy apps that call std/httpclient
-# directly (apps/legacy/openai*) are not listed because they are not in the
-# compiled registry (src/apps/apps.nim) and therefore cannot be reached by any
-# keyword at all.
-const CLOUD_REFUSED_APP_KEYWORDS* = [
-  # apt-get install (privileged!) plus a headless Chromium pointed at a
-  # configured URL: a package installer and an SSRF pivot in one node.
-  "chromiumScreenshot",
-  # ffmpeg -i <url>: another attacker-chosen target fetched by a child process
-  # rather than by the bounded HTTP client.
-  "rstpSnapshot",
-]
+# CLOUD_REFUSED_APP_KEYWORDS / refusedCloudAppKeyword moved to
+# cloud/scene_guard.nim (re-exported below): the scene registry now re-checks
+# persisted cloud-origin payloads at load time, and scenes.nim cannot import
+# this module.
 
 type
   CloudHubAuthError* = object of CatchableError
@@ -306,11 +294,19 @@ initLock(policyCacheLock)
 
 proc refreshLocalNetworkPolicy*(frameConfig: FrameConfig) {.gcsafe.} =
   ## Recomputes the managed-frame private-network HTTP deny
-  ## (utils/http_client.nim): active iff the frame is cloud-managed and the
+  ## (utils/http_client.nim): active iff the frame is cloud-managed — or
+  ## still running provider-pushed scenes after losing the link — and the
   ## local admin has not set `network.allowLocalNetworkAccess` in frame.json.
-  ## Called at startup and whenever the hub thread observes link-state or
-  ## config changes; standalone and backend-managed frames always end up with
-  ## the policy off.
+  ## Called at startup, whenever the hub thread observes link-state or config
+  ## changes, and (via uploadedScenesChangedHook) whenever the uploaded scene
+  ## set is replaced; standalone and backend-managed frames always end up
+  ## with the policy off.
+  ##
+  ## The scene-origin term closes the demotion hole: demoteManagedLink keeps
+  ## rendering the provider's last-pushed scenes, and before origin was
+  ## recorded that meant those scenes kept running with the deny switched
+  ## off. Now the deny follows the scenes, not the link — replacing them
+  ## locally (or via a backend deploy) is what lifts it.
   {.gcsafe.}:
     # Sampled before the (possibly cached) read so a save that races us always
     # leaves the cache key behind the state file, never ahead of it.
@@ -331,11 +327,17 @@ proc refreshLocalNetworkPolicy*(frameConfig: FrameConfig) {.gcsafe.} =
       exempt = policyCacheExempt
     let localOverride = frameConfig != nil and frameConfig.network != nil and
       frameConfig.network.allowLocalNetworkAccess
-    setLocalNetworkPolicy(managed and not localOverride, exempt)
+    # Computed outside the generation cache: the uploaded scene set changes
+    # independently of the link state.
+    let providerScenes = cloudUploadedScenesResident()
+    setLocalNetworkPolicy((managed or providerScenes) and not localOverride, exempt)
 
 proc demoteManagedLink(reason: string) {.gcsafe.} =
   ## Persistent 401: the provider revoked this frame. Return to standalone —
-  ## keep rendering the last pushed scenes, never touch them.
+  ## keep rendering the last pushed scenes, never touch them. The LAN deny
+  ## deliberately survives this: refreshLocalNetworkPolicy keys on the
+  ## persisted scene origin, so provider-pushed scenes keep their network
+  ## restrictions until the local admin (or a backend deploy) replaces them.
   {.gcsafe.}:
     withLock cloudLinkLock:
       let state = loadCloudLinkState()
@@ -559,38 +561,6 @@ proc validateInterpretedScenesPayload*(scenes: JsonNode): tuple[ok: bool, error:
       return (false, "invalid_scenes")
   (true, "")
 
-proc refusedCloudAppKeyword*(scenes: JsonNode): string {.gcsafe.} =
-  ## "" when the payload references no app from CLOUD_REFUSED_APP_KEYWORDS,
-  ## otherwise the offending keyword. Cloud-pushed scenes only: a scene the
-  ## local admin wrote may still use these apps, which is why this check lives
-  ## in the verb dispatcher and not in the scene parser.
-  if scenes == nil or scenes.kind != JArray:
-    return ""
-  for scene in scenes:
-    if scene == nil or scene.kind != JObject:
-      continue
-    let nodes = scene{"nodes"}
-    if nodes == nil or nodes.kind != JArray:
-      continue
-    for node in nodes:
-      if node == nil or node.kind != JObject:
-        continue
-      if node{"type"}.getStr("") != "app":
-        continue
-      let data = node{"data"}
-      if data == nil or data.kind != JObject:
-        continue
-      let keyword = data{"keyword"}.getStr("")
-      if keyword.len == 0:
-        continue
-      # Compare on the trailing segment ("data/rstpSnapshot" → "rstpSnapshot")
-      # so a category rename cannot quietly reopen the hole.
-      let leaf = keyword.rsplit('/', maxsplit = 1)[^1]
-      for refused in CLOUD_REFUSED_APP_KEYWORDS:
-        if cmpIgnoreCase(leaf, refused) == 0:
-          return keyword
-  ""
-
 proc expectedUploadedSceneId(scenes: JsonNode, requestedSceneId = ""): string =
   ## updateUploadedScenesFromPayload prefixes every scene id with "uploaded/",
   ## and activates the payload's `sceneId` when it names one of the pushed
@@ -643,7 +613,14 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
   # The workspace's "preview on frame" flow names which pushed scene to
   # activate and seeds its public state; the runtime's uploadScenes handler
   # honors both keys (runner.nim), so pass them through untouched.
-  var eventPayload = %*{"scenes": scenes}
+  #
+  # "source" is the runtime origin stamp: the DEVICE marks everything that
+  # arrives over this verb as provider-pushed — never trusting a key inside
+  # the payload — and updateUploadedScenesFromPayload persists it with the
+  # scenes. It is what keeps the LAN deny up after a demotion and what the
+  # load-time refused-app re-check keys on. Local admin uploads carry no
+  # source and read back as "local".
+  var eventPayload = %*{"scenes": scenes, "source": "cloud"}
   let requestedSceneId = msg{"scene_id"}.getStr("")
   if requestedSceneId.len > 0:
     eventPayload["sceneId"] = %requestedSceneId
@@ -1642,6 +1619,11 @@ proc startCloudManagement*(frameConfig: FrameConfig) {.gcsafe.} =
   ## the frame is enrolled (mode=managed in cloud_link.json) or a pending
   ## claim-token enrollment file appears at boot.
   {.gcsafe.}:
+    # A local upload replacing provider scenes must lift (or a rehydrate must
+    # raise) the deny without waiting for a hub tick — the hub thread idles
+    # on a standalone or demoted frame.
+    uploadedScenesChangedHook = proc() {.gcsafe.} =
+      refreshLocalNetworkPolicy(frameConfig)
     # Policy is correct from the first render onwards, not only once the
     # thread has spun up.
     refreshLocalNetworkPolicy(frameConfig)

@@ -264,6 +264,10 @@ export async function POST(
     .update(frames)
     .set({
       assignedChecksum: payload.checksum,
+      // Per-scene slices of the same payload. The hub promotes this map to
+      // deployed_scene_state when the device acks payload.checksum, so the
+      // workspace can name the scene that is not on the frame yet.
+      assignedSceneState: payload.sceneStates,
       serviceSettingGroups,
       updatedAt: new Date(),
     })
