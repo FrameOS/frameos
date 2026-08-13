@@ -52,6 +52,34 @@
 ## js.close()
 ## ```
 ##
+## **Example: Bytecode Compilation**
+## ```nim
+## import frameos/js_runtime/burrito
+##
+## var js = newQuickJS()
+##
+## # Add a simple function
+## proc multiply(ctx: ptr JSContext, a: JSValue, b: JSValue): JSValue =
+##   let numA = toNimFloat(ctx, a)
+##   let numB = toNimFloat(ctx, b)
+##   result = nimFloatToJS(ctx, numA * numB)
+##
+## js.registerFunction("multiply", multiply)
+##
+## # Compile JavaScript to bytecode
+## let code = "multiply(5, 6);"
+## let bytecode = js.compileToBytecode(code)
+##
+## # Execute bytecode (faster, no compilation needed) - works with any bytecode!
+## let result = js.evalBytecode(bytecode)
+##
+## # For REPL: Use pre-compiled bytecode (run: nimble compile_repl_bytecode)
+## import ../build/src/repl_bytecode
+## discard js.evalBytecodeModule(qjsc_replBytecode)
+## js.close()
+## ```
+##
+
 import std/[tables, macros, json, strutils, os, monotimes, times]
 
 when defined(frameosEmbedded):
@@ -242,11 +270,23 @@ proc JS_SetMemoryLimit*(rt: ptr JSRuntime, limit: csize_t)
 proc JS_SetMaxStackSize*(rt: ptr JSRuntime, stackSize: csize_t)
 proc JS_SetInterruptHandler*(rt: ptr JSRuntime, cb: JSInterruptHandler, opaque: pointer)
 
+# Bytecode serialization
+proc JS_WriteObject*(ctx: ptr JSContext, psize: ptr csize_t, obj: JSValueConst, flags: cint): ptr uint8
+proc JS_ReadObject*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: cint): JSValue
+
 {.pop.}
 
-# JavaScript evaluation flags. These must match the bundled quickjs.h exactly:
-# COMPILE_ONLY and BACKTRACE_BARRIER were once declared one bit too high, so
-# "compile only" silently became "run it and set a backtrace barrier".
+# Bytecode evaluation from quickjs-libc.h (not built on embedded/wasm)
+when not defined(frameosEmbedded) and not defined(frameosWasm):
+  {.push importc, header: "quickjs/quickjs-libc.h".}
+  proc js_std_eval_binary*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: cint)
+  {.pop.}
+
+# JavaScript evaluation flags. These must match the bundled quickjs.h — the
+# two below were each one bit too high, so JS_EVAL_FLAG_COMPILE_ONLY actually
+# set JS_EVAL_FLAG_BACKTRACE_BARRIER: the code ran instead of being compiled,
+# and the caller got a value (a Promise, for a module) where it expected
+# bytecode. compileToBytecode has been quietly serialising the wrong thing.
 const
   JS_EVAL_TYPE_GLOBAL* = 0
   JS_EVAL_TYPE_MODULE* = 1
@@ -260,6 +300,12 @@ const
   JS_PROP_CONFIGURABLE* = (1 shl 0)
   JS_PROP_WRITABLE* = (1 shl 1)
   JS_PROP_ENUMERABLE* = (1 shl 2)
+
+# Bytecode serialization flags
+const
+  JS_WRITE_OBJ_BYTECODE* = (1 shl 0)
+  JS_WRITE_OBJ_BSWAP* = (1 shl 1)
+  JS_READ_OBJ_BYTECODE* = (1 shl 0)
 
 # C Function types
 const
@@ -1351,6 +1397,148 @@ proc evalModuleNamespace*(js: QuickJS, code: string, filename: string = "<module
     let errorMsg = toNimString(ctx, exception)
     JS_FreeValue(ctx, result)
     raise newException(JSException, errorMsg)
+
+proc compileToBytecode*(js: QuickJS, code: string, filename: string = "<input>", isModule: bool = false): seq[byte] =
+  ## Compile JavaScript code to bytecode format
+  ## Returns a `byte` value containing the compiled bytecode
+  ##
+  ## The bytecode can be saved and later executed with evalBytecode
+  ## Note: The bytecode format is tied to the QuickJS version
+
+  # Auto-detect module if not explicitly specified (like qjsc does)
+  let isModuleCode = if isModule:
+    true
+  else:
+    # Check for module syntax (simplified detection)
+    code.contains("import ") or code.contains("export ")
+
+  var evalFlags = JS_EVAL_FLAG_COMPILE_ONLY
+  if isModuleCode:
+    evalFlags = evalFlags or JS_EVAL_TYPE_MODULE
+  else:
+    evalFlags = evalFlags or JS_EVAL_TYPE_GLOBAL
+
+  let compiled = JS_Eval(js.context, code.cstring, code.len.csize_t, filename.cstring, evalFlags.cint)
+
+  if JS_IsException(compiled) != 0:
+    let exception = JS_GetException(js.context)
+    defer: JS_FreeValue(js.context, exception)
+    let errorMsg = toNimString(js.context, exception)
+    JS_FreeValue(js.context, compiled)
+    raise newException(JSException, "Compilation failed: " & errorMsg)
+
+  # Serialize to bytecode
+  var size: csize_t
+  let buf = JS_WriteObject(js.context, addr size, compiled, JS_WRITE_OBJ_BYTECODE)
+  JS_FreeValue(js.context, compiled)
+
+  if buf.isNil:
+    raise newException(JSException, "Failed to serialize bytecode")
+
+  # Copy to Nim seq
+  result = newSeq[byte](size)
+  copyMem(addr result[0], buf, size)
+
+  # Free the buffer allocated by JS_WriteObject
+  {.emit: """js_free(`js`->context, `buf`);""".}
+
+proc loadBytecodeModule*(js: QuickJS, bytecode: openArray[byte]): ptr JSModuleDef =
+  ## Load a module from bytecode without executing it
+  ## Returns the module definition that can be used with JS_GetModuleNamespace
+  let obj = JS_ReadObject(js.context, cast[ptr uint8](unsafeAddr bytecode[0]), bytecode.len.csize_t, JS_READ_OBJ_BYTECODE)
+
+  if JS_IsException(obj) != 0:
+    let exception = JS_GetException(js.context)
+    defer: JS_FreeValue(js.context, exception)
+    let errorMsg = toNimString(js.context, exception)
+    JS_FreeValue(js.context, obj)
+    raise newException(JSException, "Failed to load bytecode: " & errorMsg)
+
+  # Extract module definition pointer
+  {.emit: """
+  if (JS_VALUE_GET_TAG(`obj`) == JS_TAG_MODULE) {
+    JSModuleDef *m = JS_VALUE_GET_PTR(`obj`);
+    JS_FreeValue(`js`->context, `obj`);
+    `result` = m;
+  } else {
+    JS_FreeValue(`js`->context, `obj`);
+    `result` = NULL;
+  }
+  """.}
+
+  if result.isNil:
+    raise newException(JSException, "Bytecode does not contain a module")
+
+proc evalBytecode*(js: QuickJS, bytecode: openArray[byte], loadOnly: bool = false): string =
+  ## Evaluate JavaScript bytecode - works with any bytecode (qjsc or compileToBytecode)
+  ##
+  ## Parameters:
+  ## - bytecode: The compiled bytecode to execute
+  ## - loadOnly: If true, load but don't execute (for module dependencies)
+  ##
+  ## This automatically detects the bytecode type and handles it appropriately.
+  ## Works with both std/os libraries (configWithBothLibs) and isolated mode (defaultConfig).
+  ## Returns the result as a string, or empty string for void operations.
+  if bytecode.len == 0:
+    raise newException(ValueError, "Empty bytecode")
+
+  when not defined(frameosEmbedded) and not defined(frameosWasm):
+    # First, check if this is qjsc-compiled bytecode (larger, complex bytecode)
+    # vs. simple compiled values from compileToBytecode
+    let shouldUseStdEval = js.config.enableStdHandlers and bytecode.len > 100
+
+    if shouldUseStdEval:
+      # Use js_std_eval_binary for qjsc-compiled bytecode (REPL, complex modules)
+      let flags = if loadOnly: 1'i32 else: 0'i32
+      js_std_eval_binary(js.context, cast[ptr uint8](unsafeAddr bytecode[0]), bytecode.len.csize_t, flags)
+      return "" # js_std_eval_binary doesn't return values
+
+  # Fallback to lower-level execution for isolated/minimal contexts
+  let obj = JS_ReadObject(js.context, cast[ptr uint8](unsafeAddr bytecode[0]), bytecode.len.csize_t, JS_READ_OBJ_BYTECODE)
+
+  if JS_IsException(obj) != 0:
+    let exception = JS_GetException(js.context)
+    defer: JS_FreeValue(js.context, exception)
+    let errorMsg = toNimString(js.context, exception)
+    JS_FreeValue(js.context, obj)
+    raise newException(JSException, "Failed to load bytecode: " & errorMsg)
+
+  # Execute the bytecode object
+  var evalResult: JSValue
+  {.emit: """
+  if (JS_VALUE_GET_TAG(`obj`) == JS_TAG_MODULE) {
+    if (JS_ResolveModule(`js`->context, `obj`) < 0) {
+      `evalResult` = JS_EXCEPTION;
+    } else {
+      `evalResult` = JS_EvalFunction(`js`->context, `obj`);
+    }
+  } else if (JS_VALUE_GET_TAG(`obj`) == JS_TAG_FUNCTION_BYTECODE) {
+    `evalResult` = JS_EvalFunction(`js`->context, `obj`);
+  } else {
+    // For simple values, just return them
+    `evalResult` = `obj`;
+    `obj` = JS_UNDEFINED;  // Don't free twice
+  }
+  """.}
+
+  if JS_IsException(evalResult) != 0:
+    let exception = JS_GetException(js.context)
+    defer: JS_FreeValue(js.context, exception)
+    let errorMsg = toNimString(js.context, exception)
+    JS_FreeValue(js.context, obj)
+    JS_FreeValue(js.context, evalResult)
+    raise newException(JSException, "Bytecode execution failed: " & errorMsg)
+
+  let resultStr = toNimString(js.context, evalResult)
+  JS_FreeValue(js.context, obj)
+  JS_FreeValue(js.context, evalResult)
+
+  return resultStr
+
+proc evalBytecodeModule*(js: QuickJS, bytecode: openArray[byte]): string =
+  ## Evaluate JavaScript module bytecode
+  ## The bytecode is executed immediately (equivalent to evalBytecode with loadOnly=false)
+  result = js.evalBytecode(bytecode, loadOnly = false)
 
 proc canUseStdLib*(js: QuickJS): bool =
   ## Check if std module is available in this QuickJS instance
