@@ -14,6 +14,7 @@ import { getScenesBaseUrl } from "./env";
 import { moderateStoreContent } from "./moderation";
 import { classifyStoreScene } from "./store-classify";
 import {
+  detectImageContentType,
   maxNewScenesPerDay,
   maxScenesPerAccount,
   maxSceneZipBytes,
@@ -270,7 +271,11 @@ export async function publishStoreScene(
       name,
       previewImage: uploadedPreview ?? null,
       previewImageHeight: uploadedPreviewHeight ?? null,
-      previewImageType: uploadedPreview ? "image/jpeg" : null,
+      // The zip's conventional image.jpg path says nothing about the real
+      // format — PNG/WebP/GIF bytes are stored untranscoded, so sniff them.
+      previewImageType: uploadedPreview
+        ? detectImageContentType(uploadedPreview) ?? "image/jpeg"
+        : null,
       previewImageWidth: uploadedPreviewWidth ?? null,
       riskFlags: validated.value.riskFlags,
       updatedAt: new Date(),

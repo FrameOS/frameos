@@ -51,6 +51,11 @@ export function SceneLivePreview({
   // Bumped by the Restart button; remounts the whole wasm runtime.
   const [restartCount, setRestartCount] = useState(0);
 
+  // A screenshot before the runtime's first paint would capture a fully
+  // transparent canvas; the button stays disabled until a frame arrives.
+  // Reset whenever the runtime remounts (restart, resize, new settings).
+  const [hasPaintedFrame, setHasPaintedFrame] = useState(false);
+
   // App settings (API keys etc.) some scenes need to render. Typed values are
   // kept per flat "group.field" key; "Apply" nests them into the settings
   // object the runtime expects and remounts the preview.
@@ -207,6 +212,7 @@ export function SceneLivePreview({
     }
     let cancelled = false;
     let handle: { destroy: () => void } | null = null;
+    setHasPaintedFrame(false);
     (async () => {
       try {
         const { mountFrameOSManager } = await import("frameos-wasm");
@@ -222,6 +228,11 @@ export function SceneLivePreview({
           // Fallback only: the runtime fetches URLs client-side first and
           // routes just CORS-blocked hosts through this endpoint.
           proxyUrl: "/api/store/preview-proxy",
+          onFrame: () => {
+            if (!cancelled) {
+              setHasPaintedFrame(true);
+            }
+          },
           onError: (message) => setError(message),
         });
       } catch (err) {
@@ -254,16 +265,32 @@ export function SceneLivePreview({
 
   async function saveScreenshot() {
     const canvas = containerRef.current?.querySelector("canvas");
-    if (!canvas) {
-      setError("No rendered frame to capture yet.");
+    if (!canvas || !hasPaintedFrame) {
+      setError(
+        "The preview has not rendered a frame yet — wait for the first render before saving a screenshot.",
+      );
       return;
     }
     setSavingShot(true);
     setError(null);
     setNotice(null);
     try {
+      // Composite over an opaque background before encoding: a canvas can
+      // hold transparent pixels, and a transparent PNG makes a blank store
+      // tile (same fillRect recipe as frontend's splitScreenThumbnail).
+      const flattened = document.createElement("canvas");
+      flattened.width = canvas.width;
+      flattened.height = canvas.height;
+      const context = flattened.getContext("2d");
+      if (!context) {
+        setError("Could not capture the canvas.");
+        return;
+      }
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, flattened.width, flattened.height);
+      context.drawImage(canvas, 0, 0);
       const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, "image/png"),
+        flattened.toBlob(resolve, "image/png"),
       );
       if (!blob) {
         setError("Could not capture the canvas.");
@@ -334,12 +361,14 @@ export function SceneLivePreview({
         <div className="button-row">
           <button
             className="button button--subtle button--small"
-            disabled={savingShot}
+            disabled={savingShot || !hasPaintedFrame}
             onClick={() => void saveScreenshot()}
             title={
-              canSaveToGallery
-                ? "Save the current frame to this scene's images"
-                : "Download the current frame as a PNG"
+              !hasPaintedFrame
+                ? "Available after the preview renders its first frame"
+                : canSaveToGallery
+                  ? "Save the current frame to this scene's images"
+                  : "Download the current frame as a PNG"
             }
             type="button"
           >

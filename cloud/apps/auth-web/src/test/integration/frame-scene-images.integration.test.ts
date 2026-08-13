@@ -5,7 +5,7 @@
 // frame's assignments; the raw store uuid must also work.
 import { generateKeyPairSync } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
-import { zipSync } from "fflate";
+import { zipSync, zlibSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
   createDb,
@@ -186,6 +186,34 @@ async function assignScene(frameId: string, sceneId: string, position = 0) {
   });
 }
 
+// A structurally valid 8-bit RGBA PNG whose every alpha byte is zero — the
+// broken live-preview screenshot legacy rows can still hold. Chunk CRCs stay
+// zeroed: the transparency detector proves via pixel data, not checksums.
+function transparentPng(width = 4, height = 4) {
+  const raw = new Uint8Array(height * (1 + width * 4)); // filter 0, all zero
+  const ihdr = new Uint8Array(13);
+  const ihdrView = new DataView(ihdr.buffer);
+  ihdrView.setUint32(0, width);
+  ihdrView.setUint32(4, height);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // RGBA
+  const chunk = (type: string, data: Uint8Array) => {
+    const out = new Uint8Array(12 + data.length);
+    new DataView(out.buffer).setUint32(0, data.length);
+    for (let i = 0; i < 4; i++) {
+      out[4 + i] = type.charCodeAt(i);
+    }
+    out.set(data, 8);
+    return Buffer.from(out);
+  };
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlibSync(raw)),
+    chunk("IEND", new Uint8Array(0)),
+  ]);
+}
+
 describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
   it("resolves a runtime scene id to the store scene's gallery cover", async () => {
     const accountId = await signIn();
@@ -275,6 +303,86 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
     expect(Buffer.from(await response.arrayBuffer()).toString()).toBe(
       "preview-bytes",
     );
+  });
+
+  it("skips a fully transparent gallery lead and serves the next image", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const scene = await createStoreScene(accountId, {
+      name: "Transparent lead",
+      previewImage: Buffer.from("preview-bytes"),
+      previewImageType: "image/webp",
+      runtimeSceneIds: ["runtime-skip"],
+    });
+    await db.insert(storeSceneImages).values([
+      {
+        content: transparentPng(),
+        contentType: "image/png",
+        position: 1,
+        sceneId: scene.id,
+      },
+      {
+        content: Buffer.from("second-gallery"),
+        contentType: "image/jpeg",
+        position: 2,
+        sceneId: scene.id,
+      },
+    ]);
+    await assignScene(frame.id, scene.id);
+
+    const response = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-skip`),
+      routeParams(frame.id, "runtime-skip"),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
+    expect(Buffer.from(await response.arrayBuffer()).toString()).toBe(
+      "second-gallery",
+    );
+  });
+
+  it("falls to preview_image when every gallery row is transparent, and 404s when the preview is transparent too", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const scene = await createStoreScene(accountId, {
+      name: "Only transparent gallery",
+      previewImage: Buffer.from("preview-bytes"),
+      previewImageType: "image/webp",
+      runtimeSceneIds: ["runtime-fall"],
+    });
+    await db.insert(storeSceneImages).values({
+      content: transparentPng(),
+      contentType: "image/png",
+      position: 1,
+      sceneId: scene.id,
+    });
+    await assignScene(frame.id, scene.id);
+
+    const fell = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-fall`),
+      routeParams(frame.id, "runtime-fall"),
+    );
+    expect(fell.status).toBe(200);
+    expect(fell.headers.get("content-type")).toBe("image/webp");
+    expect(Buffer.from(await fell.arrayBuffer()).toString()).toBe(
+      "preview-bytes",
+    );
+
+    // A legacy transparent preview_image is no better than no image.
+    const blankScene = await createStoreScene(accountId, {
+      name: "Transparent preview",
+      previewImage: transparentPng(),
+      previewImageType: "image/png",
+      runtimeSceneIds: ["runtime-blank"],
+    });
+    await assignScene(frame.id, blankScene.id, 1);
+
+    const blank = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-blank`),
+      routeParams(frame.id, "runtime-blank"),
+    );
+    expect(blank.status).toBe(404);
+    expect((await blank.json()).error).toBe("no_image");
   });
 
   it("404s for scene ids no assignment owns, and for scenes with no image at all", async () => {
