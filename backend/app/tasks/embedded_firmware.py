@@ -319,6 +319,11 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "flashSize": "32MB",
         "psramMB": 16,
         "pins": EMBEDDED_WAVESHARE_13IN3E6_PINS,
+        # VBAT taps ADC1_CH7 = GPIO8 through a 1/3 divider; Waveshare's own
+        # ADC examples (01_ADC_Test, Arduino + IDF) read CHANNEL_7 and
+        # multiply the calibrated pin voltage by 3.
+        "batteryPin": 8,
+        "batteryDivider": 3.0,
         "sdCardAssets": {
             "enabled": True,
             "preset": "waveshare_esp32_s3_epaper_13_3e6",
@@ -1018,6 +1023,12 @@ def apply_embedded_hardware_preset(frame: Frame) -> str:
         }
     else:
         device_config.pop("sdCardAssets", None)
+    # Battery sensing defaults, same policy as pins: the preset knows the
+    # board's divider, and the device can still override via console/NVS.
+    if "batteryPin" in preset:
+        device_config["batteryPin"] = preset["batteryPin"]
+    if "batteryDivider" in preset:
+        device_config["batteryDivider"] = preset["batteryDivider"]
     frame.device_config = device_config
     return preset_key
 

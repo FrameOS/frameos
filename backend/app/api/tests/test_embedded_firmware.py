@@ -664,6 +664,12 @@ def test_embedded_hardware_preset_for_waveshare_13in3e6():
     assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK 6" in header
     assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO 5" in header
     assert "#define FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI 7" in header
+    # Battery: VBAT on ADC1_CH7 = GPIO8 through a 1/3 divider (vendor ADC
+    # examples read CHANNEL_7 and multiply the calibrated voltage by 3).
+    assert frame.device_config["batteryPin"] == 8
+    assert frame.device_config["batteryDivider"] == 3.0
+    assert "#define FRAMEOS_DEFAULT_BATTERY_PIN 8" in header
+    assert "#define FRAMEOS_DEFAULT_BATTERY_DIVIDER 3.0f" in header
 
 
 def test_embedded_hardware_preset_for_waveshare_photopainter():
