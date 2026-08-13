@@ -278,6 +278,9 @@ suite "cloud hub verb dispatcher":
     check recorded.events.len == 1
     check recorded.events[0][0] == "uploadScenes"
     check recorded.events[0][1]{"scenes"}.kind == JArray
+    # The device stamps the runtime origin itself — this is what persists to
+    # state/uploaded.json and keeps the LAN deny alive after a demotion.
+    check recorded.events[0][1]{"source"}.getStr("") == "cloud"
     check recorded.persistedChecksums == @["sum-1"]
     check ctx.scenesChecksum == "sum-1"
     check reply.extra.len == 1

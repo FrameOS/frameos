@@ -4,6 +4,7 @@ import checksums/md5
 import scenes/scenes
 import system/scenes as systemScenesRegistry
 import frameos/channels
+import frameos/cloud/scene_guard
 import frameos/hal/files as halFiles
 import frameos/types
 import frameos/interpreter
@@ -263,11 +264,37 @@ var
   lastPersistedSceneId: Option[SceneId] = none(SceneId)
   uploadedScenePayloadLock: Lock
   uploadedScenePayload {.guard: uploadedScenePayloadLock.} = ""
+  # Runtime origin of the uploaded scene set: "cloud" when the payload came in
+  # over the provider's set_scenes verb (hub_client stamps it, the payload is
+  # persisted verbatim so the stamp survives reboots), "" for local admin
+  # uploads. Trust-boundary metadata, not the template-provenance
+  # `scene.origin` the editor writes.
+  uploadedScenesSource {.guard: uploadedScenePayloadLock.} = ""
   uploadedStateCleanupRan = false
+
+# Lets the cloud module recompute the LAN-deny policy when the uploaded scene
+# set (and with it the recorded origin) changes — scenes.nim cannot import
+# hub_client, which imports this module. Registered by startCloudManagement.
+var uploadedScenesChangedHook*: proc() {.gcsafe.} = nil
 
 proc setUploadedScenePayload*(payload: string) =
   withLock uploadedScenePayloadLock:
     uploadedScenePayload = payload
+
+proc setUploadedScenesSource(source: string) =
+  withLock uploadedScenePayloadLock:
+    uploadedScenesSource = source
+
+proc cloudUploadedScenesResident*(): bool =
+  ## True while the resident uploaded scene set was pushed by a cloud
+  ## provider. Keeps the private-network deny keyed to the scenes themselves:
+  ## a frame demoted out of the managed state still runs them, so it keeps
+  ## the deny until they are replaced.
+  {.gcsafe.}:
+    var isCloud = false
+    withLock uploadedScenePayloadLock:
+      isCloud = uploadedScenesSource == "cloud"
+    isCloud
 
 proc getUploadedScenePayload*(): JsonNode =
   withLock uploadedScenePayloadLock:
@@ -376,6 +403,21 @@ proc updateUploadedScenesFromPayload*(
   else:
     return (none(SceneId), @[])
 
+  # Runtime origin stamp (hub_client sets "cloud" on the set_scenes verb; the
+  # payload round-trips through state/uploaded.json, so the stamp survives a
+  # reboot). Cloud-origin payloads repeat the refused-app check the verb
+  # dispatcher already ran at transport time: a payload edited on disk, or
+  # persisted before a keyword joined the list, must not reach those apps by
+  # being replayed at boot.
+  let payloadSource = payload{"source"}.getStr("")
+  if payloadSource == "cloud":
+    let refused = refusedCloudAppKeyword(scenePayload)
+    if refused.len > 0:
+      log(%*{"event": "uploadScenes:refused", "source": payloadSource,
+             "keyword": refused,
+             "message": "Cloud-origin scene payload references a refused app; not loading it."})
+      return (none(SceneId), @[])
+
   # nim json -> jsony -> FrameSceneInput
   # clunky but works...
   let payloadString = $scenePayload
@@ -394,6 +436,11 @@ proc updateUploadedScenesFromPayload*(
     oldUploaded = uploadedScenes
   updateUploadedScenes(newScenes)
   setUploadedScenePayload(payloadString)
+  setUploadedScenesSource(payloadSource)
+  # The LAN-deny policy keys on the recorded origin; recompute it now rather
+  # than on the next hub tick (the hub thread idles on a demoted frame).
+  if not uploadedScenesChangedHook.isNil:
+    uploadedScenesChangedHook()
   for sceneId in oldUploaded.keys:
     if sceneId.string.startsWith("uploaded/") and not newScenes.hasKey(sceneId):
       removePersistedState(sceneId)
