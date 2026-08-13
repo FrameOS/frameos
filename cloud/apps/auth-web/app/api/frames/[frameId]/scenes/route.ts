@@ -23,6 +23,7 @@ import {
   supersedePendingCommands,
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import { copySceneCoversIntoFrameCache } from "../../../../../src/lib/scene-images";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -316,6 +317,15 @@ export async function POST(
     },
     target: { commandId: command?.id, frameId: frame.id },
   });
+
+  // Install-time cover copy: without it a freshly assigned scene's tile
+  // stays blank until the device renders it and a snapshot fetch lands.
+  // Cosmetic, so a failure must not fail the push that just committed.
+  try {
+    await copySceneCoversIntoFrameCache(db, frame.id, requested);
+  } catch (error) {
+    console.error("install-time scene cover copy failed", error);
+  }
 
   return NextResponse.json({
     assigned_checksum: payload.checksum,
