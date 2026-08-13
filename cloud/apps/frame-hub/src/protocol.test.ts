@@ -16,6 +16,7 @@ import {
   parseJsonMessage,
   parseLogEntries,
   parseLogTimestamp,
+  stateWithActiveScene,
   withinJsonByteLimit,
   type FrameRow,
 } from "./protocol";
@@ -257,6 +258,35 @@ describe("persisted-value size caps", () => {
     expect(isAcceptableChecksum("a".repeat(maxChecksumChars + 1))).toBe(false);
     expect(isAcceptableChecksum(undefined)).toBe(false);
     expect(isAcceptableChecksum(12345)).toBe(false);
+  });
+});
+
+describe("folding the top-level active_scene into last_state", () => {
+  // hello/state carry active_scene as a SIBLING of `states`, but only the
+  // `states` object is stored — without the fold the id is lost and the
+  // workspace cannot name the frame's active scene until a scene_ack.
+  it("copies the sibling active_scene into the stored states", () => {
+    expect(stateWithActiveScene({ brightness: 1 }, "df0e3976")).toEqual({
+      active_scene: "df0e3976",
+      brightness: 1,
+    });
+  });
+
+  it("leaves the states alone when the device put the id inside them", () => {
+    const states = { active_scene: "inner" };
+    expect(stateWithActiveScene(states, "outer")).toBe(states);
+  });
+
+  it("ignores missing, empty and non-string ids", () => {
+    const states = { brightness: 1 };
+    expect(stateWithActiveScene(states, undefined)).toBe(states);
+    expect(stateWithActiveScene(states, "")).toBe(states);
+    expect(stateWithActiveScene(states, 42)).toBe(states);
+  });
+
+  it("caps a runaway id at the stored scene-id ceiling", () => {
+    const folded = stateWithActiveScene({}, "x".repeat(maxSceneIdChars + 50));
+    expect((folded.active_scene as string).length).toBe(maxSceneIdChars);
   });
 });
 

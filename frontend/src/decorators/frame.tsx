@@ -67,16 +67,23 @@ export function formatFrameRelativeTime(timestamp?: string | null): string | nul
   return pluralize(days, 'day')
 }
 
+// Cloud frames carry no last_log_at, only the hub-maintained last_seen_at —
+// same substitution the sidebar status dots make.
+function frameActivityTimestamp(frame: FrameType): string | null | undefined {
+  return frame.last_log_at ?? frame.last_seen_at
+}
+
 export function frameIsStale(frame: FrameType): boolean {
-  if (!frame.last_log_at) {
+  const activityAt = frameActivityTimestamp(frame)
+  if (!activityAt) {
     return false
   }
-  const lastLogAt = parseFrameTimestamp(frame.last_log_at)
-  return Number.isFinite(lastLogAt) && Date.now() - lastLogAt > 1000 * 60 * 60
+  const lastActivityAt = parseFrameTimestamp(activityAt)
+  return Number.isFinite(lastActivityAt) && Date.now() - lastActivityAt > 1000 * 60 * 60
 }
 
 export function frameHasActivityLog(frame: FrameType): boolean {
-  return Number.isFinite(parseFrameTimestamp(frame.last_log_at))
+  return Number.isFinite(parseFrameTimestamp(frameActivityTimestamp(frame)))
 }
 
 export function frameIsHealthy(frame: FrameType): boolean {
@@ -85,6 +92,12 @@ export function frameIsHealthy(frame: FrameType): boolean {
 
 export function frameIsActive(frame: FrameType): boolean {
   if ((frame.active_connections ?? 0) > 0) {
+    return true
+  }
+  // The hub keeps `connected` live for cloud frames; an open device socket is
+  // as active as a frame gets. Everything below is heuristics for frames that
+  // carry no such flag (the backend) or are between reconnects.
+  if (frame.connected === true) {
     return true
   }
   if (frameIsStale(frame)) {

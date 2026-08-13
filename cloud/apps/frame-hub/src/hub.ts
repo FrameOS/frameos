@@ -67,6 +67,7 @@ import {
   newMetricsEvent,
   parseJsonMessage,
   parseLogEntries,
+  stateWithActiveScene,
   uuidPattern,
   withinJsonByteLimit,
   type FrameRow,
@@ -517,6 +518,9 @@ export async function startFrameHub(
 
     const hello = session.hello ?? {};
     const now = new Date();
+    const helloState = isRecord(hello.states)
+      ? stateWithActiveScene(hello.states, hello.active_scene)
+      : undefined;
     await db
       .update(frames)
       .set({
@@ -527,8 +531,8 @@ export async function startFrameHub(
         ...(typeof hello.frameos_version === "string"
           ? { frameosVersion: hello.frameos_version.slice(0, 64) }
           : {}),
-        ...(isRecord(hello.states) && acceptState(frameId, hello.states)
-          ? { lastState: hello.states }
+        ...(helloState && acceptState(frameId, helloState)
+          ? { lastState: helloState }
           : {}),
         ...(isAcceptableChecksum(hello.scenes_checksum)
           ? {
@@ -740,8 +744,11 @@ export async function startFrameHub(
   ) {
     // `state` is hello-shaped; some payloads nest scene state under `states`,
     // so prefer that and fall back to the whole payload minus the envelope.
+    // Either way the top-level active_scene must survive into last_state.
     const { id: _id, type: _type, ...rest } = msg;
-    const lastState = isRecord(rest.states) ? rest.states : rest;
+    const lastState = isRecord(rest.states)
+      ? stateWithActiveScene(rest.states, rest.active_scene)
+      : rest;
     const checksum = acceptChecksum(session.frame.id, rest.scenes_checksum);
     const now = new Date();
     await db

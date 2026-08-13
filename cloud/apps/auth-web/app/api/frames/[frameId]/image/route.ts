@@ -14,7 +14,12 @@ export const runtime = "nodejs";
 
 const fetchCommandTtlMs = 2 * 60 * 1000;
 // The preview panel wants "the current image" — anything older than a
-// render interval is history. Serve stale immediately, refresh behind it.
+// render interval is history. A passive load (?t=-1, a tile filling in)
+// serves stale immediately and refreshes behind it; an explicit refresh
+// (?t=<seconds> — the refresh button, or a render signal) waits for the
+// device's answer before falling back to the stale copy. Serving the same
+// stale bytes to the very click that asked for fresh ones is how the
+// refresh button reads as broken.
 const imageStaleAfterMs = 30_000;
 const longPollTotalMs = 25_000;
 const longPollStepMs = 750;
@@ -101,6 +106,10 @@ export async function GET(
 
   const cached = await cachedImage(db, frame.id);
   const now = Date.now();
+  // ?t=-1 is the tile's initial cache-only load (entityImagesModel); any
+  // real timestamp means someone deliberately asked for the current image.
+  const tParam = request.nextUrl.searchParams.get("t");
+  const wantsFresh = tParam !== null && tParam !== "-1";
   const needsFetch =
     !cached || now - cached.updatedAt.getTime() > imageStaleAfterMs;
   if (
@@ -115,18 +124,22 @@ export async function GET(
       type: "image_get",
     });
   }
-  if (cached) {
+  const canWaitForFresh = frame.status === "active";
+  if (cached && !(wantsFresh && needsFetch && canWaitForFresh)) {
     return imageResponse(cached);
   }
   if (frame.status !== "active") {
     return jsonError("frame_not_active", 409);
   }
 
+  // Long-poll for the image_get result: the first image ever, or one newer
+  // than the stale row an explicit refresh is trying to replace.
+  const previousUpdatedAt = cached?.updatedAt.getTime() ?? 0;
   const deadline = now + longPollTotalMs;
   while (Date.now() < deadline) {
     await sleep(longPollStepMs);
     const row = await cachedImage(db, frame.id);
-    if (row) {
+    if (row && row.updatedAt.getTime() > previousUpdatedAt) {
       return imageResponse(row);
     }
     const [refused] = await db
@@ -142,8 +155,17 @@ export async function GET(
       )
       .limit(1);
     if (refused) {
+      // The device could not serve a fresh image right now (busy mid-render,
+      // rebooting, nothing rendered yet). For a refresh of an existing image
+      // the stale copy beats an error page.
+      if (cached) {
+        return imageResponse(cached);
+      }
       return jsonError(refused.error ?? "image_unavailable", 404);
     }
+  }
+  if (cached) {
+    return imageResponse(cached);
   }
   return jsonError("image_unavailable", 504);
 }

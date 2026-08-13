@@ -89,8 +89,30 @@ export function parseLogTimestamp(value: unknown, fallback = new Date()): Date {
 
 // Longest scene id the hub stores, matching the ceiling auth-web puts on a
 // set_current_scene payload. Applies to a log entry's `scene` and to the
-// active_scene a scene_ack merges into last_state.
+// active_scene merged into last_state.
 export const maxSceneIdChars = 256;
+
+// Devices report their active scene as a TOP-LEVEL sibling of `states`
+// (helloStatePayload on Linux, add_state_fields on the esp32), while the hub
+// stores the `states` object alone as last_state — so the id must be folded
+// in here or it is lost. scene_ack used to be the only writer of
+// last_state.active_scene, which left it empty after a reboot and stale
+// after any locally driven scene change (schedule, buttons), and the
+// workspace then showed "the active scene is not available" for a frame
+// that was happily rendering.
+export function stateWithActiveScene(
+  states: Record<string, unknown>,
+  activeScene: unknown,
+): Record<string, unknown> {
+  if (typeof activeScene !== "string" || activeScene.length === 0) {
+    return states;
+  }
+  // A scene id inside `states` is the device's own spelling — leave it be.
+  if (typeof states.active_scene === "string" && states.active_scene) {
+    return states;
+  }
+  return { ...states, active_scene: activeScene.slice(0, maxSceneIdChars) };
+}
 
 export function parseLogEntries(
   value: unknown,
