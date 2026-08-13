@@ -21,6 +21,7 @@ import {
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getSceneImage } from "../../../app/api/frames/[frameId]/scene_images/[sceneId]/route";
+import { POST as assignFrameScenes } from "../../../app/api/frames/[frameId]/scenes/route";
 import { sceneSnapshotAssetPath } from "../../lib/frame-asset-cache";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { resetSceneImageCacheForTests } from "../../lib/scene-images";
@@ -435,5 +436,125 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
       .from(frameCommands)
       .where(eq(frameCommands.frameId, frame.id));
     expect(queued.map((row) => row.type)).toEqual(["asset_get"]);
+  });
+});
+
+// The explicit install-time cover copy: POST /scenes writes each installed
+// scene's cover into frame_asset_files under the runtime scene ids, so a
+// tile has bytes to show before the device has ever rendered the scene.
+describe("POST /api/frames/{id}/scenes cover copy", () => {
+  function postScenes(frameId: string, sceneIds: string[]) {
+    return assignFrameScenes(
+      new NextRequest(new URL(`/api/frames/${frameId}/scenes`, baseUrl), {
+        body: JSON.stringify({
+          scenes: sceneIds.map((id) => ({ scene_id: id })),
+        }),
+        headers: { "content-type": "application/json", origin: baseUrl },
+        method: "POST",
+      }),
+      { params: Promise.resolve({ frameId }) },
+    );
+  }
+
+  async function assetRows(frameId: string) {
+    return await db
+      .select({
+        content: frameAssetFiles.content,
+        contentType: frameAssetFiles.contentType,
+        path: frameAssetFiles.path,
+        thumb: frameAssetFiles.thumb,
+      })
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frameId));
+  }
+
+  it("copies the cover under every runtime scene id, full and thumb", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const scene = await createStoreScene(accountId, {
+      name: "Installed",
+      previewImage: Buffer.from("cover-bytes"),
+      previewImageType: "image/jpeg",
+      runtimeSceneIds: ["runtime-a", "runtime-b"],
+    });
+
+    const response = await postScenes(frame.id, [scene.id]);
+    expect(response.status).toBe(200);
+
+    const rows = await assetRows(frame.id);
+    const expected = ["runtime-a", "runtime-b"].flatMap((id) =>
+      [false, true].map((thumb) => ({
+        path: sceneSnapshotAssetPath(id),
+        thumb,
+      })),
+    );
+    expect(
+      rows
+        .map((row) => ({ path: row.path, thumb: row.thumb }))
+        .sort((a, b) =>
+          `${a.path}:${a.thumb}`.localeCompare(`${b.path}:${b.thumb}`),
+        ),
+    ).toEqual(
+      expected.sort((a, b) =>
+        `${a.path}:${a.thumb}`.localeCompare(`${b.path}:${b.thumb}`),
+      ),
+    );
+    for (const row of rows) {
+      expect(Buffer.from(row.content).toString()).toBe("cover-bytes");
+      expect(row.contentType).toBe("image/jpeg");
+    }
+
+    // And the tile route serves the copy from the snapshot tier at once.
+    const tile = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-a?thumb=1`),
+      routeParams(frame.id, "runtime-a"),
+    );
+    expect(tile.status).toBe(200);
+    expect(tile.headers.get("cache-control")).toBe("private, max-age=60");
+    expect(Buffer.from(await tile.arrayBuffer()).toString()).toBe(
+      "cover-bytes",
+    );
+  });
+
+  it("never overwrites an existing device snapshot", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const scene = await createStoreScene(accountId, {
+      name: "Rendered before",
+      previewImage: Buffer.from("cover-bytes"),
+      previewImageType: "image/jpeg",
+      runtimeSceneIds: ["runtime-snapped"],
+    });
+    await db.insert(frameAssetFiles).values({
+      content: Buffer.from("device-render"),
+      contentType: "image/png",
+      frameId: frame.id,
+      path: sceneSnapshotAssetPath("runtime-snapped"),
+      sizeBytes: "device-render".length,
+      thumb: false,
+    });
+
+    const response = await postScenes(frame.id, [scene.id]);
+    expect(response.status).toBe(200);
+
+    const rows = await assetRows(frame.id);
+    const full = rows.find((row) => !row.thumb);
+    const thumb = rows.find((row) => row.thumb);
+    // The device's render survives; only the missing thumb slot is filled.
+    expect(Buffer.from(full!.content).toString()).toBe("device-render");
+    expect(Buffer.from(thumb!.content).toString()).toBe("cover-bytes");
+  });
+
+  it("copies nothing for a scene with no cover, without failing the push", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const scene = await createStoreScene(accountId, {
+      name: "Coverless",
+      runtimeSceneIds: ["runtime-bare-install"],
+    });
+
+    const response = await postScenes(frame.id, [scene.id]);
+    expect(response.status).toBe(200);
+    expect(await assetRows(frame.id)).toEqual([]);
   });
 });

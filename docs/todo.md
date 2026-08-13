@@ -42,14 +42,16 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 
 ## Cloud-managed frames
 
-- **A scene added from a template shows a blank tile.** Two independent
-  causes, both reproduced: `/api/frames/{id}/scene_images/{sceneId}` resolves
-  the runtime scene id through `frame_scene_assignments`, so a scene not yet
-  saved/pushed maps to nothing and 404s; and separately the template's own
-  stored `preview_image` is transparent, so even a successful lookup serves
-  nothing visible. Needs a decision: serve the store cover for unassigned
-  scenes, render a placeholder, or fix whatever writes transparent previews
-  at publish time.
+- **Transparent `preview_image` at publish time.** The surviving half of the
+  blank-tile bug: the decided fix (explicitly copy the store cover into
+  `frame_asset_files` when `POST /frames/{id}/scenes` installs an assignment
+  set — the backend's `assignSceneImages` pattern, now on the cloud too)
+  gives every installed scene's tile bytes to show, but a copy of a fully
+  transparent cover is still invisible. The auto-captured preview appears to
+  be grabbed from the wasm live-preview canvas before the first render
+  completes; composite over an opaque background at capture, reject
+  fully-transparent uploads at publish, and backfill or gallery-fall-through
+  the existing rows.
 - **Cloud "not on the frame yet" is all-or-nothing.** #323 reads the
   assigned_checksum/scenes_checksum pair, which covers the whole assigned set
   and cannot say WHICH scene differs. Per-scene granularity needs the cloud to

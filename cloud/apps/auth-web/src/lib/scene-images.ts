@@ -19,7 +19,12 @@ import {
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
-import { extractScenesJson, type FramesDatabase } from "./frames";
+import { cachedAssetFile, sceneSnapshotAssetPath } from "./frame-asset-cache";
+import {
+  extractScenesJson,
+  storeFrameAssetFile,
+  type FramesDatabase,
+} from "./frames";
 
 // (storeSceneId, version) → runtime scene ids in that version's scenes.json.
 // Bounded so a pathological fleet cannot grow it without limit; eviction is
@@ -195,6 +200,57 @@ export async function storeSceneCoverImage(
     };
   }
   return undefined;
+}
+
+// The explicit install-time cover copy (docs/todo.md, "a scene added from a
+// template shows a blank tile"): when an assignment set is pushed, each
+// installed scene's cover is written into frame_asset_files under the exact
+// paths the device's own snapshots will occupy — one row per runtime scene
+// id and thumb variant. The tile route then has bytes to serve from the
+// first request, and the first real snapshot replaces the cover through the
+// same upsert the asset_get chunk stream uses. Rows that already exist are
+// left alone: a device snapshot must never lose to a cover.
+export async function copySceneCoversIntoFrameCache(
+  db: Parameters<typeof storeFrameAssetFile>[0],
+  frameId: string,
+  assignments: readonly {
+    sceneId: string;
+    sceneVersion: number | null;
+  }[],
+): Promise<void> {
+  for (const assignment of assignments) {
+    const cover = await storeSceneCoverImage(db, assignment.sceneId);
+    if (!cover) {
+      continue;
+    }
+    const version = await pinnedVersionNumber(
+      db,
+      assignment.sceneId,
+      assignment.sceneVersion,
+    );
+    if (version === undefined) {
+      continue;
+    }
+    const runtimeIds = await runtimeIdsForVersion(
+      db,
+      assignment.sceneId,
+      version,
+    );
+    for (const runtimeId of runtimeIds) {
+      const path = sceneSnapshotAssetPath(runtimeId);
+      for (const thumb of [false, true]) {
+        if (await cachedAssetFile(db, frameId, path, thumb)) {
+          continue;
+        }
+        await storeFrameAssetFile(db, frameId, {
+          content: cover.content,
+          contentType: cover.contentType,
+          path,
+          thumb,
+        });
+      }
+    }
+  }
 }
 
 export function resetSceneImageCacheForTests() {
