@@ -5,8 +5,11 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowPathIcon, MagnifyingGlassPlusIcon } from '@heroicons/react/24/outline'
 import { framesModel } from '../models/framesModel'
 import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
+import { wasmPreviewModel } from '../models/wasmPreviewModel'
 import { urls } from '../urls'
-import type { FrameId } from '../types'
+import { isCloudMode } from '../utils/cloudMode'
+import { wasmPreviewCacheKey } from '../utils/wasmScenePreview'
+import type { FrameId, FrameType } from '../types'
 
 const placeholderRefreshAttempts = new Set<string>()
 
@@ -53,6 +56,77 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   imageClassName?: string
   hideWhileLoading?: boolean
   loadFullSizeAfterThumb?: boolean
+  /** Cloud fleet only: when the image fails to load (no device snapshot, no
+   * store cover), render this scene in the browser via the frameos-wasm
+   * worker and show the captured bitmap instead of an empty box. */
+  wasmFallback?: { sceneId: string } | undefined
+}
+
+/**
+ * Browser-rendered stand-in for a tile with no device-sourced image: asks
+ * wasmPreviewModel for a one-shot render of the scene once the tile is
+ * actually visible (a big fleet page must not render everything on load).
+ */
+function WasmScenePreviewFallback({
+  frame,
+  sceneId,
+  imageClassName,
+  imageStyle,
+}: {
+  frame: FrameType
+  sceneId: string
+  imageClassName: string
+  imageStyle: React.CSSProperties
+}): JSX.Element {
+  const { scenePreviews } = useValues(wasmPreviewModel)
+  const { requestScenePreview } = useActions(wasmPreviewModel)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [visible, setVisible] = useState(false)
+  const cacheKey = wasmPreviewCacheKey(frame, sceneId)
+  const dataUrl = scenePreviews[cacheKey]
+  // A null entry is a tombstone (failed render): show nothing, don't retry.
+  const needsRender = !(cacheKey in scenePreviews)
+
+  useEffect(() => {
+    const node = containerRef.current
+    if (!node) {
+      return
+    }
+    if (typeof IntersectionObserver === 'undefined') {
+      setVisible(true)
+      return
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setVisible(true)
+      }
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (visible && needsRender) {
+      requestScenePreview(frame.id, sceneId)
+    }
+  }, [visible, needsRender, cacheKey])
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative flex h-full max-h-full w-full max-w-full items-center justify-center"
+      title="Browser-rendered preview (device image unavailable)"
+    >
+      {typeof dataUrl === 'string' ? (
+        <>
+          <img className={imageClassName} src={dataUrl} style={imageStyle} alt="" />
+          <span className="pointer-events-none absolute bottom-1 right-1 z-10 rounded bg-white/75 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-500 shadow-sm backdrop-blur-sm">
+            Preview
+          </span>
+        </>
+      ) : null}
+    </div>
+  )
 }
 
 export function FrameImageRefreshButton({
@@ -127,6 +201,7 @@ export function FrameImage({
   imageClassName,
   hideWhileLoading = false,
   loadFullSizeAfterThumb = false,
+  wasmFallback,
   ...props
 }: FrameImageProps) {
   const { frames } = useValues(framesModel)
@@ -153,6 +228,10 @@ export function FrameImage({
   const shouldLoadFullSize = shouldProgressivelyLoadFullSize && fullSizeLoadUrl === imageUrl
   const fullSizeLoaded = shouldProgressivelyLoadFullSize && fullSizeLoadedUrl === imageUrl
   const baseImageFailed = !!imageSrc && failedImageUrl === imageSrc
+  // Device-sourced images always win: the wasm render only fills the empty
+  // box left when the image endpoint has nothing to serve. Cloud mode only.
+  const wasmFallbackSceneId = wasmFallback?.sceneId
+  const showWasmFallback = Boolean(wasmFallbackSceneId && baseImageFailed && frame && isCloudMode())
 
   // Determine if we should show the fade-in-out or loading cursor
   const visiblyLoading = !sceneId && (isLoading || frame?.status !== 'ready') && frame?.interval > 5
@@ -272,6 +351,14 @@ export function FrameImage({
               }}
               style={imageStyle}
               alt=""
+            />
+          ) : null}
+          {showWasmFallback && wasmFallbackSceneId ? (
+            <WasmScenePreviewFallback
+              frame={frame}
+              sceneId={wasmFallbackSceneId}
+              imageClassName={baseImageClassName}
+              imageStyle={imageStyle}
             />
           ) : null}
           {shouldProgressivelyLoadFullSize && shouldLoadFullSize ? (
