@@ -143,7 +143,10 @@ export function frameStatusDescription(frame: FrameType): string {
   }
 
   const status = frameStatusLabel(frame)
-  const relativeTime = formatFrameRelativeTime(frame.last_log_at)
+  // last_log_at is a backend column; the cloud's frameSummary never serves
+  // it, but the hub bumps last_seen_at on every log, metric and state the
+  // device sends — without the fallback every cloud frame read "no logs yet".
+  const relativeTime = formatFrameRelativeTime(frame.last_log_at ?? frame.last_seen_at)
   const logDescription = relativeTime ? `last seen ${relativeTime}` : 'no logs yet'
 
   return `${status} - ${logDescription}`

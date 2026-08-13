@@ -111,7 +111,9 @@ function sidebarFrameActivityDescription(frame: FrameType): string {
     return 'waiting for first deploy'
   }
 
-  const relativeTime = formatFrameRelativeTime(frame.last_log_at)
+  // Same fallback as frameStatusDescription: cloud frames have no
+  // last_log_at, only the hub-maintained last_seen_at.
+  const relativeTime = formatFrameRelativeTime(frame.last_log_at ?? frame.last_seen_at)
   if (!relativeTime) {
     return 'no logs yet'
   }
