@@ -54,10 +54,6 @@ function cloudAppCompatibility(
     return unsupported('Requires Linux packages, which the cloud cannot install on managed frames.')
   }
 
-  if (app?.category === 'legacy') {
-    return unsupported('Legacy apps are not available in the interpreted runtime.')
-  }
-
   return supported
 }
 
@@ -102,10 +98,6 @@ export function appCompatibilityForFrame(
 
   if (embeddedUnavailableApps[keyword]) {
     return unsupported(embeddedUnavailableApps[keyword])
-  }
-
-  if (app?.category === 'legacy') {
-    return unsupported('Legacy apps are not available in the ESP32 runtime.')
   }
 
   if (sources && hasCompiledAppSource(sources) && !hasJavaScriptAppSource(sources)) {

@@ -14,10 +14,7 @@ import std/[json, strutils]
 #
 # Derived by grepping src/apps for child-process spawning
 # (`utils/process`, `hal/processes`, `runProcess`, `osproc`): those two files
-# are the complete set on this branch. Legacy apps that call std/httpclient
-# directly (apps/legacy/openai*) are not listed because they are not in the
-# compiled registry (src/apps/apps.nim) and therefore cannot be reached by any
-# keyword at all.
+# are the complete set on this branch.
 const CLOUD_REFUSED_APP_KEYWORDS* = [
   # apt-get install (privileged!) plus a headless Chromium pointed at a
   # configured URL: a package installer and an SSRF pivot in one node.

@@ -164,7 +164,7 @@ function defaultAppFromOptions(frame: FrameType | null, appOptions: AppNodeOptio
 
 function systemAppOptions(apps: Record<string, AppConfig>): SystemAppOption[] {
   return Object.entries(apps)
-    .filter(([keyword, app]) => !isRepoAppKeyword(keyword) && app.category !== 'legacy')
+    .filter(([keyword]) => !isRepoAppKeyword(keyword))
     .map(([keyword, app]) => ({
       keyword,
       label: app.name || keyword,

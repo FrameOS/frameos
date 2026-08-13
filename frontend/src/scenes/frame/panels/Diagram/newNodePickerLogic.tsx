@@ -95,7 +95,7 @@ function getAppsForType(apps: Record<string, AppConfig>, returnType: string = 'i
 }
 
 function isRunnableApp(app: AppConfig): boolean {
-  return app.category !== 'legacy' && (!app.output || app.output.length === 0 || app.category === 'render')
+  return !app.output || app.output.length === 0 || app.category === 'render'
 }
 
 function addJavaScriptCatalogAppOptions(
@@ -327,7 +327,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
             })
           }
           for (const [keyword, app] of Object.entries(effectiveApps)) {
-            if (isJavaScriptCatalogApp(keyword) || app.category === 'legacy') {
+            if (isJavaScriptCatalogApp(keyword)) {
               continue
             }
             const compatibility = appCompatibilityForFrame(mode, keyword, app, undefined, frameForm)
@@ -524,7 +524,6 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           event: [],
           state: [],
           scene: [],
-          legacy: [],
           other: [],
         }
         for (const option of allNewNodeOptions) {
@@ -545,7 +544,6 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
           ...priority['event'],
           ...priority['state'],
           ...priority['scene'],
-          ...priority['legacy'],
           ...priority['other'],
         ]
       },

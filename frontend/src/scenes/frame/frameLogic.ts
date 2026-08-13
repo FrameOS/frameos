@@ -1216,20 +1216,10 @@ function cleanBackgroundColor(color: string): string {
   return '#000000'
 }
 
+// Renames for apps in scenes that predate the current keywords. Nodes using
+// the removed legacy/* apps are rewritten server-side by the alembic
+// migration and app/utils/legacy_app_migration.py.
 const legacyAppMapping: Record<string, string> = {
-  // image data apps. todo: make migration to get rid of them
-  downloadImage: 'legacy/downloadImage',
-  unsplash: 'legacy/unsplash',
-  frameOSGallery: 'legacy/frameOSGallery',
-  openai: 'legacy/openai',
-  resize: 'legacy/resize',
-  rotate: 'legacy/rotate',
-  localImage: 'legacy/localImage',
-  qr: 'legacy/qr',
-  haSensor: 'legacy/haSensor',
-  openaiText: 'legacy/openaiText',
-  clock: 'legacy/clock',
-
   // render app
   color: 'render/color',
   gradient: 'render/gradient',

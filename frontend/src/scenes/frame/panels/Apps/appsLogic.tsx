@@ -48,8 +48,7 @@ export const appsLogic = kea<appsLogicType>([
       (search, allApps): Record<string, AppConfig> => {
         return Object.fromEntries(
           Object.entries(allApps).filter(
-            ([_, app]) =>
-              app.category !== 'legacy' && (searchInText(search, app.name) || searchInText(search, app.description))
+            ([_, app]) => searchInText(search, app.name) || searchInText(search, app.description)
           )
         )
       },

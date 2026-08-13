@@ -78,10 +78,6 @@ const appSettings: Record<string, string[]> = {
   "data/openaiImage": ["openAI"],
   "data/openaiText": ["openAI"],
   "data/unsplash": ["unsplash"],
-  "legacy/frameOSGallery": ["frameOS"],
-  "legacy/haSensor": ["homeAssistant"],
-  "legacy/openai": ["openAI"],
-  "legacy/openaiText": ["openAI"],
 };
 
 type AppSources = Record<string, string>;
