@@ -489,6 +489,7 @@ export function Esp32CloudFlasher({
   // the hardware/panel choice, so it wins over a preset's wiring.
   const [pinsSpec, setPinsSpec] = useState('')
   const busyRef = useRef(false)
+  const logRef = useRef<HTMLPreElement | null>(null)
   // The frames that already existed when this flash started (snapshotted just
   // before the claim token is minted, so the enrolled frame can never be in
   // it). null = no usable snapshot; then the panel does not guess.
@@ -537,6 +538,22 @@ export function Esp32CloudFlasher({
   function log(line: string): void {
     setLines((previous) => [...previous.slice(-200), line])
   }
+
+  // Follow the log while a flash runs: the interesting lines (enrollment,
+  // reboot wait, the frame handoff) land after the box has filled its
+  // max-height, so without this they appear below the fold. Stick to the
+  // bottom only when the view is already there — a user who scrolled up to
+  // re-read an earlier line must not be yanked back down by the next one.
+  useEffect(() => {
+    const el = logRef.current
+    if (!el) {
+      return
+    }
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (distanceFromBottom < 80) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [lines])
 
   // Enrollment codes are plumbing, not UX: mint a fresh single-use code per
   // flash, provision it over serial, never show it to the user. In
@@ -1006,6 +1023,7 @@ export function Esp32CloudFlasher({
       ) : null}
       {lines.length > 0 ? (
         <pre
+          ref={logRef}
           className="frameos-inset max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-[11px] leading-relaxed"
           role="status"
         >
