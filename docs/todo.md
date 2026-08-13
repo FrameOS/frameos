@@ -18,24 +18,20 @@ only the open work is listed here.
 Deliberately not gaps: terminal / ping / debug panels are backend-only
 because the cloud protocol has no shell verbs — structural, nothing to close.
 
-- **Service settings: verify the Nim client on hardware** — the Linux/Pi
-  client is unit-tested and build-verified only, never run against a real
-  provider. (The ESP32 client has been.)
-- Cloud-managed ESP32-C3 frames still have no render source (wasm harness
-  is the building block; C3 boards stay out of the cloud flasher until then).
+- **Service settings + cloud OTA: verify the Nim client on hardware** — the
+  Linux/Pi client is unit-tested and build-verified only, never run against
+  a real provider. (The ESP32 client has been.) The cloud OTA verb wiring
+  (2026-08-13) is in the same boat: code-complete, unit-tested, no hardware
+  pass. Verifying a full buildroot SD-card cloud install + update covers
+  both.
 
 ## Cloud-managed frames
 
-- **Account hardening** — passkeys/TOTP 2FA, re-authentication for
-  sensitive actions (revoking frames, bulk assignment changes, scope
+- **Account hardening** (next up) — passkeys/TOTP 2FA, re-authentication
+  for sensitive actions (revoking frames, bulk assignment changes, scope
   grants), per-frame audit trail surfaced in the UI.
 - **Panel-displayed link code** — show the enrollment code/QR on the e-ink
   panel itself (proof of possession), not just the portal/admin page.
-- **Buildroot cloud OTA** — the Nim client answers
-  `notify_update_available` with an audit log and nothing else, while the
-  signed upgrade flow it should trigger already exists on-device
-  (`frameos/src/frameos/upgrade.nim`, `POST /api/upgrade`). Wire the verb
-  to that flow so cloud-managed Pi frames can update like the esp32s do.
 - **Backend↔cloud promotion/demotion ceremony** — the explicit local
   action that moves a frame between control planes without a reset (exact
   UX still an open design question).
@@ -50,40 +46,33 @@ work. The photopainter-todo nice-to-haves (parallel builds, portal polish,
 mDNS, log persistence, artifact GC, deep sleep) and the optional spill
 follow-ups moved to the parking lot.
 
-- **`compileToBytecode` serialises the wrong object.** It asked for
-  `JS_EVAL_FLAG_COMPILE_ONLY`, which burrito.nim declared one bit too high —
-  that value is `JS_EVAL_FLAG_BACKTRACE_BARRIER` in the bundled quickjs.h — so
-  the code ran and whatever came back (a value, or a Promise for a module) was
-  written out instead of bytecode. #322 fixed the constant; the function
-  itself is still unused and untested. Fix it with a test or delete it: it is
-  the prerequisite for ever shipping QuickJS bytecode instead of source.
-
 ### Memory
 
 The Weather scene renders on an 8 MB board now (#318, #320, #322). The
 resident baseline went 2.72 MB → 1.05 MB, a render starts with 7.1 MB
-instead of 5.5 MB, and steady-state renders no longer touch the emergency
-reserve. What is left:
+instead of 5.5 MB, and renders no longer touch the emergency reserve.
+Measured on the bench 7.3" PhotoPainter (v2026.8.19 + `-d:memProbe`,
+2026-08-14): the first render after a boot no longer dips into the reserve
+either — the probed low-water across scene load, both weatherPanel
+transpiles and the SVG rasters was **4.17 MB free PSRAM with the 1 MB
+reserve still armed** (idle-with-scene 7.14 MB, post-render steady
+6.2 MB). That closes the two open measurement items from this section: the
+first-render dip is gone, and the reserve stays at 1 MB — it is not the
+binding constraint on anything measured, and it remains the
+OOM-containment backbone for pathological decodes. What is left:
 
-- **The first render after a boot still dips into the 1 MB emergency
-  reserve** (`heap exhausted: released 1048576 byte emergency reserve`). It
-  succeeds, but that render also pays the scene parse and the app transpile,
-  so it is the one with no headroom to spare.
-- **Re-size the emergency reserve.** It is now the entire resident baseline:
-  everything else at boot — wifi, scene storage, the console, HTTP, OTA —
-  costs about 2 KB of PSRAM between them. 1 MB was chosen when a render could
-  exhaust the pool; peak is much lower now, so measure whether it still needs
-  to be that large.
 - **Surface memory over a channel that survives the link being down** — the
   workspace advisory reads device metrics, so a frame too low on internal RAM
   to connect reports nothing and cannot be flagged. Today it is preventive
   only; a frame already over the edge is visible over USB and nowhere else.
 
 How to measure, before proposing a fix: `-d:memProbe` logs PSRAM free and a
-millisecond timestamp before every interpreter node, and
-`-DFRAMEOS_BOOTMEM=1` does the same for each boot step. A host-side peak
-model once predicted 3.7 MB where the device wanted ~4.5 MB, and separately
-put the source map at 45% of a transpile when it was 5% — reconcile any host
+millisecond timestamp before every interpreter node
+(`FRAMEOS_EXTRA_NIM_FLAGS="-d:memProbe" ./build_nim.sh`), and
+`FRAMEOS_BOOTMEM=1` in the environment at configure time compiles in the
+same for each boot step (`main/CMakeLists.txt`). A host-side peak model
+once predicted 3.7 MB where the device wanted ~4.5 MB, and separately put
+the source map at 45% of a transpile when it was 5% — reconcile any host
 measurement against a device run before trusting it.
 
 ## Cloud services (scope table in CLOUD-TODO.md)
@@ -156,6 +145,14 @@ measurement against a device run before trusting it.
 
 ## Ideas parking lot (unscheduled)
 
+- **Thin-client frames on the cloud (ESP32-C3, embedded Pi/Pico).** Parked
+  2026-08-13 pending a product decision: serving these boards means the
+  cloud renders every frame for them, i.e. offering free cloud rendering
+  forever to everyone — decide if we want that before building. Technical
+  notes: C3 has no on-device render source (the wasm harness is the
+  building block); C3 boards stay out of the cloud flasher until then, and
+  the pico/Inky streaming thin client would depend on a render host the
+  same way.
 - **quickts: parse TypeScript straight into QuickJS.** Teach the engine to
   strip/ignore TS syntax while parsing, so apps ship `.ts` source and the
   separate token-transpiler pass — and the transpiled copy every runtime

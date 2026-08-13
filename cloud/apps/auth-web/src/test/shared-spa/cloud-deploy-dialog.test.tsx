@@ -162,14 +162,16 @@ describe("the deploy dialog in cloud mode", () => {
     }
   });
 
-  it("leaves a cloud Pi frame the scene push without the esp32 surfaces", () => {
+  it("leaves a cloud Pi frame the scene push and the FrameOS update, without the esp32 surfaces", () => {
     render(<FrameDeployPlanDrawer frame={cloudFrame("pi-zero2w")} />);
 
     expect(screen.getByRole("button", { name: /Push scenes & settings/ })).toBeTruthy();
-    // USB provisioning, the firmware nudge and the hardware panel are
-    // esp32-profile surfaces: a cloud Pi is updated through the buildroot
-    // release flow, not a signed firmware image, and it has no serial console
-    // to provision over.
+    // The same notify_update_available nudge the esp32 gets, with Pi wording:
+    // the device runs its own signed release upgrade (frameos/upgrade.nim).
+    expect(screen.getByRole("button", { name: /Update FrameOS/ })).toBeTruthy();
+    // USB provisioning and the hardware panel stay esp32-profile surfaces: a
+    // cloud Pi has no serial console to provision over and no enrollment
+    // hardware report to render.
     expect(screen.queryByRole("button", { name: /Over the air/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Over USB/ })).toBeNull();
     expect(screen.queryByText("Wi-Fi & device status")).toBeNull();

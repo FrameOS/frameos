@@ -188,6 +188,11 @@ type
     ## schedule (see pullServiceSettings), and a failed fetch must not look
     ## like a refused verb.
     refreshServiceSettingsFn*: proc() {.gcsafe.}
+    ## Accepts a `notify_update_available` nudge. Acks on ACCEPTANCE, like the
+    ## service-settings refresh: the upgrade itself runs detached and reports
+    ## through the upgrade status file and shipped logs, never through the
+    ## ack. Must be idempotent — hub delivery is at-least-once.
+    requestUpgradeFn*: proc() {.gcsafe.}
     rebootFn*: proc() {.gcsafe.}
     auditFn*: proc(payload: JsonNode) {.gcsafe.}
 
@@ -369,6 +374,24 @@ proc defaultReboot() {.gcsafe.} =
     let command = "(sleep 2; systemctl reboot || reboot) >/dev/null 2>&1 &"
     discard runShellCapture(privilegedCommand("sh -c " & shellQuote(command)), timeoutMs = 10_000)
 
+proc defaultRequestUpgrade() {.gcsafe.} =
+  ## The `notify_update_available` implementation on the full/Pi profile:
+  ## run the device's own signed upgrade flow, detached, exactly as the local
+  ## admin's POST /api/upgrade does (frameos/upgrade.nim). The provider
+  ## supplied no URL and none would be used — scheduleFrameOSUpgrade fetches
+  ## the configured release archive and verifies the minisign signature
+  ## itself. Delivery is at-least-once, so a repeat while one is in flight is
+  ## a logged no-op, and an already-current install resolves to `up_to_date`.
+  {.gcsafe.}:
+    if frameOSUpgradeInFlight():
+      log(%*{"event": "cloud:upgrade", "status": "skipped", "detail": "already_in_flight"})
+      return
+    try:
+      discard scheduleFrameOSUpgrade()
+      log(%*{"event": "cloud:upgrade", "status": "scheduled"})
+    except CatchableError as error:
+      log(%*{"event": "cloud:upgrade", "status": "error", "detail": error.msg})
+
 proc hiddenAssetPath(relPath: string): bool =
   ## Dotfiles and dot-directories (".thumbs" above all) are local plumbing the
   ## admin panel does not list either — keep them off the wire.
@@ -505,6 +528,8 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
             AssetReadResult(error: "no_image"),
       refreshServiceSettingsFn: proc() {.gcsafe.} =
         requestServiceSettingsPull(),
+      requestUpgradeFn: proc() {.gcsafe.} =
+        defaultRequestUpgrade(),
       rebootFn: proc() {.gcsafe.} =
         defaultReboot(),
       auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -996,12 +1021,17 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = CloudVerbReply(ack: ackOk(id))
     discard ctx.sendEventFn("restart", %*{})
   of "notify_update_available":
-    # Advisory only: the device fetches release metadata from its own
-    # configured archive and verifies signatures itself. The payload carries
-    # no URLs by design, and nothing here would fetch one if it did.
+    # The provider supplies no URLs and no binaries — this nudges the device
+    # to run its own signed upgrade flow (frameos/upgrade.nim), which fetches
+    # release metadata from its configured archive and verifies signatures
+    # itself; nothing here would fetch a URL if the payload smuggled one in.
+    # The ack means the nudge was accepted, not that an upgrade happened:
+    # requestUpgradeFn refuses repeats while one is in flight and resolves to
+    # up_to_date on a current install, so at-least-once redelivery is safe.
     ctx.audit("notify_update_available", true)
     log(%*{"event": "cloud:updateAvailable", "version": msg{"version"}.getStr("")})
     result = CloudVerbReply(ack: ackOk(id))
+    ctx.requestUpgradeFn()
   else:
     let label = if verb.len > 0: verb else: "(missing type)"
     ctx.audit(label, false, "unknown_verb")

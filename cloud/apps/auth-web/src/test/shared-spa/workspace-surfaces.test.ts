@@ -308,12 +308,16 @@ describe("the esp32 cloud device profile", () => {
     expect(frameCapabilities(piFrame, "cloud")).toEqual(fullSet);
   });
 
-  it("offers the Update firmware action on the cloud alone, enabled for esp32", () => {
+  it("offers the Update firmware action on the cloud alone, enabled for esp32 and pi", () => {
     // The menu entry enqueues notify_update_available; the backend and the
     // on-device panel have their own firmware flows (deploy drawer / local
-    // deploy), so the action is cloud-only.
+    // deploy), so the action is cloud-only. Both cloud profiles take it:
+    // the esp32 swaps its signed OTA image, the Pi runs its own signed
+    // release upgrade (frameos/upgrade.nim).
     expect(frameMenuActionIsAllowed("cloud", "updateFirmware", esp32Frame)).toBe(true);
     expect(frameMenuActionDisabledReason("cloud", "updateFirmware", esp32Frame)).toBeNull();
+    expect(frameMenuActionIsAllowed("cloud", "updateFirmware", piFrame)).toBe(true);
+    expect(frameMenuActionDisabledReason("cloud", "updateFirmware", piFrame)).toBeNull();
     expect(frameMenuActionIsAllowed("backend", "updateFirmware")).toBe(false);
     expect(frameMenuActionIsAllowed("frameAdmin", "updateFirmware")).toBe(false);
   });
