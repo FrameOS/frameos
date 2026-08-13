@@ -18,11 +18,6 @@ only the open work is listed here.
 Deliberately not gaps: terminal / ping / debug panels are backend-only
 because the cloud protocol has no shell verbs — structural, nothing to close.
 
-- **Flashing convergence** — the backend should adopt the same
-  browser-centric flash system the cloud uses (Esp32CloudFlasher /
-  EmbeddedWebFlasher). The backend may still build a frame-specific binary
-  server-side when a custom source build is needed; the browser flasher then
-  flashes that artifact instead of a release download.
 - **Service settings: verify the Nim client on hardware** — the Linux/Pi
   client is unit-tested and build-verified only, never run against a real
   provider. (The ESP32 client has been.)
@@ -34,24 +29,11 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   `ota_image_not_published`) and the first to report a real `frameos_version`
   from an ESP32. Both want checking, not assuming, and only a real release
   tests it. Meanwhile the USB updater moves a board on.
-- **`FrameConfig.scalingMode` is hardcoded to `"cover"` on embedded** — a Pi
-  reads it from frame.json; an ESP32 cannot be configured at all. Since #321
-  it no longer decides image placement (the consuming node's own placement
-  does), but it still wants the config path `rotate` already has: NVS field,
-  console `set`, settings sync, backend/cloud plumbing.
-
 ## Cloud-managed frames
 
-- **Transparent `preview_image` at publish time.** The surviving half of the
-  blank-tile bug: the decided fix (explicitly copy the store cover into
-  `frame_asset_files` when `POST /frames/{id}/scenes` installs an assignment
-  set — the backend's `assignSceneImages` pattern, now on the cloud too)
-  gives every installed scene's tile bytes to show, but a copy of a fully
-  transparent cover is still invisible. The auto-captured preview appears to
-  be grabbed from the wasm live-preview canvas before the first render
-  completes; composite over an opaque background at capture, reject
-  fully-transparent uploads at publish, and backfill or gallery-fall-through
-  the existing rows.
+- **Run `scene:scrub-transparent-previews --apply` on prod** once the
+  transparent-preview fix deploys (dry-run first; `scene:sync-preview` per
+  affected slug afterwards rebuilds the zips).
 - **Account hardening** — passkeys/TOTP 2FA, re-authentication for
   sensitive actions (revoking frames, bulk assignment changes, scope
   grants), per-frame audit trail surfaced in the UI.
