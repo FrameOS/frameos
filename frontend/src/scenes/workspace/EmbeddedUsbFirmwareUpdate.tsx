@@ -33,6 +33,7 @@ import {
   parseEsp32PartitionTable,
   type FirmwareUpdateWritePlan,
 } from './embeddedFlashImage'
+import { loadEsptool } from './esptoolLoader'
 import { workspaceLogic } from './workspaceLogic'
 
 // USB firmware update for a frame that is ALREADY enrolled — the counterpart
@@ -57,6 +58,19 @@ const releasePlatformByHardware: Record<string, string> = {
   'esp32-c3': 'esp32-c3-generic',
 }
 
+/** The platform string this frame is known by: what the device reported at
+ * enrollment (cloud frames) or the configured embedded platform (backend
+ * frames, which have no device-reported hardware). */
+function frameHardwarePlatform(frame: FrameType): string {
+  return (frame.hardware?.platform ?? frame.embedded?.platform ?? '').toLowerCase()
+}
+
+/** Whether a published release asset is known for this frame's platform —
+ * the gate for offering the release updater on self-hosted backend frames. */
+export function hasReleaseFirmwarePlatform(frame: FrameType): boolean {
+  return frameHardwarePlatform(frame) in releasePlatformByHardware
+}
+
 export interface ReleaseFirmwareAsset {
   name: string
   platform: string
@@ -68,10 +82,9 @@ export interface ReleaseFirmwareListing {
   release?: string
 }
 
-/** Which published asset fits the hardware the device reported at enrollment. */
+/** Which published asset fits this frame's hardware. */
 export function releaseFirmwarePlatform(frame: FrameType): string {
-  const platform = (frame.hardware?.platform ?? '').toLowerCase()
-  return releasePlatformByHardware[platform] ?? 'esp32-s3-generic'
+  return releasePlatformByHardware[frameHardwarePlatform(frame)] ?? 'esp32-s3-generic'
 }
 
 /** The published release and its assets — also how the deploy drawer learns
@@ -192,7 +205,7 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
       const plan = firmwareUpdateWritePlan(firmware.bytes)
 
       // Loaded on demand: esptool-js adds ~380KB we only need when flashing.
-      const { ESPLoader, Transport } = await import('esptool-js')
+      const { ESPLoader, Transport } = await loadEsptool()
       transport = new Transport(port, false)
       traceRecorder = recordTransportTrace(frame.id, transport)
       flashTerminal = createUsbLogTerminal(frame.id)

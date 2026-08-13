@@ -1,4 +1,4 @@
-import { strToU8, zipSync } from "fflate";
+import { strToU8, zipSync, zlibSync } from "fflate";
 import { eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -149,11 +149,13 @@ function bearer(token: string) {
 function templateZip({
   frameosVersion,
   image = true,
+  imageBytes,
   name = "Sunrise Clock",
   scenes = [{ id: "scene-1", nodes: [] }],
 }: {
   frameosVersion?: string;
   image?: boolean;
+  imageBytes?: Buffer;
   name?: string;
   scenes?: unknown[];
 } = {}) {
@@ -172,9 +174,40 @@ function templateZip({
     [`${name}/scenes.json`]: strToU8(JSON.stringify(scenes)),
   };
   if (image) {
-    files[`${name}/image.jpg`] = new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 9]);
+    files[`${name}/image.jpg`] = imageBytes
+      ? new Uint8Array(imageBytes)
+      : new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 9]);
   }
   return Buffer.from(zipSync(files));
+}
+
+// A structurally valid 8-bit RGBA PNG whose every alpha byte is zero — the
+// exact artifact the live preview produced when a screenshot was captured
+// before the first frame painted. Chunk CRCs stay zeroed: the transparency
+// detector proves via the pixel data, not the checksums.
+function transparentPng(width = 4, height = 4) {
+  const raw = new Uint8Array(height * (1 + width * 4)); // filter 0, all zero
+  const ihdr = new Uint8Array(13);
+  const ihdrView = new DataView(ihdr.buffer);
+  ihdrView.setUint32(0, width);
+  ihdrView.setUint32(4, height);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // RGBA
+  const chunk = (type: string, data: Uint8Array) => {
+    const out = new Uint8Array(12 + data.length);
+    new DataView(out.buffer).setUint32(0, data.length);
+    for (let i = 0; i < 4; i++) {
+      out[4 + i] = type.charCodeAt(i);
+    }
+    out.set(data, 8);
+    return Buffer.from(out);
+  };
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlibSync(raw)),
+    chunk("IEND", new Uint8Array(0)),
+  ]);
 }
 
 function publishBody(overrides: Record<string, unknown> = {}) {
@@ -440,6 +473,44 @@ describe("store publish and distribution", () => {
       content_base64: templateZip({ scenes: [] }).toString("base64"),
     });
     expect(emptyScenes.status).toBe(400);
+  });
+
+  it("rejects previews and gallery uploads proven fully transparent", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+
+    // Publish-time: the zip's image.jpg is a fully transparent PNG.
+    const rejected = await publish(accessToken, {
+      content_base64: templateZip({
+        imageBytes: transparentPng(),
+      }).toString("base64"),
+    });
+    expect(rejected.status).toBe(400);
+    expect((await readJson(rejected)).error).toBe(
+      "preview_image_fully_transparent",
+    );
+
+    // Gallery route: same detector on the direct image upload path.
+    const scene = (await readJson(await publish(accessToken))).scene as Record<
+      string,
+      unknown
+    >;
+    const sceneId = scene.id as string;
+    const added = await addGalleryImage(
+      request(`/api/account/scenes/${sceneId}/images`, "POST", {
+        body: { content_base64: transparentPng().toString("base64") },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(added.status).toBe(400);
+    expect((await readJson(added)).error).toBe(
+      "preview_image_fully_transparent",
+    );
+    const [galleryCount] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(storeSceneImages)
+      .where(eq(storeSceneImages.sceneId, sceneId));
+    expect(galleryCount?.count).toBe(0);
   });
 
   it("versions the ZIP preview when the lead storefront image changes", async () => {

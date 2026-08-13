@@ -58,6 +58,12 @@
 #ifndef FRAMEOS_DEFAULT_ROTATE
 #define FRAMEOS_DEFAULT_ROTATE 0
 #endif
+#ifndef FRAMEOS_DEFAULT_SCALING_MODE
+/* "cover" matches what the embedded runtime always hardcoded; the Pi's
+ * frame.json default is "contain" — divergence kept deliberately so shipping
+ * this config path does not change how existing embedded frames render. */
+#define FRAMEOS_DEFAULT_SCALING_MODE "cover"
+#endif
 #ifndef FRAMEOS_DEFAULT_INTERVAL_SEC
 #define FRAMEOS_DEFAULT_INTERVAL_SEC 300
 #endif

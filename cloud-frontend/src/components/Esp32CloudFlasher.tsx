@@ -2,6 +2,7 @@ import { ArrowRightIcon, BoltIcon, CheckCircleIcon, CpuChipIcon } from '@heroico
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
+import { watchdogResetAfterFlash } from '../../../frontend/src/scenes/workspace/esp32WatchdogReset'
 import { loadEsptool } from '../lib/esptool'
 import { fetchReleaseListing, releaseLookupErrorMessage } from '../lib/release-lookup'
 import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '../lib/remembered-wifi'
@@ -185,52 +186,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-// ESP32-S3 RTC_CNTL registers, values from esptool's targets/esp32s3.py.
-const S3_RTC_CNTL_OPTION1_REG = 0x6000812c
-const S3_RTC_CNTL_FORCE_DOWNLOAD_BOOT_MASK = 0x1
-const S3_RTC_CNTL_WDTCONFIG0_REG = 0x60008098
-const S3_RTC_CNTL_WDTCONFIG1_REG = 0x6000809c
-const S3_RTC_CNTL_WDTWPROTECT_REG = 0x600080b0
-const S3_RTC_CNTL_WDT_WKEY = 0x50d83aa1
-// WDT_EN | STG0=reset system | sys reset length | cpu reset length
-const S3_RTC_WDT_RESET_CONFIG = (0x80000000 | (5 << 28) | (1 << 8) | 2) >>> 0
-
-interface StubLoaderLike {
-  chip?: { CHIP_NAME?: string }
-  writeReg(addr: number, value: number, mask?: number): Promise<void>
-}
-
-// Reset the chip via the RTC watchdog, like `esptool --after watchdog-reset`
-// (same recipe as EmbeddedWebFlasher.tsx in the on-device admin). A DTR/RTS
+// The RTC-watchdog post-flash reset is shared with the workspace flashers:
+// frontend/src/scenes/workspace/esp32WatchdogReset.ts (this bundle already
+// deep-imports frontend/src — see main.tsx). It exists because a DTR/RTS
 // reset pulse goes through the USB-Serial/JTAG strap logic, which on some
 // boards (XIAO ESP32-S3) latches the chip back into ROM download mode — the
 // flash "succeeds" but the app never boots, so provisioning times out waiting
-// for a console that will never come (arduino-esp32#6762). The watchdog reset
-// runs over the flasher-stub protocol and never touches the strap pins.
-async function watchdogResetAfterFlash(loader: StubLoaderLike): Promise<boolean> {
-  if (loader.chip?.CHIP_NAME !== 'ESP32-S3') {
-    return false
-  }
-  try {
-    await loader.writeReg(S3_RTC_CNTL_OPTION1_REG, 0, S3_RTC_CNTL_FORCE_DOWNLOAD_BOOT_MASK)
-    await loader.writeReg(S3_RTC_CNTL_WDTWPROTECT_REG, S3_RTC_CNTL_WDT_WKEY)
-    await loader.writeReg(S3_RTC_CNTL_WDTCONFIG1_REG, 2000)
-  } catch {
-    return false
-  }
-  // The watchdog fires ~20ms after the arming write — often before the
-  // arming or lock command's response makes it back, dropping the USB
-  // device mid-exchange. Errors from here on mean the reset happened,
-  // which is the success case.
-  try {
-    await loader.writeReg(S3_RTC_CNTL_WDTCONFIG0_REG, S3_RTC_WDT_RESET_CONFIG)
-    await loader.writeReg(S3_RTC_CNTL_WDTWPROTECT_REG, 0)
-  } catch {
-    // Expected: see above.
-  }
-  await sleep(500)
-  return true
-}
+// for a console that will never come (arduino-esp32#6762).
 
 // A watchdog reset re-enumerates the USB device: the SerialPort object the
 // user picked goes permanently stale (every open() fails with NetworkError).
@@ -715,7 +677,7 @@ export function Esp32CloudFlasher({
           // boards back into ROM download mode (see watchdogResetAfterFlash).
           // Non-S3 chips get the classic reset pulse instead; esptool-js's own
           // after() never asserts RTS, so it would not reset the board at all.
-          if (!(await watchdogResetAfterFlash(loader as unknown as StubLoaderLike))) {
+          if (!(await watchdogResetAfterFlash(loader))) {
             try {
               await transport.setDTR(false)
               await transport.setRTS(true)

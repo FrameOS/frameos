@@ -25,6 +25,7 @@ import {
   storeFrameAssetFile,
   type FramesDatabase,
 } from "./frames";
+import { isProvablyFullyTransparentImage } from "./store";
 
 // (storeSceneId, version) → runtime scene ids in that version's scenes.json.
 // Bounded so a pathological fleet cannot grow it without limit; eviction is
@@ -45,6 +46,31 @@ function rememberRuntimeIds(key: string, ids: ReadonlySet<string>) {
     }
   }
   runtimeIdCache.set(key, ids);
+}
+
+// Legacy rows can hold fully transparent preview bytes (screenshots captured
+// before the live preview painted, uploaded before publish-time rejection
+// existed). The cover resolver skips them; the verdict is cached because the
+// scan inflates the PNG. Keyed by row identity + byte length so a replaced
+// image gets a fresh verdict; bounded FIFO like runtimeIdCache above.
+const transparencyVerdictCache = new Map<string, boolean>();
+const transparencyVerdictCacheMaxEntries = 512;
+
+function isTransparentCover(key: string, content: Buffer): boolean {
+  const cacheKey = `${key}:${content.length}`;
+  const cached = transparencyVerdictCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const verdict = isProvablyFullyTransparentImage(content);
+  if (transparencyVerdictCache.size >= transparencyVerdictCacheMaxEntries) {
+    const oldest = transparencyVerdictCache.keys().next().value;
+    if (oldest !== undefined) {
+      transparencyVerdictCache.delete(oldest);
+    }
+  }
+  transparencyVerdictCache.set(cacheKey, verdict);
+  return verdict;
 }
 
 function runtimeIdsFromZip(content: Buffer): ReadonlySet<string> {
@@ -178,22 +204,31 @@ export async function storeSceneCoverImage(
   if (!scene || scene.status !== "active") {
     return undefined;
   }
-  const [galleryImage] = await db
+  // At most maxImagesPerScene (10) rows; walk them in gallery order and skip
+  // provably transparent bytes so a broken lead cannot blank every tile —
+  // fall through to the next image, then to the publish-time preview.
+  const galleryImages = await db
     .select({
       content: storeSceneImages.content,
       contentType: storeSceneImages.contentType,
+      id: storeSceneImages.id,
     })
     .from(storeSceneImages)
     .where(eq(storeSceneImages.sceneId, storeSceneId))
-    .orderBy(asc(storeSceneImages.position), asc(storeSceneImages.createdAt))
-    .limit(1);
-  if (galleryImage) {
+    .orderBy(asc(storeSceneImages.position), asc(storeSceneImages.createdAt));
+  for (const galleryImage of galleryImages) {
+    if (isTransparentCover(`image:${galleryImage.id}`, galleryImage.content)) {
+      continue;
+    }
     return {
       content: galleryImage.content,
       contentType: galleryImage.contentType || "image/jpeg",
     };
   }
-  if (scene.previewImage) {
+  if (
+    scene.previewImage &&
+    !isTransparentCover(`preview:${storeSceneId}`, scene.previewImage)
+  ) {
     return {
       content: scene.previewImage,
       contentType: scene.previewImageType ?? "image/jpeg",
@@ -255,4 +290,5 @@ export async function copySceneCoversIntoFrameCache(
 
 export function resetSceneImageCacheForTests() {
   runtimeIdCache.clear();
+  transparencyVerdictCache.clear();
 }

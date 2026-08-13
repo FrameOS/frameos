@@ -263,6 +263,19 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
+    const cJSON *scaling = cJSON_GetObjectItem(frame, "scalingMode");
+    char normalized_scaling[16];
+    if (cJSON_IsString(scaling) &&
+        fos_config_normalize_scaling_mode(scaling->valuestring, normalized_scaling,
+                                          sizeof(normalized_scaling)) &&
+        strcmp(config->scaling_mode, normalized_scaling) != 0) {
+        strlcpy(config->scaling_mode, normalized_scaling, sizeof(config->scaling_mode));
+        /* Unlike rotate this is a per-decode fallback, not a canvas
+         * dimension — fos_client pushes it into the Nim runtime every pass,
+         * so no restart is needed. */
+        changed = true;
+    }
+
     return changed;
 }
 
@@ -481,9 +494,9 @@ esp_err_t fos_settings_sync(bool force)
             return ESP_FAIL;
         }
         log_settings_event("applied", s_restart_after_apply ? "restarting" : "");
-        ESP_LOGI(TAG, "settings applied from backend (interval=%lu render_mode=%d rotate=%u)",
+        ESP_LOGI(TAG, "settings applied from backend (interval=%lu render_mode=%d rotate=%u scaling=%s)",
                  (unsigned long)config->interval_sec, (int)config->render_mode,
-                 (unsigned)config->rotate);
+                 (unsigned)config->rotate, config->scaling_mode);
     }
     if (response_etag[0]) {
         strlcpy(s_etag, response_etag, sizeof(s_etag));

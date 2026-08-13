@@ -133,6 +133,15 @@ proc fos_nim_send_event_impl*(eventName: cstring, payloadJson: cstring): bool {.
 proc getFrameConfig*(): FrameConfig =
   frameConfig
 
+proc fos_nim_set_scaling_mode_impl(mode: cstring) {.exportc, cdecl.} =
+  ## Fallback fit for image consumers that do not place the image themselves
+  ## (a node's own placement wins since #321). fos_client pushes the config
+  ## value every render pass, so console/settings/cloud changes apply live —
+  ## unlike rotate, no canvas re-init is involved. The C side normalizes to
+  ## contain/cover/stretch/center before calling.
+  if not frameConfig.isNil and mode != nil and mode.len > 0:
+    frameConfig.scalingMode = $mode
+
 proc fos_nim_set_debug_impl(enabled: cint) {.exportc, cdecl.} =
   ## Turns the interpreter's per-node memory profile on and off at runtime
   ## (`set debug 1` on the console). It logs a line per node per render — the

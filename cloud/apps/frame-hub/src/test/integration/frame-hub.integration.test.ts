@@ -75,8 +75,39 @@ async function truncateAllTables() {
     .map((row) => row.tablename)
     .filter((name) => name !== "schema_migrations")
     .map((name) => `"${name}"`);
-  if (names.length > 0) {
-    await db.execute(sql.raw(`TRUNCATE TABLE ${names.join(", ")} CASCADE`));
+  if (names.length === 0) {
+    return;
+  }
+  // The hub finishes device messages with an unawaited-by-the-test
+  // broadcastFrameUpdate (SELECTs on frames/linked_clients); a test that
+  // observed its DB effect and returned can still have that tail in flight
+  // when the next test's TRUNCATE wants AccessExclusiveLock — Postgres then
+  // picks a deadlock victim (40P01). The reads retry themselves; when the
+  // TRUNCATE is the victim, retry it too instead of failing the suite.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await db.execute(sql.raw(`TRUNCATE TABLE ${names.join(", ")} CASCADE`));
+      return;
+    } catch (error) {
+      // Drizzle wraps the PostgresError (sometimes more than one level
+      // deep), so walk the cause chain instead of trusting one shape.
+      let isDeadlock = false;
+      for (
+        let cursor: unknown = error;
+        cursor && typeof cursor === "object";
+        cursor = (cursor as { cause?: unknown }).cause
+      ) {
+        const { code, message } = cursor as { code?: string; message?: string };
+        if (code === "40P01" || message?.includes("deadlock detected")) {
+          isDeadlock = true;
+          break;
+        }
+      }
+      if (!isDeadlock || attempt >= 3) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+    }
   }
 }
 

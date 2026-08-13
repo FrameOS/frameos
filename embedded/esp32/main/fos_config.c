@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "esp_log.h"
 #include "nvs.h"
@@ -30,6 +31,7 @@ static void load_defaults(void)
     strlcpy(s_config.panel, FRAMEOS_DEFAULT_PANEL, sizeof(s_config.panel));
     s_config.render_mode = (fos_render_mode_t)FRAMEOS_DEFAULT_RENDER_MODE;
     s_config.rotate = FRAMEOS_DEFAULT_ROTATE;
+    strlcpy(s_config.scaling_mode, FRAMEOS_DEFAULT_SCALING_MODE, sizeof(s_config.scaling_mode));
     s_config.interval_sec = FRAMEOS_DEFAULT_INTERVAL_SEC;
     s_config.max_http_response_bytes = FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES;
     s_config.server_send_logs = FRAMEOS_DEFAULT_SERVER_SEND_LOGS;
@@ -135,6 +137,16 @@ esp_err_t fos_config_init(void)
         (rotate_u16 == 0 || rotate_u16 == 90 || rotate_u16 == 180 || rotate_u16 == 270)) {
         s_config.rotate = rotate_u16;
     }
+    char scaling_raw[16];
+    size_t scaling_len = sizeof(scaling_raw);
+    if (nvs_get_str(nvs, "scaling", scaling_raw, &scaling_len) == ESP_OK) {
+        /* Validated on read like rotate: a corrupt or legacy value falls back
+         * to the baked default instead of poisoning every render. */
+        char normalized[16];
+        if (fos_config_normalize_scaling_mode(scaling_raw, normalized, sizeof(normalized))) {
+            strlcpy(s_config.scaling_mode, normalized, sizeof(s_config.scaling_mode));
+        }
+    }
     if (nvs_get_u32(nvs, "max_http", &u32) == ESP_OK) s_config.max_http_response_bytes = u32;
     uint8_t u8;
     if (nvs_get_u8(nvs, "render_mode", &u8) == ESP_OK) s_config.render_mode = (fos_render_mode_t)u8;
@@ -208,6 +220,7 @@ esp_err_t fos_config_save(void)
     nvs_set_u32(nvs, "frame_id", s_config.frame_id);
     nvs_set_u32(nvs, "interval", s_config.interval_sec);
     nvs_set_u16(nvs, "rotate", s_config.rotate);
+    nvs_set_str(nvs, "scaling", s_config.scaling_mode);
     nvs_set_u32(nvs, "max_http", s_config.max_http_response_bytes);
     nvs_set_u32(nvs, "spill_force", s_config.http_spill_force_bytes);
     nvs_set_u8(nvs, "render_mode", (uint8_t)s_config.render_mode);
@@ -266,6 +279,19 @@ bool fos_config_normalize_rotate(double value, uint16_t *out)
     if (rot != 0 && rot != 90 && rot != 180 && rot != 270) return false;
     if (out != NULL) *out = (uint16_t)rot;
     return true;
+}
+
+bool fos_config_normalize_scaling_mode(const char *value, char *out, size_t out_len)
+{
+    static const char *modes[] = { "contain", "cover", "stretch", "center" };
+    if (value == NULL || out == NULL || out_len == 0) return false;
+    for (size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
+        if (strcasecmp(value, modes[i]) == 0) {
+            strlcpy(out, modes[i], out_len);
+            return true;
+        }
+    }
+    return false;
 }
 
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins)

@@ -56,6 +56,7 @@ extern int fos_nim_load_scene_impl(const char *scene_json);
 extern void fos_nim_apply_service_settings_impl(const char *json);
 extern void fos_nim_set_debug_impl(int enabled);
 extern void fos_nim_set_fusion_impl(int enabled);
+extern void fos_nim_set_scaling_mode_impl(const char *mode);
 extern double fos_nim_scene_interval_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
@@ -513,6 +514,14 @@ void frameos_nim_set_debug(int enabled)
     if (!s_nim_ready) return;
     if (!nim_lock_take()) return;
     fos_nim_set_debug_impl(enabled);
+    nim_lock_give();
+}
+
+void frameos_nim_set_scaling_mode(const char *mode)
+{
+    if (!s_nim_ready || mode == NULL || mode[0] == '\0') return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_scaling_mode_impl(mode);
     nim_lock_give();
 }
 

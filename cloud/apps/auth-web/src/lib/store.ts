@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { strToU8, unzipSync, zipSync } from "fflate";
+import { strToU8, unzipSync, unzlibSync, zipSync } from "fflate";
 
 // FrameOS store constants and helpers (STORE-TODO). Payloads are the frameos
 // template interchange zip: {name}/template.json + scenes.json + image.jpg.
@@ -178,6 +178,168 @@ export function detectImageContentType(content: Buffer): string | undefined {
   return undefined;
 }
 
+// Proves, from the bytes alone, that an image is fully transparent — every
+// pixel's alpha is zero, i.e. the fingerprint of a live-preview screenshot
+// captured before the wasm runtime painted its first frame. Only PNG can be
+// proven without an image library: JPEG/GIF have no alpha channel, and WebP
+// alpha cannot be checked without a full decoder. Anything that is not a
+// provably-blank PNG is accepted (returns false); a REJECT here must be a
+// mathematical certainty, never a heuristic:
+// - color types 0/2 (grey/RGB) and palette without tRNS have no alpha.
+// - 8-bit non-interlaced grey+alpha/RGBA: inflate the IDAT stream, undo the
+//   five scanline filters (filtered deltas can encode nonzero alpha, so raw
+//   scanning is not sound), and scan every alpha byte.
+// - 16-bit, Adam7-interlaced, palette+tRNS, oversized (> 64 MB of raw pixel
+//   data), or malformed/truncated input: cannot cheaply prove, so accept.
+export function isProvablyFullyTransparentImage(content: Uint8Array): boolean {
+  const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (content.length < 8 + 25 || pngSignature.some((byte, i) => content[i] !== byte)) {
+    return false;
+  }
+
+  // Walk the chunk list: IHDR must come first; collect IDAT and note tRNS.
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  let sawIhdr = false;
+  let sawTrns = false;
+  const idatChunks: Uint8Array[] = [];
+  let idatBytes = 0;
+  let offset = 8;
+  while (offset + 8 <= content.length) {
+    const length =
+      (content[offset]! << 24) |
+      (content[offset + 1]! << 16) |
+      (content[offset + 2]! << 8) |
+      content[offset + 3]!;
+    if (length < 0 || offset + 12 + length > content.length) {
+      return false; // Truncated or absurd chunk: cannot prove anything.
+    }
+    const type = String.fromCharCode(
+      content[offset + 4]!,
+      content[offset + 5]!,
+      content[offset + 6]!,
+      content[offset + 7]!,
+    );
+    const data = content.subarray(offset + 8, offset + 8 + length);
+    if (!sawIhdr) {
+      if (type !== "IHDR" || length !== 13) {
+        return false;
+      }
+      width = (data[0]! << 24) | (data[1]! << 16) | (data[2]! << 8) | data[3]!;
+      height = (data[4]! << 24) | (data[5]! << 16) | (data[6]! << 8) | data[7]!;
+      bitDepth = data[8]!;
+      colorType = data[9]!;
+      interlace = data[12]!;
+      sawIhdr = true;
+    } else if (type === "tRNS") {
+      sawTrns = true;
+    } else if (type === "IDAT") {
+      idatChunks.push(data);
+      idatBytes += data.length;
+    } else if (type === "IEND") {
+      break;
+    }
+    offset += 12 + length;
+  }
+  if (!sawIhdr || idatChunks.length === 0 || width <= 0 || height <= 0) {
+    return false;
+  }
+
+  // No alpha anywhere in these color modes: opaque by definition. Palette
+  // WITH a tRNS chunk could in principle be all-transparent, but proving it
+  // needs a palette-aware pixel scan — out of scope, accept.
+  if (colorType === 0 || colorType === 2 || colorType === 3) {
+    return false;
+  }
+  // Only plain 8-bit grey+alpha (4) and RGBA (6) are provable here.
+  if ((colorType !== 4 && colorType !== 6) || bitDepth !== 8 || interlace !== 0 || sawTrns) {
+    return false;
+  }
+
+  const channels = colorType === 4 ? 2 : 4;
+  const stride = width * channels;
+  const rawSize = height * (1 + stride);
+  if (rawSize > 64 * 1024 * 1024) {
+    return false; // Scanning would cost too much: accept rather than prove.
+  }
+
+  let raw: Uint8Array;
+  try {
+    const compressed = new Uint8Array(idatBytes);
+    let idatOffset = 0;
+    for (const chunk of idatChunks) {
+      compressed.set(chunk, idatOffset);
+      idatOffset += chunk.length;
+    }
+    raw = unzlibSync(compressed);
+  } catch {
+    return false;
+  }
+  if (raw.length < rawSize) {
+    return false;
+  }
+
+  // Undo the per-scanline filters (spec section 9): each byte may reference
+  // the left/up/up-left reconstructed bytes, so alpha can only be judged on
+  // the reconstructed scanlines.
+  const previous = new Uint8Array(stride);
+  const line = new Uint8Array(stride);
+  let position = 0;
+  for (let y = 0; y < height; y++) {
+    const filter = raw[position]!;
+    position += 1;
+    for (let x = 0; x < stride; x++) {
+      const value = raw[position + x]!;
+      const left = x >= channels ? line[x - channels]! : 0;
+      const up = previous[x]!;
+      const upLeft = x >= channels ? previous[x - channels]! : 0;
+      let reconstructed: number;
+      switch (filter) {
+        case 0:
+          reconstructed = value;
+          break;
+        case 1:
+          reconstructed = value + left;
+          break;
+        case 2:
+          reconstructed = value + up;
+          break;
+        case 3:
+          reconstructed = value + ((left + up) >> 1);
+          break;
+        case 4:
+          reconstructed = value + paethPredictor(left, up, upLeft);
+          break;
+        default:
+          return false; // Unknown filter type: not provable.
+      }
+      line[x] = reconstructed & 0xff;
+    }
+    position += stride;
+    for (let alpha = channels - 1; alpha < stride; alpha += channels) {
+      if (line[alpha] !== 0) {
+        return false;
+      }
+    }
+    previous.set(line);
+  }
+  return true;
+}
+
+function paethPredictor(left: number, up: number, upLeft: number): number {
+  const p = left + up - upLeft;
+  const pa = Math.abs(p - left);
+  const pb = Math.abs(p - up);
+  const pc = Math.abs(p - upLeft);
+  if (pa <= pb && pa <= pc) {
+    return left;
+  }
+  return pb <= pc ? up : upLeft;
+}
+
 export function slugifyName(name: string) {
   const slug = name
     .toLowerCase()
@@ -270,6 +432,13 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
   const imageRaw = files[`${folder}image.jpg`];
   if (imageRaw && imageRaw.length > maxPreviewImageBytes) {
     return { ok: false, error: "preview_image_too_large" };
+  }
+  // A provably all-transparent preview is a broken screenshot (captured
+  // before the live preview painted); it would render as a blank tile
+  // everywhere the store shows it. Reject at the choke point every publish
+  // path funnels through.
+  if (imageRaw && isProvablyFullyTransparentImage(imageRaw)) {
+    return { ok: false, error: "preview_image_fully_transparent" };
   }
 
   return {

@@ -141,6 +141,7 @@ static int cmd_status(int argc, char **argv)
     }
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
     printf("rotate:      %u\n", (unsigned)config->rotate);
+    printf("scaling_mode: %s\n", config->scaling_mode);
     printf("send_logs:   %d\n", (int)config->server_send_logs);
     printf("debug:       %d\n", (int)config->debug_logging);
     printf("fusion:      %d\n", (int)config->image_fusion);
@@ -316,7 +317,7 @@ static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
-               "cloud_wsurl|hardware|panel|render_mode|rotate|"
+               "cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|"
                "interval|spill_force|debug|fusion|server_send_logs|allow_local_network|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
@@ -498,6 +499,14 @@ static int cmd_set(int argc, char **argv)
             return 1;
         }
         config->rotate = rot;
+    }
+    else if (strcmp(key, "scaling_mode") == 0) {
+        char mode[16];
+        if (!fos_config_normalize_scaling_mode(value, mode, sizeof(mode))) {
+            printf("bad scaling_mode value, want contain, cover, stretch or center\n");
+            return 1;
+        }
+        strlcpy(config->scaling_mode, mode, sizeof(config->scaling_mode));
     }
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
     else if (strcmp(key, "debug") == 0) config->debug_logging = atoi(value) != 0;

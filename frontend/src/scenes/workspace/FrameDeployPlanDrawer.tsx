@@ -73,6 +73,7 @@ import { settingsLogic } from '../settings/settingsLogic'
 import {
   EmbeddedUsbFirmwareUpdate,
   fetchReleaseFirmwareListing,
+  hasReleaseFirmwarePlatform,
   releaseFirmwarePlatform,
 } from './EmbeddedUsbFirmwareUpdate'
 import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
@@ -1962,6 +1963,25 @@ function EmbeddedFirmwareSection({
             </div>
             <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
           </div>
+          {/* Backend mode only: the frame-admin bundle renders this section
+              too, but a device serves no /api/frames/firmware release pipe —
+              the card would only ever error there. */}
+          {workspaceMode() === 'backend' && hasReleaseFirmwarePlatform(frame) ? (
+            <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-[color:var(--tool-strong)]">
+                  Update to release firmware over USB
+                </div>
+                <div className="frame-tool-muted mt-1 text-sm leading-5">
+                  Flashes the latest published FrameOS release ({releaseFirmwarePlatform(frame)}) around the board's
+                  settings partition, so it keeps its Wi-Fi credentials and saved settings. Unlike the server build
+                  above, the release image carries none of this frame's baked-in configuration — the board runs on
+                  whatever it has saved.
+                </div>
+              </div>
+              <EmbeddedUsbFirmwareUpdate frame={frame} />
+            </div>
+          ) : null}
           <EmbeddedUsbSetup frame={frame} />
           <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">

@@ -881,6 +881,14 @@ static char s_scene_ack_checksum[96] = "";
 static uint32_t s_scene_ack_generation = 0;
 static int64_t s_scene_ack_deadline_us = 0;
 static volatile bool s_scene_ack_pending = false;
+/* The checksum of the last cloud set_scenes payload the render task actually
+ * applied, persisted so a reboot does not amnesia it: fos_scenes stores every
+ * pushed payload with etag "local" (a backend-sync guard, not a checksum), so
+ * a hello that reported the etag told the provider "local" after every
+ * reboot and the frame showed "sync pending" forever despite being in sync.
+ * The hello sends this instead whenever the resident scenes came from the
+ * cloud. */
+static char s_applied_scenes_checksum[96] = "";
 
 /* telemetry:logs granted by the provider — parsed from the ready message's
  * scopes array, cleared with the session. Read from the logging tasks (the
@@ -1120,7 +1128,16 @@ static void add_state_fields(cJSON *msg)
     if (state_json && state_json[0]) states = cJSON_Parse(state_json);
     if (!states) states = cJSON_CreateObject();
     cJSON_AddItemToObject(msg, "states", states);
-    cJSON_AddStringToObject(msg, "scenes_checksum", fos_scenes_etag());
+    /* Cloud-installed scenes: report the checksum of the payload the render
+     * task last applied, not the store's etag (which is the literal "local"
+     * for every pushed payload). Anything else resident — backend-synced or
+     * locally uploaded — reports the etag, which is the truth the provider
+     * should see: out of sync. */
+    if (fos_scenes_from_cloud() && s_applied_scenes_checksum[0]) {
+        cJSON_AddStringToObject(msg, "scenes_checksum", s_applied_scenes_checksum);
+    } else {
+        cJSON_AddStringToObject(msg, "scenes_checksum", fos_scenes_etag());
+    }
 }
 
 static void ws_send_hello(void)
@@ -1233,6 +1250,13 @@ static void ws_poll_scene_ack(void)
     if (!fos_scenes_apply_succeeded()) {
         ESP_LOGW(TAG, "set_scenes: hot-load failed; no scene_ack sent");
         return;
+    }
+    /* The payload is live: remember its checksum across reboots so the next
+     * hello reports the applied state instead of the store's "local" etag. */
+    if (s_scene_ack_checksum[0]) {
+        strlcpy(s_applied_scenes_checksum, s_scene_ack_checksum,
+                sizeof(s_applied_scenes_checksum));
+        nvs_store_str("cloud_scn_sum", s_applied_scenes_checksum);
     }
     if (!s_ws_client || !s_ws_ready) {
         /* Socket went away between the push and the apply; the next hello
@@ -1811,10 +1835,11 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * profile persists the subset that maps onto fos_config: `interval`
  * (interval_sec, picked up by the render loop's next pass, no reboot),
  * `name` (the DHCP hostname — the provider-side display name stays
- * authoritative on the provider) and `rotate` (the renderer sizes its canvas
- * once at init, so this one costs a reboot). Any other key refuses the WHOLE
- * verb with setting_not_allowed, mirroring the Nim runtime, so the provider
- * never half-applies a settings push. */
+ * authoritative on the provider), `rotate` (the renderer sizes its canvas
+ * once at init, so this one costs a reboot) and `scaling_mode` (a per-decode
+ * fallback fit, applied live on the next render pass). Any other key refuses
+ * the WHOLE verb with setting_not_allowed, mirroring the Nim runtime, so the
+ * provider never half-applies a settings push. */
 static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
 {
     const cJSON *settings = cJSON_GetObjectItem(root, "settings");
@@ -1826,7 +1851,7 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     cJSON_ArrayForEach(entry, settings) {
         const char *key = entry->string ? entry->string : "";
         if (strcmp(key, "interval") != 0 && strcmp(key, "name") != 0 &&
-            strcmp(key, "rotate") != 0) {
+            strcmp(key, "rotate") != 0 && strcmp(key, "scaling_mode") != 0) {
             ESP_LOGW(TAG, "ws: set_settings key \"%s\" not supported on the esp32 profile", key);
             ws_ack(id, false, "setting_not_allowed");
             return;
@@ -1867,6 +1892,19 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         }
         rotate_changed = config->rotate != normalized;
         config->rotate = normalized;
+    }
+    const cJSON *scaling = cJSON_GetObjectItem(settings, "scaling_mode");
+    if (scaling != NULL) {
+        char normalized[16];
+        if (!cJSON_IsString(scaling) ||
+            !fos_config_normalize_scaling_mode(scaling->valuestring, normalized,
+                                               sizeof(normalized))) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        /* No reboot: a per-decode fallback, pushed into the Nim runtime by
+         * fos_client on the next pass. */
+        strlcpy(config->scaling_mode, normalized, sizeof(config->scaling_mode));
     }
     if (fos_config_save() != ESP_OK) {
         ws_ack(id, false, "persist_failed");
@@ -2471,6 +2509,8 @@ static void load_stored_state(void)
     nvs_load_str("cloud_fid", s_frame_id, sizeof(s_frame_id));
     nvs_load_str("cloud_ws", s_ws_path, sizeof(s_ws_path));
     nvs_load_str("cloud_wsurl", s_ws_url, sizeof(s_ws_url));
+    nvs_load_str("cloud_scn_sum", s_applied_scenes_checksum,
+                 sizeof(s_applied_scenes_checksum));
     if (s_access_token[0]) {
         s_state = FOS_CLOUD_ENROLLED;
     } else if (config->cloud_url[0] && config->claim_token[0]) {

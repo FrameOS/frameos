@@ -279,6 +279,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
     frame = await device_frame(async_client, db)
     frame.name = 'Kitchen'
     frame.interval = 61.5
+    frame.scaling_mode = 'contain'
     frame.timezone = None  # deterministic utcOffsetMinutes
     frame.device_config = {
         **(frame.device_config or {}),
@@ -300,9 +301,12 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'wakeSchedule': False,
         'utcOffsetMinutes': 0,  # no timezone set on the frame
         'rotate': 0,
+        'scalingMode': 'contain',
     }
 
-    # Defaults: local render on PSRAM boards, power flags off
+    # Defaults: local render on PSRAM boards, power flags off, and an unset
+    # scaling mode falls back to the embedded default "cover"
+    frame.scaling_mode = None
     frame.device_config = {
         key: value
         for key, value in (frame.device_config or {}).items()
@@ -320,6 +324,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'wakeSchedule': False,
         'utcOffsetMinutes': 0,
         'rotate': 0,
+        'scalingMode': 'cover',
     }
 
 

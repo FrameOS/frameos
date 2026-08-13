@@ -7,6 +7,7 @@ import { jsonError, readJsonObject } from "../../../../../../src/lib/device-flow
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import {
   detectImageContentType,
+  isProvablyFullyTransparentImage,
   maxImagesPerScene,
   maxPreviewImageBytes,
   maxSceneZipBytes,
@@ -52,6 +53,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
   const contentType = detectImageContentType(content);
   if (!contentType) {
     return jsonError("unsupported_image", 400);
+  }
+  // A provably all-transparent image is a broken live-preview screenshot
+  // (captured before the first frame painted) and would show as a blank tile.
+  if (isProvablyFullyTransparentImage(content)) {
+    return jsonError("preview_image_fully_transparent", 400);
   }
 
   const [counted] = await db

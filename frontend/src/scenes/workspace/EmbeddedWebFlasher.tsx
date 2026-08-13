@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BoltIcon, CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
 import { useActions, useValues } from 'kea'
-import type { ESPLoader, IEspLoaderTerminal, Transport as EspTransport } from 'esptool-js'
+import type { IEspLoaderTerminal, Transport as EspTransport } from 'esptool-js'
 
 import { Spinner } from '../../components/Spinner'
 import {
@@ -20,8 +20,19 @@ import {
 import { embeddedUsbUploadTimeoutMs, framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/framesModel'
 import type { FrameType, FrameId } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
+import {
+  ESP32_PARTITION_TABLE_OFFSET,
+  ESP32_PARTITION_TABLE_SIZE,
+  deviceLayoutMatchesPlan,
+  firmwareUpdateWritePlan,
+  parseEsp32PartitionTable,
+} from './embeddedFlashImage'
+import { watchdogResetAfterFlash } from './esp32WatchdogReset'
+import { loadEsptool } from './esptoolLoader'
 import { workspaceLogic } from './workspaceLogic'
 import { isEsp32CloudFrame } from './workspaceSurfaces'
+
+export { watchdogResetAfterFlash } from './esp32WatchdogReset'
 
 export type FlashPhase = 'idle' | 'connecting' | 'preparing' | 'flashing' | 'done' | 'error'
 type EspFlashSize = '4MB' | '8MB' | '16MB' | '32MB'
@@ -46,43 +57,9 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-// ESP32-S3 RTC_CNTL registers, values from esptool's targets/esp32s3.py
-const S3_RTC_CNTL_OPTION1_REG = 0x6000812c
-const S3_RTC_CNTL_FORCE_DOWNLOAD_BOOT_MASK = 0x1
-const S3_RTC_CNTL_WDTCONFIG0_REG = 0x60008098
-const S3_RTC_CNTL_WDTCONFIG1_REG = 0x6000809c
-const S3_RTC_CNTL_WDTWPROTECT_REG = 0x600080b0
-const S3_RTC_CNTL_WDT_WKEY = 0x50d83aa1
-// WDT_EN | STG0=reset system | sys reset length | cpu reset length
-const S3_RTC_WDT_RESET_CONFIG = (0x80000000 | (5 << 28) | (1 << 8) | 2) >>> 0
-
-// Reset the chip via the RTC watchdog, like `esptool --after watchdog-reset`.
-// A DTR/RTS reset pulse goes through the USB-Serial/JTAG strap logic, which on
-// some boards (XIAO ESP32-S3) latches the chip back into ROM download mode so
-// the app never boots after flashing (arduino-esp32#6762). The watchdog reset
-// runs over the flasher-stub protocol and never touches the strap pins.
-export async function watchdogResetAfterFlash(loader: ESPLoader): Promise<boolean> {
-  if (loader.chip?.CHIP_NAME !== 'ESP32-S3') {
-    return false
-  }
-  try {
-    await loader.writeReg(S3_RTC_CNTL_OPTION1_REG, 0, S3_RTC_CNTL_FORCE_DOWNLOAD_BOOT_MASK)
-    await loader.writeReg(S3_RTC_CNTL_WDTWPROTECT_REG, S3_RTC_CNTL_WDT_WKEY)
-    await loader.writeReg(S3_RTC_CNTL_WDTCONFIG1_REG, 2000)
-  } catch (error) {
-    return false
-  }
-  // The watchdog fires ~20ms after the arming write — often before the
-  // arming or lock command's response makes it back, dropping the USB
-  // device mid-exchange. Errors from here on mean the reset happened,
-  // which is the success case.
-  try {
-    await loader.writeReg(S3_RTC_CNTL_WDTCONFIG0_REG, S3_RTC_WDT_RESET_CONFIG)
-    await loader.writeReg(S3_RTC_CNTL_WDTWPROTECT_REG, 0)
-  } catch (error) {}
-  await sleep(500)
-  return true
-}
+// (watchdogResetAfterFlash — the post-flash RTC watchdog reset — lives in
+// esp32WatchdogReset.ts, shared with the cloud enrollment flasher, and is
+// re-exported above for its existing importers.)
 
 type FirmwareStatus = NonNullable<NonNullable<FrameType['embedded']>['firmware']>
 
@@ -321,6 +298,91 @@ async function downloadFirmware(downloadUrl: string): Promise<Uint8Array> {
   return new Uint8Array(await response.arrayBuffer())
 }
 
+export interface ServerFirmwareWritePlan {
+  fileArray: { address: number; data: Uint8Array }[]
+  totalBytes: number
+  /** The partition being flashed around, when the device's settings are kept. */
+  preserved?: { name: string; size: number }
+  /** Why the plan fell back to the full write, when it did. */
+  warning?: string
+}
+
+/**
+ * How to write a server-built merged image: around the NVS partition when the
+ * user asked to keep the device's saved settings (Wi-Fi credentials, keys,
+ * panel choice), or as one monolithic write at the flash offset otherwise.
+ *
+ * Unlike the release updater (EmbeddedUsbFirmwareUpdate), a plan that cannot
+ * be built or verified here falls back to the full write instead of aborting:
+ * the server-built image carries this frame's own baked-in configuration, so
+ * a full write still yields a working frame — it just resets whatever the
+ * device saved on top, and the warning says so.
+ */
+export async function planServerFirmwareWrite(options: {
+  firmware: Uint8Array
+  flashOffset: number
+  keepSettings: boolean
+  loader: { readFlash?: (address: number, size: number) => Promise<Uint8Array> }
+  log: (message: string) => void
+}): Promise<ServerFirmwareWritePlan> {
+  const { firmware, flashOffset, keepSettings, loader, log } = options
+  const fullWrite: ServerFirmwareWritePlan = {
+    fileArray: [{ address: flashOffset, data: firmware }],
+    totalBytes: firmware.byteLength,
+  }
+  if (!keepSettings) {
+    return fullWrite
+  }
+  if (flashOffset !== 0) {
+    // The write plan's segment addresses are absolute flash offsets — the
+    // shape `idf.py merge-bin` produces from 0x0. An image that flashes
+    // elsewhere cannot be split around a partition table it does not carry.
+    return {
+      ...fullWrite,
+      warning: `This image flashes at 0x${flashOffset.toString(
+        16
+      )}, not 0x0, so its settings partition cannot be located. Writing the whole image.`,
+    }
+  }
+  let plan
+  try {
+    plan = firmwareUpdateWritePlan(firmware)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    return {
+      ...fullWrite,
+      warning: `Cannot flash around the settings partition (${detail}). Writing the whole image instead — the board's saved settings reset to this build's values.`,
+    }
+  }
+  if (typeof loader.readFlash === 'function') {
+    let table: Uint8Array | null = null
+    try {
+      table = await loader.readFlash(ESP32_PARTITION_TABLE_OFFSET, ESP32_PARTITION_TABLE_SIZE)
+    } catch (error) {
+      log("Could not read the board's partition table; trusting the image's own layout.")
+    }
+    if (table) {
+      const partitions = parseEsp32PartitionTable(table)
+      if (partitions.length === 0) {
+        // A blank or freshly erased board: nothing saved yet, nothing to lose.
+        log("The board has no readable partition table yet; trusting the image's own layout.")
+      } else if (!deviceLayoutMatchesPlan(partitions, plan)) {
+        return {
+          ...fullWrite,
+          warning:
+            'The board is partitioned differently from this image, so its settings partition cannot be spared. ' +
+            "Writing the whole image instead — the board's saved settings reset to this build's values.",
+        }
+      }
+    }
+  }
+  return {
+    fileArray: plan.segments.map((segment) => ({ address: segment.address, data: segment.data })),
+    totalBytes: plan.totalBytes,
+    preserved: { name: plan.preserved.name, size: plan.preserved.size },
+  }
+}
+
 /**
  * Why a cloud-managed frame never uploads scenes over USB.
  *
@@ -519,12 +581,18 @@ export function EmbeddedWebFlasher({
   const [phase, setPhase] = useState<FlashPhase>('idle')
   const [message, setMessage] = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
+  const [keepSettingsChecked, setKeepSettingsChecked] = useState(true)
   const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
   const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
 
   const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
   const busy = phase === 'connecting' || phase === 'preparing' || phase === 'flashing'
   const usbLogStreamState = usbLogStreamStatesByFrameId[frame.id]
+  // Only offer to flash around the settings partition when the firmware status
+  // reports a partition layout (with_embedded_firmware_layout on the backend);
+  // without one there is no NVS to reason about — e.g. pico/virtual frames.
+  const canKeepSettings = (frame.embedded?.firmware?.layout?.flash?.partitions ?? []).length > 0
+  const keepSettings = canKeepSettings && keepSettingsChecked
 
   useEffect(() => {
     onBusyChange?.(busy)
@@ -568,7 +636,7 @@ export function EmbeddedWebFlasher({
       appendBrowserFlashLog(frame.id, 'USB port selected')
 
       // Loaded on demand: esptool-js adds ~380KB we only need when actually flashing
-      const { ESPLoader, Transport } = await import('esptool-js')
+      const { ESPLoader, Transport } = await loadEsptool()
       transport = new Transport(port, false)
       traceRecorder = recordTransportTrace(frame.id, transport)
       flashTerminal = createUsbLogTerminal(frame.id)
@@ -587,22 +655,50 @@ export function EmbeddedWebFlasher({
       setFlashMessage('Downloading firmware image')
       const firmware = await downloadFirmware(downloadUrl)
 
+      // Keep-settings: write the image in segments around its NVS partition so
+      // whatever the board saved at runtime (Wi-Fi joined over the console,
+      // rotated keys) survives the re-flash. Falls back to the monolithic
+      // write when the plan cannot be built or the board is partitioned
+      // differently — the server-built image carries this frame's own baked-in
+      // defaults, so a full write still works, it just resets those settings.
+      const writePlan = await planServerFirmwareWrite({
+        firmware,
+        flashOffset,
+        keepSettings,
+        loader,
+        log: (line) => appendBrowserFlashLog(frame.id, line),
+      })
+      if (writePlan.warning) {
+        setFlashMessage(writePlan.warning)
+      }
+
       setPhase('flashing')
-      setFlashMessage(`Flashing ${Math.round(firmware.length / 1024)}KB to ${chip}`)
+      setFlashMessage(
+        writePlan.preserved
+          ? `Flashing ${Math.round(writePlan.totalBytes / 1024)}KB to ${chip}, keeping the device's saved settings (${
+              writePlan.preserved.name
+            }, ${Math.round(writePlan.preserved.size / 1024)}KB untouched)`
+          : `Flashing ${Math.round(writePlan.totalBytes / 1024)}KB to ${chip}`
+      )
+      // reportProgress counts per segment; weight them into one bar.
+      const segmentOffsets = writePlan.fileArray.map((_, index) =>
+        writePlan.fileArray.slice(0, index).reduce((total, segment) => total + segment.data.byteLength, 0)
+      )
       await loader.writeFlash({
-        fileArray: [{ data: firmware, address: flashOffset }],
+        fileArray: writePlan.fileArray,
         flashSize,
         flashMode: 'keep',
         flashFreq: 'keep',
         // eraseAll off: the merged image's FF padding already overwrites NVS,
-        // otadata and RF calibration (they sit inside the written range), so
-        // the freshly baked frame defaults win. The state partition beyond it
-        // survives, sparing the ~3 minute SPIFFS format on every re-flash —
-        // scenes are re-uploaded by this flow right after boot anyway.
+        // otadata and RF calibration when they sit inside the written range
+        // (and the keep-settings plan skips the NVS on purpose). The state
+        // partition beyond it survives, sparing the ~3 minute SPIFFS format
+        // on every re-flash — scenes are re-uploaded right after boot anyway.
         eraseAll: false,
         compress: true,
-        reportProgress: (_fileIndex, written, total) => {
-          setProgress(total > 0 ? Math.round((written / total) * 100) : null)
+        reportProgress: (fileIndex, written, total) => {
+          const done = (segmentOffsets[fileIndex] ?? 0) + (total > 0 ? written : 0)
+          setProgress(writePlan.totalBytes > 0 ? Math.min(100, Math.round((done / writePlan.totalBytes) * 100)) : null)
         },
       })
       traceRecorder.expectReboot()
@@ -723,6 +819,18 @@ export function EmbeddedWebFlasher({
         </button>
         <EmbeddedUsbConnectionButton frame={frame} disabled={busy} />
       </div>
+      {canKeepSettings ? (
+        <label className="frame-tool-muted flex items-center gap-2 text-xs leading-5">
+          <input
+            type="checkbox"
+            checked={keepSettingsChecked}
+            disabled={busy}
+            onChange={(event) => setKeepSettingsChecked(event.target.checked)}
+          />
+          Keep device settings (Wi-Fi, keys) — flash around the settings partition. Untick to reset the board to this
+          build's values.
+        </label>
+      ) : null}
       {phase === 'flashing' && progress !== null ? (
         <div className="frameos-inset h-2 w-full overflow-hidden rounded-full border">
           <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />

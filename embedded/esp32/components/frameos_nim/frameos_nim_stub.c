@@ -43,6 +43,7 @@ int frameos_nim_load_scenes(const char *json)
 }
 void frameos_nim_set_debug(int enabled) { (void)enabled; }
 void frameos_nim_set_fusion(int enabled) { (void)enabled; }
+void frameos_nim_set_scaling_mode(const char *mode) { (void)mode; }
 double frameos_nim_scene_interval(void) { return 0; }
 double frameos_nim_next_sleep(void) { return -1; }
 bool frameos_nim_render_requested(void) { return false; }

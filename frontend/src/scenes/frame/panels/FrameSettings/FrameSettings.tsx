@@ -1528,10 +1528,29 @@ export function FrameSettings({
                   />
                 )}
               </Field>
+              <Field
+                name="scaling_mode"
+                label="Scaling mode"
+                tooltip="The fallback fit for images whose scene node does not choose its own placement. Applied on the next render — no reboot."
+              >
+                {({ value, onChange }) => (
+                  <Select
+                    value={value || 'cover'}
+                    onChange={onChange}
+                    name="scaling_mode"
+                    options={[
+                      { value: 'cover', label: 'Cover (fill the panel, crop the overflow)' },
+                      { value: 'contain', label: 'Contain (fit inside, letterbox)' },
+                      { value: 'stretch', label: 'Stretch' },
+                      { value: 'center', label: 'Center (no scaling)' },
+                    ]}
+                  />
+                )}
+              </Field>
               <p className="frameos-muted text-sm">
-                This ESP32 frame accepts its name, refresh interval and rotation from the cloud. The panel driver,
-                WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console
-                or the FrameOS-Setup portal.
+                This ESP32 frame accepts its name, refresh interval, rotation and scaling mode from the cloud. The
+                panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its
+                USB console or the FrameOS-Setup portal.
               </p>
             </div>
           </>

@@ -670,6 +670,14 @@ def test_embedded_hardware_preset_for_waveshare_13in3e6():
     assert frame.device_config["batteryDivider"] == 3.0
     assert "#define FRAMEOS_DEFAULT_BATTERY_PIN 8" in header
     assert "#define FRAMEOS_DEFAULT_BATTERY_DIVIDER 3.0f" in header
+    # Scaling mode: unset falls back to the embedded default "cover"; a
+    # configured value is baked, an unknown one is refused server-side.
+    assert '#define FRAMEOS_DEFAULT_SCALING_MODE "cover"' in header
+    frame.scaling_mode = "contain"
+    assert '#define FRAMEOS_DEFAULT_SCALING_MODE "contain"' in _generated_config_header(frame)
+    frame.scaling_mode = "diagonal"
+    assert '#define FRAMEOS_DEFAULT_SCALING_MODE "cover"' in _generated_config_header(frame)
+    frame.scaling_mode = None
 
 
 def test_embedded_hardware_preset_for_waveshare_photopainter():

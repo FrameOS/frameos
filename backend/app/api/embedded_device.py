@@ -54,6 +54,7 @@ from app.tasks.embedded_firmware import (
     embedded_buffer_size,
     embedded_panel_for_frame,
     embedded_pixel_format_for_panel,
+    embedded_scaling_mode_for_frame,
     latest_embedded_firmware,
 )
 from . import api_public
@@ -372,6 +373,10 @@ def embedded_frame_settings(frame: Frame) -> dict:
         # 0/90/180/270 — the firmware restarts itself to re-init the renderer
         # when this changes (scene canvases are sized at init).
         "rotate": int(frame.rotate or 0) % 360,
+        # Fallback fit for image consumers without their own placement.
+        # Applied live on the device (no restart); default and validation in
+        # embedded_scaling_mode_for_frame.
+        "scalingMode": embedded_scaling_mode_for_frame(frame),
         # The device matches schedule events in frame-local wall-clock time
         # but carries no tz database — it applies this offset to UTC. Sent as
         # the CURRENT offset, so a DST shift propagates on the next poll.

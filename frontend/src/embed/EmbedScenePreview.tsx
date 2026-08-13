@@ -97,16 +97,34 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     setPreviewSettings(nested)
   }
 
+  // Screenshots before the first painted frame would capture a fully
+  // transparent canvas — those uploads made blank store tiles.
+  const canScreenshot = renderCount > 0 && previewStatus === 'running'
+
   // "Save screenshot": offer the current frame to the embedding page (which
   // can store it — FrameOS Cloud adds it to the scene's image gallery). If no
   // parent acknowledges within a moment, fall back to a plain PNG download.
   const saveScreenshot = (): void => {
     const canvas = canvasRef.current
-    if (!canvas) {
-      setScreenshotStatus('Nothing rendered yet')
+    if (!canvas || !canScreenshot) {
+      setScreenshotStatus('Nothing rendered yet — wait for the first render')
       return
     }
-    const dataUrl = canvas.toDataURL('image/png')
+    // Composite over an opaque background before encoding, so stray
+    // transparent pixels can never produce a see-through gallery image
+    // (same fillRect recipe as utils/splitScreenThumbnail).
+    const flattened = document.createElement('canvas')
+    flattened.width = canvas.width
+    flattened.height = canvas.height
+    const context = flattened.getContext('2d')
+    if (!context) {
+      setScreenshotStatus('Could not capture the canvas')
+      return
+    }
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, flattened.width, flattened.height)
+    context.drawImage(canvas, 0, 0)
+    const dataUrl = flattened.toDataURL('image/png')
     setScreenshotStatus('Saving…')
     let settled = false
     const onAck = (event: MessageEvent): void => {
@@ -300,7 +318,12 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
           color="secondary"
           className="flex items-center gap-1"
           onClick={saveScreenshot}
-          title="Save the current frame as an image of this scene"
+          disabled={!canScreenshot}
+          title={
+            canScreenshot
+              ? 'Save the current frame as an image of this scene'
+              : 'Available after the preview renders its first frame'
+          }
         >
           <CameraIcon className="h-4 w-4" />
           Save screenshot
