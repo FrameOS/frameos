@@ -80,6 +80,25 @@ esptool.py --chip esp32s3 --port /dev/tty.usbmodem* --baud 460800 --flash_size 8
 # Use --flash_size 4MB, 16MB, or 32MB when building one of those profiles.
 ```
 
+**App-only flashes: the app offset depends on the partition table, and a
+wrong offset fails silently.** An 8 MB layout (`partitions.csv`) puts ota_0
+at 0x10000; the 16 MB layout (`partitions_ota_16mb.csv`) puts it at 0x20000.
+`write_flash` to the wrong offset lands mid-partition, the image is never
+found, and the bootloader silently keeps running the *old* app from the
+other slot — esptool reports "Hash of data verified" either way. This once
+cost a full day of benchmarking two "different" firmwares that were the same
+untouched binary. After every flash, check the boot log for
+`boot: Loaded app from partition at offset ...` and confirm the slot;
+`esp_image: image at 0x10000 has invalid magic byte` means the write went to
+the wrong offset.
+
+**Serial drops output during CPU-bound bursts.** The USB-Serial-JTAG console
+loses lines while `fos_client` holds the CPU — a cold boot's transpile
+window comes back as a multi-second gap with corrupted joins
+(`MEMMEMPROBE`, `MEMrender`). Absence of a probe line is not evidence the
+probe did not fire; read with a tight poll loop and expect to repeat the
+capture.
+
 CI uses the same full-image path, including Nim runtime generation, ESP-IDF
 `build merge-bin`, partition/size checks, and an optional QEMU boot smoke:
 
