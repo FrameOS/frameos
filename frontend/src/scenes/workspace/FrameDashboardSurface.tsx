@@ -363,12 +363,17 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
     !unsavedChanges &&
     undeployedChangeDetails.length > 0 &&
     undeployedChangeDetails.every((change) => change.frameosVersionChange || change.remoteVersionChange)
+  // On the cloud, undeployed changes mean the last push is queued and still
+  // unacked by the device — it applies by itself when the frame syncs, so
+  // "deploy now" would ask for a click that changes nothing.
   const changeLabel = unsavedChanges
     ? 'unsaved'
     : onlyFrameosUpgrade
     ? 'upgrade'
     : undeployedChanges
-    ? 'deploy now'
+    ? workspaceMode() === 'cloud'
+      ? 'waiting to sync'
+      : 'deploy now'
     : 'up to date'
   const frameIsUpToDate = !unsavedChanges && !undeployedChanges
   // Same predicate as the deploy tile above and the "…" menu: this link is

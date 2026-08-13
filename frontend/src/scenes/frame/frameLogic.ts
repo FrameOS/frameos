@@ -255,6 +255,27 @@ function deployedFrameBaseline(frame: FrameType | null | undefined): Partial<Fra
   return null
 }
 
+function isCloudManagedFrame(frame: FrameType | null | undefined): boolean {
+  return isCloudMode() || frame?.managed_by === 'cloud'
+}
+
+/**
+ * The cloud has no deploy records — deployedFrameBaseline() reads
+ * last_successful_deploy, a backend column the cloud never serves, so the
+ * backend diff called every cloud frame permanently undeployed ("deploy
+ * now" forever). The cloud's deployed-ness is its checksum pair: what the
+ * control plane assigned vs what the device last acked applying (the same
+ * signal frameNeedsInitialDeploy uses). A mismatch means a push is already
+ * queued and travels on its own when the frame syncs, so it is reported as
+ * waiting, not as something to deploy again.
+ */
+function cloudUndeployedChangeDetails(frame: FrameType | null | undefined): ChangeDetail[] {
+  if (!frame?.assigned_checksum || frame.assigned_checksum === frame.scenes_checksum) {
+    return []
+  }
+  return [{ label: 'Waiting for the frame to apply the last push', requiresFullDeploy: false }]
+}
+
 const FRAME_KEYS: (keyof FrameType)[] = [
   'name',
   'mode',
@@ -2146,8 +2167,12 @@ export const frameLogic = kea<frameLogicType>([
     lastDeploy: [(s) => [s.frame], (frame) => deployedFrameBaseline(frame)],
     undeployedChanges: [
       (s) => [s.frame, s.lastDeploy, s.mode, s.isFrameAdminMode],
-      (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode'], isFrameAdminMode: boolean) =>
-        !isFrameAdminMode && !frame?.archived && deployChangeDetails(lastDeploy, frame, mode).length > 0,
+      (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode'], isFrameAdminMode: boolean) => {
+        if (isCloudManagedFrame(frame)) {
+          return !frame?.archived && cloudUndeployedChangeDetails(frame).length > 0
+        }
+        return !isFrameAdminMode && !frame?.archived && deployChangeDetails(lastDeploy, frame, mode).length > 0
+      },
     ],
     unsavedChangeDetails: [
       (s) => [s.frame, s.frameForm, s.mode],
@@ -2155,8 +2180,12 @@ export const frameLogic = kea<frameLogicType>([
     ],
     undeployedChangeDetails: [
       (s) => [s.lastDeploy, s.frame, s.mode, s.isFrameAdminMode],
-      (lastDeploy, frame, mode, isFrameAdminMode): ChangeDetail[] =>
-        isFrameAdminMode || frame?.archived ? [] : deployChangeDetails(lastDeploy, frame, mode),
+      (lastDeploy, frame, mode, isFrameAdminMode): ChangeDetail[] => {
+        if (isCloudManagedFrame(frame)) {
+          return frame?.archived ? [] : cloudUndeployedChangeDetails(frame)
+        }
+        return isFrameAdminMode || frame?.archived ? [] : deployChangeDetails(lastDeploy, frame, mode)
+      },
     ],
     requiresRecompilation: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.mode, s.isFrameAdminMode],
@@ -2167,7 +2196,8 @@ export const frameLogic = kea<frameLogicType>([
         mode: FrameType['mode'],
         isFrameAdminMode: boolean
       ): boolean => {
-        if (isFrameAdminMode || frame?.archived) {
+        // Cloud pushes are interpreted-only — nothing is ever compiled.
+        if (isFrameAdminMode || frame?.archived || isCloudManagedFrame(frame)) {
           return false
         }
         const pendingFrame = Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame
