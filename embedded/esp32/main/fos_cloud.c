@@ -881,6 +881,14 @@ static char s_scene_ack_checksum[96] = "";
 static uint32_t s_scene_ack_generation = 0;
 static int64_t s_scene_ack_deadline_us = 0;
 static volatile bool s_scene_ack_pending = false;
+/* The checksum of the last cloud set_scenes payload the render task actually
+ * applied, persisted so a reboot does not amnesia it: fos_scenes stores every
+ * pushed payload with etag "local" (a backend-sync guard, not a checksum), so
+ * a hello that reported the etag told the provider "local" after every
+ * reboot and the frame showed "sync pending" forever despite being in sync.
+ * The hello sends this instead whenever the resident scenes came from the
+ * cloud. */
+static char s_applied_scenes_checksum[96] = "";
 
 /* telemetry:logs granted by the provider — parsed from the ready message's
  * scopes array, cleared with the session. Read from the logging tasks (the
@@ -1120,7 +1128,16 @@ static void add_state_fields(cJSON *msg)
     if (state_json && state_json[0]) states = cJSON_Parse(state_json);
     if (!states) states = cJSON_CreateObject();
     cJSON_AddItemToObject(msg, "states", states);
-    cJSON_AddStringToObject(msg, "scenes_checksum", fos_scenes_etag());
+    /* Cloud-installed scenes: report the checksum of the payload the render
+     * task last applied, not the store's etag (which is the literal "local"
+     * for every pushed payload). Anything else resident — backend-synced or
+     * locally uploaded — reports the etag, which is the truth the provider
+     * should see: out of sync. */
+    if (fos_scenes_from_cloud() && s_applied_scenes_checksum[0]) {
+        cJSON_AddStringToObject(msg, "scenes_checksum", s_applied_scenes_checksum);
+    } else {
+        cJSON_AddStringToObject(msg, "scenes_checksum", fos_scenes_etag());
+    }
 }
 
 static void ws_send_hello(void)
@@ -1233,6 +1250,13 @@ static void ws_poll_scene_ack(void)
     if (!fos_scenes_apply_succeeded()) {
         ESP_LOGW(TAG, "set_scenes: hot-load failed; no scene_ack sent");
         return;
+    }
+    /* The payload is live: remember its checksum across reboots so the next
+     * hello reports the applied state instead of the store's "local" etag. */
+    if (s_scene_ack_checksum[0]) {
+        strlcpy(s_applied_scenes_checksum, s_scene_ack_checksum,
+                sizeof(s_applied_scenes_checksum));
+        nvs_store_str("cloud_scn_sum", s_applied_scenes_checksum);
     }
     if (!s_ws_client || !s_ws_ready) {
         /* Socket went away between the push and the apply; the next hello
@@ -2485,6 +2509,8 @@ static void load_stored_state(void)
     nvs_load_str("cloud_fid", s_frame_id, sizeof(s_frame_id));
     nvs_load_str("cloud_ws", s_ws_path, sizeof(s_ws_path));
     nvs_load_str("cloud_wsurl", s_ws_url, sizeof(s_ws_url));
+    nvs_load_str("cloud_scn_sum", s_applied_scenes_checksum,
+                 sizeof(s_applied_scenes_checksum));
     if (s_access_token[0]) {
         s_state = FOS_CLOUD_ENROLLED;
     } else if (config->cloud_url[0] && config->claim_token[0]) {

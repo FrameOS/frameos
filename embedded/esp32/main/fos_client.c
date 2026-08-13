@@ -991,6 +991,22 @@ static void client_task(void *arg)
         }
 
         uint32_t sleep_s = compute_sleep_seconds(interval, cycle_start);
+        /* A pass that ran before the scene store finished loading must not
+         * park the frame for the whole fallback interval: scenes only load ON
+         * a pass, so nothing wakes the loop when they become loadable, and a
+         * boot could sit dark for the frame interval looking exactly like a
+         * hang (the 2026.8.18 cloud-OTA "stuck frame" report — the panel
+         * stayed dark until a manual render command forced a pass). Retry
+         * quickly until something is resident; an empty pass costs no panel
+         * refresh. Deep-sleep frames are exempt: their wake IS a fresh boot,
+         * and short-cycling them would drain the battery. */
+        if (!config->deep_sleep && config->render_mode == FOS_RENDER_LOCAL &&
+            frameos_nim_available() && fos_scenes_loaded() == 0 &&
+            fos_scenes_state_mounted() && sleep_s > 10) {
+            ESP_LOGW(TAG, "no scene loaded yet; retrying in 10 s instead of %lu s",
+                     (unsigned long)sleep_s);
+            sleep_s = 10;
+        }
         ESP_LOGI(TAG, "next render in %lu s (interval %lu s)",
                  (unsigned long)sleep_s, (unsigned long)interval);
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
