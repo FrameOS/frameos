@@ -162,7 +162,7 @@ measurement against a device run before trusting it.
   2026-08-13 to shelve: after the allocation fix (#329) a cold boot pays
   only ~3.3 s of transpile (weatherIcons 0.55 s + weatherPanel 1.38 s×2,
   bench 7.3" PhotoPainter, `-d:memProbe`), and dropping the ~80–92 KB
-  transpiler from the image is not worth it — shipping readable JS source
+  transpiler from the image is not worth it — shipping readable TS source
   to the device is a feature. Per-render costs live elsewhere anyway (SVG
   raster 7–8 s, dither+pack 3.2 s, panel refresh ~29 s). Revisit only if
   boot time or flash budget becomes a real constraint.
