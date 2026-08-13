@@ -1,8 +1,17 @@
 # ESP32 large-image spill-to-storage
 
-Status: prototype merged to main (C glue + Nim reader + stub no-op,
-runtime-inert). Remaining: firmware wiring in `main.c` + bench validation —
-tracked in `docs/todo.md`.
+Status: shipped and bench-validated. The firmware wiring landed (spill dir
+in `main.c`, SD `.cache` preferred, `/state` fallback, boot sweep, the
+`set spill_force <bytes>` test knob), and the 13.3E6 forced-spill bench ran
+2026-08-13: a 4.4 MB baseline JPEG spilled to SD in ~24 s and streamed
+through the windowed decoder with a ~5.2 MB PSRAM floor. The bench also
+exposed that the decode-budget arithmetic — not memory — was the limiting
+factor (min(largest-block, headroom)/2 refused a 1.87 MB plan a fragmented
+heap easily held); the budget is now headroom-based, into-target decodes get
+the full headroom, and budget refusals degrade to a reduced-resolution
+decode instead of surfacing as error frames (`decodeIntoTargetWithDegrade`).
+Remaining nice-to-haves are in `docs/todo.md` (proactive Content-Length
+trigger, URL+ETag decode cache).
 
 ## The failure this fixes
 

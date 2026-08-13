@@ -1,7 +1,7 @@
 # FrameOS — consolidated remaining work
 
 One tracker for everything still open across the repo (last swept
-2026-08-10). Reference material — principles, permission scopes, store
+2026-08-13). Reference material — principles, permission scopes, store
 decisions, threat models, wire protocols — stays in the linked docs; this
 file only lists what is left to do. When an item ships, delete it here.
 
@@ -52,21 +52,6 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   completes; composite over an opaque background at capture, reject
   fully-transparent uploads at publish, and backfill or gallery-fall-through
   the existing rows.
-- **Cloud "not on the frame yet" is all-or-nothing.** #323 reads the
-  assigned_checksum/scenes_checksum pair, which covers the whole assigned set
-  and cannot say WHICH scene differs. Per-scene granularity needs the cloud to
-  record what it last pushed — its equivalent of the backend's
-  `last_successful_deploy.scenes`.
-- **Scene origin is not tracked at runtime** — the JS-runtime capability
-  audit is done and written up in `cloud/docs/cloud-frames.md`, "sandbox
-  posture": bindings enumerated, JS time/heap/stack ceilings landed, the
-  asset sandbox made symlink-safe with an opt-in per-scene mode, RFC1918
-  blocking ported to ESP32, elevation moved behind an on-panel code. What is
-  left is the thing all of those wanted and none could have: a frame cannot
-  tell a cloud-installed scene from a locally authored one, so the store's
-  `"shell"` risk flag has nothing to refuse, and a frame demoted out of the
-  managed state keeps running the provider's last-pushed scenes with the LAN
-  deny switched off.
 - **Account hardening** — passkeys/TOTP 2FA, re-authentication for
   sensitive actions (revoking frames, bulk assignment changes, scope
   grants), per-frame audit trail surfaced in the UI.
@@ -82,25 +67,12 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 - **Fleet extras** (design phase 4): offline alerting/notifications,
   backups integration, paid-tier gating.
 
-## Value pipeline (design + phased tracker in docs/value-pipeline.md)
-
-Replace the interpreter's single-shape decode-target fusion with declared
-per-port capabilities + a load-time planner with tiered fallback
-(fuse-into-target > canvas-sized scratch > materialize; bytes may spool to
-SD as a last-resort tier). Invisible in the editor. Phase 0 (per-node
-memory profiling on the 13.3E6) gates the ordering of the rest; the phase
-checklists live in the linked doc, not here.
-
 ## ESP32
 
-- **Large-image spill: bench validation** — a forced-spill render on the
-  13.3E6 (`set spill_force <bytes>`, ~3 MB gallery JPEG) confirming the PSRAM
-  floor during spill+decode. Measure fresh: the original premise, a 12-scene
-  workload eating the headroom, died when scenes stopped being resident.
-  Design: `cloud/docs/esp32-large-image-spill.md`.
-- Spill follow-ups (optional): proactive Content-Length trigger;
-  file-backed `InflateSegment` source in the pixie fork so spilled PNGs
-  stream too; URL+ETag decode cache.
+- Spill follow-ups (optional): proactive Content-Length trigger; URL+ETag
+  decode cache. (Spilled PNGs stream already; the 13.3E6 forced-spill bench
+  ran 2026-08-13 — 4.4 MB JPEG spilled to SD `.cache` and decoded with a
+  ~5.2 MB PSRAM floor after the decode-budget fixes.)
 
 ### Board follow-ups (rolled in from docs/esp32-photopainter-todo.md)
 
@@ -109,20 +81,6 @@ and the `image_get` cloud verb, all hardware-verified — so the file is gone
 and its board facts now live in `embedded/esp32/README.md` next to the preset
 table. What was still open there, mostly nice-to-have:
 
-- **The 13.3E6's internal-RAM figure is stale.** It was measured at ~16-19 KB
-  free with a dozen scenes, before the Nim heap moved to PSRAM explicitly and
-  before scenes became one-file-per-scene with only the active one resident.
-  Those two changes took a PhotoPainter from ~12.5 KB to ~109 KB. Nobody has
-  re-measured the 13.3E6; do that before drawing any conclusion from the old
-  number.
-- **Battery telemetry on the 13.3E6** — it has a battery header but no
-  telemetry IC. Check the schematic for a voltage-divider ADC pin and set
-  `battery_pin` if one is there.
-- **API-key rotation without reflash.** Check first whether `set api_key ""`
-  already clears it: the console has since grown an empty-value convention
-  for `gpio_buttons` and `cloud_wsurl`, so the original "cannot unset a
-  value" may no longer be true. Not tested here — it would wipe a live
-  frame's key.
 - **Parallel firmware builds.** Build directories are per-profile now, but
   `main/generated_config.h` and the Nim `nimcache` are still shared in-tree,
   so builds serialise under the global build lock.
