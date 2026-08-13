@@ -5,7 +5,9 @@ import type { FrameId, FrameScene, FrameType } from '../types'
 import { apiFetch } from '../utils/apiFetch'
 import { assetUrl } from '../utils/assetUrl'
 import { isCloudMode } from '../utils/cloudMode'
+import { isFrameControlMode } from '../utils/frameControlMode'
 import { getBasePath } from '../utils/getBasePath'
+import { projectApiPath } from '../utils/projectApi'
 import {
   createWasmPreviewQueue,
   wasmPreviewCacheKey,
@@ -16,12 +18,14 @@ import { framesModel } from './framesModel'
 
 import type { wasmPreviewModelType } from './wasmPreviewModelType'
 
-// Cloud fleet only: renders a frame's assigned scene in the browser via the
-// frameos-wasm worker when a tile has no device-sourced image at all, and
-// caches the captured bitmap as a data URL. Strictly a fallback — a device
-// snapshot or store cover always wins (FrameImage only asks here once its
-// <img> has failed). One worker at a time; failures cache a tombstone so
-// tiles don't retry in a loop.
+// Cloud and backend modes: renders a frame's assigned scene in the browser
+// via the frameos-wasm worker when a tile has no device-sourced image at
+// all, and caches the captured bitmap as a data URL. Strictly a fallback —
+// a device snapshot or store cover always wins (FrameImage only asks here
+// once its <img> has failed), and strictly on the user's explicit click.
+// One worker at a time; failures cache a tombstone so tiles don't retry in
+// a loop. Frame-control mode is out: the frame's own admin serves the real
+// image, and its web server has no preview proxy.
 
 // The worker renders synchronously on init (data apps fetch inside the
 // render), so the first frame is normally complete. Some scenes immediately
@@ -39,33 +43,53 @@ interface CapturedFrame {
 }
 
 // App settings (API keys etc.) for data apps, like livePreviewLogic fetches
-// per preview. Fleet tiles render in bulk, so cache the merged settings for
-// the session; a failed fetch degrades to no secrets for that render only.
-let settingsJsonPromise: Promise<string> | null = null
-function fetchSettingsJson(): Promise<string> {
-  if (!settingsJsonPromise) {
-    settingsJsonPromise = (async () => {
-      const response = await apiFetch('/api/settings')
+// per preview: one merged object on the cloud, assembled per frame by the
+// backend. Cached per key for the session; a failed fetch degrades to no
+// secrets for that render only.
+const settingsJsonPromises = new Map<string, Promise<string>>()
+function fetchSettingsJson(frameId: FrameId): Promise<string> {
+  const cacheKey = isCloudMode() ? 'cloud' : `frame:${frameId}`
+  let promise = settingsJsonPromises.get(cacheKey)
+  if (!promise) {
+    promise = (async () => {
+      if (isCloudMode()) {
+        const response = await apiFetch('/api/settings')
+        if (!response.ok) {
+          throw new Error(`settings fetch failed: ${response.status}`)
+        }
+        return JSON.stringify((await response.json()) ?? {})
+      }
+      const response = await apiFetch(`/api/frames/${frameId}/scene_preview_settings`)
       if (!response.ok) {
         throw new Error(`settings fetch failed: ${response.status}`)
       }
-      return JSON.stringify((await response.json()) ?? {})
+      const data = await response.json()
+      return JSON.stringify(data?.settings ?? {})
     })().catch(() => {
-      settingsJsonPromise = null
+      settingsJsonPromises.delete(cacheKey)
       return '{}'
     })
+    settingsJsonPromises.set(cacheKey, promise)
   }
-  return settingsJsonPromise
+  return promise
 }
 
-function previewProxyUrl(): string {
+async function previewProxyUrl(frameId: FrameId): Promise<string> {
   // Same-origin proxy for the runtime's CORS-blocked HTTP fetches — the same
-  // anonymous, rate-limited endpoint livePreviewLogic uses in cloud mode.
+  // per-mode endpoints livePreviewLogic resolves.
   const configuredProxyUrl = (window as any).FRAMEOS_APP_CONFIG?.preview_proxy_url
   if (typeof configuredProxyUrl === 'string' && configuredProxyUrl) {
     return configuredProxyUrl
   }
-  return getBasePath() + '/api/store/preview-proxy'
+  if (isCloudMode()) {
+    return getBasePath() + '/api/store/preview-proxy'
+  }
+  try {
+    return getBasePath() + (await projectApiPath(`/api/frames/${frameId}/scene_preview_proxy`))
+  } catch {
+    // The render still runs; external fetches fail with CORS as before.
+    return ''
+  }
 }
 
 function capturedFrameToDataUrl(frame: CapturedFrame): string {
@@ -88,7 +112,8 @@ async function renderSceneToDataUrl(frame: FrameType, sceneId: string): Promise<
   }
   const payloadScenes = collectScenePreviewPayloadScenes(scene, sceneList, null)
   const { width, height } = wasmPreviewDimensions(frame)
-  const settingsJson = await fetchSettingsJson()
+  const settingsJson = await fetchSettingsJson(frame.id)
+  const proxyUrl = await previewProxyUrl(frame.id)
 
   const worker = new Worker(assetUrl('/frameos-wasm/preview-worker.js'), { type: 'module' })
   return await new Promise<string>((resolve, reject) => {
@@ -147,7 +172,7 @@ async function renderSceneToDataUrl(frame: FrameType, sceneId: string): Promise<
       timeZone: frame.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       scenesJson: JSON.stringify(payloadScenes),
       settingsJson,
-      proxyUrl: previewProxyUrl(),
+      proxyUrl,
       sceneId: scene.id,
     })
   })
@@ -178,7 +203,7 @@ export const wasmPreviewModel = kea<wasmPreviewModelType>([
   }),
   listeners(({ values }) => ({
     requestScenePreview: ({ frameId, sceneId }) => {
-      if (!isCloudMode()) {
+      if (isFrameControlMode()) {
         return
       }
       const frame = values.frames[frameId]

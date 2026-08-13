@@ -57,9 +57,13 @@ fleet tile's device snapshot and store cover both fail, the assigned scene
 renders in-browser via the frameos-wasm worker and the captured bitmap
 fills the tile (`frontend/src/models/wasmPreviewModel.tsx` +
 `utils/wasmScenePreview.ts`; serial one-worker queue, 30-entry bitmap cache
-with failure tombstones, "Preview" badge; device-sourced images always win,
-cloud mode only, no proxies beyond the existing
-`/api/store/preview-proxy`). Renders ONLY on the tile's explicit
+with failure tombstones, "Preview" badge; device-sourced images always
+win). Works on the cloud AND the self-hosted backend — settings and proxy
+resolve per mode exactly like livePreviewLogic (`/api/settings` +
+`/api/store/preview-proxy` on cloud, `scene_preview_settings` +
+`scene_preview_proxy` per frame on a backend); frame-control mode is out.
+Wired into the fleet tiles, preview panels, sidebar preview, and the
+scene-control drawer. Renders ONLY on the tile's explicit
 "Preview in browser" click, never automatically — a scene render runs data
 apps with the account's real settings and can hit paid APIs (OpenAI image
 nodes), so bulk auto-rendering would spend the owner's money. The Assets panel is read-write on cloud

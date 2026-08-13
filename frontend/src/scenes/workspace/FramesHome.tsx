@@ -955,6 +955,7 @@ function SceneControlPanelContent({
                   loadFullSizeAfterThumb
                   className="h-full w-full"
                   imageClassName="h-full w-full rounded-md object-contain"
+                  wasmFallback={{ sceneId: scene.id }}
                 />
                 {selectedSceneIsActive ? <FrameImageOverlayControls frame={frame} sceneId={scene.id} /> : null}
                 {sceneIsCompiledForFrame(scene, frame.mode) ? (

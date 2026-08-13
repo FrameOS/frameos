@@ -7,7 +7,7 @@ import { framesModel } from '../models/framesModel'
 import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 import { wasmPreviewModel } from '../models/wasmPreviewModel'
 import { urls } from '../urls'
-import { isCloudMode } from '../utils/cloudMode'
+import { isFrameControlMode } from '../utils/frameControlMode'
 import { wasmPreviewCacheKey } from '../utils/wasmScenePreview'
 import type { FrameId, FrameType } from '../types'
 
@@ -56,9 +56,10 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
   imageClassName?: string
   hideWhileLoading?: boolean
   loadFullSizeAfterThumb?: boolean
-  /** Cloud fleet only: when the image fails to load (no device snapshot, no
-   * store cover), render this scene in the browser via the frameos-wasm
-   * worker and show the captured bitmap instead of an empty box. */
+  /** Cloud and backend modes: when the image fails to load (no device
+   * snapshot, no store cover), offer to render this scene in the browser via
+   * the frameos-wasm worker and show the captured bitmap instead of an empty
+   * box. Click-to-render only; frame-control mode never shows it. */
   wasmFallback?: { sceneId: string } | undefined
 }
 
@@ -225,7 +226,7 @@ export function FrameImage({
   // Device-sourced images always win: the wasm render only fills the empty
   // box left when the image endpoint has nothing to serve. Cloud mode only.
   const wasmFallbackSceneId = wasmFallback?.sceneId
-  const showWasmFallback = Boolean(wasmFallbackSceneId && baseImageFailed && frame && isCloudMode())
+  const showWasmFallback = Boolean(wasmFallbackSceneId && baseImageFailed && frame && !isFrameControlMode())
 
   // Determine if we should show the fade-in-out or loading cursor
   const visiblyLoading = !sceneId && (isLoading || frame?.status !== 'ready') && frame?.interval > 5
