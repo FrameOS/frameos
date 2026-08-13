@@ -28,6 +28,7 @@ from app.tasks.buildroot_image import (
     ensure_buildroot_frame_defaults,
 )
 from app.tasks.embedded_firmware import ensure_embedded_frame_defaults
+from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.timezone import stored_timezone
 from app.utils.versions import current_frameos_version
 
@@ -1253,6 +1254,9 @@ async def apply_frame_sync(
             scenes_json_choices,
         )
         if not _sync_values_equal(backend_scenes, backend_frame.get("scenes")):
+            if isinstance(backend_scenes, list):
+                # Scenes pulled from a device may predate the removal of the legacy/* apps
+                migrate_legacy_apps_in_scenes(backend_scenes)
             frame.scenes = backend_scenes
             database_changed = True
         if not _sync_values_equal(frame_scenes, remote_scenes):

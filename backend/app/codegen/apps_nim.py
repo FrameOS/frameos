@@ -306,8 +306,6 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
     app_modules = {}
     app_capabilities = {}
     for app_id, app_dir in _iter_config_app_dirs(source_dir / "src" / "apps"):
-        if app_id.startswith("legacy"):
-            continue
         config_path = app_dir / "config.json"
         with config_path.open("r") as f:
             config = json.load(f)

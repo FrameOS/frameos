@@ -36,6 +36,7 @@ from app.models.organization import OrganizationMember, Project
 from app.models.template import Template
 from app.models.user import User
 from app.redis import get_redis
+from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.schemas.cloud import (
     CloudBackupKeyImportRequest,
     CloudBackupRestoreRequest,
@@ -283,11 +284,14 @@ async def restore_cloud_backup(
                 status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail=f"Could not parse the template backup: {exc}"
             ) from exc
         image = fields.get("image")
+        scenes = fields.get("scenes") or []
+        # Backups may predate the removal of the legacy/* apps
+        migrate_legacy_apps_in_scenes(scenes)
         template = Template(
             project_id=project.id,
             name=fields.get("name") or backup.get("name") or "Restored template",
             description=fields.get("description"),
-            scenes=fields.get("scenes") or [],
+            scenes=scenes,
             config=fields.get("config"),
             image=image if isinstance(image, bytes) else None,
             image_width=fields.get("imageWidth") or fields.get("image_width"),
@@ -320,6 +324,9 @@ async def restore_cloud_backup(
         for field in FRAME_RESTORE_FIELDS:
             if field in frame_dict:
                 setattr(frame, field, frame_dict[field])
+        if isinstance(frame.scenes, list):
+            # Backups may predate the removal of the legacy/* apps
+            migrate_legacy_apps_in_scenes(frame.scenes)
         agent = dict(frame.agent or {}) if isinstance(frame.agent, dict) else {}
         agent["agentSharedSecret"] = secure_token(32)
         frame.agent = agent
