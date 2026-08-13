@@ -1119,6 +1119,19 @@ static void ws_handle_get_metrics(const cJSON *id)
     for (size_t i = 0; i < count; i++) free(samples[i].json);
 }
 
+/* The scene the render task is currently on, "" until one is selected
+ * (selection happens on the first render pass, minutes after boot). */
+static void current_scene_id(char *out, size_t out_len)
+{
+    out[0] = '\0';
+    const char *info = frameos_nim_scene_info_json();
+    cJSON *info_json = info && info[0] ? cJSON_Parse(info) : NULL;
+    if (info_json) {
+        json_field_str(info_json, "currentSceneId", out, out_len);
+        cJSON_Delete(info_json);
+    }
+}
+
 /* Attach the hello-shaped state fields to msg. */
 static void add_state_fields(cJSON *msg)
 {
@@ -1129,6 +1142,14 @@ static void add_state_fields(cJSON *msg)
     if (state_json && state_json[0]) states = cJSON_Parse(state_json);
     if (!states) states = cJSON_CreateObject();
     cJSON_AddItemToObject(msg, "states", states);
+    /* Same top-level spot the Linux client puts it (helloStatePayload); the
+     * hub folds it into last_state, which is where the workspace reads the
+     * frame's active scene from. */
+    char scene_id[128] = "";
+    current_scene_id(scene_id, sizeof(scene_id));
+    if (scene_id[0]) {
+        cJSON_AddStringToObject(msg, "active_scene", scene_id);
+    }
     /* Cloud-installed scenes: report the checksum of the payload the render
      * task last applied, not the store's etag (which is the literal "local"
      * for every pushed payload). Anything else resident — backend-synced or
@@ -1141,6 +1162,30 @@ static void add_state_fields(cJSON *msg)
     }
 }
 
+/* Tell the provider when the render task moves to another scene. hello only
+ * covers connect time, and on a fresh boot the WS is usually up minutes
+ * before the first render pass selects a scene — without this push the
+ * cloud's last_state has no active scene until the next reconnect, and the
+ * workspace shows "the active scene is not available" for a frame that is
+ * happily rendering. Scene changes from set_scenes pushes also ride the
+ * scene_ack, so this mostly fires for boot, schedules and button presses. */
+static char s_active_scene_reported[128] = "";
+
+static void ws_poll_active_scene(void)
+{
+    if (!s_ws_client || !s_ws_ready) return;
+    char scene_id[128] = "";
+    current_scene_id(scene_id, sizeof(scene_id));
+    if (!scene_id[0] || strcmp(scene_id, s_active_scene_reported) == 0) return;
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return;
+    cJSON_AddStringToObject(msg, "type", "state");
+    add_state_fields(msg);
+    ws_send_json(msg);
+    cJSON_Delete(msg);
+    strlcpy(s_active_scene_reported, scene_id, sizeof(s_active_scene_reported));
+}
+
 static void ws_send_hello(void)
 {
     cJSON *msg = cJSON_CreateObject();
@@ -1149,6 +1194,9 @@ static void ws_send_hello(void)
     add_state_fields(msg);
     ws_send_json(msg);
     cJSON_Delete(msg);
+    /* The hello just carried whatever scene is current (possibly none yet);
+     * the poll only needs to speak up when that changes. */
+    current_scene_id(s_active_scene_reported, sizeof(s_active_scene_reported));
 }
 
 /* challenge → auth: sign the base64-decoded nonce bytes with the enrolled
@@ -1273,12 +1321,7 @@ static void ws_poll_scene_ack(void)
         cJSON_AddStringToObject(msg, "checksum", s_scene_ack_checksum);
     }
     char scene_id[128] = "";
-    const char *info = frameos_nim_scene_info_json();
-    cJSON *info_json = info && info[0] ? cJSON_Parse(info) : NULL;
-    if (info_json) {
-        json_field_str(info_json, "currentSceneId", scene_id, sizeof(scene_id));
-        cJSON_Delete(info_json);
-    }
+    current_scene_id(scene_id, sizeof(scene_id));
     cJSON_AddStringToObject(msg, "active_scene", scene_id);
     ws_send_json(msg);
     cJSON_Delete(msg);
@@ -2589,6 +2632,7 @@ static void cloud_task(void *arg)
             ws_poll_scene_ack();
             ws_poll_logs();
             ws_poll_metrics();
+            ws_poll_active_scene();
             /* Streamed asset replies run here, off the WS task. A 1 s idle
              * tick keeps browse-the-SD latency humane; the polls are cheap
              * flag/queue checks. */
