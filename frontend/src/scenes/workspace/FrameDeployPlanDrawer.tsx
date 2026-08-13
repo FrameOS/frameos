@@ -2202,48 +2202,50 @@ function CloudDeployStatus({
     )
   }
 
+  // Version row for every cloud frame: the esp32 swaps firmware images, the
+  // Pi upgrades its FrameOS release, but "device version vs latest published
+  // release" reads the same either way.
+  const versionLabel = isEsp32 ? 'Firmware' : 'FrameOS'
   let firmware: JSX.Element | null = null
-  if (isEsp32) {
-    if (deviceVersion && releaseInfo.release) {
-      firmware =
-        deviceVersion === releaseInfo.release ? (
-          <CloudStatusRow
-            label="Firmware"
-            value={deviceVersion}
-            detail="Up to date with the latest release."
-            tone="ok"
-          />
-        ) : (
-          <CloudStatusRow
-            label="Firmware"
-            value={`${deviceVersion} → ${releaseInfo.release}`}
-            detail="A newer firmware release is published."
-            tone="warn"
-          />
-        )
-    } else if (deviceVersion) {
-      firmware = (
+  if (deviceVersion && releaseInfo.release) {
+    firmware =
+      deviceVersion === releaseInfo.release ? (
         <CloudStatusRow
-          label="Firmware"
+          label={versionLabel}
           value={deviceVersion}
-          detail={
-            releaseInfo.loading
-              ? 'Checking the latest published release…'
-              : releaseInfo.error ?? 'Could not determine the latest published release.'
-          }
-          tone="muted"
+          detail="Up to date with the latest release."
+          tone="ok"
         />
-      )
-    } else {
-      firmware = (
+      ) : (
         <CloudStatusRow
-          label="Firmware"
-          value="Not reported yet"
-          detail="The device reports its firmware version when it connects."
-          tone="muted"
+          label={versionLabel}
+          value={`${deviceVersion} → ${releaseInfo.release}`}
+          detail="A newer release is published."
+          tone="warn"
         />
       )
-    }
+  } else if (deviceVersion) {
+    firmware = (
+      <CloudStatusRow
+        label={versionLabel}
+        value={deviceVersion}
+        detail={
+          releaseInfo.loading
+            ? 'Checking the latest published release…'
+            : releaseInfo.error ?? 'Could not determine the latest published release.'
+        }
+        tone="muted"
+      />
+    )
+  } else {
+    firmware = (
+      <CloudStatusRow
+        label={versionLabel}
+        value="Not reported yet"
+        detail="The device reports its version when it connects."
+        tone="muted"
+      />
+    )
   }
 
   const scenesValue = `${scenes.length} scene${scenes.length === 1 ? '' : 's'}`
@@ -2774,6 +2776,60 @@ function CloudHardwareDetails({
 }
 
 /**
+ * The Pi/buildroot counterpart to the esp32 OTA view's firmware section:
+ * queues the same notify_update_available nudge, but on this profile the
+ * device answers by running its own signed release upgrade
+ * (frameos/upgrade.nim) — it fetches the latest published FrameOS release
+ * itself, verifies the minisign signature on the device, stages it next to
+ * the current install and restarts into it. The cloud supplies no URLs and
+ * no binaries either way.
+ */
+function CloudPiUpdateCard({
+  frame,
+  releaseInfo,
+}: {
+  frame: FrameType
+  releaseInfo: CloudFirmwareReleaseInfo
+}): JSX.Element | null {
+  const { updateFrameFirmware } = useActions(framesModel)
+  const mode = workspaceMode()
+  if (!frameMenuActionIsAllowed(mode, 'updateFirmware', frame)) {
+    return null
+  }
+  const disabledReason = frameMenuActionDisabledReason(mode, 'updateFirmware', frame)
+  const deviceVersion = normalizedFirmwareVersion(frame.frameos_version)
+  const upToDate = Boolean(deviceVersion && releaseInfo.release && deviceVersion === releaseInfo.release)
+
+  return (
+    <section className="space-y-2">
+      <DrawerHeading>FrameOS update</DrawerHeading>
+      <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+        <div className="frame-tool-muted text-sm leading-5">
+          Queues an update notification for the frame (it stays valid for 24 hours). When the frame picks it up, it
+          downloads the latest FrameOS release, verifies the signature on the device itself, installs it next to the
+          current version and restarts into it. Progress shows up in Logs as <code>cloud:upgrade</code> lines.
+        </div>
+        {upToDate ? (
+          <div className="frame-tool-muted text-xs leading-4">
+            The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
+          </div>
+        ) : null}
+        <button
+          type="button"
+          title={disabledReason ?? 'Queue a FrameOS update notification'}
+          disabled={Boolean(disabledReason)}
+          onClick={() => updateFrameFirmware(frame.id)}
+          className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+        >
+          <CloudArrowDownIcon className="h-4 w-4" />
+          Update FrameOS
+        </button>
+      </div>
+    </section>
+  )
+}
+
+/**
  * The deploy dialog for a cloud-managed frame.
  *
  * Nothing the backend drawer shows applies here: no build host, no SSH
@@ -2818,7 +2874,7 @@ function CloudDeploySection({
 }): JSX.Element {
   const mode = workspaceMode()
   const isEsp32 = isEsp32CloudFrame(frame, mode)
-  const releaseInfo = useCloudFirmwareRelease(frame, isEsp32)
+  const releaseInfo = useCloudFirmwareRelease(frame, true)
   // A frame no board has enrolled as cannot be reached over the air at all
   // (its command queue 409s), so the OTA/USB choice would be a trick
   // question — land on USB directly.
@@ -2835,7 +2891,10 @@ function CloudDeploySection({
     <div className="space-y-5">
       <CloudDeployStatus frame={frame} isEsp32={isEsp32} releaseInfo={releaseInfo} />
       {!isEsp32 ? (
-        <CloudScenesPushCard frame={frame} onPushed={onClose} />
+        <>
+          <CloudScenesPushCard frame={frame} onPushed={onClose} />
+          <CloudPiUpdateCard frame={frame} releaseInfo={releaseInfo} />
+        </>
       ) : activeView === 'main' ? (
         <section className="space-y-2">
           <DrawerHeading>Deploy</DrawerHeading>

@@ -455,7 +455,7 @@ const capabilityDisabledReasons: Record<FrameCapability, string> = {
   settings: "This ESP32 frame's firmware does not accept settings changes from the cloud yet.",
   logs: 'This frame does not report logs to the cloud.',
   metrics: 'This ESP32 frame does not report metrics to the cloud.',
-  updateNotify: 'This ESP32 frame does not take update notifications.',
+  updateNotify: 'This frame does not take update notifications.',
 }
 
 function allows<T extends string>(list: Record<WorkspaceMode, readonly T[]>, mode: WorkspaceMode, value: T): boolean {

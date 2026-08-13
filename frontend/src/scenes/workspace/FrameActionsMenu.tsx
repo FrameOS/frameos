@@ -25,7 +25,6 @@ import { workspaceLogic } from './workspaceLogic'
 import {
   frameMenuActionDisabledReason,
   frameMenuActionIsAllowed,
-  isEsp32CloudFrame,
   workspaceMode,
   type FrameMenuAction,
 } from './workspaceSurfaces'
@@ -161,13 +160,13 @@ export function FrameActionsMenu({
               },
             ]
           : []),
-        // Firmware-shaped on purpose: only esp32 cloud frames get the entry —
-        // a Pi cloud frame has no firmware image to swap (its update path is
-        // the buildroot release flow, not yet cloud-nudgeable), so an
-        // always-disabled button would explain nothing. The capability check
-        // still rides menuActionCapabilities (updateNotify) for the day a
-        // profile lags behind the verb again.
-        ...(allows('updateFirmware') && isEsp32CloudFrame(frame)
+        // Every cloud frame takes the notify_update_available nudge now: the
+        // esp32 fetches its signed OTA image, the Pi runs its own signed
+        // release upgrade (frameos/upgrade.nim) — either way the device
+        // fetches and verifies everything itself. The capability check still
+        // rides menuActionCapabilities (updateNotify) for the day a profile
+        // lags behind the verb again.
+        ...(allows('updateFirmware')
           ? [
               {
                 label: 'Update firmware',

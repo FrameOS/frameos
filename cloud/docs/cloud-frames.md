@@ -145,8 +145,10 @@ Cloud-profile verb set (complete):
 - `get_state`, `get_logs`, `get_metrics` — gated by the `telemetry:*` scopes
   the owner granted.
 - `reboot`, `restart_runtime`.
-- `notify_update_available` — advisory only; the device fetches and verifies
-  independently (see OTA below).
+- `notify_update_available` — carries no URLs and no binaries; the device
+  fetches and verifies its own signed release independently (see OTA
+  below). On buildroot/Pi it triggers the signed upgrade flow in
+  `frameos/upgrade.nim`; on ESP32 the signed boot-slot OTA.
 - `refresh_service_settings` — advisory only, empty payload; the device
   fetches the account's service API keys over device-authed HTTPS (see
   "Service settings: a pull, not a push" below). No credential ever rides
@@ -154,12 +156,11 @@ Cloud-profile verb set (complete):
 
 Anything else the socket receives is rejected and audit-logged on-device.
 
-Not every device implements all of it. Microcontroller frames (ESP32) run a
-subset — scenes, current scene, state, render, reboot — and answer
-`unsupported_verb` for `set_schedule`, `set_settings`, `get_logs`,
-`get_metrics` and `notify_update_available`. The management UI should hide
-those controls for an `esp32` frame rather than enqueue commands that come
-back refused; the profile table lives in `docs/cloud-frames.md`.
+Not every device need implement all of it — a device answers
+`unsupported_verb` for a verb outside its profile — though today both
+profiles (full Linux/Pi and ESP32) implement the complete set. The
+management UI disables-with-reason any control whose frame profile lags a
+verb; the profile table lives in `docs/cloud-frames.md`.
 
 ### Device identity and enrollment secrets
 
@@ -347,11 +348,14 @@ Both halves are in place.
   (`frameos/src/frameos/upgrade.nim`) — before `tar -xzf`, because extracting
   an unverified archive already lets an attacker choose file contents and
   paths on the device.
-- The cloud can only *suggest*: `notify_update_available` carries a version
-  and no URL, and the device fetches release metadata from its own configured
-  archive. Cloud compromise therefore cannot become native code execution
-  through the update channel — the worst it can do is point a frame at an
-  update it will refuse.
+- The cloud can only *suggest*: `notify_update_available` carries no URL,
+  and the device fetches release metadata from its own configured archive.
+  Since 2026-08-13 the buildroot/Pi client acts on the nudge by launching
+  its own signed upgrade (`hub_client.nim` → `scheduleFrameOSUpgrade`,
+  single-flight, up-to-date is a no-op) — before that it only audit-logged.
+  Cloud compromise therefore cannot become native code execution through
+  the update channel — the worst it can do is ask a frame to check for an
+  update it will verify and refuse.
 
 Not covered: the buildroot `.img.gz` SD-card images, which are flashed by
 hand from a machine that already trusts what it downloaded. Nothing

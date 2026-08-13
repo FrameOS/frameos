@@ -112,6 +112,47 @@ suite "FrameOS upgrade helpers":
     check not staleErrorStatus.hasKey("latest_error")
     check staleErrorStatus{"update_available"}.getBool() == false
 
+  test "in-flight detection trusts only fresh starting/running statuses":
+    let tempDir = getTempDir() / "frameos-upgrade-inflight-test"
+    if dirExists(tempDir):
+      removeDir(tempDir)
+
+    let hadFrameosDir = existsEnv("FRAMEOS_DIR")
+    let oldFrameosDir = if hadFrameosDir: getEnv("FRAMEOS_DIR") else: ""
+    try:
+      putEnv("FRAMEOS_DIR", tempDir)
+
+      # No status file at all
+      check not frameOSUpgradeInFlight()
+
+      # Fresh "running" blocks a second trigger
+      writeUpgradeStatus(%*{"status": "running"})
+      check frameOSUpgradeInFlight()
+
+      # Terminal statuses do not
+      writeUpgradeStatus(%*{"status": "failed"})
+      check not frameOSUpgradeInFlight()
+      writeUpgradeStatus(%*{"status": "success"})
+      check not frameOSUpgradeInFlight()
+
+      # A "running" entry stamped in the distant past is a crashed upgrade,
+      # not one in flight — it must not wedge future triggers.
+      writeFile(frameosUpgradeStatusPath(), $(%*{
+        "status": "running", "updated_at": "2020-01-01T00:00:00Z"}))
+      check not frameOSUpgradeInFlight()
+
+      # As is one whose timestamp cannot be believed at all.
+      writeFile(frameosUpgradeStatusPath(), $(%*{
+        "status": "starting", "updated_at": "not-a-timestamp"}))
+      check not frameOSUpgradeInFlight()
+    finally:
+      if hadFrameosDir:
+        putEnv("FRAMEOS_DIR", oldFrameosDir)
+      else:
+        delEnv("FRAMEOS_DIR")
+      if dirExists(tempDir):
+        removeDir(tempDir)
+
   test "upgrade copies shared admin session salt for legacy release compatibility":
     let tempDir = getTempDir() / "frameos-upgrade-salt-test"
     if dirExists(tempDir):

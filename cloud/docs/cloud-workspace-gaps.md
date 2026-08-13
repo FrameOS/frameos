@@ -10,16 +10,9 @@ stable. Consolidated tracker: `docs/todo.md` at the repo root.
 
 ## Remaining
 
-- **6. FrameOS updates (OTA) from the cloud — buildroot half.** The esp32
-  half shipped (see the ledger); on buildroot/Pi the Nim client answers
-  `notify_update_available` with an audit log and nothing else, while the
-  signed upgrade flow it should trigger already exists on-device
-  (`frameos/src/frameos/upgrade.nim`, `POST /api/upgrade`). Wire the verb
-  (or a cloud UI action) to that flow so cloud-managed Pi frames can
-  actually update. The esp32 path was confirmed against production on
-  2026-08-13: a real frame OTA'd to release 2026.8.19 (download → signed
-  apply → reboot → `frameos_version` reported from the running app
-  descriptor).
+- (nothing — see the ledger; item 6's buildroot half still wants a
+  hardware pass, covered by the planned buildroot SD-card install + update
+  verification)
 
 ## Shipped (ledger — item numbers referenced from code)
 
@@ -40,11 +33,18 @@ stable. Consolidated tracker: `docs/todo.md` at the repo root.
 4. **Scene upload events** — `POST /api/frames/{id}/event/{name}` shim
    maps render / setCurrentScene / uploadScenes onto queue verbs.
 5. **`GET /api/cloud/status`** — handled by `cloudEmptyCatalogs`.
-6. **FrameOS updates (OTA), esp32 half** — `notify_update_available`
-   triggers a signed cloud OTA on-device (`main/fos_ota.c`: fetch the
-   manifest, verify the minisign signature, apply); `unsupported_verb`
-   retired with it. Buildroot half + real-release confirmation remain,
-   above.
+6. **FrameOS updates (OTA), both halves** — `notify_update_available`
+   triggers a signed cloud OTA on-device. ESP32: `main/fos_ota.c` (fetch
+   the manifest, verify the minisign signature, apply); confirmed against
+   production 2026-08-13 — a real frame OTA'd to release 2026.8.19
+   (download → signed apply → reboot → `frameos_version` reported from the
+   running app descriptor). Buildroot/Pi (wired 2026-08-13): the hub
+   client's `requestUpgradeFn` launches the device's own signed release
+   upgrade (`frameos/upgrade.nim` `scheduleFrameOSUpgrade`, single-flight
+   via the upgrade status file, up-to-date is a no-op); the workspace
+   offers it through the "…" menu's Update firmware action and a "FrameOS
+   update" card in the cloud deploy drawer. Hardware pass pending (see
+   Remaining).
 7. **Live updates in dev** — the shell injects the LAN hub origin and the
    hub accepts private-network browser origins outside production.
 8. **Scene tiles** hydrate from `GET /api/frames/{id}/scenes`.

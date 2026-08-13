@@ -89,6 +89,27 @@ proc readUpgradeStatus*(): JsonNode =
     discard
   %*{"status": "idle"}
 
+const UpgradeInFlightMaxAge = initDuration(hours = 2)
+
+proc frameOSUpgradeInFlight*(): bool =
+  ## True while the status file says an upgrade is queued or running, so a
+  ## second trigger (a redelivered cloud nudge, a double-clicked button) is
+  ## refused instead of clobbering the status of the one in flight. An
+  ## upgrade that died without writing a terminal status must not wedge this
+  ## forever: entries older than UpgradeInFlightMaxAge are disbelieved (the
+  ## download alone is capped at 30 minutes).
+  let payload = readUpgradeStatus()
+  if payload{"status"}.getStr("") notin ["starting", "running"]:
+    return false
+  let updatedAt = payload{"updated_at"}.getStr("")
+  if updatedAt.len == 0:
+    return false
+  try:
+    let stamped = parse(updatedAt, "yyyy-MM-dd'T'HH:mm:ss'Z'", utc()).toTime()
+    result = getTime() - stamped < UpgradeInFlightMaxAge
+  except CatchableError:
+    result = false
+
 proc normalizeReleaseVersion*(value: string): string =
   publishedFrameOSVersion(value)
 

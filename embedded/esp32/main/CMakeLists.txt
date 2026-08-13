@@ -54,3 +54,10 @@ if(DEFINED ENV{FRAMEOS_SELECTED_PANEL}
     target_compile_definitions(${COMPONENT_LIB} PRIVATE
         "FRAMEOS_ENV_DEFAULT_PANEL=\"$ENV{FRAMEOS_SELECTED_PANEL}\"")
 endif()
+
+# Boot-time memory attribution (main.c BOOTMEM), the C-side companion to the
+# Nim -d:memProbe. FRAMEOS_BOOTMEM=1 in the environment at configure time
+# compiles the per-init-step PSRAM logging in.
+if(DEFINED ENV{FRAMEOS_BOOTMEM} AND "$ENV{FRAMEOS_BOOTMEM}" STREQUAL "1")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE "FRAMEOS_BOOTMEM=1")
+endif()

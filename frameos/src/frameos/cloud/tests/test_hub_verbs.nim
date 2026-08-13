@@ -18,6 +18,7 @@ type
     assetDeletes: seq[string]
     assetRenames: seq[(string, string)]
     serviceSettingsRefreshes: int
+    upgradeRequests: int
 
 proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContext =
   CloudVerbContext(
@@ -76,6 +77,8 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
       recorded.assetRenames.add((src, dst)),
     refreshServiceSettingsFn: proc() {.gcsafe.} =
       recorded.serviceSettingsRefreshes += 1,
+    requestUpgradeFn: proc() {.gcsafe.} =
+      recorded.upgradeRequests += 1,
     rebootFn: proc() {.gcsafe.} =
       recorded.reboots += 1,
     auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -578,14 +581,16 @@ suite "cloud hub verb dispatcher":
     check handleCloudVerb(ctx, %*{"type": "restart_runtime"}).ack{"ok"}.getBool(false)
     check recorded.events.mapIt(it[0]) == @["restart"]
 
-  test "notify_update_available is advisory only":
+  test "notify_update_available triggers the injected upgrade, nothing else":
     let recorded = Recorded()
     let reply = handleCloudVerb(makeContext(recorded), %*{
       "type": "notify_update_available", "version": "9.9.9",
       "url": "https://evil.example.com/firmware.bin"})
     check reply.ack{"ok"}.getBool(false) == true
-    # Nothing dispatched, nothing persisted — and there is no code path that
-    # could fetch the injected URL.
+    check recorded.upgradeRequests == 1
+    # The nudge only starts the device's own signed upgrade flow: nothing
+    # else is dispatched or persisted, and there is no code path that could
+    # fetch the injected URL.
     check recorded.events.len == 0
     check recorded.persistedSettings.len == 0
     check "notify_update_available" in auditedVerbs(recorded)
