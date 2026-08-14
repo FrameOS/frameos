@@ -147,7 +147,7 @@ Reference TypeScript shapes (for structure sanity):
   - StateNodeData: { keyword: string }
   - CodeNodeData: { codeJS?: string, code?: string, codeArgs?: { name: string, type: FieldType }[], codeOutputs?: { name: string, type: FieldType }[], cache?: object, logOutput?: boolean }
   - SceneNodeData: { keyword: string, config: object }
-- FieldType: "string"|"text"|"float"|"integer"|"boolean"|"color"|"date"|"json"|"node"|"scene"|"image"|"font"|"select"
+- FieldType: "string"|"text"|"float"|"integer"|"boolean"|"color"|"date"|"json"|"node"|"scene"|"image"|"font"|"select"|"path" (a "path" field is a string holding a file/folder path on the frame; it may carry pick?: "file"|"folder"|"any" and extensions?: string[])
 Follow these rules:
 - Output a JSON object with a top-level "title" string and "scenes" array. No markdown or code fences.
 - Each scene must include: id (string), name (string), nodes (array), edges (array).

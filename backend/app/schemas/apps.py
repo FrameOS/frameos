@@ -19,6 +19,7 @@ class FieldTypeEnum(str, Enum):
     text = "text"
     select = "select"
     font = "font"
+    path = "path"
 
 
 class ConfigFieldConditionOperator(str, Enum):

@@ -137,6 +137,28 @@ proc managementLine*(frameConfig: FrameConfig): string =
     return &"Managed via: self-hosted backend ({serverHost}:{serverPort})"
   "Managed via: standalone (no server configured)"
 
+proc remoteControlSecurityLine*(frameConfig: FrameConfig): string =
+  ## Transport truth for the "Remote control" line: over what kind of link
+  ## remote commands actually reach this frame. Cloud-managed frames dial the
+  ## provider over the enrollment URL (https everywhere outside dev setups);
+  ## backend-managed frames run the frameos-remote agent, which speaks TLS
+  ## exactly when the port says so (443/8443/… — the agent's own dial rule).
+  ## Empty when remote control is off.
+  let linkState = loadCloudLinkState()
+  if linkState{"mode"}.getStr("") == "managed":
+    let providerUrl = providerUrlFromState(linkState)
+    let host = cloudProviderHostname(linkState)
+    if providerUrl.startsWith("https://"):
+      return &"  over an encrypted HTTPS connection to {host}"
+    return &"  over an UNENCRYPTED http connection to {host} — fine on a trusted local network, not beyond it"
+  if frameConfig.agent != nil and frameConfig.agent.agentEnabled:
+    let serverHost = if frameConfig.serverHost.len > 0: frameConfig.serverHost else: "?"
+    let port = if frameConfig.serverPort <= 0: 443 else: frameConfig.serverPort
+    if port mod 1000 == 443:
+      return &"  over an encrypted TLS connection to {serverHost}:{port}"
+    return &"  over an UNENCRYPTED connection to {serverHost}:{port} — commands are signed, but traffic is readable on the network"
+  ""
+
 proc buildSceneListText*(self: Scene): string =
   let entries = self.buildSceneList()
   let frameConfig = self.frameConfig
@@ -160,7 +182,13 @@ proc buildSceneListText*(self: Scene): string =
     else: configuredFrameHost
   let framePort = if publicPort(frameConfig) > 0: $publicPort(frameConfig) else: "?"
   let frameScheme = publicScheme(frameConfig)
-  let remoteControl = if frameConfig.agent != nil and frameConfig.agent.agentEnabled: "enabled" else: "disabled"
+  # Cloud-managed frames take remote commands over the provider link even
+  # when the self-hosted agent flag is off — "disabled" would be a lie there.
+  let cloudManaged = loadCloudLinkState(){"mode"}.getStr("") == "managed"
+  let remoteControl =
+    if cloudManaged or (frameConfig.agent != nil and frameConfig.agent.agentEnabled): "enabled"
+    else: "disabled"
+  let remoteSecurity = remoteControlSecurityLine(frameConfig)
   var lines: seq[string] = @[
     "FrameOS System Info",
     "",
@@ -173,8 +201,10 @@ proc buildSceneListText*(self: Scene): string =
     managementLine(frameConfig),
     &"Frame: {frameScheme}://{frameHost}:{framePort}",
     &"FrameOS Remote control: {remoteControl}",
-    ""
   ]
+  if remoteSecurity.len > 0:
+    lines.add(remoteSecurity)
+  lines.add("")
   if entries.len == 0:
     lines.add("No scenes found.")
     return lines.join("\n")

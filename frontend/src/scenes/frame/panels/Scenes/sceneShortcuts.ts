@@ -11,10 +11,12 @@ const baseSdCardImageScene: FrameScene = {
   fields: [
     {
       access: 'public',
-      label: 'Image folder',
+      label: 'Image or folder',
       name: 'imageFolder',
       persist: 'disk',
-      type: 'string',
+      type: 'path',
+      pick: 'any',
+      extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'qoi', 'ppm', 'svg'],
       value: '/srv/assets',
     },
     {

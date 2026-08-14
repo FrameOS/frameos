@@ -213,6 +213,12 @@ export interface FrameType {
   scaling_mode: string
   image_engine?: '' | 'pixie' | 'imagemagick'
   rotate?: number
+  /** ESP32 power management (cloud set_settings mirror, frames.settings). */
+  deep_sleep?: boolean
+  deep_sleep_on_battery?: boolean
+  wake_check_seconds?: number
+  battery_pin?: number
+  battery_divider?: number
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]
@@ -513,6 +519,7 @@ export type FieldType =
   | 'scene'
   | 'image'
   | 'font'
+  | 'path'
 
 export const fieldTypes = [
   'string',
@@ -527,7 +534,11 @@ export const fieldTypes = [
   'scene',
   'image',
   'font',
+  'path',
 ] as const
+
+/** What a 'path' field may point at. Defaults to 'file' when absent. */
+export type PathFieldPick = 'file' | 'folder' | 'any'
 
 export type AppConfigFieldType = FieldType | 'select' | 'font'
 
@@ -567,6 +578,10 @@ export interface AppConfigField {
   type: AppConfigFieldType
   /** List of options for the field, only used if type is 'select' */
   options?: string[]
+  /** Whether the path points at a file, a folder or either, only used if type is 'path' */
+  pick?: PathFieldPick
+  /** Allowed file extensions without the dot (e.g. ["jpg", "png"]), only used if type is 'path' */
+  extensions?: string[]
   /** Whether the field is required */
   required?: boolean
   /** Whether the field is a secret and is hidden from display */

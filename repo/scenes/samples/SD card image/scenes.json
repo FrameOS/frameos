@@ -10,11 +10,22 @@
     "fields": [
       {
         "access": "public",
-        "label": "Image folder",
+        "label": "Image or folder",
         "name": "imageFolder",
         "persist": "disk",
-        "type": "string",
-        "value": "/srv/assets"
+        "type": "path",
+        "value": "/srv/assets",
+        "pick": "any",
+        "extensions": [
+          "jpg",
+          "jpeg",
+          "png",
+          "gif",
+          "bmp",
+          "qoi",
+          "ppm",
+          "svg"
+        ]
       },
       {
         "access": "public",

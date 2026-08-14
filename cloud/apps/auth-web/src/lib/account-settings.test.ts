@@ -22,7 +22,9 @@ describe("storableAccountSettingsFields", () => {
       github: ["api_key"],
       homeAssistant: ["accessToken", "url"],
       immich: ["apiKey", "url"],
-      openAI: ["apiKey"],
+      // backendApiKey: the account's own AI-chat key — storable, not a
+      // preview field, never device-deliverable.
+      openAI: ["apiKey", "backendApiKey"],
       unsplash: ["accessKey"],
     });
   });
@@ -60,7 +62,7 @@ describe("filterAccountSettings", () => {
     });
     expect(settings).toEqual({
       homeAssistant: { accessToken: "token", url: "http://ha.local:8123" },
-      openAI: { apiKey: "sk" },
+      openAI: { apiKey: "sk", backendApiKey: "sk-backend" },
     });
   });
 

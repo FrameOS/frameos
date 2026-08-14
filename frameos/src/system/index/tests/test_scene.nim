@@ -113,3 +113,41 @@ suite "system/index scene":
     finally:
       setCurrentDir(previousDir)
       removeDir(tempDir)
+
+  test "remote control security line names the transport honestly":
+    let previousDir = getCurrentDir()
+    let tempDir = getTempDir() / ("frameos-index-scene-security-" & $epochTime())
+    createDir(tempDir / "state")
+    setCurrentDir(tempDir)
+    try:
+      var config = testConfig()
+
+      # Remote control off, no cloud link: nothing to say.
+      check index_scene.remoteControlSecurityLine(config) == ""
+
+      # Self-hosted agent: TLS iff the port says so (the agent's dial rule).
+      config.agent = AgentConfig(agentEnabled: true)
+      config.serverPort = 8989
+      check "UNENCRYPTED" in index_scene.remoteControlSecurityLine(config)
+      check "frameos.local:8989" in index_scene.remoteControlSecurityLine(config)
+      config.serverPort = 8443
+      check "encrypted TLS" in index_scene.remoteControlSecurityLine(config)
+
+      # Cloud-managed wins over the agent flag and reports the provider link.
+      writeFile("state" / "cloud_link.json", $(%*{
+        "mode": "managed",
+        "status": "connected",
+        "provider_url": "https://cloud.frameos.net",
+      }))
+      check "encrypted HTTPS connection to cloud.frameos.net" in
+        index_scene.remoteControlSecurityLine(config)
+
+      writeFile("state" / "cloud_link.json", $(%*{
+        "mode": "managed",
+        "status": "connected",
+        "provider_url": "http://10.4.0.47:4999",
+      }))
+      check "UNENCRYPTED http" in index_scene.remoteControlSecurityLine(config)
+    finally:
+      setCurrentDir(previousDir)
+      removeDir(tempDir)

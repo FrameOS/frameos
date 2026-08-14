@@ -136,7 +136,9 @@ describe("account settings API", () => {
     expect(saved).toEqual({
       frameOS: { apiKey: "2024" },
       homeAssistant: { accessToken: "ha-token", url: "http://ha.local:8123" },
-      openAI: { apiKey: "sk-frames" },
+      // backendApiKey is the account's own AI-chat key: storable, but never
+      // device-deliverable (frame-service-settings.ts).
+      openAI: { apiKey: "sk-frames", backendApiKey: "sk-backend" },
     });
 
     const roundTrip = await getSettings(getRequest());

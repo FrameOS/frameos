@@ -251,6 +251,45 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
+    const cJSON *sleep_on_battery = cJSON_GetObjectItem(frame, "deepSleepOnBattery");
+    if (cJSON_IsBool(sleep_on_battery) &&
+        config->deep_sleep_on_battery != (bool)cJSON_IsTrue(sleep_on_battery)) {
+        config->deep_sleep_on_battery = cJSON_IsTrue(sleep_on_battery);
+        changed = true;
+    }
+
+    const cJSON *wake_check = cJSON_GetObjectItem(frame, "wakeCheckSeconds");
+    if (cJSON_IsNumber(wake_check) && wake_check->valuedouble >= 0 &&
+        wake_check->valuedouble <= 86400) {
+        uint32_t seconds = (uint32_t)wake_check->valuedouble;
+        /* Floor mirrors the cloud validator: sub-minute check-ins would
+         * drain a battery for nothing. 0 stays 0 (only wake to render). */
+        if (seconds > 0 && seconds < 60) seconds = 60;
+        if (config->wake_check_sec != seconds) {
+            config->wake_check_sec = seconds;
+            changed = true;
+        }
+    }
+
+    const cJSON *battery_pin = cJSON_GetObjectItem(frame, "batteryPin");
+    if (cJSON_IsNumber(battery_pin) && battery_pin->valuedouble >= -1 &&
+        battery_pin->valuedouble <= 48 &&
+        config->battery_pin != (int8_t)battery_pin->valuedouble) {
+        config->battery_pin = (int8_t)battery_pin->valuedouble;
+        /* The ADC is set up once at boot (main.c) — re-init via restart. */
+        s_restart_after_apply = true;
+        changed = true;
+    }
+
+    const cJSON *battery_divider = cJSON_GetObjectItem(frame, "batteryDivider");
+    if (cJSON_IsNumber(battery_divider) && battery_divider->valuedouble >= 0.5 &&
+        battery_divider->valuedouble <= 20.0 &&
+        config->battery_divider != (float)battery_divider->valuedouble) {
+        config->battery_divider = (float)battery_divider->valuedouble;
+        s_restart_after_apply = true;
+        changed = true;
+    }
+
     const cJSON *rotate = cJSON_GetObjectItem(frame, "rotate");
     uint16_t normalized_rotate = 0;
     if (cJSON_IsNumber(rotate) &&

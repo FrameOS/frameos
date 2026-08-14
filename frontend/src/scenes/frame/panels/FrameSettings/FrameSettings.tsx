@@ -1151,11 +1151,12 @@ export function FrameSettings({
   // not exist in the cloud protocol, so their settings are never rendered.
   const workspaceSurfaceMode = workspaceMode()
   const hideForCloud = workspaceSurfaceMode === 'cloud'
-  // A cloud-managed ESP32 accepts exactly two settings from the cloud —
-  // name and refresh interval (its set_settings subset). Everything else on
-  // this panel (mounts, network, palette, GPIO, …) either does not exist on
-  // the firmware or is provisioned on the device itself, so rendering those
-  // sections was an invitation to edit values that can never be saved.
+  // A cloud-managed ESP32 accepts only its set_settings subset from the
+  // cloud — name, refresh interval, rotation, scaling mode and the power
+  // keys. Everything else on this panel (mounts, network, palette, GPIO, …)
+  // either does not exist on the firmware or is provisioned on the device
+  // itself, so rendering those sections was an invitation to edit values
+  // that can never be saved.
   const esp32CloudProfile = hideForCloud && isEsp32CloudFrame(frame)
   const showBackendSection = frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-backend')
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
@@ -1548,9 +1549,102 @@ export function FrameSettings({
                 )}
               </Field>
               <p className="frameos-muted text-sm">
-                This ESP32 frame accepts its name, refresh interval, rotation and scaling mode from the cloud. The
-                panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its
-                USB console or the FrameOS-Setup portal.
+                This ESP32 frame accepts its name, refresh interval, rotation, scaling mode and the power settings
+                below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the
+                device itself — over its USB console or the FrameOS-Setup portal.
+              </p>
+            </div>
+            <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
+              <H6 id="frame-settings-power">Power</H6>
+            </div>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field
+                name="deep_sleep"
+                label="Between renders"
+                tooltip={
+                  <>
+                    Deep sleep powers the frame almost completely off between renders — best for battery frames. While
+                    asleep it is offline: cloud commands queue and land on the next wake. "On battery" relies on the
+                    battery sense GPIO below; without one the frame cannot tell and stays connected.
+                  </>
+                }
+              >
+                {({ value, onChange }) => (
+                  <Select
+                    value={value ? 'always' : frameForm.deep_sleep_on_battery ? 'battery' : 'connected'}
+                    onChange={(mode) => {
+                      onChange(mode === 'always')
+                      setFrameFormValues({ deep_sleep_on_battery: mode === 'battery' })
+                    }}
+                    options={[
+                      { value: 'connected', label: 'Stay connected (default)' },
+                      { value: 'battery', label: 'Deep sleep when on battery' },
+                      { value: 'always', label: 'Always deep sleep' },
+                    ]}
+                  />
+                )}
+              </Field>
+              {frameForm.deep_sleep || frameForm.deep_sleep_on_battery ? (
+                <Field
+                  name="wake_check_seconds"
+                  label="Check for commands while sleeping"
+                  tooltip={
+                    <>
+                      Extra wake-ups between renders that connect to the cloud, fetch queued commands and scene
+                      updates, and go back to sleep without refreshing the panel. The scheduled render still happens
+                      on time. Each check-in costs battery — pick the longest interval you can live with.
+                    </>
+                  }
+                >
+                  {({ value, onChange }) => (
+                    <Select
+                      value={String(value ?? 0)}
+                      onChange={(seconds) => onChange(parseInt(seconds))}
+                      options={[
+                        { value: '0', label: 'Only wake to render' },
+                        { value: '900', label: 'Every 15 minutes' },
+                        { value: '1800', label: 'Every 30 minutes' },
+                        { value: '3600', label: 'Every hour' },
+                        { value: '10800', label: 'Every 3 hours' },
+                        { value: '21600', label: 'Every 6 hours' },
+                        { value: '43200', label: 'Every 12 hours' },
+                        { value: '86400', label: 'Once a day' },
+                        ...(value && !['0', '900', '1800', '3600', '10800', '21600', '43200', '86400'].includes(String(value))
+                          ? [{ value: String(value), label: `Every ${value} seconds` }]
+                          : []),
+                      ]}
+                    />
+                  )}
+                </Field>
+              ) : null}
+              <Field
+                name="battery_pin"
+                label="Battery sense GPIO"
+                tooltip={
+                  <>
+                    ADC1-capable GPIO wired to the battery through a voltage divider. Enables the battery percentage
+                    in metrics, the low-battery render guard and "deep sleep when on battery". Set -1 (or leave empty)
+                    when the board has no battery tap. Saving a change reboots the frame to re-init the ADC. The
+                    Waveshare 13.3" E6 board uses GPIO 8 with a 3.0 divider.
+                  </>
+                }
+              >
+                <NumberTextInput name="battery_pin" placeholder="-1 = no battery" />
+              </Field>
+              <Field
+                name="battery_divider"
+                label="Battery voltage divider"
+                tooltip={
+                  <>
+                    Vbat = Vpin × divider. 2.0 for the classic 100k/100k tap, 3.0 on the Waveshare 13.3" E6 board.
+                  </>
+                }
+              >
+                <NumberTextInput name="battery_divider" placeholder="2.0" />
+              </Field>
+              <p className="frameos-muted text-sm">
+                Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings
+                push. Update the frame first if saving fails.
               </p>
             </div>
           </>

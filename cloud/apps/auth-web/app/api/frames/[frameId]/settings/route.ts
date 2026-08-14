@@ -10,6 +10,7 @@ import {
 } from "../../../../../src/lib/device-flow";
 import {
   enqueueFrameCommand,
+  esp32OnlySettableKeys,
   esp32SettableKeys,
   frameForAccount,
   mergeFrameSettings,
@@ -76,6 +77,15 @@ export async function POST(
   if (
     isEsp32 &&
     Object.keys(settings).some((key) => !esp32SettableKeys.has(key))
+  ) {
+    return jsonError("settings_not_supported_by_device", 400);
+  }
+  // The inverse holds too: the power keys exist only in the ESP32 firmware's
+  // profile — the Pi runtime's CLOUD_SETTINGS_ALLOWLIST refuses the whole
+  // verb on any of them, so refuse up front instead of half-applying.
+  if (
+    !isEsp32 &&
+    Object.keys(settings).some((key) => esp32OnlySettableKeys.has(key))
   ) {
     return jsonError("settings_not_supported_by_device", 400);
   }

@@ -16,6 +16,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import { useEffect, useState, type ReactNode } from 'react'
+import { Checkbox } from '../../components/Checkbox'
 
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
@@ -2393,6 +2394,10 @@ function CloudOtaDeployView({
   onPushed: () => void
 }): JSX.Element {
   const { updateFrameFirmware } = useActions(framesModel)
+  const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
+  // Mirrors CloudPiUpdateCard: one press converges firmware + scenes +
+  // settings. The scenes push is idempotent when nothing changed.
+  const [alsoPushScenes, setAlsoPushScenes] = useState(true)
   const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
   const mode = workspaceMode()
   const canUpdateFirmware = frameMenuActionIsAllowed(mode, 'updateFirmware', frame)
@@ -2443,15 +2448,32 @@ function CloudOtaDeployView({
                 The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
               </div>
             ) : null}
+            <Checkbox
+              label="Also push scenes & settings"
+              value={alsoPushScenes}
+              onChange={setAlsoPushScenes}
+            />
             <button
               type="button"
-              title={firmwareDisabledReason ?? 'Queue a firmware update notification'}
+              title={
+                firmwareDisabledReason ??
+                (alsoPushScenes
+                  ? 'Queue a firmware update and push this frame’s scenes & settings'
+                  : 'Queue a firmware update notification')
+              }
               disabled={Boolean(firmwareDisabledReason)}
-              onClick={() => updateFrameFirmware(frame.id)}
+              onClick={() => {
+                if (alsoPushScenes) {
+                  // Scenes first: the OTA reboot redelivers a queued push
+                  // when the frame reconnects.
+                  saveAndDeployFrame()
+                }
+                updateFrameFirmware(frame.id)
+              }}
               className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
             >
               <CloudArrowDownIcon className="h-4 w-4" />
-              Update firmware
+              {alsoPushScenes ? 'Update everything' : 'Update firmware'}
             </button>
           </div>
         </section>
@@ -2792,6 +2814,11 @@ function CloudPiUpdateCard({
   releaseInfo: CloudFirmwareReleaseInfo
 }): JSX.Element | null {
   const { updateFrameFirmware } = useActions(framesModel)
+  const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
+  // "One big button": converge the whole frame — firmware, scenes and
+  // settings — in one press. The scenes push is idempotent, so leaving this
+  // on costs nothing when there is nothing to change.
+  const [alsoPushScenes, setAlsoPushScenes] = useState(true)
   const mode = workspaceMode()
   if (!frameMenuActionIsAllowed(mode, 'updateFirmware', frame)) {
     return null
@@ -2814,15 +2841,32 @@ function CloudPiUpdateCard({
             The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
           </div>
         ) : null}
+        <Checkbox
+          label="Also push scenes & settings"
+          value={alsoPushScenes}
+          onChange={setAlsoPushScenes}
+        />
         <button
           type="button"
-          title={disabledReason ?? 'Queue a FrameOS update notification'}
+          title={
+            disabledReason ??
+            (alsoPushScenes
+              ? 'Queue a FrameOS update and push this frame’s scenes & settings'
+              : 'Queue a FrameOS update notification')
+          }
           disabled={Boolean(disabledReason)}
-          onClick={() => updateFrameFirmware(frame.id)}
+          onClick={() => {
+            if (alsoPushScenes) {
+              // Scenes first: the firmware update reboots the frame, and a
+              // queued push simply redelivers after it reconnects.
+              saveAndDeployFrame()
+            }
+            updateFrameFirmware(frame.id)
+          }}
           className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
         >
           <CloudArrowDownIcon className="h-4 w-4" />
-          Update FrameOS
+          {alsoPushScenes ? 'Update everything' : 'Update FrameOS'}
         </button>
       </div>
     </section>

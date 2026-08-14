@@ -256,6 +256,7 @@ export function ExpandedScene({
                   onChange={onChange}
                   currentState={currentState}
                   stateChanges={stateChanges}
+                  frameId={frameId}
                 />
               )}
             </Field>

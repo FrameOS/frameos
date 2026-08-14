@@ -364,12 +364,38 @@ def embedded_frame_settings(frame: Frame) -> dict:
                 return value
         return False
 
+    # Present-only power keys: battery wiring and check-in cadence are often
+    # provisioned on the device itself (USB console hardware presets), so the
+    # poll must stay silent about them unless the backend actually holds a
+    # value — a default sent every poll would clobber the device's own copy.
+    def _optional_power_settings() -> dict:
+        extra: dict[str, object] = {}
+        for out_key, keys, kind in (
+            ("deepSleepOnBattery", ("deepSleepOnBattery", "deep_sleep_on_battery"), "bool"),
+            ("wakeCheckSeconds", ("wakeCheckSeconds", "wake_check_seconds"), "int"),
+            ("batteryPin", ("batteryPin", "battery_pin"), "int"),
+            ("batteryDivider", ("batteryDivider", "battery_divider"), "float"),
+        ):
+            for key in keys:
+                value = device_config.get(key)
+                if kind == "bool" and isinstance(value, bool):
+                    extra[out_key] = value
+                    break
+                if kind == "int" and isinstance(value, int) and not isinstance(value, bool):
+                    extra[out_key] = value
+                    break
+                if kind == "float" and isinstance(value, (int, float)) and not isinstance(value, bool):
+                    extra[out_key] = float(value)
+                    break
+        return extra
+
     return {
         "interval": float(frame.interval or 300),
         "name": frame.name or "",
         "renderMode": "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
         "deepSleep": _bool_config("deepSleep", "deep_sleep"),
         "wakeSchedule": _bool_config("wakeSchedule", "wake_schedule"),
+        **_optional_power_settings(),
         # 0/90/180/270 — the firmware restarts itself to re-init the renderer
         # when this changes (scene canvases are sized at init).
         "rotate": int(frame.rotate or 0) % 360,

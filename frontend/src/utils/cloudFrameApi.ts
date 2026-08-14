@@ -1,7 +1,13 @@
 import type { FrameSchedule, FrameScene, FrameType } from '../types'
 import { apiFetch } from './apiFetch'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
-import { cloudFrameSettingKeys, cloudFrameSettingsPayload, type CloudFrameSettingKey } from './cloudFrameSettings'
+import {
+  cloudFrameSettingKeys,
+  cloudFrameSettingsPayload,
+  esp32CloudFrameSettingKeys,
+  type CloudFrameSettingKey,
+} from './cloudFrameSettings'
+import { isEsp32CloudFrame } from '../scenes/workspace/workspaceSurfaces'
 import type { FrameId } from './frameId'
 
 // FrameOS Cloud speaks a much narrower dialect than the FrameOS backend: an
@@ -60,7 +66,10 @@ export async function sendCloudFrameCommand(
  * for a request it never made.
  */
 export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<FrameType>): Promise<boolean> {
-  const settings = cloudFrameSettingsPayload(frame)
+  // The power keys exist only in the ESP32 firmware's set_settings profile;
+  // the Pi runtime refuses the whole push on a key it does not know.
+  const keys = isEsp32CloudFrame(frame) ? esp32CloudFrameSettingKeys : cloudFrameSettingKeys
+  const settings = cloudFrameSettingsPayload(frame, keys)
   if (Object.keys(settings).length === 0) {
     return false
   }

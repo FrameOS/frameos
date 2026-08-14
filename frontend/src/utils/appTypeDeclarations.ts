@@ -13,6 +13,7 @@ const fieldTypeToTsType: Record<AppConfigFieldType, string> = {
   scene: 'string',
   image: 'any',
   font: 'string',
+  path: 'string',
   select: 'string',
 }
 

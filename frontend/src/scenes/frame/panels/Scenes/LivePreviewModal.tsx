@@ -471,6 +471,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
                         onChange={(value) => setEditStateValues((values) => ({ ...values, [field.name]: value }))}
                         currentState={previewState}
                         stateChanges={editStateValues}
+                        frameId={frameId}
                       />
                     </div>
                   ))}

@@ -930,11 +930,22 @@ export function Settings() {
                     <Box className="p-2 space-y-2">
                       <p className="text-sm leading-loose">
                         The OpenAI API key is used within OpenAI apps on frames.
-                        {showBackendOnlyFields ? ' The backend key powers AI features in the control plane.' : ''}
+                        {showBackendOnlyFields
+                          ? ' The backend key powers AI features in the control plane.'
+                          : ' The AI chat key powers scene chat here in the workspace; it stays on your account and is never sent to frames.'}
                       </p>
                       <Field name="apiKey" label="API key for frames" secret={!!savedSettings?.openAI?.apiKey}>
                         <TextInput name="apiKey" />
                       </Field>
+                      {!showBackendOnlyFields ? (
+                        <Field
+                          name="backendApiKey"
+                          label="API key for AI chat"
+                          secret={!!savedSettings?.openAI?.backendApiKey}
+                        >
+                          <TextInput name="backendApiKey" />
+                        </Field>
+                      ) : null}
                       {showBackendOnlyFields ? (
                         <>
                           <Field

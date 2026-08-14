@@ -1881,9 +1881,12 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * `name` (the DHCP hostname — the provider-side display name stays
  * authoritative on the provider), `rotate` (the renderer sizes its canvas
  * once at init, so this one costs a reboot) and `scaling_mode` (a per-decode
- * fallback fit, applied live on the next render pass). Any other key refuses
- * the WHOLE verb with setting_not_allowed, mirroring the Nim runtime, so the
- * provider never half-applies a settings push. */
+ * fallback fit, applied live on the next render pass). The power keys —
+ * `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up
+ * by the render loop's next pass) and `battery_pin` / `battery_divider`
+ * (deferred reboot: the ADC is set up once at boot) — round out the profile.
+ * Any other key refuses the WHOLE verb with setting_not_allowed, mirroring
+ * the Nim runtime, so the provider never half-applies a settings push. */
 static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
 {
     const cJSON *settings = cJSON_GetObjectItem(root, "settings");
@@ -1891,11 +1894,22 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         ws_ack(id, false, "invalid_settings");
         return;
     }
+    static const char *settable_keys[] = {
+        "interval", "name", "rotate", "scaling_mode",
+        "deep_sleep", "deep_sleep_on_battery", "wake_check_seconds",
+        "battery_pin", "battery_divider",
+    };
     const cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, settings) {
         const char *key = entry->string ? entry->string : "";
-        if (strcmp(key, "interval") != 0 && strcmp(key, "name") != 0 &&
-            strcmp(key, "rotate") != 0 && strcmp(key, "scaling_mode") != 0) {
+        bool known = false;
+        for (size_t k = 0; k < sizeof(settable_keys) / sizeof(settable_keys[0]); k++) {
+            if (strcmp(key, settable_keys[k]) == 0) {
+                known = true;
+                break;
+            }
+        }
+        if (!known) {
             ESP_LOGW(TAG, "ws: set_settings key \"%s\" not supported on the esp32 profile", key);
             ws_ack(id, false, "setting_not_allowed");
             return;
@@ -1950,11 +1964,70 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
          * fos_client on the next pass. */
         strlcpy(config->scaling_mode, normalized, sizeof(config->scaling_mode));
     }
+    const cJSON *deep_sleep = cJSON_GetObjectItem(settings, "deep_sleep");
+    if (deep_sleep != NULL) {
+        if (!cJSON_IsBool(deep_sleep)) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        config->deep_sleep = cJSON_IsTrue(deep_sleep);
+    }
+    const cJSON *sleep_on_battery = cJSON_GetObjectItem(settings, "deep_sleep_on_battery");
+    if (sleep_on_battery != NULL) {
+        if (!cJSON_IsBool(sleep_on_battery)) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        config->deep_sleep_on_battery = cJSON_IsTrue(sleep_on_battery);
+    }
+    const cJSON *wake_check = cJSON_GetObjectItem(settings, "wake_check_seconds");
+    if (wake_check != NULL) {
+        if (!cJSON_IsNumber(wake_check) || wake_check->valuedouble < 0 ||
+            wake_check->valuedouble > 86400) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        uint32_t seconds = (uint32_t)wake_check->valuedouble;
+        /* Sub-minute check-ins would drain a battery for nothing; 0 stays 0
+         * (only wake to render). Same floor as the backend settings poll. */
+        if (seconds > 0 && seconds < 60) seconds = 60;
+        config->wake_check_sec = seconds;
+    }
+    /* Battery sensing: the ADC is set up once at boot (main.c), so a changed
+     * pin or divider takes a deferred reboot, exactly like rotate. */
+    bool battery_changed = false;
+    const cJSON *battery_pin = cJSON_GetObjectItem(settings, "battery_pin");
+    if (battery_pin != NULL) {
+        if (!cJSON_IsNumber(battery_pin) || battery_pin->valuedouble < -1 ||
+            battery_pin->valuedouble > 48) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        int8_t pin = (int8_t)battery_pin->valuedouble;
+        battery_changed = battery_changed || config->battery_pin != pin;
+        config->battery_pin = pin;
+    }
+    const cJSON *battery_divider = cJSON_GetObjectItem(settings, "battery_divider");
+    if (battery_divider != NULL) {
+        if (!cJSON_IsNumber(battery_divider) || battery_divider->valuedouble < 0.5 ||
+            battery_divider->valuedouble > 20.0) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        float divider = (float)battery_divider->valuedouble;
+        battery_changed = battery_changed || config->battery_divider != divider;
+        config->battery_divider = divider;
+    }
     if (fos_config_save() != ESP_OK) {
         ws_ack(id, false, "persist_failed");
         return;
     }
     ws_ack(id, true, NULL);
+    if (battery_changed && !rotate_changed) {
+        ESP_LOGW(TAG, "ws: battery sensing changed (pin %d, divider %.2f); restarting to re-init the ADC",
+                 (int)config->battery_pin, (double)config->battery_divider);
+        ws_schedule_reboot();
+    }
     if (rotate_changed) {
         /* The Nim runtime sizes the scene canvas at init (main.c passes
          * config->rotate into frameos_nim_init), and the panel packers read
@@ -1991,6 +2064,16 @@ static void ws_handle_message(const char *data, size_t len)
     const cJSON *type_item = cJSON_GetObjectItem(root, "type");
     const cJSON *id = cJSON_GetObjectItem(root, "id");
     const char *type = cJSON_IsString(type_item) ? type_item->valuestring : "";
+
+    /* A verb arriving is the provider actively driving this frame: hold off
+     * deep sleep briefly so a burst (set_scenes + set_settings + render)
+     * completes before the frame disappears. Short on purpose — the local
+     * HTTP API's 3-minute hold would cost real battery on every check-in.
+     * Handshake messages and provider notices do not count. */
+    if (strcmp(type, "challenge") != 0 && strcmp(type, "ready") != 0 &&
+        strcmp(type, "error") != 0 && strcmp(type, "ack") != 0) {
+        fos_client_keep_awake_ms(15000);
+    }
 
     /* One control plane owns the content (docs/cloud-frames.md): enrollment
      * is refused while a backend is configured, but a device that gained a

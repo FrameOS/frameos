@@ -155,6 +155,10 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
 export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string[]> = {
   backend: [
     'frame-settings-info',
+    // Only the esp32 cloud profile renders Power today; the per-frame gate
+    // (esp32OnlyFrameSettingsSections) refuses it everywhere else. Listed
+    // here so the allow-list hygiene invariant (cloud ⊆ backend) holds.
+    'frame-settings-power',
     'frame-settings-device',
     'frame-settings-ssh',
     'frame-settings-agent',
@@ -197,6 +201,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
   // cloud frame talks to the hub and nothing else.
   cloud: [
     'frame-settings-info',
+    'frame-settings-power',
     'frame-settings-device',
     'frame-http-api-section',
     'frame-settings-admin',
@@ -568,10 +573,17 @@ export function frameSupportsUsbSerialConsole(
 
 /**
  * The esp32 cloud profile replaces the whole settings form with one compact
- * block (name + interval) — see `esp32CloudProfile` in FrameSettings.tsx — so
- * every other nav entry would scroll to an anchor that is never rendered.
+ * block (name/interval/rotate/scaling) plus the Power section — see
+ * `esp32CloudProfile` in FrameSettings.tsx — so every other nav entry would
+ * scroll to an anchor that is never rendered. The compact block itself keeps
+ * no nav entry: an "Info" link pointing at the form the panel opens on was
+ * pure noise.
  */
-const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-info']
+const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-power']
+
+/** Sections only the esp32 cloud profile renders — for everyone else the
+ * anchor does not exist, so the nav entry must not either. */
+const esp32OnlyFrameSettingsSections: readonly string[] = ['frame-settings-power']
 
 /**
  * Sections FrameSettings.tsx renders only for a full host OS (its
@@ -598,7 +610,11 @@ export function frameSettingsSectionIsAllowed(
   sectionId: string,
   frame?: FrameCapabilityInput | null
 ): boolean {
-  if (isEsp32CloudFrame(frame, mode) && !esp32CloudFrameSettingsSections.includes(sectionId)) {
+  if (isEsp32CloudFrame(frame, mode)) {
+    if (!esp32CloudFrameSettingsSections.includes(sectionId)) {
+      return false
+    }
+  } else if (esp32OnlyFrameSettingsSections.includes(sectionId)) {
     return false
   }
   if (

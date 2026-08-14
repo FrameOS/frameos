@@ -1331,17 +1331,40 @@ describe("frame management API", () => {
   });
 
   it("accepts exactly the device's settings allowlist, in the device's spelling", async () => {
-    // Authoritative list: CLOUD_SETTINGS_ALLOWLIST in
-    // frameos/src/frameos/cloud/hub_client.nim, mirrored in
-    // docs/cloud-frames.md. The hub forwards keys verbatim and the device
-    // refuses the whole verb on one unknown key, so this must match exactly.
+    // Authoritative lists: CLOUD_SETTINGS_ALLOWLIST in
+    // frameos/src/frameos/cloud/hub_client.nim (the base six) plus the power
+    // keys only ws_handle_set_settings in embedded/esp32/main/fos_cloud.c
+    // applies, mirrored in docs/cloud-frames.md. The hub forwards keys
+    // verbatim and each device refuses the whole verb on one unknown key, so
+    // this must match exactly (the SPA only sends power keys to esp32).
     expect([...allowedFrameSettings.keys()].sort()).toEqual(
-      ["debug", "interval", "name", "rotate", "scaling_mode", "timezone"].sort(),
+      [
+        "debug",
+        "interval",
+        "name",
+        "rotate",
+        "scaling_mode",
+        "timezone",
+        "deep_sleep",
+        "deep_sleep_on_battery",
+        "wake_check_seconds",
+        "battery_pin",
+        "battery_divider",
+      ].sort(),
     );
-    // The ESP32 profile is a strict subset of that list: exactly what
-    // ws_handle_set_settings in embedded/esp32/main/fos_cloud.c applies.
+    // The ESP32 profile: exactly what ws_handle_set_settings applies.
     expect([...esp32SettableKeys].sort()).toEqual(
-      ["interval", "name", "rotate", "scaling_mode"].sort(),
+      [
+        "interval",
+        "name",
+        "rotate",
+        "scaling_mode",
+        "deep_sleep",
+        "deep_sleep_on_battery",
+        "wake_check_seconds",
+        "battery_pin",
+        "battery_divider",
+      ].sort(),
     );
     for (const key of esp32SettableKeys) {
       expect(allowedFrameSettings.has(key)).toBe(true);

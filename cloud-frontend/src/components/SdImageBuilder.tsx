@@ -773,8 +773,9 @@ export function SdImageBuilder({
             retrying enrollment itself.
           </li>
           <li>
-            The claim code stays valid for the period chosen above — the frame appears here as <em>pending</em>{' '}
-            whenever it first reaches this cloud, even much later.
+            There is no rush to boot the frame: as long as it first reaches this cloud within the claim-code validity
+            chosen above, it appears here as <em>pending</em>. After the code expires, enrollment is refused — build a
+            new image with a fresh code.
           </li>
         </ul>
       </details>

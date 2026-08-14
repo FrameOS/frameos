@@ -287,13 +287,35 @@ time. Without it (or before SNTP syncs) the time already spent awake this cycle
 — boot, Wi-Fi, render — is subtracted from the interval so the cadence doesn't
 drift by however long a render took.
 
+`deep_sleep_on_battery` deep-sleeps between refreshes only while a battery is
+detected on `battery_pin` (cell voltage above ~2.5 V — the best power-source
+signal we have; no supported board exposes VBUS on a readable pin, so a
+plugged-in-and-charging frame counts as "on battery" too, which just means it
+sleeps while charging). Without a configured battery pin the flag never fires
+and the frame stays connected.
+
+`wake_check` (seconds, 0 = off, floored to 60) makes a deep-sleeping frame
+wake at least this often to check the control plane for queued commands. The
+scheduled render's due time survives the reboot in RTC memory, so a check-in
+wake connects, applies whatever is queued (`set_scenes`, `set_settings`,
+schedules, OTA nudges — each arriving cloud verb holds the device awake for
+15 s so a burst completes) and goes back to sleep **without** refreshing the
+panel; an explicit `render` command still repaints immediately. Before any
+deep sleep a cloud-enrolled frame also holds the boot open up to 20 s for the
+management socket, so queued commands are not lost to a race with the sleep.
+
 `battery_pin` enables battery sensing on an **ADC1** GPIO (ADC2 conflicts with
 Wi-Fi). The reading is divider-corrected (`battery_divider`, default 2.0 for a
 100k/100k tap), mapped to a percentage via a Li-ion curve, and reported in
 `status` and `GET /status`. Below 3% the render + panel refresh is skipped and
 the device sleeps 6h to keep a low cell from being cycled down to damage. The
-backend can bake these in per-frame via `device_config`:
-`deepSleep`, `wakeSchedule`, `batteryPin`, `batteryDivider`.
+integrated-board hardware presets carry known battery wiring (the Waveshare
+13.3" E6 board taps VBAT on GPIO 8 through a 3.0 divider). The backend can
+bake these in per-frame via `device_config`: `deepSleep`, `deepSleepOnBattery`,
+`wakeSchedule`, `wakeCheckSeconds`, `batteryPin`, `batteryDivider` — and the
+cloud can set the same live over `set_settings` (`deep_sleep`,
+`deep_sleep_on_battery`, `wake_check_seconds`, `battery_pin`,
+`battery_divider`), surfaced as the frame's "Power" settings section.
 
 ## Scene storage and memory (2026.8.13)
 

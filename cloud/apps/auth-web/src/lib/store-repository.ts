@@ -80,7 +80,10 @@ export async function buildStoreRepository(
       flags: scene.riskFlags.length > 0 ? scene.riskFlags : undefined,
       frameosVersion: scene.frameosVersion ?? undefined,
       id: scene.slug,
-      image: scene.hasPreview ? asset(`/scenes/${scene.id}/image`) : undefined,
+      // ?v pins the preview to the published version, making the image URL
+      // immutable — the route answers it with a forever cache-control, so
+      // the CDN edge serves thumbnails without touching Postgres.
+      image: scene.hasPreview ? asset(`/scenes/${scene.id}/image?v=${scene.latestVersion}`) : undefined,
       imageHeight: scene.previewImageHeight ?? undefined,
       imageWidth: scene.previewImageWidth ?? undefined,
       name: scene.name,

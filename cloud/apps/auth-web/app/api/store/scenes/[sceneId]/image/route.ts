@@ -36,6 +36,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const [scene] = await db
     .select({
       accountId: storeScenes.accountId,
+      latestVersion: storeScenes.latestVersion,
       previewImage: storeScenes.previewImage,
       previewImageType: storeScenes.previewImageType,
       shareToken: storeScenes.shareToken,
@@ -65,11 +66,38 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
   }
 
+  // The preview bytes change only when a new version is published, so a
+  // request that names the current version (?v=…, emitted by the store
+  // repository index) is immutable and can live on the CDN edge for good —
+  // a new publish changes the URL. Everything else still gets a day at the
+  // edge plus an ETag, so the recurring cost of the Postgres bytea read is
+  // one 304 per browser instead of the full image per pageview. Private
+  // scenes must never be publicly cached: their URL is guessable and the
+  // edge would happily serve the cached copy to anonymous requests.
+  const isPublic = scene.visibility === "public";
+  const versionParam = request.nextUrl.searchParams.get("v");
+  const versionPinned =
+    versionParam !== null && versionParam === String(scene.latestVersion);
+  const etag = `W/"${sceneId}-${scene.latestVersion}"`;
+  const cacheControl = !isPublic
+    ? "private, max-age=3600"
+    : versionPinned
+      ? "public, max-age=86400, s-maxage=31536000, immutable"
+      : "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400";
+
+  if (request.headers.get("if-none-match") === etag) {
+    return new NextResponse(null, {
+      status: 304,
+      headers: { "cache-control": cacheControl, etag },
+    });
+  }
+
   return new NextResponse(Buffer.from(scene.previewImage), {
     headers: {
-      "cache-control": "public, max-age=3600",
+      "cache-control": cacheControl,
       "content-length": String(scene.previewImage.length),
       "content-type": scene.previewImageType ?? "image/jpeg",
+      etag,
       "x-content-type-options": "nosniff",
     },
   });

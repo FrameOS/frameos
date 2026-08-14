@@ -12,6 +12,12 @@ export interface ModalProps {
   panelClassName?: string
   /** Overrides the body's default max-h-[70vh], e.g. 'h-[calc(100dvh-9rem)]'. */
   bodyClassName?: string
+  /**
+   * 'center' (default) keeps the dialog vertically centered, which recenters
+   * it whenever its content grows or shrinks. 'top' pins it near the top of
+   * the viewport so a dialog with changing content doesn't jump around.
+   */
+  align?: 'center' | 'top'
 }
 
 export function Modal({
@@ -23,12 +29,18 @@ export function Modal({
   initialFocus,
   panelClassName,
   bodyClassName,
+  align,
 }: ModalProps): JSX.Element {
   const isOpen = open === undefined || open
   return (
     <Dialog open={isOpen} onClose={onClose} initialFocus={initialFocus} className="relative z-[120]">
       <div className="fixed inset-0 z-[120] bg-slate-950/35 backdrop-blur-sm" />
-      <div className="justify-center items-center flex overflow-x-hidden overflow-y-auto fixed inset-0 z-[130] outline-none focus:outline-none">
+      <div
+        className={clsx(
+          'justify-center flex overflow-x-hidden overflow-y-auto fixed inset-0 z-[130] outline-none focus:outline-none',
+          align === 'top' ? 'items-start pt-[8vh]' : 'items-center'
+        )}
+      >
         <Dialog.Panel className={clsx('relative w-auto my-6 mx-auto w-full', panelClassName ?? 'max-w-[767px]')}>
           <div className="frameos-panel border border-white/80 rounded-[24px] shadow-2xl relative flex flex-col bg-white/95 outline-none focus:outline-none backdrop-blur-xl">
             <>

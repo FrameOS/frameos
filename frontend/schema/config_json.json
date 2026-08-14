@@ -72,6 +72,17 @@
     "AppConfigField": {
       "additionalProperties": false,
       "properties": {
+        "capabilities": {
+          "$ref": "#/definitions/InputPortCapabilities",
+          "description": "Runtime-only: what this input port can negotiate. Never shown in the editor."
+        },
+        "extensions": {
+          "description": "Allowed file extensions without the dot (e.g. [\"jpg\", \"png\"]), only used if type is 'path'",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "hint": {
           "description": "Info tooltip contents (markdown)",
           "type": "string"
@@ -90,6 +101,10 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "pick": {
+          "$ref": "#/definitions/PathFieldPick",
+          "description": "Whether the path points at a file, a folder or either, only used if type is 'path'"
         },
         "placeholder": {
           "description": "Placeholder text for the field",
@@ -238,9 +253,115 @@
         "node",
         "scene",
         "image",
-        "font"
+        "font",
+        "path"
       ],
       "type": "string"
+    },
+    "ForwardsBoundsCapability": {
+      "additionalProperties": false,
+      "properties": {
+        "heightFrom": {
+          "type": "string"
+        },
+        "input": {
+          "description": "Input port the consumer's useful-resolution bounds are passed on to",
+          "type": "string"
+        },
+        "swapWhen": {
+          "additionalProperties": false,
+          "description": "Field controlling the geometry (a rotation degree): values in `swap` exchange width and height, values in `keep` pass them through, anything else refuses the bounds plan.",
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "keep": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "swap": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": ["field", "swap", "keep"],
+          "type": "object"
+        },
+        "widthFrom": {
+          "description": "Or replace the bounds with these fields' static values (a resize)",
+          "type": "string"
+        }
+      },
+      "required": ["input"],
+      "type": "object"
+    },
+    "ForwardsTargetCapability": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "description": "Input port the target request is passed on to",
+          "type": "string"
+        },
+        "requireStatic": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        }
+      },
+      "required": ["input"],
+      "type": "object"
+    },
+    "InputPortCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "providesTarget": {
+          "$ref": "#/definitions/ProvidesTargetCapability",
+          "description": "This input can hand its producer an image to write into"
+        }
+      },
+      "type": "object"
+    },
+    "IntoTargetCapability": {
+      "additionalProperties": false,
+      "properties": {
+        "fits": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "requireOpaqueColor": {
+          "description": "Color fields that must statically resolve to a fully opaque color for the capability to apply — the \"output is opaque given these fields\" promise that lets a generator (gradient, solid color) fill the target in place.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "requireStatic": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "requireUnset": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
     },
     "MarkdownField": {
       "additionalProperties": false,
@@ -263,6 +384,10 @@
     "OutputField": {
       "additionalProperties": false,
       "properties": {
+        "capabilities": {
+          "$ref": "#/definitions/OutputPortCapabilities",
+          "description": "Runtime-only: what this output port can negotiate. Never shown in the editor."
+        },
         "example": {
           "description": "Example output (stringified)",
           "type": "string"
@@ -277,6 +402,84 @@
         }
       },
       "required": ["name", "type"],
+      "type": "object"
+    },
+    "OutputPortCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "forwardsBounds": {
+          "$ref": "#/definitions/ForwardsBoundsCapability",
+          "description": "This output passes useful-resolution bounds upstream (requestedBounds)"
+        },
+        "forwardsTarget": {
+          "$ref": "#/definitions/ForwardsTargetCapability",
+          "description": "This output passes a target request upstream and mutates the result in place"
+        },
+        "intoTarget": {
+          "$ref": "#/definitions/IntoTargetCapability",
+          "description": "This output writes into a caller-supplied image instead of allocating one"
+        }
+      },
+      "type": "object"
+    },
+    "PathFieldPick": {
+      "description": "What a 'path' field may point at. Defaults to 'file' when absent.",
+      "enum": ["file", "folder", "any"],
+      "type": "string"
+    },
+    "ProvidesTargetCapability": {
+      "additionalProperties": false,
+      "description": "Execution protocols a port declares, read by the frame's planner (frameos/planner.nim) and never by the editor — see docs/value-pipeline.md. Absent means \"materialized\", the floor every edge supports.",
+      "properties": {
+        "compositingRequireStatic": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Extra requireStatic constraints applied when the producer composites into the target (a JS app drawing source-over) instead of overwriting every fitted pixel",
+          "type": "object"
+        },
+        "fitFrom": {
+          "description": "Config field carrying the fit (cover/contain/stretch) to ask the producer for",
+          "type": "string"
+        },
+        "fits": {
+          "description": "Fits this port can hand upstream",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ownedTargetExcludes": {
+          "description": "Field/value combinations where an app-owned scratch target changes the pixels",
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "requireStatic": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": "Field -> values it must statically resolve to for the capability to apply",
+          "type": "object"
+        },
+        "requireUnset": {
+          "description": "Fields that must be neither configured nor wired",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     }
   }

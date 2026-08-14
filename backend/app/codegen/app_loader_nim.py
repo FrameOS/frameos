@@ -60,7 +60,7 @@ def _accepts_byte_iter(field: Dict[str, Any]) -> bool:
 
 def _default_literal(field_name: str, field_type: str, default: Scalar, required: bool) -> str:
     """Return a Nim literal/expression usable as the fallback/default element value."""
-    if field_type in ("string", "text", "select", "font", "date"):
+    if field_type in ("string", "text", "select", "font", "date", "path"):
         return _nim_quote(default if isinstance(default, str) else "")
     if field_type == "integer":
         return str(_as_int(default, 0))
@@ -90,7 +90,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
     Returns a Nim *expression* (often a 'block:' expression).
     """
     k = f'params{{"{field_name}"}}'
-    if field_type in ("string", "text", "select", "font", "date"):
+    if field_type in ("string", "text", "select", "font", "date", "path"):
         return f'{k}.getStr({default_expr})'
 
     if field_type == "integer":
@@ -171,7 +171,7 @@ def _scalar_getter(field_name: str, field_type: str, default_expr: str, required
 
 def _field_elem_nim_type(field_type: str, required: bool) -> str:
     """Element type (for seqs)."""
-    if field_type in ("string", "text", "select", "font", "date"):
+    if field_type in ("string", "text", "select", "font", "date", "path"):
         return "string"
     if field_type == "integer":
         return "int"
@@ -651,7 +651,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
             )
         else:
             # Map Value -> field setter
-            if field_type in ("string", "text", "select", "font", "date"):
+            if field_type in ("string", "text", "select", "font", "date", "path"):
                 app_set_lines.append(f"    app.appConfig.{field_name} = value.asString()")
             elif field_type == "integer":
                 app_set_lines.append(f"    app.appConfig.{field_name} = value.asInt().int")
