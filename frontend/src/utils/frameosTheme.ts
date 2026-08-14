@@ -2,11 +2,10 @@ import { assetUrl } from './assetUrl'
 
 export type FrameosTheme = 'light' | 'dark'
 
-// Four icons, not two: the theme picks the outline colour (dark glyph on a
-// light tab strip, white glyph on a dark one) and "am I on localhost" picks
-// whether the three squares keep their colours. A developer usually has the
-// real deployment open in another tab; the monochrome icon is what tells the
-// two apart at a glance.
+// Four icons, not two: the glyph colour has to contrast with the TAB STRIP,
+// and "am I on localhost" picks whether the three squares keep their colours.
+// A developer usually has the real deployment open in another tab; the
+// monochrome icon is what tells the two apart at a glance.
 //
 // Keep in sync with the inline pre-paint scripts in frontend/src/index.html
 // and cloud-frontend/src/index.html — they run before this module loads and
@@ -15,6 +14,8 @@ const faviconPaths: Record<FrameosTheme, { colour: string; mono: string }> = {
   light: { colour: '/img/logo-2/logo.svg', mono: '/img/logo-2/logo-black.svg' },
   dark: { colour: '/img/logo-2/logo-white-colors.svg', mono: '/img/logo-2/logo-white.svg' },
 }
+
+const darkChromeQuery = '(prefers-color-scheme: dark)'
 
 /**
  * Is this page being served from a development machine rather than a real
@@ -34,21 +35,41 @@ export function isLocalFrameosHost(hostname?: string): boolean {
   )
 }
 
+/**
+ * Which icon the BROWSER's own colours call for.
+ *
+ * Deliberately not the workspace theme. A favicon is painted into the tab
+ * strip, not into the page, so the only thing it has to contrast with is the
+ * browser chrome — and the two disagree constantly: a dark Chrome with the
+ * workspace set to light was drawing the black glyph onto a dark tab strip,
+ * where it was all but invisible. `prefers-color-scheme` is what the chrome
+ * follows, so it is what the icon follows.
+ */
+function prefersDarkChrome(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false
+  }
+  return window.matchMedia(darkChromeQuery).matches
+}
+
 export function applyFrameosTheme(theme: FrameosTheme): void {
   if (typeof document === 'undefined') {
     return
   }
   document.documentElement.dataset.frameosTheme = theme
   document.documentElement.style.colorScheme = theme
-  applyFrameosFavicon(theme)
+  // The favicon takes no argument: it does not depend on `theme` at all.
+  applyFrameosFavicon()
 }
 
-function applyFrameosFavicon(theme: FrameosTheme): void {
+let watchingChromeScheme = false
+
+export function applyFrameosFavicon(): void {
   if (typeof document === 'undefined') {
     return
   }
 
-  const paths = faviconPaths[theme]
+  const paths = faviconPaths[prefersDarkChrome() ? 'dark' : 'light']
   const href = assetUrl(isLocalFrameosHost() ? paths.mono : paths.colour)
   let favicon = document.querySelector<HTMLLinkElement>('link[data-frameos-favicon]')
   if (!favicon) {
@@ -60,5 +81,21 @@ function applyFrameosFavicon(theme: FrameosTheme): void {
   }
   if (favicon.getAttribute('href') !== href) {
     favicon.setAttribute('href', href)
+  }
+
+  // Switching the OS or browser between light and dark has to repaint the
+  // icon; nothing else in the app re-runs on that event, because the
+  // workspace theme may well be pinned and unaffected by it. Registered once,
+  // lazily, so importing this module costs nothing.
+  if (!watchingChromeScheme && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    watchingChromeScheme = true
+    const media = window.matchMedia(darkChromeQuery)
+    const onChange = (): void => applyFrameosFavicon()
+    if (typeof media.addEventListener === 'function') {
+      media.addEventListener('change', onChange)
+    } else if (typeof media.addListener === 'function') {
+      // Safari < 14.
+      media.addListener(onChange)
+    }
   }
 }

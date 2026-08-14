@@ -24,13 +24,19 @@ const themeStorageKey = "frameos-cloud-theme";
 // localStorage, then the system preference — so the pre-paint class and the
 // class the effect applies always agree and the page never flips twice.
 //
-// It also picks the favicon, which is four files rather than two: the theme
-// chooses the outline colour, and whether the page is served from a loopback
-// name chooses whether the three squares keep their colours. Anyone working on
-// the cloud has a dev tab and the real account.frameos.net open at once; the
-// monochrome icon is what tells them apart in the tab strip. The workspace SPA
-// applies the same rule to its own icon — see
+// It also picks the favicon, which is four files rather than two: whether the
+// page is served from a loopback name chooses whether the three squares keep
+// their colours, and prefers-color-scheme chooses the outline colour. Anyone
+// working on the cloud has a dev tab and the real account.frameos.net open at
+// once; the monochrome icon is what tells them apart in the tab strip. The
+// workspace SPA applies the same rule to its own icon — see
 // frontend/src/utils/frameosTheme.ts and cloud-frontend/src/index.html.
+//
+// The icon deliberately ignores `t`, the theme resolved just above. It is
+// painted into the tab strip rather than the page, so the only thing it has
+// to contrast with is the browser chrome — and a dark Chrome showing a
+// light-themed account page was drawing the black glyph onto a dark strip,
+// where it all but disappeared. ThemeToggle keeps it in step afterwards.
 const themeScript = `(function(){try{
 var c=document.cookie.split(";").map(function(p){return p.trim()}).filter(function(p){return p.indexOf("${themeCookieName}=")===0})[0];
 var v=c?c.slice(${themeCookieName.length + 1}):null;
@@ -40,8 +46,9 @@ t=(s==="dark"||s==="light")?s:(window.matchMedia("(prefers-color-scheme: dark)")
 document.documentElement.classList.toggle("theme-dark",t==="dark");
 var h=window.location.hostname.toLowerCase();
 var local=h==="localhost"||h.slice(-10)===".localhost"||h==="127.0.0.1"||h==="0.0.0.0"||h==="::1"||h==="[::1]";
+var darkChrome=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;
 var icon=document.querySelector("link[data-frameos-favicon]");
-if(icon){icon.setAttribute("href","/logo-"+(t==="dark"?"dark":"light")+(local?"-mono":"")+".svg")}
+if(icon){icon.setAttribute("href","/logo-"+(darkChrome?"dark":"light")+(local?"-mono":"")+".svg")}
 }catch(e){}})()`;
 
 export default async function RootLayout({
@@ -59,12 +66,16 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        {/* The server knows the theme from the cookie but not the hostname the
-            browser used, so the colourful light icon is the placeholder and
-            themeScript corrects it before first paint. */}
+        {/* A fixed placeholder, not a guess. The two things that pick the
+            icon — the browser's colour scheme and the hostname the browser
+            used — are both invisible to the server, and the theme cookie is
+            NOT a stand-in for the first (that substitution is what put a
+            black glyph on a dark tab strip). themeScript, right below, has
+            both and corrects this before the first paint; a `media` pair
+            here instead would give JS two elements to fight over. */}
         <link
           data-frameos-favicon=""
-          href={theme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
+          href="/logo-light.svg"
           rel="icon"
           type="image/svg+xml"
         />

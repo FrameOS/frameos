@@ -31,9 +31,11 @@
           document.documentElement.style.colorScheme = theme
 
           // Same four-icon rule as the self-hosted shell and
-          // frontend/src/utils/frameosTheme.ts, which takes over on mount:
-          // theme picks the outline colour, localhost drops the colours so a
-          // dev tab is never mistaken for account.frameos.net.
+          // frontend/src/utils/frameosTheme.ts, which takes over on mount.
+          // It keys off prefers-color-scheme rather than the `theme` resolved
+          // above: the icon lands in the tab strip, so it has to contrast
+          // with the browser's colours, not the workspace's — a dark Chrome
+          // on a light-themed workspace drew a black glyph on a dark strip.
           var favicon = document.querySelector('link[data-frameos-favicon]')
           if (favicon) {
             var host = window.location.hostname.toLowerCase()
@@ -44,13 +46,14 @@
               host === '0.0.0.0' ||
               host === '::1' ||
               host === '[::1]'
+            var darkChrome = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
             favicon.href =
               '/frames-app/img/logo-2/' +
               (isLocal
-                ? theme === 'dark'
+                ? darkChrome
                   ? 'logo-white.svg'
                   : 'logo-black.svg'
-                : theme === 'dark'
+                : darkChrome
                 ? 'logo-white-colors.svg'
                 : 'logo.svg')
           }

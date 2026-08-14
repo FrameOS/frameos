@@ -17,8 +17,11 @@
         document.documentElement.style.colorScheme = theme
 
         // Mirrors utils/frameosTheme.ts, which takes over once the bundle
-        // loads: theme picks the outline colour, localhost picks whether the
-        // squares keep theirs. Both have to agree or the icon flips on boot.
+        // loads. Note it keys off prefers-color-scheme, NOT the `theme`
+        // resolved above: the icon is painted into the tab strip, so it has
+        // to contrast with the browser's colours, not the workspace's. A
+        // dark Chrome showing a light-themed workspace was drawing the black
+        // glyph onto a dark tab strip.
         const favicon = document.querySelector('link[data-frameos-favicon]')
         if (favicon) {
           const basePath = ((window.FRAMEOS_APP_CONFIG && window.FRAMEOS_APP_CONFIG.ingress_path) || '').replace(
@@ -33,11 +36,12 @@
             host === '0.0.0.0' ||
             host === '::1' ||
             host === '[::1]'
+          const darkChrome = window.matchMedia?.('(prefers-color-scheme: dark)').matches
           const icon = isLocal
-            ? theme === 'dark'
+            ? darkChrome
               ? '/img/logo-2/logo-white.svg'
               : '/img/logo-2/logo-black.svg'
-            : theme === 'dark'
+            : darkChrome
             ? '/img/logo-2/logo-white-colors.svg'
             : '/img/logo-2/logo.svg'
           favicon.href = basePath + icon
