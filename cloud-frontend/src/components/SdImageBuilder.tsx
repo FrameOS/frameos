@@ -157,11 +157,29 @@ export function SdImageBuilder({
   // NOT travel: they live on the old card's disk, and nothing in the image
   // carries them. Bound codes are single-use by contract, so the validity
   // picker and the multi-card copy do not apply here.
-  reenrollFrame?: { id: string; name: string } | undefined
+  //
+  // The display fields seed the form: the frame already knows its driver and
+  // panel size, and "pick the display later (setup portal)" is the wrong
+  // starting point for hardware that is already configured. Still editable —
+  // a re-download is sometimes a move to different hardware.
+  reenrollFrame?:
+    | {
+        id: string
+        name: string
+        device?: string | undefined
+        width?: number | undefined
+        height?: number | undefined
+        rotate?: number | undefined
+      }
+    | undefined
 }): ReactElement {
   const [release, setRelease] = useState<ReleaseState>({ status: 'loading' })
   const [platform, setPlatform] = useState('')
   const [frameName, setFrameName] = useState(reenrollFrame?.name ?? '')
+  // Only a device the catalog actually offers can seed the select — an
+  // unknown value would render as the "pick later" option while silently
+  // baking itself into the image.
+  const knownFrameDevice = reenrollFrame?.device && findDeviceOption(reenrollFrame.device) ? reenrollFrame.device : ''
   const remembered = useRef(loadRememberedWifi()).current
   const [wifiSsid, setWifiSsid] = useState(remembered?.ssid ?? '')
   const [wifiPassword, setWifiPassword] = useState(remembered?.password ?? '')
@@ -173,10 +191,16 @@ export function SdImageBuilder({
   // refuses password logins there). One of the two is required.
   const [rootPassword, setRootPassword] = useState('')
   const [passwordlessRoot, setPasswordlessRoot] = useState(false)
-  const [displayChoice, setDisplayChoice] = useState<string>('')
-  const [width, setWidth] = useState('')
-  const [height, setHeight] = useState('')
-  const [rotate, setRotate] = useState('0')
+  const [displayChoice, setDisplayChoice] = useState<string>(knownFrameDevice)
+  const [width, setWidth] = useState(knownFrameDevice && reenrollFrame?.width ? String(reenrollFrame.width) : '')
+  const [height, setHeight] = useState(knownFrameDevice && reenrollFrame?.height ? String(reenrollFrame.height) : '')
+  const [rotate, setRotate] = useState(
+    knownFrameDevice &&
+      reenrollFrame?.rotate &&
+      (rotationChoices as readonly string[]).includes(String(reenrollFrame.rotate))
+      ? String(reenrollFrame.rotate)
+      : '0'
+  )
   const [vcom, setVcom] = useState('')
   const [uploadUrl, setUploadUrl] = useState('')
   const [claimValidity, setClaimValidity] = useState<string>(defaultClaimValidity)

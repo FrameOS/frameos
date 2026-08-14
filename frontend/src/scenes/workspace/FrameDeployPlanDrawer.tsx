@@ -2407,9 +2407,18 @@ function CloudOtaDeployView({
 }): JSX.Element {
   const { updateFrameFirmware } = useActions(framesModel)
   const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
+  const { unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
   // Mirrors CloudPiUpdateCard: one press converges firmware + scenes +
-  // settings. The scenes push is idempotent when nothing changed.
+  // settings — but "converge" means "make equal", so when there is nothing
+  // unsaved and the device acked the last push, the tick sends nothing. The
+  // redelivery was technically idempotent server-side, yet the device still
+  // reloaded and re-rendered for it: an e-ink flash and a page of log lines
+  // per upgrade click.
   const [alsoPushScenes, setAlsoPushScenes] = useState(true)
+  const scenesInSync =
+    unsavedChangeDetails.length === 0 &&
+    Boolean(frame.assigned_checksum) &&
+    frame.assigned_checksum === frame.scenes_checksum
   const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
   const mode = workspaceMode()
   const canUpdateFirmware = frameMenuActionIsAllowed(mode, 'updateFirmware', frame)
@@ -2461,6 +2470,11 @@ function CloudOtaDeployView({
               </div>
             ) : null}
             <Checkbox label="Also push scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+            {alsoPushScenes && scenesInSync ? (
+              <div className="frame-tool-muted text-xs leading-4">
+                Scenes &amp; settings are already in sync — nothing extra is sent.
+              </div>
+            ) : null}
             <button
               type="button"
               title={
@@ -2471,7 +2485,7 @@ function CloudOtaDeployView({
               }
               disabled={Boolean(firmwareDisabledReason)}
               onClick={() => {
-                if (alsoPushScenes) {
+                if (alsoPushScenes && !scenesInSync) {
                   // Scenes first: the OTA reboot redelivers a queued push
                   // when the frame reconnects.
                   saveAndDeployFrame()
@@ -2828,10 +2842,18 @@ function CloudPiUpdateCard({
 }): JSX.Element | null {
   const { updateFrameFirmware } = useActions(framesModel)
   const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
+  const { unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
   // "One big button": converge the whole frame — firmware, scenes and
-  // settings — in one press. The scenes push is idempotent, so leaving this
-  // on costs nothing when there is nothing to change.
+  // settings — in one press. Converge means "make equal": with nothing
+  // unsaved and the last push acked, the tick sends nothing at all. The
+  // redelivery it used to send was idempotent in effect but not in noise —
+  // the device reloaded its config and re-rendered the panel twice per
+  // upgrade click (once for set_settings, once for set_scenes).
   const [alsoPushScenes, setAlsoPushScenes] = useState(true)
+  const scenesInSync =
+    unsavedChangeDetails.length === 0 &&
+    Boolean(frame.assigned_checksum) &&
+    frame.assigned_checksum === frame.scenes_checksum
   const mode = workspaceMode()
   if (!frameMenuActionIsAllowed(mode, 'updateFirmware', frame)) {
     return null
@@ -2855,6 +2877,11 @@ function CloudPiUpdateCard({
           </div>
         ) : null}
         <Checkbox label="Also push scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+        {alsoPushScenes && scenesInSync ? (
+          <div className="frame-tool-muted text-xs leading-4">
+            Scenes &amp; settings are already in sync — nothing extra is sent.
+          </div>
+        ) : null}
         <button
           type="button"
           title={
@@ -2865,7 +2892,7 @@ function CloudPiUpdateCard({
           }
           disabled={Boolean(disabledReason)}
           onClick={() => {
-            if (alsoPushScenes) {
+            if (alsoPushScenes && !scenesInSync) {
               // Scenes first: the firmware update reboots the frame, and a
               // queued push simply redelivers after it reconnects.
               saveAndDeployFrame()

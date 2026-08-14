@@ -69,7 +69,17 @@ export function CloudFrameSdImageCard({ frame }: { frame: FrameType }): ReactEle
           <SdImageBuilder
             cloudOrigin={cloudOrigin()}
             mintClaimToken={mintClaimToken}
-            reenrollFrame={{ id: String(frame.id), name: frame.name || 'this frame' }}
+            reenrollFrame={{
+              id: String(frame.id),
+              name: frame.name || 'this frame',
+              // Seed the display picker from what the frame already runs —
+              // "pick the display later" is the wrong default for hardware
+              // that is already configured. All still editable in the form.
+              device: frame.device,
+              width: frame.width,
+              height: frame.height,
+              rotate: frame.rotate,
+            }}
           />
         ) : (
           <div className="frame-tool-muted text-xs leading-4">

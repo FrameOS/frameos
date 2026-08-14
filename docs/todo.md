@@ -26,17 +26,36 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   pass. Verifying a full buildroot SD-card cloud install + update covers
   both.
 
-  2026-08-15: the first hardware attempt (buildroot Pi, 2026.8.20 →
-  2026.8.21) reported nothing after `cloud:upgrade scheduled` and the
-  version never moved. The visibility half is fixed — `frameos upgrade`
-  runs detached and only ever wrote `upgrade-status.json`, which the local
-  admin page polls and the cloud could not see, so the hub session now
-  watches that file and forwards every status change (plus a `stalled`
-  line when the child dies silently, and a replay of a terminal status
-  written while the frame was restarting). **Whether the upgrade itself
-  works on buildroot is still unverified**: re-run it and read the new
-  `cloud:upgrade` lines, which now carry the failure message from
-  `performFrameOSUpgrade` when there is one.
+  2026-08-15: two hardware attempts (buildroot Pi, 2026.8.20 → 2026.8.21)
+  reported nothing after `cloud:upgrade scheduled` and the version never
+  moved. The visibility half is fixed — `frameos upgrade` runs detached and
+  only ever wrote `upgrade-status.json`, which the local admin page polls
+  and the cloud could not see; the hub session now watches that file and
+  forwards every status change (plus a `stalled` line when the child dies
+  silently, and a replay of a terminal status written while the frame was
+  restarting). That watcher only reaches a frame VIA a release, so a frame
+  on 2026.8.20/21 stays silent regardless — the outcome of those attempts
+  is on the device:
+
+      cat /srv/frameos/state/upgrade-status.json
+      tail -50 /srv/frameos/logs/upgrade.log
+
+  Checked 2026-08-15: the v2026.8.21 release does publish
+  `frameos-2026.8.21-debian-bookworm-arm64.tar.gz` (the buildroot Zero 2 W
+  target), and 2026.8.20 has the full verb → scheduleFrameOSUpgrade →
+  `frameos upgrade --yes` chain — so the failure (or a reboot_required the
+  cloud never saw) is inside the detached child. One candidate to rule out
+  first: `performFrameOSUpgrade` with setupStatus==2 ends `reboot_required`
+  and deliberately does NOT restart services — the device would then still
+  report 2026.8.20 until someone reboots it, which from the cloud looks
+  exactly like "nothing happened".
+
+  Same session also killed the noise around the click: the "Also push
+  scenes & settings" tick used to redeliver the unchanged settings+scenes,
+  and the device reloaded its config and re-rendered the panel twice per
+  upgrade click. The workspace now skips the push when nothing is unsaved
+  and the device acked the last one, and the device (next release) acks an
+  idempotent set_settings/set_scenes redelivery without reloading.
 
 ## Cloud-managed frames
 

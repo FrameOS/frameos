@@ -182,6 +182,11 @@ type
     ## dropped, so verbs that must not be acked optimistically can say so.
     sendEventFn*: proc(event: string, payload: JsonNode): bool {.gcsafe.}
     persistSettingsFn*: proc(payload: JsonNode) {.gcsafe.}
+    # "Would persisting this payload change anything?" — the guard that lets
+    # an idempotent set_settings redelivery be acked without a config reload
+    # (which re-inits the scene and re-renders the panel). nil means "assume
+    # yes", i.e. the old always-reload behaviour.
+    settingsChangedFn*: proc(payload: JsonNode): bool {.gcsafe.}
     persistChecksumFn*: proc(checksum: string) {.gcsafe.}
     getLogsFn*: proc(): JsonNode {.gcsafe.}
     getMetricsFn*: proc(): JsonNode {.gcsafe.}
@@ -524,6 +529,9 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
       persistSettingsFn: proc(payload: JsonNode) {.gcsafe.} =
         {.gcsafe.}:
           persistFrameApiUpdate(payload),
+      settingsChangedFn: proc(payload: JsonNode): bool {.gcsafe.} =
+        {.gcsafe.}:
+          frameApiUpdateChangesConfig(payload),
       persistChecksumFn: proc(checksum: string) {.gcsafe.} =
         persistScenesChecksum(checksum),
       getLogsFn: proc(): JsonNode {.gcsafe.} =
@@ -683,6 +691,28 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
   let state = msg{"state"}
   if state != nil and state.kind == JObject:
     eventPayload["state"] = copy(state)
+  # Idempotency guard, mirroring set_settings: the checksum covers the whole
+  # payload, so a redelivery of exactly what this frame already applied (the
+  # "also push scenes & settings" tick with nothing changed, or at-least-once
+  # redelivery after a reconnect) has nothing to do — re-uploading would
+  # re-init the scene and re-render the panel for a no-op. Only skipped when
+  # the message ALSO asks for no scene switch and carries no state seed;
+  # either of those is new work even under an unchanged checksum. The ack and
+  # scene_ack still go out — that is what reconciles the provider's sync row.
+  if checksum.len > 0 and checksum == ctx.scenesChecksum and
+      requestedSceneId.len == 0 and (state == nil or state.kind != JObject):
+    ctx.audit("set_scenes", true)
+    # The runtime was not touched, so report the scene it is ACTUALLY showing
+    # — the payload's default would be a guess that goes wrong the moment the
+    # user has switched scenes since the last real push.
+    let currentActive =
+      if ctx.getStateFn.isNil: expectedUploadedSceneId(scenes, requestedSceneId)
+      else: ctx.getStateFn(){"active_scene"}.getStr(expectedUploadedSceneId(scenes, requestedSceneId))
+    var unchangedAck = %*{"type": "scene_ack", "checksum": checksum,
+                          "active_scene": currentActive}
+    if id != nil and id.kind != JNull:
+      unchangedAck["id"] = id
+    return CloudVerbReply(ack: ackOk(id), extra: @[unchangedAck])
   if not ctx.sendEventFn("uploadScenes", eventPayload):
     # The runtime queue was full, so the deploy never happened. Acking ok here
     # (and persisting the checksum) would tell the provider the frame is up to
@@ -715,12 +745,19 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
   for key in settings.keys:
     payload[key] = copy(settings[key])
   if payload.len > 0:
-    try:
-      ctx.persistSettingsFn(payload)
-    except CatchableError as error:
-      ctx.audit("set_settings", false, "persist_failed: " & error.msg)
-      return CloudVerbReply(ack: ackError(id, "persist_failed"))
-    discard ctx.sendEventFn("reload", %*{})
+    # Idempotency guard: every "push scenes & settings" click redelivers the
+    # full settings object, and reloading the config re-inits the active scene
+    # and re-renders the panel — an e-ink flash plus a page of reload/render
+    # log lines for a write that changed nothing. Values already in effect are
+    # acked without touching disk or the runtime.
+    let changed = ctx.settingsChangedFn.isNil or ctx.settingsChangedFn(payload)
+    if changed:
+      try:
+        ctx.persistSettingsFn(payload)
+      except CatchableError as error:
+        ctx.audit("set_settings", false, "persist_failed: " & error.msg)
+        return CloudVerbReply(ack: ackError(id, "persist_failed"))
+      discard ctx.sendEventFn("reload", %*{})
   ctx.audit("set_settings", true)
   CloudVerbReply(ack: ackOk(id))
 

@@ -790,6 +790,62 @@ describe("SdImageBuilder", () => {
       });
     });
 
+    // "Pick the display later (setup portal)" is the wrong starting point for
+    // hardware that is already configured — the frame knows its driver and
+    // panel size, so the form starts from them. Still editable: a re-download
+    // is sometimes a move to different hardware.
+    it("preselects the frame's display, dimensions and rotation", async () => {
+      mockReleaseAndImage();
+      render(
+        <SdImageBuilder
+          cloudOrigin={window.location.origin}
+          mintClaimToken={() => Promise.resolve("FRCT_bound")}
+          reenrollFrame={{
+            ...reenrollFrame,
+            device: "framebuffer",
+            width: 800,
+            height: 480,
+            rotate: 90,
+          }}
+        />,
+      );
+      await screen.findByRole("option", {
+        name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+      });
+
+      expect(
+        (screen.getByLabelText("Display") as HTMLSelectElement).value,
+      ).toBe("framebuffer");
+      expect(
+        (screen.getByLabelText("Display width") as HTMLInputElement).value,
+      ).toBe("800");
+      expect(
+        (screen.getByLabelText("Display height") as HTMLInputElement).value,
+      ).toBe("480");
+      expect(
+        (screen.getByLabelText("Rotation") as HTMLSelectElement).value,
+      ).toBe("90");
+    });
+
+    it("falls back to 'pick later' for a device the catalog does not offer", async () => {
+      mockReleaseAndImage();
+      render(
+        <SdImageBuilder
+          cloudOrigin={window.location.origin}
+          mintClaimToken={() => Promise.resolve("FRCT_bound")}
+          reenrollFrame={{ ...reenrollFrame, device: "not.a.real.driver", width: 800 }}
+        />,
+      );
+      await screen.findByRole("option", {
+        name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+      });
+
+      // An unknown value must not silently bake itself into the image while
+      // the select renders the "pick later" option.
+      expect((screen.getByLabelText("Display") as HTMLSelectElement).value).toBe("");
+      expect(screen.queryByLabelText("Display width")).toBeNull();
+    });
+
     // The enrollment watch looks for a frame that was not in the list before;
     // re-keying produces none, so it would either hang on "waiting" forever
     // or latch onto an unrelated enrollment.

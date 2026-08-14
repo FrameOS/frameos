@@ -456,6 +456,40 @@ proc persistFrameApiUpdate*(payload: JsonNode) =
       persistScenesPayload(payload["scenes"])
     writeTextFileAtomically(configPath, pretty(nextConfig, indent = 4) & "\n")
 
+proc frameApiUpdateChangesConfig*(payload: JsonNode): bool =
+  ## Would persistFrameApiUpdate write anything different? Decided by running
+  ## the SAME merge it runs and comparing — never by a hand-kept key mapping
+  ## that would drift the moment the merge learns a new field.
+  ##
+  ## The cloud client uses this to skip the reload on an idempotent
+  ## `set_settings`: every "Upgrade FrameOS / push scenes" click delivers the
+  ## full settings object whether or not anything changed, and reloading the
+  ## config re-inits the active scene and re-renders the panel — an e-ink
+  ## flash and a page of reload/render log lines for a write that changed
+  ## nothing.
+  if payload == nil or payload.kind != JObject or payload.len == 0:
+    return false
+  # Scenes ride their own persistence and are never a no-op to skip here.
+  if payload.hasKey("scenes"):
+    return true
+  withLock frameConfigWriteLock:
+    let existing = loadConfigJson()
+    let next = frontendFramePayloadToRuntimeConfig(payload, existing)
+    # frameApi is sync BOOKKEEPING, not runtime config: an echo of the last
+    # payload plus a frame_sync revision the merge freshly stamps on every
+    # call. Comparing it would make every redelivery read as a change and
+    # this probe could never answer "no" — so the runtime-visible config is
+    # what gets compared, and a difference confined to the bookkeeping is
+    # not a reason to reload the runtime.
+    var comparableNext = copy(next)
+    if comparableNext.kind == JObject and comparableNext.hasKey("frameApi"):
+      comparableNext.delete("frameApi")
+    var comparableExisting =
+      if existing != nil and existing.kind == JObject: copy(existing) else: %*{}
+    if comparableExisting.hasKey("frameApi"):
+      comparableExisting.delete("frameApi")
+    result = comparableNext != comparableExisting
+
 proc localNetworkAccessPayload*(): JsonNode =
   let enabled = globalFrameConfig != nil and globalFrameConfig.network != nil and
     globalFrameConfig.network.allowLocalNetworkAccess
