@@ -296,6 +296,7 @@ function frameToolPanelFromSearchParams(
 
 const allFrameSettingsSections = [
   { id: 'frame-settings-info', label: 'Info' },
+  { id: 'frame-settings-power', label: 'Power' },
   { id: 'frame-settings-device', label: 'Device' },
   { id: 'frame-settings-ssh', label: 'SSH' },
   { id: 'frame-settings-agent', label: 'Remote' },

@@ -533,6 +533,25 @@ function frameIsActiveInCurrentState(frame: FrameType): boolean {
   return frameIsActiveForHome(frame)
 }
 
+/**
+ * Active/inactive grouping for the home list. Membership is pinned to the
+ * snapshot taken when the page was opened, exactly like the ordering: the
+ * live predicate flips whenever a log line lands (last_log_at moves), and
+ * re-partitioning on every log made frames jump between the Active and
+ * Inactive groups while the user was looking at them. Frames that appeared
+ * after the snapshot (fresh enrollments) fall back to their live state.
+ */
+function frameIsActiveForGrouping(
+  frame: FrameType,
+  frameOrderSnapshot: FrameId[],
+  frameActiveSnapshot: Record<FrameId, boolean>
+): boolean {
+  if (frameOrderSnapshot.includes(frame.id)) {
+    return !!frameActiveSnapshot[frame.id]
+  }
+  return frameIsActiveInCurrentState(frame)
+}
+
 function frameSortName(frame: FrameType): string {
   // A freshly enrolled cloud frame can have neither a name nor a host —
   // undefined here crashed the home list's sort into a white screen.
@@ -1179,13 +1198,18 @@ export const workspaceLogic = kea<workspaceLogicType>([
         applyFrameOrderSnapshot(archivedFramesList, frameOrderSnapshot),
     ],
     homeActiveFramesList: [
-      (s) => [s.orderedActiveFramesList],
-      (orderedActiveFramesList): FrameType[] => orderedActiveFramesList.filter(frameIsActiveInCurrentState),
+      (s) => [s.orderedActiveFramesList, s.frameOrderSnapshot, s.frameActiveSnapshot],
+      (orderedActiveFramesList, frameOrderSnapshot, frameActiveSnapshot): FrameType[] =>
+        orderedActiveFramesList.filter((frame) =>
+          frameIsActiveForGrouping(frame, frameOrderSnapshot, frameActiveSnapshot)
+        ),
     ],
     homeInactiveFramesList: [
-      (s) => [s.orderedActiveFramesList],
-      (orderedActiveFramesList): FrameType[] =>
-        orderedActiveFramesList.filter((frame) => !frameIsActiveInCurrentState(frame)),
+      (s) => [s.orderedActiveFramesList, s.frameOrderSnapshot, s.frameActiveSnapshot],
+      (orderedActiveFramesList, frameOrderSnapshot, frameActiveSnapshot): FrameType[] =>
+        orderedActiveFramesList.filter(
+          (frame) => !frameIsActiveForGrouping(frame, frameOrderSnapshot, frameActiveSnapshot)
+        ),
     ],
     filteredOverviewFrames: [
       (s) => [s.orderedActiveFramesList, s.search],
@@ -1226,14 +1250,20 @@ export const workspaceLogic = kea<workspaceLogicType>([
       },
     ],
     overviewActiveFrameSections: [
-      (s) => [s.overviewFrameSections],
-      (overviewFrameSections): OverviewFrameSection[] =>
-        overviewFrameSections.filter((section) => !section.archived && frameIsActiveInCurrentState(section.frame)),
+      (s) => [s.overviewFrameSections, s.frameOrderSnapshot, s.frameActiveSnapshot],
+      (overviewFrameSections, frameOrderSnapshot, frameActiveSnapshot): OverviewFrameSection[] =>
+        overviewFrameSections.filter(
+          (section) =>
+            !section.archived && frameIsActiveForGrouping(section.frame, frameOrderSnapshot, frameActiveSnapshot)
+        ),
     ],
     overviewInactiveFrameSections: [
-      (s) => [s.overviewFrameSections],
-      (overviewFrameSections): OverviewFrameSection[] =>
-        overviewFrameSections.filter((section) => !section.archived && !frameIsActiveInCurrentState(section.frame)),
+      (s) => [s.overviewFrameSections, s.frameOrderSnapshot, s.frameActiveSnapshot],
+      (overviewFrameSections, frameOrderSnapshot, frameActiveSnapshot): OverviewFrameSection[] =>
+        overviewFrameSections.filter(
+          (section) =>
+            !section.archived && !frameIsActiveForGrouping(section.frame, frameOrderSnapshot, frameActiveSnapshot)
+        ),
     ],
     overviewArchivedFrameSections: [
       (s) => [s.overviewFrameSections],

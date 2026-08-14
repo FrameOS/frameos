@@ -27,6 +27,7 @@ import { newNodePickerLogic } from './newNodePickerLogic'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
 import { FontSelect } from '../../../../components/FontSelect'
+import { PathInput } from '../Assets/PathInput'
 import { ColorInput } from '../../../../components/ColorInput'
 import { NodeZoomLabel } from './NodeZoomLabel'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
@@ -392,6 +393,20 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                         ? data.config[field.name]
                                         : field.value) || ''
                                     }
+                                    onChange={(value) => updateNodeConfig(id, field.name, value)}
+                                  />
+                                ) : field.type === 'path' ? (
+                                  <PathInput
+                                    theme="node"
+                                    frameId={frameId}
+                                    placeholder={field.placeholder}
+                                    pick={field.pick}
+                                    extensions={field.extensions}
+                                    value={String(
+                                      (data.config && field.name in data.config
+                                        ? data.config[field.name]
+                                        : field.value) ?? ''
+                                    )}
                                     onChange={(value) => updateNodeConfig(id, field.name, value)}
                                   />
                                 ) : field.type === 'select' ? (

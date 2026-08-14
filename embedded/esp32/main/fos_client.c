@@ -24,6 +24,7 @@
 
 #include "fos_battery.h"
 #include "fos_buttons.h"
+#include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_mem.h"
 #include "fos_ota.h"
@@ -43,6 +44,25 @@ static const char *TAG = "fos_client";
 /* Below this charge we stop rendering and sleep long to protect the cell. */
 #define FOS_BATTERY_CRITICAL_PCT 3
 #define FOS_BATTERY_CRITICAL_SLEEP_SEC (6 * 3600)
+
+/* A cell reading at least this many mV counts as "running on battery" for
+ * deep_sleep_on_battery. It is the best power-source signal we have: no
+ * supported board wires VBUS to a readable pin (the PhotoPainter's AXP2101
+ * could tell, but nothing reads its status registers yet). A plugged-in,
+ * charging frame passes this too — acceptable, deep sleeping while charging
+ * costs nothing. */
+#define FOS_BATTERY_PRESENT_MV 2500
+
+/* How long to hold the boot open for the provider's management socket before
+ * a deep sleep, so queued commands can land (each arriving verb arms the
+ * keep-awake hold and cancels this pass's sleep). */
+#define FOS_CLOUD_SLEEP_GRACE_SEC 20
+
+/* When a deep-sleeping frame wakes only to check for commands
+ * (wake_check_seconds), the scheduled render survives the reboot here; the
+ * RTC domain keeps both this variable and the system clock through deep
+ * sleep. 0 = unknown, render on the next pass. */
+RTC_DATA_ATTR static time_t s_next_render_due;
 
 /* FrameOS embedded bitmap wire format ("FOSB"):
  * magic[4] ver(u8) format(u8) width(u16le) height(u16le) reserved(u16le),
@@ -909,6 +929,11 @@ static uint32_t compute_sleep_seconds(uint32_t interval, int64_t cycle_start_us)
 static void client_task(void *arg)
 {
     fos_config_t *config = fos_config();
+    /* Set when the sleep wait below broke early on an explicit render signal
+     * (cloud/HTTP render verb, button, schedule tick, scene request): the
+     * next pass must render even if the wake-check bookkeeping says the
+     * scheduled render is not due yet. */
+    bool force_render = false;
     xEventGroupWaitBits(s_events, START_RENDER_LOOP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     while (true) {
         int64_t cycle_start = esp_timer_get_time();
@@ -942,6 +967,23 @@ static void client_task(void *arg)
          * cycling the display down to a damaging voltage. */
         int battery_pct = fos_battery_present() ? fos_battery_percent() : -1;
         bool battery_critical = battery_pct >= 0 && battery_pct <= FOS_BATTERY_CRITICAL_PCT;
+        bool on_battery = fos_battery_present() &&
+                          fos_battery_millivolts() >= FOS_BATTERY_PRESENT_MV;
+        bool deep_sleep_now =
+            config->deep_sleep || (config->deep_sleep_on_battery && on_battery);
+        /* A wake-check pass: this deep-sleeping frame woke early (or is held
+         * awake) only to check the control plane for commands — the panel's
+         * scheduled render is not due yet, so skip the costly refresh. An
+         * explicit render signal always wins. */
+        time_t wall_now = time(NULL);
+        bool clock_ok = fos_wifi_time_synced() && wall_now > 1000000000;
+        bool checkin_pass = deep_sleep_now && config->wake_check_sec > 0 &&
+                            !force_render && clock_ok &&
+                            s_next_render_due > wall_now + 2 &&
+                            /* a due date past the longest allowed interval is
+                             * garbage (clock jump, stale RTC) — render */
+                            s_next_render_due < wall_now + 7 * 86400 + 3600;
+        force_render = false;
         bool rendered = false;
         if (s_render_paused_for_memory) {
             /* Paused after repeated PSRAM exhaustion — see
@@ -952,6 +994,10 @@ static void client_task(void *arg)
         } else if (battery_critical) {
             ESP_LOGW(TAG, "battery critical (%d%%); skipping render to protect the cell", battery_pct);
             log_render_skipped("battery", battery_pct);
+        } else if (checkin_pass) {
+            ESP_LOGI(TAG, "wake-check pass; next render due in %ld s",
+                     (long)(s_next_render_due - wall_now));
+            log_render_skipped("wake_check", -1);
         } else {
             if (fos_ota_busy()) {
                 ESP_LOGW(TAG, "OTA in progress; skipping render cycle");
@@ -1000,23 +1046,58 @@ static void client_task(void *arg)
          * quickly until something is resident; an empty pass costs no panel
          * refresh. Deep-sleep frames are exempt: their wake IS a fresh boot,
          * and short-cycling them would drain the battery. */
-        if (!config->deep_sleep && config->render_mode == FOS_RENDER_LOCAL &&
+        if (!deep_sleep_now && config->render_mode == FOS_RENDER_LOCAL &&
             frameos_nim_available() && fos_scenes_loaded() == 0 &&
             fos_scenes_state_mounted() && sleep_s > 10) {
             ESP_LOGW(TAG, "no scene loaded yet; retrying in 10 s instead of %lu s",
                      (unsigned long)sleep_s);
             sleep_s = 10;
         }
+        if (checkin_pass) {
+            /* This pass skipped the render, so sleep until the scheduled one,
+             * not a fresh interval from now. */
+            int64_t until_due = (int64_t)(s_next_render_due - time(NULL));
+            if (until_due < 1) until_due = 1;
+            if ((uint64_t)until_due < sleep_s) sleep_s = (uint32_t)until_due;
+        }
         ESP_LOGI(TAG, "next render in %lu s (interval %lu s)",
                  (unsigned long)sleep_s, (unsigned long)interval);
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
-        if (config->deep_sleep && fos_display_present() && keep_awake_s == 0) {
-            ESP_LOGI(TAG, "deep sleeping for %lu s%s", (unsigned long)sleep_s,
-                     config->wake_schedule ? " (wake-on-schedule)" : "");
-            /* USB console drops in deep sleep; that's the point (battery). */
-            esp_deep_sleep((uint64_t)sleep_s * 1000000ULL);
+        if (deep_sleep_now && fos_display_present() && keep_awake_s == 0 &&
+            fos_cloud_state() == FOS_CLOUD_ENROLLED && fos_wifi_ip()[0] != '\0' &&
+            !fos_cloud_ws_connected()) {
+            /* Hold the boot open briefly for the provider's management socket
+             * so queued commands can land before the deep sleep kills it. An
+             * arriving verb arms the keep-awake hold, which cancels this
+             * pass's deep sleep below. */
+            int64_t grace_end = esp_timer_get_time() +
+                                (int64_t)FOS_CLOUD_SLEEP_GRACE_SEC * 1000000LL;
+            while (!fos_cloud_ws_connected() && esp_timer_get_time() < grace_end &&
+                   keep_awake_remaining_seconds() == 0) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+            if (fos_cloud_ws_connected()) {
+                /* Session is up: give queued verbs a moment to arrive. */
+                vTaskDelay(pdMS_TO_TICKS(3000));
+            }
+            keep_awake_s = keep_awake_remaining_seconds();
         }
-        if (config->deep_sleep && fos_display_present() && keep_awake_s > 0) {
+        if (deep_sleep_now && fos_display_present() && keep_awake_s == 0) {
+            /* Wake early to check the control plane for commands when asked
+             * to — the render schedule itself survives in s_next_render_due
+             * (RTC memory), so the check-in wake does not refresh the panel. */
+            uint32_t chunk = sleep_s;
+            if (config->wake_check_sec >= 60 && chunk > config->wake_check_sec) {
+                chunk = config->wake_check_sec;
+            }
+            s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;
+            ESP_LOGI(TAG, "deep sleeping for %lu s%s%s", (unsigned long)chunk,
+                     config->wake_schedule ? " (wake-on-schedule)" : "",
+                     chunk < sleep_s ? " (wake-check)" : "");
+            /* USB console drops in deep sleep; that's the point (battery). */
+            esp_deep_sleep((uint64_t)chunk * 1000000ULL);
+        }
+        if (deep_sleep_now && fos_display_present() && keep_awake_s > 0) {
             ESP_LOGI(TAG, "staying awake for %lu s after HTTP activity",
                      (unsigned long)keep_awake_s);
             if (sleep_s > keep_awake_s) sleep_s = keep_awake_s;
@@ -1028,14 +1109,23 @@ static void client_task(void *arg)
             uint32_t slice = remaining_ms > 1000 ? 1000 : remaining_ms;
             EventBits_t bits = xEventGroupWaitBits(s_events, RENDER_NOW_BIT, pdTRUE,
                                                    pdFALSE, pdMS_TO_TICKS(slice));
-            if (bits & RENDER_NOW_BIT) break;
+            if (bits & RENDER_NOW_BIT) {
+                force_render = true;
+                break;
+            }
             if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
                 fos_buttons_process_events();
                 /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —
                  * evaluated on the render task, like every Nim call. */
-                if (fos_schedule_tick()) break;
+                if (fos_schedule_tick()) {
+                    force_render = true;
+                    break;
+                }
             }
-            if (frameos_nim_render_requested()) break;
+            if (frameos_nim_render_requested()) {
+                force_render = true;
+                break;
+            }
             remaining_ms -= slice;
         }
     }

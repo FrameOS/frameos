@@ -134,6 +134,26 @@ export const allowedFrameSettings = new Map<
       v === "contain" || v === "cover" || v === "stretch" || v === "center",
   ],
   ["timezone", (v) => typeof v === "string" && v.length <= 64],
+  // Power management (ESP32 profile — the Nim runtime has no consumer, so
+  // the SPA only sends these for esp32 frames; see esp32PowerSettingKeys in
+  // frontend/src/utils/cloudFrameSettings.ts).
+  ["deep_sleep", (v) => typeof v === "boolean"],
+  ["deep_sleep_on_battery", (v) => typeof v === "boolean"],
+  [
+    "wake_check_seconds",
+    (v) =>
+      typeof v === "number" &&
+      Number.isInteger(v) &&
+      (v === 0 || (v >= 60 && v <= 86400)),
+  ],
+  [
+    "battery_pin",
+    (v) => typeof v === "number" && Number.isInteger(v) && v >= -1 && v <= 48,
+  ],
+  [
+    "battery_divider",
+    (v) => typeof v === "number" && v >= 0.5 && v <= 20,
+  ],
 ]);
 
 export const allowedFrameCommandTypes = new Set([
@@ -183,11 +203,30 @@ export function validateFrameSettings(
 // field of fos_config_t and `timezone` is unimplementable without a tz
 // database — so the firmware refuses the WHOLE verb on them and the route
 // refuses them up front instead of half-applying a push.
+// Keys only the ESP32 firmware knows: the Pi runtime's
+// CLOUD_SETTINGS_ALLOWLIST refuses the whole verb on any of them, so the
+// settings route refuses them up front for non-esp32 frames.
+export const esp32OnlySettableKeys = new Set([
+  "deep_sleep",
+  "deep_sleep_on_battery",
+  "wake_check_seconds",
+  "battery_pin",
+  "battery_divider",
+]);
+
 export const esp32SettableKeys = new Set([
   "interval",
   "name",
   "rotate",
   "scaling_mode",
+  // Power management: deep_sleep / deep_sleep_on_battery / wake_check_seconds
+  // apply on the next render pass; battery_pin / battery_divider cost a
+  // deferred reboot (the ADC is set up once at boot).
+  "deep_sleep",
+  "deep_sleep_on_battery",
+  "wake_check_seconds",
+  "battery_pin",
+  "battery_divider",
 ]);
 
 // The settings frames.settings mirrors, in the device's spelling. `name` is

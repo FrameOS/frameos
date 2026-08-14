@@ -14,6 +14,7 @@ export const typeColors: Record<FieldType, TagProps['color']> = {
   scene: 'secondary',
   image: 'red',
   font: 'secondary',
+  path: 'blue',
 }
 
 export interface FieldTypeTagProps {

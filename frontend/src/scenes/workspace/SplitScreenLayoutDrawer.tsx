@@ -13,7 +13,7 @@ import {
 import { ArrowLeftIcon, EllipsisHorizontalIcon, TrashIcon, ViewColumnsIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { ColorInput } from '../../components/ColorInput'
 import { FrameImage } from '../../components/FrameImage'
-import type { FrameScene, FrameType, StateField } from '../../types'
+import type { FrameId, FrameScene, FrameType, StateField } from '../../types'
 import { buildSplitScene, frameLogic } from '../frame/frameLogic'
 import { StateFieldEdit } from '../frame/panels/Scenes/StateFieldEdit'
 import { assignSceneImages } from '../../utils/sceneImages'
@@ -755,6 +755,7 @@ function SplitLeafControls({
 }
 
 function SplitSceneOptionsPanel({
+  frameId,
   leaf,
   scene,
   canRemove,
@@ -762,6 +763,7 @@ function SplitSceneOptionsPanel({
   onSplitLeaf,
   onRemoveLeaf,
 }: {
+  frameId: FrameId
   leaf: SplitLayoutLeaf | null
   scene: FrameScene | null
   canRemove: boolean
@@ -807,6 +809,7 @@ function SplitSceneOptionsPanel({
                   onChange={(value) => onSetSceneStateValue(leaf.id, field, value)}
                   currentState={{}}
                   stateChanges={state}
+                  frameId={frameId}
                 />
               </div>
             </div>
@@ -1140,6 +1143,7 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
           </div>
 
           <SplitSceneOptionsPanel
+            frameId={frame.id}
             leaf={selectedLeaf}
             scene={selectedLeafScene}
             canRemove={selectedLeaf ? canRemoveSplitLayoutLeaf(layout.root, selectedLeaf.id) : false}

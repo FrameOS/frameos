@@ -249,7 +249,7 @@ proc zeroValueForCodeArgType*(fieldType: string): Value =
     valueFromJsonByType(newJNull(), fieldType)
   of "text":
     VText("")
-  of "string", "select":
+  of "string", "select", "path":
     VString("")
   of "image":
     VNone()

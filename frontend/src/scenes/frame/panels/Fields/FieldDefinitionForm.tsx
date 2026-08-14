@@ -82,6 +82,46 @@ export function FieldDefinitionForm<T extends AppConfigField>({
           />
         </Field>
       ) : null}
+      {field.type === 'path' ? (
+        <>
+          <Field name="pick" label="Points at">
+            <Select
+              value={field.pick ?? 'file'}
+              options={[
+                { value: 'file', label: 'A file' },
+                { value: 'folder', label: 'A folder' },
+                { value: 'any', label: 'A file or a folder' },
+              ]}
+              onChange={(value) =>
+                setFields(
+                  fields.map((field, i) => (i === index ? { ...field, pick: value as AppConfigField['pick'] } : field))
+                )
+              }
+            />
+          </Field>
+          <Field
+            name="extensions"
+            label="Allowed file extensions"
+            tooltip={<>Comma-separated, without dots — e.g. "jpg, png". Leave empty to allow any file.</>}
+          >
+            <TextInput
+              value={(field.extensions ?? []).join(', ')}
+              placeholder="e.g. jpg, png"
+              onChange={(value) => {
+                const extensions = value
+                  .split(/[\s,]+/)
+                  .map((extension) => extension.replace(/^\.+/, '').trim())
+                  .filter(Boolean)
+                setFields(
+                  fields.map((field, i) =>
+                    i === index ? { ...field, extensions: extensions.length > 0 ? extensions : undefined } : field
+                  )
+                )
+              }}
+            />
+          </Field>
+        </>
+      ) : null}
       <Field name="value" label="Initial value">
         <TextInput />
       </Field>

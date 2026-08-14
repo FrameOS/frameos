@@ -1500,9 +1500,17 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
     deep_sleep = _config_value("deepSleep", "deep_sleep")
     if isinstance(deep_sleep, bool):
         lines.append(f"#define FRAMEOS_DEFAULT_DEEP_SLEEP {1 if deep_sleep else 0}")
+    deep_sleep_on_battery = _config_value("deepSleepOnBattery", "deep_sleep_on_battery")
+    if isinstance(deep_sleep_on_battery, bool):
+        lines.append(
+            f"#define FRAMEOS_DEFAULT_DEEP_SLEEP_ON_BATTERY {1 if deep_sleep_on_battery else 0}"
+        )
     wake_schedule = _config_value("wakeSchedule", "wake_schedule")
     if isinstance(wake_schedule, bool):
         lines.append(f"#define FRAMEOS_DEFAULT_WAKE_SCHEDULE {1 if wake_schedule else 0}")
+    wake_check_seconds = _config_value("wakeCheckSeconds", "wake_check_seconds")
+    if isinstance(wake_check_seconds, int) and not isinstance(wake_check_seconds, bool):
+        lines.append(f"#define FRAMEOS_DEFAULT_WAKE_CHECK_SEC {max(0, wake_check_seconds)}")
     battery_pin = _config_value("batteryPin", "battery_pin")
     if isinstance(battery_pin, int) and not isinstance(battery_pin, bool):
         lines.append(f"#define FRAMEOS_DEFAULT_BATTERY_PIN {battery_pin}")

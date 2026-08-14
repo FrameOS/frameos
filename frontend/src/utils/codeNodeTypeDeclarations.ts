@@ -32,6 +32,7 @@ const fieldTypeToTsType: Record<FieldType, string> = {
   scene: 'string',
   image: 'string',
   font: 'string',
+  path: 'string',
 }
 
 const frameosGlobals = `declare function now(): number;

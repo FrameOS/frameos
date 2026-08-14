@@ -182,7 +182,7 @@ def opaque_colors_hold(target_id: str, node: dict, app_config: dict,
 
 
 def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
-    if field_type in ('select', 'text', 'string', 'font'):
+    if field_type in ('select', 'text', 'string', 'font', 'path'):
         return 'string'
     if field_type == 'float':
         return 'float'
@@ -206,7 +206,7 @@ def field_type_to_nim_type(field_type: str, required: bool = True) -> str:
 
 
 def field_type_to_value_accessor(field_type: str) -> str:
-    if field_type in ('select', 'text', 'string', 'font', 'date'):
+    if field_type in ('select', 'text', 'string', 'font', 'date', 'path'):
         return '.asString()'
     if field_type == 'float':
         return '.asFloat()'
@@ -230,7 +230,7 @@ def field_type_to_value_accessor(field_type: str) -> str:
 def field_type_to_value_constructor(field_type: str, expression: str) -> str:
     if field_type == 'text':
         return f'VText({expression})'
-    if field_type in ('select', 'string', 'font', 'date'):
+    if field_type in ('select', 'string', 'font', 'date', 'path'):
         return f'VString({expression})'
     if field_type == 'float':
         return f'VFloat({expression})'

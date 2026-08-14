@@ -55,7 +55,9 @@ static void load_defaults(void)
     s_config.assets_sd.mosi = FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI;
     s_config.assets_sd.max_freq_khz = FRAMEOS_DEFAULT_ASSETS_SD_MAX_FREQ_KHZ;
     s_config.deep_sleep = FRAMEOS_DEFAULT_DEEP_SLEEP;
+    s_config.deep_sleep_on_battery = FRAMEOS_DEFAULT_DEEP_SLEEP_ON_BATTERY;
     s_config.wake_schedule = FRAMEOS_DEFAULT_WAKE_SCHEDULE;
+    s_config.wake_check_sec = FRAMEOS_DEFAULT_WAKE_CHECK_SEC;
     s_config.battery_pin = FRAMEOS_DEFAULT_BATTERY_PIN;
     s_config.battery_divider = FRAMEOS_DEFAULT_BATTERY_DIVIDER;
     fos_config_parse_gpio_buttons(FRAMEOS_DEFAULT_GPIO_BUTTONS, &s_config);
@@ -166,7 +168,9 @@ esp_err_t fos_config_init(void)
     if (nvs_get_i8(nvs, "sd_mosi", &i8) == ESP_OK) s_config.assets_sd.mosi = i8;
     if (nvs_get_u32(nvs, "sd_freq", &u32) == ESP_OK) s_config.assets_sd.max_freq_khz = u32;
     if (nvs_get_u8(nvs, "deep_sleep", &u8) == ESP_OK) s_config.deep_sleep = u8 != 0;
+    if (nvs_get_u8(nvs, "sleep_batt", &u8) == ESP_OK) s_config.deep_sleep_on_battery = u8 != 0;
     if (nvs_get_u8(nvs, "wake_sched", &u8) == ESP_OK) s_config.wake_schedule = u8 != 0;
+    if (nvs_get_u32(nvs, "wake_check", &u32) == ESP_OK) s_config.wake_check_sec = u32;
     if (nvs_get_i8(nvs, "batt_pin", &i8) == ESP_OK) s_config.battery_pin = i8;
     if (nvs_get_u32(nvs, "batt_div_m", &u32) == ESP_OK) s_config.battery_divider = (float)u32 / 1000.0f;
     char pins[FOS_STR_LEN] = "";
@@ -239,7 +243,9 @@ esp_err_t fos_config_save(void)
     nvs_set_i8(nvs, "sd_mosi", s_config.assets_sd.mosi);
     nvs_set_u32(nvs, "sd_freq", s_config.assets_sd.max_freq_khz);
     nvs_set_u8(nvs, "deep_sleep", s_config.deep_sleep ? 1 : 0);
+    nvs_set_u8(nvs, "sleep_batt", s_config.deep_sleep_on_battery ? 1 : 0);
     nvs_set_u8(nvs, "wake_sched", s_config.wake_schedule ? 1 : 0);
+    nvs_set_u32(nvs, "wake_check", s_config.wake_check_sec);
     nvs_set_i8(nvs, "batt_pin", s_config.battery_pin);
     nvs_set_u32(nvs, "batt_div_m", (uint32_t)(s_config.battery_divider * 1000.0f));
     char gpio_buttons[FOS_GPIO_BUTTONS_SPEC_LEN];

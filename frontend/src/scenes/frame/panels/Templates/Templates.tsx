@@ -20,6 +20,7 @@ import { isCloudMode } from '../../../../utils/cloudMode'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { appsModel } from '../../../../models/appsModel'
 import { templateCompatibilityForFrame, type CompatibilityResult } from '../../../../utils/embeddedCompatibility'
+import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { templateFavouriteId } from './templateFavourites'
 import { CloudDrive } from './CloudDrive'
@@ -293,6 +294,11 @@ export function Templates({ openInstalledSceneDrawer = false }: TemplatesProps =
                       index,
                       compatibility: templateCompatibilityForFrame(mode, template, apps, frameForm),
                     }))
+                    // A microcontroller can never run these (shell apps,
+                    // compiled-only nodes, …) — on ESP32 an unsupported row
+                    // is pure noise, so hide it instead of graying it out.
+                    // Fuller platforms keep the row with its reason.
+                    .filter(({ compatibility }) => compatibility.supported || !isEsp32Frame(frameForm))
                     .toSorted(sortCompatibleTemplates)
                     .map(({ template, index, compatibility }) => {
                       const favouriteId = templateFavouriteId(template, repository)

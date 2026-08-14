@@ -235,19 +235,24 @@ describe("the esp32 cloud device profile", () => {
     }
   });
 
-  it("links only to the one settings section the compact form renders", () => {
-    // FrameSettings replaces the whole form with a name+interval block for
-    // this profile (esp32CloudProfile), so the settings sub-nav must collapse
-    // to match. It used to be filtered by mode alone and offered all 15 cloud
-    // sections — 14 of them scrolling to an anchor that is never rendered.
-    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-info", esp32Frame)).toBe(true);
+  it("links only to the settings sections the compact form renders", () => {
+    // FrameSettings replaces the whole form with a compact block plus the
+    // Power section for this profile (esp32CloudProfile), so the settings
+    // sub-nav must collapse to match. It used to be filtered by mode alone
+    // and offered all cloud sections — most scrolling to an anchor that is
+    // never rendered. The compact block itself keeps no nav entry (the old
+    // "Info" link pointed at the form the panel opens on anyway).
+    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-power", esp32Frame)).toBe(true);
     for (const section of allowedFrameSettingsSections.cloud) {
-      if (section === "frame-settings-info") continue;
+      if (section === "frame-settings-power") continue;
       expect(frameSettingsSectionIsAllowed("cloud", section, esp32Frame)).toBe(false);
     }
-    // A cloud Pi still gets the full form, so its nav is untouched.
+    // A cloud Pi still gets the full form, so its nav is untouched — except
+    // Power, which only the esp32 profile renders.
     for (const section of allowedFrameSettingsSections.cloud) {
-      expect(frameSettingsSectionIsAllowed("cloud", section, piFrame)).toBe(true);
+      expect(frameSettingsSectionIsAllowed("cloud", section, piFrame)).toBe(
+        section !== "frame-settings-power",
+      );
     }
   });
 
@@ -381,9 +386,12 @@ describe("embedded-hardware frames on the backend control plane", () => {
       expect(frameSettingsSectionIsAllowed("backend", "frame-settings-info", frame)).toBe(true);
       expect(frameSettingsSectionIsAllowed("backend", "frame-http-api-section", frame)).toBe(true);
     }
-    // A Pi on the same control plane keeps all of them.
+    // A Pi on the same control plane keeps all of them — except Power,
+    // which only the esp32 cloud profile renders.
     for (const section of allowedFrameSettingsSections.backend) {
-      expect(frameSettingsSectionIsAllowed("backend", section, {})).toBe(true);
+      expect(frameSettingsSectionIsAllowed("backend", section, {})).toBe(
+        section !== "frame-settings-power",
+      );
     }
   });
 

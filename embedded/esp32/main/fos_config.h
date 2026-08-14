@@ -111,7 +111,10 @@ typedef struct {
     char assets_path[FOS_ASSETS_PATH_LEN]; /* VFS mount point for local assets, default /srv/assets */
     fos_assets_sd_config_t assets_sd;
     bool deep_sleep;               /* deep sleep between refreshes */
+    bool deep_sleep_on_battery;    /* deep sleep between refreshes, but only while running on battery */
     bool wake_schedule;            /* align deep-sleep wake to wall-clock interval boundaries */
+    uint32_t wake_check_sec;       /* while deep sleeping, wake at least this often to check the
+                                    * control plane for commands (0 = only wake to render) */
     int8_t battery_pin;            /* ADC1 GPIO for battery voltage, -1 = none */
     float battery_divider;         /* Vbat = Vpin * divider (default 2.0) */
     size_t gpio_button_count;

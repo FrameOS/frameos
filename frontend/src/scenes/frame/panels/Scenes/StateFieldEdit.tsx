@@ -4,7 +4,8 @@ import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Select } from '../../../../components/Select'
 import { TextArea } from '../../../../components/TextArea'
 import { TextInput } from '../../../../components/TextInput'
-import { StateField } from '../../../../types'
+import { PathInput } from '../Assets/PathInput'
+import { FrameId, StateField } from '../../../../types'
 
 interface StateFieldEditProps {
   field: StateField
@@ -12,6 +13,8 @@ interface StateFieldEditProps {
   onChange: (value: any) => void
   currentState: Record<string, any>
   stateChanges: Record<string, any>
+  /** Enables the file/folder picker for 'path' fields; without it they render as plain text. */
+  frameId?: FrameId
 }
 
 export function StateFieldEdit({
@@ -20,8 +23,18 @@ export function StateFieldEdit({
   currentState,
   value,
   onChange,
+  frameId,
 }: StateFieldEditProps): JSX.Element {
-  return field.type === 'select' ? (
+  return field.type === 'path' && frameId !== undefined ? (
+    <PathInput
+      frameId={frameId}
+      placeholder={field.placeholder}
+      value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
+      onChange={onChange}
+      pick={field.pick}
+      extensions={field.extensions}
+    />
+  ) : field.type === 'select' ? (
     <Select
       value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
       onChange={onChange}

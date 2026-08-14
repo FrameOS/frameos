@@ -28,6 +28,17 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 
 ## Cloud-managed frames
 
+- **Cloud AI chat follow-ups** (scoped out of the 2026-08-14 port of
+  /api/ai/scenes/chat to auth-web) — app-code chat (`/api/ai/apps/chat`
+  answers 501), chat persistence (stateless today, SPA resends history),
+  catalog/RAG context, progress log streaming, and making the OpenAI model
+  override fields storable on the cloud (only apiKey/backendApiKey are in
+  the account-settings allowlist, so chat runs on the defaults).
+- **Power section for backend-managed ESP32 frames** — the wire is done
+  (settings poll sends deepSleepOnBattery/wakeCheckSeconds/batteryPin/
+  batteryDivider when set in device_config, firmware applies them) but only
+  the esp32 CLOUD profile renders the Power settings UI; backend users
+  configure via USB console / device_config for now.
 - **Account hardening** (next up) — passkeys/TOTP 2FA, re-authentication
   for sensitive actions (revoking frames, bulk assignment changes, scope
   grants), per-frame audit trail surfaced in the UI.
@@ -48,6 +59,26 @@ numbers and the measurement tooling live in `docs/esp32-memory.md`.
   workspace advisory reads device metrics, so a frame too low on internal RAM
   to connect reports nothing and cannot be flagged. Today it is preventive
   only; a frame already over the edge is visible over USB and nowhere else.
+
+## Buildroot images
+
+- **Support more Pi models** — the Zero 2 W image is easily adapted to
+  other Pis; a draft exists on the `multi-pi-sd-image` branch (unified
+  64-bit `raspberry-pi-64` image covering Zero 2 W / Pi 3 / Pi 4, all
+  DTBs + both firmware sets on the boot partition, plan in its
+  `TODO-MULTI-PI-SD-IMAGE.md`). The branch predates the
+  `buildroot_platforms.py` registry and needs redoing on top of it, but
+  the defconfig analysis still holds.
+- **Pi 5 image** — not covered by the draft above (BCM2712 needs its own
+  kernel/firmware set); wants its own platform entry.
+- **Cloud SD images ship passwordless root** — the cloud download flow
+  offers no root-password/SSH-key field and never sets
+  `BR2_TARGET_GENERIC_ROOT_PASSWD`, so console login is root with no
+  password (SSH is safe: dropbear runs `-s -g` with no authorized keys).
+  Physical-access exposure only, but decide: password field in the cloud
+  SD builder (the self-hosted flow already has one via
+  `frameos-root-password`), a generated per-image password, or a
+  documented deliberate choice.
 
 ## Cloud services (scope table in CLOUD-TODO.md)
 

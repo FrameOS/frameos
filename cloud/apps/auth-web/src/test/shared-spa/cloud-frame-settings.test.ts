@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   cloudFrameSettingKeys,
   cloudFrameSettingsPayload,
+  esp32CloudFrameSettingKeys,
 } from "../../../../../../frontend/src/utils/cloudFrameSettings";
 import { allowedFrameCommandTypes, allowedFrameSettings } from "../../lib/frames";
 
@@ -15,7 +16,7 @@ import { allowedFrameCommandTypes, allowedFrameSettings } from "../../lib/frames
 
 describe("cloud settings push", () => {
   it("sends only keys the control plane accepts", () => {
-    for (const key of cloudFrameSettingKeys) {
+    for (const key of esp32CloudFrameSettingKeys) {
       expect(
         allowedFrameSettings.has(key),
         `${key} is sent by the SPA but not on the control plane's allowlist`,
@@ -24,12 +25,27 @@ describe("cloud settings push", () => {
   });
 
   it("covers every key the control plane accepts", () => {
+    // The esp32 list is the superset: base keys for every frame plus the
+    // power keys only the esp32 firmware consumes.
     for (const key of allowedFrameSettings.keys()) {
       expect(
-        (cloudFrameSettingKeys as readonly string[]).includes(key),
+        (esp32CloudFrameSettingKeys as readonly string[]).includes(key),
         `${key} is accepted by the control plane but never sent by the SPA`,
       ).toBe(true);
     }
+  });
+
+  it("keeps the power keys out of the base (Pi) payload", () => {
+    // The Pi runtime's CLOUD_SETTINGS_ALLOWLIST does not know the power keys
+    // and refuses the WHOLE push on an unknown key.
+    for (const key of cloudFrameSettingKeys) {
+      expect(key.startsWith("battery_") || key.includes("sleep") || key.includes("wake")).toBe(false);
+    }
+    const payload = cloudFrameSettingsPayload({
+      deep_sleep: true,
+      interval: 300,
+    } as never);
+    expect(Object.keys(payload)).toEqual(["interval"]);
   });
 
   it("drops everything else from a full frame form", () => {

@@ -1,6 +1,7 @@
 import { AppConfig, AppNodeData, CodeNodeData, FrameScene, FrameType, SceneApp, TemplateType } from '../types'
 import { hasCompiledAppSource, hasJavaScriptAppSource, isJavaScriptCatalogApp, sceneAppToAppConfig } from './sceneApps'
 import { isCloudMode } from './cloudMode'
+import { isEsp32Frame } from '../scenes/workspace/workspaceSurfaces'
 
 export interface CompatibilityResult {
   supported: boolean
@@ -148,7 +149,9 @@ export function templateCompatibilityForFrame(
   apps: Record<string, AppConfig>,
   frame?: Partial<FrameType> | null
 ): CompatibilityResult {
-  const embedded = isEmbeddedMode(mode)
+  // Cloud frame rows carry no `mode` — an enrolled ESP32 reveals itself only
+  // through the hardware report, and it hits every embedded limitation.
+  const embedded = isEmbeddedMode(mode) || isEsp32Frame(frame)
   const cloudManaged = isCloudManagedFrame(frame)
 
   if (!embedded && !cloudManaged) {

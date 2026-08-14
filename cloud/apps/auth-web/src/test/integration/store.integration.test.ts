@@ -322,7 +322,9 @@ describe("store publish and distribution", () => {
     expect(templates).toHaveLength(1);
     expect(templates[0]).toMatchObject({
       id: "sunrise-clock",
-      image: `./scenes/${firstScene.id}/image`,
+      // ?v pins the preview to the published version so the CDN can cache
+      // it immutably; a republish changes the URL.
+      image: `./scenes/${firstScene.id}/image?v=2`,
       imageHeight: 480,
       imageWidth: 800,
       name: "Sunrise Clock",

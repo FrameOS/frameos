@@ -103,7 +103,11 @@ describe("the deploy dialog in cloud mode", () => {
     // The cloud's deploy: settings push + one checksummed set_scenes.
     expect(screen.getByRole("button", { name: /Push scenes & settings/ })).toBeTruthy();
     // The firmware nudge (notify_update_available; the device downloads and
-    // signature-verifies the image itself).
+    // signature-verifies the image itself). "Also push scenes & settings" is
+    // on by default, so the button reads "Update everything"; unticking it
+    // reverts to the firmware-only label.
+    expect(screen.getByRole("button", { name: /Update everything/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Also push scenes & settings/ }));
     expect(screen.getByRole("button", { name: /Update firmware/ })).toBeTruthy();
     // OTA progress is only visible as ota:cloud log lines, so the view links
     // straight to them.
@@ -168,6 +172,9 @@ describe("the deploy dialog in cloud mode", () => {
     expect(screen.getByRole("button", { name: /Push scenes & settings/ })).toBeTruthy();
     // The same notify_update_available nudge the esp32 gets, with Pi wording:
     // the device runs its own signed release upgrade (frameos/upgrade.nim).
+    // "Also push scenes & settings" defaults on → "Update everything".
+    expect(screen.getByRole("button", { name: /Update everything/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Also push scenes & settings/ }));
     expect(screen.getByRole("button", { name: /Update FrameOS/ })).toBeTruthy();
     // USB provisioning and the hardware panel stay esp32-profile surfaces: a
     // cloud Pi has no serial console to provision over and no enrollment

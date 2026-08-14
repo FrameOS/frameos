@@ -406,6 +406,7 @@ function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }
                       onChange={onChange}
                       currentState={{}}
                       stateChanges={{}}
+                      frameId={frameId}
                     />
                   )}
                 </Field>
