@@ -48,6 +48,22 @@ Deploy the pushed HEAD with:
 pnpm deploy:prod
 ```
 
+Or deploy any other pushed ref — a branch, tag or commit — by naming it:
+
+```sh
+pnpm deploy:prod -- my-branch
+```
+
+A bare branch name resolves against the remote first, so this deploys what is
+pushed rather than a local branch that happens to share the name. The script
+checks that ref out (detached), builds, deploys, and returns you to where you
+were, including when the build fails. Production running a branch is a normal
+thing here — some frame-facing work can only be exercised against the real
+cloud — so the goal is to make it deliberate rather than to prevent it: the
+ref is named on the command line, a banner announces any non-default ref
+before the build, and the server records what is live. **Redeploy `main` when
+you are done.**
+
 The deploy builds locally and ships a self-contained bundle:
 
 1. `turbo run build --filter=@frameos-cloud/auth-web` builds the editor and
@@ -64,10 +80,23 @@ The deploy builds locally and ships a self-contained bundle:
    untouched), swaps `/opt/frameos-cloud` (previous release kept at
    `/opt/frameos-cloud.previous` for rollback), and restarts the service.
 
-The script refuses to deploy a dirty tree or an unpushed commit, and checks the
-service plus the public login URL afterwards. Override
-`FRAMEOS_CLOUD_DEPLOY_HOST`, `FRAMEOS_CLOUD_DEPLOY_SSH_KEY`, or
-`FRAMEOS_CLOUD_DEPLOY_CHECK_URL`, `FRAMEOS_ACCOUNT_DEPLOY_CHECK_URL`, or
+The script refuses to deploy a dirty tree, and refuses a commit that is on no
+branch of the remote — production has to be a state someone else can check
+out, roll forward from, or revert to. (Reachability from the remote, not an
+`@{upstream}` test: a detached HEAD and a branch checked out without tracking
+both have no upstream and are both perfectly deployable once pushed.)
+
+Two files record the release next to each other on the server:
+`/opt/frameos-cloud/RELEASE` is the bare commit SHA, and
+`/opt/frameos-cloud/RELEASE_REF` adds the ref name, timestamp and deploying
+user — so `cat RELEASE_REF` answers "which branch is prod on?" without
+resolving a SHA against a repo you may not have.
+
+It checks the service plus the public URLs afterwards. Override
+`FRAMEOS_CLOUD_DEPLOY_HOST`, `FRAMEOS_CLOUD_DEPLOY_SSH_KEY`,
+`FRAMEOS_CLOUD_DEPLOY_REMOTE` (default `origin`),
+`FRAMEOS_CLOUD_DEPLOY_DEFAULT_BRANCH` (default `main`), or
+`FRAMEOS_CLOUD_DEPLOY_CHECK_URL`, `FRAMEOS_ACCOUNT_DEPLOY_CHECK_URL`,
 `FRAMEOS_SCENES_DEPLOY_CHECK_URL` if the target changes. The default deployment
 health check requires all three public origins to return a 2xx or 3xx response.
 
