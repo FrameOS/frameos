@@ -54,6 +54,12 @@ export const accounts = pgTable("accounts", {
   // subject (see account_identities). Never use this column for account lookup
   // or recovery decisions; it is a display/contact snapshot only.
   primaryEmail: text("primary_email"),
+  // Verified publisher: superadmin-granted trust mark. Today its only consumer
+  // is the AI chat's store-catalog tool, which recommends public scenes from
+  // verified publishers only. Null = not verified.
+  verifiedPublisherAt: timestamp("verified_publisher_at", {
+    withTimezone: true,
+  }),
   ...timestamps,
 });
 
@@ -884,5 +890,60 @@ export const frameMetrics = pgTable(
   },
   (table) => ({
     frameIdx: index("frame_metrics_frame_idx").on(table.frameId, table.id),
+  }),
+);
+
+// AI chat conversations (the workspace's AI drawer). The chat id is minted by
+// the SPA (uuid) before the first message, so the id is client-supplied —
+// ownership is enforced on every read/write, and an id collision with another
+// account's chat is refused rather than adopted. context_type/context_id
+// mirror the SPA's ChatSummary shape ("frame" | "scene" | "app", with the
+// scene id or scene::node id as the context id).
+export const aiChats = pgTable(
+  "ai_chats",
+  {
+    id: uuid("id").primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    // Frame deletion should not erase the account's chat history — the
+    // conversations are about scenes and setup, not just one device.
+    frameId: uuid("frame_id").references(() => frames.id, {
+      onDelete: "set null",
+    }),
+    contextType: text("context_type").default("frame").notNull(),
+    contextId: text("context_id"),
+    title: text("title"),
+    messageCount: integer("message_count").default(0).notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    accountIdx: index("ai_chats_account_idx").on(table.accountId, table.updatedAt),
+    frameIdx: index("ai_chats_frame_idx").on(table.frameId),
+  }),
+);
+
+// One row per chat turn. `content` is the display text; `tool` labels what the
+// assistant did (reply / build_scene / modify_scene); `payload` carries
+// structured extras (generated scenes) that history reloads may surface later.
+export const aiChatMessages = pgTable(
+  "ai_chat_messages",
+  {
+    id: bigint("id", { mode: "number" })
+      .generatedAlwaysAsIdentity()
+      .primaryKey(),
+    chatId: uuid("chat_id")
+      .notNull()
+      .references(() => aiChats.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    tool: text("tool"),
+    payload: jsonb("payload"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    chatIdx: index("ai_chat_messages_chat_idx").on(table.chatId, table.id),
   }),
 );

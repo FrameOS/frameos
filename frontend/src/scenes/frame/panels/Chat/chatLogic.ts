@@ -20,6 +20,8 @@ import type {
 import { socketLogic } from '../../../socketLogic'
 import { editAppLogic } from '../EditApp/editAppLogic'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
+import { isCloudMode } from '../../../../utils/cloudMode'
+import { streamCloudAiChat, type CloudAiChatEvent } from '../../../../utils/cloudAiChat'
 import { projectApiPathForProject } from '../../../../utils/projectApi'
 
 import type { chatLogicType } from './chatLogicType'
@@ -623,14 +625,18 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       try {
-        const projectId = frameProjectId(values.frameForm, values.frame)
-        if (!projectId) {
-          actions.loadChatsSuccess([], false, 0)
-          return
+        // Cloud serves chats at the account origin; self-hosted scopes them
+        // under the project.
+        let path = `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`
+        if (!isCloudMode()) {
+          const projectId = frameProjectId(values.frameForm, values.frame)
+          if (!projectId) {
+            actions.loadChatsSuccess([], false, 0)
+            return
+          }
+          path = projectApiPathForProject(projectId, path)
         }
-        const response = await apiFetch(
-          projectApiPathForProject(projectId, `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`)
-        )
+        const response = await apiFetch(path)
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
           throw new Error(payload?.detail || 'Failed to load chats')
@@ -653,17 +659,16 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       try {
-        const projectId = frameProjectId(values.frameForm, values.frame)
-        if (!projectId) {
-          actions.loadMoreChatsSuccess([], false, values.chatsOffset)
-          return
+        let path = `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=${values.chatsOffset}`
+        if (!isCloudMode()) {
+          const projectId = frameProjectId(values.frameForm, values.frame)
+          if (!projectId) {
+            actions.loadMoreChatsSuccess([], false, values.chatsOffset)
+            return
+          }
+          path = projectApiPathForProject(projectId, path)
         }
-        const response = await apiFetch(
-          projectApiPathForProject(
-            projectId,
-            `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=${values.chatsOffset}`
-          )
-        )
+        const response = await apiFetch(path)
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
           throw new Error(payload?.detail || 'Failed to load more chats')
@@ -762,12 +767,16 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       try {
-        const projectId = frameProjectId(values.frameForm, values.frame)
-        if (!projectId) {
-          actions.loadChatMessagesSuccess(chatId, [])
-          return
+        let path = `/api/ai/chats/${chatId}`
+        if (!isCloudMode()) {
+          const projectId = frameProjectId(values.frameForm, values.frame)
+          if (!projectId) {
+            actions.loadChatMessagesSuccess(chatId, [])
+            return
+          }
+          path = projectApiPathForProject(projectId, path)
         }
-        const response = await apiFetch(projectApiPathForProject(projectId, `/api/ai/chats/${chatId}`))
+        const response = await apiFetch(path)
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
           throw new Error(payload?.detail || 'Failed to load chat history')
@@ -939,6 +948,107 @@ export const chatLogic = kea<chatLogicType>([
                 targetHandle: edge.targetHandle,
               }))
             : []
+        if (isCloudMode()) {
+          // Cloud AI chat v2: a streaming agentic loop. Text arrives as
+          // real token deltas, tool activity feeds the message's log pane,
+          // and generated scenes are applied the moment they validate.
+          let streamedContent = ''
+          let logContent = ''
+          let finalTool: string | undefined
+          let streamError: string | null = null
+          const applyBuildScenes = async (scenes: Record<string, any>[], title?: string): Promise<void> => {
+            if (!scenes.length) {
+              return
+            }
+            const frameStore = frameLogic({ frameId: props.frameId })
+            const existingSceneIds = new Set(frameStore.values.scenes.map((scene) => scene.id))
+            const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => {
+              const sanitizedScene = sanitizeScene(scene, frameStore.values.frameForm)
+              return {
+                ...sanitizedScene,
+                settings: {
+                  ...sanitizedScene.settings,
+                  autoArrangeOnLoad: true,
+                },
+              }
+            })
+            await frameStore.asyncActions.applyTemplate({
+              scenes: sanitizedScenes,
+              name: title || 'AI Generated Scene',
+            })
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            const updatedScenes = frameStore.values.frameForm?.scenes ?? frameStore.values.scenes
+            const newlyAddedScene = updatedScenes.find((scene) => !existingSceneIds.has(scene.id))
+            if (newlyAddedScene) {
+              scenesLogic({ frameId: props.frameId }).actions.focusScene(newlyAddedScene.id)
+            }
+          }
+          await streamCloudAiChat(
+            {
+              prompt,
+              chatId,
+              frameId: props.frameId,
+              sceneId: selectedScene?.id ?? null,
+              scene: selectedScene ?? null,
+              selectedNodes: selectedNodesPayload.length ? selectedNodesPayload : undefined,
+              selectedEdges: selectedEdgesPayload.length ? selectedEdgesPayload : undefined,
+              history: values.historyForRequest,
+            },
+            async (event: CloudAiChatEvent) => {
+              switch (event.type) {
+                case 'delta':
+                  streamedContent += event.text
+                  actions.updateMessage(chatId, assistantMessageId, {
+                    content: streamedContent,
+                    isPlaceholder: false,
+                    isStreaming: true,
+                  })
+                  break
+                case 'tool':
+                  if (event.status === 'start') {
+                    logContent = logContent ? `${logContent}\n${event.label}…` : `${event.label}…`
+                  } else if (event.status === 'error') {
+                    logContent = `${logContent ? `${logContent}\n` : ''}Failed: ${event.detail || event.label}`
+                  } else {
+                    break
+                  }
+                  actions.updateMessage(chatId, assistantMessageId, {
+                    logContent,
+                    isPlaceholder: false,
+                  })
+                  break
+                case 'scenes':
+                  if (event.tool === 'build_scene') {
+                    await applyBuildScenes(event.scenes ?? [], event.title)
+                  } else {
+                    const updatedScene = event.scenes?.[0]
+                    const targetSceneId = updatedScene?.id || selectedScene?.id
+                    if (updatedScene && targetSceneId) {
+                      actions.updateScene(targetSceneId, updatedScene)
+                    }
+                  }
+                  break
+                case 'done':
+                  finalTool = event.tool
+                  break
+                case 'error':
+                  streamError = event.detail
+                  break
+              }
+            }
+          )
+          if (streamError) {
+            throw new Error(streamError)
+          }
+          actions.updateMessage(chatId, assistantMessageId, {
+            content: streamedContent || 'Done.',
+            tool: finalTool ?? 'reply',
+            isStreaming: false,
+            isPlaceholder: false,
+          })
+          actions.setSubmitting(false)
+          return
+        }
         const response = await apiFetch('/api/ai/scenes/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1062,7 +1172,7 @@ export const chatLogic = kea<chatLogicType>([
     },
   })),
   afterMount(({ actions, values }) => {
-    if (!isFrameControlMode() && frameProjectId(values.frameForm, values.frame)) {
+    if (!isFrameControlMode() && (isCloudMode() || frameProjectId(values.frameForm, values.frame))) {
       actions.loadChats()
     }
     if (values.activeEditAppContext) {
@@ -1102,12 +1212,22 @@ export const chatLogic = kea<chatLogicType>([
       }
     },
     frame: () => {
-      if (!isFrameControlMode() && frameProjectId(values.frameForm, values.frame) && values.chats.length === 0) {
+      if (
+        !isFrameControlMode() &&
+        !isCloudMode() &&
+        frameProjectId(values.frameForm, values.frame) &&
+        values.chats.length === 0
+      ) {
         actions.loadChats()
       }
     },
     frameForm: () => {
-      if (!isFrameControlMode() && frameProjectId(values.frameForm, values.frame) && values.chats.length === 0) {
+      if (
+        !isFrameControlMode() &&
+        !isCloudMode() &&
+        frameProjectId(values.frameForm, values.frame) &&
+        values.chats.length === 0
+      ) {
         actions.loadChats()
       }
     },
