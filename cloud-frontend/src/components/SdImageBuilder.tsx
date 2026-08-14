@@ -30,10 +30,9 @@ import { useEnrollmentWatch } from './enrollmentWatch'
 const firmwareApiUrl = '/api/frames/firmware'
 
 const knownBoards = [
-  { label: 'Raspberry Pi Zero 2 W', platform: 'raspberry-pi-zero-2-w' },
-  { label: 'Raspberry Pi Zero W', platform: 'raspberry-pi-zero-w' },
   { label: 'Raspberry Pi Zero 2 W / 3 / 4 (64-bit)', platform: 'raspberry-pi-64' },
-  { label: 'Raspberry Pi 5', platform: 'raspberry-pi-5' },
+  { label: 'Raspberry Pi Zero / Zero W / 1 (32-bit)', platform: 'raspberry-pi-32' },
+  { label: 'Raspberry Pi 5 / CM5 (64-bit)', platform: 'raspberry-pi-5' },
 ] as const
 
 // The full device catalog, generated from the backend registry (every

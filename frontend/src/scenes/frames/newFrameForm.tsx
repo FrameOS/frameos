@@ -7,7 +7,7 @@ import type { newFrameFormType } from './newFrameFormType'
 import { framesModel } from '../../models/framesModel'
 import { apiFetch } from '../../utils/apiFetch'
 import { loaders } from 'kea-loaders'
-import { BUILDROOT_RASPBERRY_PI_ZERO_2_W, EMBEDDED_ESP32_S3 } from '../../devices'
+import { BUILDROOT_RASPBERRY_PI_64, EMBEDDED_ESP32_S3 } from '../../devices'
 import { settingsLogic } from '../settings/settingsLogic'
 import { defaultNewFrameServerHost } from '../../utils/backendAddress'
 
@@ -69,7 +69,7 @@ function framePayload(frame: NewFrameFormType): NewFrameFormType {
       ...frameValues,
       mode: 'buildroot',
       frame_host: '',
-      platform: frameValues.platform || BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+      platform: frameValues.platform || BUILDROOT_RASPBERRY_PI_64,
       agent,
     }
   }
@@ -171,7 +171,7 @@ export const newFrameForm = kea<newFrameFormType>([
         frame_host: '',
         device: 'web_only',
         timezone: '',
-        platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+        platform: BUILDROOT_RASPBERRY_PI_64,
         network: {
           wifiSSID: '',
           wifiPassword: '',

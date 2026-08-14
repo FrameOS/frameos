@@ -29,8 +29,8 @@ const releasePayload = {
     },
     {
       browser_download_url:
-        "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-raspberry-pi-zero-2-w-buildroot.img.gz",
-      name: "frameos-1.2.3-raspberry-pi-zero-2-w-buildroot.img.gz",
+        "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-raspberry-pi-64-buildroot.img.gz",
+      name: "frameos-1.2.3-raspberry-pi-64-buildroot.img.gz",
       size: 4096,
     },
   ],
@@ -98,8 +98,8 @@ describe("GET /api/frames/firmware", () => {
           size: firmwareBytes.length,
         },
         {
-          name: "frameos-1.2.3-raspberry-pi-zero-2-w-buildroot.img.gz",
-          platform: "raspberry-pi-zero-2-w",
+          name: "frameos-1.2.3-raspberry-pi-64-buildroot.img.gz",
+          platform: "raspberry-pi-64",
           size: 4096,
         },
       ],
@@ -129,7 +129,7 @@ describe("GET /api/frames/firmware", () => {
   it("refuses to stream anything but the ESP32 firmware", async () => {
     mockGitHub();
 
-    const response = await GET(request("?platform=raspberry-pi-zero-2-w"));
+    const response = await GET(request("?platform=raspberry-pi-64"));
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({

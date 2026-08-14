@@ -14,16 +14,30 @@ quirks all live there. Currently enabled:
 
 | Platform | Bits | Defconfig | Binary target |
 | --- | --- | --- | --- |
-| `raspberry-pi-zero-2-w` | 64 | `raspberrypizero2w_64_defconfig` | `debian-bookworm-arm64` |
-| `raspberry-pi-zero-w` | 32 | `raspberrypi0w_defconfig` | `debian-bookworm-armv6` |
+| `raspberry-pi-32` | 32 | `raspberrypi0w_defconfig` | `debian-bookworm-armv6` |
+| `raspberry-pi-64` | 64 | `raspberrypizero2w_64_defconfig` | `debian-bookworm-arm64` |
+| `raspberry-pi-5` | 64 | `raspberrypi5_defconfig` | `debian-bookworm-arm64` |
 
-The Pi Zero W is ARMv6 hard-float. Debian has no ARMv6 port, so its FrameOS
-and Remote binaries are cross-compiled with the Bootlin `armv6-eabihf`
-toolchain inside an amd64 container (`backend/bin/cross` target
-`debian-bookworm-armv6`); the Debian armhf packages only provide headers and
-link-time stubs, and at runtime binaries resolve against the ARMv6 Buildroot
-rootfs libraries. Never ship `armhf` (ARMv7) binaries to a Pi Zero W — they
-SIGILL on its ARM1176 core.
+`raspberry-pi-64` is one unified image for the Zero 2 W, Pi 3, and Pi 4/400
+(one bcm2711 kernel, all DTBs, both `start.elf`/`start4.elf` firmware sets;
+the GPU bootloader picks per model). The Zero 2 W used to be its own
+`raspberry-pi-zero-2-w` platform before folding in here; that key survives
+as an alias. `raspberry-pi-5` covers every BCM2712 board with a DTB in the
+pinned kernel: Pi 5 (C0 + D0) and CM5 on either carrier (Pi 500 / CM5 Lite
+DTS files postdate the pin and join on the next Buildroot bump).
+
+`raspberry-pi-32` is one unified image for every ARMv6 board (Pi Zero,
+Zero W, Pi 1 A/A+/B/B+, CM1): they all boot the same `bcmrpi` kernel and
+`start.elf` firmware, so the image just ships every `bcm2708-*.dtb` and the
+GPU bootloader picks per model. It was published as `raspberry-pi-zero-w`
+before the DTB list was widened; that key survives as an alias. ARMv6 is
+hard-float and Debian has no ARMv6 port, so the FrameOS and Remote binaries
+are cross-compiled with the Bootlin `armv6-eabihf` toolchain inside an amd64
+container (`backend/bin/cross` target `debian-bookworm-armv6`); the Debian
+armhf packages only provide headers and link-time stubs, and at runtime
+binaries resolve against the ARMv6 Buildroot rootfs libraries. Never ship
+`armhf` (ARMv7) binaries to an ARMv6 board — they SIGILL on its ARM1176
+core.
 
 Base images for 32-bit ARM platforms are best built on x86_64 hosts, where the
 prebuilt Bootlin rootfs toolchain applies; on other hosts Buildroot silently
@@ -47,15 +61,15 @@ manifest commit:
 ```bash
 gh workflow run buildroot-base-image.yml --ref your-branch
 
-# Build the 32-bit Raspberry Pi Zero W base image:
-gh workflow run buildroot-base-image.yml --ref your-branch -f platform=raspberry-pi-zero-w
+# Build the unified 32-bit ARMv6 base image (Pi Zero / Zero W / 1):
+gh workflow run buildroot-base-image.yml --ref your-branch -f platform=raspberry-pi-32
 
 # Use a custom runner label, for example a larger ARM runner:
 gh workflow run buildroot-base-image.yml --ref your-branch -f runner_label=your-arm-runner-label
 ```
 
 The workflow picks the platform's default runner (`ubuntu-24.04-arm` for the
-Zero 2 W, x86_64 `ubuntu-24.04` for 32-bit ARM platforms so the prebuilt
+64-bit platforms, x86_64 `ubuntu-24.04` for 32-bit ARM platforms so the prebuilt
 Bootlin toolchain applies) and can be dispatched with a custom runner label
 when a larger/self-hosted runner is available. It builds the base image,
 uploads it to R2, verifies the refreshed manifest, and commits the resulting
@@ -74,16 +88,16 @@ R2_ACCOUNT_ID    # or R2_ENDPOINT
 
 ```bash
 # Build the reusable base image for the current FrameOS version.
-python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w build
+python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-64 build
 
 # Force a clean rebuild of the selected cached /build/output entry.
-python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w build --clean-output-cache
+python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-64 build --clean-output-cache
 
 # Upload it to R2 and update buildroot-images/manifest.json in the bucket.
-python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w upload --yes
+python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-64 upload --yes
 
 # Compose a release-ready image from downloaded precompiled release artifacts.
-python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-zero-2-w \
+python tools/buildroot-images/buildroot_images.py --platform raspberry-pi-64 \
   release-image --prebuilt-cross-dir release-assets --release-assets-dir release-assets
 
 # Refresh the checked-in local manifest from R2.
@@ -96,7 +110,7 @@ python tools/buildroot-images/buildroot_images.py list
 python tools/buildroot-images/buildroot_images.py platforms
 ```
 
-All commands accept `--platform raspberry-pi-zero-w` for the 32-bit Pi Zero W;
+All commands accept `--platform raspberry-pi-32` for the unified 32-bit image;
 `release-image` derives `--target` from the platform when omitted.
 
 The helper reads R2 credentials from the environment or a `.env` file:
@@ -198,9 +212,10 @@ the placeholder: the boot patch deletes any stale `frameos-cloud.txt`, since
 those frames are backend-managed.
 
 Release images exist only for platforms that have a published base image in
-the manifest. To enable `raspberry-pi-zero-w` release images, first run the
-manual base-image workflow for it once
-(`gh workflow run buildroot-base-image.yml --ref <branch> -f platform=raspberry-pi-zero-w`);
+the manifest. To enable a platform's release images (`raspberry-pi-32`,
+`raspberry-pi-64`, `raspberry-pi-5`, …), first run the manual base-image
+workflow for it once
+(`gh workflow run buildroot-base-image.yml --ref <branch> -f platform=<key>`);
 release composition picks the platform up from the manifest after that.
 
 Add future hardware targets by adding a `BuildrootPlatform` entry in

@@ -6,11 +6,10 @@ on:
       platform:
         description: "Buildroot platform to publish"
         required: true
-        default: raspberry-pi-zero-2-w
+        default: raspberry-pi-64
         type: choice
         options:
-          - raspberry-pi-zero-2-w
-          - raspberry-pi-zero-w
+          - raspberry-pi-32
           - raspberry-pi-64
           - raspberry-pi-5
       runner_label:
@@ -74,7 +73,7 @@ jobs:
             # in backend/app/tasks/buildroot_platforms.py: 32-bit ARM targets
             # build on x86_64 so the prebuilt Bootlin toolchains apply.
             case "${PLATFORM}" in
-              raspberry-pi-zero-w) runner="depot-ubuntu-24.04-32" ;;
+              raspberry-pi-32) runner="depot-ubuntu-24.04-32" ;;
               *) runner="depot-ubuntu-24.04-arm-32" ;;
             esac
           fi

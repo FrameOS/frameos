@@ -235,18 +235,30 @@ export const withCustomPalette: Record<string, Palette> = {
   'pimoroni.inky_impression_13_2025': spectraPalettes[0],
 }
 
-// Keep in sync with backend/app/tasks/buildroot_platforms.py
-export const BUILDROOT_RASPBERRY_PI_ZERO_2_W = 'raspberry-pi-zero-2-w'
-export const BUILDROOT_RASPBERRY_PI_ZERO_W = 'raspberry-pi-zero-w'
+// Keep in sync with backend/app/tasks/buildroot_platforms.py. The old
+// single-model 'raspberry-pi-zero-2-w' key folded into 'raspberry-pi-64';
+// the backend still accepts it as an alias for frames saved before that.
+export const BUILDROOT_RASPBERRY_PI_32 = 'raspberry-pi-32'
 export const BUILDROOT_RASPBERRY_PI_64 = 'raspberry-pi-64'
 export const BUILDROOT_RASPBERRY_PI_5 = 'raspberry-pi-5'
 
 export const buildrootPlatforms: Option[] = [
-  { value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' },
-  { value: BUILDROOT_RASPBERRY_PI_ZERO_W, label: 'Raspberry Pi Zero W (32-bit)' },
   { value: BUILDROOT_RASPBERRY_PI_64, label: 'Raspberry Pi Zero 2 W / 3 / 4 (64-bit)' },
-  { value: BUILDROOT_RASPBERRY_PI_5, label: 'Raspberry Pi 5' },
+  { value: BUILDROOT_RASPBERRY_PI_32, label: 'Raspberry Pi Zero / Zero W / 1 (32-bit)' },
+  { value: BUILDROOT_RASPBERRY_PI_5, label: 'Raspberry Pi 5 / CM5 (64-bit)' },
 ]
+
+// The only legacy canonical keys the UI ever wrote; frames saved before the
+// consolidation still store them. Maps them onto the platform whose image
+// actually boots that board so selects render the right option.
+const legacyBuildrootPlatforms: Record<string, string> = {
+  'raspberry-pi-zero-2-w': BUILDROOT_RASPBERRY_PI_64,
+  'raspberry-pi-zero-w': BUILDROOT_RASPBERRY_PI_32,
+}
+
+export function normalizeBuildrootPlatform(platform?: string | null): string {
+  return legacyBuildrootPlatforms[platform ?? ''] ?? platform ?? BUILDROOT_RASPBERRY_PI_64
+}
 
 export const EMBEDDED_ESP32_S3 = 'esp32-s3'
 export const EMBEDDED_ESP32_C3 = 'esp32-c3'

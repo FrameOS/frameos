@@ -66,8 +66,8 @@ const firmwarePayload = {
       size: 1_500_000,
     },
     {
-      name: "frameos-1.2.3-raspberry-pi-zero-2-w-buildroot.img.gz",
-      platform: "raspberry-pi-zero-2-w",
+      name: "frameos-1.2.3-raspberry-pi-64-buildroot.img.gz",
+      platform: "raspberry-pi-64",
       size: gzippedImage.length,
     },
   ],
@@ -199,12 +199,12 @@ describe("SdImageBuilder", () => {
     render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_x")} />);
 
     const available = await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
     expect((available as HTMLOptionElement).disabled).toBe(false);
 
     const missing = screen.getByRole("option", {
-      name: "Raspberry Pi Zero W — image not published yet",
+      name: "Raspberry Pi Zero / Zero W / 1 (32-bit) — image not published yet",
     });
     expect((missing as HTMLOptionElement).disabled).toBe(true);
   });
@@ -223,7 +223,7 @@ describe("SdImageBuilder", () => {
     const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
     render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
@@ -251,7 +251,7 @@ describe("SdImageBuilder", () => {
     const mint = vi.fn(() => Promise.resolve("FRCT_multi_use_token"));
     render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
@@ -272,7 +272,7 @@ describe("SdImageBuilder", () => {
     // default that suits interactive flows.
     expect(mint).toHaveBeenCalledExactlyOnceWith({ multiUse: true, ttlDays: 90 });
     expect(saved.suggestedName).toBe(
-      "frameos-raspberry-pi-zero-2-w-kitchen-frame.img.gz",
+      "frameos-raspberry-pi-64-kitchen-frame.img.gz",
     );
     expect(saved.closed).toBe(true);
     expect(saved.aborted).toBe(false);
@@ -302,7 +302,7 @@ describe("SdImageBuilder", () => {
     const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
     render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     // Name only — neither a root password nor the passwordless checkbox.
@@ -332,7 +332,7 @@ describe("SdImageBuilder", () => {
       />,
     );
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     fireEvent.change(screen.getByPlaceholderText("Frame name"), {
@@ -366,7 +366,7 @@ describe("SdImageBuilder", () => {
       />,
     );
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
@@ -392,7 +392,7 @@ describe("SdImageBuilder", () => {
       />,
     );
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
@@ -421,7 +421,7 @@ describe("SdImageBuilder", () => {
       />,
     );
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
@@ -462,7 +462,7 @@ describe("SdImageBuilder", () => {
       />,
     );
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
@@ -487,7 +487,7 @@ describe("SdImageBuilder", () => {
     const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
     render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
@@ -512,7 +512,7 @@ describe("SdImageBuilder", () => {
       />,
     );
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
@@ -563,7 +563,7 @@ describe("SdImageBuilder", () => {
 
     render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_m")} />);
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
     // The in-memory caveat is stated up front.
     expect(screen.getByText(/assembled in memory/)).toBeDefined();
@@ -576,7 +576,7 @@ describe("SdImageBuilder", () => {
 
     expect(clicked).toHaveLength(1);
     expect(clicked[0]?.download).toBe(
-      "frameos-raspberry-pi-zero-2-w-kitchen-frame.img.gz",
+      "frameos-raspberry-pi-64-kitchen-frame.img.gz",
     );
     expect(clicked[0]?.href).toBe("blob:mock-url");
     expect(blobs).toHaveLength(1);
@@ -608,7 +608,7 @@ describe("SdImageBuilder", () => {
     stubFailingSaveFilePicker("The target volume is full.");
     render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_m")} />);
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
@@ -629,7 +629,7 @@ describe("SdImageBuilder", () => {
     stubSaveFilePicker();
     render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_m")} />);
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame("x".repeat(5000));
@@ -660,7 +660,7 @@ describe("SdImageBuilder", () => {
       <SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_multi")} />,
     );
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
@@ -681,7 +681,7 @@ describe("SdImageBuilder", () => {
     const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
     render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
     await screen.findByRole("option", {
-      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     fireEvent.click(

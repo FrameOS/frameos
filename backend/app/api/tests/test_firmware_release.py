@@ -25,9 +25,9 @@ RELEASE = {
             "browser_download_url": "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-esp32-s3-generic-app.bin",
         },
         {
-            "name": "frameos-1.2.3-raspberry-pi-zero-2-w-buildroot.img.gz",
+            "name": "frameos-1.2.3-raspberry-pi-64-buildroot.img.gz",
             "size": 1024,
-            "browser_download_url": "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-raspberry-pi-zero-2-w-buildroot.img.gz",
+            "browser_download_url": "https://github.com/FrameOS/frameos/releases/download/v1.2.3/frameos-1.2.3-raspberry-pi-64-buildroot.img.gz",
         },
         # Not a frameos- asset: ignored by the allow-list.
         {
@@ -67,8 +67,8 @@ async def test_firmware_listing(async_client):
         {"name": "frameos-1.2.3-esp32-s3-generic.bin", "platform": "esp32-s3-generic", "size": 64},
         {"name": "frameos-1.2.3-esp32-c3-generic.bin", "platform": "esp32-c3-generic", "size": 32},
         {
-            "name": "frameos-1.2.3-raspberry-pi-zero-2-w-buildroot.img.gz",
-            "platform": "raspberry-pi-zero-2-w",
+            "name": "frameos-1.2.3-raspberry-pi-64-buildroot.img.gz",
+            "platform": "raspberry-pi-64",
             "size": 1024,
         },
     ]
@@ -154,7 +154,7 @@ async def test_firmware_unknown_platform(async_client):
 
     # SD images are listed but never streamed through this route.
     with patch_release():
-        response = await async_client.get("/api/frames/firmware?platform=raspberry-pi-zero-2-w")
+        response = await async_client.get("/api/frames/firmware?platform=raspberry-pi-64")
     assert response.status_code == 400
 
 

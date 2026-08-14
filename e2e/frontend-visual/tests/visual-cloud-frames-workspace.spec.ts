@@ -54,8 +54,8 @@ const contentTypes: Record<string, string> = {
 const firmwareListing = {
   release: '2026.7.6',
   assets: [
-    { name: 'frameos-2026.7.6-raspberry-pi-zero-2-w.img.gz', platform: 'raspberry-pi-zero-2-w', size: 341_835_776 },
-    { name: 'frameos-2026.7.6-raspberry-pi-zero-w.img.gz', platform: 'raspberry-pi-zero-w', size: 335_544_320 },
+    { name: 'frameos-2026.7.6-raspberry-pi-64.img.gz', platform: 'raspberry-pi-64', size: 341_835_776 },
+    { name: 'frameos-2026.7.6-raspberry-pi-32.img.gz', platform: 'raspberry-pi-32', size: 335_544_320 },
     { name: 'frameos-2026.7.6-esp32-s3-generic.bin', platform: 'esp32-s3-generic', size: 3_407_872 },
   ],
 }
@@ -65,7 +65,7 @@ const firmwareListing = {
 const firmwareListingWithoutGenericEsp32 = {
   release: '2026.6.0',
   assets: [
-    { name: 'frameos-2026.6.0-raspberry-pi-zero-2-w.img.gz', platform: 'raspberry-pi-zero-2-w', size: 341_835_776 },
+    { name: 'frameos-2026.6.0-raspberry-pi-64.img.gz', platform: 'raspberry-pi-64', size: 341_835_776 },
     { name: 'frameos-2026.6.0-esp32-s3-epd7in5v2.bin', platform: 'esp32-s3-epd7in5v2', size: 3_145_728 },
   ],
 }
@@ -80,7 +80,7 @@ const cloudFrames = [
     connected: true,
     active_connections: 1,
     frameos_version: '2026.7.6',
-    hardware: { platform: 'raspberry-pi-zero-2-w' },
+    hardware: { platform: 'raspberry-pi-64' },
     created_at: '2026-05-01T09:00:00Z',
     last_seen_at: '2026-05-23T11:58:00Z',
     last_log_at: '2026-05-23T11:58:00Z',
@@ -360,7 +360,7 @@ test.describe('cloud /frames workspace @e2e', () => {
     const drawer = await openAddFrameDrawer(page)
 
     // Board options come from the mocked release listing.
-    await expect(drawer.getByLabel('Board')).toHaveValue('raspberry-pi-zero-2-w')
+    await expect(drawer.getByLabel('Board')).toHaveValue('raspberry-pi-64')
     await expect(drawer.getByLabel('Board').locator('option', { hasText: 'Raspberry Pi Zero 2 W (2026.7.6)' })).toHaveCount(1)
 
     // No display picked yet: the detail fields stay hidden.
