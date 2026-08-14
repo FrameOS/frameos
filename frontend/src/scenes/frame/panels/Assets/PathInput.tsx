@@ -132,6 +132,7 @@ function PathPickerModal({
   return (
     <Modal
       open
+      align="top"
       onClose={onClose}
       title={pick === 'folder' ? 'Pick a folder' : pick === 'any' ? 'Pick a file or folder' : 'Pick a file'}
       footer={
@@ -171,17 +172,30 @@ function PathPickerModal({
         {storageUnmounted ? (
           <div className="text-sm text-amber-500">The frame reports its storage as not mounted.</div>
         ) : null}
-        {assetsLoading ? (
-          <div className="flex items-center gap-2 text-sm">
-            <Spinner className="h-4 w-4" /> Loading assets…
-          </div>
-        ) : visibleChildren.length === 0 ? (
-          <div className="frameos-muted text-sm">
-            {pick === 'folder' ? 'No folders here.' : 'Nothing to pick in this folder.'}
-          </div>
-        ) : (
-          <div className="max-h-[45vh] space-y-0.5 overflow-y-auto">
-            {visibleChildren.map((child) => {
+        {/* Fixed height on purpose: paired with the modal's top alignment,
+            the dialog keeps one size and position while browsing instead of
+            resizing and recentering with every folder's contents. */}
+        <div className="h-[45vh] space-y-0.5 overflow-y-auto">
+          {effectivePath ? (
+            <button
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-blue-500/10"
+              title="Up one level"
+              onClick={() => setCurrentPath(breadcrumbParts.slice(0, -1).join('/'))}
+            >
+              <FolderIcon className="h-4 w-4 shrink-0 text-amber-500" />
+              <span>..</span>
+            </button>
+          ) : null}
+          {assetsLoading ? (
+            <div className="flex items-center gap-2 px-2 py-1.5 text-sm">
+              <Spinner className="h-4 w-4" /> Loading assets…
+            </div>
+          ) : visibleChildren.length === 0 ? (
+            <div className="frameos-muted px-2 py-1.5 text-sm">
+              {pick === 'folder' ? 'No folders here.' : 'Nothing to pick in this folder.'}
+            </div>
+          ) : (
+            visibleChildren.map((child) => {
               const childPath = effectivePath ? `${effectivePath}/${child.name}` : child.name
               const isSelected = childPath === selectedRelative
               return (
@@ -207,9 +221,9 @@ function PathPickerModal({
                   <span className="truncate">{child.name}</span>
                 </button>
               )
-            })}
-          </div>
-        )}
+            })
+          )}
+        </div>
       </div>
     </Modal>
   )
