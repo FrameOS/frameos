@@ -29,6 +29,8 @@ const releaseApiUrl =
 const allowedPlatforms = new Set([
   "raspberry-pi-zero-2-w",
   "raspberry-pi-zero-w",
+  "raspberry-pi-64",
+  "raspberry-pi-5",
 ]);
 
 interface ReleaseAsset {

@@ -62,6 +62,16 @@ class BuildrootPlatform:
     # The Zero 2 W ships a BCM43436 whose firmware only exists in the
     # RPi-Distro firmware-nonfree repo; enables the download/symlink fixups.
     needs_zero_2_w_wifi_firmware: bool = False
+    # genimage size of the FAT boot partition. 32M fits a single-model image
+    # (one kernel + one firmware set + overlays); multi-model images carrying
+    # every DTB and both start.elf/start4.elf sets, and the larger bcm2711/
+    # bcm2712 kernels, need more.
+    boot_partition_size: str = "32M"
+    # config.txt keys stripped from the rpi-firmware sample config during
+    # post-image. Buildroot's sample configs pin start_file=/fixup_file=,
+    # which breaks multi-model images: a Pi 4 must load start4.elf, and the
+    # GPU bootloader only auto-selects per model when the keys are absent.
+    remove_boot_config_keys: tuple[str, ...] = ()
     # Default GitHub Actions runner label for base-image builds: 32-core
     # Depot runners (Buildroot is compile-bound and scales with cores, and
     # Depot serves actions/cache from its own storage). x86_64 runners can
@@ -171,6 +181,126 @@ RASPBERRY_PI_ZERO_W = BuildrootPlatform(
     default_runner_label="depot-ubuntu-24.04-32",
 )
 
+RASPBERRY_PI_64 = BuildrootPlatform(
+    key="raspberry-pi-64",
+    label="Raspberry Pi Zero 2 W / 3 / 4 (64-bit)",
+    family="raspberrypi",
+    # One unified 64-bit image the way Raspberry Pi OS ships a single card:
+    # start from the Zero 2 W defconfig (same kernel tarball as
+    # raspberrypi4_64_defconfig in Buildroot 2025.02) and widen the kernel +
+    # firmware selection below so the GPU bootloader picks per model.
+    defconfig="raspberrypizero2w_64_defconfig",
+    build_target=TargetMetadata(arch="aarch64", distro="debian", version="bookworm"),
+    docker_platform="linux/arm64",
+    release_target="debian-bookworm-arm64",
+    aliases=frozenset(
+        {
+            "pi-64",
+            "pi-3",
+            "pi-4",
+            "raspberry-pi-3",
+            "raspberry-pi-3-b",
+            "raspberry-pi-3-b-plus",
+            "raspberry-pi-4",
+            "raspberry-pi-4-b",
+            "raspberry-pi-400",
+            "raspberrypi3",
+            "raspberrypi4",
+            "raspberrypi3_64_defconfig",
+            "raspberrypi4_64_defconfig",
+        }
+    ),
+    extra_config_lines=(
+        # Same toolchain story as the Zero 2 W entry above: the defconfig's
+        # Bootlin *stable* aarch64 toolchain ships 4.19 kernel headers, below
+        # NetworkManager's 4.20 floor; bleeding-edge (gcc 14, 5.15 headers)
+        # keeps NetworkManager. Generic aarch64 code runs on Cortex-A53 and
+        # Cortex-A72 alike.
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_BLEEDING_EDGE=y",
+        # The bcm2711 kernel defconfig supports BCM2710 (Zero 2 W / Pi 3) and
+        # BCM2711 (Pi 4 / 400 / CM4) in one Image — it is what Raspberry Pi OS
+        # 64-bit builds its single kernel8.img from. The Zero 2 W defconfig's
+        # bcmrpi3 defconfig lacks BCM2711.
+        'BR2_LINUX_KERNEL_DEFCONFIG="bcm2711"',
+        # All DTBs on the boot partition; the firmware auto-selects by model.
+        'BR2_LINUX_KERNEL_INTREE_DTS_NAME="broadcom/bcm2710-rpi-zero-2-w broadcom/bcm2710-rpi-3-b broadcom/bcm2710-rpi-3-b-plus broadcom/bcm2711-rpi-4-b broadcom/bcm2711-rpi-400 broadcom/bcm2711-rpi-cm4"',
+        # The rpi-firmware variants are additive booleans, not a choice: the
+        # base defconfig already selects VARIANT_PI (start.elf/fixup.dat, for
+        # Zero 2 W / Pi 3) + BOOTCODE_BIN; adding VARIANT_PI4 stages
+        # start4.elf/fixup4.dat next to them for Pi 4 / 400 / CM4.
+        "BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI4=y",
+    ),
+    # Both firmware sets + all DTBs + the bigger bcm2711 kernel + overlays
+    # don't fit the 32M single-model boot partition.
+    boot_partition_size="64M",
+    # The Buildroot sample config.txt pins start_file=start.elf, which would
+    # make a Pi 4 load Pi-3-generation firmware and fail to boot. With the
+    # pins removed the bootloader auto-selects start.elf vs start4.elf.
+    remove_boot_config_keys=("start_file", "fixup_file"),
+    # Same 512MB-class default as the Zero 2 W; ignored where irrelevant.
+    default_boot_config_lines=("gpu_mem=32",),
+    # Zero 2 W BCM43436 quirk applies to the unified image too; Pi 3/3B+/4
+    # blobs (43430/43455 incl. board-specific NVRAMs) already come from
+    # BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI.
+    wifi_firmware_models=(
+        "raspberrypi,model-zero-2-w",
+        "raspberrypi,model-zero-2-2",
+    ),
+    needs_zero_2_w_wifi_firmware=True,
+    default_runner_label="depot-ubuntu-24.04-arm-32",
+)
+
+RASPBERRY_PI_5 = BuildrootPlatform(
+    key="raspberry-pi-5",
+    label="Raspberry Pi 5",
+    family="raspberrypi",
+    # BCM2712 needs its own kernel (bcm2712 defconfig) and boots without any
+    # start*.elf/bootcode.bin — the EEPROM bootloader loads the kernel Image
+    # straight off the FAT partition — so it cannot join the unified
+    # raspberry-pi-64 image above.
+    defconfig="raspberrypi5_defconfig",
+    build_target=TargetMetadata(arch="aarch64", distro="debian", version="bookworm"),
+    docker_platform="linux/arm64",
+    release_target="debian-bookworm-arm64",
+    aliases=frozenset(
+        {
+            "pi-5",
+            "pi5",
+            "raspberry-pi-5-b",
+            "raspberrypi5",
+            "raspberrypi5_defconfig",
+        }
+    ),
+    extra_config_lines=(
+        # raspberrypi5_defconfig builds its toolchain from source; switch to
+        # the prebuilt Bootlin bleeding-edge aarch64 toolchain (same one the
+        # other 64-bit entries use — generic aarch64 runs fine on Cortex-A76,
+        # and its 5.15 headers keep NetworkManager). Only available on x86_64
+        # build hosts; elsewhere olddefconfig falls back to from-source.
+        "BR2_TOOLCHAIN_EXTERNAL=y",
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y",
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_AARCH64_GLIBC_BLEEDING_EDGE=y",
+        # raspberrypi5_defconfig turns DTB overlays off; FrameOS needs them
+        # for the SPI/I2C e-ink display dtoverlay= lines.
+        "BR2_PACKAGE_RPI_FIRMWARE_INSTALL_DTB_OVERLAYS=y",
+    ),
+    # The shared FrameOS config points BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES
+    # at /work/linux-fragment.config, which *replaces* the defconfig's
+    # board/raspberrypi/linux-4k-page-size.fragment — without re-adding it
+    # here the bcm2712 kernel defaults to 16K pages, which breaks page-size
+    # assumptions in prebuilt userspace.
+    kernel_fragment_lines=("CONFIG_ARM64_4K_PAGES=y",),
+    # bcm2712 kernel Image + DTBs + overlays outgrow the 32M boot partition.
+    boot_partition_size="64M",
+    # No gpu_mem on the Pi 5 (firmware ignores it; memory split is fixed).
+    default_boot_config_lines=(),
+    # Pi 5 Wi-Fi is a BCM43455; generic + board-specific NVRAM files ship in
+    # BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI already.
+    wifi_firmware_models=(),
+    needs_zero_2_w_wifi_firmware=False,
+    default_runner_label="depot-ubuntu-24.04-arm-32",
+)
+
 # TODO(luckfox-pico): Rockchip RV1103/RV1106 boards (Luckfox Pico family).
 # Mainline Buildroot has no defconfig for them; bring-up needs the Luckfox
 # BR2_EXTERNAL tree (or a custom defconfig + rkbin boot blobs) plus a
@@ -211,6 +341,8 @@ BUILDROOT_PLATFORMS: dict[str, BuildrootPlatform] = {
     for platform in (
         RASPBERRY_PI_ZERO_2_W,
         RASPBERRY_PI_ZERO_W,
+        RASPBERRY_PI_64,
+        RASPBERRY_PI_5,
         LUCKFOX_PICO,
         ALLWINNER_T113,
     )

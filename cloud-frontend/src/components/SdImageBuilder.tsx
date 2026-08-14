@@ -32,6 +32,8 @@ const firmwareApiUrl = '/api/frames/firmware'
 const knownBoards = [
   { label: 'Raspberry Pi Zero 2 W', platform: 'raspberry-pi-zero-2-w' },
   { label: 'Raspberry Pi Zero W', platform: 'raspberry-pi-zero-w' },
+  { label: 'Raspberry Pi Zero 2 W / 3 / 4 (64-bit)', platform: 'raspberry-pi-64' },
+  { label: 'Raspberry Pi 5', platform: 'raspberry-pi-5' },
 ] as const
 
 // The full device catalog, generated from the backend registry (every
@@ -155,6 +157,13 @@ export function SdImageBuilder({
   const [wifiSsid, setWifiSsid] = useState(remembered?.ssid ?? '')
   const [wifiPassword, setWifiPassword] = useState(remembered?.password ?? '')
   const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
+  // Console login on the device: either a real root password (written into
+  // the image in-browser, applied via chpasswd on first boot — which also
+  // re-enables SSH password login), or an explicit opt-in to the image
+  // default of passwordless root on the console (physical access only; SSH
+  // refuses password logins there). One of the two is required.
+  const [rootPassword, setRootPassword] = useState('')
+  const [passwordlessRoot, setPasswordlessRoot] = useState(false)
   const [displayChoice, setDisplayChoice] = useState<string>('')
   const [width, setWidth] = useState('')
   const [height, setHeight] = useState('')
@@ -300,6 +309,14 @@ export function SdImageBuilder({
       sanitizeConfigValue(wifiPassword, 'WiFi password')
       sanitizeConfigValue(device, 'Display device')
       sanitizeConfigValue(uploadUrl.trim(), 'Upload URL')
+      sanitizeConfigValue(rootPassword, 'Root password')
+      if (!rootPassword && !passwordlessRoot) {
+        failWith(
+          'Set a root password for the device, or tick "Enable passwordless root login" to accept the default.'
+        )
+        busyRef.current = false
+        return
+      }
       const displayError = displayInputError()
       if (displayError) {
         failWith(displayError)
@@ -360,6 +377,7 @@ export function SdImageBuilder({
         width: device && width ? Number(width) : undefined,
         wifiPassword: wifiSsid ? wifiPassword : '',
         wifiSsid,
+        rootPassword: rootPassword || undefined,
       })
 
       setStatus(`Downloading ${board.asset.name}…`)
@@ -506,7 +524,8 @@ export function SdImageBuilder({
     <div className="space-y-2">
       <p className="frameos-muted text-xs">
         Build a ready-to-flash image for your board right here: it embeds this cloud&apos;s address and a multi-use
-        claim code. WiFi credentials are written into the image in your browser — they are never sent to FrameOS Cloud.
+        claim code. WiFi credentials and the root password are written into the image in your browser — they are never
+        sent to FrameOS Cloud.
       </p>
       {release.status === 'loading' ? (
         <p className="frameos-muted text-xs">Looking up the latest FrameOS release…</p>
@@ -653,6 +672,26 @@ export function SdImageBuilder({
               type="checkbox"
             />
             Remember WiFi credentials in this browser (never sent to the cloud)
+          </label>
+          <input
+            aria-label="Root password"
+            className={controlClassName}
+            disabled={building || passwordlessRoot}
+            maxLength={128}
+            onChange={(event) => setRootPassword(event.target.value)}
+            placeholder="Root password (written into the image in your browser)"
+            type="password"
+            value={rootPassword}
+          />
+          <label className="frameos-muted flex items-center gap-2 text-xs">
+            <input
+              checked={passwordlessRoot}
+              disabled={building || rootPassword !== ''}
+              onChange={(event) => setPasswordlessRoot(event.target.checked)}
+              type="checkbox"
+            />
+            Enable passwordless root login on this device (console only — needs physical access; SSH password login
+            stays disabled)
           </label>
           <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
             <span>Claim code accepts new frames for</span>

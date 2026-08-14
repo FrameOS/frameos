@@ -2362,8 +2362,35 @@ def test_post_build_script_wifi_firmware_is_platform_specific():
 def test_post_image_script_keeps_gpu_memory_reserve_for_zero_w():
     post_image = render_post_image_script(RASPBERRY_PI_ZERO_W)
 
-    assert 'line = "gpu_mem=32"' in post_image
+    assert '\'{"remove": [], "set": ["gpu_mem=32"]}\'' in post_image
+    assert "size = 32M" in post_image
     assert "genimage" in post_image
+
+
+def test_post_image_script_unified_image_strips_start_file_pins():
+    from app.tasks.buildroot_platforms import BUILDROOT_PLATFORMS
+
+    post_image = render_post_image_script(BUILDROOT_PLATFORMS["raspberry-pi-64"])
+
+    # start_file=start.elf pinned in the sample config would stop a Pi 4 from
+    # loading start4.elf; the unified image must strip the pins.
+    assert '\'{"remove": ["fixup_file", "start_file"], "set": ["gpu_mem=32"]}\'' in post_image
+    # All DTBs + both firmware sets don't fit the 32M single-model layout.
+    assert "size = 64M" in post_image
+
+
+def test_post_image_script_pi_5_leaves_boot_config_alone():
+    from app.tasks.buildroot_platforms import BUILDROOT_PLATFORMS
+
+    post_image = render_post_image_script(BUILDROOT_PLATFORMS["raspberry-pi-5"])
+
+    # No default lines and no keys to strip: the config.txt patcher is
+    # omitted entirely (no gpu_mem on the Pi 5).
+    assert "rpi-firmware/config.txt" not in post_image.split("rootfs_image=")[0]
+    assert "gpu_mem" not in post_image
+    assert "size = 64M" in post_image
+    # The kernel still lands on the FAT partition even without a kernel= pin.
+    assert 'kernel="Image"' in post_image
 
 
 def test_zero_w_frame_uses_armv6_cross_target(tmp_path, monkeypatch):

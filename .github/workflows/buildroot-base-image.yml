@@ -11,6 +11,8 @@ on:
         options:
           - raspberry-pi-zero-2-w
           - raspberry-pi-zero-w
+          - raspberry-pi-64
+          - raspberry-pi-5
       runner_label:
         description: "Runner label override; empty uses the platform default (32-core Depot runners — x86_64 for 32-bit ARM targets so prebuilt Bootlin toolchains apply)"
         required: false

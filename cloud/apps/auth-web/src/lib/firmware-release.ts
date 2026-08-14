@@ -38,6 +38,14 @@ export const provisioningAssets = [
     platform: "raspberry-pi-zero-w",
     suffix: "-raspberry-pi-zero-w-buildroot.img.gz",
   },
+  {
+    platform: "raspberry-pi-64",
+    suffix: "-raspberry-pi-64-buildroot.img.gz",
+  },
+  {
+    platform: "raspberry-pi-5",
+    suffix: "-raspberry-pi-5-buildroot.img.gz",
+  },
 ] as const;
 
 // OTA images. NOT the same file as above, and the difference is the whole

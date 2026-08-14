@@ -238,10 +238,14 @@ export const withCustomPalette: Record<string, Palette> = {
 // Keep in sync with backend/app/tasks/buildroot_platforms.py
 export const BUILDROOT_RASPBERRY_PI_ZERO_2_W = 'raspberry-pi-zero-2-w'
 export const BUILDROOT_RASPBERRY_PI_ZERO_W = 'raspberry-pi-zero-w'
+export const BUILDROOT_RASPBERRY_PI_64 = 'raspberry-pi-64'
+export const BUILDROOT_RASPBERRY_PI_5 = 'raspberry-pi-5'
 
 export const buildrootPlatforms: Option[] = [
   { value: BUILDROOT_RASPBERRY_PI_ZERO_2_W, label: 'Raspberry Pi Zero 2 W' },
   { value: BUILDROOT_RASPBERRY_PI_ZERO_W, label: 'Raspberry Pi Zero W (32-bit)' },
+  { value: BUILDROOT_RASPBERRY_PI_64, label: 'Raspberry Pi Zero 2 W / 3 / 4 (64-bit)' },
+  { value: BUILDROOT_RASPBERRY_PI_5, label: 'Raspberry Pi 5' },
 ]
 
 export const EMBEDDED_ESP32_S3 = 'esp32-s3'

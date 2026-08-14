@@ -402,6 +402,17 @@ test.describe('cloud /frames workspace @e2e', () => {
       drawer.getByLabel('Claim code validity').locator('option', { hasText: 'Forever' })
     ).toHaveCount(1)
 
+    // Root login on the device is an explicit choice: a password, or a
+    // deliberate passwordless opt-in — the two controls exclude each other.
+    await expect(drawer.getByLabel('Root password')).toBeVisible()
+    const passwordlessRoot = drawer.getByLabel(/Enable passwordless root login/)
+    await expect(passwordlessRoot).not.toBeChecked()
+    await drawer.getByLabel('Root password').fill('hunter2')
+    await expect(passwordlessRoot).toBeDisabled()
+    await drawer.getByLabel('Root password').fill('')
+    await passwordlessRoot.check()
+    await expect(drawer.getByLabel('Root password')).toBeDisabled()
+
     expectNoCloudFrontendErrors(readErrors)
   })
 

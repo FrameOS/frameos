@@ -57,6 +57,8 @@ PROVISIONING_ASSETS: list[dict[str, str]] = [
     {"platform": "esp32-c3-generic", "suffix": "-esp32-c3-generic.bin"},
     {"platform": "raspberry-pi-zero-2-w", "suffix": "-raspberry-pi-zero-2-w-buildroot.img.gz"},
     {"platform": "raspberry-pi-zero-w", "suffix": "-raspberry-pi-zero-w-buildroot.img.gz"},
+    {"platform": "raspberry-pi-64", "suffix": "-raspberry-pi-64-buildroot.img.gz"},
+    {"platform": "raspberry-pi-5", "suffix": "-raspberry-pi-5-buildroot.img.gz"},
 ]
 
 # Only the ESP32 firmware (a few MB) is ever streamed from here; the

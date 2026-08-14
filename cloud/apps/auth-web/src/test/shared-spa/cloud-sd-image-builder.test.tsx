@@ -164,11 +164,19 @@ function savedBytes(saved: SavedFile): Uint8Array {
   return joined;
 }
 
-// The frame name is required now — every build path fills one first.
+// The frame name and a root-login choice are both required now — every build
+// path fills the name and (unless it sets a password itself) opts into
+// passwordless root first.
 function nameFrame(value = "Kitchen Frame") {
   fireEvent.change(screen.getByPlaceholderText("Frame name"), {
     target: { value },
   });
+  const passwordless = screen.getByLabelText(
+    /Enable passwordless root login/,
+  ) as HTMLInputElement;
+  if (!passwordless.checked && !passwordless.disabled) {
+    fireEvent.click(passwordless);
+  }
 }
 
 beforeEach(() => {
@@ -287,6 +295,88 @@ describe("SdImageBuilder", () => {
     expect(regionText).toContain("name=Kitchen Frame\n");
     expect(regionText).toContain("wifi_ssid=MyNet\n");
     expect(regionText).toContain("wifi_password=hunter2\n");
+  });
+
+  it("requires a root password or an explicit passwordless-root opt-in", async () => {
+    mockReleaseAndImage();
+    const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+    });
+
+    // Name only — neither a root password nor the passwordless checkbox.
+    fireEvent.change(screen.getByPlaceholderText("Frame name"), {
+      target: { value: "Kitchen Frame" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /download sd image/i }),
+    );
+
+    await screen.findByText(/Set a root password for the device, or tick/);
+    expect(mint).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).startsWith("/api/frames/sd-image"),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("writes the root password into the image in the browser", async () => {
+    mockReleaseAndImage();
+    const saved = stubSaveFilePicker();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_multi")}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Frame name"), {
+      target: { value: "Kitchen Frame" },
+    });
+    fireEvent.change(screen.getByLabelText("Root password"), {
+      target: { value: "hunter2root" },
+    });
+    // A typed password makes the passwordless opt-in irrelevant (and
+    // disabled, so nameFrame-style ticking is impossible).
+    expect(
+      (screen.getByLabelText(/Enable passwordless root login/) as HTMLInputElement)
+        .disabled,
+    ).toBe(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: /download sd image/i }),
+    );
+    await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+
+    const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
+    expect(regionText).toContain("root_password=hunter2root\n");
+  });
+
+  it("omits the root_password key on an explicit passwordless opt-in", async () => {
+    mockReleaseAndImage();
+    const saved = stubSaveFilePicker();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_multi")}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W (v1.2.3)",
+    });
+
+    nameFrame();
+    fireEvent.click(
+      screen.getByRole("button", { name: /download sd image/i }),
+    );
+    await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+
+    const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
+    expect(regionText).not.toContain("root_password=");
   });
 
   it("reuses a previously minted multi-use token passed as a prop", async () => {

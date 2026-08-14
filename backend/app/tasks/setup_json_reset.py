@@ -349,11 +349,13 @@ handle_cloud_config() {
   cloud_rotate=''
   cloud_vcom=''
   cloud_upload_url=''
+  cloud_root_password=''
   cloud_recognized=0
   cloud_unknown_keys=''
   cloud_enrolled=0
   cloud_wifi_applied=0
   cloud_display_applied=0
+  cloud_root_applied=0
   while IFS= read -r cloud_line || [ -n "$cloud_line" ]; do
     # Tolerate CRLF line endings, comments, and surrounding whitespace.
     cloud_line="$(printf '%s' "$cloud_line" | tr -d '\\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -376,6 +378,7 @@ handle_cloud_config() {
       rotate) cloud_rotate="$cloud_value"; cloud_recognized=1 ;;
       vcom) cloud_vcom="$cloud_value"; cloud_recognized=1 ;;
       upload_url) cloud_upload_url="$cloud_value"; cloud_recognized=1 ;;
+      root_password) cloud_root_password="$cloud_value"; cloud_recognized=1 ;;
       *)
         echo "Ignoring unknown key '$cloud_key' in $CLOUD_FILE"
         cloud_unknown_keys="$cloud_unknown_keys $cloud_key"
@@ -401,7 +404,7 @@ handle_cloud_config() {
       # would destroy the user's only copy of what they typed. Warn loudly,
       # keep the file, do not enroll.
       echo "Warning: $CLOUD_FILE has KEY=value lines but no recognized keys; unrecognized:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password"
       echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     else
       echo "No personalization keys in $CLOUD_FILE (placeholder or comments only); leaving it in place"
@@ -497,6 +500,25 @@ os.replace(tmp, path)'; then
     fi
   fi
 
+  # Same semantics as the /boot/frameos-root-password path above (which runs
+  # before this function and therefore cannot be reused for cloud-built
+  # images): setting a password also re-enables dropbear password logins.
+  # Without this key the image keeps its build-time default — passwordless
+  # root on the console, SSH refusing password logins entirely.
+  if [ -n "$cloud_root_password" ]; then
+    echo "Setting root password from cloud personalization"
+    if printf 'root:%s\\n' "$cloud_root_password" | chpasswd; then
+      install -d -m 755 "$ETC_DIR"/default
+      printf '%s\\n' 'DROPBEAR_ARGS=""' > "$ETC_DIR"/default/dropbear
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl try-restart dropbear.service || true
+      fi
+      cloud_root_applied=1
+    else
+      echo "Warning: failed to set root password from cloud personalization"
+    fi
+  fi
+
   if [ -z "$claim_token" ]; then
     echo "Warning: no claim_token in $CLOUD_FILE; skipping cloud enrollment state"
   else
@@ -551,11 +573,11 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
   # (e.g. "claim_tokn=FRCT_..." next to a valid cloud_url: recognized keys
   # exist, but no enrollment), so keep it and say why. /boot is mounted
   # root-only (umask=077), so keeping it does not leak to other users.
-  if [ "$cloud_enrolled" -eq 0 ] && [ "$cloud_wifi_applied" -eq 0 ] && [ "$cloud_display_applied" -eq 0 ]; then
+  if [ "$cloud_enrolled" -eq 0 ] && [ "$cloud_wifi_applied" -eq 0 ] && [ "$cloud_display_applied" -eq 0 ] && [ "$cloud_root_applied" -eq 0 ]; then
     echo "Warning: nothing was applied from $CLOUD_FILE; leaving it in place instead of shredding it"
     if [ -n "$cloud_unknown_keys" ]; then
       echo "Warning: unrecognized keys:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password"
     fi
     echo "Warning: fix $CLOUD_FILE and reboot to enroll"
     return 0
@@ -565,7 +587,7 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     # WiFi was applied but the enrollment keys were mistyped: shredding here
     # would destroy the claim token the user meant to type.
     echo "Warning: no cloud enrollment happened; unrecognized keys:$cloud_unknown_keys"
-    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url"
+    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password"
     echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     return 0
   fi
@@ -579,6 +601,7 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
   fi
   claim_token=''
   cloud_wifi_password=''
+  cloud_root_password=''
 
   # After the shred on purpose: driver setup edits /boot/config.txt and may
   # schedule a reboot, and a reboot must not replay personalization. The

@@ -49,6 +49,8 @@ def test_enabled_platforms_have_complete_definitions():
     assert [platform.key for platform in platforms] == [
         "raspberry-pi-zero-2-w",
         "raspberry-pi-zero-w",
+        "raspberry-pi-64",
+        "raspberry-pi-5",
     ]
     for platform in platforms:
         assert platform.defconfig
@@ -82,6 +84,38 @@ def test_armv6_never_resolves_to_armv7_prebuilts():
     # built for ARMv7 and SIGILL on the Zero W's ARM1176 core.
     assert resolve_prebuilt_target("debian", "bookworm", "armv6l") == "debian-bookworm-armv6"
     assert resolve_prebuilt_target("debian", "bookworm", "armv7l") == "debian-bookworm-armhf"
+
+
+def test_raspberry_pi_64_is_a_unified_multi_model_image():
+    platform = BUILDROOT_PLATFORMS["raspberry-pi-64"]
+    assert platform.defconfig == "raspberrypizero2w_64_defconfig"
+    assert platform.build_target.arch == "aarch64"
+    # The bcm2711 kernel covers BCM2710 (Zero 2 W / Pi 3) and BCM2711 (Pi 4).
+    assert 'BR2_LINUX_KERNEL_DEFCONFIG="bcm2711"' in platform.extra_config_lines
+    # Both firmware sets side by side so the bootloader picks per model.
+    assert "BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI4=y" in platform.extra_config_lines
+    # A pinned start_file would force Pi-3-generation firmware onto a Pi 4.
+    assert set(platform.remove_boot_config_keys) == {"start_file", "fixup_file"}
+    # All DTBs + both firmware sets outgrow the 32M single-model boot layout.
+    assert platform.boot_partition_size != "32M"
+    assert platform.needs_zero_2_w_wifi_firmware
+    for alias in ("pi-3", "pi-4", "raspberry-pi-4", "raspberrypi4_64_defconfig"):
+        assert normalize_buildroot_platform(alias) == "raspberry-pi-64"
+
+
+def test_raspberry_pi_5_has_its_own_kernel_and_no_gpu_mem():
+    platform = BUILDROOT_PLATFORMS["raspberry-pi-5"]
+    assert platform.defconfig == "raspberrypi5_defconfig"
+    assert platform.build_target.arch == "aarch64"
+    # The shared kernel fragment replaces the defconfig's 4K-page fragment,
+    # so the platform must re-add it or the kernel defaults to 16K pages.
+    assert "CONFIG_ARM64_4K_PAGES=y" in platform.kernel_fragment_lines
+    # raspberrypi5_defconfig disables overlays; e-ink displays need them.
+    assert "BR2_PACKAGE_RPI_FIRMWARE_INSTALL_DTB_OVERLAYS=y" in platform.extra_config_lines
+    # No start*.elf firmware on the Pi 5 and no gpu_mem key either.
+    assert platform.default_boot_config_lines == ()
+    for alias in ("pi-5", "pi5", "raspberrypi5"):
+        assert normalize_buildroot_platform(alias) == "raspberry-pi-5"
 
 
 def test_build_target_copy_is_isolated():

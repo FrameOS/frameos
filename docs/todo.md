@@ -62,23 +62,21 @@ numbers and the measurement tooling live in `docs/esp32-memory.md`.
 
 ## Buildroot images
 
-- **Support more Pi models** — the Zero 2 W image is easily adapted to
-  other Pis; a draft exists on the `multi-pi-sd-image` branch (unified
-  64-bit `raspberry-pi-64` image covering Zero 2 W / Pi 3 / Pi 4, all
-  DTBs + both firmware sets on the boot partition, plan in its
-  `TODO-MULTI-PI-SD-IMAGE.md`). The branch predates the
-  `buildroot_platforms.py` registry and needs redoing on top of it, but
-  the defconfig analysis still holds.
-- **Pi 5 image** — not covered by the draft above (BCM2712 needs its own
-  kernel/firmware set); wants its own platform entry.
-- **Cloud SD images ship passwordless root** — the cloud download flow
-  offers no root-password/SSH-key field and never sets
-  `BR2_TARGET_GENERIC_ROOT_PASSWD`, so console login is root with no
-  password (SSH is safe: dropbear runs `-s -g` with no authorized keys).
-  Physical-access exposure only, but decide: password field in the cloud
-  SD builder (the self-hosted flow already has one via
-  `frameos-root-password`), a generated per-image password, or a
-  documented deliberate choice.
+- **Boot-test the new `raspberry-pi-64` and `raspberry-pi-5` platforms** —
+  both are registered in `buildroot_platforms.py` (the unified 64-bit image
+  covers Zero 2 W / Pi 3 / Pi 4 with all DTBs + both firmware sets on the
+  boot partition; the Pi 5 entry carries its own bcm2712 kernel and
+  no-start.elf boot flow) but neither has booted on hardware yet. After
+  boot-testing, dispatch `buildroot-base-image.yml` for each and land the
+  manifest commit so releases pick them up (`docker-publish-multi.yml` skips
+  platforms with no published base image).
+- **Passwordless root is now an explicit choice in the cloud SD builder** —
+  the builder requires either a root password (a `root_password` key in
+  `frameos-cloud.txt`, applied via `chpasswd` on first boot like the
+  self-hosted `frameos-root-password` file, which also re-enables dropbear
+  password logins) or ticking an "enable passwordless root" checkbox that
+  keeps the image default: console-only root with no password, SSH refusing
+  password logins (`dropbear -s -g`, no authorized keys).
 
 ## Cloud services (scope table in CLOUD-TODO.md)
 

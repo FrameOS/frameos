@@ -102,7 +102,7 @@ BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "6"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 18
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 19
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "30M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "30M")
 BUILDROOT_DATA_PARTITION_HEADROOM_BYTES = 8 * 1024 * 1024
@@ -3409,7 +3409,53 @@ def render_post_image_script(platform: BuildrootPlatform) -> str:
         raise NotImplementedError(
             f"Post-image script generation is not implemented for the {platform.family} family"
         )
-    boot_config_line = platform.default_boot_config_lines[0] if platform.default_boot_config_lines else ""
+    # The rpi-firmware sample config.txt is inherited, not authored: apply the
+    # platform's default lines (replacing same-key lines; a gpu_mem line also
+    # replaces the gpu_mem_256/512/1024 variants) and strip pinned keys that
+    # break multi-model images (start_file/fixup_file).
+    boot_config_spec = json.dumps(
+        {
+            "set": list(platform.default_boot_config_lines),
+            "remove": sorted(platform.remove_boot_config_keys),
+        },
+        sort_keys=True,
+    )
+    if platform.default_boot_config_lines or platform.remove_boot_config_keys:
+        boot_config_block = f"""
+boot_config="${{BINARIES_DIR:?BINARIES_DIR is required}}/rpi-firmware/config.txt"
+if [ -f "$boot_config" ]; then
+  python3 - "$boot_config" {shlex.quote(boot_config_spec)} <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+spec = json.loads(sys.argv[2])
+
+with open(path, encoding="utf-8") as handle:
+    lines = handle.read().splitlines()
+
+drop_keys = set(spec["remove"])
+for line in spec["set"]:
+    key = line.split("=", 1)[0]
+    drop_keys.add(key)
+    if key == "gpu_mem":
+        drop_keys.update({{"gpu_mem_256", "gpu_mem_512", "gpu_mem_1024"}})
+
+lines = [
+    existing for existing in lines
+    if existing in spec["set"] or existing.split("=", 1)[0] not in drop_keys
+]
+for line in spec["set"]:
+    if line not in lines:
+        lines.append(line)
+
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write("\\n".join(lines).strip() + "\\n")
+PY
+fi
+"""
+    else:
+        boot_config_block = ""
     return f"""#!/usr/bin/env bash
 set -euo pipefail
 
@@ -3433,30 +3479,7 @@ if [ -f "$cmdline" ]; then
   mv "$tmp_cmdline" "$cmdline"
 fi
 
-boot_config="${{BINARIES_DIR:?BINARIES_DIR is required}}/rpi-firmware/config.txt"
-if [ -f "$boot_config" ] && [ -n "{boot_config_line}" ]; then
-  python3 - "$boot_config" <<'PY'
-import sys
-
-path = sys.argv[1]
-gpu_keys = {{"gpu_mem", "gpu_mem_256", "gpu_mem_512", "gpu_mem_1024"}}
-
-with open(path, encoding="utf-8") as handle:
-    lines = handle.read().splitlines()
-
-line = "{boot_config_line}"
-lines = [
-    existing for existing in lines
-    if existing == line or existing.split("=", 1)[0] not in gpu_keys
-]
-if line not in lines:
-    lines.append(line)
-
-with open(path, "w", encoding="utf-8") as handle:
-    handle.write("\\n".join(lines).strip() + "\\n")
-PY
-fi
-
+{boot_config_block}
 rootfs_image="${{BINARIES_DIR:?BINARIES_DIR is required}}/rootfs.ext4"
 if [ -f "$rootfs_image" ]; then
   e2fsck -fy "$rootfs_image"
@@ -3471,6 +3494,11 @@ for candidate in "${{BINARIES_DIR}}"/*.dtb "${{BINARIES_DIR}}"/rpi-firmware/*; d
 done
 
 kernel="$(sed -n 's/^kernel=//p' "${{BINARIES_DIR}}/rpi-firmware/config.txt" || true)"
+if [ -z "$kernel" ] && [ -e "${{BINARIES_DIR}}/Image" ]; then
+  # No kernel= pin in config.txt (Pi 4/5 firmware defaults to kernel8.img /
+  # kernel_2712.img, which we don't ship) — fall back to the built Image.
+  kernel="Image"
+fi
 if [ -n "$kernel" ]; then
   files+=("$kernel")
 fi
@@ -3521,7 +3549,7 @@ $boot_files
 		}}
 	}}
 
-	size = 32M
+	size = {platform.boot_partition_size}
 }}
 
 image frameos.ext4 {{
