@@ -62,23 +62,39 @@ numbers and the measurement tooling live in `docs/esp32-memory.md`.
 
 ## Buildroot images
 
-- **Support more Pi models** — the Zero 2 W image is easily adapted to
-  other Pis; a draft exists on the `multi-pi-sd-image` branch (unified
-  64-bit `raspberry-pi-64` image covering Zero 2 W / Pi 3 / Pi 4, all
-  DTBs + both firmware sets on the boot partition, plan in its
-  `TODO-MULTI-PI-SD-IMAGE.md`). The branch predates the
-  `buildroot_platforms.py` registry and needs redoing on top of it, but
-  the defconfig analysis still holds.
-- **Pi 5 image** — not covered by the draft above (BCM2712 needs its own
-  kernel/firmware set); wants its own platform entry.
-- **Cloud SD images ship passwordless root** — the cloud download flow
-  offers no root-password/SSH-key field and never sets
-  `BR2_TARGET_GENERIC_ROOT_PASSWD`, so console login is root with no
-  password (SSH is safe: dropbear runs `-s -g` with no authorized keys).
-  Physical-access exposure only, but decide: password field in the cloud
-  SD builder (the self-hosted flow already has one via
-  `frameos-root-password`), a generated per-image password, or a
-  documented deliberate choice.
+- **Boot-test the consolidated platforms, then publish base images
+  BEFORE the next release** — the registry now has exactly three
+  Raspberry Pi platforms: `raspberry-pi-64` (Zero 2 W / Pi 3 / Pi 4 —
+  absorbed the old `raspberry-pi-zero-2-w` single-model platform and is
+  the new default; old key lives on as an alias and canonicalizes on
+  frame create), `raspberry-pi-32` (every ARMv6 board: Zero, Zero W,
+  Pi 1 A/A+/B/B+, CM1 — replaced `raspberry-pi-zero-w`, same alias
+  treatment), and `raspberry-pi-5` (all BCM2712 boards with a DTB in
+  the pinned kernel: Pi 5 C0+D0 and CM5 on either carrier). None has
+  booted on hardware yet; minimum coverage is a Zero 2 W regression
+  boot for pi-64, a Zero W regression boot for pi-32, ideally plus one
+  Pi 1 / Pi 3 / Pi 4 / Pi 5. **Release-blocking**: both old manifest
+  entries were removed and no new platform has a base image, so
+  `docker-publish-multi.yml` now hard-fails ("No Buildroot platforms
+  with cached base images found") until `buildroot-base-image.yml` has
+  been dispatched for at least `raspberry-pi-64` and the manifest
+  commit landed. Do that before merging this branch to main.
+- **Deliberately unsupported Pi models** — Pi 2 (BCM2836, ARMv7) is
+  skipped as a conscious decision: it is the only Pi needing its own
+  32-bit kernel binary (`kernel7.img`) and Buildroot builds one kernel
+  per image. Pi 500 and CM5 Lite are deferred, not declined: their
+  `bcm2712-rpi-500`/`bcm2712-rpi-cm5l-*` DTS files entered rpi-6.6.y
+  after the 2024-04 kernel commit Buildroot 2025.02.13 pins, and the
+  EEPROM bootloader wants the exact model DTB — the next Buildroot (or
+  kernel-pin) bump adds them to the `raspberry-pi-5` image for free;
+  widen its `BR2_LINUX_KERNEL_INTREE_DTS_NAME` then.
+- **Passwordless root is now an explicit choice in the cloud SD builder** —
+  the builder requires either a root password (a `root_password` key in
+  `frameos-cloud.txt`, applied via `chpasswd` on first boot like the
+  self-hosted `frameos-root-password` file, which also re-enables dropbear
+  password logins) or ticking an "enable passwordless root" checkbox that
+  keeps the image default: console-only root with no password, SSH refusing
+  password logins (`dropbear -s -g`, no authorized keys).
 
 ## Cloud services (scope table in CLOUD-TODO.md)
 

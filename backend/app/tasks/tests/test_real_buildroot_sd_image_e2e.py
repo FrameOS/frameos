@@ -92,7 +92,7 @@ def _frame(db) -> Frame:
             "deployWithAgent": True,
         },
         buildroot={
-            "platform": "raspberry-pi-zero-2-w",
+            "platform": "raspberry-pi-64",
             "compilationMode": COMPILATION_MODE_PRECOMPILED,
         },
     )
@@ -133,7 +133,7 @@ async def test_real_buildroot_sd_image_generation_from_precompiled_release(
     metadata = await BuildrootImageBuilder(db=db, redis=redis, frame=frame).run()
 
     assert metadata["status"] == "ready"
-    assert metadata["platform"] == "raspberry-pi-zero-2-w"
+    assert metadata["platform"] == "raspberry-pi-64"
     assert metadata["compilationMode"] == COMPILATION_MODE_PRECOMPILED
     assert metadata["compressed"] is True
     image_path = Path(metadata["path"])

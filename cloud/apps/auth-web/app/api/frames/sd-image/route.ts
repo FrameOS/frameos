@@ -27,8 +27,9 @@ const releaseApiUrl =
 // upstream host and path are never taken from user input, so this cannot be
 // steered into an SSRF.
 const allowedPlatforms = new Set([
-  "raspberry-pi-zero-2-w",
-  "raspberry-pi-zero-w",
+  "raspberry-pi-32",
+  "raspberry-pi-64",
+  "raspberry-pi-5",
 ]);
 
 interface ReleaseAsset {

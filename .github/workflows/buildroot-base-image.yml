@@ -4,13 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       platform:
-        description: "Buildroot platform to publish"
+        description: "Buildroot platform to publish; 'all' builds every platform in parallel"
         required: true
-        default: raspberry-pi-zero-2-w
+        default: raspberry-pi-64
         type: choice
         options:
-          - raspberry-pi-zero-2-w
-          - raspberry-pi-zero-w
+          - all
+          - raspberry-pi-32
+          - raspberry-pi-64
+          - raspberry-pi-5
       runner_label:
         description: "Runner label override; empty uses the platform default (32-core Depot runners — x86_64 for 32-bit ARM targets so prebuilt Bootlin toolchains apply)"
         required: false
@@ -51,10 +53,10 @@ permissions:
   contents: write
 
 jobs:
-  resolve-runner:
+  resolve-matrix:
     runs-on: ubuntu-24.04
     outputs:
-      runner_label: ${{ steps.resolve.outputs.runner_label }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
       - id: resolve
         env:
@@ -62,29 +64,50 @@ jobs:
           RUNNER_OVERRIDE: ${{ inputs.runner_label }}
         run: |
           set -euo pipefail
-          if [ -n "${RUNNER_OVERRIDE}" ]; then
-            runner="${RUNNER_OVERRIDE}"
+          # Keep this list in sync with the dispatch choice options above and
+          # enabled_buildroot_platforms() in buildroot_platforms.py. Parallel
+          # publishes are safe by design: uploads upsert the R2 manifest (the
+          # source of truth) and the commit step re-downloads the converged
+          # manifest with a push-retry loop instead of rebasing local edits.
+          if [ "${PLATFORM}" = "all" ]; then
+            platforms=(raspberry-pi-32 raspberry-pi-64 raspberry-pi-5)
           else
-            # 32-core Depot runners: a Buildroot build is compile-bound and
-            # scales nearly linearly, and Depot serves actions/cache from its
-            # own storage (faster restores, no 10GB repo quota squeezing the
-            # ccache). Keep the arch split in sync with default_runner_label
-            # in backend/app/tasks/buildroot_platforms.py: 32-bit ARM targets
-            # build on x86_64 so the prebuilt Bootlin toolchains apply.
-            case "${PLATFORM}" in
-              raspberry-pi-zero-w) runner="depot-ubuntu-24.04-32" ;;
-              *) runner="depot-ubuntu-24.04-arm-32" ;;
-            esac
+            platforms=("${PLATFORM}")
           fi
-          echo "runner_label=${runner}" >> "$GITHUB_OUTPUT"
+          entries=()
+          for platform in "${platforms[@]}"; do
+            if [ -n "${RUNNER_OVERRIDE}" ]; then
+              runner="${RUNNER_OVERRIDE}"
+            else
+              # 32-core Depot runners: a Buildroot build is compile-bound and
+              # scales nearly linearly, and Depot serves actions/cache from
+              # its own storage (faster restores, no 10GB repo quota
+              # squeezing the ccache). Keep the arch split in sync with
+              # default_runner_label in backend/app/tasks/buildroot_platforms.py:
+              # 32-bit ARM targets build on x86_64 so the prebuilt Bootlin
+              # toolchains apply.
+              case "${platform}" in
+                raspberry-pi-32) runner="depot-ubuntu-24.04-32" ;;
+                *) runner="depot-ubuntu-24.04-arm-32" ;;
+              esac
+            fi
+            entries+=("{\"platform\":\"${platform}\",\"runner\":\"${runner}\"}")
+          done
+          matrix="{\"include\":[$(IFS=,; echo "${entries[*]}")]}"
+          echo "Matrix: ${matrix}"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
 
   publish:
-    name: Build and publish ${{ inputs.platform }}
-    needs: resolve-runner
-    runs-on: ${{ needs.resolve-runner.outputs.runner_label }}
+    name: Build and publish ${{ matrix.platform }}
+    needs: resolve-matrix
+    strategy:
+      # One platform failing must not cancel the others mid-publish.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve-matrix.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     env:
-      PLATFORM: ${{ inputs.platform }}
+      PLATFORM: ${{ matrix.platform }}
       R2_BUCKET: ${{ inputs.bucket }}
       R2_PREFIX: ${{ inputs.prefix }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -138,9 +161,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/buildroot-images/cache
-          key: buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-${{ github.run_id }}
+          key: buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ matrix.platform }}-${{ github.run_id }}
           restore-keys: |
-            buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ inputs.platform }}-
+            buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ matrix.platform }}-
             buildroot-dl-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install Python dependencies
@@ -305,8 +328,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: buildroot-base-${{ inputs.platform }}-${{ github.run_id }}
+          name: buildroot-base-${{ matrix.platform }}-${{ github.run_id }}
           path: |
-            build/buildroot-images/${{ inputs.platform }}/**/metadata.json
+            build/buildroot-images/${{ matrix.platform }}/**/metadata.json
             tools/buildroot-images/manifest.json
           if-no-files-found: warn

@@ -27,10 +27,10 @@ import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
 import { frameHasActivityLog, frameHost } from '../../decorators/frame'
 import {
-  BUILDROOT_RASPBERRY_PI_ZERO_2_W,
   EMBEDDED_VIRTUAL,
   buildrootPlatforms,
   devices,
+  normalizeBuildrootPlatform,
   partialRefreshDefaultsByDevice,
   partialRefreshDevices,
 } from '../../devices'
@@ -1107,7 +1107,7 @@ function BuildrootSdCardSection({
   const device = frameForm.device ?? frame.device ?? 'web_only'
   const deviceConfig = frameForm.device_config ?? frame.device_config ?? {}
   const timezone = normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone)
-  const platform = buildroot.platform ?? BUILDROOT_RASPBERRY_PI_ZERO_2_W
+  const platform = normalizeBuildrootPlatform(buildroot.platform)
   const compilationMode = String(buildroot.compilationMode ?? '')
   const rootPassword = frameForm.ssh_pass ?? frame.ssh_pass ?? ''
   const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys

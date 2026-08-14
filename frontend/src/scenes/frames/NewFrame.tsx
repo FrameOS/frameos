@@ -11,7 +11,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import {
-  BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+  BUILDROOT_RASPBERRY_PI_64,
   EMBEDDED_ESP32_C3,
   EMBEDDED_ESP32_S3,
   EMBEDDED_PICO_2W,
@@ -189,7 +189,7 @@ function setInstallMethodValues(
     return {
       install_method: installMethod,
       mode: 'buildroot',
-      platform: BUILDROOT_RASPBERRY_PI_ZERO_2_W,
+      platform: BUILDROOT_RASPBERRY_PI_64,
       frame_host: '',
       server_host: defaultNewFrameServerHost(savedSettings),
       network: defaultWifiNetwork(savedSettings),

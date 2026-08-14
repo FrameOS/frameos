@@ -1314,7 +1314,7 @@ async def test_api_frame_update_keeps_server_side_sd_image_record(async_client, 
     # a rebuild must not revert sdImage to the stale copy the client holds.
     frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
     frame.mode = 'buildroot'
-    frame.buildroot = {'platform': 'raspberry-pi-zero-w', 'compilationMode': 'precompiled'}
+    frame.buildroot = {'platform': 'raspberry-pi-32', 'compilationMode': 'precompiled'}
     frame.scenes = []
     ensure_buildroot_frame_defaults(frame)
     db.add(frame)
@@ -1360,7 +1360,7 @@ async def test_api_frame_update_clears_sd_image_when_config_changes(async_client
     # record (the preserved server-side copy no longer matches the config).
     frame = await new_frame(db, redis, 'BuildrootFrame2', 'frame.local', 'backend.local')
     frame.mode = 'buildroot'
-    frame.buildroot = {'platform': 'raspberry-pi-zero-w', 'compilationMode': 'precompiled'}
+    frame.buildroot = {'platform': 'raspberry-pi-32', 'compilationMode': 'precompiled'}
     frame.scenes = []
     ensure_buildroot_frame_defaults(frame)
     db.add(frame)
@@ -2094,7 +2094,7 @@ async def test_api_frame_new_buildroot_defaults(async_client):
         "name": "BuildrootFrame",
         "frame_host": "",
         "server_host": "backend.local",
-        "platform": "raspberry-pi-zero-2-w",
+        "platform": "raspberry-pi-64",
         "timezone": "Europe/Brussels",
         "network": {"wifiSSID": "Test WiFi", "wifiPassword": "secret1234"},
     }
@@ -2108,7 +2108,7 @@ async def test_api_frame_new_buildroot_defaults(async_client):
     assert frame['ssh_user'] == 'root'
     assert frame['assets_path'] == '/srv/assets'
     assert frame['https_proxy']['enable'] is False
-    assert frame['buildroot']['platform'] == 'raspberry-pi-zero-2-w'
+    assert frame['buildroot']['platform'] == 'raspberry-pi-64'
     assert frame['timezone'] == 'Europe/Brussels'
     assert frame['network']['wifiSSID'] == 'Test WiFi'
     assert frame['network']['wifiPassword'] == 'secret1234'
@@ -2233,7 +2233,7 @@ async def test_api_frame_new_buildroot_accepts_root_password_and_ssh_keys(async_
         "name": "BuildrootFrame",
         "frame_host": "",
         "server_host": "backend.local",
-        "platform": "raspberry-pi-zero-2-w",
+        "platform": "raspberry-pi-64",
         "network": {"wifiSSID": "", "wifiPassword": ""},
         "ssh_pass": "secret-root-password",
         "ssh_keys": ["main", "main", "", "backup"],
@@ -2255,7 +2255,7 @@ async def test_api_frame_new_buildroot_preserves_empty_ssh_key_selection(async_c
         "name": "BuildrootFrame",
         "frame_host": "",
         "server_host": "backend.local",
-        "platform": "raspberry-pi-zero-2-w",
+        "platform": "raspberry-pi-64",
         "network": {"wifiSSID": "", "wifiPassword": ""},
         "ssh_keys": [],
     }
@@ -2303,22 +2303,30 @@ async def test_api_frame_new_buildroot_rejects_registered_but_disabled_platform(
 
 
 @pytest.mark.asyncio
-async def test_api_frame_new_buildroot_accepts_raspberry_pi_zero_w(async_client):
-    payload = {
-        "mode": "buildroot",
-        "name": "BuildrootFrame",
-        "frame_host": "",
-        "server_host": "backend.local",
-        "platform": "raspberry-pi-zero-w",
-    }
+async def test_api_frame_new_buildroot_accepts_legacy_platform_keys(async_client):
+    # "raspberry-pi-zero-w" and "raspberry-pi-zero-2-w" were canonical keys
+    # before the unified 32-/64-bit images; they must stay accepted (clients
+    # and frames created back then still send them) and get canonicalized on
+    # create.
+    for index, (legacy, canonical) in enumerate([
+        ("raspberry-pi-zero-w", "raspberry-pi-32"),
+        ("raspberry-pi-zero-2-w", "raspberry-pi-64"),
+    ]):
+        payload = {
+            "mode": "buildroot",
+            "name": f"BuildrootFrame{index}",
+            "frame_host": "",
+            "server_host": "backend.local",
+            "platform": legacy,
+        }
 
-    response = await async_client.post('/api/frames/new', json=payload)
+        response = await async_client.post('/api/frames/new', json=payload)
 
-    assert response.status_code == 200
-    frames_response = await async_client.get('/api/frames')
-    frames = frames_response.json()['frames']
-    assert len(frames) == 1
-    assert frames[0]['buildroot']['platform'] == 'raspberry-pi-zero-w'
+        assert response.status_code == 200
+        frames_response = await async_client.get('/api/frames')
+        frames = frames_response.json()['frames']
+        assert len(frames) == index + 1
+        assert frames[index]['buildroot']['platform'] == canonical
 
 
 @pytest.mark.asyncio
@@ -2328,7 +2336,7 @@ async def test_api_frame_new_buildroot_allows_missing_wifi(async_client):
         "name": "BuildrootFrame",
         "frame_host": "",
         "server_host": "backend.local",
-        "platform": "raspberry-pi-zero-2-w",
+        "platform": "raspberry-pi-64",
         "network": {"wifiSSID": "", "wifiPassword": ""},
     }
 
@@ -2354,7 +2362,7 @@ async def test_api_frame_buildroot_sd_image_enqueue(async_client, db, monkeypatc
             "name": "BuildrootFrame",
             "frame_host": "",
             "server_host": "backend.local",
-            "platform": "raspberry-pi-zero-2-w",
+            "platform": "raspberry-pi-64",
             "network": {"wifiSSID": "Test WiFi", "wifiPassword": "secret1234"},
         },
     )
@@ -2374,7 +2382,7 @@ async def test_api_frame_buildroot_sd_image_enqueue(async_client, db, monkeypatc
     assert captured[0][2] == f"buildroot_sd_image:{frame_id}:{captured[0][1]}"
     db.expire_all()
     frame = db.get(Frame, frame_id)
-    assert frame.buildroot['platform'] == 'raspberry-pi-zero-2-w'
+    assert frame.buildroot['platform'] == 'raspberry-pi-64'
     assert frame.buildroot['sdImage']['status'] == 'queued'
     assert frame.buildroot['sdImage']['queueJobId'] == captured[0][2]
     assert frame.agent['agentEnabled'] is True
@@ -2393,7 +2401,7 @@ async def test_api_frame_buildroot_sd_image_accepts_configured_build_host(async_
         'wifiSSID': 'Test WiFi',
         'wifiPassword': 'secret1234',
     }
-    frame.buildroot = {'platform': 'raspberry-pi-zero-2-w'}
+    frame.buildroot = {'platform': 'raspberry-pi-64'}
     db.add(Settings(project_id=frame.project_id, key='buildEnvironment', value={'provider': 'buildHost'}))
     db.add(
         Settings(
@@ -2431,7 +2439,7 @@ async def test_api_frame_buildroot_sd_image_allows_precompiled_when_build_enviro
 
     frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
     frame.mode = 'buildroot'
-    frame.buildroot = {'platform': 'raspberry-pi-zero-2-w', 'compilationMode': 'precompiled'}
+    frame.buildroot = {'platform': 'raspberry-pi-64', 'compilationMode': 'precompiled'}
     frame.scenes = [{'id': 'scene-1', 'settings': {'execution': 'interpreted'}}]
     db.add(Settings(project_id=frame.project_id, key='buildEnvironment', value={'provider': 'none'}))
     db.add(frame)
@@ -2456,7 +2464,7 @@ async def test_api_frame_buildroot_sd_image_rejects_source_build_when_build_envi
 ):
     frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
     frame.mode = 'buildroot'
-    frame.buildroot = {'platform': 'raspberry-pi-zero-2-w', 'compilationMode': 'static'}
+    frame.buildroot = {'platform': 'raspberry-pi-64', 'compilationMode': 'static'}
     db.add(Settings(project_id=frame.project_id, key='buildEnvironment', value={'provider': 'none'}))
     db.add(frame)
     db.commit()
@@ -2474,7 +2482,7 @@ async def test_api_frame_buildroot_sd_image_hassio_rejects_source_build_with_con
     monkeypatch.setenv("HASSIO_RUN_MODE", "ingress")
     frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
     frame.mode = 'buildroot'
-    frame.buildroot = {'platform': 'raspberry-pi-zero-2-w', 'compilationMode': 'static'}
+    frame.buildroot = {'platform': 'raspberry-pi-64', 'compilationMode': 'static'}
     db.add(frame)
     db.commit()
 
@@ -2493,7 +2501,7 @@ async def test_api_frame_buildroot_sd_image_status_allows_precompiled_when_base_
 ):
     frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
     frame.mode = 'buildroot'
-    frame.buildroot = {'platform': 'raspberry-pi-zero-2-w', 'compilationMode': 'precompiled'}
+    frame.buildroot = {'platform': 'raspberry-pi-64', 'compilationMode': 'precompiled'}
     frame.scenes = []
     db.add(frame)
     db.commit()
@@ -2517,7 +2525,7 @@ async def test_api_frame_buildroot_sd_image_status_marks_inactive_build_failed(a
     frame.mode = 'buildroot'
     stale_at = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'building',
             'requestId': 'request123',
@@ -2563,7 +2571,7 @@ async def test_api_frame_buildroot_sd_image_does_not_publish_previous_error(asyn
         'wifiPassword': 'secret1234',
     }
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'error',
             'error': "name 'systemd_dir' is not defined",
@@ -2604,7 +2612,7 @@ async def test_api_frame_buildroot_sd_image_recovers_legacy_building_state(async
         'wifiPassword': 'secret1234',
     }
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'building',
             'startedAt': datetime.now(timezone.utc).isoformat(),
@@ -2638,7 +2646,7 @@ async def test_api_frame_buildroot_sd_image_keeps_active_build(async_client, db,
     frame = await new_frame(db, redis, 'BuildrootFrame', 'frame.local', 'backend.local')
     frame.mode = 'buildroot'
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'building',
             'requestId': 'request123',
@@ -2679,7 +2687,7 @@ async def test_api_frame_buildroot_sd_image_post_returns_ready_image(async_clien
         'sha256': 'current-sha256',
     }
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img',
@@ -2721,7 +2729,7 @@ async def test_api_frame_update_clears_ready_buildroot_sd_image_on_config_change
     image_path.write_bytes(b'frameos image')
     frame.mode = 'buildroot'
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img.gz',
@@ -2748,7 +2756,7 @@ async def test_api_frame_update_keeps_buildroot_sd_image_for_unrelated_metadata(
     image_path.write_bytes(b'frameos image')
     frame.mode = 'buildroot'
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img.gz',
@@ -2781,7 +2789,7 @@ async def test_api_frame_buildroot_sd_image_force_regenerates_ready_image(async_
         'wifiPassword': 'secret1234',
     }
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img',
@@ -2829,7 +2837,7 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_customization_vers
         'wifiPassword': 'secret1234',
     }
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img.gz',
@@ -2879,7 +2887,7 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_base_image(
         'wifiPassword': 'secret1234',
     }
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img.gz',
@@ -2947,7 +2955,7 @@ async def test_api_frame_buildroot_sd_image_regenerates_stale_config_fingerprint
         'sha256': 'current-sha256',
     }
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'compilationMode': 'precompiled',
         'sdImage': {
             'status': 'ready',
@@ -2998,7 +3006,7 @@ async def test_api_frame_buildroot_sd_image_download(async_client, db, redis, tm
     image_path.write_bytes(b'frameos image')
     frame.mode = 'buildroot'
     frame.buildroot = {
-        'platform': 'raspberry-pi-zero-2-w',
+        'platform': 'raspberry-pi-64',
         'sdImage': {
             'status': 'ready',
             'filename': 'frameos-test.img',

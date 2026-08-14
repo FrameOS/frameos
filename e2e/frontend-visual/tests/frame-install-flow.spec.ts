@@ -115,7 +115,7 @@ async function installE2ERoutes(page: Page): Promise<void> {
         message: 'E2E SD card image ready',
         sdImage: {
           status: 'ready',
-          platform: 'raspberry-pi-zero-2-w',
+          platform: 'raspberry-pi-64',
           filename: `frameos-e2e-${frameId}.img.gz`,
           downloadUrl: `/api/frames/${frameId}/buildroot/sd_image/download`,
         },

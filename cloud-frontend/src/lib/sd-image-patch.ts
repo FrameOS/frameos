@@ -88,6 +88,11 @@ export interface CloudConfigInput {
   width?: number | undefined;
   wifiPassword?: string | undefined;
   wifiSsid?: string | undefined;
+  // Console/SSH root password applied via chpasswd on first boot. Absent =
+  // the image's build-time default: passwordless root on the console, SSH
+  // password logins disabled. The builder UI only omits it when the user
+  // explicitly opts into passwordless root.
+  rootPassword?: string | undefined;
 }
 
 // Render the personalized frameos-cloud.txt region: magic line, KEY=value
@@ -130,6 +135,7 @@ export function renderCloudConfig(input: CloudConfigInput): Uint8Array {
   // vcom stays a string so "-1.48" round-trips exactly as typed.
   push("vcom", input.vcom, "VCOM");
   push("upload_url", input.uploadUrl, "Upload URL");
+  push("root_password", input.rootPassword, "Root password");
 
   const content = new TextEncoder().encode(lines.join("\n") + "\n");
   if (content.length > CLOUD_CONFIG_REGION_SIZE) {

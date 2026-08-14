@@ -88,8 +88,8 @@ const metadataPayload = {
       size: firmwareBytes.length,
     },
     {
-      name: "frameos-1.2.3-raspberry-pi-zero-2-w-buildroot.img.gz",
-      platform: "raspberry-pi-zero-2-w",
+      name: "frameos-1.2.3-raspberry-pi-64-buildroot.img.gz",
+      platform: "raspberry-pi-64",
       size: 1024,
     },
   ],

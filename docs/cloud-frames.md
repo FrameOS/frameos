@@ -472,6 +472,7 @@ height=1200            # optional, with device
 rotate=90              # optional: 0/90/180/270
 vcom=-1.48             # optional (IT8951-style panels)
 upload_url=https://…   # optional; required by device=http.upload
+root_password=…        # optional; sets the root password via chpasswd
 ```
 
 Parsing is deliberately forgiving: `KEY=value` lines, `#` comments, blank
@@ -498,6 +499,17 @@ frame boots with its previous display config and the setup portal remains
 the fallback. Images from releases before these keys existed log
 "Ignoring unknown key" and enroll normally, so providers may always write
 them.
+
+`root_password` mirrors the self-hosted `/boot/frameos-root-password`
+semantics: applied with `chpasswd` on first boot, and setting it also
+re-enables dropbear password logins (`DROPBEAR_ARGS=""`). Without the key
+the image keeps its build-time default — root with no password on the
+console (physical access only), while SSH refuses password logins entirely
+(`dropbear -s -g`, no authorized keys). The provider's SD-image builder
+makes this an explicit choice: enter a root password, or tick a
+"passwordless root" checkbox to accept the default. Like the WiFi
+credentials, the password is written into the image in the browser and
+never reaches the provider.
 
 **Placeholder + in-browser personalization.** Release images ship the file
 pre-created as an all-comments placeholder of exactly **4096 bytes**, first

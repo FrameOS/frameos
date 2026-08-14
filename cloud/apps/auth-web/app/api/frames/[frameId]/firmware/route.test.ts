@@ -185,7 +185,7 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
   it("allows only the ESP32 platform allow-list", async () => {
     mockGitHub();
 
-    for (const platform of ["raspberry-pi-zero-2-w", "esp32-s3-evil", ""]) {
+    for (const platform of ["raspberry-pi-64", "esp32-s3-evil", ""]) {
       const response = await manifest(platform);
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toEqual({

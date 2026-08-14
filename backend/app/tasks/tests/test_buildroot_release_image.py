@@ -120,7 +120,7 @@ async def test_release_image_composes_with_executor_when_host_tools_are_missing(
         calls["platform"] = platform
         return {
             "frameos_version": "2026.6.1",
-            "object_key": "buildroot-images/raspberry-pi-zero-2-w/base.img.gz",
+            "object_key": "buildroot-images/raspberry-pi-64/base.img.gz",
             "sha256": "base-sha",
             "updated_at": "2026-06-01T00:00:00+00:00",
         }
@@ -187,7 +187,7 @@ async def test_release_image_composes_with_executor_when_host_tools_are_missing(
 
     await module.build_release_image(
         SimpleNamespace(
-            platform="raspberry-pi-zero-2-w",
+            platform="raspberry-pi-64",
             prebuilt_cross_dir=str(prebuilt_dir),
             release_assets_dir=str(release_assets_dir),
             target=target,
@@ -200,9 +200,9 @@ async def test_release_image_composes_with_executor_when_host_tools_are_missing(
     assert calls["compose_image"] == "frameos/frameos-buildroot:test"
     assert fake_executor.entered is True
     assert fake_executor.exited is True
-    assert (release_assets_dir / "frameos-2026.6.2-raspberry-pi-zero-2-w-buildroot.img.gz").is_file()
+    assert (release_assets_dir / "frameos-2026.6.2-raspberry-pi-64-buildroot.img.gz").is_file()
     metadata = json.loads(
-        (release_assets_dir / "frameos-2026.6.2-raspberry-pi-zero-2-w-buildroot.img.metadata.json").read_text(
+        (release_assets_dir / "frameos-2026.6.2-raspberry-pi-64-buildroot.img.metadata.json").read_text(
             encoding="utf-8"
         )
     )

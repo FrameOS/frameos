@@ -46,7 +46,7 @@ from app.tasks.buildroot_image import (
     render_post_build_script,
     render_post_image_script,
 )
-from app.tasks.buildroot_platforms import RASPBERRY_PI_ZERO_2_W, RASPBERRY_PI_ZERO_W
+from app.tasks.buildroot_platforms import RASPBERRY_PI_32, RASPBERRY_PI_64
 from app.tasks.binary_builder import FrameBinaryBuildResult
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.setup_json_reset import (
@@ -253,7 +253,7 @@ def test_buildroot_sd_image_bakes_wpa_supplicant_conf_only_without_network_manag
     network = {"wifiSSID": "Home WiFi", "wifiPassword": "hunter2hunter2"}
     conf_relative = Path(BUILDROOT_WPA_SUPPLICANT_STATE_DIR.lstrip("/")) / BUILDROOT_WPA_SUPPLICANT_CONF_NAME
 
-    zero_w = SimpleNamespace(id=1, network=network, buildroot={"platform": RASPBERRY_PI_ZERO_W.key})
+    zero_w = SimpleNamespace(id=1, network=network, buildroot={"platform": RASPBERRY_PI_32.key})
     zero_w_overlay = tmp_path / "zero-w-overlay"
     BuildrootImageBuilder(db=None, redis=None, frame=zero_w)._write_state_wpa_supplicant_conf(zero_w_overlay)
 
@@ -266,13 +266,13 @@ def test_buildroot_sd_image_bakes_wpa_supplicant_conf_only_without_network_manag
     assert stat.S_IMODE(conf_path.parent.stat().st_mode) == 0o700
 
     # The Zero 2 W has NetworkManager and is deliberately left untouched.
-    zero_2_w = SimpleNamespace(id=2, network=network, buildroot={"platform": RASPBERRY_PI_ZERO_2_W.key})
+    zero_2_w = SimpleNamespace(id=2, network=network, buildroot={"platform": RASPBERRY_PI_64.key})
     zero_2_w_overlay = tmp_path / "zero-2-w-overlay"
     BuildrootImageBuilder(db=None, redis=None, frame=zero_2_w)._write_state_wpa_supplicant_conf(zero_2_w_overlay)
     assert not (zero_2_w_overlay / conf_relative).exists()
 
     # No credentials at all: nothing to bake, and the setup hotspot takes over.
-    blank = SimpleNamespace(id=3, network={}, buildroot={"platform": RASPBERRY_PI_ZERO_W.key})
+    blank = SimpleNamespace(id=3, network={}, buildroot={"platform": RASPBERRY_PI_32.key})
     blank_overlay = tmp_path / "blank-overlay"
     BuildrootImageBuilder(db=None, redis=None, frame=blank)._write_state_wpa_supplicant_conf(blank_overlay)
     assert not (blank_overlay / conf_relative).exists()
@@ -391,7 +391,7 @@ def test_buildroot_defaults_remove_setup_json_reset_file_path():
         id=7,
         frame_host="",
         buildroot={
-            "platform": "raspberry-pi-zero-2-w",
+            "platform": "raspberry-pi-64",
             "setupJsonResetFilePath": "/custom/setup.json",
         },
         https_proxy={},
@@ -409,7 +409,7 @@ def _buildroot_agent_frame(agent: dict[str, Any]) -> SimpleNamespace:
     return SimpleNamespace(
         id=7,
         frame_host="",
-        buildroot={"platform": "raspberry-pi-zero-2-w"},
+        buildroot={"platform": "raspberry-pi-64"},
         https_proxy={},
         agent=agent,
         network={},
@@ -475,7 +475,7 @@ def test_buildroot_setup_payload_includes_real_frame_scenes(monkeypatch):
 def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     config_path = tmp_path / "frameos-buildroot.config"
 
-    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_ZERO_2_W)
+    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_64)
     config = config_path.read_text(encoding="utf-8")
 
     assert "BR2_PACKAGE_BASH=y" in config
@@ -604,7 +604,7 @@ def test_buildroot_config_check_ignores_host_dependent_toolchain_symbols(tmp_pat
 def test_buildroot_build_script_verifies_config_after_olddefconfig(tmp_path):
     script_path = tmp_path / "buildroot-build.sh"
 
-    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_ZERO_W)
+    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_32)
     script = script_path.read_text(encoding="utf-8")
 
     olddefconfig_at = script.index("olddefconfig")
@@ -619,7 +619,7 @@ def test_buildroot_build_script_verifies_config_after_olddefconfig(tmp_path):
 def test_kernel_config_fragment_disables_case_colliding_xtables_targets(tmp_path):
     fragment_path = tmp_path / "linux-fragment.config"
 
-    BuildrootImageBuilder._write_kernel_config_fragment(fragment_path, RASPBERRY_PI_ZERO_2_W)
+    BuildrootImageBuilder._write_kernel_config_fragment(fragment_path, RASPBERRY_PI_64)
     fragment = fragment_path.read_text(encoding="utf-8")
 
     assert "# CONFIG_NETFILTER_XT_TARGET_DSCP is not set" in fragment
@@ -638,7 +638,7 @@ def test_kernel_config_fragment_disables_case_colliding_xtables_targets(tmp_path
 def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
     script_path = tmp_path / "buildroot-build.sh"
 
-    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_ZERO_2_W)
+    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_64)
     script = script_path.read_text(encoding="utf-8")
 
     assert "O=/build/output" in script
@@ -675,8 +675,8 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     post_image_path = tmp_path / "post-image.sh"
 
     BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
-    BuildrootImageBuilder._write_post_image_script(post_image_path, RASPBERRY_PI_ZERO_2_W)
-    BuildrootImageBuilder._write_post_build_script(tmp_path / "post-build.sh", RASPBERRY_PI_ZERO_2_W)
+    BuildrootImageBuilder._write_post_image_script(post_image_path, RASPBERRY_PI_64)
+    BuildrootImageBuilder._write_post_build_script(tmp_path / "post-build.sh", RASPBERRY_PI_64)
 
     partition_post_build = partition_post_build_path.read_text(encoding="utf-8")
     post_image = post_image_path.read_text(encoding="utf-8")
@@ -887,9 +887,9 @@ def test_precompiled_buildroot_sd_image_release_url_uses_release_image_name(monk
     monkeypatch.setattr(buildroot_image_module, "BUILDROOT_PRECOMPILED_SD_IMAGE_RELEASE_BASE_URL", "https://example.test/releases")
     monkeypatch.setattr(buildroot_image_module, "release_version", lambda: "2026.6.3")
 
-    assert precompiled_buildroot_sd_image_release_url("raspberry-pi-zero-2-w") == (
+    assert precompiled_buildroot_sd_image_release_url("raspberry-pi-64") == (
         "https://example.test/releases/v2026.6.3/"
-        "frameos-2026.6.3-raspberry-pi-zero-2-w-buildroot.img.gz"
+        "frameos-2026.6.3-raspberry-pi-64-buildroot.img.gz"
     )
 
 
@@ -1123,7 +1123,7 @@ async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path
         "frame_host": "Kitchen Frame.local",
         "network": {},
         "buildroot": {
-            "platform": "raspberry-pi-zero-2-w",
+            "platform": "raspberry-pi-64",
             "compilationMode": "precompiled",
         },
         "scenes": [],
@@ -1272,7 +1272,7 @@ async def test_precompiled_sd_image_shortcut_does_not_fallback_when_disabled(tmp
         id=42,
         project_id=7,
         mode="buildroot",
-        buildroot={"platform": "raspberry-pi-zero-2-w", "compilationMode": "precompiled"},
+        buildroot={"platform": "raspberry-pi-64", "compilationMode": "precompiled"},
         scenes=[],
     )
     builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
@@ -1805,7 +1805,7 @@ async def test_partition_patches_stay_local_when_this_host_has_the_tools(tmp_pat
         project_id=1,
         mode="buildroot",
         frame_host="kitchen.local",
-        buildroot={"platform": "raspberry-pi-zero-w"},
+        buildroot={"platform": "raspberry-pi-32"},
         scenes=[],
     )
     builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
@@ -1965,10 +1965,10 @@ def test_buildroot_output_cache_key_tracks_bootstrap_inputs(tmp_path, monkeypatc
     partition_post_build_path = tmp_path / "partition-post-build.sh"
     post_image_path = tmp_path / "post-image.sh"
 
-    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_ZERO_2_W)
-    BuildrootImageBuilder._write_post_build_script(post_build_path, RASPBERRY_PI_ZERO_2_W)
+    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_64)
+    BuildrootImageBuilder._write_post_build_script(post_build_path, RASPBERRY_PI_64)
     BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
-    BuildrootImageBuilder._write_post_image_script(post_image_path, RASPBERRY_PI_ZERO_2_W)
+    BuildrootImageBuilder._write_post_image_script(post_image_path, RASPBERRY_PI_64)
 
     builder = BuildrootImageBuilder(db=object(), redis=None, frame=SimpleNamespace(id=1))
 
@@ -2186,7 +2186,7 @@ def test_buildroot_boot_config_defaults_minimize_gpu_memory(monkeypatch):
 
     lines = _frame_boot_config_lines(SimpleNamespace(id=1))
 
-    assert lines == list(RASPBERRY_PI_ZERO_2_W.default_boot_config_lines)
+    assert lines == list(RASPBERRY_PI_64.default_boot_config_lines)
     assert "gpu_mem=32" in lines
 
 
@@ -2261,7 +2261,7 @@ def test_buildroot_bootstrap_frame_uses_web_only_and_clears_scenes():
             "error_behavior": {"mode": "show_error_retry"},
             "palette": {},
             "buildroot": {
-                "platform": "raspberry-pi-zero-2-w",
+                "platform": "raspberry-pi-64",
                 "sdImage": {"status": "ready"},
             },
             "rpios": {"compilationMode": "precompiled"},
@@ -2281,7 +2281,7 @@ def test_buildroot_bootstrap_frame_uses_web_only_and_clears_scenes():
     assert bootstrap_frame.scenes == []
     assert bootstrap_frame.gpio_buttons == []
     assert bootstrap_frame.schedule is None
-    assert bootstrap_frame.buildroot["platform"] == "raspberry-pi-zero-2-w"
+    assert bootstrap_frame.buildroot["platform"] == "raspberry-pi-64"
     assert "sdImage" not in bootstrap_frame.buildroot
 
 
@@ -2298,7 +2298,7 @@ def test_buildroot_setup_payload_supports_gzip(tmp_path):
 def test_buildroot_config_for_zero_w_selects_bootlin_armv6_toolchain(tmp_path):
     config_path = tmp_path / "frameos-buildroot.config"
 
-    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_ZERO_W)
+    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_32)
     config = config_path.read_text(encoding="utf-8")
 
     assert "BR2_TOOLCHAIN_EXTERNAL=y" in config
@@ -2313,8 +2313,8 @@ def test_buildroot_config_for_zero_w_uses_wpa_supplicant_instead_of_network_mana
     zero_w_path = tmp_path / "zero-w.config"
     zero_2_w_path = tmp_path / "zero-2-w.config"
 
-    BuildrootImageBuilder._write_buildroot_config(zero_w_path, RASPBERRY_PI_ZERO_W)
-    BuildrootImageBuilder._write_buildroot_config(zero_2_w_path, RASPBERRY_PI_ZERO_2_W)
+    BuildrootImageBuilder._write_buildroot_config(zero_w_path, RASPBERRY_PI_32)
+    BuildrootImageBuilder._write_buildroot_config(zero_2_w_path, RASPBERRY_PI_64)
     zero_w = zero_w_path.read_text(encoding="utf-8")
     zero_2_w = zero_2_w_path.read_text(encoding="utf-8")
 
@@ -2337,7 +2337,7 @@ def test_buildroot_config_for_zero_w_uses_wpa_supplicant_instead_of_network_mana
 def test_buildroot_build_script_uses_platform_defconfig(tmp_path):
     script_path = tmp_path / "buildroot-build.sh"
 
-    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_ZERO_W)
+    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_32)
     script = script_path.read_text(encoding="utf-8")
 
     assert "O=/build/output raspberrypi0w_defconfig" in script
@@ -2345,8 +2345,8 @@ def test_buildroot_build_script_uses_platform_defconfig(tmp_path):
 
 
 def test_post_build_script_wifi_firmware_is_platform_specific():
-    zero_2_w = render_post_build_script(RASPBERRY_PI_ZERO_2_W)
-    zero_w = render_post_build_script(RASPBERRY_PI_ZERO_W)
+    zero_2_w = render_post_build_script(RASPBERRY_PI_64)
+    zero_w = render_post_build_script(RASPBERRY_PI_32)
 
     assert "raspberrypi,model-zero-2-w" in zero_2_w
     assert "firmware-nonfree" in zero_2_w
@@ -2360,16 +2360,43 @@ def test_post_build_script_wifi_firmware_is_platform_specific():
 
 
 def test_post_image_script_keeps_gpu_memory_reserve_for_zero_w():
-    post_image = render_post_image_script(RASPBERRY_PI_ZERO_W)
+    post_image = render_post_image_script(RASPBERRY_PI_32)
 
-    assert 'line = "gpu_mem=32"' in post_image
+    assert '\'{"remove": [], "set": ["gpu_mem=32"]}\'' in post_image
+    assert "size = 32M" in post_image
     assert "genimage" in post_image
+
+
+def test_post_image_script_unified_image_strips_start_file_pins():
+    from app.tasks.buildroot_platforms import BUILDROOT_PLATFORMS
+
+    post_image = render_post_image_script(BUILDROOT_PLATFORMS["raspberry-pi-64"])
+
+    # start_file=start.elf pinned in the sample config would stop a Pi 4 from
+    # loading start4.elf; the unified image must strip the pins.
+    assert '\'{"remove": ["fixup_file", "start_file"], "set": ["gpu_mem=32"]}\'' in post_image
+    # All DTBs + both firmware sets don't fit the 32M single-model layout.
+    assert "size = 64M" in post_image
+
+
+def test_post_image_script_pi_5_leaves_boot_config_alone():
+    from app.tasks.buildroot_platforms import BUILDROOT_PLATFORMS
+
+    post_image = render_post_image_script(BUILDROOT_PLATFORMS["raspberry-pi-5"])
+
+    # No default lines and no keys to strip: the config.txt patcher is
+    # omitted entirely (no gpu_mem on the Pi 5).
+    assert "rpi-firmware/config.txt" not in post_image.split("rootfs_image=")[0]
+    assert "gpu_mem" not in post_image
+    assert "size = 64M" in post_image
+    # The kernel still lands on the FAT partition even without a kernel= pin.
+    assert 'kernel="Image"' in post_image
 
 
 def test_zero_w_frame_uses_armv6_cross_target(tmp_path, monkeypatch):
     monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
 
-    frame = SimpleNamespace(id=1, buildroot={"platform": "raspberry-pi-zero-w"})
+    frame = SimpleNamespace(id=1, buildroot={"platform": "raspberry-pi-32"})
     builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)
     target = builder.platform.build_target_copy()
 
@@ -2399,19 +2426,19 @@ def test_zero_w_frame_uses_armv6_cross_target(tmp_path, monkeypatch):
 
 
 def test_resolve_base_entry_falls_back_to_remote_manifest_for_missing_platform(tmp_path, monkeypatch):
-    # A checked-in manifest that predates the first pi-zero-w base publish:
+    # A checked-in manifest that predates the first pi 32-bit base publish:
     # the platform must resolve via the archive manifest instead of erroring.
     local_manifest = tmp_path / "manifest.json"
     local_manifest.write_text(
-        json.dumps({"entries": [{"platform": "raspberry-pi-zero-2-w", "object_key": "a", "sha256": "b"}]}),
+        json.dumps({"entries": [{"platform": "raspberry-pi-64", "object_key": "a", "sha256": "b"}]}),
         encoding="utf-8",
     )
     monkeypatch.setattr(buildroot_image_module, "BUILDROOT_BASE_MANIFEST_FILE", str(local_manifest))
 
     remote_entry = {
-        "platform": "raspberry-pi-zero-w",
+        "platform": "raspberry-pi-32",
         "frameos_version": "2026.7.6",
-        "object_key": "buildroot-images/raspberry-pi-zero-w/x.img.gz",
+        "object_key": "buildroot-images/raspberry-pi-32/x.img.gz",
         "sha256": "deadbeef",
     }
 
@@ -2420,7 +2447,7 @@ def test_resolve_base_entry_falls_back_to_remote_manifest_for_missing_platform(t
 
     monkeypatch.setattr(buildroot_image_module, "_remote_buildroot_base_manifest", fake_remote_manifest)
 
-    entry = asyncio.run(buildroot_image_module.resolve_buildroot_base_entry("raspberry-pi-zero-w"))
+    entry = asyncio.run(buildroot_image_module.resolve_buildroot_base_entry("raspberry-pi-32"))
     assert entry == remote_entry
 
 
@@ -2434,8 +2461,8 @@ def test_resolve_base_entry_reports_missing_platform_when_remote_also_lacks_it(t
 
     monkeypatch.setattr(buildroot_image_module, "_remote_buildroot_base_manifest", fake_remote_manifest)
 
-    with pytest.raises(RuntimeError, match="No Buildroot base image is available for raspberry-pi-zero-w"):
-        asyncio.run(buildroot_image_module.resolve_buildroot_base_entry("raspberry-pi-zero-w"))
+    with pytest.raises(RuntimeError, match="No Buildroot base image is available for raspberry-pi-32"):
+        asyncio.run(buildroot_image_module.resolve_buildroot_base_entry("raspberry-pi-32"))
 
 
 def test_frameos_service_names_network_manager_only_where_it_exists():
