@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  normalizeSceneChatTool,
   splitStateNodesByApp,
+  validateAppKeywords,
   validateScenePayload,
   type JsonObject,
-} from "./ai-scene";
+} from "./scene-utils";
 
 function minimalScene(): JsonObject {
   return {
@@ -46,7 +46,7 @@ describe("validateScenePayload", () => {
     ]);
   });
 
-  it("flags a broken scene the way the Python validator does", () => {
+  it("flags a broken scene", () => {
     const scene = minimalScene();
     delete scene.name;
     scene.settings = { execution: "compiled" };
@@ -54,21 +54,63 @@ describe("validateScenePayload", () => {
       { data: { config: {}, keyword: "render/text" }, id: "app-1", type: "app" },
       { data: { config: {}, keyword: "render/text" }, id: "app-1", type: "app" },
     ];
-    scene.edges = [
-      { source: "app-1", target: "ghost" },
-      "not-an-edge",
-    ];
+    scene.edges = [{ source: "app-1", target: "ghost" }, "not-an-edge"];
     const issues = validateScenePayload({ scenes: [scene] });
     expect(issues).toContain("Scene 0 is missing id or name.");
-    expect(issues).toContain(
-      "Scene 0 settings.execution must be 'interpreted'.",
-    );
+    expect(issues).toContain("Scene 0 settings.execution must be 'interpreted'.");
     expect(issues).toContain("Scene 0 has duplicate node id app-1.");
     expect(issues).toContain("Scene 0 is missing a render event node.");
-    expect(issues).toContain(
-      "Scene 0 edge target 'ghost' is not a valid node id.",
-    );
+    expect(issues).toContain("Scene 0 edge target 'ghost' is not a valid node id.");
     expect(issues).toContain("Scene 0 has an edge that is not an object.");
+  });
+});
+
+describe("validateAppKeywords", () => {
+  const known = new Set(["render/text", "data/clock"]);
+
+  it("accepts known keywords", () => {
+    expect(validateAppKeywords({ scenes: [minimalScene()] }, known)).toEqual([]);
+  });
+
+  it("flags hallucinated keywords", () => {
+    const scene = minimalScene();
+    (scene.nodes as JsonObject[]).push({
+      data: { config: {}, keyword: "render/hologram" },
+      id: "app-2",
+      type: "app",
+    });
+    const issues = validateAppKeywords({ scenes: [scene] }, known);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toContain("render/hologram");
+  });
+
+  it("accepts scene-local apps and inline-source apps", () => {
+    const scene = minimalScene();
+    scene.apps = { "my/customApp": { name: "Custom", sources: {} } };
+    (scene.nodes as JsonObject[]).push(
+      {
+        data: { config: {}, keyword: "my/customApp" },
+        id: "app-2",
+        type: "app",
+      },
+      {
+        data: {
+          config: {},
+          keyword: "inline/app",
+          sources: { "app.ts": "export function get() {}" },
+        },
+        id: "app-3",
+        type: "app",
+      },
+    );
+    expect(validateAppKeywords({ scenes: [scene] }, known)).toEqual([]);
+  });
+
+  it("flags app nodes without keywords", () => {
+    const scene = minimalScene();
+    (scene.nodes as JsonObject[]).push({ data: {}, id: "app-2", type: "app" });
+    const issues = validateAppKeywords({ scenes: [scene] }, known);
+    expect(issues).toEqual(["Scene 0 has an app node without a keyword."]);
   });
 });
 
@@ -103,20 +145,15 @@ describe("splitStateNodesByApp", () => {
         { data: { config: {}, keyword: "render/text" }, id: "app-b", type: "app" },
       ],
     };
-    const payload: JsonObject = { scenes: [scene] };
-    splitStateNodesByApp(payload);
+    splitStateNodesByApp({ scenes: [scene] });
 
     const nodes = scene.nodes as JsonObject[];
     const stateNodes = nodes.filter((node) => node.type === "state");
-    // The shared state node is replaced by one clone per connected app.
     expect(stateNodes).toHaveLength(2);
     expect(stateNodes.every((node) => node.id !== "state-1")).toBe(true);
     expect(
-      stateNodes.every(
-        (node) => (node.data as JsonObject).keyword === "title",
-      ),
+      stateNodes.every((node) => (node.data as JsonObject).keyword === "title"),
     ).toBe(true);
-    // Each edge now points from a distinct clone to its app.
     expect(edgeToA.source).not.toBe("state-1");
     expect(edgeToB.source).not.toBe("state-1");
     expect(edgeToA.source).not.toBe(edgeToB.source);
@@ -148,35 +185,5 @@ describe("splitStateNodesByApp", () => {
       "app-a",
     ]);
     expect(edge.source).toBe("state-1");
-  });
-});
-
-describe("normalizeSceneChatTool", () => {
-  it("keeps known tools", () => {
-    expect(normalizeSceneChatTool("build_scene", false)).toBe("build_scene");
-    expect(normalizeSceneChatTool("reply", false)).toBe("reply");
-    expect(normalizeSceneChatTool("modify_scene", true)).toBe("modify_scene");
-    expect(normalizeSceneChatTool("answer_scene_question", true)).toBe(
-      "answer_scene_question",
-    );
-  });
-
-  it("falls back to answer_frame_question for unknown tools", () => {
-    expect(normalizeSceneChatTool("make_coffee", true)).toBe(
-      "answer_frame_question",
-    );
-    expect(normalizeSceneChatTool(undefined, true)).toBe(
-      "answer_frame_question",
-    );
-    expect(normalizeSceneChatTool(42, true)).toBe("answer_frame_question");
-  });
-
-  it("degrades scene-scoped tools when no scene is provided", () => {
-    expect(normalizeSceneChatTool("modify_scene", false)).toBe(
-      "answer_frame_question",
-    );
-    expect(normalizeSceneChatTool("answer_scene_question", false)).toBe(
-      "answer_frame_question",
-    );
   });
 });

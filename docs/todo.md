@@ -28,12 +28,17 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 
 ## Cloud-managed frames
 
-- **Cloud AI chat follow-ups** (scoped out of the 2026-08-14 port of
-  /api/ai/scenes/chat to auth-web) — app-code chat (`/api/ai/apps/chat`
-  answers 501), chat persistence (stateless today, SPA resends history),
-  catalog/RAG context, progress log streaming, and making the OpenAI model
-  override fields storable on the cloud (only apiKey/backendApiKey are in
-  the account-settings allowlist, so chat runs on the defaults).
+- **Cloud AI chat follow-ups** — the 2026-08-14 chat v2 rebuild (branch
+  `cloud-ai-chat-v2`) replaced the ported pipeline with a streaming agentic
+  loop (`/api/ai/chat`, NDJSON) with tools for the app catalog, docs,
+  GitHub source, frame telemetry, and the store; it added chat persistence
+  (`ai_chats`/`ai_chat_messages`), storable `chatModel`/
+  `chatReasoningEffort` overrides, and a `verified_publisher_at` account
+  flag. Still open: app-code chat (`/api/ai/apps/chat` answers 501), a
+  settings UI for the model overrides and the verified-publisher admin
+  toggle (both API-only today), letting the chat *save/fork* scenes
+  directly (it delivers to the editor; the user saves), and seeding
+  `verified_publisher_at` in prod (SQL one-off).
 - **Power section for backend-managed ESP32 frames** — the wire is done
   (settings poll sends deepSleepOnBattery/wakeCheckSeconds/batteryPin/
   batteryDivider when set in device_config, firmware applies them) but only

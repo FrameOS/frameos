@@ -25,12 +25,14 @@ export const storableAccountSettingsFields: ReadonlyMap<
       new Set(group.fields.map((field) => field.path[1])),
     ])
     .map(([key, fields]) => {
-      // The account's own OpenAI key for AI chat in the workspace. Storable
-      // but deliberately NOT in previewSettingsGroups (the wasm preview has
-      // no use for it) and NOT device-deliverable
-      // (frame-service-settings.ts) — it must never reach a frame.
+      // The account's own OpenAI key + model tuning for AI chat in the
+      // workspace. Storable but deliberately NOT in previewSettingsGroups
+      // (the wasm preview has no use for them) and NOT device-deliverable
+      // (frame-service-settings.ts) — they must never reach a frame.
       if (key === "openAI") {
         fields.add("backendApiKey");
+        fields.add("chatModel");
+        fields.add("chatReasoningEffort");
       }
       return [key, fields];
     }),
