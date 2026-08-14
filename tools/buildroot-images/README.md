@@ -64,6 +64,10 @@ gh workflow run buildroot-base-image.yml --ref your-branch
 # Build the unified 32-bit ARMv6 base image (Pi Zero / Zero W / 1):
 gh workflow run buildroot-base-image.yml --ref your-branch -f platform=raspberry-pi-32
 
+# Build every platform in parallel (one matrix job per platform, each on its
+# default runner; the manifest commit step handles the concurrent pushes):
+gh workflow run buildroot-base-image.yml --ref your-branch -f platform=all
+
 # Use a custom runner label, for example a larger ARM runner:
 gh workflow run buildroot-base-image.yml --ref your-branch -f runner_label=your-arm-runner-label
 ```
@@ -74,7 +78,8 @@ Bootlin toolchain applies) and can be dispatched with a custom runner label
 when a larger/self-hosted runner is available. It builds the base image,
 uploads it to R2, verifies the refreshed manifest, and commits the resulting
 `tools/buildroot-images/manifest.json` change back to the selected branch.
-Run it once per platform; the manifest keeps one entry per platform.
+Run it once per platform, or dispatch with `platform=all` to build every
+platform in parallel; the manifest keeps one entry per platform.
 
 Repository secrets required by the upload step:
 
