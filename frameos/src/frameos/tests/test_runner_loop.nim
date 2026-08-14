@@ -266,6 +266,54 @@ suite "runner loop safety":
     check hasEvent(store, "event:setCurrentScene")
     check not logger.enabled
 
+  test "setCurrentScene resolves public scene ids to their uploaded registration":
+    clearEventChannel()
+
+    # Cloud pushes register scenes as "uploaded/<id>", but the provider's
+    # set_current_scene verb (and workspace-authored schedules) name the
+    # public id. The runner must resolve it instead of failing "Scene not
+    # found".
+    let publicSceneId = "tests/runner/public-activation"
+    let uploadedSceneId = ("uploaded/" & publicSceneId).SceneId
+    try:
+      var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+      uploaded[uploadedSceneId] = ExportedInterpretedScene(
+        name: "Uploaded activation scene",
+        publicStateFields: @[],
+        persistedStateKeys: @[],
+        init: fastInit,
+        render: fastRender,
+        runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard
+      )
+      updateUploadedScenes(uploaded)
+
+      var config = loadConfig()
+      let store = LogStore(entries: @[])
+      var runnerThread = RunnerThread(
+        frameConfig: config,
+        scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: getFirstSceneId(),
+        lastRenderAt: 0.0,
+        sleepFuture: none(Future[void]),
+        isRendering: false,
+        triggerRenderNext: false,
+        logger: testLogger(config, store)
+      )
+
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 2)
+      sendEvent("setCurrentScene", %*{"sceneId": publicSceneId})
+
+      let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
+      check finished
+      if finished:
+        waitFor messageLoop
+      check runnerThread.currentSceneId == uploadedSceneId
+      check runnerThread.scenes.hasKey(uploadedSceneId)
+      check not store.entries.anyIt(it.kind == JObject and
+        it{"error"}.getStr("") == "Scene not found")
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
   test "scene changes are logged while render logging is paused":
     let sceneId = "tests/runner/paused-scene-change".SceneId
     try:
