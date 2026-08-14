@@ -217,3 +217,68 @@ suite "FrameOS upgrade helpers":
     let blob = "ED" & parseHexStr(OtaSigningKeyIdHex) & repeat("\x00", 64)
     expect ValueError:
       verifyReleaseArchiveSignature(archive, "untrusted comment: x\n" & encode(blob) & "\n")
+
+suite "upgrade status reporting":
+  # A cloud OTA used to log "scheduled" and then nothing at all: the upgrade
+  # runs detached, and its status file was read by the local admin page only.
+  # The cloud client now watches that file, so the shape of what it logs is
+  # part of the contract.
+  test "the log line keeps what a person needs and drops the rest":
+    let line = upgradeStatusLogLine(%*{
+      "status": "running",
+      "message": "FrameOS upgrade is running.",
+      "current_version": "2026.8.20",
+      "latest_version": "2026.8.21",
+      "target": "debian-bookworm-arm64",
+      "exit_code": 0,
+      # Bulk the log has no use for: the whole release object and a path.
+      "latest_release": {"version": "2026.8.21", "asset_url": "https://example.com/x.tar.gz"},
+      "log_path": "/srv/frameos/logs/upgrade.log",
+      "started_at": "2026-08-14T22:07:35Z",
+    })
+    check line{"event"}.getStr("") == "cloud:upgrade"
+    check line{"status"}.getStr("") == "running"
+    check line{"message"}.getStr("") == "FrameOS upgrade is running."
+    check line{"current_version"}.getStr("") == "2026.8.20"
+    check line{"latest_version"}.getStr("") == "2026.8.21"
+    check line{"target"}.getStr("") == "debian-bookworm-arm64"
+    check line{"exit_code"}.getInt(-1) == 0
+    check not line.hasKey("latest_release")
+    check not line.hasKey("log_path")
+    check not line.hasKey("started_at")
+
+  test "empty and missing fields are omitted rather than logged blank":
+    # The provider names no version in notify_update_available, and a status
+    # written before a target was detected has an empty target. `"target": ""`
+    # in a log line reads as a bug in the frame.
+    let line = upgradeStatusLogLine(%*{"status": "failed", "target": "", "message": "boom"})
+    check line{"status"}.getStr("") == "failed"
+    check line{"message"}.getStr("") == "boom"
+    check not line.hasKey("target")
+    check not line.hasKey("current_version")
+
+  test "a missing or malformed status file reads as idle, never crashes":
+    check upgradeStatusLogLine(nil){"status"}.getStr("") == "idle"
+    check upgradeStatusLogLine(newJNull()){"status"}.getStr("") == "idle"
+    check upgradeStatusLogLine(%*["not", "an", "object"]){"status"}.getStr("") == "idle"
+    check upgradeStatusLogLine(%*{}){"status"}.getStr("") == "idle"
+
+  test "every status the upgrade can end on is recognised as terminal":
+    # The watcher stops polling on these; one missing here would leave a
+    # finished upgrade being re-checked until the session ends.
+    for status in ["success", "reboot_required", "failed", "up_to_date", "idle"]:
+      check status in UpgradeTerminalStatuses
+    # …and the in-flight ones are not, or the outcome would never be logged.
+    for status in ["starting", "running"]:
+      check status notin UpgradeTerminalStatuses
+
+  test "the mtime probe answers 0 for a device that never upgraded":
+    let dir = getTempDir() / "frameos-upgrade-mtime-test"
+    createDir(dir)
+    defer: removeDir(dir)
+    putEnv("FRAMEOS_DIR", dir)
+    defer: delEnv("FRAMEOS_DIR")
+    check upgradeStatusMtime() == 0.0
+
+    writeUpgradeStatus(%*{"status": "starting"})
+    check upgradeStatusMtime() > 0.0

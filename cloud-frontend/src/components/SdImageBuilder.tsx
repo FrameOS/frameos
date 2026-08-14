@@ -139,6 +139,7 @@ export function SdImageBuilder({
   claimTokenExpiresAt,
   cloudOrigin,
   mintClaimToken,
+  reenrollFrame,
 }: {
   claimToken?: string | undefined
   claimTokenExpiresAt?: string | undefined
@@ -147,11 +148,20 @@ export function SdImageBuilder({
   // browsing through (a tunnel, a LAN IP, 127.0.0.1 vs localhost). The panel
   // above resolves it from the shell config the server injects.
   cloudOrigin: string
-  mintClaimToken: (opts: { multiUse: boolean; ttlDays?: number | 'forever' }) => Promise<string>
+  mintClaimToken: (opts: { frameId?: string; multiUse: boolean; ttlDays?: number | 'forever' }) => Promise<string>
+  // Re-download mode: build another card for a frame this account already
+  // owns. The claim code is minted bound to that frame id, so the card
+  // re-keys the existing row instead of enrolling a second one — the frame
+  // keeps its scenes, its history and its place in the workspace, and the
+  // cloud pushes the scenes down as soon as the new card connects. Assets do
+  // NOT travel: they live on the old card's disk, and nothing in the image
+  // carries them. Bound codes are single-use by contract, so the validity
+  // picker and the multi-card copy do not apply here.
+  reenrollFrame?: { id: string; name: string } | undefined
 }): ReactElement {
   const [release, setRelease] = useState<ReleaseState>({ status: 'loading' })
   const [platform, setPlatform] = useState('')
-  const [frameName, setFrameName] = useState('')
+  const [frameName, setFrameName] = useState(reenrollFrame?.name ?? '')
   const remembered = useRef(loadRememberedWifi()).current
   const [wifiSsid, setWifiSsid] = useState(remembered?.ssid ?? '')
   const [wifiPassword, setWifiPassword] = useState(remembered?.password ?? '')
@@ -310,9 +320,7 @@ export function SdImageBuilder({
       sanitizeConfigValue(uploadUrl.trim(), 'Upload URL')
       sanitizeConfigValue(rootPassword, 'Root password')
       if (!rootPassword && !passwordlessRoot) {
-        failWith(
-          'Set a root password for the device, or tick "Enable passwordless root login" to accept the default.'
-        )
+        failWith('Set a root password for the device, or tick "Enable passwordless root login" to accept the default.')
         busyRef.current = false
         return
       }
@@ -331,7 +339,22 @@ export function SdImageBuilder({
       // Gzipped output: Raspberry Pi Imager and balenaEtcher both read
       // .img.gz directly, it downloads ~10x smaller, and browsers don't flag
       // an archive as a dangerous file the way they do a bare .img.
-      const suggestedName = `frameos-${board.platform}-${slugify(frameName) || 'cloud'}.img.gz`
+      //
+      // The release version is part of the name because these files outlive
+      // the download: a card flashed months ago and a fresh build sit in the
+      // same Downloads folder under names that differed only by frame, with
+      // nothing saying which FrameOS either one installs.
+      // Dots kept — "2026.8.21" is the version people read; slugify() would
+      // turn it into "2026-8-21", which looks like a date.
+      const versionSuffix = release.version
+        .trim()
+        .replace(/^v/i, '')
+        .replace(/[^0-9A-Za-z.]+/g, '-')
+        .replace(/^[-.]+|[-.]+$/g, '')
+        .slice(0, 24)
+      const suggestedName =
+        `frameos-${board.platform}-${slugify(frameName) || 'cloud'}` +
+        `${versionSuffix ? `-${versionSuffix}` : ''}.img.gz`
       // Ask for the save location first, while the click's user activation is
       // still fresh (Chrome/Edge; other browsers fall back to a Blob).
       if (canStreamToDisk) {
@@ -356,13 +379,20 @@ export function SdImageBuilder({
         }
       }
 
-      let token = claimToken
+      // A bound code is single-use and short-lived by contract, and is never
+      // reused across builds — so the cached multi-use token from the panel
+      // above must not stand in for it.
+      let token = reenrollFrame ? undefined : claimToken
       if (!token) {
-        setStatus('Creating a multi-use claim code…')
-        token = await mintClaimToken({
-          multiUse: true,
-          ttlDays: claimValidity === 'forever' ? 'forever' : Number(claimValidity),
-        })
+        setStatus(reenrollFrame ? 'Creating a claim code for this frame…' : 'Creating a multi-use claim code…')
+        token = await mintClaimToken(
+          reenrollFrame
+            ? { frameId: reenrollFrame.id, multiUse: false }
+            : {
+                multiUse: true,
+                ttlDays: claimValidity === 'forever' ? 'forever' : Number(claimValidity),
+              }
+        )
       }
       const configBytes = renderCloudConfig({
         claimToken: token,
@@ -508,7 +538,10 @@ export function SdImageBuilder({
   // left refreshing the page by hand to see it. The first successful poll is
   // the baseline — nothing can boot the image before it exists — and polling
   // stops with the drawer (unmount) or when a frame shows up.
-  const { enrolledFrame, hintDue } = useEnrollmentWatch({ active: phase === 'done' })
+  // Nothing new to watch for when re-keying an existing frame: the frames
+  // list already contains it, so the watch would either see nothing or
+  // latch onto an unrelated enrollment.
+  const { enrolledFrame, hintDue } = useEnrollmentWatch({ active: phase === 'done' && !reenrollFrame })
 
   if (!supported) {
     return (
@@ -522,9 +555,22 @@ export function SdImageBuilder({
   return (
     <div className="space-y-2">
       <p className="frameos-muted text-xs">
-        Build a ready-to-flash image for your board right here: it embeds this cloud&apos;s address and a multi-use
-        claim code. WiFi credentials and the root password are written into the image in your browser — they are never
-        sent to FrameOS Cloud.
+        {reenrollFrame ? (
+          <>
+            Build another card for this frame — for a replacement Pi, a dead SD card, or a move to different hardware.
+            The image embeds a claim code bound to this frame, so the new card comes back as{' '}
+            <span className="frameos-strong font-semibold">{reenrollFrame.name}</span> rather than as a second frame,
+            and the cloud pushes its scenes down as soon as it connects.{' '}
+            <span className="frameos-strong font-semibold">Assets do not travel</span>: images and files uploaded to the
+            old card live on its disk, and nothing here can copy them. Upload them again once the new card is up.
+          </>
+        ) : (
+          <>
+            Build a ready-to-flash image for your board right here: it embeds this cloud&apos;s address and a multi-use
+            claim code. WiFi credentials and the root password are written into the image in your browser — they are
+            never sent to FrameOS Cloud.
+          </>
+        )}
       </p>
       {release.status === 'loading' ? (
         <p className="frameos-muted text-xs">Looking up the latest FrameOS release…</p>
@@ -555,7 +601,9 @@ export function SdImageBuilder({
           <input
             aria-label="Frame name"
             className={controlClassName}
-            disabled={building}
+            // The name belongs to the frame row being re-keyed; letting the
+            // image disagree with the workspace would just be confusing.
+            disabled={building || Boolean(reenrollFrame)}
             maxLength={256}
             onChange={(event) => setFrameName(event.target.value)}
             placeholder="Frame name"
@@ -692,22 +740,32 @@ export function SdImageBuilder({
             Enable passwordless root login on this device (console only — needs physical access; SSH password login
             stays disabled)
           </label>
-          <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
-            <span>Claim code accepts new frames for</span>
-            <select
-              aria-label="Claim code validity"
-              className={`${controlClassName} w-auto`}
-              disabled={building}
-              onChange={(event) => setClaimValidity(event.target.value)}
-              value={claimValidity}
-            >
-              {claimValidityChoices.map((choice) => (
-                <option key={choice.value} value={choice.value}>
-                  {choice.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {reenrollFrame ? (
+            // Bound codes are single-use and expire in an hour (the
+            // claim-tokens route enforces both), so there is nothing to pick:
+            // say what it means instead of offering a choice that is refused.
+            <p className="frameos-muted text-xs">
+              The claim code in this image is single-use and valid for one hour — flash the card and boot it while it
+              lasts, or build another image here.
+            </p>
+          ) : (
+            <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
+              <span>Claim code accepts new frames for</span>
+              <select
+                aria-label="Claim code validity"
+                className={`${controlClassName} w-auto`}
+                disabled={building}
+                onChange={(event) => setClaimValidity(event.target.value)}
+                value={claimValidity}
+              >
+                {claimValidityChoices.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {!canStreamToDisk ? (
             <p className="frameos-muted flex items-start gap-1.5 text-xs">
               <CircleStackIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
@@ -735,7 +793,15 @@ export function SdImageBuilder({
           </div>
         </div>
       ) : null}
-      {phase === 'done' ? (
+      {phase === 'done' && reenrollFrame ? (
+        <div className="frameos-success-button rounded-xl border px-3 py-2 text-xs" data-testid="sd-image-done">
+          Image saved. Flash this <code>.img.gz</code> to the card (Raspberry Pi Imager or balenaEtcher, &ldquo;Use
+          custom image&rdquo; — both read it compressed) and boot it within the hour. It comes back as{' '}
+          <span className="frameos-strong font-semibold">{reenrollFrame.name}</span>, and this frame&apos;s scenes are
+          pushed to it automatically. Its assets are not — re-upload those once it is online.
+        </div>
+      ) : null}
+      {phase === 'done' && !reenrollFrame ? (
         <div className="frameos-success-button rounded-xl border px-3 py-2 text-xs" data-testid="sd-image-done">
           Image saved. Flash this <code>.img.gz</code> to as many SD cards as you like (Raspberry Pi Imager or
           balenaEtcher, &ldquo;Use custom image&rdquo; — both read it compressed). Each frame appears in this workspace
@@ -751,7 +817,7 @@ export function SdImageBuilder({
             : ''}
         </div>
       ) : null}
-      {phase === 'done' ? (
+      {phase === 'done' && !reenrollFrame ? (
         <div className="frameos-card space-y-2 rounded-xl border px-3 py-2 text-xs" data-testid="sd-image-enrollment">
           {enrolledFrame ? (
             <>
@@ -780,8 +846,8 @@ export function SdImageBuilder({
               {hintDue ? (
                 <p className="frameos-muted">
                   Nothing yet — that usually means the frame has not reached the cloud: check its power and WiFi (a
-                  first boot can also take a couple of minutes). The claim code stays valid, so it appears here
-                  whenever it gets through.
+                  first boot can also take a couple of minutes). The claim code stays valid, so it appears here whenever
+                  it gets through.
                 </p>
               ) : null}
             </>

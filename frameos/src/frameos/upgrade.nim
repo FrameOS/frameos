@@ -89,6 +89,45 @@ proc readUpgradeStatus*(): JsonNode =
     discard
   %*{"status": "idle"}
 
+const UpgradeTerminalStatuses* = ["success", "reboot_required", "failed", "up_to_date", "idle"]
+
+proc upgradeStatusLogLine*(payload: JsonNode): JsonNode =
+  ## The loggable view of upgrade-status.json.
+  ##
+  ## `frameos upgrade` runs detached, in a process that shares nothing with a
+  ## running FrameOS but this file, so a cloud owner who pressed "Upgrade
+  ## FrameOS" saw the request go out and then heard nothing — whether the
+  ## device downloaded 40 MB, refused as already current, or died on an
+  ## unsupported target. The cloud client watches the file and logs this.
+  ##
+  ## Only the fields worth a log line: the status file also carries the whole
+  ## release JSON and a log path, which say nothing a person reading the log
+  ## wants to know.
+  let status =
+    if payload != nil and payload.kind == JObject: payload{"status"}.getStr("idle")
+    else: "idle"
+  result = %*{"event": "cloud:upgrade", "status": status}
+  if payload == nil or payload.kind != JObject:
+    return
+  for key in ["message", "current_version", "latest_version", "target", "exit_code"]:
+    let value = payload{key}
+    if value == nil or value.kind == JNull:
+      continue
+    if value.kind == JString and value.getStr("").len == 0:
+      continue
+    result[key] = value
+
+proc upgradeStatusMtime*(): float =
+  ## Unix mtime of upgrade-status.json, 0 when it does not exist. A stat, not
+  ## a parse: the cloud client calls this on every watch tick.
+  try:
+    let path = frameosUpgradeStatusPath()
+    if fileExists(path):
+      return getLastModificationTime(path).toUnixFloat()
+  except CatchableError:
+    discard
+  0.0
+
 const UpgradeInFlightMaxAge = initDuration(hours = 2)
 
 proc frameOSUpgradeInFlight*(): bool =

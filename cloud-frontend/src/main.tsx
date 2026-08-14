@@ -8,8 +8,10 @@ import '../../frontend/src/utils/configureMonaco'
 import { App } from './scenes/App'
 import './index.css'
 import { initKea } from '../../frontend/src/initKea'
-import { registerAddFramePanel } from '../../frontend/src/scenes/workspace/addFramePanelRegistry'
+import { registerAddFramePanel, registerFramePanel } from '../../frontend/src/scenes/workspace/addFramePanelRegistry'
 import { CloudAddFrameDrawer } from './components/CloudAddFrameDrawer'
+import { CloudFrameSdImageCard } from './components/CloudFrameSdImageCard'
+import { CloudFrameUsbRelink } from './components/CloudFrameUsbRelink'
 import { cloudAssetsBasePath, cloudRouteBasePath } from './routes'
 import { seedThemeFromSharedCookie, syncThemeToSharedCookie } from './cloudThemeSync'
 
@@ -35,6 +37,13 @@ if (typeof window !== 'undefined') {
 // is handed down instead — registered before the first render, so FramesHome
 // sees it the moment it mounts.
 registerAddFramePanel(CloudAddFrameDrawer)
+
+// Same handoff for the two per-frame enrollment operations the deploy drawer
+// offers — re-linking a wiped ESP32, and writing another SD card for a Pi.
+// Both mint a claim token bound to an existing frame, which only this bundle
+// can do.
+registerFramePanel('usbRelink', CloudFrameUsbRelink)
+registerFramePanel('sdImage', CloudFrameSdImageCard)
 
 // The account pages and this workspace share one theme preference. Seeding
 // must happen before initKea — authThemeLogic reads its stored value once,

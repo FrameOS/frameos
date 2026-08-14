@@ -103,12 +103,12 @@ describe("the deploy dialog in cloud mode", () => {
     // The cloud's deploy: settings push + one checksummed set_scenes.
     expect(screen.getByRole("button", { name: /Push scenes & settings/ })).toBeTruthy();
     // The firmware nudge (notify_update_available; the device downloads and
-    // signature-verifies the image itself). "Also push scenes & settings" is
-    // on by default, so the button reads "Update everything"; unticking it
-    // reverts to the firmware-only label.
-    expect(screen.getByRole("button", { name: /Update everything/ })).toBeTruthy();
+    // signature-verifies the image itself). The label is constant — the
+    // checkbox next to it is what says whether scenes ride along, and a
+    // button that renamed itself made the two disagree.
+    expect(screen.getByRole("button", { name: /Upgrade firmware/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox", { name: /Also push scenes & settings/ }));
-    expect(screen.getByRole("button", { name: /Update firmware/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Upgrade firmware/ })).toBeTruthy();
     // OTA progress is only visible as ota:cloud log lines, so the view links
     // straight to them.
     expect(screen.getByRole("button", { name: /Follow along in Logs/ })).toBeTruthy();
@@ -121,8 +121,10 @@ describe("the deploy dialog in cloud mode", () => {
     render(<FrameDeployPlanDrawer frame={cloudFrame("esp32")} />);
     fireEvent.click(screen.getByRole("button", { name: /Over USB/ }));
 
-    // 1. The NVS-sparing firmware update…
+    // 1. The NVS-sparing firmware update, with the same "and the scenes too"
+    // tick the over-the-air firmware card offers…
     expect(screen.getByRole("button", { name: /Update over USB/ })).toBeTruthy();
+    expect(screen.getAllByRole("checkbox", { name: /Also push scenes & settings/ }).length).toBeGreaterThan(0);
     // 2. …the same scene bodies the OTA push sends, over the cable (behind a
     // connect button until a board is attached)…
     expect(screen.getByText("Push scenes & settings")).toBeTruthy();
@@ -130,10 +132,11 @@ describe("the deploy dialog in cloud mode", () => {
     // 3. …and WebSerial provisioning, the only repair channel for a board
     // whose Wi-Fi credentials are wrong.
     expect(screen.getByText("Wi-Fi & device status")).toBeTruthy();
-    // Re-enrolling a WIPED board is enrollment, not deployment: it moved to
-    // the "Add frame" panel and only a pointer remains.
-    expect(screen.queryByText(/Connect & re-enroll/)).toBeNull();
-    expect(screen.getByText(/re-connect it from the "Add\s?frame" panel/i)).toBeTruthy();
+    // Re-linking a WIPED board is the last card, not a pointer at some other
+    // screen: it needs a claim token bound to this frame, so the cloud bundle
+    // registers it (CloudFrameUsbRelink) — absent in this shared-SPA harness,
+    // which registers no panels.
+    expect(screen.queryByText(/re-connect it from the "Add\s?frame" panel/i)).toBeNull();
   });
 
   it("lands a frame no board has enrolled as straight on the USB view", () => {
@@ -172,17 +175,17 @@ describe("the deploy dialog in cloud mode", () => {
     expect(screen.getByRole("button", { name: /Push scenes & settings/ })).toBeTruthy();
     // The same notify_update_available nudge the esp32 gets, with Pi wording:
     // the device runs its own signed release upgrade (frameos/upgrade.nim).
-    // "Also push scenes & settings" defaults on → "Update everything".
-    expect(screen.getByRole("button", { name: /Update everything/ })).toBeTruthy();
+    // Constant label; the checkbox owns "and the scenes too".
+    expect(screen.getByRole("button", { name: /Upgrade FrameOS/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox", { name: /Also push scenes & settings/ }));
-    expect(screen.getByRole("button", { name: /Update FrameOS/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Upgrade FrameOS/ })).toBeTruthy();
     // USB provisioning and the hardware panel stay esp32-profile surfaces: a
     // cloud Pi has no serial console to provision over and no enrollment
     // hardware report to render.
     expect(screen.queryByRole("button", { name: /Over the air/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Over USB/ })).toBeNull();
     expect(screen.queryByText("Wi-Fi & device status")).toBeNull();
-    expect(screen.queryByRole("button", { name: /Update firmware/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Upgrade firmware/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Update over USB/ })).toBeNull();
     expect(screen.queryByText("Hardware")).toBeNull();
   });

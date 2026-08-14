@@ -26,6 +26,18 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   pass. Verifying a full buildroot SD-card cloud install + update covers
   both.
 
+  2026-08-15: the first hardware attempt (buildroot Pi, 2026.8.20 →
+  2026.8.21) reported nothing after `cloud:upgrade scheduled` and the
+  version never moved. The visibility half is fixed — `frameos upgrade`
+  runs detached and only ever wrote `upgrade-status.json`, which the local
+  admin page polls and the cloud could not see, so the hub session now
+  watches that file and forwards every status change (plus a `stalled`
+  line when the child dies silently, and a replay of a terminal status
+  written while the frame was restarting). **Whether the upgrade itself
+  works on buildroot is still unverified**: re-run it and read the new
+  `cloud:upgrade` lines, which now carry the failure message from
+  `performFrameOSUpgrade` when there is one.
+
 ## Cloud-managed frames
 
 - **Cloud AI chat follow-ups** — the 2026-08-14 chat v2 rebuild (branch

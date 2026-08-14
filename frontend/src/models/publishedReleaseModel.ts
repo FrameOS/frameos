@@ -1,0 +1,62 @@
+import { actions, afterMount, kea, path, selectors } from 'kea'
+import { loaders } from 'kea-loaders'
+
+import { apiFetch } from '../utils/apiFetch'
+import { isCloudMode } from '../utils/cloudMode'
+
+import type { publishedReleaseModelType } from './publishedReleaseModelType'
+
+// Same endpoint the deploy drawer's firmware updater reads; duplicated as a
+// constant rather than imported so a model does not have to pull a workspace
+// component (and its flasher dependencies) into every bundle that mounts it.
+const firmwareListingUrl = '/api/frames/firmware'
+
+/**
+ * The latest published FrameOS release, fleet-wide.
+ *
+ * The deploy drawer already looked this up per frame, but nothing outside it
+ * could: the change indicator next to every frame is a kea selector, so "this
+ * frame is a release behind" had no way to reach it, and the button stayed
+ * idle-white while the drawer behind it said `2026.8.20 → 2026.8.21`.
+ *
+ * One fetch for the whole page — the answer is a property of the release
+ * channel, not of a frame. The per-frame ASSET (its size, whether this
+ * platform is published at all) stays in the drawer's own hook.
+ *
+ * Cloud only. A self-hosted backend deploys the FrameOS it was built with, so
+ * "the newest tag on GitHub" is not what its frames are behind on.
+ */
+export const publishedReleaseModel = kea<publishedReleaseModelType>([
+  path(['src', 'models', 'publishedReleaseModel']),
+  actions({
+    loadPublishedRelease: true,
+  }),
+  loaders({
+    publishedRelease: [
+      null as string | null,
+      {
+        // A failure (offline, rate-limited, a dev cloud with no releases) is
+        // not retried: kea-loaders keeps the previous value, and null means
+        // "unknown", which every reader below treats as "assume up to date".
+        loadPublishedRelease: async () => {
+          const response = await apiFetch(firmwareListingUrl)
+          if (!response.ok) {
+            throw new Error('Could not look up the latest FrameOS release.')
+          }
+          const listing = (await response.json()) as { release?: string }
+          // Releases are tagged `vX`; device-reported versions are not.
+          return (listing.release ?? '').trim().replace(/^v/i, '') || null
+        },
+      },
+    ],
+  }),
+  selectors({
+    /** Normalized, or null when unknown — never guess a frame is out of date. */
+    latestPublishedRelease: [(s) => [s.publishedRelease], (publishedRelease): string | null => publishedRelease],
+  }),
+  afterMount(({ actions }) => {
+    if (isCloudMode()) {
+      actions.loadPublishedRelease()
+    }
+  }),
+])

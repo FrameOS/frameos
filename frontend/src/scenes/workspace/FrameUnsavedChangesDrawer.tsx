@@ -1,7 +1,9 @@
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
+import { useEffect, useRef } from 'react'
 
+import { Spinner } from '../../components/Spinner'
 import type { FrameType } from '../../types'
 import { frameLogic, type ChangeDetail } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -30,22 +32,42 @@ function UnsavedChangeRows({ changes }: { changes: ChangeDetail[] }): JSX.Elemen
 }
 
 export function FrameUnsavedChangesDrawer({ frame }: { frame: FrameType }): JSX.Element {
-  const { unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
+  const { isFrameFormSubmitting, unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
   const { hideDeployPlanModal, resetUnsavedChanges, saveFrame } = useActions(frameLogic({ frameId: frame.id }))
   const { closeFrameChangeDrawer } = useActions(workspaceLogic)
+  // The drawer used to close on the click, which on the cloud hid the one
+  // surface that could have shown the save's several seconds of work — a
+  // settings push, then a store-scene version per scene, then the assignment
+  // push. It now stays put and spins, and closes itself once the save lands.
+  const saving = useRef(false)
 
   const closeDrawer = (): void => {
     hideDeployPlanModal()
     closeFrameChangeDrawer()
   }
 
+  useEffect(() => {
+    if (isFrameFormSubmitting) {
+      saving.current = true
+      return
+    }
+    if (!saving.current) {
+      return
+    }
+    saving.current = false
+    // A failed save leaves the changes pending: keep the drawer open so the
+    // reason (reported as a failed task) is next to what it refused.
+    if (unsavedChangeDetails.length === 0) {
+      closeDrawer()
+    }
+    // closeDrawer is stable enough for this — the actions it calls are kea
+    // action creators, and re-running on identity churn would close the
+    // drawer a second time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFrameFormSubmitting, unsavedChangeDetails.length])
+
   const discardChanges = (): void => {
     resetUnsavedChanges()
-    closeDrawer()
-  }
-
-  const saveChanges = (): void => {
-    saveFrame()
     closeDrawer()
   }
 
@@ -87,17 +109,20 @@ export function FrameUnsavedChangesDrawer({ frame }: { frame: FrameType }): JSX.
           </button>
           <button
             type="button"
+            disabled={isFrameFormSubmitting}
             onClick={discardChanges}
-            className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
           >
             Discard
           </button>
           <button
             type="button"
-            onClick={saveChanges}
-            className="frameos-primary-action rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            disabled={isFrameFormSubmitting}
+            onClick={() => saveFrame()}
+            className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
           >
-            Save changes
+            {isFrameFormSubmitting ? <Spinner color="white" /> : null}
+            {isFrameFormSubmitting ? 'Saving…' : 'Save changes'}
           </button>
         </div>
       </div>

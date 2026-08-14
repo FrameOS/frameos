@@ -23,13 +23,26 @@ const themeStorageKey = "frameos-cloud-theme";
 // deliberately identical to ThemeToggle's effect — cookie, then
 // localStorage, then the system preference — so the pre-paint class and the
 // class the effect applies always agree and the page never flips twice.
+//
+// It also picks the favicon, which is four files rather than two: the theme
+// chooses the outline colour, and whether the page is served from a loopback
+// name chooses whether the three squares keep their colours. Anyone working on
+// the cloud has a dev tab and the real account.frameos.net open at once; the
+// monochrome icon is what tells them apart in the tab strip. The workspace SPA
+// applies the same rule to its own icon — see
+// frontend/src/utils/frameosTheme.ts and cloud-frontend/src/index.html.
 const themeScript = `(function(){try{
 var c=document.cookie.split(";").map(function(p){return p.trim()}).filter(function(p){return p.indexOf("${themeCookieName}=")===0})[0];
 var v=c?c.slice(${themeCookieName.length + 1}):null;
 var t=(v==="dark"||v==="light")?v:null;
 if(!t){var s=window.localStorage.getItem("${themeStorageKey}");
 t=(s==="dark"||s==="light")?s:(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")}
-document.documentElement.classList.toggle("theme-dark",t==="dark")}catch(e){}})()`;
+document.documentElement.classList.toggle("theme-dark",t==="dark");
+var h=window.location.hostname.toLowerCase();
+var local=h==="localhost"||h.slice(-10)===".localhost"||h==="127.0.0.1"||h==="0.0.0.0"||h==="::1"||h==="[::1]";
+var icon=document.querySelector("link[data-frameos-favicon]");
+if(icon){icon.setAttribute("href","/logo-"+(t==="dark"?"dark":"light")+(local?"-mono":"")+".svg")}
+}catch(e){}})()`;
 
 export default async function RootLayout({
   children,
@@ -46,6 +59,15 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        {/* The server knows the theme from the cookie but not the hostname the
+            browser used, so the colourful light icon is the placeholder and
+            themeScript corrects it before first paint. */}
+        <link
+          data-frameos-favicon=""
+          href={theme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
+          rel="icon"
+          type="image/svg+xml"
+        />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body>

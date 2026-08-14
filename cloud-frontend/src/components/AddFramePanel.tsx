@@ -1,6 +1,5 @@
 import {
   ArrowLeftIcon,
-  ArrowPathIcon,
   ChevronRightIcon,
   ClipboardDocumentIcon,
   CommandLineIcon,
@@ -61,19 +60,7 @@ export interface AddFramePanelProps {
   onClose?: (() => void) | undefined
 }
 
-type AddFramePath = 'script' | 'sd' | 'link' | 'esp32' | 'reenroll'
-
-// The frames listing rows the reconnect path needs — GET /api/frames serves
-// the full summary; only these fields are read here.
-// `| undefined` spelled out: auth-web compiles these shared sources with
-// exactOptionalPropertyTypes, where a bare `panel?: string` refuses the
-// explicit undefined the frames-listing map produces.
-interface ReenrollFrameChoice {
-  id: string
-  name: string
-  panel?: string | undefined
-  connected?: boolean | undefined
-}
+type AddFramePath = 'script' | 'sd' | 'link' | 'esp32'
 
 // Stage one: one button per enrollment path, each with a single line saying
 // what it is for. The chosen path's full form is stage two.
@@ -107,13 +94,6 @@ const pathChoices: {
     key: 'esp32',
     title: 'Flash an ESP32 from this browser',
   },
-  {
-    description:
-      'An ESP32 that was factory-reset or re-flashed: write the firmware and link it back to a frame you already have — its scenes, assets and logs carry over.',
-    icon: ArrowPathIcon,
-    key: 'reenroll',
-    title: 'Reconnect a board to an existing frame',
-  },
 ]
 
 export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddFramePanelProps): ReactElement {
@@ -131,11 +111,6 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   // minted with; changing the validity in the SD builder mints a fresh one.
   const [multiUseTtlDays, setMultiUseTtlDays] = useState<number | 'forever' | undefined>()
   const [minting, setMinting] = useState(false)
-  // The reconnect path: which existing esp32 frames the board could be linked
-  // back to. Fetched once per panel session, on first entering the path.
-  const [reenrollFrames, setReenrollFrames] = useState<ReenrollFrameChoice[] | undefined>()
-  const [reenrollError, setReenrollError] = useState<string | undefined>()
-  const [reenrollTarget, setReenrollTarget] = useState<ReenrollFrameChoice | undefined>()
   const abortRef = useRef<AbortController | undefined>(undefined)
   const cancelledRef = useRef(false)
   // One mint per opening, whatever React does with renders. A ref, not state:
@@ -248,54 +223,6 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
       setMinting(false)
     }
   }
-
-  // Re-enrollment binds a claim token to an EXISTING frame, so the path needs
-  // the fleet list to pick from. Only esp32 frames qualify: they are the only
-  // hardware whose identity lives in flashable NVS.
-  useEffect(() => {
-    if (path !== 'reenroll' || reenrollFrames !== undefined) {
-      return
-    }
-    let cancelled = false
-    setReenrollError(undefined)
-    void (async () => {
-      try {
-        const response = await fetch('/api/frames')
-        const data = (await response.json().catch(() => ({}))) as {
-          frames?: {
-            id?: string
-            name?: string
-            hardware?: { platform?: string; panel?: string }
-            connected?: boolean
-          }[]
-        }
-        if (cancelled) {
-          return
-        }
-        if (!response.ok || !Array.isArray(data.frames)) {
-          setReenrollError('Could not load your frames — try again in a moment.')
-          return
-        }
-        setReenrollFrames(
-          data.frames
-            .filter((frame) => (frame.hardware?.platform ?? '').toLowerCase().startsWith('esp32'))
-            .map((frame) => ({
-              id: String(frame.id),
-              name: frame.name || 'Unnamed frame',
-              panel: frame.hardware?.panel,
-              connected: frame.connected,
-            }))
-        )
-      } catch {
-        if (!cancelled) {
-          setReenrollError('Could not load your frames — try again in a moment.')
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [path, reenrollFrames])
 
   async function copyText(text: string, setFlag: (value: boolean) => void): Promise<void> {
     await navigator.clipboard.writeText(text)
@@ -470,69 +397,6 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
               Flash an ESP32 from this browser
             </h3>
             <Esp32CloudFlasher cloudOrigin={cloudOrigin} />
-          </section>
-        ) : null}
-
-        {path === 'reenroll' ? (
-          <section className="frameos-card rounded-2xl border border-white/90 p-4 shadow-sm">
-            <h3 className="frameos-strong mb-1 flex items-center gap-2 text-sm font-semibold">
-              <ArrowPathIcon aria-hidden className="h-5 w-5" />
-              Reconnect a board to an existing frame
-            </h3>
-            <p className="frameos-muted text-xs">
-              For a board whose settings were wiped — a factory reset, or a full flash. Pick the frame it should come
-              back as: flashing writes the firmware and links the board to that frame, keeping its scenes, assets and
-              logs. Wi-Fi has to be entered again.
-            </p>
-            {reenrollError ? (
-              <p className="frameos-warning-button mt-2 rounded-xl border px-3 py-2 text-xs" role="alert">
-                {reenrollError}
-              </p>
-            ) : reenrollFrames === undefined ? (
-              <p className="frameos-muted mt-2 text-xs">Loading your frames…</p>
-            ) : reenrollFrames.length === 0 ? (
-              <p className="frameos-muted mt-2 text-xs">
-                This account has no ESP32 frames to reconnect to. Use “Flash an ESP32 from this browser” to enroll the
-                board as a new frame instead.
-              </p>
-            ) : (
-              <div className="mt-2 grid gap-2">
-                {reenrollFrames.map((candidate) => (
-                  <button
-                    key={candidate.id}
-                    type="button"
-                    aria-pressed={reenrollTarget?.id === candidate.id}
-                    onClick={() => setReenrollTarget(candidate)}
-                    className={`flex items-center gap-3 rounded-2xl border p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
-                      reenrollTarget?.id === candidate.id
-                        ? 'border-blue-400 bg-blue-50/60'
-                        : 'frameos-card border-white/90 hover:border-blue-400'
-                    }`}
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="frameos-strong block text-sm font-semibold">{candidate.name}</span>
-                      <span className="frameos-muted block text-xs">
-                        {candidate.panel ?? 'esp32'}
-                        {/* Offline is the expected state of the board being repaired;
-                          a frame that is ONLINE is probably not the one you mean. */}
-                        {candidate.connected ? ' · currently online' : ' · offline'}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {reenrollTarget ? (
-              // Keyed so switching targets restarts the flasher with a claim
-              // token bound to the newly chosen frame.
-              <div className="mt-3">
-                <Esp32CloudFlasher
-                  key={reenrollTarget.id}
-                  cloudOrigin={cloudOrigin}
-                  reenrollFrame={{ id: reenrollTarget.id, name: reenrollTarget.name }}
-                />
-              </div>
-            ) : null}
           </section>
         ) : null}
       </div>

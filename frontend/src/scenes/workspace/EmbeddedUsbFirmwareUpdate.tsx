@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import { ArrowUpCircleIcon } from '@heroicons/react/24/outline'
-import { useActions } from 'kea'
+import { useActions, useValues } from 'kea'
 import type { Transport as EspTransport } from 'esptool-js'
 
+import { Checkbox } from '../../components/Checkbox'
 import { Spinner } from '../../components/Spinner'
+import { frameLogic } from '../frame/frameLogic'
+import { pushScenesOverUsb, pushedScenesMessage } from './embeddedUsbScenePush'
 import {
   embeddedUsbLogStreamSessionPort,
   prepareSerialPortReconnect,
@@ -158,6 +161,14 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
   const [progress, setProgress] = useState<number | null>(null)
   const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
   const { loadFrame } = useActions(framesModel)
+  const { frameForm } = useValues(frameLogic({ frameId: frame.id }))
+  // Same tick the over-the-air firmware card offers, for the same reason: one
+  // press should converge the board. The flash keeps the settings partition,
+  // so a board that comes back on the new firmware is still running whatever
+  // scenes it had — which is rarely what you wanted when you pulled out a
+  // cable to update it.
+  const [alsoPushScenes, setAlsoPushScenes] = useState(true)
+  const scenes = frameForm?.scenes ?? frame.scenes ?? []
 
   const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
   const busy = phase === 'connecting' || phase === 'preparing' || phase === 'flashing'
@@ -288,8 +299,29 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
             setFlashMessage,
             'Waiting for the board to come back on USB.'
           )
-          setPhase('done')
-          setFlashMessage('Firmware updated. The frame kept its Wi-Fi and cloud settings and is reconnecting.')
+          // Scenes ride the same USB session, after the board answers again:
+          // the freshly flashed firmware is what has to accept them, and its
+          // usb_api is only up once waitForUsbApiReadyAfterFlash returns. A
+          // failure here is reported as its own thing — the firmware update
+          // itself already succeeded and must not be reported as failed.
+          if (alsoPushScenes && scenes.length > 0) {
+            setFlashMessage(`Pushing ${scenes.length} scene${scenes.length === 1 ? '' : 's'} over USB.`)
+            try {
+              await pushScenesOverUsb(frame.id, scenes)
+              setPhase('done')
+              setFlashMessage(
+                `Firmware updated and ${pushedScenesMessage(scenes.length).toLowerCase()} ` +
+                  'The frame kept its Wi-Fi and cloud settings and is reconnecting.'
+              )
+            } catch (pushError) {
+              setPhase('error')
+              const detail = pushError instanceof Error ? pushError.message : String(pushError)
+              setFlashMessage(`Firmware updated, but pushing the scenes over USB failed: ${detail}`)
+            }
+          } else {
+            setPhase('done')
+            setFlashMessage('Firmware updated. The frame kept its Wi-Fi and cloud settings and is reconnecting.')
+          }
           // Its reported firmware version changes as soon as it re-syncs.
           loadFrame(frame.id)
         } catch (error) {
@@ -316,6 +348,17 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
 
   return (
     <div className="space-y-2">
+      <Checkbox
+        label="Also push scenes & settings"
+        value={alsoPushScenes}
+        onChange={setAlsoPushScenes}
+        disabled={busy || scenes.length === 0}
+        title={
+          scenes.length === 0
+            ? 'This frame has no scenes to push'
+            : 'After the board reboots on the new firmware, send it the workspace’s current scenes over the same cable. Settings still arrive when the frame next connects.'
+        }
+      />
       <button
         type="button"
         onClick={update}

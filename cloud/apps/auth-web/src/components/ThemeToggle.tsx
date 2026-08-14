@@ -7,8 +7,28 @@ type Theme = "light" | "dark";
 const themeCookieName = "frameos_theme";
 const localStorageKey = "frameos-cloud-theme";
 
+// Loopback names only — a LAN IP or a `.local` name is how you reach a real
+// deployment from another device. Keep in step with app/layout.tsx's inline
+// script, which makes the same call before first paint.
+function isLocalHost() {
+  const host = window.location.hostname.toLowerCase();
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    host === "[::1]"
+  );
+}
+
 function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle("theme-dark", theme === "dark");
+  const icon = document.querySelector("link[data-frameos-favicon]");
+  icon?.setAttribute(
+    "href",
+    `/logo-${theme}${isLocalHost() ? "-mono" : ""}.svg`,
+  );
 }
 
 function readThemeCookie() {

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FrameOS Cloud</title>
-    <link rel="icon" type="image/svg+xml" href="/frames-app/img/logo-2/logo.svg" />
+    <link rel="icon" type="image/svg+xml" href="/frames-app/img/logo-2/logo.svg" data-frameos-favicon />
     <script>
       // Pre-paint theme, mirroring the Next app's inline script in
       // app/layout.tsx: the shared frameos_theme cookie first, then the
@@ -29,6 +29,31 @@
           }
           document.documentElement.dataset.frameosTheme = theme
           document.documentElement.style.colorScheme = theme
+
+          // Same four-icon rule as the self-hosted shell and
+          // frontend/src/utils/frameosTheme.ts, which takes over on mount:
+          // theme picks the outline colour, localhost drops the colours so a
+          // dev tab is never mistaken for account.frameos.net.
+          var favicon = document.querySelector('link[data-frameos-favicon]')
+          if (favicon) {
+            var host = window.location.hostname.toLowerCase()
+            var isLocal =
+              host === 'localhost' ||
+              host.slice(-10) === '.localhost' ||
+              host === '127.0.0.1' ||
+              host === '0.0.0.0' ||
+              host === '::1' ||
+              host === '[::1]'
+            favicon.href =
+              '/frames-app/img/logo-2/' +
+              (isLocal
+                ? theme === 'dark'
+                  ? 'logo-white.svg'
+                  : 'logo-black.svg'
+                : theme === 'dark'
+                ? 'logo-white-colors.svg'
+                : 'logo.svg')
+          }
         } catch (e) {}
       })()
     </script>

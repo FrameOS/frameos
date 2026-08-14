@@ -34,12 +34,11 @@ import {
   partialRefreshDefaultsByDevice,
   partialRefreshDevices,
 } from '../../devices'
-import { embeddedUsbUploadTimeoutMs, framesModel, type RemoteTaskTransport } from '../../models/framesModel'
+import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
 import {
   embeddedUsbApiCanUse,
   embeddedUsbLogsModel,
   isEmbeddedUsbLogStreamOpen,
-  runEmbeddedUsbApiCommand,
 } from '../../models/embeddedUsbLogsModel'
 import type {
   FrameOSSettings,
@@ -77,6 +76,8 @@ import {
   hasReleaseFirmwarePlatform,
   releaseFirmwarePlatform,
 } from './EmbeddedUsbFirmwareUpdate'
+import { registeredFramePanel } from './addFramePanelRegistry'
+import { pushScenesOverUsb, pushedScenesMessage } from './embeddedUsbScenePush'
 import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
 import { EmbeddedUsbConnectionButton, EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
@@ -2343,6 +2344,14 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
   const { unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
   const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
   const offline = frame.connected === false
+  // Nothing to send and the device already acked the last push: the button
+  // still works (a re-send is idempotent) but it is not what this screen is
+  // asking you to do, so it stops competing with the firmware upgrade next
+  // to it for the one primary-coloured slot.
+  const inSync =
+    unsavedChangeDetails.length === 0 &&
+    Boolean(frame.assigned_checksum) &&
+    frame.assigned_checksum === frame.scenes_checksum
 
   return (
     <section className="space-y-2">
@@ -2372,7 +2381,10 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
             saveAndDeployFrame()
             onPushed()
           }}
-          className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className={clsx(
+            inSync ? 'frameos-secondary-button' : 'frameos-primary-action',
+            'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+          )}
         >
           <CloudArrowUpIcon className="h-4 w-4" />
           Push scenes &amp; settings
@@ -2448,11 +2460,7 @@ function CloudOtaDeployView({
                 The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
               </div>
             ) : null}
-            <Checkbox
-              label="Also push scenes & settings"
-              value={alsoPushScenes}
-              onChange={setAlsoPushScenes}
-            />
+            <Checkbox label="Also push scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
             <button
               type="button"
               title={
@@ -2470,10 +2478,20 @@ function CloudOtaDeployView({
                 }
                 updateFrameFirmware(frame.id)
               }}
-              className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              // Primary while the device is behind the published release —
+              // an available upgrade is the thing to do on this screen, and a
+              // secondary button next to a primary "push scenes" one read as
+              // the lesser action even when the version row said otherwise.
+              className={clsx(
+                upToDate ? 'frameos-secondary-button' : 'frameos-primary-action',
+                'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
+              )}
             >
               <CloudArrowDownIcon className="h-4 w-4" />
-              {alsoPushScenes ? 'Update everything' : 'Update firmware'}
+              {/* Constant label: the checkbox above says whether scenes ride
+                  along, so a button that renamed itself to "Update
+                  everything" only made the two disagree about what it does. */}
+              Upgrade firmware
             </button>
           </div>
         </section>
@@ -2505,14 +2523,9 @@ function CloudUsbScenesPushCard({ frame }: { frame: FrameType }): JSX.Element {
     setMessage(null)
     setError(null)
     try {
-      const payload = new TextEncoder().encode(JSON.stringify(scenes))
-      await runEmbeddedUsbApiCommand(frame.id, 'upload-scenes', {
-        payload,
-        timeoutMs: embeddedUsbUploadTimeoutMs(payload.byteLength),
-      })
+      await pushScenesOverUsb(frame.id, scenes)
       setMessage(
-        `Pushed ${scenes.length} scene${scenes.length === 1 ? '' : 's'} over USB. ` +
-          'The cloud reconciles the sync state when the frame next connects.'
+        `${pushedScenesMessage(scenes.length)} The cloud reconciles the sync state when the frame next connects.`
       )
     } catch (pushError) {
       setError(pushError instanceof Error ? pushError.message : String(pushError))
@@ -2556,6 +2569,9 @@ function CloudUsbScenesPushCard({ frame }: { frame: FrameType }): JSX.Element {
 
 function CloudUsbDeployView({ frame, onBack }: { frame: FrameType; onBack?: () => void }): JSX.Element {
   const showUsbJtagPortGuidance = needsEsp32UsbJtagPortGuidance(frame)
+  // Cloud-only, handed down through the registry: minting a claim token bound
+  // to an existing frame is a cloud operation the shared bundle cannot do.
+  const UsbRelinkPanel = registeredFramePanel('usbRelink')
 
   return (
     <>
@@ -2584,14 +2600,14 @@ function CloudUsbDeployView({ frame, onBack }: { frame: FrameType; onBack?: () =
 
       {/* Mirrors the over-the-air view's order: firmware and scenes first —
           the two things a deploy is — then Wi-Fi repair as the maintenance
-          card. Re-linking a wiped board is enrollment, not deployment, so it
-          lives in the "Add frame" panel. */}
+          card. */}
       <section className="space-y-2">
         <DrawerHeading>Update firmware</DrawerHeading>
         <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
           <div className="frame-tool-muted text-sm leading-5">
             Flashes the latest released firmware around the board's settings partition: it keeps its Wi-Fi credentials,
-            its settings and its link to this account. No re-enrollment needed.
+            its settings and its link to this account. No re-enrollment needed. A board whose settings were wiped has
+            nothing left to keep — use &ldquo;Re-link a wiped board&rdquo; at the bottom of this view instead.
           </div>
           <EmbeddedUsbFirmwareUpdate frame={frame} />
         </div>
@@ -2605,10 +2621,7 @@ function CloudUsbDeployView({ frame, onBack }: { frame: FrameType; onBack?: () =
         description="Check the board over its serial console, join a different Wi-Fi network, or restart it."
       />
 
-      <div className="frame-tool-muted text-xs leading-4">
-        A board that was factory-reset or fully erased has lost its link to this frame — re-connect it from the "Add
-        frame" panel, which can bind it back to an existing frame.
-      </div>
+      {UsbRelinkPanel ? <UsbRelinkPanel frame={frame} /> : null}
     </>
   )
 }
@@ -2841,11 +2854,7 @@ function CloudPiUpdateCard({
             The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
           </div>
         ) : null}
-        <Checkbox
-          label="Also push scenes & settings"
-          value={alsoPushScenes}
-          onChange={setAlsoPushScenes}
-        />
+        <Checkbox label="Also push scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
         <button
           type="button"
           title={
@@ -2863,10 +2872,18 @@ function CloudPiUpdateCard({
             }
             updateFrameFirmware(frame.id)
           }}
-          className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+          // Primary while the device is behind the published release. The
+          // status rows above already flag the version gap; a secondary
+          // button next to the primary "Push scenes & settings" one made the
+          // upgrade look like the optional half of this screen.
+          className={clsx(
+            upToDate ? 'frameos-secondary-button' : 'frameos-primary-action',
+            'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
+          )}
         >
           <CloudArrowDownIcon className="h-4 w-4" />
-          {alsoPushScenes ? 'Update everything' : 'Update FrameOS'}
+          {/* Constant label — the checkbox above owns "and the scenes too". */}
+          Upgrade FrameOS
         </button>
       </div>
     </section>
@@ -2892,9 +2909,10 @@ function CloudPiUpdateCard({
  *                  Wi-Fi/status repair (EmbeddedUsbSetup). The only path
  *                  that works when the board cannot reach the network,
  *                  which is why a frame no board has enrolled as yet skips
- *                  the choice and lands here directly. Re-enrolling a WIPED
- *                  board is enrollment, not deployment — that flow lives in
- *                  the "Add frame" panel (AddFramePanel's reconnect path).
+ *                  the choice and lands here directly. It is also how a
+ *                  wiped board is put back on this frame: the firmware
+ *                  update writes the identity along with the image, so
+ *                  "Add frame" needs no separate reconnect path.
  *
  * Both views open with the same status summary (connection, firmware
  * version vs. the published release, scenes sync) and close with the
@@ -2919,6 +2937,7 @@ function CloudDeploySection({
   const mode = workspaceMode()
   const isEsp32 = isEsp32CloudFrame(frame, mode)
   const releaseInfo = useCloudFirmwareRelease(frame, true)
+  const SdImagePanel = registeredFramePanel('sdImage')
   // A frame no board has enrolled as cannot be reached over the air at all
   // (its command queue 409s), so the OTA/USB choice would be a trick
   // question — land on USB directly.
@@ -2938,6 +2957,9 @@ function CloudDeploySection({
         <>
           <CloudScenesPushCard frame={frame} onPushed={onClose} />
           <CloudPiUpdateCard frame={frame} releaseInfo={releaseInfo} />
+          {/* Cloud-only, and last: writing a card is what you do when the
+              hardware, not the deploy, is the problem. */}
+          {SdImagePanel ? <SdImagePanel frame={frame} /> : null}
         </>
       ) : activeView === 'main' ? (
         <section className="space-y-2">

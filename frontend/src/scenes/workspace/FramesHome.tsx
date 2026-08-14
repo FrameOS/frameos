@@ -23,6 +23,7 @@ import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { FrameImage } from '../../components/FrameImage'
 import { Modal } from '../../components/Modal'
+import { Spinner } from '../../components/Spinner'
 import { TextInput } from '../../components/TextInput'
 import {
   formatFrameRelativeTime,
@@ -860,7 +861,7 @@ function SceneControlPanelContent({
     uploadedScenesLoading,
   } = useValues(controlLogic({ frameId: sceneControlSelection.frameId }))
   const frameLogicProps = { frameId: sceneControlSelection.frameId }
-  const { frameForm } = useValues(frameLogic(frameLogicProps))
+  const { frameForm, isFrameFormSubmitting } = useValues(frameLogic(frameLogicProps))
   const { saveAndDeployFrame, saveFrame } = useActions(frameLogic(frameLogicProps))
   const { undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic(frameLogicProps))
   const { openGenerator } = useActions(splitScreenLayoutLogic(frameLogicProps))
@@ -1005,6 +1006,7 @@ function SceneControlPanelContent({
               ) : null}
               <SceneControlPanelModeTitle />
               <SceneControlChangeNotice
+                busy={isFrameFormSubmitting}
                 sceneIsUndeployed={sceneIsUndeployed}
                 sceneIsUnsaved={sceneIsUnsaved}
                 onDeploy={saveAndDeployFrame}
@@ -1035,11 +1037,16 @@ function SceneControlPanelModeTitle(): JSX.Element {
 }
 
 function SceneControlChangeNotice({
+  busy,
   sceneIsUndeployed,
   sceneIsUnsaved,
   onDeploy,
   onSave,
 }: {
+  // A cloud save/deploy is seconds of network (settings push, a store-scene
+  // version per scene, the assignment push) with nothing to look at; without
+  // this the button just sat there and people clicked it again.
+  busy: boolean
   sceneIsUndeployed: boolean
   sceneIsUnsaved: boolean
   onDeploy: () => void
@@ -1060,19 +1067,22 @@ function SceneControlChangeNotice({
         {content.showSaveButton ? (
           <button
             type="button"
+            disabled={busy}
             onClick={onSave}
-            className="frameos-secondary-button rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
           >
-            Save changes
+            {busy ? <Spinner /> : null}
+            {busy ? 'Saving…' : 'Save changes'}
           </button>
         ) : null}
         <button
           type="button"
+          disabled={busy}
           onClick={onDeploy}
-          className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
         >
-          <RocketLaunchIcon className="h-4 w-4" />
-          {content.deployLabel}
+          {busy ? <Spinner color="white" /> : <RocketLaunchIcon className="h-4 w-4" />}
+          {busy ? 'Working…' : content.deployLabel}
         </button>
       </div>
     </div>

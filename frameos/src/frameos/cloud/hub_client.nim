@@ -128,6 +128,24 @@ const
   # timer would: the frame is otherwise happily connected and may be rendering
   # with a key the owner already replaced.
   HubServiceSettingsRetrySeconds = 300.0
+  # How often the session stats upgrade-status.json. `frameos upgrade` runs
+  # detached in its own process (scheduleFrameOSUpgrade), so the only thing it
+  # shares with this connection is that file — without watching it, a cloud
+  # user who pressed "Upgrade FrameOS" sees the `scheduled` line and then
+  # nothing at all, whether the upgrade downloaded 40MB, refused as already
+  # current, or died on an unsupported target. A stat every few seconds is
+  # cheap; the file is only parsed when its mtime moves.
+  HubUpgradeCheckSeconds = 5.0
+  # A successful upgrade restarts FrameOS, which takes this connection down
+  # with it — so the terminal status is written by a process that is gone by
+  # the time anyone could see it. Replay a status file younger than this once
+  # per session, so the outcome lands in the log of the session that comes
+  # back rather than being lost with the one that triggered it.
+  HubUpgradeReplaySeconds = 15 * 60.0
+  # An upgrade whose status file stops moving is a dead child: systemd-run
+  # refused, the binary is missing, the process was OOM-killed. Say so instead
+  # of leaving the last line reading `starting` forever.
+  HubUpgradeStallSeconds = 45 * 60.0
 
 # Declarative settings a provider may push; every key maps onto an existing
 # frame.json field through the same persist path the local admin uses. Must
@@ -374,6 +392,15 @@ proc defaultReboot() {.gcsafe.} =
     let command = "(sleep 2; systemctl reboot || reboot) >/dev/null 2>&1 &"
     discard runShellCapture(privilegedCommand("sh -c " & shellQuote(command)), timeoutMs = 10_000)
 
+proc logUpgradeStatus(): string {.gcsafe.} =
+  ## Forward the detached upgrade's own status file into the frame log — the
+  ## only channel a cloud owner can see. Returns the status it logged so the
+  ## caller can stop watching once it is terminal.
+  {.gcsafe.}:
+    let line = upgradeStatusLogLine(readUpgradeStatus())
+    result = line{"status"}.getStr("idle")
+    log(line)
+
 proc defaultRequestUpgrade() {.gcsafe.} =
   ## The `notify_update_available` implementation on the full/Pi profile:
   ## run the device's own signed upgrade flow, detached, exactly as the local
@@ -382,13 +409,17 @@ proc defaultRequestUpgrade() {.gcsafe.} =
   ## the configured release archive and verifies the minisign signature
   ## itself. Delivery is at-least-once, so a repeat while one is in flight is
   ## a logged no-op, and an already-current install resolves to `up_to_date`.
+  ##
+  ## Everything after "scheduled" happens in another process; the session loop
+  ## watches upgrade-status.json and logs what that process reports.
   {.gcsafe.}:
     if frameOSUpgradeInFlight():
       log(%*{"event": "cloud:upgrade", "status": "skipped", "detail": "already_in_flight"})
       return
     try:
       discard scheduleFrameOSUpgrade()
-      log(%*{"event": "cloud:upgrade", "status": "scheduled"})
+      log(%*{"event": "cloud:upgrade", "status": "scheduled",
+             "current_version": installedFrameOSVersion()})
     except CatchableError as error:
       log(%*{"event": "cloud:upgrade", "status": "error", "detail": error.msg})
 
@@ -1029,7 +1060,16 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     # requestUpgradeFn refuses repeats while one is in flight and resolves to
     # up_to_date on a current install, so at-least-once redelivery is safe.
     ctx.audit("notify_update_available", true)
-    log(%*{"event": "cloud:updateAvailable", "version": msg{"version"}.getStr("")})
+    # The provider is not required to name a version — the device resolves the
+    # latest release itself — and logging `"version": ""` only made the line
+    # look broken. Report what this device is on instead; the target shows up
+    # in the cloud:upgrade lines the watcher forwards.
+    var notice = %*{"event": "cloud:updateAvailable",
+                    "installed": installedFrameOSVersion()}
+    let offeredVersion = msg{"version"}.getStr("")
+    if offeredVersion.len > 0:
+      notice["version"] = %offeredVersion
+    log(notice)
     result = CloudVerbReply(ack: ackOk(id))
     ctx.requestUpgradeFn()
   else:
@@ -1431,6 +1471,18 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
       var stale: seq[SerializedLog] = @[]
       drainCloudLogChannel(stale)
       cloudLogForwardingEnabled.store(true, moRelaxed)
+    # ---- upgrade watch ---------------------------------------------------
+    # `frameos upgrade` runs in a process this one cannot see; the status file
+    # is the whole channel. Replay a recent one first (the upgrade that
+    # succeeded took the previous session down before it could report), then
+    # follow the file for as long as it keeps moving.
+    var lastUpgradeStatusMtime = upgradeStatusMtime()
+    var lastUpgradeCheckAt = epochTime()
+    var upgradeWatchingSince = 0.0
+    if lastUpgradeStatusMtime > 0 and
+        epochTime() - lastUpgradeStatusMtime <= HubUpgradeReplaySeconds:
+      if logUpgradeStatus() notin UpgradeTerminalStatuses:
+        upgradeWatchingSince = epochTime()
     var recvFut: Future[HubPacket] = nil
     var lastReceivedAt = epochTime()
     var lastPingSentAt = epochTime()
@@ -1529,6 +1581,24 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
         if sample != nil:
           lastMetricsSentAt = now
           await socket.send($(%*{"type": "metrics", "metrics": sample}))
+      if now - lastUpgradeCheckAt >= HubUpgradeCheckSeconds:
+        lastUpgradeCheckAt = now
+        let upgradeMtime = upgradeStatusMtime()
+        if upgradeMtime > lastUpgradeStatusMtime:
+          lastUpgradeStatusMtime = upgradeMtime
+          upgradeWatchingSince =
+            if logUpgradeStatus() in UpgradeTerminalStatuses: 0.0
+            elif upgradeWatchingSince > 0.0: upgradeWatchingSince
+            else: now
+        elif upgradeWatchingSince > 0.0 and
+            now - upgradeWatchingSince >= HubUpgradeStallSeconds:
+          # Nothing has written the file for the whole stall window: the child
+          # is gone. Say so once and stop watching, rather than leaving the log
+          # ending on a `running` line that will never be followed up.
+          upgradeWatchingSince = 0.0
+          log(%*{"event": "cloud:upgrade", "status": "stalled",
+                 "detail": "the upgrade process stopped reporting; check " &
+                           frameosInstallDir() / "logs" / "upgrade.log"})
       if now - lastStateCheckAt >= HubStateCheckSeconds:
         lastStateCheckAt = now
         # Pick up local settings changes (allowLocalNetworkAccess toggled on
