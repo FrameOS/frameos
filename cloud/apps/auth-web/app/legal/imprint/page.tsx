@@ -90,18 +90,9 @@ export default function ImprintPage() {
 
       <h2>Dispute resolution</h2>
       <p className="copy">
-        The European Commission provides a platform for online dispute
-        resolution at{" "}
-        <a
-          href="https://ec.europa.eu/consumers/odr"
-          rel="noreferrer noopener"
-          target="_blank"
-        >
-          ec.europa.eu/consumers/odr
-        </a>
-        . We are not obliged to participate in dispute resolution proceedings
-        before a consumer arbitration board, and we prefer to sort things out
-        with you directly — write to us first.
+        We are not obliged to, and do not, participate in dispute resolution
+        proceedings before a consumer arbitration board. If something has gone
+        wrong, write to us first — we prefer to sort it out with you directly.
       </p>
 
       <h2>Responsibility for content and links</h2>

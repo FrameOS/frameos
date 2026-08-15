@@ -44,8 +44,8 @@ export default function PrivacyPage() {
         The controller is {entity.name}, {entity.address.join(", ")},{" "}
         {entity.country}. For anything in this policy — including the requests
         described under &ldquo;Your rights&rdquo; — write to{" "}
-        <a href={`mailto:${entity.contactEmail}`}>{entity.contactEmail}</a>. We
-        are small enough that a real person reads that address.
+        <a href={`mailto:${entity.contactEmail}`}>{entity.contactEmail}</a>. A
+        real person reads that address.
       </p>
       <p className="copy">
         We have not appointed a Data Protection Officer: we are not a public
@@ -72,9 +72,10 @@ export default function PrivacyPage() {
         Whatever you put into the service: the frames you link, the scenes you
         write or install, the images and files you upload, your device settings
         and schedules, backups of your FrameOS installations, and the logs and
-        metrics your frames report. Also <strong>performance of a contract</strong> —
-        this is the thing you signed up for. Private scenes are private; a
-        scene becomes public only when you publish it.
+        metrics your frames report. The legal basis is again{" "}
+        <strong>performance of a contract</strong>: storing and serving this
+        content is the service. Private scenes stay private; a scene becomes
+        public only when you publish it.
       </p>
 
       <h3>Security and abuse prevention</h3>
@@ -113,7 +114,7 @@ export default function PrivacyPage() {
       </p>
 
       <h2>Cookies and similar storage</h2>
-      <p className="copy">We use as few as we can get away with:</p>
+      <p className="copy">We use the following:</p>
       <ul className="copy">
         <li>
           <strong>Session cookie</strong> — proves you are signed in. Strictly
@@ -204,8 +205,9 @@ export default function PrivacyPage() {
         </li>
         <li>
           <strong>Security audit trail</strong> — kept after account deletion
-          with your account identifier removed, because a security log you can
-          erase on request is not a security log. It no longer points at you.
+          with your account identifier removed, so it no longer identifies you.
+          A security log that could be erased on request would not serve its
+          purpose.
         </li>
         <li>
           <strong>Backups</strong> — the off-site backups roll over on a

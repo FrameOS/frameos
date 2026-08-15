@@ -134,13 +134,4 @@ export const processors: Processor[] = [
     purpose:
       "Sign-in with Google — only if you choose that button instead of a password.",
   },
-  {
-    data: "The display name and email address on a new account.",
-    location: "United States",
-    name: "Discord",
-    optional: true,
-    privacyUrl: "https://discord.com/privacy",
-    purpose:
-      "An internal operations alert when someone signs up or reports a scene.",
-  },
 ];

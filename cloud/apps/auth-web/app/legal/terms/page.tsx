@@ -13,8 +13,8 @@ export default function TermsPage() {
       <h1>Terms of Service</h1>
       <p className="copy">
         Last updated: {lastUpdated}. These terms are the agreement between you
-        and {entity.name} for the use of FrameOS Cloud. We have tried to write
-        them so you can actually read them.
+        and {entity.name} for the use of FrameOS Cloud. They are deliberately
+        short and in plain language.
       </p>
 
       {incomplete ? (
@@ -36,8 +36,7 @@ export default function TermsPage() {
       <p className="copy">
         FrameOS itself is free and open-source software (AGPL-3.0). Nothing
         here obliges you to use this service: you can run the whole thing
-        yourself, and your frames will work without us. That is deliberate, and
-        it is the safety net behind every other clause on this page.
+        yourself, and your frames will work without us. That is deliberate.
       </p>
 
       <h2>2. Your account</h2>
@@ -115,13 +114,18 @@ export default function TermsPage() {
           accounts, overload the infrastructure, or scrape it wholesale. Good
           faith security research is welcome — tell us at{" "}
           <a href={`mailto:${entity.contactEmail}`}>{entity.contactEmail}</a>{" "}
-          before publishing, and we will not come after you for it.
+          before publishing, and we will not take action against you for
+          good-faith research.
         </li>
         <li>
           Circumvent rate limits, quotas or abuse checks, or create accounts in
           bulk.
         </li>
-        <li>Resell the service as if it were yours.</li>
+        <li>
+          Resell the service as if it were yours. If you are interested in a
+          partnership or a white-label deployment, contact us at{" "}
+          <a href={`mailto:${entity.contactEmail}`}>{entity.contactEmail}</a>.
+        </li>
       </ul>
 
       <h2>6. Moderation</h2>
@@ -143,7 +147,7 @@ export default function TermsPage() {
       <p className="copy">
         We run this carefully — monitored, backed up, and with restores
         rehearsed — but we do not promise any particular uptime, and there is
-        no SLA. There will be maintenance, and there will be outages. We will
+        no SLA. Expect maintenance windows and the occasional outage; we will
         avoid unannounced downtime where we reasonably can.
       </p>
       <p className="copy">
@@ -183,8 +187,8 @@ export default function TermsPage() {
         anything on this page.
       </p>
       <p className="copy">
-        Keep your own backups of anything you cannot afford to lose. The export
-        button exists for exactly this.
+        Keep your own backups of anything you cannot afford to lose; the export
+        button on the account security page is there for that.
       </p>
 
       <h2>10. Changes to these terms</h2>
