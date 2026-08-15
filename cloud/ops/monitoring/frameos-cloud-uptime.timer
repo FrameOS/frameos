@@ -1,0 +1,9 @@
+[Unit]
+Description=FrameOS Cloud uptime check every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+RandomizedDelaySec=20
+
+[Install]
+WantedBy=timers.target

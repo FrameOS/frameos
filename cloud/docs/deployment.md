@@ -25,6 +25,9 @@ cleanup, or sync jobs need separate execution.
 - **Periodic cleanup.** Schedule `pnpm db:cleanup` (e.g. daily cron) to prune
   finished device authorization requests, expired login codes, and expired or
   revoked sessions. These tables grow without bound otherwise.
+- **Backups.** The host runs `frameos-cloud-backup.timer` nightly (pg_dump +
+  host config to a Hetzner Storage Box, healthchecks.io ping). Setup,
+  verification, and the restore runbook: [backups.md](backups.md).
 
 ## Initial Process
 

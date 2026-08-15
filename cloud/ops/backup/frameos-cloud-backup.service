@@ -1,0 +1,17 @@
+[Unit]
+Description=FrameOS Cloud backup (pg_dump + host config to Storage Box)
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+# auth-web.env provides DATABASE_URL (reused, so there is no second copy of
+# the password); backup.env provides the backup settings. Both optional (-)
+# so a missing file degrades to the script's defaults instead of failing the
+# unit before the script can say why.
+EnvironmentFile=-/etc/frameos-cloud/auth-web.env
+EnvironmentFile=-/etc/frameos-cloud/backup.env
+ExecStart=/usr/local/bin/frameos-cloud-backup
+# The dump and upload should never compete with live requests for the disk.
+Nice=10
+IOSchedulingClass=idle

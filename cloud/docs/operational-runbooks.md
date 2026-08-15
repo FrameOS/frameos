@@ -82,6 +82,27 @@ If a backend retains access after its link is revoked:
 4. Inspect backend inventory sync timestamps.
 5. Add a regression test for the propagation path that failed.
 
+## Uptime Monitoring
+
+`frameos-cloud-uptime.timer` (every 5 minutes, on the host, installed from
+`cloud/ops/monitoring/`) curls the three public URLs and pings the
+healthchecks.io "FrameOS cloud went offline" check only when all answer
+2xx/3xx. A broken app sends an explicit `/fail` ping (immediate alert); a
+dead host stops pinging (alert after the check's period + grace). Ping URL:
+`UPTIME_HEALTHCHECKS_URL` in `/etc/frameos-cloud/monitoring.env`. With
+5-minute pings, setting the check to period 10 min / grace 5 min gives
+~15-minute worst-case detection.
+
+## Backups
+
+Nightly `frameos-cloud-backup` (systemd timer on the host, installed from
+`cloud/ops/backup/`) dumps Postgres and the host config to the Hetzner
+Storage Box and pings healthchecks.io, so a job that stops running raises an
+alert. Setup, verification, and the restore runbook: [backups.md](backups.md).
+Rehearse a restore quarterly (instructions there) — an untested backup is a
+hypothesis. Take a manual `frameos-cloud-backup` run before risky
+migrations.
+
 ## Maintenance Tasks
 
 Run `pnpm db:cleanup` on a schedule (daily is fine). It deletes:

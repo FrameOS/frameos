@@ -1,0 +1,9 @@
+[Unit]
+Description=FrameOS Cloud uptime check (public URLs -> healthchecks.io)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/frameos-cloud/monitoring.env
+ExecStart=/usr/local/bin/frameos-cloud-uptime

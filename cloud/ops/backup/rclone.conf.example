@@ -1,0 +1,24 @@
+# /root/.config/rclone/rclone.conf on the production host (chmod 600).
+#
+# Hetzner Storage Box over SFTP with SSH-key auth. The private key lives at
+# /root/.ssh/hetzner-storage.key (and a postgres-owned copy at
+# /var/lib/postgresql/.ssh/ for pgBackRest); its PUBLIC half must be
+# registered on the Storage Box (Hetzner console -> Storage Box -> SSH keys,
+# or ssh-copy-id style with the box password).
+#
+# Port 23 is Hetzner's SSH/SFTP port for Storage Boxes ("SSH support" must be
+# enabled in the box's settings). The md5/sha1 overrides are the
+# Hetzner-specific incantation from the rclone docs — the boxes run a
+# restricted shell whose checksum tools have BSD names. Seed known_hosts with:
+#   ssh-keyscan -p 23 uXXXXXX.your-storagebox.de >> /root/.ssh/known_hosts
+
+[storagebox]
+type = sftp
+host = uXXXXXX.your-storagebox.de
+user = uXXXXXX
+port = 23
+key_file = /root/.ssh/hetzner-storage.key
+known_hosts_file = /root/.ssh/known_hosts
+shell_type = unix
+md5sum_command = md5 -r
+sha1sum_command = sha1 -r
