@@ -287,6 +287,11 @@ export default async function ScenePage({
       isSuperadmin={
         isOwner ? await accountIsSuperadmin(session?.accountId) : isAdmin
       }
+      // A public store page is public, and its browse traffic is worth
+      // measuring. A private scene reached through its share link is not:
+      // its name, description and images are the owner's, shown to whoever
+      // holds the link, and none of that should reach analytics.
+      noCapture={isPrivate}
       signedIn={Boolean(session)}
       title="FrameOS Scenes"
     >
@@ -407,7 +412,11 @@ export default async function ScenePage({
         </p>
       ) : null}
 
-      <div className="scene-detail section-block">
+      {/* ph-no-capture: the scene itself — gallery images, live preview,
+          description, editor. Autocapture would otherwise ship image URLs as
+          element attributes and the scene's own text as click labels. The
+          deliberate scene_viewed / scene_forked events are unaffected. */}
+      <div className="scene-detail section-block ph-no-capture">
         <SceneImageGallery
           canEdit={isOwner}
           hasPreview={scene.hasPreview}

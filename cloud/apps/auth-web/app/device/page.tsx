@@ -32,7 +32,9 @@ export default async function DevicePage({ searchParams }: DevicePageProps) {
   }
 
   return (
-    <AppShell title="Connect this FrameOS backend">
+    // noCapture: the approval panel shows the connecting install's own
+    // details, and the pairing code is in this page's URL.
+    <AppShell noCapture title="Connect this FrameOS backend">
       <div className="content-header">
         <div>
           <p className="copy">

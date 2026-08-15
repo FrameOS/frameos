@@ -96,7 +96,10 @@ export function SceneImageGallery({
   }
 
   return (
-    <div className="scene-gallery">
+    // ph-no-capture travels with the gallery rather than being left to each
+    // page that mounts it: the scene's own images and name are never
+    // analytics material, wherever it is rendered.
+    <div className="scene-gallery ph-no-capture">
       {current ? (
         <div className="scene-gallery__main">
           <img

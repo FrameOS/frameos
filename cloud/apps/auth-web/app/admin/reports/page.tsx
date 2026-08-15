@@ -24,7 +24,9 @@ export default async function AdminReportsPage() {
   const reports = await listOpenReportsForAdmin(createDb());
 
   return (
-    <AppShell isSuperadmin title="Scene reports">
+    // noCapture: reports carry the reporter's email and the reported
+    // scene's name.
+    <AppShell isSuperadmin noCapture title="Scene reports">
       <div className="content-header">
         <div>
           <p className="copy">

@@ -352,7 +352,9 @@ export function SceneLivePreview({
   return (
     // The open preview takes over the whole viewport, like the scene editor
     // modal — the page underneath stays put for when it closes.
-    <div aria-modal className="editor-modal" role="dialog">
+    // ph-no-capture: what it renders is the scene's own imagery and its
+    // settings values, some of them user-supplied.
+    <div aria-modal className="editor-modal ph-no-capture" role="dialog">
       <div className="editor-modal__bar">
         <div className="editor-modal__title">
           Live preview
