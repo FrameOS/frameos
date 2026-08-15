@@ -13,11 +13,14 @@ import {
   assertDatabaseUrlConfigured,
   getBaseUrl,
 } from "../../../../../src/lib/env";
+import { reportError } from "../../../../../src/lib/log";
 import { createSecretToken, hashSecret } from "../../../../../src/lib/secrets";
 import {
+  clientKey,
   identityRateLimitResponse,
   rateLimitResponse,
 } from "../../../../../src/lib/rate-limit";
+import { verifyTurnstileToken } from "../../../../../src/lib/turnstile";
 
 const resetTokenMaxAgeMs = 60 * 60 * 1000;
 
@@ -36,12 +39,26 @@ export async function POST(request: NextRequest) {
   }
 
   const body = (await request.json().catch(() => undefined)) as
-    | { email?: unknown }
+    | { email?: unknown; turnstile_token?: unknown }
     | undefined;
   const email =
     typeof body?.email === "string" ? normalizeEmail(body.email) : "";
   if (!email) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  // Reset is the other endpoint that turns an unauthenticated request into an
+  // outbound email, so it gets the same gate as signup — otherwise it becomes
+  // the cheap way to burn the sending reputation instead.
+  const turnstile = await verifyTurnstileToken(
+    typeof body?.turnstile_token === "string" ? body.turnstile_token : undefined,
+    clientKey(request),
+  );
+  if (!turnstile.ok) {
+    return NextResponse.json(
+      { error: "turnstile_failed", turnstile_errors: turnstile.errorCodes },
+      { status: 400 },
+    );
   }
 
   const emailLimited = await identityRateLimitResponse(
@@ -80,10 +97,10 @@ export async function POST(request: NextRequest) {
     try {
       await sendPasswordResetEmail(email, resetUrl);
     } catch (error) {
-      console.error(
-        "auth/reset/request: sending reset email failed:",
-        error instanceof Error ? error.message : "unknown error",
-      );
+      // Swallowed on purpose — telling the caller the send failed would leak
+      // whether the address is registered. So the failure has to reach us by
+      // another route: the error tracker. Never log the email address.
+      reportError("email.password_reset_send_failed", error, { accountId });
     }
 
     await recordAuditEvent(db, {

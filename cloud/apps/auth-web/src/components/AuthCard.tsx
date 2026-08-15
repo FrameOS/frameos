@@ -1,4 +1,5 @@
 import { BrandMark } from "./BrandMark";
+import { LegalFooter } from "./LegalFooter";
 
 export function AuthCard({
   children,
@@ -29,6 +30,7 @@ export function AuthCard({
           {children}
         </div>
       </section>
+      <LegalFooter />
     </main>
   );
 }

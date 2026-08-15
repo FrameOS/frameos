@@ -102,9 +102,39 @@ else
   echo "Updated $env_file with any missing local database settings"
 fi
 
+# Next loads .env.local from ITS OWN project root (apps/auth-web), not from
+# cloud/, so the app file is a symlink to the shared one and there is a single
+# place to edit.
 if [ ! -e "$app_env_file" ]; then
   ln -s ../../.env.local "$app_env_file"
   echo "Linked $app_env_file to ../../.env.local for Next.js local env loading"
+elif [ ! -L "$app_env_file" ]; then
+  # A real file here silently shadows the symlink, and because this branch
+  # used to be a bare "already exists, nothing to do" it stayed that way
+  # forever: every variable added to cloud/.env.local afterwards reached the
+  # frame hub and the scripts but never the Next app, with no error anywhere
+  # — the page just renders as though the value were unset. Checkouts that
+  # predate the symlink all have one. Warn loudly; do NOT replace it
+  # automatically, because it may hold values the shared file does not.
+  echo
+  echo "WARNING: $app_env_file is a real file, not a symlink to ../../.env.local." >&2
+  echo "         Next.js reads THAT file, so anything you add to cloud/.env.local" >&2
+  echo "         is ignored by the web app. To fix, copy over anything that only" >&2
+  echo "         exists in the app file, then:" >&2
+  echo >&2
+  echo "           mv $app_env_file $app_env_file.bak" >&2
+  echo "           ln -s ../../.env.local $app_env_file" >&2
+  echo >&2
+  only_in_app="$(
+    comm -13 \
+      <(grep -oE '^[A-Za-z_][A-Za-z_0-9]*' "$env_file" | sort -u) \
+      <(grep -oE '^[A-Za-z_][A-Za-z_0-9]*' "$app_env_file" | sort -u) \
+      | tr '\n' ' '
+  )"
+  if [ -n "${only_in_app// /}" ]; then
+    echo "         Set only in the app file (copy these first): $only_in_app" >&2
+    echo >&2
+  fi
 fi
 
 echo "DATABASE_URL=$database_url"

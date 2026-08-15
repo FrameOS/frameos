@@ -101,6 +101,14 @@ applies migrations, and creates `.env.local` with local database settings and
 generated development secrets when needed. Fill in the Google OAuth client
 values to exercise Google SSO; password auth needs no extra configuration.
 
+**Edit `cloud/.env.local`, and only that one.** Next.js loads `.env.local`
+from its own project root, so `apps/auth-web/.env.local` is a symlink to it
+that `db-setup.sh` creates. If yours is a real file instead (checkouts
+predating the symlink have one), Next reads *that* copy and every variable
+you add to `cloud/.env.local` is silently ignored by the web app while the
+frame hub and the scripts still see it — the page just renders as though the
+value were unset. `db-setup.sh` warns when it finds one and prints the fix.
+
 ## Layout
 
 - `apps/auth-web`: FrameOS Cloud Auth UI and route handlers.

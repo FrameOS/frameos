@@ -15,8 +15,9 @@ import {
   hashPassword,
   validatePasswordCandidate,
 } from "../../../../src/lib/passwords";
-import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { clientKey, rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { notifyNewCloudUser } from "../../../../src/lib/signup-notifications";
+import { verifyTurnstileToken } from "../../../../src/lib/turnstile";
 
 // Deliberately loose: real validation happens when the address receives the
 // password reset email. This only rejects obvious garbage.
@@ -37,8 +38,28 @@ export async function POST(request: NextRequest) {
   }
 
   const body = (await request.json().catch(() => undefined)) as
-    | { email?: unknown; name?: unknown; password?: unknown }
+    | {
+        email?: unknown;
+        name?: unknown;
+        password?: unknown;
+        turnstile_token?: unknown;
+      }
     | undefined;
+
+  // Before any database work: the whole point is to keep automated signups
+  // from reaching the account table and the Postmark quota at all. No-ops
+  // when Turnstile is not configured.
+  const turnstile = await verifyTurnstileToken(
+    typeof body?.turnstile_token === "string" ? body.turnstile_token : undefined,
+    clientKey(request),
+  );
+  if (!turnstile.ok) {
+    return NextResponse.json(
+      { error: "turnstile_failed", turnstile_errors: turnstile.errorCodes },
+      { status: 400 },
+    );
+  }
+
   const email =
     typeof body?.email === "string" ? normalizeEmail(body.email) : "";
   const password = typeof body?.password === "string" ? body.password : "";

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { AnalyticsConsentBanner } from "../src/components/AnalyticsConsent";
 import { PostHogProvider } from "../src/components/PostHogProvider";
 import { ThemeToggle } from "../src/components/ThemeToggle";
 import { getSessionCookieDomain } from "../src/lib/env";
@@ -85,6 +86,9 @@ export default async function RootLayout({
         <PostHogProvider>
           <ThemeToggle cookieDomain={getSessionCookieDomain()} />
           {children}
+          {/* Last in the body so it overlays without shifting the page, and
+              so nothing above it depends on the visitor having answered. */}
+          <AnalyticsConsentBanner cookieDomain={getSessionCookieDomain()} />
         </PostHogProvider>
       </body>
     </html>

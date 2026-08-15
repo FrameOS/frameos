@@ -1,6 +1,21 @@
-// Configuration health for the /admin "System checks" section: which
-// environment variables are set and what stops working without them. Only
-// presence is reported — never values.
+// Health for the /admin panel, in two flavours:
+//
+//   runSystemChecks()  configuration — which environment variables are set
+//                      and what stops working without them. Presence only,
+//                      never values. Synchronous and free.
+//   runLiveChecks()    the things a set env var does not prove: that Postgres
+//                      answers and that Postmark will actually deliver.
+//                      Talks to those services, so it is async and slow-ish.
+//
+// The split matters because the two most expensive outages this service can
+// have — a dead database and silently undelivered mail — both look perfectly
+// healthy to a presence check.
+
+import { sql } from "drizzle-orm";
+import { createDb } from "@frameos-cloud/db";
+import { checkEmailDelivery } from "./email";
+import { hasDatabaseUrl } from "./env";
+import { getTurnstileSiteKey } from "./turnstile";
 
 export type SystemCheck = {
   configured: boolean;
@@ -106,9 +121,108 @@ export function runSystemChecks(): SystemCheck[] {
     {
       configured: isSet("NEXT_PUBLIC_POSTHOG_KEY"),
       detail:
-        "PostHog analytics (browser events and server-side signup capture).",
+        "PostHog analytics AND error tracking (browser exceptions, server-side reportError, signup capture).",
       name: "NEXT_PUBLIC_POSTHOG_KEY",
       required: false,
     },
+    {
+      configured:
+        isSet("NEXT_PUBLIC_TURNSTILE_SITE_KEY") && isSet("TURNSTILE_SECRET_KEY"),
+      detail:
+        "Cloudflare Turnstile on signup and password reset; without it the Postgres rate limiter is the only gate.",
+      name: "NEXT_PUBLIC_TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY",
+      required: false,
+    },
+    {
+      configured: isSet("FRAMEOS_LEGAL_ENTITY_NAME"),
+      detail:
+        "Operator identity on /legal/imprint, /legal/terms, and /legal/privacy. Required by EU law before broad signup.",
+      name: "FRAMEOS_LEGAL_ENTITY_* (see legal.ts)",
+      required: true,
+    },
+  ];
+}
+
+export type LiveCheck = {
+  detail: string;
+  name: string;
+  state: "ok" | "warning" | "failing" | "not_configured";
+};
+
+async function checkDatabaseLive(): Promise<LiveCheck> {
+  if (!hasDatabaseUrl()) {
+    return {
+      detail: "DATABASE_URL is not set.",
+      name: "Postgres",
+      state: "failing",
+    };
+  }
+  const startedAt = Date.now();
+  try {
+    await createDb().execute(sql`select 1`);
+    return {
+      detail: `Answered select 1 in ${Date.now() - startedAt} ms.`,
+      name: "Postgres",
+      state: "ok",
+    };
+  } catch (error) {
+    return {
+      detail: error instanceof Error ? error.message : "unknown error",
+      name: "Postgres",
+      state: "failing",
+    };
+  }
+}
+
+// Not a probe of a remote service but of THIS BUILD: the site key is a
+// NEXT_PUBLIC_ value inlined when the bundle was compiled, and production
+// bundles are built on a developer machine and streamed to the server. So
+// "the server's env file has both keys" does not mean the running app has
+// both — and the presence check above cannot tell the difference. This can.
+function checkTurnstileLive(): LiveCheck {
+  const siteKeyInBundle = Boolean(getTurnstileSiteKey());
+  const secretAtRuntime = Boolean(process.env.TURNSTILE_SECRET_KEY?.trim());
+
+  if (!siteKeyInBundle && !secretAtRuntime) {
+    return {
+      detail: "Not configured; the Postgres rate limiter is the only gate.",
+      name: "Turnstile (signup abuse gate)",
+      state: "not_configured",
+    };
+  }
+  if (siteKeyInBundle && secretAtRuntime) {
+    return {
+      detail: "Site key is baked into this build and the secret is present.",
+      name: "Turnstile (signup abuse gate)",
+      state: "ok",
+    };
+  }
+  if (!siteKeyInBundle) {
+    return {
+      detail:
+        "TURNSTILE_SECRET_KEY is set but NEXT_PUBLIC_TURNSTILE_SITE_KEY was missing when this bundle was BUILT — no widget renders, so Turnstile is disabled to avoid rejecting every signup. Set the site key where the build runs and redeploy.",
+      name: "Turnstile (signup abuse gate)",
+      state: "failing",
+    };
+  }
+  return {
+    detail:
+      "Site key is in the build but TURNSTILE_SECRET_KEY is missing at runtime, so the widget's answer is never checked.",
+    name: "Turnstile (signup abuse gate)",
+    state: "failing",
+  };
+}
+
+// Both remote probes in parallel; each already resolves to a result rather
+// than throwing, so one failing service cannot blank the whole panel.
+export async function runLiveChecks(): Promise<LiveCheck[]> {
+  const [database, email] = await Promise.all([
+    checkDatabaseLive(),
+    checkEmailDelivery(),
+  ]);
+  return [
+    database,
+    { ...email, name: "Postmark (email delivery)" },
+    checkTurnstileLive(),
   ];
 }

@@ -191,6 +191,55 @@ describe("password signup and login", () => {
     expect(await readJson(response)).toMatchObject({ error: "weak_password" });
   });
 
+  it("refuses a signup that fails the Turnstile check, before touching the database", async () => {
+    // The gate has to run before the account row and before the Postmark
+    // send — an abuse check that fires after the expensive part has already
+    // happened is not a gate.
+    // Both halves: with only the secret set, verification deliberately fails
+    // open (see turnstile.ts, the site-key-missing-from-build case).
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "test-site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "test-secret");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ "error-codes": ["invalid-input-response"], success: false }),
+          { status: 200 },
+        ),
+      );
+
+    try {
+      const response = await signup(
+        postJson("/api/auth/signup", {
+          email: "bot@example.com",
+          password: "a long enough password",
+          turnstile_token: "forged",
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await readJson(response)).toMatchObject({
+        error: "turnstile_failed",
+      });
+      expect(await db.select().from(accounts)).toHaveLength(0);
+    } finally {
+      fetchMock.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("signs up normally when Turnstile is not configured", async () => {
+    // Local development and this suite must not need a Cloudflare account.
+    const response = await signup(
+      postJson("/api/auth/signup", {
+        email: "no-turnstile@example.com",
+        password: "a long enough password",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
   it("logs in with the right password and rejects the wrong one", async () => {
     const { email } = await signUpUser();
 

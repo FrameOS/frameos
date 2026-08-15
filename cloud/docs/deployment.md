@@ -219,7 +219,10 @@ location ~ ^/api/frames/([^/]+/)?updates$ {
 ```
 
 Health check: `curl http://127.0.0.1:3100/healthz` on the host returns
-`{"connected_frames": N}`.
+`{"connected_frames": N}`. auth-web has its own `/healthz` on every public
+hostname, which returns 200 only after it has actually reached Postgres and
+503 otherwise; both the uptime timer and this script's post-deploy check use
+it (see docs/operational-runbooks.md).
 
 The public hostnames point at the same process. `cloud.frameos.net` owns
 login/auth plus the account, device, admin, and frames pages (root redirects
@@ -350,6 +353,39 @@ NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
 The PostHog event is `cloud user signed up` with the account id as
 `distinct_id`, sent server-side to the `/capture` endpoint using the same
 public project key as the browser SDK (no extra secret required).
+
+## Legal Pages
+
+`/legal/terms`, `/legal/privacy` and `/legal/imprint` are served from the
+cloud origin and linked from the footer of every page, on every surface.
+
+**Quote any value with a space in `/etc/frameos-cloud/auth-web.env`.** The
+legal values are the first settings here that routinely contain spaces, and
+that file is read two ways on the server: systemd's `EnvironmentFile=`
+accepts bare values, but `frameos-cloud-update` `source`s it as shell, where
+`FRAMEOS_LEGAL_ENTITY_NAME=Example Frames BV` means "run `BV`". The deploy
+then fails part-way through streaming the bundle with `BV: command not
+found` and `tar: Write error`, which says nothing about quoting. Production
+is left untouched when this happens — the swap has not run yet — so the fix
+is to quote and redeploy.
+They read the operator's identity from `FRAMEOS_LEGAL_*` (see
+`.env.example` and `src/lib/legal.ts`) and render a visible
+`[TO BE COMPLETED]` warning until `FRAMEOS_LEGAL_ENTITY_NAME` is set — the
+`/admin` system checks flag it as a required setting for the same reason.
+**Fill these in before opening signups to the public**: an imprint is a legal
+requirement for an EU-established operator, not a nice-to-have, and the
+privacy policy needs a named controller to be worth anything.
+
+The privacy policy's processor table is generated from the `processors` list
+in `src/lib/legal.ts`. That list is the promise the policy makes, so a new
+outbound integration that touches personal data has to be added there in the
+same change — `grep -rhoE 'https://[a-zA-Z0-9.-]+' apps/*/src apps/*/app` is
+the audit that produced the current list.
+
+Browser analytics is gated behind the consent banner and captures nothing
+before the visitor accepts; server-side error reports carry no user identity
+and run without consent. Withdrawal is one click from the footer's "Cookie
+settings" on any page.
 
 ## Service Boundaries
 

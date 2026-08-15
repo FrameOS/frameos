@@ -85,13 +85,59 @@ If a backend retains access after its link is revoked:
 ## Uptime Monitoring
 
 `frameos-cloud-uptime.timer` (every 5 minutes, on the host, installed from
-`cloud/ops/monitoring/`) curls the three public URLs and pings the
-healthchecks.io "FrameOS cloud went offline" check only when all answer
-2xx/3xx. A broken app sends an explicit `/fail` ping (immediate alert); a
-dead host stops pinging (alert after the check's period + grace). Ping URL:
-`UPTIME_HEALTHCHECKS_URL` in `/etc/frameos-cloud/monitoring.env`. With
-5-minute pings, setting the check to period 10 min / grace 5 min gives
-~15-minute worst-case detection.
+`cloud/ops/monitoring/`) curls `/healthz` on each of the three public
+hostnames plus frame-hub on loopback, and pings the healthchecks.io "FrameOS
+cloud went offline" check only when all answer 2xx/3xx. A broken app sends an
+explicit `/fail` ping (immediate alert); a dead host stops pinging (alert
+after the check's period + grace). Ping URL: `UPTIME_HEALTHCHECKS_URL` in
+`/etc/frameos-cloud/monitoring.env`. With 5-minute pings, setting the check
+to period 10 min / grace 5 min gives ~15-minute worst-case detection.
+
+`/healthz` (auth-web: `app/healthz/route.ts`; frame-hub: `src/hub.ts`)
+returns 200 only after auth-web has actually reached Postgres, and 503
+otherwise. That is the point of it: the check used to curl `/login` and the
+two site roots, which the App Router renders happily with a dead database —
+so the single failure most worth paging on was the one the monitor could not
+see. `scripts/deploy.sh` uses the same endpoint for its post-deploy check, so
+a deploy that boots but cannot serve fails loudly instead of looking green.
+frame-hub is checked on `127.0.0.1:3100` because it has no public URL of its
+own; without that, a dead hub leaves every frame offline while all three
+public checks stay green.
+
+## Error Tracking
+
+Server-side failures go through `reportError` (`apps/auth-web/src/lib/log.ts`),
+which writes a structured JSON line to the journal AND files a `$exception`
+event in PostHog error tracking. Browser exceptions land in the same PostHog
+project via `capture_exceptions` (`PostHogProvider.tsx`). One vendor on
+purpose: it keeps the privacy policy down to a single analytics subprocessor.
+
+What to search when someone reports a vague problem:
+
+- `frameos_event` on a PostHog exception carries our own event name, e.g.
+  `email.verification_send_failed`, `auth.google_code_exchange_failed`,
+  `frames.enroll_encryption_unavailable`.
+- On the host, `journalctl -u frameos-cloud-auth-web -o cat | jq 'select(.level=="error")'`
+  — every log line from auth-web and frame-hub is single-line JSON with
+  `event`, `level`, `service` and `time`.
+- Credential-shaped field names (`*token*`, `*secret*`, `*password*`,
+  `*cookie*`, `*api_key*`) are redacted before they reach either sink, so a
+  redacted value in a log line is expected, not a bug.
+
+Email is the silent failure worth knowing about: login requires a verified
+address, and Postmark sends are best-effort, so a bad token or a Postmark
+outage locks out every new signup while showing them "check your inbox". Both
+send paths now `reportError`, and `/admin` runs a live Postmark probe (see
+below) that also catches a server left in Sandbox mode — which accepts every
+message and delivers none.
+
+## Admin Live Checks
+
+`/admin` has two tables. **System checks** is configuration presence only.
+**Live checks** actually probes: `select 1` against Postgres, and Postmark's
+`/server` endpoint to confirm the token works and the server is Live rather
+than Sandbox. Both are re-run on every page load, and neither can 500 the
+page — a failing probe renders as a failing row.
 
 ## Backups
 
@@ -99,9 +145,14 @@ Nightly `frameos-cloud-backup` (systemd timer on the host, installed from
 `cloud/ops/backup/`) dumps Postgres and the host config to the Hetzner
 Storage Box and pings healthchecks.io, so a job that stops running raises an
 alert. Setup, verification, and the restore runbook: [backups.md](backups.md).
-Rehearse a restore quarterly (instructions there) — an untested backup is a
-hypothesis. Take a manual `frameos-cloud-backup` run before risky
-migrations.
+
+Rehearse a restore quarterly with `ops/backup/restore-drill.sh` (or
+`/usr/local/bin/frameos-cloud-restore-drill` on the box): it restores the
+newest dump into a scratch database, verifies it, and exits non-zero if the
+backups are not known-good. Both paths were rehearsed for the first time on
+2026-08-15 and passed; the measured numbers and the two gotchas found are
+recorded in [backups.md](backups.md#results-so-far). Take a manual
+`frameos-cloud-backup` run before risky migrations.
 
 ## Maintenance Tasks
 
@@ -114,6 +165,34 @@ Run `pnpm db:cleanup` on a schedule (daily is fine). It deletes:
 The retention window defaults to 7 days and can be overridden with
 `FRAMEOS_CLOUD_CLEANUP_RETENTION_DAYS`. Audit and consent events are never
 deleted by this job.
+
+## Data Subject Requests
+
+Most of this is self-serve and needs no operator at all — which is the point,
+because a right that requires a support ticket is a right with a queue in
+front of it.
+
+- **Access / portability (GDPR arts. 15, 20)** — the user downloads
+  `/api/account/export` from their account security page: a JSON document
+  with their account, identities, settings, frames, scenes, chats and audit
+  trail. It deliberately excludes credentials (password hash, session/share/
+  enrollment tokens, encrypted backend credentials) and embeds no binary
+  blobs — scene zips, images and backups are listed with size, checksum and
+  a download path instead.
+- **Erasure (art. 17)** — the user deletes their own account from the same
+  page, re-authenticating first (password, or typing their email for
+  Google-only accounts). Everything cascades from `accounts.id`;
+  `audit_events.account_id` is `ON DELETE SET NULL`, so the security trail
+  survives de-identified. Superadmins cannot self-delete (the panel must keep
+  a way in) — hand the flag over first.
+- **What an operator still has to do**: rectification, restriction, objection,
+  and anything the export does not cover. One month to respond (art. 12(3)).
+- **Backups**: deleted data persists in off-site backups for up to 30 days
+  until retention rolls them over. This is stated in the privacy policy. Do
+  not restore a backup to recover a deleted account.
+
+Requests arrive at `FRAMEOS_LEGAL_CONTACT_EMAIL`. The public-facing wording
+of all of the above is `/legal/privacy`; keep the two in step.
 
 ## Session Compromise
 

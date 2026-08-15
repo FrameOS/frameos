@@ -26,6 +26,7 @@ import {
 } from "../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createEncryptedSecretToken, hashSecret } from "../../../../src/lib/secrets";
+import { reportError } from "../../../../src/lib/log";
 
 export const runtime = "nodejs";
 
@@ -184,10 +185,7 @@ async function enrollWithClaimToken(
   try {
     accessToken = createEncryptedSecretToken("fc_link");
   } catch (error) {
-    console.error(
-      "frames/enroll: encryption unavailable:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    reportError("frames.enroll_encryption_unavailable", error);
     return jsonError("encryption_not_configured", 503);
   }
 

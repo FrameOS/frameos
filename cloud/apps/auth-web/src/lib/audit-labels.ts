@@ -3,11 +3,13 @@
 // silently invisible.
 
 const eventLabels: Record<string, string> = {
+  "account.data_exported": "Account data exported",
   "account.email_verified": "Email address verified",
   "account.password_changed": "Password changed",
   "account.password_reset": "Password reset completed",
   "account.password_reset_requested": "Password reset requested",
   "account.signed_in": "Signed in",
+  "account.self_deleted": "Account deleted by its owner",
   "account.signed_up": "Account created",
   "admin.account_deleted": "Account deleted by an admin",
   "admin.sessions_revoked": "Sessions revoked by an admin",

@@ -17,6 +17,7 @@ import {
   getGoogleOAuthConfig,
 } from "../../../../../src/lib/env";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import { reportError } from "../../../../../src/lib/log";
 
 export async function GET(request: NextRequest) {
   const limited = await rateLimitResponse(request, "auth:google-start", {
@@ -38,10 +39,7 @@ export async function GET(request: NextRequest) {
   try {
     discovery = await discoverOidcProvider(config.issuerUrl);
   } catch (error) {
-    console.error(
-      "auth/google/start: OIDC discovery failed:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    reportError("auth.google_discovery_failed", error);
     return NextResponse.redirect(
       new URL("/login?error=provider_unavailable", getBaseUrl()),
     );

@@ -1529,3 +1529,154 @@ a.tag-pill:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* --- Legal pages, consent banner, footer ------------------------------- */
+
+/* The imprint and privacy policy have to be reachable from every page, so
+   this footer renders inside all three shells (AppShell, PublicShell,
+   AuthCard). Muted by design: permanently accessible, never competing with
+   the page. */
+.legal-footer {
+  width: calc(100% - 40px);
+  margin: 0 auto;
+  padding: 24px 0 32px;
+  border-top: 1px solid var(--line);
+}
+
+.legal-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.legal-footer a,
+.footer-link-button {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.legal-footer a:hover,
+.footer-link-button:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* Rendered as a button because withdrawing consent is an action, not a
+   destination; styled as a link because that is where people look for it. */
+.footer-link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Docked bottom-left rather than a full-width bar across the top: it must be
+   dismissable by answering, and it must never cover the page content or the
+   form someone came here to fill in. Consent that is extracted by blocking
+   the page is not freely given. */
+.consent-banner {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(calc(100vw - 32px), 420px);
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 14px;
+}
+
+.consent-banner__copy .copy {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.consent-banner__actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* Equal width so neither answer is the visually obvious one — the styling
+   half of "as easy to refuse as to accept". */
+.consent-banner__actions .button {
+  flex: 1;
+  justify-content: center;
+}
+
+.legal-document {
+  max-width: 76ch;
+}
+
+.legal-document h1 {
+  margin: 0 0 12px;
+  font-size: 30px;
+}
+
+.legal-document h2 {
+  margin: 32px 0 8px;
+  font-size: 20px;
+}
+
+.legal-document h3 {
+  margin: 22px 0 6px;
+  font-size: 16px;
+}
+
+.legal-document p,
+.legal-document li {
+  line-height: 1.65;
+}
+
+.legal-document ul {
+  padding-left: 20px;
+}
+
+.legal-document li {
+  margin-bottom: 8px;
+}
+
+.legal-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+  gap: 8px 24px;
+  margin: 16px 0 0;
+}
+
+.legal-facts dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.legal-facts dd {
+  margin: 0;
+}
+
+@media (width <= 640px) {
+  .legal-facts {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .legal-facts dd {
+    margin-bottom: 12px;
+  }
+}
+
+/* The subprocessor table is the widest thing on the privacy page; let it
+   scroll inside itself rather than pushing the document sideways. */
+.table-scroll {
+  overflow-x: auto;
+  margin: 16px 0;
+}
+
+.turnstile-widget:not(:empty) {
+  margin-bottom: 4px;
+}

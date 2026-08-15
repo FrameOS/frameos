@@ -6,6 +6,7 @@ import { authenticateLinkedClient } from "../../../../src/lib/backend-auth";
 import { jsonError, requireDatabase } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createEncryptedSecretToken } from "../../../../src/lib/secrets";
+import { reportError } from "../../../../src/lib/log";
 
 export const runtime = "nodejs";
 
@@ -37,10 +38,7 @@ export async function POST(request: NextRequest) {
   try {
     credential = createEncryptedSecretToken("fc_link");
   } catch (error) {
-    console.error(
-      "backends/rotate-token: encryption unavailable:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    reportError("backends.encryption_unavailable", error);
     return jsonError("encryption_not_configured", 503);
   }
 

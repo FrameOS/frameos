@@ -66,4 +66,15 @@ describe("Next.js security headers", () => {
     );
     expect(development).not.toContain("cloudflareinsights");
   });
+
+  it("allows the Turnstile script in both phases", async () => {
+    // Unlike the RUM beacon this one has to work in development too: with it
+    // missing, a developer running against real Turnstile keys gets a widget
+    // that never loads and a submit button that never enables, with nothing
+    // but a CSP violation in the console to say why.
+    for (const phase of [PHASE_PRODUCTION_SERVER, PHASE_DEVELOPMENT_SERVER]) {
+      const policy = await contentSecurityPolicy(phase);
+      expect(policy).toContain("https://challenges.cloudflare.com");
+    }
+  });
 });

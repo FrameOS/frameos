@@ -14,13 +14,28 @@ set -euo pipefail
 # silence IS the signal.
 #
 # Same URL set and 2xx/3xx rule as scripts/deploy.sh's post-deploy check.
+#
+# Every URL is /healthz (app/healthz/route.ts), not a page. The check used to
+# curl /login and the two site roots, which the App Router renders happily
+# with a dead database — so the single failure most worth paging on was the
+# one this script could not see. /healthz returns 503 unless it has actually
+# reached Postgres. All three hostnames are kept: they are one app behind
+# three nginx server blocks, so hitting each still proves each vhost routes.
 
 healthchecks_url="${UPTIME_HEALTHCHECKS_URL:?set UPTIME_HEALTHCHECKS_URL in /etc/frameos-cloud/monitoring.env}"
 
+#
+# frame-hub is checked on loopback because nothing else does: it has no
+# public URL of its own (nginx only proxies its /api/frames/ws path), so a
+# hub that died would leave every connected frame offline while all three
+# public checks stayed green. This script runs on the box, so 127.0.0.1 is
+# reachable and needs no extra exposure.
+
 urls=(
-  https://cloud.frameos.net/login
-  https://account.frameos.net/
-  https://scenes.frameos.net/
+  https://cloud.frameos.net/healthz
+  https://account.frameos.net/healthz
+  https://scenes.frameos.net/healthz
+  http://127.0.0.1:3100/healthz
 )
 
 ok=true

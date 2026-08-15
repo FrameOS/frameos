@@ -67,10 +67,16 @@ function createNextConfig(phase: string): NextConfig {
 
   // Cloudflare zone-injected RUM beacon; without this entry the browser
   // console fills with CSP violations on every prod page load.
+  //
+  // challenges.cloudflare.com is Turnstile (src/lib/turnstile.ts). Unlike the
+  // beacon it is needed in development too — anyone running against real
+  // Turnstile keys locally would otherwise get a widget that silently never
+  // loads, and a signup button that never enables. frame-src already allows
+  // https:, which covers the challenge iframe.
   const scriptSrcElem =
     phase === PHASE_DEVELOPMENT_SERVER
-      ? ""
-      : " https://static.cloudflareinsights.com";
+      ? " https://challenges.cloudflare.com"
+      : " https://static.cloudflareinsights.com https://challenges.cloudflare.com";
 
   const contentSecurityPolicy = (frameAncestors: string) =>
     [

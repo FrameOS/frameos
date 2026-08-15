@@ -67,9 +67,13 @@ deploy_host="${FRAMEOS_CLOUD_DEPLOY_HOST:-root@167.233.35.240}"
 ssh_key="${FRAMEOS_CLOUD_DEPLOY_SSH_KEY:-$HOME/.ssh/hetzner}"
 remote="${FRAMEOS_CLOUD_DEPLOY_REMOTE:-origin}"
 default_branch="${FRAMEOS_CLOUD_DEPLOY_DEFAULT_BRANCH:-main}"
-cloud_check_url="${FRAMEOS_CLOUD_DEPLOY_CHECK_URL:-https://cloud.frameos.net/login}"
-account_check_url="${FRAMEOS_ACCOUNT_DEPLOY_CHECK_URL:-https://account.frameos.net/}"
-scenes_check_url="${FRAMEOS_SCENES_DEPLOY_CHECK_URL:-https://scenes.frameos.net/}"
+# /healthz rather than a page: it 503s unless the freshly deployed process can
+# actually reach Postgres, so a deploy that boots but cannot serve anything
+# fails here instead of looking green. Same rationale as
+# ops/monitoring/uptime-check.sh.
+cloud_check_url="${FRAMEOS_CLOUD_DEPLOY_CHECK_URL:-https://cloud.frameos.net/healthz}"
+account_check_url="${FRAMEOS_ACCOUNT_DEPLOY_CHECK_URL:-https://account.frameos.net/healthz}"
+scenes_check_url="${FRAMEOS_SCENES_DEPLOY_CHECK_URL:-https://scenes.frameos.net/healthz}"
 
 # Checked before anything is fetched or checked out: switching refs under a
 # dirty tree would either fail halfway or quietly carry uncommitted work into

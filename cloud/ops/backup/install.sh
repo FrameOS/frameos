@@ -19,6 +19,11 @@ run() { ssh -i "$ssh_key" "$deploy_host" "$@"; }
 echo "Installing backup script and systemd units on $deploy_host"
 scp -i "$ssh_key" pg-backup.sh "$deploy_host:/usr/local/bin/frameos-cloud-backup"
 run chmod 755 /usr/local/bin/frameos-cloud-backup
+# The drill is deliberately NOT on a timer: it is a quarterly exercise a human
+# runs and reads (cloud/docs/backups.md, "Rehearsal"). Shipping it here just
+# means the box always has the current version to hand.
+scp -i "$ssh_key" restore-drill.sh "$deploy_host:/usr/local/bin/frameos-cloud-restore-drill"
+run chmod 755 /usr/local/bin/frameos-cloud-restore-drill
 scp -i "$ssh_key" frameos-cloud-backup.service frameos-cloud-backup.timer \
   "$deploy_host:/etc/systemd/system/"
 

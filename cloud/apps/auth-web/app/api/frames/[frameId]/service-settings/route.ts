@@ -17,6 +17,7 @@ import {
   identityRateLimitResponse,
   rateLimitResponse,
 } from "../../../../../src/lib/rate-limit";
+import { reportError } from "../../../../../src/lib/log";
 
 export const runtime = "nodejs";
 
@@ -136,8 +137,7 @@ export async function GET(
     try {
       groups = await computeAndStoreServiceSettingGroups(db, auth.frame.id);
     } catch (error) {
-      console.error("frames/service-settings: group backfill failed", {
-        error: error instanceof Error ? error.message : "unknown error",
+      reportError("frames.service_settings_backfill_failed", error, {
         frameId: auth.frame.id,
       });
       groups = [];
