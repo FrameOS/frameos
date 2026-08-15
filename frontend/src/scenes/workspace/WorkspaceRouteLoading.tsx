@@ -209,7 +209,12 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
   const preloadHome = () => preloadSceneComponent('frames')
 
   return (
-    <div className={clsx('frameos-app-shell min-h-screen overflow-x-hidden text-slate-900', `frameos-theme-${theme}`)}>
+    <div
+      // See FrameosShell: this placeholder mimics the real rail, so it marks
+      // itself as the loading one.
+      data-workspace-shell="loading"
+      className={clsx('frameos-app-shell min-h-screen overflow-x-hidden text-slate-900', `frameos-theme-${theme}`)}
+    >
       <aside
         className={clsx(
           'workspace-sidebar frameos-panel fixed bottom-5 left-5 top-5 z-30 flex max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl',

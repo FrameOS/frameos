@@ -152,11 +152,15 @@ async function scrollLogsToLatest(page: Page): Promise<void> {
 }
 
 async function closeSecondaryPanel(page: Page): Promise<void> {
-  const activeNavigationButton = page.locator('.frameos-nav-button[title^="Hide "]').first()
-  if (await activeNavigationButton.isVisible().catch(() => false)) {
-    await activeNavigationButton.click()
+  const collapsedSidebar = page.locator('.workspace-sidebar-collapsed').first()
+  if (await collapsedSidebar.isVisible().catch(() => false)) {
+    return
   }
-  await page.locator('.workspace-sidebar-collapsed').first().waitFor()
+  // Let click() do the waiting instead of a point-in-time isVisible() check:
+  // skipping the click when the button has not rendered yet turns into a
+  // guaranteed timeout on the collapsed sidebar below.
+  await page.locator('.frameos-nav-button[title^="Hide "]').first().click()
+  await collapsedSidebar.waitFor()
 }
 
 async function openAddFrameDrawer(page: Page): Promise<void> {
