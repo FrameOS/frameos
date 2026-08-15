@@ -300,7 +300,8 @@ export function SceneEditorModal({ sceneId, width, height, description, canSave 
   }
 
   return (
-    <div aria-modal className="editor-modal" role="dialog">
+    // ph-no-capture: the scene's own diagram, node labels and settings.
+    <div aria-modal className="editor-modal ph-no-capture" role="dialog">
       <div className="editor-modal__bar">
         <div className="editor-modal__title">
           Scene editor

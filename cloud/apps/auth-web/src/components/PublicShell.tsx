@@ -15,11 +15,16 @@ import {
 export function PublicShell({
   children,
   isSuperadmin = false,
+  noCapture = false,
   signedIn,
   title,
 }: Readonly<{
   children: React.ReactNode;
   isSuperadmin?: boolean;
+  // As AppShell's: suppresses autocapture for the page body. The store is
+  // public by definition, so this is off by default and set only for the
+  // views that are not — a private scene reached through its share link.
+  noCapture?: boolean;
   signedIn: boolean;
   title?: React.ReactNode;
 }>) {
@@ -74,7 +79,9 @@ export function PublicShell({
           )}
         </nav>
       </header>
-      <main className="content">{children}</main>
+      <main className={noCapture ? "content ph-no-capture" : "content"}>
+        {children}
+      </main>
       <BackForwardRefresh />
     </div>
   );

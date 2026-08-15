@@ -14,10 +14,18 @@ import {
 export function AppShell({
   children,
   isSuperadmin = false,
+  noCapture = false,
   title,
 }: Readonly<{
   children: React.ReactNode;
   isSuperadmin?: boolean;
+  // Marks the page body as off-limits to PostHog autocapture (see
+  // lib/analytics-redaction.ts). Set it on any surface whose content is the
+  // user's own data — frame names, scene names, install hostnames, other
+  // people's email addresses — which is nearly everything behind a login.
+  // Pageviews still fire, so traffic to the page is still measured; only the
+  // click events that would carry the content are dropped.
+  noCapture?: boolean;
   title?: React.ReactNode;
 }>) {
   const cloudBaseUrl = getCloudBaseUrl();
@@ -54,7 +62,9 @@ export function AppShell({
           </form>
         </nav>
       </header>
-      <main className="content">{children}</main>
+      <main className={noCapture ? "content ph-no-capture" : "content"}>
+        {children}
+      </main>
       <BackForwardRefresh />
     </div>
   );
