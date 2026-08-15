@@ -1,5 +1,6 @@
 import std/[base64, json, os, strutils, tables, unittest]
 
+import ../device_setup
 import ../ota_pubkey
 import ../upgrade
 
@@ -283,3 +284,59 @@ suite "upgrade status reporting":
     writeUpgradeStatus(%*{"status": "starting"})
     check upgradeStatusMtime() > 0.0
 
+
+suite "staging verifies the signature before anything runs":
+  # The crypto itself is covered above (wrong key, tampered bytes, malformed
+  # sigs) and the transport in test_http_client — but neither pins the WIRING:
+  # that stageFrameOSRelease checks the downloaded bytes against the compiled-
+  # in key BEFORE tar touches them. `tar -xzf` on unverified bytes already
+  # lets an attacker choose file contents and paths on the device, so a
+  # refactor that reorders those two lines must fail here, not in the field.
+  teardown:
+    resetReleaseFetchersForTest()
+    resetSetupCommandRunnerForTest()
+    delEnv("FRAMEOS_DIR")
+    delEnv("FRAMEOS_REMOTE_DIR")
+    delEnv("FRAMEOS_ASSETS_DIR")
+
+  test "an archive that fails verification never reaches tar":
+    let root = getTempDir() / "frameos-stage-sig-test"
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+    putEnv("FRAMEOS_DIR", root / "frameos")
+    putEnv("FRAMEOS_REMOTE_DIR", root / "remote")
+    putEnv("FRAMEOS_ASSETS_DIR", root / "assets")
+
+    var commands: seq[string] = @[]
+    setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+      commands.add(command)
+      (output: "", exitCode: 0))
+
+    var archiveFetched = false
+    setReleaseFetchersForTest(
+      proc(release: FrameOSReleaseInfo, destination: string) =
+        archiveFetched = true
+        writeFile(destination, "definitely not the bytes that were signed"),
+      proc(release: FrameOSReleaseInfo): string =
+        # Well-formed and from the trusted key id, so it passes parsing and
+        # the failure is the actual Ed25519 verification of the bytes — the
+        # same shape a hijacked download would present.
+        let blob = "ED" & parseHexStr(OtaSigningKeyIdHex) & repeat("\x00", 64)
+        "untrusted comment: x\n" & encode(blob) & "\n")
+
+    expect ValueError:
+      discard stageFrameOSRelease(FrameOSReleaseInfo(
+        version: "9.9.9",
+        tagName: "v9.9.9",
+        target: "debian-bookworm-arm64",
+        assetName: "frameos-9.9.9-debian-bookworm-arm64.tar.gz",
+        assetUrl: GitHubReleaseDownloadPrefix &
+          "v9.9.9/frameos-9.9.9-debian-bookworm-arm64.tar.gz",
+      ))
+
+    check archiveFetched
+    # The one command that must not have run: nothing may unpack (or execute
+    # anything derived from) bytes the key check refused.
+    for command in commands:
+      check not command.contains("tar ")

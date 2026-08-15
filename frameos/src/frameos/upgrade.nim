@@ -39,12 +39,12 @@ type
     dryRun*: bool
     yes*: bool
 
-  StagedFrameOSRelease = object
-    name: string
-    frameosReleaseDir: string
-    remoteReleaseDir: string
-    serviceUser: string
-    setupStatus: int
+  StagedFrameOSRelease* = object
+    name*: string
+    frameosReleaseDir*: string
+    remoteReleaseDir*: string
+    serviceUser*: string
+    setupStatus*: int
 
 proc frameosInstallDir*(): string =
   getEnv("FRAMEOS_DIR", "/srv/frameos").strip(leading = false, trailing = true, chars = {'/'})
@@ -486,6 +486,27 @@ proc downloadReleaseArchive*(release: FrameOSReleaseInfo, destination: string) =
     headers = @[("User-Agent", "FrameOS/" & compiledFrameOSVersion())],
   )
 
+# Test seams for stageFrameOSRelease's two network fetches. nil = the real
+# downloader. They exist so the SECURITY-CRITICAL property of the staging
+# flow — the signature is verified before tar touches the archive — can be
+# pinned by an offline test; the fetchers themselves are covered separately
+# (boundedDownloadToFile in test_http_client, the crypto in test_upgrade).
+type
+  ReleaseArchiveFetcher* = proc(release: FrameOSReleaseInfo, destination: string)
+  ReleaseSignatureFetcher* = proc(release: FrameOSReleaseInfo): string
+
+var releaseArchiveFetcher: ReleaseArchiveFetcher = nil
+var releaseSignatureFetcher: ReleaseSignatureFetcher = nil
+
+proc setReleaseFetchersForTest*(archive: ReleaseArchiveFetcher,
+                                signature: ReleaseSignatureFetcher) =
+  releaseArchiveFetcher = archive
+  releaseSignatureFetcher = signature
+
+proc resetReleaseFetchersForTest*() =
+  releaseArchiveFetcher = nil
+  releaseSignatureFetcher = nil
+
 proc downloadReleaseSignature(release: FrameOSReleaseInfo): string =
   ## The .minisig beside the asset. Small (a few hundred bytes), so it is
   ## fetched into memory rather than staged on disk.
@@ -571,7 +592,7 @@ proc copyFirstExistingFile(sources: openArray[string], destination: string) =
       copyFile(source, destination)
       return
 
-proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
+proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
   let timestamp = format(now(), "yyyyMMddHHmmss")
   result.name = "release_upgrade_" & timestamp & "_" & release.version.replace(".", "_")
   result.frameosReleaseDir = frameosInstallDir() / "releases" / result.name
@@ -595,7 +616,10 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
     createDir(frameosAssetsDir())
 
     setupLog("FrameOS upgrade: downloading " & release.assetName)
-    downloadReleaseArchive(release, workDir / "frameos.tar.gz")
+    if releaseArchiveFetcher.isNil:
+      downloadReleaseArchive(release, workDir / "frameos.tar.gz")
+    else:
+      releaseArchiveFetcher(release, workDir / "frameos.tar.gz")
 
     # Verify BEFORE unpacking: `tar -xzf` on an unverified archive is already
     # letting an attacker choose file contents and paths on this device. The
@@ -603,8 +627,10 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
     # compromised provider (or a hijacked download) cannot get code executed
     # here — it can only offer bytes that fail this check.
     setupLog("FrameOS upgrade: verifying the release signature")
-    verifyReleaseArchiveSignature(workDir / "frameos.tar.gz",
-                                  downloadReleaseSignature(release))
+    let minisig =
+      if releaseSignatureFetcher.isNil: downloadReleaseSignature(release)
+      else: releaseSignatureFetcher(release)
+    verifyReleaseArchiveSignature(workDir / "frameos.tar.gz", minisig)
     setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & ")")
 
     discard runSetupCommand("tar -xzf " & shellQuote(workDir / "frameos.tar.gz") & " -C " & shellQuote(workDir / "extract"))
