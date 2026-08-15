@@ -195,6 +195,9 @@ describe("password signup and login", () => {
     // The gate has to run before the account row and before the Postmark
     // send — an abuse check that fires after the expensive part has already
     // happened is not a gate.
+    // Both halves: with only the secret set, verification deliberately fails
+    // open (see turnstile.ts, the site-key-missing-from-build case).
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "test-site-key");
     vi.stubEnv("TURNSTILE_SECRET_KEY", "test-secret");
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
