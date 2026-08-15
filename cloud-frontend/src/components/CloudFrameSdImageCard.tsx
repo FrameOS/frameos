@@ -2,6 +2,7 @@ import { DevicePhoneMobileIcon } from '@heroicons/react/24/outline'
 import { useState } from 'react'
 import type { ReactElement } from 'react'
 
+import { normalizeBuildrootPlatform } from '../../../frontend/src/devices'
 import type { FrameType } from '../../../frontend/src/types'
 import { cloudOrigin } from '../cloudConfig'
 import { SdImageBuilder } from './SdImageBuilder'
@@ -30,6 +31,24 @@ import { SdImageBuilder } from './SdImageBuilder'
  */
 export function CloudFrameSdImageCard({ frame }: { frame: FrameType }): ReactElement {
   const [open, setOpen] = useState(false)
+
+  // Only seed the board when the frame actually records one — normalize on a
+  // missing value would hand back the raspberry-pi-64 default, which is a
+  // guess, and a guessed board is exactly what does not survive being wrong.
+  const storedPlatform = frame.buildroot?.platform
+  const buildrootPlatform = storedPlatform ? normalizeBuildrootPlatform(storedPlatform) : undefined
+
+  // The display comes from the device's own `hardware` report, not from the
+  // frame's settings: `device`, `width` and `height` are not in the cloud's
+  // settings allowlist (src/lib/frames.ts — only `rotate` of the four is), so
+  // frameSummary never carries them and seeding from frame.device alone left
+  // every re-download on "pick the display later" for a frame whose panel the
+  // cloud already knew. `hardware` is what the device sent at enrollment and
+  // re-sends on every hub hello.
+  const hardware = frame.hardware
+  const seededDevice = frame.device || hardware?.device || undefined
+  const seededWidth = frame.width ?? hardware?.width ?? undefined
+  const seededHeight = frame.height ?? hardware?.height ?? undefined
 
   // Bound (re-enrollment) codes only: single-use, one-hour, no frame quota.
   // Minted per build rather than cached, because one code can only ever key
@@ -75,10 +94,11 @@ export function CloudFrameSdImageCard({ frame }: { frame: FrameType }): ReactEle
               // Seed the display picker from what the frame already runs —
               // "pick the display later" is the wrong default for hardware
               // that is already configured. All still editable in the form.
-              device: frame.device,
-              width: frame.width,
-              height: frame.height,
+              device: seededDevice,
+              width: seededWidth,
+              height: seededHeight,
               rotate: frame.rotate,
+              buildrootPlatform,
             }}
           />
         ) : (
