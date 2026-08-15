@@ -117,7 +117,9 @@ What to search when someone reports a vague problem:
 - `frameos_event` on a PostHog exception carries our own event name, e.g.
   `email.verification_send_failed`, `auth.google_code_exchange_failed`,
   `frames.enroll_encryption_unavailable`.
-- On the host, `journalctl -u frameos-cloud-auth-web -o cat | jq 'select(.level=="error")'`
+- On the host, `journalctl -u 'frameos-cloud-auth-web@*' -o cat | jq 'select(.level=="error")'`
+  (the glob covers both blue/green instances, so a deploy does not split the
+  log in two)
   — every log line from auth-web and frame-hub is single-line JSON with
   `event`, `level`, `service` and `time`.
 - Credential-shaped field names (`*token*`, `*secret*`, `*password*`,

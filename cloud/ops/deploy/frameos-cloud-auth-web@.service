@@ -1,0 +1,62 @@
+[Unit]
+# One auth-web instance, named after the port it listens on
+# (frameos-cloud-auth-web@3000.service). Two of these exist so a deploy can
+# start the new release beside the running one and flip nginx between them;
+# only one runs at a time. See cloud/ops/deploy/frameos-cloud-update.
+#
+# Everything below that is not about the blue/green pair is carried over
+# verbatim from the single frameos-cloud-auth-web.service this replaced.
+Description=FrameOS Cloud auth-web (port %i)
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=frameos-cloud
+Group=frameos-cloud
+WorkingDirectory=/opt/frameos-cloud.instances/%i/cloud/apps/auth-web
+# Refuses to start without a usable DATABASE_URL, so a misconfigured env file
+# fails here rather than as 503s from a booted process. It is also the gate
+# that makes the deploy's health check meaningful.
+ExecStartPre=/usr/bin/node /opt/frameos-cloud.instances/%i/cloud/apps/auth-web/scripts/require-database-url.mjs production
+ExecStart=/usr/bin/node /opt/frameos-cloud.instances/%i/cloud/apps/auth-web/server.js
+
+# The instance runs whatever /opt/frameos-cloud.instances/%i points at, NOT
+# /opt/frameos-cloud. That pin is what makes an automatic restart safe: a
+# crash brings the instance back on the release it was already running
+# instead of jumping to whatever became current in the meantime, and the
+# draining old instance keeps reading its own directory while Next.js lazily
+# loads route chunks out of it.
+
+EnvironmentFile=/etc/frameos-cloud/auth-web.env
+# After EnvironmentFile on purpose: systemd applies these in order, so this
+# wins over any PORT left in the env file. Both instances would otherwise
+# fight over the same port and the deploy would flip to a dead upstream.
+# (The unit this replaced set both inline on ExecStart, for the same reason.)
+Environment=NODE_ENV=production
+Environment=PORT=%i
+# Next.js standalone binds HOSTNAME; nginx is the only client.
+Environment=HOSTNAME=127.0.0.1
+
+Restart=on-failure
+RestartSec=5
+# Long enough for a cold Next.js start plus the first Postgres connection,
+# short enough that a hung process is not mistaken for a slow one.
+TimeoutStartSec=120
+# SIGTERM, then let in-flight requests finish before the kill. The deploy
+# drains for longer than this before it stops the old instance.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+NoNewPrivileges=true
+# ProtectSystem=full, not strict: /opt stays writable, matching the unit this
+# replaced. Next.js writes .next/cache at runtime (fetch cache, image
+# optimizer), and ReadWritePaths keeps that working if this is ever tightened.
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/frameos-cloud.releases
+
+[Install]
+WantedBy=multi-user.target

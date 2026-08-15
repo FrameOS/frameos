@@ -11,6 +11,7 @@
     "db:cleanup": "scripts/db-cleanup.sh",
     "db:migrate": "scripts/db-migrate.sh",
     "db:setup": "scripts/db-setup.sh",
+    "deploy:install": "scripts/install-deploy.sh",
     "deploy:prod": "scripts/deploy.sh",
     "lint": "turbo run lint --filter='@frameos-cloud/*'",
     "test": "turbo run test --filter='@frameos-cloud/*'",

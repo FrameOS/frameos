@@ -15,10 +15,16 @@ cleanup, or sync jobs need separate execution.
 
 ## Hard Constraints
 
-- **Single instance only.** Rate limiting (brute-force protection for device
-  user codes and token endpoints) uses in-memory buckets that do not span
-  replicas. Do not scale `apps/auth-web` beyond one instance until the rate
-  limiter is backed by a shared store (e.g. Redis).
+- **One auth-web instance at a time.** Nothing in `apps/auth-web` requires it
+  any more — rate limiting is backed by Postgres (`src/lib/rate-limit.ts`), and
+  the remaining module-level state is caches — but the deployment is sized and
+  configured for one process, and a deploy briefly overlaps two (see
+  "Updating Production"). Running two permanently is untested; the overlap is
+  seconds long and only doubles cache memory and the in-memory rate-limit
+  fallback that a database outage would fall back to.
+- **The frame hub is genuinely single instance.** It resets the `connected`
+  flag of every frame on boot, so a second hub marks live frames offline. It
+  is deliberately not blue/green — it restarts in place and frames reconnect.
 - **Database TLS.** `postgres.js` defaults to no TLS. If Postgres is not on
   the same host, set `DATABASE_SSL=require` (or `sslmode=require` in
   `DATABASE_URL`).
@@ -40,9 +46,10 @@ pnpm --filter @frameos-cloud/auth-web start
 
 Production runs on a single Hetzner host — set `FRAMEOS_CLOUD_DEPLOY_HOST`
 (user@host) and optionally `FRAMEOS_CLOUD_DEPLOY_SSH_KEY`; host specifics live
-in the private ops notes. It runs as the `frameos-cloud-auth-web.service`
-systemd unit, which starts the Next.js standalone server
-(`node cloud/apps/auth-web/server.js`) from `/opt/frameos-cloud`, with env in
+in the private ops notes. auth-web runs as
+`frameos-cloud-auth-web@<port>.service`, a systemd template instance named
+after the port it listens on, which starts the Next.js standalone server
+(`node cloud/apps/auth-web/server.js`) with env in
 `/etc/frameos-cloud/auth-web.env`. The server has no pnpm and does not build.
 
 Deploy the pushed HEAD with:
@@ -79,9 +86,96 @@ The deploy builds locally and ships a self-contained bundle:
    streams the tar into `/usr/local/bin/frameos-cloud-update --archive -` on
    the server.
 3. `frameos-cloud-update` applies the SQL migrations via `psql` from the new
-   release (before the swap, so a failed migration leaves the running app
-   untouched), swaps `/opt/frameos-cloud` (previous release kept at
-   `/opt/frameos-cloud.previous` for rollback), and restarts the service.
+   release (before anything is flipped, so a failed migration leaves the
+   running app untouched), then performs the zero-downtime flip below.
+
+### Zero-downtime deploys
+
+Until August 2026 the deploy restarted the one auth-web process in place, and
+nginx answered 502 for the ten-odd seconds a cold Next.js start takes — every
+deploy was a short visible outage. It no longer restarts the process serving
+traffic at all.
+
+Two instances exist, `frameos-cloud-auth-web@3000` and
+`frameos-cloud-auth-web@3001`, and only one runs at a time. A deploy:
+
+1. starts the new release on the **idle** port,
+2. polls `http://127.0.0.1:<idle>/healthz` until it answers 200 — which also
+   proves the new process reached Postgres,
+3. rewrites `/etc/nginx/conf.d/frameos-cloud-upstream.conf` to point the
+   `frameos_cloud_auth_web` upstream at that port and `systemctl reload
+nginx` (graceful: in-flight requests finish on the old workers),
+4. restarts the frame hub, which is not blue/green (see Hard Constraints),
+5. drains for `FRAMEOS_CLOUD_DRAIN_SECONDS` (30) and stops the old instance.
+
+If the new release never becomes healthy, or nginx rejects the config,
+nothing is flipped and the old instance keeps serving: a bad deploy is a
+failed deploy rather than an outage. `pnpm deploy:prod` polls the live site
+twice a second for the whole deploy and prints any non-2xx it saw — the
+expected count is zero.
+
+Releases are directories rather than an in-place swap:
+
+```text
+/opt/frameos-cloud.releases/<sha>-<utc>/   unpacked bundles (last 5 kept)
+/opt/frameos-cloud.instances/<port>        symlink: what that instance runs
+/opt/frameos-cloud                         symlink -> active release
+/opt/frameos-cloud.previous                symlink -> previous release
+```
+
+The per-instance symlink is what makes `Restart=always` safe: a crashed
+instance comes back on the release it was already running instead of jumping
+to whatever became current, and the draining instance keeps reading its own
+directory while Next.js lazily loads route chunks out of it. The two
+compatibility symlinks keep every documented path working (`cat
+/opt/frameos-cloud/RELEASE_REF`, the frame-hub unit, the backup script).
+
+One consequence to keep in mind: during a deploy the **old** code runs
+against the **new** schema for a minute or so, so a migration has to stay
+backward compatible with the previous release. That was already true (they
+ran before the swap); the window is now longer and overlapping rather than
+instantaneous.
+
+The server half lives in `ops/deploy/` and is shipped inside the release it
+deploys — `frameos-cloud-update` installs the newer copy over itself once the
+release is live, so `/usr/local/bin/frameos-cloud-update` on the box equals
+the file in this repo. (It used to exist only on the server and in the
+backups, which is how the most dangerous script in the deployment stayed out
+of review.) Changing the systemd unit is not automatic, since applying it
+restarts both instances; rerun the installer when you want it.
+
+Installing this on a host that still restarts in place is a one-time step:
+
+```sh
+pnpm deploy:install -- --dry-run   # print every change, touch nothing
+pnpm deploy:install
+```
+
+The installer rewrites the vhosts' `proxy_pass http://127.0.0.1:3000;` to name
+the upstream (backups kept next to each file, gated on `nginx -t`), installs
+the templated unit, brings the current release up on the idle port, flips
+nginx, and only then disables the legacy `frameos-cloud-auth-web.service` — so
+the install itself is zero-downtime too. It prints the old unit next to the
+new one first and asks before continuing: anything the old unit had in
+`Environment=`, `EnvironmentFile=`, `ReadWritePaths=` or `User=` that the new
+one lacks will be lost.
+
+Useful on the box:
+
+```sh
+frameos-cloud-update --status     # active port, release, both instances
+frameos-cloud-update --rollback   # flip back to the previous release
+```
+
+Before changing anything in `ops/deploy/`, run the rehearsal — it exercises
+both scripts against a fake host in a container, including the failure paths:
+
+```sh
+cloud/ops/deploy/rehearse.sh
+```
+
+See [rehearsals.md](rehearsals.md#deploy-rehearsal) for what it does and does
+not prove.
 
 The script refuses to deploy a dirty tree, and refuses a commit that is on no
 branch of the remote — production has to be a state someone else can check
@@ -103,9 +197,10 @@ It checks the service plus the public URLs afterwards. Override
 `FRAMEOS_SCENES_DEPLOY_CHECK_URL` if the target changes. The default deployment
 health check requires all three public origins to return a 2xx or 3xx response.
 
-To roll back, move `/opt/frameos-cloud.previous` back to `/opt/frameos-cloud`
-and restart `frameos-cloud-auth-web.service` (database migrations are not
-rolled back automatically). The pre-monorepo pnpm-based release is not
+To roll back, run `frameos-cloud-update --rollback` on the host. It takes the
+same path a deploy does — previous release up on the idle port, health gate,
+nginx flip — so a rollback is not an outage either. Database migrations are
+not rolled back. The pre-monorepo pnpm-based release is not
 startable by the current unit; the cutover-era backups
 (`frameos-cloud-update.pre-monorepo`,
 `frameos-cloud-auth-web.service.pre-monorepo`) would have to be restored to
@@ -132,7 +227,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# Same user/group as frameos-cloud-auth-web.service.
+# Same user/group as frameos-cloud-auth-web@.service.
 User=frameos-cloud
 Group=frameos-cloud
 WorkingDirectory=/opt/frameos-cloud/cloud/apps/frame-hub
@@ -148,6 +243,10 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 ```
+
+`/opt/frameos-cloud` in those paths is the symlink to the active release, and
+the hub is meant to follow it: unlike auth-web it is not pinned to a release,
+because it is restarted on every deploy anyway and only one may ever run.
 
 `/etc/frameos-cloud/frame-hub.env` needs only:
 
@@ -290,7 +389,7 @@ multi-use SD-image code, which is capped at the frame limit.
 ## DNS and Reverse Proxy
 
 Create DNS records and TLS certificates for all three hostnames, then send them to
-the existing `frameos-cloud-auth-web` upstream. The reverse proxy must preserve
+the existing `frameos_cloud_auth_web` upstream. The reverse proxy must preserve
 the public `Host` and `X-Forwarded-Proto` headers. In nginx, the HTTP and HTTPS
 server blocks can share the same proxy location for all three names:
 
@@ -299,9 +398,20 @@ location / {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_pass http://127.0.0.1:3000;
+    # Not a literal port: the upstream block is the one place a deploy moves
+    # traffic between the two auth-web instances. It is generated into
+    # /etc/nginx/conf.d/frameos-cloud-upstream.conf and rewritten on every
+    # deploy — never edit it by hand.
+    proxy_pass http://frameos_cloud_auth_web;
 }
 ```
+
+Production keeps those proxy lines in
+`/etc/nginx/snippets/frameos-cloud-proxy.conf` and `include`s the snippet from
+every location that needs them (`location /` on cloud/scenes, `location /api/`
+and the two install-script paths on the legacy account host). So there is one
+line to change and the installer looks in `snippets/` as well as
+`sites-enabled/` and `conf.d/`.
 
 After deployment, verify that `https://cloud.frameos.net/` redirects to
 `/backends` (which lands on login when signed out), that

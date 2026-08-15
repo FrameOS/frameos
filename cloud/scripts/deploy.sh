@@ -5,10 +5,12 @@ cd "$(dirname "$0")/.."
 
 # Builds apps/auth-web locally (Next.js standalone output) and streams a
 # self-contained bundle into /usr/local/bin/frameos-cloud-update on the
-# server, which runs migrations, swaps /opt/frameos-cloud (keeping
-# /opt/frameos-cloud.previous as rollback), and restarts
-# frameos-cloud-auth-web.service. The server needs no pnpm or build step.
-# See docs/deployment.md.
+# server, which runs migrations, starts the new release on the idle port,
+# waits for it to answer /healthz, and only then moves nginx to it — so a
+# deploy no longer takes the site down while Next.js boots. The server needs
+# no pnpm or build step. See docs/deployment.md, and
+# ops/deploy/frameos-cloud-update for the server half (shipped in the bundle,
+# so the box always runs the version in this repo).
 #
 # Any ref can be deployed, not just main: `pnpm deploy:prod -- <ref>` builds
 # THAT ref rather than whatever is checked out. Shipping a branch to
@@ -161,6 +163,21 @@ if [ "$head_sha" != "$default_sha" ]; then
   echo
 fi
 
+# Fail before the build rather than after the upload: on a host that still
+# has the pre-blue-green frameos-cloud-update, this script would hand it a
+# bundle it half-understands — it would restart auth-web in place (the
+# outage this replaced) and never restart the frame hub, because that step
+# moved into the server script. One ssh round trip is cheaper than finding
+# that out from a frame that stopped updating.
+if ! ssh -i "$ssh_key" "$deploy_host" 'frameos-cloud-update --status' >/dev/null 2>&1; then
+  echo "The host's frameos-cloud-update does not support --status, so it predates" >&2
+  echo "the zero-downtime deploy. Convert it first (one time, no downtime):" >&2
+  echo "  pnpm deploy:install -- --dry-run" >&2
+  echo "  pnpm deploy:install" >&2
+  echo "See docs/deployment.md, 'Zero-downtime deploys'." >&2
+  exit 1
+fi
+
 echo "Installing dependencies and building the standalone bundle"
 (cd .. && pnpm install --frozen-lockfile)
 pnpm build
@@ -182,11 +199,21 @@ if [ ! -f "$hub_dir/dist/index.cjs" ]; then
 fi
 
 stage="$(mktemp -d)"
-# One trap for both jobs: a second `trap ... EXIT` would REPLACE the checkout
-# restore installed above, leaving the caller on a detached HEAD after every
-# branch deploy.
+probe_log="$(mktemp)"
+probe_pid=""
+stop_probe() {
+  if [ -n "$probe_pid" ]; then
+    kill "$probe_pid" 2>/dev/null || true
+    wait "$probe_pid" 2>/dev/null || true
+    probe_pid=""
+  fi
+}
+# One trap for all three jobs: a second `trap ... EXIT` would REPLACE the
+# checkout restore installed above, leaving the caller on a detached HEAD
+# after every branch deploy.
 cleanup() {
-  rm -rf "$stage"
+  stop_probe
+  rm -rf "$stage" "$probe_log"
   restore_checkout
 }
 trap cleanup EXIT
@@ -210,8 +237,14 @@ mkdir -p "$stage/cloud/packages/db"
 cp -a packages/db/drizzle "$stage/cloud/packages/db/drizzle"
 mkdir -p "$stage/cloud/scripts"
 cp -a scripts/db-migrate.sh scripts/db-cleanup.sh "$stage/cloud/scripts/"
-# RELEASE stays exactly one bare SHA — frameos-cloud-update on the server
-# reads it, and this script cannot see that code to check what it tolerates.
+# The server-side deploy script rides along in the release it deploys, and
+# frameos-cloud-update installs the newer copy over itself once the release is
+# live. Before this the box's copy existed only on the box (and in backups),
+# which is how it stayed invisible to review for so long.
+mkdir -p "$stage/cloud/ops"
+cp -a ops/deploy "$stage/cloud/ops/deploy"
+# RELEASE stays exactly one bare SHA — frameos-cloud-update names the release
+# directory after it (ops/deploy/frameos-cloud-update, cmd_archive).
 # The human-readable detail goes next to it instead, so `cat RELEASE_REF` on
 # the box answers "which branch is prod on?" without anyone having to resolve
 # a SHA against a repo they may not have.
@@ -223,26 +256,53 @@ deployed_at $(date -u +%Y-%m-%dT%H:%M:%SZ)
 deployed_by ${USER:-unknown}
 RELEASE_REF
 
+# Watch the live site for the whole deploy. The point of the blue/green flip
+# is that this stays empty; if it ever isn't, the regression shows up in the
+# deploy that caused it rather than in a user's bug report. Requests are made
+# from here, over the internet, so a stray failure can also just be the local
+# network — the log says what and when, and judgement is left to the reader.
+(
+  # Explicit, even though bash resets traps in a subshell: an inherited EXIT
+  # trap here would delete the staging directory the moment the probe is
+  # killed, in the middle of the deploy it is meant to be watching.
+  trap - EXIT
+  while :; do
+    probe_status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$cloud_check_url" || echo 000)"
+    case "$probe_status" in
+      2* | 3*) ;;
+      *) echo "$(date -u +%H:%M:%S) ${cloud_check_url} -> ${probe_status}" >>"$probe_log" ;;
+    esac
+    sleep 0.5
+  done
+) &
+probe_pid=$!
+
 echo "Deploying ${release_ref} (${head_sha}) to ${deploy_host}"
+# The server does the rest: migrations, start-on-idle-port, health gate,
+# nginx flip, frame-hub restart, drain, prune. It leaves the old release
+# serving if any of that fails, so a non-zero exit here means production is
+# untouched rather than half-deployed.
 tar -C "$stage" -cf - . |
   ssh -i "$ssh_key" "$deploy_host" frameos-cloud-update --archive -
 
-echo "Verifying service and public URLs"
-ssh -i "$ssh_key" "$deploy_host" systemctl is-active frameos-cloud-auth-web.service
+echo "Verifying public URLs"
 
-# Restart the frame hub from the freshly swapped release. Tolerate the unit
-# not being installed yet on a host that predates the hub (unit file content:
-# docs/deployment.md "Frame hub").
-ssh -i "$ssh_key" "$deploy_host" '
-  if systemctl cat frameos-cloud-frame-hub.service >/dev/null 2>&1; then
-    systemctl restart frameos-cloud-frame-hub.service &&
-    systemctl is-active frameos-cloud-frame-hub.service
+report_probe() {
+  stop_probe
+  if [ -s "$probe_log" ]; then
+    echo
+    echo "  The live site returned $(wc -l <"$probe_log" | tr -d ' ') non-2xx/3xx response(s) during this deploy:"
+    sed 's/^/    /' "$probe_log"
+    echo "  Zero is the expected number — see ops/deploy/frameos-cloud-update."
+    echo
   else
-    echo "frameos-cloud-frame-hub.service not installed; see cloud/docs/deployment.md"
+    echo "No failed requests to ${cloud_check_url} during the deploy."
   fi
-'
+}
 
-# The service restart races the first request; retry briefly before alarming.
+# The server does not answer until the new instance is already healthy, so
+# these should pass on the first attempt; the retries only cover DNS and TLS
+# hiccups between here and the box.
 for attempt in 1 2 3 4 5 6; do
   checks_ok=true
   check_summary=""
@@ -255,6 +315,7 @@ for attempt in 1 2 3 4 5 6; do
     esac
   done
   if [ "$checks_ok" = true ]; then
+    report_probe
     echo "Deployed ${release_ref} — ${head_sha} (${check_summary})"
     exit 0
   fi
@@ -262,5 +323,6 @@ for attempt in 1 2 3 4 5 6; do
   sleep 5
 done
 
-echo "Deploy finished but a public URL stayed unhealthy (${check_summary}); investigate (rollback: move /opt/frameos-cloud.previous back and restart)." >&2
+report_probe
+echo "Deploy finished but a public URL stayed unhealthy (${check_summary}); investigate (rollback: ssh ${deploy_host} frameos-cloud-update --rollback)." >&2
 exit 1

@@ -69,6 +69,38 @@ Pass criteria:
 - For the whole-box path: `pg_is_in_recovery()` returns false before any
   numbers are believed, and the recovery point is within the ≤5 min RPO.
 
+## Deploy Rehearsal
+
+Goal: prove a deploy cannot take the site down, and that a bad one is a
+failed deploy rather than an outage. Before changing anything in
+`ops/deploy/`, and before the one-time install on a host.
+
+```sh
+cloud/ops/deploy/rehearse.sh   # needs docker; nothing else
+```
+
+It runs the real `frameos-cloud-update` and `install.sh` inside a Debian
+container against a fake host — stub `systemctl`, `nginx`, `curl` and `psql`,
+a throwaway `/opt` tree — and asserts the orchestration end to end.
+
+Pass criteria (the script checks each and exits non-zero on any):
+
+- A deploy starts the new release on the **idle** port and only moves nginx
+  after `/healthz` answers there; consecutive deploys alternate ports.
+- A release that never becomes healthy, a failing migration, and an `nginx
+-t` failure each leave the upstream and the live release untouched.
+- `--rollback` returns to the previous release the same way.
+- `install.sh` converts a legacy host without moving traffic until the new
+  instance is up, keeps a backup of every vhost it rewrites, and leaves the
+  frame hub's own `proxy_pass` alone.
+- Exactly one auth-web instance is left running afterwards, pinned to the
+  live release.
+
+What it cannot prove, and what still has to be watched on the box: real unit
+semantics (`Restart=`, ordering, `ProtectSystem=strict`), and that Next.js
+actually boots on the idle port. `pnpm deploy:prod` covers the second one by
+polling the live site throughout the deploy and printing any non-2xx.
+
 ## Local Postgres Rehearsal
 
 Goal: prove a new developer machine can run the auth prototype.

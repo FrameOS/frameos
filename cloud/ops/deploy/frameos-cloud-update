@@ -1,0 +1,513 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# /usr/local/bin/frameos-cloud-update — the server half of `pnpm deploy:prod`.
+#
+# Installed from cloud/ops/deploy/install.sh; the copy in the repo is the
+# source of truth. Read cloud/docs/deployment.md before changing it.
+#
+# What changed and why
+# --------------------
+# The old version unpacked the bundle, moved /opt/frameos-cloud aside, and
+# ran `systemctl restart frameos-cloud-auth-web.service`. Between the stop and
+# the moment Next.js finished booting there was nothing listening on port
+# 3000, so nginx answered every request with 502 — the site was visibly down
+# for the ten-odd seconds a cold Next.js start takes.
+#
+# This version never restarts the process that is serving traffic. Two
+# instances of auth-web exist as systemd template units named after their
+# port (frameos-cloud-auth-web@3000 / @3001); only one runs at a time. A
+# deploy starts the NEW release on the idle port, waits for its /healthz to
+# answer 200 (which means it has also reached Postgres), and only then points
+# nginx at it and reloads. `nginx -s reload` is graceful: existing requests
+# finish on the old workers. The previous instance is stopped after a drain
+# delay. If the new release never becomes healthy, nothing is flipped and the
+# old one keeps serving — a bad deploy is a failed deploy, not an outage.
+#
+# Releases are directories, not an in-place swap:
+#
+#   /opt/frameos-cloud.releases/<sha>-<utc>/   unpacked bundles (last 5 kept)
+#   /opt/frameos-cloud.instances/<port>        what that instance runs, pinned
+#   /opt/frameos-cloud                         symlink -> active release
+#   /opt/frameos-cloud.previous                symlink -> previous release
+#
+# The two compatibility symlinks keep every documented path working
+# (`cat /opt/frameos-cloud/RELEASE_REF`, the frame-hub unit, backups).
+#
+# The per-instance symlink is the load-bearing one: systemd's Restart=always
+# must bring a crashed instance back on the SAME release it was running, not
+# on whatever `current` happens to point at by then. Pinning also means the
+# old process keeps reading its own release directory after the flip, so
+# Next.js can still lazily load route chunks while it drains.
+#
+# Migrations still run before anything is flipped, from the new release, so a
+# failed migration leaves production untouched. The consequence is unchanged
+# but now lasts a little longer: for the length of a deploy the old code runs
+# against the new schema, so migrations must stay backward compatible for one
+# release.
+#
+# Usage:
+#   frameos-cloud-update --archive -    unpack from stdin and deploy
+#   frameos-cloud-update --rollback     flip back to the previous release
+#   frameos-cloud-update --status       what is live, on which port
+#   frameos-cloud-update --activate <release-dir>
+#
+# Environment (all optional):
+#   FRAMEOS_CLOUD_DRAIN_SECONDS   wait before stopping the old instance (30)
+#   FRAMEOS_CLOUD_HEALTH_TIMEOUT  seconds to wait for the new instance (120)
+#   FRAMEOS_CLOUD_KEEP_RELEASES   how many release dirs to keep (5)
+#   FRAMEOS_CLOUD_SERVICE_USER    owner of the release tree (frameos-cloud)
+
+app_link="/opt/frameos-cloud"
+previous_link="/opt/frameos-cloud.previous"
+releases_dir="/opt/frameos-cloud.releases"
+instances_dir="/opt/frameos-cloud.instances"
+env_file="/etc/frameos-cloud/auth-web.env"
+state_file="/etc/frameos-cloud/active-port"
+upstream_file="/etc/nginx/conf.d/frameos-cloud-upstream.conf"
+unit_prefix="frameos-cloud-auth-web@"
+unit_dir="/etc/systemd/system"
+hub_unit="frameos-cloud-frame-hub.service"
+# Where this script is installed. Not "$0": ssh runs it by bare name off
+# PATH, and both usage() and the self-update need a path they can open.
+self_path="/usr/local/bin/frameos-cloud-update"
+
+ports=(3000 3001)
+
+drain_seconds="${FRAMEOS_CLOUD_DRAIN_SECONDS:-30}"
+health_timeout="${FRAMEOS_CLOUD_HEALTH_TIMEOUT:-120}"
+keep_releases="${FRAMEOS_CLOUD_KEEP_RELEASES:-5}"
+service_user="${FRAMEOS_CLOUD_SERVICE_USER:-frameos-cloud}"
+
+# Every line also lands in /root/CODEX_LOG.md, which is the box's deploy
+# history and is captured by the nightly host-config backup. The script this
+# replaced wrote the same file; losing that trail would mean losing the only
+# record of what happened on the host and when.
+log_file="/root/CODEX_LOG.md"
+log() {
+  echo "[frameos-cloud-update] $*"
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$log_file" 2>/dev/null || true
+}
+log_section() {
+  printf '\n## %s - %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$log_file" 2>/dev/null || true
+}
+die() {
+  echo "[frameos-cloud-update] $*" >&2
+  printf '%s FAILED: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$log_file" 2>/dev/null || true
+  exit 1
+}
+
+usage() {
+  local src="$self_path"
+  [ -r "$src" ] || src="$0"
+  sed -n '/^# Usage:/,/^$/p' "$src" 2>/dev/null | sed 's/^# \{0,1\}//' >&2
+}
+
+[ "$(id -u)" -eq 0 ] || die "must run as root"
+
+# --- helpers ----------------------------------------------------------------
+
+# ln -sfn on an existing symlink is not atomic (it unlinks, then creates), so
+# a crash in between would leave /opt/frameos-cloud missing entirely. Create
+# the link under a temporary name and rename it over the old one instead:
+# rename(2) is atomic, and readers only ever see the old or the new target.
+link_atomic() {
+  local target="$1" link="$2" tmp
+  tmp="${link}.tmp.$$"
+  ln -sfn "$target" "$tmp"
+  mv -T "$tmp" "$link"
+}
+
+# Which release a symlink points at, or empty when it does not exist. -f
+# resolves the whole chain, so a stale link to a pruned directory reads as
+# empty rather than as a path that cannot be started.
+link_target() {
+  local link="$1"
+  [ -L "$link" ] || [ -e "$link" ] || return 0
+  readlink -f "$link" 2>/dev/null || true
+}
+
+active_port() {
+  local port
+  if [ -r "$state_file" ]; then
+    port="$(tr -dc '0-9' <"$state_file")"
+    if [ -n "$port" ]; then
+      echo "$port"
+      return
+    fi
+  fi
+  # No state file yet (first deploy after install, or someone removed it):
+  # believe nginx, which is what actually decides where traffic goes.
+  if [ -r "$upstream_file" ]; then
+    port="$(sed -n 's/.*127\.0\.0\.1:\([0-9]\{1,\}\).*/\1/p' "$upstream_file" | head -n 1)"
+    if [ -n "$port" ]; then
+      echo "$port"
+      return
+    fi
+  fi
+  echo "${ports[0]}"
+}
+
+idle_port() {
+  local active="$1"
+  if [ "$active" = "${ports[0]}" ]; then
+    echo "${ports[1]}"
+  else
+    echo "${ports[0]}"
+  fi
+}
+
+wait_for_health() {
+  local port="$1" deadline=$((SECONDS + health_timeout)) status
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    # /healthz rather than a TCP connect: Next.js binds the port before it can
+    # serve, and 200 here also proves the new process reached Postgres. A
+    # process that listens but cannot answer must not be flipped to.
+    status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+      "http://127.0.0.1:${port}/healthz" || echo 000)"
+    if [ "$status" = "200" ]; then
+      return 0
+    fi
+    if ! systemctl is-active --quiet "${unit_prefix}${port}.service"; then
+      log "instance on ${port} is no longer running (last probe: ${status})"
+      return 1
+    fi
+    sleep 1
+  done
+  log "instance on ${port} did not become healthy within ${health_timeout}s"
+  return 1
+}
+
+point_nginx_at() {
+  local port="$1" backup=""
+  if [ -e "$upstream_file" ]; then
+    backup="${upstream_file}.bak.$$"
+    cp -p "$upstream_file" "$backup"
+  fi
+  cat >"$upstream_file" <<UPSTREAM
+# Managed by frameos-cloud-update. Edits are overwritten on every deploy;
+# change cloud/ops/deploy/ in the repo instead.
+upstream frameos_cloud_auth_web {
+    server 127.0.0.1:${port};
+}
+UPSTREAM
+  if ! nginx -t >/dev/null 2>&1; then
+    nginx -t || true
+    if [ -n "$backup" ]; then
+      mv -f "$backup" "$upstream_file"
+    else
+      rm -f "$upstream_file"
+    fi
+    return 1
+  fi
+  # Graceful: nginx starts workers with the new config and lets the old ones
+  # finish the requests they already accepted. No connection is dropped.
+  systemctl reload nginx
+  rm -f "$backup"
+  echo "$port" >"$state_file"
+  return 0
+}
+
+stop_other_instances() {
+  local keep="$1" port
+  for port in "${ports[@]}"; do
+    [ "$port" = "$keep" ] && continue
+    if systemctl is-active --quiet "${unit_prefix}${port}.service"; then
+      log "stopping the previous instance on ${port}"
+      systemctl stop "${unit_prefix}${port}.service" || true
+    fi
+  done
+}
+
+restart_frame_hub() {
+  # The hub is deliberately NOT blue/green: it resets the `connected` flag of
+  # every frame on boot because a single hub owns all device sockets, so two
+  # of them overlapping would mark live frames offline. Frames reconnect on
+  # their own, and the hub serves no page, so its restart is not downtime in
+  # the sense this script is about.
+  #
+  # Returns non-zero rather than dying, because by the time it runs the web
+  # flip is already done: exiting here would leave the old auth-web instance
+  # running and enabled forever. The caller finishes the swap and reports the
+  # failure at the end.
+  if ! systemctl cat "$hub_unit" >/dev/null 2>&1; then
+    log "${hub_unit} is not installed; skipping (see cloud/docs/deployment.md)"
+    return 0
+  fi
+  log "restarting the frame hub"
+  if ! systemctl restart "$hub_unit" || ! systemctl is-active --quiet "$hub_unit"; then
+    log "WARNING: the frame hub did not come back; frames stay offline until it does"
+    systemctl status --no-pager --lines=30 "$hub_unit" >&2 || true
+    return 1
+  fi
+  return 0
+}
+
+prune_releases() {
+  local keep_paths=() release count=0 path
+  for path in "$app_link" "$previous_link" "$instances_dir"/*; do
+    path="$(link_target "$path")"
+    [ -n "$path" ] && keep_paths+=("$path")
+  done
+  # Newest first, so the count below keeps the most recent releases.
+  while IFS= read -r release; do
+    [ -d "$release" ] || continue
+    local pinned=false keep
+    for keep in "${keep_paths[@]}"; do
+      [ "$release" = "$keep" ] && pinned=true && break
+    done
+    count=$((count + 1))
+    if [ "$pinned" = true ] || [ "$count" -le "$keep_releases" ]; then
+      continue
+    fi
+    log "pruning old release $(basename "$release")"
+    rm -rf "$release"
+  done < <(find "$releases_dir" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null |
+    sort -rn | cut -d' ' -f2-)
+}
+
+# Turn a pre-blue/green /opt/frameos-cloud (a real directory) into the
+# symlink layout, once, without touching the process currently serving from
+# it: the directory is renamed, which the running process follows by inode,
+# and the symlink takes its place.
+migrate_layout() {
+  mkdir -p "$releases_dir" "$instances_dir"
+  if [ -L "$app_link" ] || [ ! -e "$app_link" ]; then
+    return 0
+  fi
+  [ -d "$app_link" ] || die "$app_link exists and is neither a directory nor a symlink"
+  local stamp adopted
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  adopted="$releases_dir/adopted-$stamp"
+  log "adopting the existing $app_link as $(basename "$adopted")"
+  mv "$app_link" "$adopted"
+  link_atomic "$adopted" "$app_link"
+  if [ -d "$previous_link" ] && [ ! -L "$previous_link" ]; then
+    mv "$previous_link" "$releases_dir/adopted-previous-$stamp"
+    link_atomic "$releases_dir/adopted-previous-$stamp" "$previous_link"
+  fi
+}
+
+# Keep the box's copy of this script equal to the one in the release that is
+# now live. Before the deploy bundle carried ops/deploy, this file existed
+# only on the server and in the backups — the least reviewed, most dangerous
+# script in the deployment.
+self_update() {
+  local release="$1"
+  local incoming="$release/cloud/ops/deploy/frameos-cloud-update"
+  [ -f "$incoming" ] || return 0
+  if ! cmp -s "$incoming" "$self_path"; then
+    local tmp="/usr/local/bin/.frameos-cloud-update.$$"
+    install -m 0755 "$incoming" "$tmp"
+    # Rename rather than overwrite in place: bash reads this script lazily
+    # from the open file, so truncating it mid-run would resume execution at
+    # a byte offset into different text. mv is atomic and leaves the running
+    # copy on its own inode.
+    mv -f "$tmp" "$self_path"
+    log "updated ${self_path} from the release"
+  fi
+  local unit="$release/cloud/ops/deploy/frameos-cloud-auth-web@.service"
+  if [ -f "$unit" ] && ! cmp -s "$unit" "$unit_dir/frameos-cloud-auth-web@.service"; then
+    log "NOTE: the unit file differs from the one in this release."
+    log "      Applying it restarts both instances, so it is not automatic:"
+    log "      rerun cloud/ops/deploy/install.sh when you want it."
+  fi
+}
+
+release_ref_line() {
+  local release="$1"
+  if [ -r "$release/RELEASE_REF" ]; then
+    tr '\n' ' ' <"$release/RELEASE_REF"
+    echo
+  elif [ -r "$release/RELEASE" ]; then
+    cat "$release/RELEASE"
+  else
+    echo "unknown"
+  fi
+}
+
+# --- the flip ---------------------------------------------------------------
+
+# Bring `release` up on the idle port, move nginx to it, retire the old one.
+# Used by both a deploy and a rollback, so the two cannot drift apart.
+activate_release() {
+  local release
+  # Resolve first: `--activate /opt/frameos-cloud` is the natural way to
+  # re-activate what is already live, and pinning an instance to a symlink
+  # that later deploys move would make the pin meaningless.
+  release="$(readlink -f "$1")"
+  [ -n "$release" ] || die "cannot resolve release path '$1'"
+  [ -f "$release/cloud/apps/auth-web/server.js" ] ||
+    die "$release does not look like a release (no cloud/apps/auth-web/server.js)"
+
+  local from to
+  from="$(active_port)"
+  to="$(idle_port "$from")"
+
+  log "current traffic is on ${from}; bringing the new release up on ${to}"
+  link_atomic "$release" "$instances_dir/$to"
+  systemctl restart "${unit_prefix}${to}.service"
+
+  if ! wait_for_health "$to"; then
+    log "rolling back: stopping ${to}, traffic stays on ${from}"
+    systemctl stop "${unit_prefix}${to}.service" || true
+    systemctl status --no-pager --lines=30 "${unit_prefix}${to}.service" >&2 || true
+    return 1
+  fi
+
+  log "new instance on ${to} is healthy; pointing nginx at it"
+  if ! point_nginx_at "$to"; then
+    log "nginx refused the new upstream; stopping ${to}, traffic stays on ${from}"
+    systemctl stop "${unit_prefix}${to}.service" || true
+    return 1
+  fi
+
+  # Only now is the new release "the" release, so the compat symlinks and the
+  # hub follow the flip rather than leading it.
+  local previous
+  previous="$(link_target "$app_link")"
+  if [ -n "$previous" ] && [ "$previous" != "$release" ]; then
+    link_atomic "$previous" "$previous_link"
+  fi
+  link_atomic "$release" "$app_link"
+
+  local hub_ok=true
+  restart_frame_hub || hub_ok=false
+
+  # systemd will not start an instance that is enabled but was stopped, and
+  # an enabled instance is what survives a reboot. Enable the live one and
+  # disable the other so a reboot brings back exactly one process.
+  systemctl enable --quiet "${unit_prefix}${to}.service" || true
+  systemctl disable --quiet "${unit_prefix}${from}.service" 2>/dev/null || true
+
+  if [ "$from" != "$to" ]; then
+    log "draining ${from} for ${drain_seconds}s"
+    sleep "$drain_seconds"
+  fi
+  stop_other_instances "$to"
+
+  prune_releases
+  log "live: $(release_ref_line "$release")"
+  log "serving on port ${to}; rollback: frameos-cloud-update --rollback"
+
+  # Reported last, and as a failure, but only after the swap is fully tidy:
+  # auth-web is serving the new release either way.
+  [ "$hub_ok" = true ] || die "auth-web is live but ${hub_unit} is down"
+  return 0
+}
+
+# --- commands ---------------------------------------------------------------
+
+cmd_archive() {
+  local source="$1"
+  [ "$source" = "-" ] || die "--archive only reads stdin ('-')"
+  [ -f "$env_file" ] || die "missing $env_file"
+  log_section "Deploy from stdin bundle"
+  migrate_layout
+
+  local staging
+  staging="$(mktemp -d "$releases_dir/.incoming.XXXXXX")"
+  trap 'rm -rf "$staging"' EXIT
+  log "unpacking the release"
+  tar -C "$staging" -xf -
+
+  [ -f "$staging/RELEASE" ] || die "the archive has no RELEASE file"
+  local sha
+  sha="$(tr -dc '0-9a-f' <"$staging/RELEASE" | cut -c1-12)"
+  [ -n "$sha" ] || die "the archive's RELEASE file is not a commit sha"
+
+  local release
+  release="$releases_dir/${sha}-$(date -u +%Y%m%dT%H%M%SZ)"
+  [ -e "$release" ] && rm -rf "$release"
+
+  if id -u "$service_user" >/dev/null 2>&1; then
+    # -h so the many relative symlinks inside node_modules/.pnpm are retargeted
+    # as links rather than having their referents chowned twice.
+    chown -Rh "$service_user":"$service_user" "$staging"
+  else
+    log "service user ${service_user} does not exist; leaving ownership as root"
+  fi
+
+  # Migrations run from the NEW release and before anything is flipped, so a
+  # failing migration leaves the running app untouched — the staging
+  # directory is simply thrown away by the trap.
+  log "applying database migrations"
+  (
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+    cd "$staging/cloud"
+    scripts/db-migrate.sh
+  ) || die "migrations failed; production untouched"
+
+  mv "$staging" "$release"
+  trap - EXIT
+  chmod 755 "$release"
+
+  activate_release "$release" || die "deploy failed; the previous release is still serving"
+  self_update "$release"
+}
+
+cmd_rollback() {
+  local target
+  target="$(link_target "$previous_link")"
+  [ -n "$target" ] || die "no previous release recorded at $previous_link"
+  [ -d "$target" ] || die "$previous_link points at $target, which no longer exists"
+  log_section "Rollback"
+  log "rolling back to $(release_ref_line "$target")"
+  log "note: database migrations are not rolled back"
+  activate_release "$target" || die "rollback failed; the current release is still serving"
+}
+
+cmd_status() {
+  local port release
+  port="$(active_port)"
+  release="$(link_target "$app_link")"
+  echo "active port:      ${port}"
+  echo "active release:   ${release:-none}"
+  echo "previous release: $(link_target "$previous_link" || true)"
+  [ -n "$release" ] && echo "release ref:      $(release_ref_line "$release")"
+  local unit_state pinned
+  for port in "${ports[@]}"; do
+    # `systemctl is-active` exits non-zero for anything but active, so read
+    # its output and treat the exit code as noise; `|| echo unknown` here
+    # would print the state AND "unknown" on every idle instance.
+    unit_state="$(systemctl is-active "${unit_prefix}${port}.service" 2>/dev/null || true)"
+    pinned="$(link_target "$instances_dir/$port")"
+    printf 'instance %s:    %s (%s)\n' "$port" \
+      "${unit_state:-unknown}" "${pinned:-unpinned}"
+  done
+}
+
+[ $# -gt 0 ] || {
+  usage
+  exit 2
+}
+
+case "$1" in
+  --archive)
+    shift
+    [ $# -eq 1 ] || die "--archive takes exactly one argument ('-')"
+    cmd_archive "$1"
+    ;;
+  --rollback)
+    migrate_layout
+    cmd_rollback
+    ;;
+  --activate)
+    shift
+    [ $# -eq 1 ] || die "--activate takes a release directory"
+    migrate_layout
+    activate_release "$1"
+    ;;
+  --status)
+    cmd_status
+    ;;
+  -h | --help)
+    usage
+    ;;
+  *)
+    die "unknown argument: $1"
+    ;;
+esac

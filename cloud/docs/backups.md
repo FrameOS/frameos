@@ -90,14 +90,18 @@ pgBackRest restores the whole cluster to any moment inside the retention
 window — e.g. one minute before the bad statement:
 
 ```sh
-systemctl stop frameos-cloud-auth-web.service frameos-cloud-frame-hub.service
+systemctl stop 'frameos-cloud-auth-web@*.service' frameos-cloud-frame-hub.service
 systemctl stop postgresql
 sudo -u postgres pgbackrest --stanza=frameos --delta \
   --type=time --target="2026-08-15 09:00:00+00" --target-action=promote restore
 systemctl start postgresql
 # verify, then:
-systemctl start frameos-cloud-auth-web.service frameos-cloud-frame-hub.service
+systemctl start "frameos-cloud-auth-web@$(cat /etc/frameos-cloud/active-port).service" frameos-cloud-frame-hub.service
 ```
+
+auth-web runs as a port-named template instance and only one of the pair is
+up, hence the glob to stop it and `/etc/frameos-cloud/active-port` to start
+the right one again (`frameos-cloud-update --status` prints it too).
 
 `--delta` reuses unchanged files in the data directory, so this is fast.
 Omit `--type=time --target=...` to restore to the latest archived WAL
@@ -106,11 +110,11 @@ Omit `--type=time --target=...` to restore to the latest archived WAL
 ### From the nightly logical dump
 
 ```sh
-systemctl stop frameos-cloud-auth-web.service frameos-cloud-frame-hub.service
+systemctl stop 'frameos-cloud-auth-web@*.service' frameos-cloud-frame-hub.service
 rclone copy storagebox:frameos-cloud-backups/db-<stamp>.dump /root/restore/
 pg_restore --clean --if-exists --no-owner \
   -d "$DATABASE_URL" /root/restore/db-<stamp>.dump
-systemctl start frameos-cloud-auth-web.service frameos-cloud-frame-hub.service
+systemctl start "frameos-cloud-auth-web@$(cat /etc/frameos-cloud/active-port).service" frameos-cloud-frame-hub.service
 ```
 
 For a single table, restore into a scratch database (see "Rehearsal") and
