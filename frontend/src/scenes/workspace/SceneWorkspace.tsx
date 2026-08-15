@@ -999,7 +999,7 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
   const frameLogicProps = { frameId }
   const { frame, scenes, unsavedChanges, undeployedChanges } = useValues(frameLogic(frameLogicProps))
   const { framesList } = useValues(framesModel)
-  const { selectedSceneId, templateDrawerFrameId, utilityPanel } = useValues(workspaceLogic)
+  const { selectedSceneId, selectedSceneIdsByFrame, templateDrawerFrameId, utilityPanel } = useValues(workspaceLogic)
 
   if (!frame) {
     return (
@@ -1016,8 +1016,18 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
     )
   }
 
+  // Resolve against the RAW per-frame selection first: workspaceLogic's
+  // selectedSceneId validates against framesModel, which only knows SAVED
+  // scenes — an unsaved scene (e.g. one the AI chat just delivered into the
+  // frame form) would bounce to the default scene on every click. frameLogic's
+  // `scenes` includes the frame form, so it can vouch for unsaved scenes too.
+  const requestedSceneId = selectedSceneIdsByFrame[frameId] ?? selectedSceneId
   const resolvedSceneId =
-    selectedSceneId && scenes.some((scene) => scene.id === selectedSceneId) ? selectedSceneId : scenes[0]?.id ?? null
+    requestedSceneId && scenes.some((scene) => scene.id === requestedSceneId)
+      ? requestedSceneId
+      : selectedSceneId && scenes.some((scene) => scene.id === selectedSceneId)
+      ? selectedSceneId
+      : scenes[0]?.id ?? null
   const selectedScene = scenes.find((scene) => scene.id === resolvedSceneId) ?? null
   const activeUtilityDefinition = sceneUtilityDefinition(utilityPanel, selectedScene, frame.mode)
 

@@ -47,7 +47,7 @@ interface CapturedFrame {
 // backend. Cached per key for the session; a failed fetch degrades to no
 // secrets for that render only.
 const settingsJsonPromises = new Map<string, Promise<string>>()
-function fetchSettingsJson(frameId: FrameId): Promise<string> {
+export function fetchSettingsJson(frameId: FrameId): Promise<string> {
   const cacheKey = isCloudMode() ? 'cloud' : `frame:${frameId}`
   let promise = settingsJsonPromises.get(cacheKey)
   if (!promise) {
@@ -74,7 +74,7 @@ function fetchSettingsJson(frameId: FrameId): Promise<string> {
   return promise
 }
 
-async function previewProxyUrl(frameId: FrameId): Promise<string> {
+export async function previewProxyUrl(frameId: FrameId): Promise<string> {
   // Same-origin proxy for the runtime's CORS-blocked HTTP fetches — the same
   // per-mode endpoints livePreviewLogic resolves.
   const configuredProxyUrl = (window as any).FRAMEOS_APP_CONFIG?.preview_proxy_url

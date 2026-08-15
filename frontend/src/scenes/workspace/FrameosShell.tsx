@@ -479,7 +479,14 @@ export function FrameosShell({
   }, [resolvedBrowserTitle])
 
   return (
-    <div className={clsx('frameos-app-shell min-h-screen overflow-x-hidden text-slate-900', `frameos-theme-${theme}`)}>
+    <div
+      // The route-loading placeholder renders a pixel-identical rail with the
+      // same classes and titles, but its nav buttons only navigate — they can
+      // not toggle the secondary panel. Tests (and anything else scripting the
+      // UI) need to tell the two apart before clicking.
+      data-workspace-shell="ready"
+      className={clsx('frameos-app-shell min-h-screen overflow-x-hidden text-slate-900', `frameos-theme-${theme}`)}
+    >
       <aside
         className={clsx(
           'workspace-sidebar frameos-panel fixed bottom-5 left-5 top-5 z-30 flex max-w-[calc(100vw-40px)] overflow-hidden rounded-[24px] border border-white/80 bg-white/90 shadow-2xl shadow-slate-400/30 backdrop-blur-xl',

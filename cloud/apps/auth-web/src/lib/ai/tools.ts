@@ -1,10 +1,11 @@
 // Tool definitions + executor for the AI chat agent loop. Tools fall into
 // five groups: knowledge (bundled catalog/docs), source code (GitHub raw,
 // Nim excluded), frames (Postgres telemetry + command queue), store catalog
-// (verified publishers), and scene delivery (create/update with local
-// validation — invalid JSON bounces back to the model as tool output instead
-// of reaching the editor).
-import { and, desc, eq, gt, isNotNull, isNull, or } from "drizzle-orm";
+// (public scenes plus everything the user owns or has installed on a
+// frame), and scene delivery (create/update with local validation — invalid
+// JSON bounces back to the model as tool output instead of reaching the
+// editor).
+import { and, desc, eq, exists, gt, isNull, or } from "drizzle-orm";
 import {
   accounts,
   createDb,
@@ -32,6 +33,11 @@ import {
   type JsonObject,
 } from "./scene-utils";
 import type { ResponsesToolDefinition } from "./openai";
+import {
+  assignScenesToFrame,
+  currentSceneAssignments,
+  maxScenesPerFrame,
+} from "../frame-scenes";
 import {
   enqueueFrameCommand,
   frameForAccount,
@@ -327,8 +333,37 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
   },
   {
     description:
-      "Search publicly published store scenes from verified publishers. Returns name, slug, description, " +
-      "category, tags and download counts.",
+      "Install a store scene on a frame and deploy it. Adds the scene to the frame's assigned scenes and " +
+      "immediately pushes the whole set to the device — this is exactly what the Scenes tab's Save/Deploy " +
+      "button does, so do NOT tell the user to do it by hand. The change is live on the physical frame, so " +
+      "only call this when the user asked for it. Use scene ids from search_store_scenes / get_store_scene " +
+      "and frame ids from list_frames. Already-assigned scenes are re-deployed rather than duplicated. An " +
+      "offline frame still accepts the call: the push is queued and lands when it reconnects.",
+    name: "add_scene_to_frame",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        frame_id: { description: "Frame id.", type: "string" },
+        scene_id: {
+          description: "Store scene id to install.",
+          type: "string",
+        },
+        scene_version: {
+          description:
+            "Pin this published version. Omit to track the latest version.",
+          type: "integer",
+        },
+      },
+      required: ["frame_id", "scene_id"],
+      type: "object",
+    },
+    type: "function",
+  },
+  {
+    description:
+      "Search store scenes: every public scene plus ALL of the user's own scenes (private ones included). " +
+      "Returns name, slug, description, category, tags, download counts, visibility and whether the " +
+      "publisher is verified. Check here before saying a scene does not exist.",
     name: "search_store_scenes",
     parameters: {
       additionalProperties: false,
@@ -341,8 +376,8 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
   },
   {
     description:
-      "Full scene JSON of a store scene (public scenes, or any scene the user owns). Use before " +
-      "recommending, forking or modifying a store scene.",
+      "Full scene JSON of a store scene (public scenes, any scene the user owns, or any scene installed " +
+      "on one of their frames). Use before recommending, forking or modifying a store scene.",
     name: "get_store_scene",
     parameters: {
       additionalProperties: false,
@@ -393,6 +428,7 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
 
 // Short human labels the SPA shows in the activity log while a tool runs.
 export const toolLabels: Record<string, string> = {
+  add_scene_to_frame: "Installing scene on frame",
   create_scenes: "Building scene",
   get_app: "Reading app config",
   get_example: "Reading example scene",
@@ -681,10 +717,79 @@ export async function executeTool(
         note: "The frame reports metrics asynchronously; a fresh sample lands in get_frame_metrics within a few seconds.",
       });
     }
+    // The one tool that changes what a physical frame shows. Every gate the
+    // workspace's Save/Deploy runs is in assignScenesToFrame, shared with
+    // app/api/frames/[frameId]/scenes/route.ts — this case only turns "add
+    // one scene" into the full replacement list that helper expects.
+    case "add_scene_to_frame": {
+      const frame = await ownedFrame(ctx, args.frame_id);
+      const sceneId = asString(args.scene_id);
+      if (!sceneId) {
+        return JSON.stringify({ error: "scene_id is required" });
+      }
+      const sceneVersion =
+        typeof args.scene_version === "number" &&
+        Number.isInteger(args.scene_version) &&
+        args.scene_version >= 1
+          ? args.scene_version
+          : null;
+
+      const existing = await currentSceneAssignments(ctx.db, frame.id);
+      // Re-deploying an already-assigned scene is the useful reading of a
+      // duplicate add (the user asking again usually means "it is still not
+      // on there"), and the helper rejects duplicate ids outright.
+      const alreadyAssigned = existing.some(
+        (entry) => entry.sceneId === sceneId,
+      );
+      const requested = alreadyAssigned
+        ? existing.map((entry) =>
+            entry.sceneId === sceneId ? { sceneId, sceneVersion } : entry,
+          )
+        : [...existing, { sceneId, sceneVersion }];
+      if (requested.length > maxScenesPerFrame) {
+        return JSON.stringify({
+          error: `A frame can hold at most ${maxScenesPerFrame} scenes; this one already has ${existing.length}. Ask the user which scene to remove.`,
+        });
+      }
+
+      const outcome = await assignScenesToFrame(ctx.db, {
+        accountId: ctx.accountId,
+        actor: { accountId: ctx.accountId, via: "ai_chat" },
+        frame,
+        requested,
+        via: "ai_chat",
+      });
+      if (!outcome.ok) {
+        // The wire codes are meaningful to the model, but only just — spell
+        // out the two it can actually do something about.
+        const explanation =
+          outcome.failure.code === "scene_not_allowed"
+            ? "That scene version runs shell commands, which a cloud push may never carry. Tell the user it has to be installed from the frame itself."
+            : outcome.failure.code === "frame_not_active"
+              ? "The frame is not active yet — the owner has to confirm it before scenes can be pushed."
+              : outcome.failure.code;
+        return JSON.stringify({
+          error: explanation,
+          ...(outcome.failure.detail ?? {}),
+        });
+      }
+      return JSON.stringify({
+        assigned_scenes: outcome.result.sceneNames,
+        deployed: true,
+        note: frame.connected
+          ? "Installed and deployed. The frame applies it within seconds; no further action from the user."
+          : "Installed. The frame is offline, so the deploy is queued and lands when it reconnects.",
+        re_deployed: alreadyAssigned,
+      });
+    }
     case "search_store_scenes": {
       const query = asString(args.query)?.toLowerCase();
+      // Same visibility rules as the store front (no verified-publisher
+      // gate — verification is a trust signal in the results, not a filter),
+      // widened with the user's own scenes regardless of visibility.
       const rows = await ctx.db
         .select({
+          accountId: storeScenes.accountId,
           category: storeScenes.category,
           description: storeScenes.description,
           downloadCount: storeScenes.downloadCount,
@@ -693,27 +798,43 @@ export async function executeTool(
           publisher: accounts.displayName,
           slug: storeScenes.slug,
           tags: storeScenes.tags,
+          verifiedPublisherAt: accounts.verifiedPublisherAt,
+          visibility: storeScenes.visibility,
         })
         .from(storeScenes)
         .innerJoin(accounts, eq(accounts.id, storeScenes.accountId))
         .where(
           and(
-            eq(storeScenes.visibility, "public"),
             eq(storeScenes.status, "active"),
             gt(storeScenes.latestVersion, 0),
-            isNotNull(accounts.verifiedPublisherAt),
-            isNull(accounts.storeBannedAt),
+            or(
+              eq(storeScenes.accountId, ctx.accountId),
+              and(
+                eq(storeScenes.visibility, "public"),
+                isNull(accounts.storeBannedAt),
+              ),
+            ),
           ),
         )
-        .orderBy(desc(storeScenes.downloadCount), desc(storeScenes.updatedAt))
+        .orderBy(
+          desc(eq(storeScenes.accountId, ctx.accountId)),
+          desc(storeScenes.downloadCount),
+          desc(storeScenes.updatedAt),
+        )
         .limit(100);
-      const results = query
-        ? rows.filter((row) =>
-            `${row.name} ${row.description ?? ""} ${(row.tags ?? []).join(" ")} ${row.category ?? ""}`
-              .toLowerCase()
-              .includes(query),
-          )
-        : rows;
+      const results = (
+        query
+          ? rows.filter((row) =>
+              `${row.name} ${row.description ?? ""} ${(row.tags ?? []).join(" ")} ${row.category ?? ""} ${row.publisher ?? ""}`
+                .toLowerCase()
+                .includes(query),
+            )
+          : rows
+      ).map(({ accountId, verifiedPublisherAt, ...row }) => ({
+        ...row,
+        owned_by_user: accountId === ctx.accountId,
+        verified_publisher: verifiedPublisherAt !== null,
+      }));
       return truncateResult(JSON.stringify({ scenes: results.slice(0, 50) }));
     }
     case "get_store_scene": {
@@ -721,6 +842,22 @@ export async function executeTool(
       if (!sceneId || !/^[0-9a-f-]{36}$/i.test(sceneId)) {
         return JSON.stringify({ error: "scene_id must be a store scene uuid" });
       }
+      // Readable: public scenes, the user's own scenes, and anything
+      // installed on one of the user's frames (even if it has since gone
+      // private or was pulled — the frame already runs those bytes and the
+      // AI needs them to debug or modify what is on the wall).
+      const installedOnOwnFrame = exists(
+        ctx.db
+          .select({ id: frameSceneAssignments.id })
+          .from(frameSceneAssignments)
+          .innerJoin(frames, eq(frames.id, frameSceneAssignments.frameId))
+          .where(
+            and(
+              eq(frameSceneAssignments.sceneId, storeScenes.id),
+              eq(frames.accountId, ctx.accountId),
+            ),
+          ),
+      );
       const [scene] = await ctx.db
         .select()
         .from(storeScenes)
@@ -730,6 +867,7 @@ export async function executeTool(
             or(
               eq(storeScenes.accountId, ctx.accountId),
               and(eq(storeScenes.visibility, "public"), eq(storeScenes.status, "active")),
+              installedOnOwnFrame,
             ),
           ),
         )

@@ -93,4 +93,13 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain('"interpreted"');
     expect(prompt).toContain("FrameOSContext");
   });
+
+  // The agent used to answer "I can't change the frame's assigned scene list
+  // from here" and recite the manual UI steps. It can, so the prompt has to
+  // say so — otherwise the tool exists and never gets called.
+  it("tells the agent it can install scenes on frames itself", () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toContain("add_scene_to_frame");
+    expect(prompt).toMatch(/never claim you cannot change a frame's scenes/i);
+  });
 });

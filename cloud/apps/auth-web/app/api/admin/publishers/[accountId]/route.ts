@@ -20,7 +20,8 @@ type RouteContext = { params: Promise<{ accountId: string }> };
 // working — sign-in, backups, existing scenes — but every new store publish
 // is rejected until the ban is lifted; existing scenes are moderated
 // separately, pull them per scene if needed) and the verified-publisher
-// trust mark (consumed by the AI chat's store-catalog tool).
+// trust mark (surfaced as a trust signal in the AI chat's store search and
+// toggled from the admin store-scenes page).
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const csrf = csrfResponse(request);
   if (csrf) {

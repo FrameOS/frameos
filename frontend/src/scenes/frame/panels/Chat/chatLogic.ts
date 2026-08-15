@@ -22,6 +22,7 @@ import { editAppLogic } from '../EditApp/editAppLogic'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { streamCloudAiChat, type CloudAiChatEvent } from '../../../../utils/cloudAiChat'
+import { renderSceneCheck } from '../../../../utils/wasmSceneRenderCheck'
 import { projectApiPathForProject } from '../../../../utils/projectApi'
 
 import type { chatLogicType } from './chatLogicType'
@@ -29,6 +30,11 @@ import type { chatLogicType } from './chatLogicType'
 const MAX_HISTORY = 8
 const CHAT_PAGE_SIZE = 20
 const APP_CONTEXT_SEPARATOR = '::'
+// After the cloud agent delivers a scene, it is rendered once in the wasm
+// preview runtime; runtime errors go back to the agent as an automatic
+// follow-up message, at most this many rounds per user message.
+const MAX_RENDER_CHECK_ROUNDS = 2
+const RENDER_CHECK_PREFIX = '[Automatic render check]'
 
 function frameProjectId(frameForm: Partial<FrameType>, frame: FrameType | null | undefined): number | null {
   return frameForm.project_id ?? frame?.project_id ?? null
@@ -133,7 +139,11 @@ export const chatLogic = kea<chatLogicType>([
   })),
   actions({
     setInput: (input: string) => ({ input }),
-    submitMessage: (content: string, chatId?: string | null) => ({ content, chatId }),
+    submitMessage: (content: string, chatId?: string | null, renderCheckRound?: number) => ({
+      content,
+      chatId,
+      renderCheckRound,
+    }),
     setSubmitting: (isSubmitting: boolean) => ({ isSubmitting }),
     setError: (error: string | null) => ({ error }),
     appendMessage: (chatId: string, message: ChatMessage) => ({ chatId, message }),
@@ -176,7 +186,9 @@ export const chatLogic = kea<chatLogicType>([
       '',
       {
         setInput: (_, { input }) => input,
-        submitMessage: () => '',
+        // Automatic render-check follow-ups must not clear a draft the user
+        // may be typing while the check runs.
+        submitMessage: (state, { renderCheckRound }) => (renderCheckRound ? state : ''),
       },
     ],
     isSubmitting: [
@@ -788,7 +800,7 @@ export const chatLogic = kea<chatLogicType>([
         actions.loadChatMessagesFailure(chatId, error instanceof Error ? error.message : 'Failed to load chat history')
       }
     },
-    submitMessage: async ({ content, chatId: chatIdOverride }) => {
+    submitMessage: async ({ content, chatId: chatIdOverride, renderCheckRound }) => {
       const prompt = content.trim()
       if (!prompt) {
         actions.setSubmitting(false)
@@ -956,9 +968,10 @@ export const chatLogic = kea<chatLogicType>([
           let logContent = ''
           let finalTool: string | undefined
           let streamError: string | null = null
-          const applyBuildScenes = async (scenes: Record<string, any>[], title?: string): Promise<void> => {
+          let deliveredSceneId: string | null = null
+          const applyBuildScenes = async (scenes: Record<string, any>[], title?: string): Promise<string | null> => {
             if (!scenes.length) {
-              return
+              return null
             }
             const frameStore = frameLogic({ frameId: props.frameId })
             const existingSceneIds = new Set(frameStore.values.scenes.map((scene) => scene.id))
@@ -982,6 +995,7 @@ export const chatLogic = kea<chatLogicType>([
             if (newlyAddedScene) {
               scenesLogic({ frameId: props.frameId }).actions.focusScene(newlyAddedScene.id)
             }
+            return newlyAddedScene?.id ?? null
           }
           await streamCloudAiChat(
             {
@@ -1019,12 +1033,13 @@ export const chatLogic = kea<chatLogicType>([
                   break
                 case 'scenes':
                   if (event.tool === 'build_scene') {
-                    await applyBuildScenes(event.scenes ?? [], event.title)
+                    deliveredSceneId = (await applyBuildScenes(event.scenes ?? [], event.title)) ?? deliveredSceneId
                   } else {
                     const updatedScene = event.scenes?.[0]
                     const targetSceneId = updatedScene?.id || selectedScene?.id
                     if (updatedScene && targetSceneId) {
                       actions.updateScene(targetSceneId, updatedScene)
+                      deliveredSceneId = targetSceneId
                     }
                   }
                   break
@@ -1046,6 +1061,57 @@ export const chatLogic = kea<chatLogicType>([
             isStreaming: false,
             isPlaceholder: false,
           })
+          if (deliveredSceneId) {
+            // Render the delivered scene once in the wasm preview runtime and
+            // hand runtime errors straight back to the agent — a scene that
+            // validated as JSON can still fail at render time.
+            logContent = `${logContent ? `${logContent}\n` : ''}Checking that the scene renders…`
+            actions.updateMessage(chatId, assistantMessageId, { logContent })
+            try {
+              const frameValues = frameLogic({ frameId: props.frameId }).values
+              const check = await renderSceneCheck(
+                {
+                  id: props.frameId,
+                  width: frameValues.frameForm?.width ?? frameValues.frame?.width,
+                  height: frameValues.frameForm?.height ?? frameValues.frame?.height,
+                  rotate: frameValues.frameForm?.rotate ?? frameValues.frame?.rotate,
+                  name: frameValues.frameForm?.name ?? frameValues.frame?.name,
+                  timezone: frameValues.frameForm?.timezone ?? frameValues.frame?.timezone,
+                },
+                frameValues.frameForm?.scenes ?? frameValues.scenes,
+                deliveredSceneId
+              )
+              const uniqueErrors = Array.from(new Set(check.errors))
+              if (uniqueErrors.length === 0 && check.rendered) {
+                logContent = `${logContent}\nRender check passed${
+                  check.renderMs !== null ? ` (${(check.renderMs / 1000).toFixed(1)}s)` : ''
+                }`
+                actions.updateMessage(chatId, assistantMessageId, { logContent })
+              } else {
+                const round = renderCheckRound ?? 0
+                logContent = `${logContent}\nRender check found ${uniqueErrors.length || 'render'} problem${
+                  uniqueErrors.length === 1 ? '' : 's'
+                }`
+                actions.updateMessage(chatId, assistantMessageId, { logContent })
+                if (round < MAX_RENDER_CHECK_ROUNDS) {
+                  const reported = uniqueErrors.slice(0, 8)
+                  const feedback =
+                    `${RENDER_CHECK_PREFIX} I rendered the delivered scene with the in-browser preview runtime` +
+                    `${check.rendered ? '' : ' and it produced no image'}. It reported these errors:\n` +
+                    reported.map((error) => `- ${error}`).join('\n') +
+                    (uniqueErrors.length > reported.length
+                      ? `\n(and ${uniqueErrors.length - reported.length} more)`
+                      : '') +
+                    '\nPlease fix the scene so it renders without errors and deliver the corrected version.'
+                  actions.submitMessage(feedback, chatId, round + 1)
+                  return
+                }
+              }
+            } catch (checkError) {
+              // The check is best-effort; never fail the chat over it.
+              console.error('Render check failed', checkError)
+            }
+          }
           actions.setSubmitting(false)
           return
         }

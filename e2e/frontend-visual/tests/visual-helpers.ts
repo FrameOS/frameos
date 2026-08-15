@@ -505,8 +505,22 @@ export async function settleForScreenshot(page: Page): Promise<void> {
     return Boolean(body.querySelector('button, canvas, img, input, select, textarea, video, [role="button"]'))
   })
   await page.waitForLoadState('domcontentloaded')
+  await waitForWorkspaceShell(page)
   await page.waitForTimeout(500)
   await stabilizeActiveLogsSearchScroll(page)
+}
+
+/**
+ * The workspace route placeholder (`WorkspaceRouteLoading`) renders the same
+ * `.workspace-sidebar` / `.frameos-nav-button` markup — with the same titles —
+ * as the real shell, but its buttons only navigate instead of toggling the
+ * secondary panel. Clicking one before the route chunk mounts therefore looks
+ * like "the toggle did nothing", so wait it out before any interaction.
+ * Screens without a workspace shell (login, signup, the cloud app) never render
+ * the marker, so this resolves immediately for them.
+ */
+export async function waitForWorkspaceShell(page: Page): Promise<void> {
+  await page.locator('[data-workspace-shell="loading"]').waitFor({ state: 'detached' })
 }
 
 async function stabilizeActiveLogsSearchScroll(page: Page): Promise<void> {

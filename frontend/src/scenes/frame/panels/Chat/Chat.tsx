@@ -6,6 +6,7 @@ import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { scenesLogic } from '../Scenes/scenesLogic'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { Button } from '../../../../components/Button'
+import { Markdown } from '../../../../components/Markdown'
 import { TextArea } from '../../../../components/TextArea'
 import { Spinner } from '../../../../components/Spinner'
 import { useEffect, useRef, useState } from 'react'
@@ -351,12 +352,24 @@ export function Chat() {
     )
   }
 
+  // Assistant replies are markdown (the cloud agent answers in it); user
+  // messages stay plain text so typed characters are never re-interpreted.
+  const renderMessageContent = (messageContent: string, isUser: boolean) =>
+    isUser ? (
+      <div className="whitespace-pre-wrap break-words">{messageContent}</div>
+    ) : (
+      <div className="chat-markdown break-words">
+        <Markdown value={messageContent} />
+      </div>
+    )
+
   const renderMessageBody = (
     messageContent: string,
     isLog: boolean,
     messageId: string,
     isStreaming?: boolean,
-    logContent?: string
+    logContent?: string,
+    isUser?: boolean
   ) => {
     if (isLog) {
       return renderLogMessage(messageContent, messageId, isStreaming)
@@ -366,7 +379,7 @@ export function Chat() {
       return (
         <div className="space-y-3">
           <div>{renderLogMessage(logContent, messageId, isStreaming)}</div>
-          {messageContent ? <div className="whitespace-pre-wrap break-words">{messageContent}</div> : null}
+          {messageContent ? renderMessageContent(messageContent, Boolean(isUser)) : null}
         </div>
       )
     }
@@ -388,7 +401,7 @@ export function Chat() {
       return <div className="whitespace-pre-wrap break-words">{renderGeneratedSceneMessage(generatedSceneName)}</div>
     }
 
-    return <div className="whitespace-pre-wrap break-words">{messageContent}</div>
+    return renderMessageContent(messageContent, Boolean(isUser))
   }
 
   return (
@@ -530,7 +543,8 @@ export function Chat() {
                             isLog,
                             message.id,
                             message.isStreaming,
-                            message.logContent
+                            message.logContent,
+                            isUser
                           )}
                         </div>
                       </div>
