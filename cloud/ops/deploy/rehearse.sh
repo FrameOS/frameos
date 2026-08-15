@@ -62,7 +62,10 @@ case "$verb" in
   reload) echo "reload $unit" >>/tmp/fake/log ;;
   enable) : >"$state/$unit.enabled"; [ "$now" = true ] && : >"$state/$unit.active" ;;
   disable) rm -f "$state/$unit.enabled"; [ "$now" = true ] && rm -f "$state/$unit.active" ;;
-  cat) [ -e "$state/$unit.installed" ] || exit 1; echo "# $unit" ;;
+  # Faithful to the real thing: a unit exists exactly while its file does.
+  # Modelling it with a separate marker let the rehearsal miss a rerun where
+  # the file had already been moved aside but systemd still knew the name.
+  cat) [ -e "/etc/systemd/system/$unit" ] || exit 1; cat "/etc/systemd/system/$unit" ;;
   status) exit 0 ;;
   daemon-reload) : ;;
   show) echo "" ;;
@@ -108,8 +111,8 @@ install -m 0644 "/deploy/frameos-cloud-auth-web@.service" /etc/systemd/system/ 2
   mkdir -p /etc/systemd/system && install -m 0644 "/deploy/frameos-cloud-auth-web@.service" /etc/systemd/system/
 echo "DATABASE_URL=postgres://fake/fake" >/etc/frameos-cloud/auth-web.env
 
-# The frame hub exists on the real host, so model it as installed.
-: >"$state/units/frameos-cloud-frame-hub.service.installed"
+# The frame hub exists on the real host, so model it as installed and up.
+printf '[Service]\nExecStart=/bin/true\n' >/etc/systemd/system/frameos-cloud-frame-hub.service
 : >"$state/units/frameos-cloud-frame-hub.service.active"
 
 # Deploys are instant here; the drain only slows the rehearsal down.
@@ -289,7 +292,6 @@ cat >/etc/systemd/system/frameos-cloud-auth-web.service <<'UNIT'
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/node /opt/frameos-cloud/cloud/apps/auth-web/server.js
 UNIT
-: >"$state/units/frameos-cloud-auth-web.service.installed"
 : >"$state/units/frameos-cloud-auth-web.service.active"
 
 bash /deploy/install.sh --dry-run >/tmp/out8dry 2>&1 ||
@@ -312,9 +314,20 @@ check "the legacy unit file was kept as a backup" "yes" \
 check "one templated instance is running" "1" "$(running)"
 check "the adopted release is what it serves" "999999999999" "$(live_sha)"
 
-echo "9. and the next deploy on the converted host is normal"
+echo "9. rerunning the installer does not eat its own backup"
+# The first production run failed halfway and had to be rerun; the second
+# pass found the untouched backup and rewrote that too.
+bash /deploy/install.sh >/tmp/out9i 2>&1 || { cat /tmp/out9i; exit 1; }
+check "the backup still holds the original config" "yes" \
+  "$(grep -q 'proxy_pass http://127.0.0.1:3000;' /etc/nginx/snippets/frameos-cloud-proxy.conf.pre-blue-green && echo yes || echo no)"
+check "no backup of a backup was made" "0" \
+  "$(find /etc/nginx/snippets -name '*.pre-blue-green.pre-blue-green' | wc -l | tr -d ' ')"
+
+echo "10. and the next deploy on the converted host is normal"
+before="$(active_port)"
 deploy 444444444444 >/tmp/out9 2>&1 || { cat /tmp/out9; exit 1; }
-check "traffic flipped again" "3000" "$(active_port)"
+check "traffic flipped to the other port" "yes" \
+  "$([ "$(active_port)" != "$before" ] && echo yes || echo no)"
 check "the new release is live" "444444444444" "$(live_sha)"
 
 echo

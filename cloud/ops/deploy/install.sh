@@ -132,11 +132,17 @@ mapfile -t candidates < <(
 )
 for conf in "${candidates[@]}"; do
   [ "$conf" = "$upstream_file" ] && continue
+  # Never patch our own backups. A rerun of this installer would otherwise
+  # find the untouched .pre-blue-green copy, rewrite it, and back THAT up as
+  # .pre-blue-green.pre-blue-green — leaving the file named "the original"
+  # holding something that never was.
+  case "$conf" in *.pre-blue-green) continue ;; esac
   grep -q "proxy_pass http://127\.0\.0\.1:${legacy_port};" "$conf" 2>/dev/null || continue
   log "repointing $(readlink -f "$conf") at upstream ${upstream_name}"
   if [ "$dry_run" = false ]; then
     real="$(readlink -f "$conf")"
-    cp -p "$real" "${real}.pre-blue-green"
+    # Keep the first backup: it is the only copy of the pre-blue/green config.
+    [ -e "${real}.pre-blue-green" ] || cp -p "$real" "${real}.pre-blue-green"
     sed -i "s|proxy_pass http://127\.0\.0\.1:${legacy_port};|proxy_pass http://${upstream_name};|g" "$real"
     patched+=("$real")
   fi
@@ -149,8 +155,10 @@ fi
 
 if [ "$dry_run" = false ]; then
   if ! nginx -t; then
+    # cp, not mv: the backup is the only copy of the original config and has
+    # to survive the revert too.
     for real in "${patched[@]}"; do
-      mv -f "${real}.pre-blue-green" "$real"
+      cp -p "${real}.pre-blue-green" "$real"
     done
     die "nginx rejected the patched config; reverted, nothing changed"
   fi
@@ -173,7 +181,11 @@ if systemctl cat "$legacy_unit" >/dev/null 2>&1; then
   # which must not abort the install one step from the end — the stop is the
   # part that matters, and the unit file is moved aside right after.
   run systemctl disable --now "$legacy_unit" || run systemctl stop "$legacy_unit" || true
-  run mv -f "$unit_dir/$legacy_unit" "$unit_dir/${legacy_unit}.pre-blue-green"
+  # Guarded: a rerun after a half-finished install finds systemd still aware
+  # of a unit whose file has already been moved aside.
+  if [ -f "$unit_dir/$legacy_unit" ]; then
+    run mv -f "$unit_dir/$legacy_unit" "$unit_dir/${legacy_unit}.pre-blue-green"
+  fi
   run systemctl daemon-reload
 fi
 
