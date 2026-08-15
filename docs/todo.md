@@ -13,15 +13,6 @@ design — the cloud protocol has no shell verbs.
 
 ## Cloud launch — operator follow-ups
 
-- **Fill in `FRAMEOS_LEGAL_*` in prod** (company name, address, KBO/BCE
-  number, VAT number, representative, contact email). The legal pages show
-  a visible `[TO BE COMPLETED]` warning and `/admin` lists it as a required
-  setting until this is done. Have a lawyer read `/legal/terms`,
-  `/legal/privacy` and `/legal/imprint` before broad signup.
-- **Set `NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`** from a
-  Cloudflare Turnstile widget. The site key is inlined at build time, so it
-  must be present on the machine that runs the build, not only on the
-  server; `/admin` → Live checks reports a half-configured deploy.
 - **Remove the Discord webhook path** (`DISCORD_REPORTS_WEBHOOK_URL`,
   `signup-notifications.ts`, `discord.ts`) — notifications go through
   PostHog. The privacy policy already omits Discord, so leave the env var
@@ -36,9 +27,6 @@ design — the cloud protocol has no shell verbs.
   a reconnect; no UI for it. Run the one-off in prod.
 - **Seed `verified_publisher_at`** in prod for the accounts that should
   have it (SQL one-off; no admin toggle yet — see below).
-- **Bootstrap already-deployed buildroot frames on ≤ 2026.8.21** once by
-  hand (scp the release tarball and stage it) — their cloud OTA downloader
-  cannot fetch https, so they cannot self-upgrade into the fixed binary.
 - Disposable-email blocking was considered and skipped: Turnstile plus the
   rate limiter covers the automated case. Revisit only if abuse is observed.
 
