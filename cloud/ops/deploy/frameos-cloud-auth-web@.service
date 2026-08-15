@@ -20,7 +20,13 @@ WorkingDirectory=/opt/frameos-cloud.instances/%i/cloud/apps/auth-web
 # fails here rather than as 503s from a booted process. It is also the gate
 # that makes the deploy's health check meaningful.
 ExecStartPre=/usr/bin/node /opt/frameos-cloud.instances/%i/cloud/apps/auth-web/scripts/require-database-url.mjs production
-ExecStart=/usr/bin/node /opt/frameos-cloud.instances/%i/cloud/apps/auth-web/server.js
+# PORT and HOSTNAME are set HERE, on the command line, not with Environment=:
+# EnvironmentFile= overrides Environment= no matter which order they appear
+# in, and /etc/frameos-cloud/auth-web.env carries PORT=3000 from the days of
+# a single instance. With Environment=PORT=%i the 3001 instance read 3000 out
+# of the env file and died with EADDRINUSE against the instance already
+# serving — which is why the unit this replaced set them inline too.
+ExecStart=/usr/bin/env PORT=%i HOSTNAME=127.0.0.1 /usr/bin/node /opt/frameos-cloud.instances/%i/cloud/apps/auth-web/server.js
 
 # The instance runs whatever /opt/frameos-cloud.instances/%i points at, NOT
 # /opt/frameos-cloud. That pin is what makes an automatic restart safe: a
@@ -30,14 +36,9 @@ ExecStart=/usr/bin/node /opt/frameos-cloud.instances/%i/cloud/apps/auth-web/serv
 # loads route chunks out of it.
 
 EnvironmentFile=/etc/frameos-cloud/auth-web.env
-# After EnvironmentFile on purpose: systemd applies these in order, so this
-# wins over any PORT left in the env file. Both instances would otherwise
-# fight over the same port and the deploy would flip to a dead upstream.
-# (The unit this replaced set both inline on ExecStart, for the same reason.)
+# A default, not an override — the env file wins over this line (see
+# ExecStart). It only matters on a host whose env file forgot NODE_ENV.
 Environment=NODE_ENV=production
-Environment=PORT=%i
-# Next.js standalone binds HOSTNAME; nginx is the only client.
-Environment=HOSTNAME=127.0.0.1
 
 Restart=on-failure
 RestartSec=5
