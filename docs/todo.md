@@ -68,6 +68,65 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
 
 ## Cloud-managed frames
 
+- **Cloud frame settings parity + an honest Settings panel** — cloud-managed
+  Linux/Pi frames currently render nearly the full self-hosted per-frame form,
+  even though cloud save/diff/readback only support the declarative base keys
+  (`name`, `debug`, `interval`, `rotate`, `scaling_mode`, `timezone`; schedule
+  and service secrets use their own paths). Most of those visible controls are
+  therefore unsaveable and may appear to save while being dropped from the
+  cloud payload. First make the surface honest: hide unsupported sections or
+  disable them with a useful explanation, and never render an editable field
+  that the active device profile cannot round-trip.
+
+  Then widen `set_settings` in deliberately small, validated batches, keeping
+  the shared SPA payload list, auth-web validator/readback, Pi/Nim allowlist,
+  ESP32 handler (where applicable), docs, and drift tests in lockstep:
+
+  - Straightforward Pi/Linux candidates: `flip`, `error_behavior` (mode and
+    retry timings), and `control_code` (enable, placement, size/padding,
+    offsets, and colors).
+  - Useful with explicit bounds/policy: `metrics_interval` (including a clear,
+    actually-working disabled value), platform-capped
+    `max_http_response_bytes`, and `save_assets` (boolean/per-app, respecting
+    disk quotas). For `timezone_updater`, expose only enabled/hour and keep the
+    download endpoint fixed and trusted — never accept an arbitrary update
+    URL from the provider.
+  - Hardware-aware settings are especially worthwhile: custom display
+    `palette` colors, the strict partial-refresh subset of `device_config`
+    (`partial`, `partialMaxAreaPercent`,
+    `partialMaxRefreshesBeforeFull`), and `gpio_buttons` (pin + label). Validate
+    them against the reported panel/platform, advertise capability/version
+    requirements, and restart the runtime/device when the driver only reads
+    them at initialization. Never allow the whole `device_config` object just
+    to carry the partial-refresh fields.
+  - ESP32 follow-ups: `max_http_response_bytes`, noisy/debug logging, and GPIO
+    buttons are plausible because the NVS fields already exist; add only the
+    settings the firmware really consumes and preserve the whole-payload
+    rejection contract. The existing cloud power controls remain their own
+    ESP32-only subset.
+  - Automatic reboot is useful, but the self-hosted `reboot` object is mostly
+    deploy-time configuration rather than a live FrameConfig field. Implement
+    it as a real cloud-safe scheduler capability (possibly through the
+    existing schedule verb) instead of merely persisting an inert object.
+    Brightness is also desirable once the runtime and relevant drivers gain a
+    real brightness setting.
+
+  Do **not** add `image_engine` to the cloud allowlist. We want to remove
+  ImageMagick, not make it a cloud-facing compatibility promise: converge on
+  Pixie, migrate/ignore old `imagemagick` config values, remove the Settings
+  selector and ImageMagick-specific runtime/build/dependency paths, and test
+  that existing frames degrade to Pixie cleanly.
+
+  Keep provisioning, credentials, and host authority local: deployment mode,
+  panel/driver/VCOM/dimensions, flash and GPIO wiring, SD-card wiring, Wi-Fi
+  and hotspot credentials, private-network elevation, frame HTTP/admin/TLS
+  access and keys, SSH/backend/agent configuration, mountpoints, HTTP-upload
+  URLs/headers, arbitrary update URLs, and service API secrets must not ride
+  `set_settings`. Likewise, do not expose raw `assets_path` or `log_to_file`
+  paths; if those features are wanted remotely, redesign them as bounded
+  toggles using fixed FrameOS-owned directories. Hardware identity reported by
+  the frame should stay authoritative rather than becoming provider-editable.
+
 - **Cloud AI chat follow-ups** — the 2026-08-14 chat v2 rebuild (branch
   `cloud-ai-chat-v2`) replaced the ported pipeline with a streaming agentic
   loop (`/api/ai/chat`, NDJSON) with tools for the app catalog, docs,
@@ -210,6 +269,36 @@ numbers and the measurement tooling live in `docs/esp32-memory.md`.
   acceptable?
 
 ## Ideas parking lot (unscheduled)
+
+- **SVG `<text>` support in render/svg** (investigated 2026-08-15; verdict:
+  1–2 days, ~150–250 lines). Today any `<text>` tag makes the whole SVG fail,
+  and the AI scene prompt tells models to layer render/text instead. Pixie
+  already has all the hard parts: the fork's SVG parser
+  (`pixie/src/pixie/fileformats/svg.nim`) turns every tag into
+  `(Path, SvgProperties)` pairs, and `fonts.nim` already does text→path
+  (`typeset`, `getGlyphPath`, private `computePaths` — exposing it is a
+  one-word change). A `"text"` case in `parseSvgElement` would typeset the
+  inner text and append glyph paths translated by `(x, y − ascent·scale)`
+  (SVG `y` is the baseline; pixie's origin is top-left) — then fill, stroke,
+  gradients, transforms (rotated text), and FrameOS's banded rendering all
+  work for free. The one design question is font resolution: pixie's parser
+  has no font access, so `parseSvg` needs a `resolveTypeface(family)` hook;
+  FrameOS plugs in `getTypeface()` from `frameos/utils/font.nim` (embedded
+  Ubuntu-Regular default + `assets/fonts` + emoji fallback) — unknown
+  families must degrade to the default, never fail. v1 scope cuts: no
+  `<tspan>`, no `textLength`/`letter-spacing`, minimal `dominant-baseline`,
+  no complex shaping (pixie has none), and **no emoji** (color glyphs are
+  bitmaps the path-only element model can't carry — keep the "emoji via
+  render/text" prompt note). `text-anchor` middle/end is cheap via
+  `layoutBounds`. Preferred home: the pixie fork (single parse, sits next to
+  the banding/`renderInto` contract; nimble lock bump via the known
+  manual-checksum recipe). Alternative considered: a FrameOS-side pre-pass
+  replacing `<text>` nodes with computed `<path d>` before `parseSvg` — no
+  fork change, but double XML parse and hand-rolled attribute inheritance.
+  Follow-ons if built: update BOTH cloud AI prompt copies
+  (`cloud/apps/auth-web/src/lib/ai/prompts.ts` + the ai-scene prompt); WASM
+  preview works automatically (default font ships via nimassets); ESP32
+  flash cost near zero (fonts already embedded).
 
 - **Thin-client frames on the cloud (ESP32-C3, embedded Pi/Pico).** Parked
   2026-08-13 pending a product decision: serving these boards means the

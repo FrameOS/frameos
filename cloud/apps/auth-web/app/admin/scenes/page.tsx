@@ -37,7 +37,8 @@ export default async function AdminScenesPage({
   const scenes = await listScenesForAdmin(createDb(), query);
 
   return (
-    <AppShell isSuperadmin title="Store scenes">
+    // noCapture: the moderation table joins every scene to its owner's email.
+    <AppShell isSuperadmin noCapture title="Store scenes">
       <div className="content-header">
         <div>
           <p className="copy">

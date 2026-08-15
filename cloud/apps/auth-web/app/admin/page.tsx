@@ -38,7 +38,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   }));
 
   return (
-    <AppShell isSuperadmin title="Users">
+    // noCapture: this table lists every account's email address.
+    <AppShell isSuperadmin noCapture title="Users">
       <div className="content-header">
         <div>
           <p className="copy">
