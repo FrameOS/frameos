@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# /usr/local/bin/frameos-cloud-deploy-command — the forced command the
+# automatic-deploy SSH key is pinned to.
+#
+# Installed by hand once (see cloud/docs/deployment.md, "Automatic deploys"),
+# then kept equal to this file by frameos-cloud-update's self-update, like the
+# deploy script itself.
+#
+# In /root/.ssh/authorized_keys, on ONE line, appended — never rewrite that
+# file, and keep the human keys above untouched:
+#
+#   command="/usr/local/bin/frameos-cloud-deploy-command",restrict ssh-ed25519 AAAA… frameos-cloud-ci
+#
+# `restrict` turns off pty, agent, port and X11 forwarding and user-rc, and
+# `command=` means the key cannot ask for anything else: whatever the client
+# sends arrives in SSH_ORIGINAL_COMMAND and is compared against the list
+# below, and everything else is refused.
+#
+# What this does and does not buy: the key can still deploy, which means it
+# can still run arbitrary code on the box as the service user — a CI deploy
+# key is a production credential no matter how it is fenced. What it stops is
+# the much larger blast radius of a *root shell*: reading the environment
+# files (database URL, session secret, encryption key), the backups, or the
+# SSH keys that open the storage box. Rotate it like any other prod secret.
+
+log_file="/root/CODEX_LOG.md"
+note() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >>"$log_file" 2>/dev/null || true
+}
+
+# Exact strings, not a prefix match. `--archive` is the whole deploy, and the
+# rest are read-only or the documented rollback; anything with a shell
+# metacharacter, an extra argument or a different path fails the comparison
+# and is refused rather than sanitised.
+allowed=(
+  "frameos-cloud-update --archive -"
+  "frameos-cloud-update --rollback"
+  "frameos-cloud-update --status"
+  "frameos-cloud-update --release-ref"
+)
+
+original="${SSH_ORIGINAL_COMMAND:-}"
+
+if [ -z "$original" ]; then
+  echo "This key is restricted to the FrameOS Cloud deploy commands." >&2
+  note "deploy key: refused an interactive session from ${SSH_CONNECTION%% *}"
+  exit 126
+fi
+
+for candidate in "${allowed[@]}"; do
+  if [ "$original" = "$candidate" ]; then
+    # No eval: the allowlist entry is what runs, so the command is one of the
+    # four literals above even if SSH_ORIGINAL_COMMAND matched by luck.
+    case "$original" in
+      "frameos-cloud-update --archive -") exec /usr/local/bin/frameos-cloud-update --archive - ;;
+      "frameos-cloud-update --rollback") exec /usr/local/bin/frameos-cloud-update --rollback ;;
+      "frameos-cloud-update --status") exec /usr/local/bin/frameos-cloud-update --status ;;
+      "frameos-cloud-update --release-ref") exec /usr/local/bin/frameos-cloud-update --release-ref ;;
+    esac
+  fi
+done
+
+echo "Refused: this key may only run the FrameOS Cloud deploy commands." >&2
+printf 'Allowed: %s\n' "${allowed[@]}" >&2
+note "deploy key: refused '${original}' from ${SSH_CONNECTION%% *}"
+exit 126

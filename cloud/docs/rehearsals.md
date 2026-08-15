@@ -90,6 +90,14 @@ Pass criteria (the script checks each and exits non-zero on any):
 - A release that never becomes healthy, a failing migration, and an `nginx
 -t` failure each leave the upstream and the live release untouched.
 - `--rollback` returns to the previous release the same way.
+- The frame hub is restarted when its bundle changed and left running when it
+  did not, so a merge that does not touch `apps/frame-hub` costs the fleet no
+  reconnects.
+- A second deploy arriving while one is running is refused rather than
+  interleaved, and succeeds once the lock is free.
+- The deploy key's forced command (`frameos-cloud-deploy-command`) allows the
+  four deploy commands and refuses a shell, a chained command, a prefix match
+  and reading the environment file.
 - `install.sh` converts a legacy host without moving traffic until the new
   instance is up, keeps a backup of every vhost it rewrites, and leaves the
   frame hub's own `proxy_pass` alone.

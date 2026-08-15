@@ -134,14 +134,18 @@ check() {
   fi
 }
 
-# Build a release tarball the way scripts/deploy.sh does.
+# Build a release tarball the way scripts/deploy.sh does. The second argument
+# is the frame-hub bundle's contents: identical bytes across two deploys are
+# what lets the hub keep running, so the rehearsal has to be able to vary it.
 make_bundle() {
-  local sha="$1" dir
+  local sha="$1" hub="${2:-// hub v1}" dir
   dir="$(mktemp -d)"
-  mkdir -p "$dir/cloud/apps/auth-web" "$dir/cloud/scripts" \
-    "$dir/cloud/packages/db/drizzle" "$dir/cloud/ops/deploy"
+  mkdir -p "$dir/cloud/apps/auth-web" "$dir/cloud/apps/frame-hub/dist" \
+    "$dir/cloud/scripts" "$dir/cloud/packages/db/drizzle" "$dir/cloud/ops/deploy"
   echo "// server" >"$dir/cloud/apps/auth-web/server.js"
+  echo "$hub" >"$dir/cloud/apps/frame-hub/dist/index.cjs"
   cp /deploy/frameos-cloud-update "$dir/cloud/ops/deploy/frameos-cloud-update"
+  cp /deploy/frameos-cloud-deploy-command "$dir/cloud/ops/deploy/"
   cp "/deploy/frameos-cloud-auth-web@.service" "$dir/cloud/ops/deploy/"
   cat >"$dir/cloud/scripts/db-migrate.sh" <<'MIG'
 #!/usr/bin/env bash
@@ -155,7 +159,11 @@ MIG
   rm -rf "$dir"
 }
 
-deploy() { make_bundle "$1" | frameos-cloud-update --archive -; }
+deploy() { make_bundle "$1" "${2:-// hub v1}" | frameos-cloud-update --archive -; }
+
+# How many times the frame hub has been restarted so far. The fake systemctl
+# appends the unit name on every start/restart.
+hub_restarts() { grep -c '^frameos-cloud-frame-hub\.service$' /tmp/fake/log 2>/dev/null || true; }
 
 active_port() { sed -n 's/.*127\.0\.0\.1:\([0-9]*\);.*/\1/p' /etc/nginx/conf.d/frameos-cloud-upstream.conf; }
 live_sha() { cat /opt/frameos-cloud/RELEASE; }
@@ -191,8 +199,13 @@ check "nginx moved to the other port" "3000" "$(active_port)"
 check "the new release is live" "cccccccccccc" "$(live_sha)"
 check "previous points at the release before it" "bbbbbbbbbbbb" "$(cat /opt/frameos-cloud.previous/RELEASE)"
 check "still one instance" "1" "$(running)"
-check "the frame hub was restarted" "yes" \
-  "$(grep -qc frameos-cloud-frame-hub /tmp/fake/log >/dev/null && echo yes || echo no)"
+# Deploy 1 restarted the hub (nothing was recorded about it yet); deploy 2
+# shipped the same bundle, so the fleet's sockets are left alone. Sections 11
+# and 12 exercise the decision on purpose.
+check "the frame hub was restarted at least once" "yes" \
+  "$([ "$(hub_restarts)" -ge 1 ] && echo yes || echo no)"
+check "an unchanged hub bundle was not restarted again" "yes" \
+  "$(grep -q 'frame hub bundle is unchanged' /tmp/out2 && echo yes || echo no)"
 
 # --- 3. a release that never becomes healthy --------------------------------
 
@@ -330,8 +343,106 @@ check "traffic flipped to the other port" "yes" \
   "$([ "$(active_port)" != "$before" ] && echo yes || echo no)"
 check "the new release is live" "444444444444" "$(live_sha)"
 
+# --- 11. the frame hub is left alone when it did not change -----------------
+
+# Most merges do not touch apps/frame-hub, and restarting it drops every
+# device socket in the fleet for minutes. Since deploys are automatic, that
+# cost has to be paid only when the hub bundle actually differs.
+echo "11. an unchanged frame hub survives a deploy"
+before_restarts="$(hub_restarts)"
+deploy 555555555555 >/tmp/out11 2>&1 || { cat /tmp/out11; exit 1; }
+check "the release still went live" "555555555555" "$(live_sha)"
+check "the hub was not restarted" "$before_restarts" "$(hub_restarts)"
+check "and the deploy said so" "yes" \
+  "$(grep -q 'frame hub bundle is unchanged' /tmp/out11 && echo yes || echo no)"
+
+# --- 12. and restarted when it did ------------------------------------------
+
+echo "12. a changed frame hub is restarted"
+before_restarts="$(hub_restarts)"
+deploy 666666666666 "// hub v2" >/tmp/out12 2>&1 || { cat /tmp/out12; exit 1; }
+check "the hub was restarted once" "$((before_restarts + 1))" "$(hub_restarts)"
+check "the recorded hash is the new bundle's" "yes" \
+  "$([ "$(cat /etc/frameos-cloud/frame-hub-bundle.sha256)" = \
+    "$(sha256sum /opt/frameos-cloud/cloud/apps/frame-hub/dist/index.cjs | cut -d' ' -f1)" ] &&
+    echo yes || echo no)"
+# The next deploy of the same bundle skips again — the marker tracks what the
+# process is running, not what the previous release happened to contain.
+before_restarts="$(hub_restarts)"
+deploy 777777777777 "// hub v2" >/tmp/out12b 2>&1 || { cat /tmp/out12b; exit 1; }
+check "the following deploy left it alone" "$before_restarts" "$(hub_restarts)"
+
+# --- 13. two deploys at once ------------------------------------------------
+
+# A manual deploy and a CI deploy can now collide. Interleaving them would
+# race the idle port, the nginx upstream and the instance symlinks.
+echo "13. a concurrent deploy is refused rather than interleaved"
+if ! command -v flock >/dev/null 2>&1; then
+  check "flock is available to test the lock" "yes" "no"
+else
+  (
+    flock 9
+    : >/tmp/fake/lock-held
+    sleep 5
+  ) 9>/run/lock/frameos-cloud-update.lock &
+  holder=$!
+  while [ ! -e /tmp/fake/lock-held ]; do sleep 0.1; done
+
+  port_before="$(active_port)"
+  sha_before="$(live_sha)"
+  export FRAMEOS_CLOUD_LOCK_WAIT=1
+  if deploy 888888888888 >/tmp/out13 2>&1; then
+    check "the second deploy was refused" "yes" "no"
+  else
+    check "the second deploy was refused" "yes" "yes"
+  fi
+  unset FRAMEOS_CLOUD_LOCK_WAIT
+  check "it said why" "yes" \
+    "$(grep -q 'another deploy' /tmp/out13 && echo yes || echo no)"
+  check "traffic never moved" "$port_before" "$(active_port)"
+  check "the live release is untouched" "$sha_before" "$(live_sha)"
+  wait "$holder"
+  rm -f /tmp/fake/lock-held
+
+  # And the queue drains: the same deploy works once the lock is free.
+  deploy 888888888888 >/tmp/out13b 2>&1 || { cat /tmp/out13b; exit 1; }
+  check "it succeeds once the lock is free" "888888888888" "$(live_sha)"
+fi
+
+# --- 14. the forced command the CI deploy key is pinned to ------------------
+
+# This is the whole difference between a leaked Actions secret that can
+# deploy and one that has a root shell on the box, so the refusals are worth
+# asserting rather than assuming.
+echo "14. the deploy key's forced command allows only the deploy commands"
+install -m 0755 /deploy/frameos-cloud-deploy-command /usr/local/bin/frameos-cloud-deploy-command
+wrapper_says() {
+  SSH_ORIGINAL_COMMAND="$1" SSH_CONNECTION="203.0.113.1 1 203.0.113.2 22" \
+    /usr/local/bin/frameos-cloud-deploy-command >/dev/null 2>&1 && echo allowed || echo refused
+}
+check "--status is allowed" "allowed" "$(wrapper_says 'frameos-cloud-update --status')"
+check "--release-ref is allowed" "allowed" "$(wrapper_says 'frameos-cloud-update --release-ref')"
+check "an interactive session is refused" "refused" "$(wrapper_says '')"
+check "a shell is refused" "refused" "$(wrapper_says '/bin/bash')"
+check "reading the env file is refused" "refused" "$(wrapper_says 'cat /etc/frameos-cloud/auth-web.env')"
+check "a chained command is refused" "refused" \
+  "$(wrapper_says 'frameos-cloud-update --status; cat /etc/shadow')"
+check "an unlisted subcommand is refused" "refused" \
+  "$(wrapper_says 'frameos-cloud-update --activate /tmp/evil')"
+check "a prefix of an allowed command is refused" "refused" \
+  "$(wrapper_says 'frameos-cloud-update --statusx')"
+# And the self-update keeps the box's copy equal to the release's.
+sed -i 's/^# Rotate it like any other prod secret\./# Rotate it like any other prod secret. (edited on the box)/' \
+  /usr/local/bin/frameos-cloud-deploy-command
+deploy 999999999999 "// hub v2" >/tmp/out14 2>&1 || { cat /tmp/out14; exit 1; }
+check "a drifted wrapper is restored from the release" "yes" \
+  "$(cmp -s /usr/local/bin/frameos-cloud-deploy-command /deploy/frameos-cloud-deploy-command &&
+    echo yes || echo no)"
+
 echo
 frameos-cloud-update --status
+echo "release ref:      $(frameos-cloud-update --release-ref)"
+check "--release-ref prints just the ref" "rehearsal" "$(frameos-cloud-update --release-ref)"
 echo
 if [ "$failures" -eq 0 ]; then
   echo "rehearsal passed"

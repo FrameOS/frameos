@@ -50,6 +50,7 @@ set -euo pipefail
 #   frameos-cloud-update --archive -    unpack from stdin and deploy
 #   frameos-cloud-update --rollback     flip back to the previous release
 #   frameos-cloud-update --status       what is live, on which port
+#   frameos-cloud-update --release-ref  just the live ref name, one line
 #   frameos-cloud-update --activate <release-dir>
 #
 # Environment (all optional):
@@ -57,6 +58,8 @@ set -euo pipefail
 #   FRAMEOS_CLOUD_HEALTH_TIMEOUT  seconds to wait for the new instance (120)
 #   FRAMEOS_CLOUD_KEEP_RELEASES   how many release dirs to keep (5)
 #   FRAMEOS_CLOUD_SERVICE_USER    owner of the release tree (frameos-cloud)
+#   FRAMEOS_CLOUD_LOCK_WAIT       seconds to wait for a concurrent deploy (900)
+#   FRAMEOS_CLOUD_FORCE_HUB_RESTART  restart the frame hub even if unchanged
 
 app_link="/opt/frameos-cloud"
 previous_link="/opt/frameos-cloud.previous"
@@ -64,6 +67,10 @@ releases_dir="/opt/frameos-cloud.releases"
 instances_dir="/opt/frameos-cloud.instances"
 env_file="/etc/frameos-cloud/auth-web.env"
 state_file="/etc/frameos-cloud/active-port"
+# The sha256 of the frame-hub bundle the running hub was started with, so a
+# deploy that does not change the hub can leave it — and every connected
+# frame — alone. See restart_frame_hub.
+hub_state_file="/etc/frameos-cloud/frame-hub-bundle.sha256"
 upstream_file="/etc/nginx/conf.d/frameos-cloud-upstream.conf"
 unit_prefix="frameos-cloud-auth-web@"
 unit_dir="/etc/systemd/system"
@@ -71,6 +78,11 @@ hub_unit="frameos-cloud-frame-hub.service"
 # Where this script is installed. Not "$0": ssh runs it by bare name off
 # PATH, and both usage() and the self-update need a path they can open.
 self_path="/usr/local/bin/frameos-cloud-update"
+# The forced command for the CI deploy key (see ops/deploy/README-ish notes in
+# cloud/docs/deployment.md). Kept up to date by self_update like this script.
+command_wrapper_path="/usr/local/bin/frameos-cloud-deploy-command"
+lock_dir="/run/lock"
+lock_file="$lock_dir/frameos-cloud-update.lock"
 
 ports=(3000 3001)
 
@@ -78,6 +90,7 @@ drain_seconds="${FRAMEOS_CLOUD_DRAIN_SECONDS:-30}"
 health_timeout="${FRAMEOS_CLOUD_HEALTH_TIMEOUT:-120}"
 keep_releases="${FRAMEOS_CLOUD_KEEP_RELEASES:-5}"
 service_user="${FRAMEOS_CLOUD_SERVICE_USER:-frameos-cloud}"
+lock_wait="${FRAMEOS_CLOUD_LOCK_WAIT:-900}"
 
 # Every line also lands in /root/CODEX_LOG.md, which is the box's deploy
 # history and is captured by the nightly host-config backup. The script this
@@ -106,6 +119,29 @@ usage() {
 [ "$(id -u)" -eq 0 ] || die "must run as root"
 
 # --- helpers ----------------------------------------------------------------
+
+# One deploy at a time. Deploys used to be something one person ran from one
+# laptop; since CI deploys every merge to main, a manual deploy and an
+# automatic one can now arrive at the same moment. Two of them interleaving
+# would race over the same idle port, the nginx upstream and the instance
+# symlinks, and could leave traffic pointing at a half-started release.
+#
+# The lock is held on fd 9 for the life of the process rather than by
+# re-exec'ing under flock(1), so the bundle on stdin is untouched and the
+# caller gets an explanation instead of a bare exit code. Waiting is the
+# right default: the second deploy is usually a queued CI run that should
+# still happen, just after this one.
+take_lock() {
+  if ! command -v flock >/dev/null 2>&1; then
+    log "WARNING: flock is not installed; running without the deploy lock"
+    return 0
+  fi
+  mkdir -p "$lock_dir" 2>/dev/null || true
+  exec 9>"$lock_file" || die "cannot open the deploy lock at $lock_file"
+  if ! flock --wait "$lock_wait" 9; then
+    die "another deploy has held the lock for ${lock_wait}s; not starting a second one"
+  fi
+}
 
 # ln -sfn on an existing symlink is not atomic (it unlinks, then creates), so
 # a crash in between would leave /opt/frameos-cloud missing entirely. Create
@@ -230,19 +266,55 @@ restart_frame_hub() {
   # their own, and the hub serves no page, so its restart is not downtime in
   # the sense this script is about.
   #
+  # It is not free either. Every device socket in the fleet drops and comes
+  # back over the following minutes (about five, measured 2026-08-15), which
+  # was a fine price for a deploy someone chose to run and a poor one for a
+  # deploy per merge. So the hub is restarted only when the bundle it would
+  # run actually differs from the one it is running — recorded as a hash next
+  # to the other host state, because the unit follows the `current` symlink
+  # and the previous release cannot answer "what is this process executing?"
+  # once a deploy that skipped the restart has moved on.
+  #
   # Returns non-zero rather than dying, because by the time it runs the web
   # flip is already done: exiting here would leave the old auth-web instance
   # running and enabled forever. The caller finishes the swap and reports the
   # failure at the end.
+  local release="$1"
   if ! systemctl cat "$hub_unit" >/dev/null 2>&1; then
     log "${hub_unit} is not installed; skipping (see cloud/docs/deployment.md)"
     return 0
   fi
-  log "restarting the frame hub"
+
+  local bundle="$release/cloud/apps/frame-hub/dist/index.cjs"
+  local incoming="" recorded=""
+  if [ -f "$bundle" ]; then
+    incoming="$(sha256sum "$bundle" | cut -d' ' -f1)"
+  fi
+  [ -r "$hub_state_file" ] && recorded="$(tr -dc '0-9a-f' <"$hub_state_file")"
+
+  # An unknown hash (this release has no hub bundle, or the marker predates
+  # this feature) restarts, which is what the script always did. Skipping is
+  # only ever done on positive evidence that the bytes are identical AND that
+  # the hub is actually up.
+  if [ -z "${FRAMEOS_CLOUD_FORCE_HUB_RESTART:-}" ] &&
+    [ -n "$incoming" ] && [ "$incoming" = "$recorded" ] &&
+    systemctl is-active --quiet "$hub_unit"; then
+    log "frame hub bundle is unchanged; leaving it up (frames stay connected)"
+    return 0
+  fi
+
+  log "restarting the frame hub (frames reconnect over the next few minutes)"
   if ! systemctl restart "$hub_unit" || ! systemctl is-active --quiet "$hub_unit"; then
     log "WARNING: the frame hub did not come back; frames stay offline until it does"
     systemctl status --no-pager --lines=30 "$hub_unit" >&2 || true
     return 1
+  fi
+  # Only after a restart that worked: a failed one leaves the marker stale on
+  # purpose, so the next deploy tries again instead of skipping.
+  if [ -n "$incoming" ]; then
+    printf '%s\n' "$incoming" >"$hub_state_file"
+  else
+    rm -f "$hub_state_file"
   fi
   return 0
 }
@@ -310,6 +382,20 @@ self_update() {
     mv -f "$tmp" "$self_path"
     log "updated ${self_path} from the release"
   fi
+  # Same argument for the forced command the CI deploy key is pinned to: it
+  # is the thing standing between a leaked Actions secret and a root shell,
+  # so the box must run the reviewed copy rather than whatever was scp'd
+  # there once. Only updated if it is already installed — a host that has not
+  # opted into key-restricted deploys does not silently gain the file.
+  local incoming_wrapper="$release/cloud/ops/deploy/frameos-cloud-deploy-command"
+  if [ -f "$incoming_wrapper" ] && [ -f "$command_wrapper_path" ] &&
+    ! cmp -s "$incoming_wrapper" "$command_wrapper_path"; then
+    local tmp_wrapper="/usr/local/bin/.frameos-cloud-deploy-command.$$"
+    install -m 0755 "$incoming_wrapper" "$tmp_wrapper"
+    mv -f "$tmp_wrapper" "$command_wrapper_path"
+    log "updated ${command_wrapper_path} from the release"
+  fi
+
   local unit="$release/cloud/ops/deploy/frameos-cloud-auth-web@.service"
   if [ -f "$unit" ] && ! cmp -s "$unit" "$unit_dir/frameos-cloud-auth-web@.service"; then
     log "NOTE: the unit file differs from the one in this release."
@@ -377,7 +463,7 @@ activate_release() {
   link_atomic "$release" "$app_link"
 
   local hub_ok=true
-  restart_frame_hub || hub_ok=false
+  restart_frame_hub "$release" || hub_ok=false
 
   # systemd will not start an instance that is enabled but was stopped, and
   # an enabled instance is what survives a reboot. Enable the live one and
@@ -485,10 +571,35 @@ cmd_status() {
   done
 }
 
+# Just the ref name of the live release, on one line and nothing else. The
+# CI deploy reads it to decide whether production is currently running main
+# or a branch someone deployed on purpose — see cloud/docs/deployment.md,
+# "Automatic deploys". Parsing --status for this would be fragile enough to
+# eventually get it wrong in the direction of stomping the branch.
+cmd_release_ref() {
+  local release ref=""
+  release="$(link_target "$app_link")"
+  if [ -z "$release" ] || [ ! -d "$release" ]; then
+    echo "none"
+    return 0
+  fi
+  if [ -r "$release/RELEASE_REF" ]; then
+    ref="$(sed -n 's/^ref //p' "$release/RELEASE_REF" | head -n 1)"
+  fi
+  echo "${ref:-unknown}"
+}
+
 [ $# -gt 0 ] || {
   usage
   exit 2
 }
+
+# Anything that moves traffic takes the lock; the read-only commands do not,
+# so `--status` still answers while a deploy is running (deploy.sh calls it
+# as a preflight, and a hung deploy is exactly when someone wants to look).
+case "$1" in
+  --archive | --rollback | --activate) take_lock ;;
+esac
 
 case "$1" in
   --archive)
@@ -508,6 +619,9 @@ case "$1" in
     ;;
   --status)
     cmd_status
+    ;;
+  --release-ref)
+    cmd_release_ref
     ;;
   -h | --help)
     usage

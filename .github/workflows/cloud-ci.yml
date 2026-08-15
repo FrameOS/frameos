@@ -134,3 +134,233 @@ jobs:
       - run: pnpm --filter @frameos-cloud/frame-hub test:integration
         env:
           TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_frame_hub_test
+
+  # Every merge to main that verify approves goes to production, unattended.
+  # The pieces that make that safe are on the server, not here: migrations run
+  # before anything is flipped, the new release has to answer /healthz on the
+  # idle port before nginx is moved to it, and a release that never becomes
+  # healthy is a failed deploy rather than an outage. See
+  # cloud/docs/deployment.md, "Automatic deploys" — including how to pause
+  # this (the FRAMEOS_CLOUD_AUTO_DEPLOY variable) and how to roll back.
+  deploy:
+    name: Deploy to production
+    needs: verify
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      vars.FRAMEOS_CLOUD_AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+
+    # Deployment history, and the one place the deploy secrets live. Nothing
+    # else in this repo can read them.
+    environment:
+      name: production
+      url: https://cloud.frameos.net
+
+    # Its own group, separate from the workflow-level one above: two merges in
+    # quick succession must not deploy at the same time, and a deploy already
+    # talking to the server must never be cancelled half way. (The server
+    # takes a lock as well — CI is not the only thing that deploys.)
+    concurrency:
+      group: frameos-cloud-deploy
+      cancel-in-progress: false
+
+    steps:
+      # Full history and the normal remote refspec: scripts/deploy.sh proves
+      # the commit it is about to ship exists on the remote before shipping
+      # it, which a shallow single-ref checkout cannot answer.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the remote branches
+        run: |
+          git config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
+          git fetch --quiet --prune origin
+
+      # Two merges landing minutes apart both reach this job. The older one
+      # would deploy older code over newer, so it stands down: the tip's own
+      # run is already queued behind this one on the concurrency group.
+      - name: Stand down if main has moved on
+        id: freshness
+        run: |
+          set -euo pipefail
+          tip="$(git rev-parse origin/main)"
+          if [ "$tip" != "$GITHUB_SHA" ]; then
+            echo "origin/main is now $tip, not $GITHUB_SHA; leaving the deploy to that run." |
+              tee -a "$GITHUB_STEP_SUMMARY"
+            echo "proceed=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure SSH
+        if: steps.freshness.outputs.proceed == 'true'
+        env:
+          DEPLOY_KEY: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_KEY" || { echo "FRAMEOS_CLOUD_DEPLOY_KEY is not set" >&2; exit 1; }
+          test -n "$KNOWN_HOSTS" || { echo "FRAMEOS_CLOUD_DEPLOY_KNOWN_HOSTS is not set" >&2; exit 1; }
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" >~/.ssh/frameos-cloud-deploy
+          chmod 600 ~/.ssh/frameos-cloud-deploy
+          # Pinned, never learned on first use: an unauthenticated host key is
+          # a deploy bundle handed to whoever answers the address.
+          printf '%s\n' "$KNOWN_HOSTS" >>~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          # Absolute: deploy.sh passes this to `ssh -i "$ssh_key"` quoted, and
+          # a literal ~ inside quotes is a path that does not exist.
+          echo "FRAMEOS_CLOUD_DEPLOY_SSH_KEY=$HOME/.ssh/frameos-cloud-deploy" >>"$GITHUB_ENV"
+
+      # Production is allowed to run a branch — some frame-facing work can
+      # only be exercised against the real cloud — and an automatic deploy
+      # must not silently take that away while someone is using it. Deploying
+      # main by hand when you are done re-arms this.
+      - name: Stand down if production is running a branch
+        id: live
+        if: steps.freshness.outputs.proceed == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          live_ref="$(ssh -i ~/.ssh/frameos-cloud-deploy -o BatchMode=yes \
+            "$DEPLOY_HOST" frameos-cloud-update --release-ref)"
+          echo "production is running: $live_ref"
+          if [ "$live_ref" = "main" ]; then
+            echo "proceed=true" >>"$GITHUB_OUTPUT"
+          else
+            {
+              echo "### Auto-deploy on hold"
+              echo
+              echo "Production is running \`$live_ref\`, not \`main\`, so this merge was **not** deployed."
+              echo "Run \`pnpm deploy:prod\` from cloud/ when you are done with that ref to resume."
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "proceed=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.live.outputs.proceed == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.live.outputs.proceed == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      # Same cache as verify, for the same reason (nim-lang.org is unreliable).
+      - name: Cache Nim toolchain
+        if: steps.live.outputs.proceed == 'true'
+        id: cache_nim_toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.choosenim
+            ~/.nimble/bin
+          key: ${{ runner.os }}-nim-toolchain-2.2.4
+
+      - uses: jiro4989/setup-nim-action@v1
+        if: steps.live.outputs.proceed == 'true' && steps.cache_nim_toolchain.outputs.cache-hit != 'true'
+        with:
+          nim-version: 2.2.4
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add cached Nim to PATH
+        if: steps.live.outputs.proceed == 'true' && steps.cache_nim_toolchain.outputs.cache-hit == 'true'
+        run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
+
+      - uses: mymindstorm/setup-emsdk@v14
+        if: steps.live.outputs.proceed == 'true'
+        with:
+          version: 6.0.2
+
+      # verify just wrote this exact key, so the build below is mostly cache
+      # replay rather than a second full build of the frontend and the wasm
+      # runtime.
+      - uses: actions/cache@v4
+        if: steps.live.outputs.proceed == 'true'
+        with:
+          path: .turbo
+          key: turbo-cloud-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-cloud-${{ runner.os }}-
+
+      - name: Install dependencies
+        if: steps.live.outputs.proceed == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # build:runtime is not part of the `build` task graph, so the deploy has
+      # to ask for it explicitly or the editor would ship whatever wasm
+      # happened to be lying around.
+      - name: Build the wasm runtime
+        if: steps.live.outputs.proceed == 'true'
+        run: |
+          (cd frameos && nimble install -d -y)
+          pnpm exec turbo run build:runtime --filter=frameos-wasm
+          # deploy.sh refuses a dirty tree, and "commit or stash" is unhelpful
+          # advice on a runner: say what actually moved.
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::warning::the build left the tree dirty; the deploy will refuse it"
+            git status --porcelain
+          fi
+
+      # The same script a human runs. `-- main` rather than the bare form so
+      # the server records the ref as "main": that is what the branch check
+      # above reads on the next merge.
+      - name: Deploy
+        if: steps.live.outputs.proceed == 'true'
+        working-directory: cloud
+        env:
+          FRAMEOS_CLOUD_DEPLOY_HOST: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_HOST }}
+          # FRAMEOS_CLOUD_DEPLOY_SSH_KEY comes from the Configure SSH step.
+        run: pnpm deploy:prod -- main
+
+      - name: Summarise
+        if: steps.live.outputs.proceed == 'true' && success()
+        run: |
+          {
+            echo "### Deployed to production"
+            echo
+            echo "\`main\` at \`$GITHUB_SHA\` is live at https://cloud.frameos.net"
+            echo
+            echo "Roll back with \`ssh <host> frameos-cloud-update --rollback\`."
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      # Nobody is watching an unattended deploy, so a failed one has to come
+      # find you. Optional: without the webhook the job still fails visibly in
+      # Actions, it just does so quietly.
+      - name: Report a failed deploy
+        if: failure() && steps.freshness.outputs.proceed == 'true'
+        env:
+          WEBHOOK_URL: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK_URL:-}" ]; then
+            echo "No FRAMEOS_CLOUD_DEPLOY_WEBHOOK_URL configured; not notifying."
+            exit 0
+          fi
+          # python writes the payload (it escapes the content correctly), curl
+          # sends it — the same split as discord-release.yml. Not urllib:
+          # Discord answers its user agent with a 403, so a notifier written
+          # that way is a notifier that only fails when you need it.
+          python3 - <<'PY'
+          import json, os
+
+          content = (
+              ":rotating_light: **FrameOS Cloud deploy failed**\n"
+              f"`main` at `{os.environ['GITHUB_SHA'][:12]}`\n"
+              f"{os.environ['RUN_URL']}\n"
+              "Production is untouched unless the log says otherwise; "
+              "`frameos-cloud-update --status` on the box is the source of truth."
+          )
+          with open("discord-payload.json", "w", encoding="utf-8") as payload_file:
+              json.dump({"content": content, "allowed_mentions": {"parse": []}}, payload_file)
+          PY
+          curl --fail-with-body --show-error --silent \
+            -H "Content-Type: application/json" \
+            --data @discord-payload.json \
+            "$WEBHOOK_URL"
+          rm -f discord-payload.json

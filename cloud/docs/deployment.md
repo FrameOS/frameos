@@ -105,10 +105,17 @@ Two instances exist, `frameos-cloud-auth-web@3000` and
 3. rewrites `/etc/nginx/conf.d/frameos-cloud-upstream.conf` to point the
    `frameos_cloud_auth_web` upstream at that port and `systemctl reload
 nginx` (graceful: in-flight requests finish on the old workers),
-4. restarts the frame hub, which is not blue/green (see Hard Constraints) —
-   device sockets drop and frames reconnect on their own, measured at about
-   five minutes on 2026-08-15, so a deploy is invisible to the web but not to
-   `connected_frames`,
+4. restarts the frame hub **if, and only if, its bundle changed** — the hub
+   is not blue/green (see Hard Constraints), so restarting it drops every
+   device socket and frames reconnect on their own, measured at about five
+   minutes on 2026-08-15. That was a fair price for a deploy someone chose to
+   run and a poor one for a deploy per merge, so the sha256 of the bundle the
+   running hub started from is kept in
+   `/etc/frameos-cloud/frame-hub-bundle.sha256` and the restart is skipped
+   when the incoming bundle matches it. A missing or unreadable hash restarts,
+   as does `FRAMEOS_CLOUD_FORCE_HUB_RESTART=1`. So a deploy is invisible to
+   the web either way, and invisible to `connected_frames` unless
+   `apps/frame-hub` actually changed,
 5. drains for `FRAMEOS_CLOUD_DRAIN_SECONDS` (30) and stops the old instance.
 
 If the new release never becomes healthy, or nginx rejects the config,
@@ -166,9 +173,18 @@ one lacks will be lost.
 Useful on the box:
 
 ```sh
-frameos-cloud-update --status     # active port, release, both instances
-frameos-cloud-update --rollback   # flip back to the previous release
+frameos-cloud-update --status       # active port, release, both instances
+frameos-cloud-update --release-ref  # just the live ref name, one line
+frameos-cloud-update --rollback     # flip back to the previous release
 ```
+
+Anything that moves traffic (`--archive`, `--rollback`, `--activate`) takes a
+lock on `/run/lock/frameos-cloud-update.lock` first and waits up to
+`FRAMEOS_CLOUD_LOCK_WAIT` (900s) for it. Deploys used to be one person at one
+laptop; now that CI deploys every merge, a manual deploy and an automatic one
+can arrive together, and two of them interleaving would race the same idle
+port, upstream file and instance symlinks. The read-only commands are not
+locked, so `--status` still answers while a deploy runs.
 
 Before changing anything in `ops/deploy/`, run the rehearsal — it exercises
 both scripts against a fake host in a container, including the failure paths:
@@ -208,6 +224,98 @@ startable by the current unit; the cutover-era backups
 (`frameos-cloud-update.pre-monorepo`,
 `frameos-cloud-auth-web.service.pre-monorepo`) would have to be restored to
 run it.
+
+### Automatic deploys
+
+Every merge to `main` that Cloud CI approves is deployed to production
+unattended, by the `deploy` job in `.github/workflows/cloud-ci.yml`. It runs
+the same `pnpm deploy:prod` a person runs — there is no second deploy path to
+keep in sync — so everything above still applies, including that a release
+which never answers `/healthz` is a failed deploy rather than an outage.
+
+Three things make it stand down instead of deploying:
+
+- **`main` moved on.** Two merges minutes apart both reach the job; the older
+  one would deploy older code over newer, so it defers to the tip's own run
+  (which is queued behind it on the `frameos-cloud-deploy` concurrency group).
+- **Production is running a branch.** Deploying a branch here is normal, and
+  an automatic deploy must not silently take it away mid-session. The job asks
+  the box `frameos-cloud-update --release-ref` and only proceeds when the
+  answer is exactly `main`. **Running `pnpm deploy:prod` by hand when you are
+  done with the branch is what resumes automatic deploys** — there is no
+  separate switch to remember, and the job summary says so on every merge it
+  held back.
+- **The kill switch.** The job only exists while the repository variable
+  `FRAMEOS_CLOUD_AUTO_DEPLOY` is `true`. Set it to anything else to pause
+  automatic deploys entirely (Settings → Secrets and variables → Actions →
+  Variables); manual deploys are unaffected.
+
+Because it deploys `main` by name, the server records `main` in
+`RELEASE_REF`, which is what the branch check reads next time.
+
+One-time setup, in order:
+
+1. **A deploy key that cannot do anything else.** On a machine that is not
+   the server:
+
+   ```sh
+   ssh-keygen -t ed25519 -C frameos-cloud-ci -f frameos-cloud-ci -N ""
+   ```
+
+   Copy `ops/deploy/frameos-cloud-deploy-command` to the box as
+   `/usr/local/bin/frameos-cloud-deploy-command` (`chmod 0755`), then
+   **append** one line to `/root/.ssh/authorized_keys` — never rewrite that
+   file, the keys already in it are how you get in:
+
+   ```text
+   command="/usr/local/bin/frameos-cloud-deploy-command",restrict ssh-ed25519 AAAA… frameos-cloud-ci
+   ```
+
+   `restrict` disables pty, agent, port and X11 forwarding; `command=` means
+   the key can only ask for the four deploy commands, whatever the client
+   sends. Verify from your laptop **before** wiring CI, and check that a
+   second terminal still has a working root session in case you got it wrong:
+
+   ```sh
+   ssh -i frameos-cloud-ci root@<host> frameos-cloud-update --release-ref  # prints the ref
+   ssh -i frameos-cloud-ci root@<host>                                     # refused
+   ssh -i frameos-cloud-ci root@<host> 'cat /etc/frameos-cloud/auth-web.env'  # refused
+   ```
+
+   This does not make the key safe — a key that can deploy can run code on the
+   box, which is what a deploy is. It removes the rest: the environment files
+   (database URL, session secret, encryption key), the backups, and the SSH
+   keys that open the storage box. Rotate it like any other production
+   secret. After the first deploy, `frameos-cloud-update` keeps the wrapper
+   equal to the copy in the release, the same way it does for itself.
+
+2. **Secrets**, on the `production` environment (Settings → Environments →
+   production), so nothing else in the repository can read them:
+
+   | Name                               | Value                                                     |
+   | ---------------------------------- | --------------------------------------------------------- |
+   | `FRAMEOS_CLOUD_DEPLOY_KEY`         | the private key from step 1                               |
+   | `FRAMEOS_CLOUD_DEPLOY_HOST`        | `root@<host>`                                             |
+   | `FRAMEOS_CLOUD_DEPLOY_KNOWN_HOSTS` | `ssh-keyscan -t ed25519 <host>`, verified against the box |
+   | `FRAMEOS_CLOUD_DEPLOY_WEBHOOK_URL` | optional Discord webhook for failed deploys               |
+
+   The host key is pinned rather than learned on first connection: an
+   unauthenticated host key means handing the deploy bundle to whoever
+   answers the address.
+
+3. **Reachability.** GitHub-hosted runners come from a wide, changing IP
+   range. If the box's firewall restricts port 22, either allow the
+   [GitHub Actions ranges](https://api.github.com/meta) or run this on a
+   self-hosted runner instead — do not open SSH to the world for it.
+
+4. **Set `FRAMEOS_CLOUD_AUTO_DEPLOY=true`** (repository variable) last, once
+   the rest is verified.
+
+A failed deploy posts to the webhook if one is configured, and fails visibly
+in Actions either way. Production is untouched by a failure before the flip;
+`frameos-cloud-update --status` on the box is the source of truth, and
+`--rollback` is unchanged. Nothing about the automatic path is required — the
+manual one keeps working with the switch off.
 
 ## Frame hub
 
