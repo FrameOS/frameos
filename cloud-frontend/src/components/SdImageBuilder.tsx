@@ -170,6 +170,13 @@ export function SdImageBuilder({
         width?: number | undefined
         height?: number | undefined
         rotate?: number | undefined
+        // Canonical buildroot platform key of the board this frame runs on,
+        // when the frame records one (the caller maps legacy keys first).
+        // The board is the one field a wrong value cannot be recovered from
+        // in the setup portal: a 64-bit card in an ARMv6 Pi does not boot far
+        // enough to say so. Unknown board = no seed, and the select holds its
+        // "Pick a board…" placeholder.
+        buildrootPlatform?: string | undefined
       }
     | undefined
 }): ReactElement {
@@ -223,6 +230,7 @@ export function SdImageBuilder({
   )
   const [canStreamToDisk] = useState(() => typeof window !== 'undefined' && 'showSaveFilePicker' in window)
 
+  const seedPlatform = reenrollFrame?.buildrootPlatform
   useEffect(() => {
     let cancelled = false
     async function loadRelease(): Promise<void> {
@@ -251,9 +259,17 @@ export function SdImageBuilder({
           // The route sends "" when the release carries no tag.
           version: data.release || 'latest',
         })
-        const firstAvailable = boards.find((board) => board.asset)
-        if (firstAvailable) {
-          setPlatform((current) => current || firstAvailable.platform)
+        // Seed the board only from the frame being re-enrolled — never from
+        // the first entry in the list. Auto-selecting a board is how an
+        // ARMv6 Pi Zero W ends up holding the 64-bit image: every other
+        // field is pre-filled from the frame, the two topmost labels both
+        // open with "Raspberry Pi Zero", and the card fails with nothing but
+        // a dark ACT LED to say why. With no seed the select keeps its
+        // disabled "Pick a board…" placeholder and the download button stays
+        // disabled until someone chooses.
+        const seeded = boards.find((board) => board.asset && board.platform === seedPlatform)
+        if (seeded) {
+          setPlatform((current) => current || seeded.platform)
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -268,7 +284,7 @@ export function SdImageBuilder({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [seedPlatform])
 
   function failWith(message: string): void {
     setError(message)

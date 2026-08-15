@@ -36,6 +36,7 @@ import {
   EMBEDDED_VIRTUAL,
   isThinClientEmbeddedPlatform,
   modes,
+  normalizeBuildrootPlatform,
   virtualColorModes,
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
@@ -1960,7 +1961,20 @@ export function FrameSettings({
           {isBuildrootMode ? (
             <Group name="buildroot">
               <Field name="platform" label="Platform">
-                <Select name="buildroot.platform" options={buildrootPlatforms} />
+                {({ value, onChange }) => (
+                  // Frames saved before the platform consolidation still store
+                  // 'raspberry-pi-zero-w' / 'raspberry-pi-zero-2-w', which match
+                  // no option and render the select blank. Show the platform
+                  // whose image actually boots that board (the backend resolves
+                  // the legacy keys the same way), so the field reads as the
+                  // truth instead of as "unset".
+                  <Select
+                    name="buildroot.platform"
+                    options={buildrootPlatforms}
+                    value={normalizeBuildrootPlatform(value)}
+                    onChange={(v) => onChange(v)}
+                  />
+                )}
               </Field>
               <Field
                 name="compilationMode"

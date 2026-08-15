@@ -164,10 +164,22 @@ function savedBytes(saved: SavedFile): Uint8Array {
   return joined;
 }
 
-// The frame name and a root-login choice are both required now — every build
-// path fills the name and (unless it sets a password itself) opts into
-// passwordless root first.
+// The board is never auto-selected: picking it is the one choice the builder
+// refuses to guess, because a wrong board produces a card that cannot say so
+// (a 64-bit image in an ARMv6 Pi Zero W just leaves the ACT LED dark). Every
+// build path therefore chooses one first.
+function pickBoard(platform = "raspberry-pi-64") {
+  const board = screen.getByLabelText("Board") as HTMLSelectElement;
+  if (!board.value) {
+    fireEvent.change(board, { target: { value: platform } });
+  }
+}
+
+// The board, the frame name and a root-login choice are all required now —
+// every build path fills them and (unless it sets a password itself) opts
+// into passwordless root first.
 function nameFrame(value = "Kitchen Frame") {
+  pickBoard();
   fireEvent.change(screen.getByPlaceholderText("Frame name"), {
     target: { value },
   });
@@ -207,6 +219,87 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero / Zero W / 1 (32-bit) — image not published yet",
     });
     expect((missing as HTMLOptionElement).disabled).toBe(true);
+  });
+
+  // Regression: the builder used to select the first board with a published
+  // asset. In a form where every other field is pre-filled that reads as a
+  // decision already made, and the first entry is the 64-bit image — which an
+  // ARMv6 Pi Zero W cannot boot, and cannot report: it flashes the ACT LED
+  // twice and goes dark. The board is the one field nothing can recover from,
+  // so it is the one field the builder never guesses.
+  it("selects no board on its own, leaving the download disabled", async () => {
+    mockReleaseAndImage();
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_x")} />);
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+    });
+
+    expect((screen.getByLabelText("Board") as HTMLSelectElement).value).toBe("");
+    expect(
+      (screen.getByRole("button", {
+        name: /download sd image/i,
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("seeds the board from the frame being re-enrolled", async () => {
+    fetchMock.mockImplementation((input) =>
+      String(input).startsWith("/api/frames/firmware")
+        ? Promise.resolve(
+            Response.json({
+              ...firmwarePayload,
+              assets: [
+                ...firmwarePayload.assets,
+                {
+                  name: "frameos-1.2.3-raspberry-pi-32-buildroot.img.gz",
+                  platform: "raspberry-pi-32",
+                  size: gzippedImage.length,
+                },
+              ],
+            }),
+          )
+        : Promise.reject(new Error(`unexpected fetch: ${String(input)}`)),
+    );
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_x")}
+        reenrollFrame={{
+          id: "f-1",
+          name: "Kitchen Frame",
+          buildrootPlatform: "raspberry-pi-32",
+        }}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero / Zero W / 1 (32-bit) (v1.2.3)",
+    });
+
+    expect((screen.getByLabelText("Board") as HTMLSelectElement).value).toBe(
+      "raspberry-pi-32",
+    );
+  });
+
+  // A frame whose board has no published image must not fall back to a
+  // different board's — a silent substitution is the bug, not the fix.
+  it("does not seed a board whose image is missing from the release", async () => {
+    mockReleaseAndImage();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_x")}
+        reenrollFrame={{
+          id: "f-1",
+          name: "Kitchen Frame",
+          buildrootPlatform: "raspberry-pi-32",
+        }}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero / Zero W / 1 (32-bit) — image not published yet",
+    });
+
+    expect((screen.getByLabelText("Board") as HTMLSelectElement).value).toBe("");
   });
 
   it("reports a failed release lookup instead of silently offering nothing", async () => {
@@ -308,7 +401,9 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
-    // Name only — neither a root password nor the passwordless checkbox.
+    // Board and name only — neither a root password nor the passwordless
+    // checkbox.
+    pickBoard();
     fireEvent.change(screen.getByPlaceholderText("Frame name"), {
       target: { value: "Kitchen Frame" },
     });
@@ -338,6 +433,7 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
+    pickBoard();
     fireEvent.change(screen.getByPlaceholderText("Frame name"), {
       target: { value: "Kitchen Frame" },
     });
@@ -687,6 +783,8 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
+    // A board but no name: the name check is the one that must speak up.
+    pickBoard();
     fireEvent.click(
       screen.getByRole("button", { name: /download sd image/i }),
     );
@@ -740,6 +838,8 @@ describe("SdImageBuilder", () => {
       // The cover copy has to be honest about what does and does not travel.
       expect(screen.getByText(/Assets do not travel/)).toBeTruthy();
 
+      // This frame records no board, so the select stays on its placeholder.
+      pickBoard();
       const passwordless = screen.getByLabelText(
         /Enable passwordless root login/,
       ) as HTMLInputElement;
@@ -774,6 +874,7 @@ describe("SdImageBuilder", () => {
         name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
       });
 
+      pickBoard();
       fireEvent.click(
         screen.getByLabelText(/Enable passwordless root login/),
       );
@@ -863,6 +964,7 @@ describe("SdImageBuilder", () => {
         name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
       });
 
+      pickBoard();
       fireEvent.click(
         screen.getByLabelText(/Enable passwordless root login/),
       );
