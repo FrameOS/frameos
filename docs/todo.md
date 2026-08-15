@@ -1,7 +1,7 @@
 # FrameOS — consolidated remaining work
 
 One tracker for everything still open across the repo (last swept
-2026-08-14). Reference material — principles, permission scopes, store
+2026-08-14; launch-readiness audit added 2026-08-15). Reference material — principles, permission scopes, store
 decisions, threat models, wire protocols, measurements — stays in the
 linked docs; this file only lists what is left to do. When an item ships,
 delete it here.
@@ -94,6 +94,9 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   UX still an open design question).
 - **Free-tier quotas** — pick numbers (frame count, backup size, private
   scene count) when provisioning starts, not before.
+- **Telemetry scope backfill** — frames enrolled before 2026-08-03 predate
+  the telemetry scope and ship no logs at all; known SQL fix on
+  `linked_clients` + a reconnect, no UI for it. Run the one-off in prod.
 
 ## ESP32
 
@@ -140,6 +143,40 @@ numbers and the measurement tooling live in `docs/esp32-memory.md`.
   password logins) or ticking an "enable passwordless root" checkbox that
   keeps the image default: console-only root with no password, SSH refusing
   password logins (`dropbear -s -g`, no authorized keys).
+
+## Cloud launch readiness — ops + legal (audit 2026-08-15)
+
+Gaps found auditing `cloud/` for "a lot of people can sign up" readiness.
+All are prerequisites for broad signups AND for charging; none touch the
+frame/release pipeline. Do these as one batch, then account hardening.
+
+- **Back up the cloud's own Postgres** — nothing exists: no dump script, no
+  offsite copy, no restore procedure anywhere in `cloud/scripts/` or
+  `docs/deployment.md`/`docs/operational-runbooks.md` (every "backup"
+  mention there is the user-facing feature). We must not charge for backups
+  while the database holding accounts, scenes, and link tokens has none.
+  Nightly dump + offsite storage + a documented, *tested* restore drill.
+- **Error tracking, health, and uptime alerting** — no Sentry/aggregation,
+  no structured logging (bare `console.error` ×19 in auth-web), no health
+  endpoint on auth-web (only frame-hub has `/healthz`), no uptime
+  monitoring or alerting. Runbooks exist but nothing announces an incident.
+  Minimum: error aggregation, an auth-web health endpoint, external uptime
+  checks that page someone.
+- **Email is a silent single point of failure gating all logins** — login
+  enforces verified email, but Postmark send failures are caught and only
+  `console.error`'d (`lib/email-verification.ts`, `api/auth/reset/request`),
+  so a bad token or Postmark outage blocks every new signup invisibly.
+  Surface send failures into the error tracking above, and add Postmark
+  delivery to the `/admin` system-checks panel.
+- **Legal pages + self-serve deletion/export** — no terms, no privacy
+  policy, no imprint anywhere under `apps/auth-web/app/`; PostHog loads in
+  the browser with no consent notice; account deletion is superadmin-only
+  and there is no data export. EU-facing hard requirement before broad
+  signup, non-negotiable before charging.
+- **Signup abuse gates** — the only gate is the Postgres rate limiter
+  (10/h/IP); no captcha, no disposable-email blocking. Add Cloudflare
+  Turnstile (or similar) on signup + reset. (Store publishing abuse is
+  already well covered: moderation, caps, bans, reports.)
 
 ## Cloud services (scope table in CLOUD-TODO.md)
 
@@ -195,6 +232,9 @@ numbers and the measurement tooling live in `docs/esp32-memory.md`.
 
 - Billing mechanics (Stripe? bundled tiers vs per-service metering) —
   decide before anything paid ships.
+- What the privacy policy can promise about frame data and telemetry
+  retention — decide early, it shapes the legal pages in the launch-
+  readiness batch above.
 - `store:publish` human review: always, only for the public store, or
   pre-review for risky (shell-app) scenes? Currently automated moderation
   + badges + post-moderation only.
