@@ -32,7 +32,6 @@ block test_remote_loads_main_frameos_frame_json_payload:
     "maxHttpResponseBytes": 33554432,
     "debug": true,
     "scalingMode": "contain",
-    "imageEngine": "",
     "rotate": 90,
     "flip": "horizontal",
     "logToFile": nil,

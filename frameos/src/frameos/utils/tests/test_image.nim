@@ -17,17 +17,6 @@ proc testImage(width = 2, height = 2): Image =
       result.data[idx].a = 255
 
 suite "image helpers":
-  test "effective runtime image engine resolves blank default to pixie":
-    setRuntimeImageEngine("")
-    check getRuntimeImageEngine() == ""
-    check getEffectiveRuntimeImageEngine() == "pixie"
-
-    setRuntimeImageEngine("imagemagick")
-    check getRuntimeImageEngine() == "imagemagick"
-    check getEffectiveRuntimeImageEngine() == "imagemagick"
-
-    setRuntimeImageEngine("")
-
   test "display decode dimensions cap oversized images while preserving aspect":
     let square = displayDecodeDimensions(10_000, 10_000)
     check square.width == DisplayDecodeMaxEdge

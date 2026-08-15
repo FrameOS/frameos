@@ -341,7 +341,6 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'assets_path',
   'save_assets',
   'upload_fonts',
-  'image_engine',
   'reboot',
   'control_code',
   'schedule',
@@ -363,7 +362,6 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   mountpoints: '2026.6.0',
   error_behavior: '2026.6.1',
   buildroot: '2026.6.2',
-  image_engine: '2026.6.3',
   max_http_response_bytes: '2026.6.4',
   rpios: '2026.6.7',
   timezone_updater: '2026.6.7',
@@ -459,7 +457,6 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   assets_path: 'Assets path',
   save_assets: 'Save assets',
   upload_fonts: 'Upload fonts',
-  image_engine: 'Image engine',
   reboot: 'Reboot settings',
   control_code: 'Control code',
   schedule: 'Schedule',
@@ -509,7 +506,6 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'log_to_file',
   'assets_path',
   'save_assets',
-  'image_engine',
   'mountpoints',
   'error_behavior',
 ]
@@ -930,10 +926,6 @@ function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknow
     return normalizeNumericFrameValue(value)
   }
 
-  if (key === 'image_engine') {
-    return value ?? ''
-  }
-
   if (key === 'agent') {
     return normalizeRemoteForComparison(value)
   }
@@ -984,16 +976,6 @@ function stringifyList(values: unknown[]): string {
 }
 
 function summarizeFrameFieldValue(key: keyof FrameType, value: unknown): string {
-  if (key === 'image_engine') {
-    if (value === 'imagemagick') {
-      return 'ImageMagick'
-    }
-    if (value === 'pixie') {
-      return 'Pixie'
-    }
-    return 'Default (Pixie)'
-  }
-
   if (value === null || value === undefined || value === '') {
     return 'Not set'
   }
@@ -1371,7 +1353,6 @@ function sanitizeFrame(frame: Partial<FrameType>): Partial<FrameType> {
 
   return {
     ...frame,
-    image_engine: frame.image_engine ?? '',
     timezone_updater: normalizeTimezoneUpdater(frame.timezone_updater),
     assets_path: assetsPath,
     rpios,

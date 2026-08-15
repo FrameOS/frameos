@@ -1741,7 +1741,7 @@ async def _embedded_asset_file_response(
 ) -> StreamingResponse:
     """Serve one asset from an embedded frame by proxying the device HTTP API.
 
-    Thumbnails are generated on the backend (the device has no ImageMagick) and
+    Thumbnails are generated on the backend (the device does not resize) and
     cached in redis keyed by the md5 of the original bytes, mirroring the
     SSH/agent code path's `asset:thumb:{md5}` cache."""
     try:

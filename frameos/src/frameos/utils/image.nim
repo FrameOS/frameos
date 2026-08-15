@@ -35,18 +35,15 @@ when defined(frameosEmbedded):
   import pixie/fileformats/webp
   import pixie/inflatestream
 when not defined(frameosEmbedded) and not defined(frameosWasm):
-  # No child processes on FreeRTOS or WebAssembly: ImageMagick/exiftool
-  # fallbacks are compiled out and pixie does all decoding.
+  # No child processes on FreeRTOS or WebAssembly: the exiftool fallback is
+  # compiled out and pixie does all decoding.
   import frameos/utils/process
 
 const MaxImageDownloadBytes = 15 * 1024 * 1024
-const MaxImageMagickOutputBytes = 50 * 1024 * 1024
 const MaxExifOutputBytes = 1024 * 1024
-const ImageMagickTimeoutMs = 30_000
 const ExifToolTimeoutMs = 10_000
 const DisplayDecodeMaxEdge* = 2048
 const DisplayDecodeMaxPixels* = DisplayDecodeMaxEdge * DisplayDecodeMaxEdge
-const ImageEngineImageMagick* = "imagemagick"
 const EmbeddedMaxRemoteSourceWidth = 800
 when defined(frameosEmbedded):
   const EmbeddedSmallDecodeCopyBytes = 512 * 1024
@@ -54,29 +51,8 @@ when defined(frameosEmbedded):
   const EmbeddedMaxDirectPngBytes = 6 * 1024 * 1024
   const EmbeddedMaxDirectRgbaBytes = 5 * 1024 * 1024
 
-var runtimeImageEngine = ""
-
 proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string, offsetX: int = 0,
     offsetY: int = 0, blendMode: BlendMode = OverwriteBlend) {.raises: [PixieError].}
-
-proc setRuntimeImageEngine*(imageEngine: string) =
-  let normalized = imageEngine.normalize.toLowerAscii()
-  runtimeImageEngine =
-    if normalized in ["", "pixie", ImageEngineImageMagick]:
-      normalized
-    else:
-      ""
-
-proc getRuntimeImageEngine*(): string =
-  runtimeImageEngine
-
-proc getEffectiveRuntimeImageEngine*(): string =
-  if runtimeImageEngine == ImageEngineImageMagick:
-    return ImageEngineImageMagick
-  return "pixie"
-
-proc useImageMagick(): bool =
-  runtimeImageEngine == ImageEngineImageMagick
 
 proc decodeOutputMaxPixels*(): int =
   ## Largest decoded-output pixel count the current memory headroom allows;
@@ -125,73 +101,6 @@ proc scaledFitPlacement*(fit: ScaledDecodeFit): string =
   of fitCover: "cover"
   of fitContain: "contain"
   of fitStretch: "stretch"
-
-proc imageMagickCommand(): string =
-  let magick = findExe("magick")
-  if magick != "":
-    return magick
-  let convert = findExe("convert")
-  if convert != "":
-    return convert
-  return ""
-
-proc decodeImageMagickOutput(output: string): Option[Image] =
-  if output.len == 0 or output.len > MaxImageMagickOutputBytes:
-    return none(Image)
-  try:
-    return some(decodeImage(output))
-  except CatchableError:
-    return none(Image)
-
-proc runImageMagick(args: seq[string]; input = ""): Option[string] =
-  when defined(frameosEmbedded) or defined(frameosWasm):
-    none(string)
-  else:
-    let cmd = imageMagickCommand()
-    if cmd == "":
-      return none(string)
-    try:
-      let processResult = runProcessPiped(
-        cmd,
-        args,
-        input = input,
-        timeoutMs = ImageMagickTimeoutMs,
-        maxOutputBytes = MaxImageMagickOutputBytes
-      )
-      if processResult.exitCode == 0 and not processResult.timedOut and not processResult.outputExceeded:
-        return some(processResult.output)
-    except CatchableError:
-      discard
-    none(string)
-
-proc decodeImageWithImageMagick(data: string): Option[Image] =
-  let output = runImageMagick(@["-quiet", "-", "-auto-orient", "bmp:-"], input = data)
-  if output.isSome:
-    return decodeImageMagickOutput(output.get())
-  return none(Image)
-
-proc decodeImageWithImageMagick(data: string, width, height: int): Option[Image] =
-  let sizeArg = &"{width}x{height}>"
-  let output = runImageMagick(@["-quiet", "-", "-auto-orient", "-resize", sizeArg, "bmp:-"], input = data)
-  if output.isSome:
-    return decodeImageMagickOutput(output.get())
-  return none(Image)
-
-proc readImageWithImageMagick(path: string): Option[Image] =
-  let output = runImageMagick(@["-quiet", path, "-auto-orient", "bmp:-"])
-  if output.isSome:
-    return decodeImageMagickOutput(output.get())
-  return none(Image)
-
-proc decodeSvgWithImageMagick*(svg: string, width: int, height: int): Option[Image] =
-  let sizeArg = &"{width}x{height}"
-  let output = runImageMagick(
-    @["-quiet", "-background", "none", "-size", sizeArg, "svg:-", "-resize", sizeArg, "bmp:-"],
-    input = svg
-  )
-  if output.isSome:
-    return decodeImageMagickOutput(output.get())
-  return none(Image)
 
 const SvgBandMinHeight = 8
 const SvgBandMinBytes = 128 * 1024
@@ -273,8 +182,6 @@ proc renderSvgBanded(svg: string, width, height, bandHeight: int): Image =
       attrs["transform"] = baseTransform
 
 proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image] =
-  if useImageMagick():
-    return decodeSvgWithImageMagick(svg, width, height)
   let bandHeight = svgBandHeight(width, height, svg)
   if bandHeight > 0 and bandHeight < height:
     try:
@@ -299,9 +206,6 @@ proc renderSvgIntoTarget*(svg: string, target: Image): bool =
   ## `renderInto` in the pixie fork is the half of that contract living there.
   if target.isNil or target.width <= 0 or target.height <= 0:
     return false
-  if useImageMagick():
-    # Keep the configured engine in charge.
-    return false
   try:
     parseSvg(svg, target.width, target.height).renderInto(target)
     true
@@ -309,11 +213,7 @@ proc renderSvgIntoTarget*(svg: string, target: Image): bool =
     false
 
 proc decodeImageWithFallback*(data: string): Image =
-  if useImageMagick():
-    let converted = decodeImageWithImageMagick(data)
-    if converted.isSome:
-      return converted.get()
-  return decodeImage(data)
+  decodeImage(data)
 
 proc looksLikeSvg(data: string): bool =
   data.len > 5 and (data.startsWith("<?xml") or data.startsWith("<svg"))
@@ -350,12 +250,6 @@ proc decodeImageWithDisplayBounds*(data: var string,
   if dimensions.width > 0 and dimensions.height > 0:
     let target = displayDecodeDimensions(dimensions, maxEdge, maxPixels)
     if target.width != dimensions.width or target.height != dimensions.height:
-      if useImageMagick():
-        let converted = decodeImageWithImageMagick(data, target.width, target.height)
-        if converted.isSome:
-          data = ""
-          GC_fullCollect()
-          return converted.get()
       return decodeImageScaled(data, target.width, target.height)
 
   result = decodeImageWithFallback(data)
@@ -504,22 +398,11 @@ when not defined(frameosEmbedded):
   proc decodeImageWithFallback*(data: var string, target: Image,
       fit = fitCover): Image =
     if not target.isNil and target.width > 0 and target.height > 0:
-      if useImageMagick():
-        let converted = decodeImageWithImageMagick(data, target.width, target.height)
-        if converted.isSome:
-          target.scaleAndDrawImage(converted.get(), scaledFitPlacement(fit))
-          data = ""
-          GC_fullCollect()
-          return target
       return decodeImageScaledInto(data, target, fit)
     decodeImageWithFallback(data)
 
 proc readImageWithFallback*(path: string): Image =
-  if useImageMagick():
-    let converted = readImageWithImageMagick(path)
-    if converted.isSome:
-      return converted.get()
-  return readImage(path)
+  readImage(path)
 
 const ImageHeaderProbeBytes = 256 * 1024
 
@@ -629,7 +512,7 @@ proc readImageWithDisplayBounds*(path: string,
   # JPEGs stream from disk through a small window, so neither the compressed
   # file nor full-size intermediates ever need to fit in memory.
   var header = probeImageFileHeader(path)
-  if isJpegHeader(header) and not useImageMagick():
+  if isJpegHeader(header):
     var dimensions: ImageDimensions
     var probed = true
     try:
@@ -712,10 +595,6 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
   ## apply (unsupported scaling mode or format); raises catchable errors for
   ## unreadable or over-budget files.
   if target.isNil or target.width <= 0 or target.height <= 0:
-    return false
-  if useImageMagick():
-    # Keep the configured engine in charge; the generic path knows how to
-    # route through ImageMagick.
     return false
   let fitOption = scalingModeToFit(scalingMode)
   if fitOption.isNone:

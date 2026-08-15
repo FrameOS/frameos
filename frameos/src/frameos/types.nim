@@ -38,7 +38,6 @@ type
     rotate*: int
     flip*: string
     scalingMode*: string
-    imageEngine*: string
     settings*: JsonNode
     assetsPath*: string
     saveAssets*: JsonNode

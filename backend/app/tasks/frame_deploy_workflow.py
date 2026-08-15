@@ -52,10 +52,7 @@ from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame
 from app.utils.versions import current_frameos_version, current_remote_version
 
-REMOTE_RUNTIME_APT_PACKAGES = (
-    "hostapd",
-    "imagemagick",
-)
+REMOTE_RUNTIME_APT_PACKAGES = ("hostapd",)
 REMOTE_BUILD_APT_PACKAGES = ("build-essential",)
 
 HELPER_ENSURE_NTP = "ensure_ntp"

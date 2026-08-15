@@ -75,7 +75,6 @@ FRAME_RESTORE_FIELDS = (
     "metrics_interval",
     "max_http_response_bytes",
     "scaling_mode",
-    "image_engine",
     "rotate",
     "flip",
     "background_color",

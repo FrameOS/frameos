@@ -842,7 +842,6 @@ data.update({
     "maxHttpResponseBytes": env_int("FRAMEOS_MAX_HTTP_RESPONSE_BYTES", 67108864),
     "debug": env_bool("FRAMEOS_DEBUG"),
     "scalingMode": env("FRAMEOS_SCALING_MODE", "contain"),
-    "imageEngine": env("FRAMEOS_IMAGE_ENGINE", ""),
     "rotate": env_int("FRAMEOS_ROTATE", 0),
     "flip": env("FRAMEOS_FLIP", ""),
     "logToFile": env("FRAMEOS_LOG_TO_FILE"),
@@ -925,7 +924,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   install_packages python3
 fi
 need_cmd python3
-install_packages ca-certificates hostapd imagemagick
+install_packages ca-certificates hostapd
 install_optional_packages caddy
 systemctl disable --now caddy.service >/dev/null 2>&1 || true
 
@@ -1125,7 +1124,6 @@ FRAMEOS_SAVE_ASSETS="${FRAMEOS_SAVE_ASSETS:-$default_save_assets}"
 FRAMEOS_MAX_HTTP_RESPONSE_BYTES="${FRAMEOS_MAX_HTTP_RESPONSE_BYTES:-67108864}"
 FRAMEOS_DEBUG="${FRAMEOS_DEBUG:-false}"
 FRAMEOS_SCALING_MODE="${FRAMEOS_SCALING_MODE:-$(json_get "$existing_config" scalingMode "contain")}"
-FRAMEOS_IMAGE_ENGINE="${FRAMEOS_IMAGE_ENGINE:-$(json_get "$existing_config" imageEngine "")}"
 FRAMEOS_FLIP="${FRAMEOS_FLIP:-$(json_get "$existing_config" flip "")}"
 
 export FRAMEOS_RELEASE_VERSION
@@ -1138,7 +1136,7 @@ export FRAMEOS_HTTP_UPLOAD_URL FRAMEOS_DEVICE_VCOM
 export FRAMEOS_NETWORK_CHECK FRAMEOS_NETWORK_CHECK_TIMEOUT_SECONDS FRAMEOS_NETWORK_CHECK_URL
 export FRAMEOS_WIFI_HOTSPOT FRAMEOS_WIFI_HOTSPOT_SSID FRAMEOS_WIFI_HOTSPOT_PASSWORD FRAMEOS_WIFI_HOTSPOT_TIMEOUT_SECONDS
 export FRAMEOS_LOG_TO_FILE FRAMEOS_ASSETS_PATH FRAMEOS_SAVE_ASSETS
-export FRAMEOS_MAX_HTTP_RESPONSE_BYTES FRAMEOS_DEBUG FRAMEOS_SCALING_MODE FRAMEOS_IMAGE_ENGINE FRAMEOS_FLIP
+export FRAMEOS_MAX_HTTP_RESPONSE_BYTES FRAMEOS_DEBUG FRAMEOS_SCALING_MODE FRAMEOS_FLIP
 export FRAMEOS_INTERVAL FRAMEOS_METRICS_INTERVAL FRAMEOS_TIME_ZONE
 
 say ""

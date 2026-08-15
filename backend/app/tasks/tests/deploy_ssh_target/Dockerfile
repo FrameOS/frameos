@@ -13,7 +13,6 @@ RUN set -eux; \
         findutils \
         gzip \
         hostapd \
-        imagemagick \
         libssl-dev \
         make \
         ntpsec \
