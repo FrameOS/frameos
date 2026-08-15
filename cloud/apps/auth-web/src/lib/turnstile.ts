@@ -18,10 +18,14 @@
 // forms render without the widget. Local development and the integration
 // tests therefore need no Cloudflare account.
 
-import { logWarn } from "./log";
+import { logWarn, reportError } from "./log";
 
 const verifyUrl = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const verifyTimeoutMs = 8000;
+
+// One report per process, not one per request: a misconfigured deploy would
+// otherwise file an exception on every signup attempt for as long as it runs.
+let reportedMissingSiteKey = false;
 
 export function getTurnstileSiteKey() {
   return process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim() || undefined;
@@ -50,6 +54,34 @@ export async function verifyTurnstileToken(
   if (!secret) {
     return { ok: true };
   }
+
+  // The half-configured deploy, which is a real trap rather than a
+  // hypothetical: NEXT_PUBLIC_* is inlined at BUILD time, and the production
+  // bundle is built on a developer machine and streamed to the server
+  // (scripts/deploy.sh). Setting the site key only in the server's env file
+  // therefore ships forms that render no widget, while this secret is very
+  // much set at runtime — so every signup arrives tokenless and would be
+  // rejected here. That is a 100% outage of account creation and password
+  // reset, caused by a config mistake no user can see or work around.
+  //
+  // So fail OPEN in exactly this case, and shout. Turnstile being off until
+  // someone rebuilds is bad; nobody being able to sign up or recover an
+  // account is worse. This is deliberately NOT the Cloudflare-unreachable
+  // case below, which stays closed: only an operator can reach this state,
+  // and only a rebuild clears it.
+  if (!getTurnstileSiteKey()) {
+    if (!reportedMissingSiteKey) {
+      reportedMissingSiteKey = true;
+      reportError(
+        "turnstile.site_key_missing_from_build",
+        new Error(
+          "TURNSTILE_SECRET_KEY is set but NEXT_PUBLIC_TURNSTILE_SITE_KEY was absent when this bundle was built, so no widget renders and no token can arrive. Turnstile is DISABLED until the app is rebuilt with the site key present. Set it on the machine that runs the build, not only on the server.",
+        ),
+      );
+    }
+    return { ok: true };
+  }
+
   if (!token) {
     return { errorCodes: ["missing-input-response"], ok: false };
   }

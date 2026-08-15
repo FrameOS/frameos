@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import { createDb } from "@frameos-cloud/db";
 import { checkEmailDelivery } from "./email";
 import { hasDatabaseUrl } from "./env";
+import { getTurnstileSiteKey } from "./turnstile";
 
 export type SystemCheck = {
   configured: boolean;
@@ -173,12 +174,55 @@ async function checkDatabaseLive(): Promise<LiveCheck> {
   }
 }
 
-// Both probes in parallel; each already resolves to a result rather than
-// throwing, so one failing service cannot blank the whole panel.
+// Not a probe of a remote service but of THIS BUILD: the site key is a
+// NEXT_PUBLIC_ value inlined when the bundle was compiled, and production
+// bundles are built on a developer machine and streamed to the server. So
+// "the server's env file has both keys" does not mean the running app has
+// both — and the presence check above cannot tell the difference. This can.
+function checkTurnstileLive(): LiveCheck {
+  const siteKeyInBundle = Boolean(getTurnstileSiteKey());
+  const secretAtRuntime = Boolean(process.env.TURNSTILE_SECRET_KEY?.trim());
+
+  if (!siteKeyInBundle && !secretAtRuntime) {
+    return {
+      detail: "Not configured; the Postgres rate limiter is the only gate.",
+      name: "Turnstile (signup abuse gate)",
+      state: "not_configured",
+    };
+  }
+  if (siteKeyInBundle && secretAtRuntime) {
+    return {
+      detail: "Site key is baked into this build and the secret is present.",
+      name: "Turnstile (signup abuse gate)",
+      state: "ok",
+    };
+  }
+  if (!siteKeyInBundle) {
+    return {
+      detail:
+        "TURNSTILE_SECRET_KEY is set but NEXT_PUBLIC_TURNSTILE_SITE_KEY was missing when this bundle was BUILT — no widget renders, so Turnstile is disabled to avoid rejecting every signup. Set the site key where the build runs and redeploy.",
+      name: "Turnstile (signup abuse gate)",
+      state: "failing",
+    };
+  }
+  return {
+    detail:
+      "Site key is in the build but TURNSTILE_SECRET_KEY is missing at runtime, so the widget's answer is never checked.",
+    name: "Turnstile (signup abuse gate)",
+    state: "failing",
+  };
+}
+
+// Both remote probes in parallel; each already resolves to a result rather
+// than throwing, so one failing service cannot blank the whole panel.
 export async function runLiveChecks(): Promise<LiveCheck[]> {
   const [database, email] = await Promise.all([
     checkDatabaseLive(),
     checkEmailDelivery(),
   ]);
-  return [database, { ...email, name: "Postmark (email delivery)" }];
+  return [
+    database,
+    { ...email, name: "Postmark (email delivery)" },
+    checkTurnstileLive(),
+  ];
 }

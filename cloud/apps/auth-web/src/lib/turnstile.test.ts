@@ -45,6 +45,7 @@ describe("verifyTurnstileToken", () => {
 
   it("rejects a missing token without calling Cloudflare", async () => {
     process.env.TURNSTILE_SECRET_KEY = "secret";
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "site";
 
     await expect(verifyTurnstileToken(undefined)).resolves.toEqual({
       errorCodes: ["missing-input-response"],
@@ -53,8 +54,25 @@ describe("verifyTurnstileToken", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("fails OPEN when the secret is set but no site key was in the build", async () => {
+    // The half-configured deploy: NEXT_PUBLIC_* is inlined at build time and
+    // production bundles are built on a developer machine, so setting the
+    // site key only in the server's env file ships forms with no widget. Every
+    // signup then arrives tokenless. Enforcing here would be a 100% outage of
+    // account creation and password reset from a config mistake no user can
+    // see — so this one case fails open and reports loudly instead.
+    process.env.TURNSTILE_SECRET_KEY = "secret";
+    delete process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(verifyTurnstileToken(undefined)).resolves.toEqual({ ok: true });
+    await expect(verifyTurnstileToken("anything")).resolves.toEqual({ ok: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("accepts a token Cloudflare confirms", async () => {
     process.env.TURNSTILE_SECRET_KEY = "secret";
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "site";
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: true }), { status: 200 }),
     );
@@ -70,6 +88,7 @@ describe("verifyTurnstileToken", () => {
 
   it("surfaces Cloudflare's rejection codes", async () => {
     process.env.TURNSTILE_SECRET_KEY = "secret";
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "site";
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({ "error-codes": ["timeout-or-duplicate"], success: false }),
@@ -85,6 +104,7 @@ describe("verifyTurnstileToken", () => {
 
   it("does not send the rate limiter's 'local' placeholder as an IP", async () => {
     process.env.TURNSTILE_SECRET_KEY = "secret";
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "site";
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ success: true }), { status: 200 }),
     );
@@ -101,6 +121,7 @@ describe("verifyTurnstileToken", () => {
     // which is exactly when a flood is cheapest to run. A brief inability to
     // sign up is the better failure, so this must never return ok.
     process.env.TURNSTILE_SECRET_KEY = "secret";
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "site";
     vi.spyOn(console, "warn").mockImplementation(() => {});
     fetchMock.mockRejectedValueOnce(new Error("network down"));
 
@@ -112,6 +133,7 @@ describe("verifyTurnstileToken", () => {
 
   it("fails closed on a non-2xx from the siteverify endpoint too", async () => {
     process.env.TURNSTILE_SECRET_KEY = "secret";
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "site";
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 502 }));
 
     await expect(verifyTurnstileToken("tok")).resolves.toEqual({
