@@ -110,6 +110,17 @@ Three Raspberry Pi platforms ship with published base images:
 (every ARMv6 board: Zero, Zero W, Pi 1, CM1) and `raspberry-pi-5` (Pi 5 /
 CM5).
 
+- **Drivers own pixie refs they did not allocate** — the shared driver
+  libraries each carry their own ARC/ORC runtime, and
+  `frameos_driver_render` hands them the host's `Image` via
+  `cast[Image](image)`. Anything in a driver that copies that ref (a plain
+  `var renderImage = image` will do it) has a second cycle collector
+  bookkeeping one object; the host then dies releasing the image at the end
+  of its render loop, with a stack that names only `runner.nim`. Cost one
+  crash-looping Pi 5 already (see the framebuffer note in
+  `drivers/frameBuffer/frameBuffer.nim`). The real fix is a borrowed,
+  non-owning view across the ABI rather than a cast — until then, drivers
+  must not take owning copies of the rendered image.
 - **Next base-image rebuild drops ImageMagick** — the defconfig no longer
   selects `BR2_PACKAGE_IMAGEMAGICK` (the runtime is Pixie-only), but the
   published base images still carry it. Nothing to do beyond dispatching

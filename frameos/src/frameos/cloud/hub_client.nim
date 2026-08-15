@@ -1701,10 +1701,30 @@ proc cloudHubThreadMain(frameConfig: FrameConfig) {.thread.} =
         nextEnrollAttemptAt = 0.0
         enrollBackoff = HubEnrollBackoffMinSeconds
       if epochTime() >= nextEnrollAttemptAt and fileExists(pendingEnrollmentPath()):
+        # Announced BEFORE the attempt, because the attempt is what changes
+        # state: a successful or permanently-rejected enrollment deletes the
+        # pending file, and if the process dies between that and the outcome
+        # log, the card is left unable to retry with nothing on record saying
+        # it ever tried. A Pi 5 crash-looping on its display driver lost its
+        # enrollment exactly that way — token redeemed, pending file gone,
+        # not one line about it in a 300 KB log.
+        log(%*{"event": "cloud:enroll:boot:attempt"})
         let (resolved, attempted, outcome) = processPendingCloudEnrollment(frameConfig)
         if attempted:
           log(%*{"event": "cloud:enroll:boot", "ok": outcome.ok,
                  "resolved": resolved, "error": outcome.error})
+        else:
+          # No request went out, and until now nothing said so. An expired
+          # claim token deletes the pending file and gives up on enrollment
+          # for the life of the card, and an unreadable one retries into a
+          # growing backoff — both in total silence, which reads from the
+          # logs exactly like a frame that never tried to enroll at all.
+          # (Cost: a Pi 5 that came up healthy and simply never appeared in
+          # the cloud, with no line anywhere to say why.)
+          log(%*{"event": "cloud:enroll:boot:skipped",
+                 "resolved": resolved,
+                 "error": if outcome.error.len > 0: outcome.error
+                          else: "no_pending_enrollment_readable"})
         if resolved:
           enrollBackoff = HubEnrollBackoffMinSeconds
           nextEnrollAttemptAt = 0.0

@@ -5,9 +5,11 @@ import gzip
 import importlib.util
 import json
 import re
+import shlex
 import stat
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -2379,18 +2381,71 @@ def test_post_image_script_unified_image_strips_start_file_pins():
     assert "size = 64M" in post_image
 
 
-def test_post_image_script_pi_5_leaves_boot_config_alone():
+def test_post_image_script_pi_5_enables_kms_and_sets_no_gpu_mem():
     from app.tasks.buildroot_platforms import BUILDROOT_PLATFORMS
 
     post_image = render_post_image_script(BUILDROOT_PLATFORMS["raspberry-pi-5"])
 
-    # No default lines and no keys to strip: the config.txt patcher is
-    # omitted entirely (no gpu_mem on the Pi 5).
-    assert "rpi-firmware/config.txt" not in post_image.split("rootfs_image=")[0]
-    assert "gpu_mem" not in post_image
+    boot_config_block = post_image.split("rootfs_image=")[0]
+    # BCM2712 ships no firmware framebuffer, so the KMS overlay is what makes
+    # /dev/fb0 exist at all. The unsuffixed name is deliberate: the firmware
+    # remaps it to vc4-kms-v3d-pi5 through overlays/overlay_map.dtb.
+    assert '\'{"remove": [], "set": ["dtoverlay=vc4-kms-v3d"]}\'' in boot_config_block
+    # Still no memory-split key of its own — the Pi 5 firmware ignores gpu_mem.
+    # (The patcher's generic body names the key; the platform's spec must not.)
+    assert not any("gpu_mem" in line for line in BUILDROOT_PLATFORMS["raspberry-pi-5"].default_boot_config_lines)
     assert "size = 64M" in post_image
     # The kernel still lands on the FAT partition even without a kernel= pin.
     assert 'kernel="Image"' in post_image
+
+
+def _extract_boot_config_python(post_image: str) -> str:
+    """The config.txt patcher's heredoc body, as the build host would run it."""
+    body = post_image.split("<<'PY'\n", 1)[1]
+    return body.split("\nPY\n", 1)[0]
+
+
+def _run_boot_config_patcher(script: str, post_image: str, existing: str) -> str:
+    """Run that patcher over `existing` with the platform's own JSON spec."""
+    invocation = next(
+        line for line in post_image.splitlines()
+        if line.strip().startswith('python3 - "$boot_config"')
+    )
+    spec = shlex.split(invocation)[3]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        config_path = Path(tmp) / "config.txt"
+        config_path.write_text(existing, encoding="utf-8")
+        script_path = Path(tmp) / "patch.py"
+        script_path.write_text(script, encoding="utf-8")
+        subprocess.run(
+            [sys.executable, str(script_path), str(config_path), spec],
+            check=True,
+        )
+        return config_path.read_text(encoding="utf-8")
+
+
+def test_post_image_config_patcher_keeps_other_dtoverlay_lines():
+    """dtoverlay is a list, not a setting.
+
+    Replacing by key would have the Pi 5's vc4 line delete a sample config's
+    miniuart-bt line (and, on a board that ever sets both, delete the first
+    one it set). Only same-key *settings* are replaced.
+    """
+    from app.tasks.buildroot_platforms import BUILDROOT_PLATFORMS
+
+    post_image = render_post_image_script(BUILDROOT_PLATFORMS["raspberry-pi-5"])
+    script = _extract_boot_config_python(post_image)
+
+    merged = _run_boot_config_patcher(
+        script,
+        post_image,
+        "dtoverlay=miniuart-bt\ndtparam=spi=on\ndisable_overscan=1\n",
+    )
+
+    assert "dtoverlay=miniuart-bt" in merged
+    assert "dtoverlay=vc4-kms-v3d" in merged
+    assert "dtparam=spi=on" in merged
 
 
 def test_zero_w_frame_uses_armv6_cross_target(tmp_path, monkeypatch):

@@ -42,6 +42,12 @@ type Driver* = ref object of FrameOSDriver
   screenInfo*: ScreenInfo
   logger*: DriverLogger
   sizeMismatchLogged*: bool
+  # False when /dev/fb0 could not be interrogated at init. The screenInfo we
+  # carry is then a fabrication (configuredScreenInfo), there is nothing to
+  # write to, and render must bail before it so much as touches the image —
+  # see the note on `render`.
+  available*: bool
+  unavailableLogged*: bool
   renderBuffer: seq[uint8]
 
 proc logFrameBuffer(logger: DriverLogger, payload: JsonNode) =
@@ -207,16 +213,19 @@ proc configuredScreenInfo(frameOS: DriverContext): ScreenInfo =
 proc init*(frameOS: DriverContext): Driver =
   let logger = if frameOS.isNil: nil else: frameOS.logger
   var screenInfo: ScreenInfo
+  var available = true
   try:
     tryToDisableCursorBlinking()
     screenInfo = getScreenInfo(logger)
   except DivByZeroDefect as e:
+    available = false
     screenInfo = configuredScreenInfo(frameOS)
     logFrameBuffer(logger, %*{"event": "driver:frameBuffer",
         "error": "Invalid framebuffer metadata caused division by zero",
         "exception": e.msg,
         "fallbackScreenInfo": screenInfo})
   except Exception as e:
+    available = false
     screenInfo = configuredScreenInfo(frameOS)
     logFrameBuffer(logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to initialize driver", "exception": e.msg,
@@ -231,6 +240,7 @@ proc init*(frameOS: DriverContext): Driver =
     name: "frameBuffer",
     screenInfo: screenInfo,
     logger: logger,
+    available: available,
   )
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
@@ -256,6 +266,22 @@ proc setup*(frameOS: DriverContext = nil): SetupResult =
 proc render*(self: Driver, image: Image) =
   if self.isNil:
     return
+
+  # A failed probe at init is not a permanent verdict. On a Pi 5 the KMS
+  # driver registers its fbdev after frameos has already started, so a driver
+  # that latched "no framebuffer" at init would sit dark forever on a board
+  # whose display works perfectly a second later. Retry the cheap probe until
+  # it lands; it also upgrades the fabricated screenInfo to the panel's real
+  # geometry.
+  if not self.available:
+    try:
+      self.screenInfo = getScreenInfo(self.logger)
+      self.available = true
+    except DivByZeroDefect:
+      discard
+    except Exception:
+      discard
+
   let bitsPerPixel = self.screenInfo.bitsPerPixel
   if self.screenInfo.width == 0 or self.screenInfo.height == 0 or bitsPerPixel == 0:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
@@ -270,24 +296,52 @@ proc render*(self: Driver, image: Image) =
 
   let width = self.screenInfo.width.int
   let height = self.screenInfo.height.int
-  var renderImage = image
-  if image.width != width or image.height != height:
-    if not self.sizeMismatchLogged:
-      self.sizeMismatchLogged = true
-      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
-          "warning": "Rendered image does not match framebuffer resolution, scaling to fit",
-          "imageWidth": image.width, "imageHeight": image.height,
-          "screenInfo": self.screenInfo})
-    renderImage = image.resize(width, height)
-  let imageData = renderImage.data
-
   let bytesPerPixel = int(bitsPerPixel) div 8
   let rowBytes = width * bytesPerPixel
   # The framebuffer can pad each row; skip the padding bytes when writing
   let lineLength = if self.screenInfo.lineLength.int >= rowBytes: self.screenInfo.lineLength.int
     else: rowBytes
+  let bufferLen = lineLength * height
+
+  # Open the device BEFORE touching `image`, and bail here if it will not
+  # open. This driver is a shared library carrying its own ARC runtime: the
+  # moment it takes an owning reference to a pixie object the host allocated,
+  # two cycle collectors are bookkeeping one object, and the HOST dies later
+  # releasing the image at the end of its render loop — SIGSEGV in
+  # unregisterCycle, from a stack that names only runner.nim. A Pi 5 with no
+  # writable framebuffer crash-looped on exactly that, fourteen restarts in
+  # two minutes. No device, no reference, no crash.
+  var fb: File
+  if not open(fb, DEVICE, fmWrite, bufferLen):
+    if not self.unavailableLogged:
+      self.unavailableLogged = true
+      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+          "error": "Cannot open " & DEVICE & " for writing, skipping renders",
+          "device": DEVICE,
+          "hint": "On a Pi 5 the firmware provides no framebuffer of its own " &
+            "(bcm2708_fb is Pi 1-4 only); config.txt needs dtoverlay=vc4-kms-v3d."})
+    return
+  self.unavailableLogged = false
+
   try:
-    let bufferLen = lineLength * height
+    # Deliberately NOT `var renderImage = image`: that is an owning copy of
+    # the host's ref, and the hazard described above. Read the host's pixels
+    # through a raw view instead, and only allocate here when the panel
+    # geometry forces a resize (that image is ours, so owning it is fine).
+    var scaled: Image = nil
+    if image.width != width or image.height != height:
+      if not self.sizeMismatchLogged:
+        self.sizeMismatchLogged = true
+        logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+            "warning": "Rendered image does not match framebuffer resolution, scaling to fit",
+            "imageWidth": image.width, "imageHeight": image.height,
+            "screenInfo": self.screenInfo})
+      scaled = image.resize(width, height)
+    let source = if scaled.isNil: image else: scaled
+    if source.width * source.height == 0:
+      return
+    let pixels = cast[ptr UncheckedArray[ColorRGBX]](unsafeAddr source.data[0])
+
     if self.renderBuffer.len != bufferLen:
       self.renderBuffer = newSeq[uint8](bufferLen)
     else:
@@ -296,7 +350,7 @@ proc render*(self: Driver, image: Image) =
       for y in 0 ..< height:
         var j = y * lineLength
         for x in 0 ..< width:
-          let color = imageData[y * width + x]
+          let color = pixels[y * width + x]
           let pixel = ((uint16(color.r) shr 3) shl 11) or ((uint16(
               color.g) shr 2) shl 5) or (uint16(color.b) shr 3)
           self.renderBuffer[j] = uint8(pixel and 0xff)
@@ -310,7 +364,7 @@ proc render*(self: Driver, image: Image) =
       for y in 0 ..< height:
         var j = y * lineLength
         for x in 0 ..< width:
-          let color = imageData[y * width + x]
+          let color = pixels[y * width + x]
           self.renderBuffer[j + redByte] = color.r
           self.renderBuffer[j + greenByte] = color.g
           self.renderBuffer[j + blueByte] = color.b
@@ -321,15 +375,14 @@ proc render*(self: Driver, image: Image) =
             self.renderBuffer[j + alphaByte] = color.a
           j += bytesPerPixel
 
-    var fb = open(DEVICE, fmWrite, self.renderBuffer.len)
-    try:
-      discard fb.writeBuffer(addr self.renderBuffer[0], self.renderBuffer.len)
-    finally:
-      fb.close()
+    discard fb.writeBuffer(addr self.renderBuffer[0], self.renderBuffer.len)
+    fb.flushFile()
     claimConsoleAfterSuccessfulRender(self.logger)
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
-        "error": "Failed to write image to /dev/fb0"})
+        "error": "Failed to write image to " & DEVICE})
+  finally:
+    fb.close()
 
 proc turnOn*(self: Driver) =
   try:
