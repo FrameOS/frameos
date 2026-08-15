@@ -169,8 +169,11 @@ def test_raspberry_pi_5_has_its_own_kernel_and_no_gpu_mem():
     assert "CONFIG_ARM64_4K_PAGES=y" in platform.kernel_fragment_lines
     # raspberrypi5_defconfig disables overlays; e-ink displays need them.
     assert "BR2_PACKAGE_RPI_FIRMWARE_INSTALL_DTB_OVERLAYS=y" in platform.extra_config_lines
-    # No start*.elf firmware on the Pi 5 and no gpu_mem key either.
-    assert platform.default_boot_config_lines == ()
+    # No start*.elf firmware on the Pi 5 and no gpu_mem key either — but the
+    # KMS overlay is mandatory: BCM2712 has no firmware framebuffer, so
+    # without vc4 there is no /dev/fb0 and the `framebuffer` device is dead.
+    assert platform.default_boot_config_lines == ("dtoverlay=vc4-kms-v3d",)
+    assert not any("gpu_mem" in line for line in platform.default_boot_config_lines)
     for alias in ("pi-5", "pi5", "raspberrypi5"):
         assert normalize_buildroot_platform(alias) == "raspberry-pi-5"
 

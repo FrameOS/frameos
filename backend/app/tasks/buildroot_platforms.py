@@ -306,8 +306,14 @@ RASPBERRY_PI_5 = BuildrootPlatform(
     kernel_fragment_lines=("CONFIG_ARM64_4K_PAGES=y",),
     # bcm2712 kernel Image + DTBs + overlays outgrow the 32M boot partition.
     boot_partition_size="64M",
-    # No gpu_mem on the Pi 5 (firmware ignores it; memory split is fixed).
-    default_boot_config_lines=(),
+    # No gpu_mem on the Pi 5 (firmware ignores it; memory split is fixed), but
+    # the KMS overlay is not optional here the way it is on older boards: the
+    # BCM2712 firmware sets up no framebuffer of its own (bcm2708_fb is Pi 1-4
+    # only), so without vc4 there is no /dev/fb0 at all and the `framebuffer`
+    # device has nothing to write to. The firmware remaps the generic name per
+    # SoC via overlays/overlay_map.dtb (bcm2712 -> vc4-kms-v3d-pi5), so the
+    # unsuffixed line is the correct one to ship.
+    default_boot_config_lines=("dtoverlay=vc4-kms-v3d",),
     # Pi 5 Wi-Fi is a BCM43455; generic + board-specific NVRAM files ship in
     # BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI already.
     wifi_firmware_models=(),

@@ -42,6 +42,12 @@ type Driver* = ref object of FrameOSDriver
   screenInfo*: ScreenInfo
   logger*: DriverLogger
   sizeMismatchLogged*: bool
+  # False when /dev/fb0 could not be interrogated at init. The screenInfo we
+  # carry is then a fabrication (configuredScreenInfo), there is nothing to
+  # write to, and render must bail before it so much as touches the image —
+  # see the note on `render`.
+  available*: bool
+  unavailableLogged*: bool
   renderBuffer: seq[uint8]
 
 proc logFrameBuffer(logger: DriverLogger, payload: JsonNode) =
@@ -207,16 +213,19 @@ proc configuredScreenInfo(frameOS: DriverContext): ScreenInfo =
 proc init*(frameOS: DriverContext): Driver =
   let logger = if frameOS.isNil: nil else: frameOS.logger
   var screenInfo: ScreenInfo
+  var available = true
   try:
     tryToDisableCursorBlinking()
     screenInfo = getScreenInfo(logger)
   except DivByZeroDefect as e:
+    available = false
     screenInfo = configuredScreenInfo(frameOS)
     logFrameBuffer(logger, %*{"event": "driver:frameBuffer",
         "error": "Invalid framebuffer metadata caused division by zero",
         "exception": e.msg,
         "fallbackScreenInfo": screenInfo})
   except Exception as e:
+    available = false
     screenInfo = configuredScreenInfo(frameOS)
     logFrameBuffer(logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to initialize driver", "exception": e.msg,
@@ -231,6 +240,7 @@ proc init*(frameOS: DriverContext): Driver =
     name: "frameBuffer",
     screenInfo: screenInfo,
     logger: logger,
+    available: available,
   )
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
@@ -255,6 +265,24 @@ proc setup*(frameOS: DriverContext = nil): SetupResult =
 
 proc render*(self: Driver, image: Image) =
   if self.isNil:
+    return
+  # Bail before touching `image`, not after. This driver is a shared library
+  # with its OWN ARC runtime: the moment it takes an owning copy of a pixie
+  # ref the host allocated (`var renderImage = image` below), two independent
+  # cycle collectors are bookkeeping one object. On the /dev/fb0 failure path
+  # that goes wrong and the HOST dies later, releasing the image at the end of
+  # its render loop — SIGSEGV in unregisterCycle, from a stack that names only
+  # runner.nim, on a frame whose real fault is a missing framebuffer. A Pi 5
+  # (no bcm2708_fb, so no fb0 unless vc4 KMS is on) crash-looped on exactly
+  # that. So: no framebuffer, no reference, no crash.
+  if not self.available:
+    if not self.unavailableLogged:
+      self.unavailableLogged = true
+      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+          "error": "Framebuffer unavailable, skipping every render",
+          "device": DEVICE,
+          "hint": "No " & DEVICE & " to write to. On a Pi 5 the firmware " &
+            "provides no framebuffer; config.txt needs dtoverlay=vc4-kms-v3d."})
     return
   let bitsPerPixel = self.screenInfo.bitsPerPixel
   if self.screenInfo.width == 0 or self.screenInfo.height == 0 or bitsPerPixel == 0:
@@ -321,7 +349,16 @@ proc render*(self: Driver, image: Image) =
             self.renderBuffer[j + alphaByte] = color.a
           j += bytesPerPixel
 
-    var fb = open(DEVICE, fmWrite, self.renderBuffer.len)
+    # The non-raising overload on purpose. A framebuffer that disappears after
+    # init (device unbound, permissions revoked) is a condition to log, not to
+    # throw through a scope that holds `renderImage` — an owning copy of a
+    # host-allocated pixie ref, destroyed by this library's ARC runtime rather
+    # than the host's. Fewer paths through that hazard is strictly better.
+    var fb: File
+    if not open(fb, DEVICE, fmWrite, self.renderBuffer.len):
+      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+          "error": "Failed to open " & DEVICE & " for writing"})
+      return
     try:
       discard fb.writeBuffer(addr self.renderBuffer[0], self.renderBuffer.len)
     finally:

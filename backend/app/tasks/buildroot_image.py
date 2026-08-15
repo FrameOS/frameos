@@ -102,7 +102,10 @@ BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "6"
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 19
+# 20: the Pi 5 gained dtoverlay=vc4-kms-v3d, which _frame_boot_config_lines
+# merges into /boot/config.txt during customization — cards cached from before
+# it carry no framebuffer and must be regenerated, not reused.
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 20
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "30M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "30M")
 BUILDROOT_DATA_PARTITION_HEADROOM_BYTES = 8 * 1024 * 1024
@@ -3409,9 +3412,10 @@ def render_post_image_script(platform: BuildrootPlatform) -> str:
             f"Post-image script generation is not implemented for the {platform.family} family"
         )
     # The rpi-firmware sample config.txt is inherited, not authored: apply the
-    # platform's default lines (replacing same-key lines; a gpu_mem line also
-    # replaces the gpu_mem_256/512/1024 variants) and strip pinned keys that
-    # break multi-model images (start_file/fixup_file).
+    # platform's default lines (replacing same-key lines, except the additive
+    # dtoverlay/dtparam lists; a gpu_mem line also replaces the
+    # gpu_mem_256/512/1024 variants) and strip pinned keys that break
+    # multi-model images (start_file/fixup_file).
     boot_config_spec = json.dumps(
         {
             "set": list(platform.default_boot_config_lines),
@@ -3433,9 +3437,16 @@ spec = json.loads(sys.argv[2])
 with open(path, encoding="utf-8") as handle:
     lines = handle.read().splitlines()
 
+# dtoverlay/dtparam are lists, not settings: config.txt may legitimately carry
+# several, and each one loads a different overlay. Adding ours must not delete
+# the sample's (miniuart-bt, say) the way a same-key replacement would.
+ADDITIVE_KEYS = {{"dtoverlay", "dtparam", "device_tree_overlay"}}
+
 drop_keys = set(spec["remove"])
 for line in spec["set"]:
     key = line.split("=", 1)[0]
+    if key in ADDITIVE_KEYS:
+        continue
     drop_keys.add(key)
     if key == "gpu_mem":
         drop_keys.update({{"gpu_mem_256", "gpu_mem_512", "gpu_mem_1024"}})
