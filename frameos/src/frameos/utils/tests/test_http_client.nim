@@ -234,6 +234,34 @@ suite "bounded http client":
       for _ in walkDirRec(dir): inc leftovers
     check leftovers == 0
 
+  # boundedDownloadToFile is what the FrameOS release upgrade downloads
+  # through — deliberately instead of shelling out to curl/wget, after
+  # busybox's TLS-less wget applet killed every buildroot upgrade. Its
+  # contract: a destination that exists is always a complete 2xx body.
+  test "boundedDownloadToFile streams a body straight into the file":
+    let path = getTempDir() / "frameos-http-download-ok.bin"
+    defer: removeFile(path)
+    boundedDownloadToFile(baseUrl() & "/big", path)
+    check readFile(path) == "x".repeat(1000)
+
+  test "boundedDownloadToFile follows redirects to the real body":
+    let path = getTempDir() / "frameos-http-download-redirect.bin"
+    defer: removeFile(path)
+    boundedDownloadToFile(baseUrl() & "/redirect", path)
+    check readFile(path) == "hello world"
+
+  test "boundedDownloadToFile raises on 4xx and leaves no partial file":
+    let path = getTempDir() / "frameos-http-download-404.bin"
+    expect HttpRequestError:
+      boundedDownloadToFile(baseUrl() & "/not-found", path)
+    check not fileExists(path)
+
+  test "boundedDownloadToFile removes the partial when the byte cap aborts":
+    let path = getTempDir() / "frameos-http-download-capped.bin"
+    expect IOError:
+      boundedDownloadToFile(baseUrl() & "/spool-large", path, maxBytes = 50_000)
+    check not fileExists(path)
+
   test "stops test server":
     try:
       discard boundedGetContent(baseUrl() & "/quit", timeoutMs = 1000, maxSeconds = 2.0)

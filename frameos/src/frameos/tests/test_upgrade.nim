@@ -1,6 +1,5 @@
 import std/[base64, json, os, strutils, tables, unittest]
 
-import ../device_setup
 import ../ota_pubkey
 import ../upgrade
 
@@ -284,69 +283,3 @@ suite "upgrade status reporting":
     writeUpgradeStatus(%*{"status": "starting"})
     check upgradeStatusMtime() > 0.0
 
-suite "release archive download fallback":
-  # Every buildroot upgrade died on `wget: not an http or ftp url`: busybox
-  # provides a wget applet, so the old one-shot `command -v wget` probe said
-  # yes — but it is built without TLS, and the failure was fatal instead of
-  # falling through to the binary's own TLS client (which had just fetched
-  # the release metadata successfully).
-  setup:
-    discard
-  teardown:
-    resetSetupCommandRunnerForTest()
-
-  test "a downloader that exits non-zero reports failure and clears partials":
-    let dir = getTempDir() / "frameos-download-fallback"
-    createDir(dir)
-    defer: removeDir(dir)
-    let destination = dir / "frameos.tar.gz"
-    writeFile(destination, "partial bytes from the failed run")
-    setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
-      (output: "wget: not an http or ftp url", exitCode: 1))
-
-    check not shellDownloadedArchive("wget -qO ...", destination)
-    # The partial is gone, so the next attempt starts clean and a bare
-    # fileExists check cannot mistake it for a finished download.
-    check not fileExists(destination)
-
-  test "a downloader that exits zero but writes nothing still reports failure":
-    let dir = getTempDir() / "frameos-download-empty"
-    createDir(dir)
-    defer: removeDir(dir)
-    let destination = dir / "frameos.tar.gz"
-    setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
-      writeFile(destination, "")
-      (output: "", exitCode: 0))
-
-    check not shellDownloadedArchive("curl ...", destination)
-
-  test "wget is used when curl is absent and it actually delivers a file":
-    let dir = getTempDir() / "frameos-download-wget-ok"
-    createDir(dir)
-    defer: removeDir(dir)
-    let destination = dir / "frameos.tar.gz"
-    var commands: seq[string] = @[]
-    setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
-      commands.add(command)
-      if command.contains("command -v 'curl'"):
-        return (output: "", exitCode: 1)
-      if command.contains("command -v 'wget'"):
-        return (output: "", exitCode: 0)
-      if command.startsWith("wget "):
-        writeFile(destination, "archive bytes")
-        return (output: "", exitCode: 0)
-      (output: "unexpected: " & command, exitCode: 127))
-
-    downloadReleaseArchive(
-      FrameOSReleaseInfo(
-        version: "2026.8.21",
-        assetUrl: GitHubReleaseDownloadPrefix &
-          "v2026.8.21/frameos-2026.8.21-debian-bookworm-arm64.tar.gz",
-      ),
-      destination,
-    )
-    check fileExists(destination)
-    check readFile(destination) == "archive bytes"
-    # No attempt ever reached beyond wget — the built-in client would not
-    # have gone through the command runner at all.
-    check commands[^1].startsWith("wget ")

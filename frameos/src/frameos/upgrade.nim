@@ -462,57 +462,29 @@ proc ensureCompatibleInstalledLayout(release: FrameOSReleaseInfo) =
     raise newException(ValueError, "FrameOS upgrade must run as root or with passwordless sudo")
   discard release
 
-proc shellDownloadedArchive*(command, destination: string): bool =
-  ## One shell downloader attempt. Failure falls through to the next
-  ## downloader instead of failing the upgrade, and a partial file is removed
-  ## so the next attempt starts clean and an "exists" check cannot lie.
-  let outcome = runSetupCommand(command, raiseOnError = false)
-  result = outcome.exitCode == 0 and fileExists(destination) and
-    getFileSize(destination) > 0
-  if not result:
-    setupLog("FrameOS upgrade: downloader failed (exit " & $outcome.exitCode &
-      "), trying the next one")
-    if fileExists(destination):
-      try:
-        removeFile(destination)
-      except CatchableError:
-        discard
-
 proc downloadReleaseArchive*(release: FrameOSReleaseInfo, destination: string) =
-  ## Download attempts, in order: curl, wget, then the binary's own bounded
-  ## TLS client — and a failing attempt FALLS THROUGH rather than failing the
-  ## upgrade. The old code picked exactly one downloader by `command -v` and
-  ## trusted it, which is how every buildroot upgrade died: busybox provides
-  ## a `wget` applet, so the probe said yes, but it is built without TLS and
-  ## refuses any https URL ("wget: not an http or ftp url") — while the
-  ## built-in client that had just fetched the release metadata over TLS sat
-  ## unused in the else branch.
+  ## Streamed to disk by the binary's own bounded TLS client — the same
+  ## client that just fetched the release metadata and is about to fetch the
+  ## signature, so a device that got this far can by construction download
+  ## the archive too.
+  ##
+  ## Deliberately NO curl and NO wget. Picking a downloader by `command -v`
+  ## is how every buildroot cloud upgrade died: busybox provides a `wget`
+  ## applet, so the probe said yes — but it is built without TLS and refuses
+  ## any https URL ("wget: not an http or ftp url"), while the built-in
+  ## client sat unused in the fallback branch. A downloader the binary
+  ## carries itself cannot be absent, misbuilt, or shadowed on the device,
+  ## and the byte/time bounds, redirect policy and partial-file cleanup are
+  ## one audited code path instead of three.
   validateGithubReleaseAssetUrl(release.assetUrl, release.version)
-  if commandExists("curl") and shellDownloadedArchive(
-    "curl -fL --proto '=https' --tlsv1.2 " & shellQuote(release.assetUrl) &
-      " -o " & shellQuote(destination),
-    destination,
-  ):
-    return
-  if commandExists("wget") and shellDownloadedArchive(
-    "wget -qO " & shellQuote(destination) & " " & shellQuote(release.assetUrl),
-    destination,
-  ):
-    return
-  # Always available and TLS-guaranteed: the same client the metadata and
-  # signature fetches use. Last rather than first only because the shell
-  # tools stream to disk while this buffers the archive in memory.
-  setupLog("FrameOS upgrade: downloading with built-in HTTP client")
-  var headers = newHttpHeaders()
-  headers["User-Agent"] = "FrameOS/" & compiledFrameOSVersion()
-  let body = boundedGetContent(
+  boundedDownloadToFile(
     release.assetUrl,
-    headers = headers,
+    destination,
     timeoutMs = 60_000,
     maxBytes = MaxReleaseArchiveBytes,
     maxSeconds = 1800,
+    headers = @[("User-Agent", "FrameOS/" & compiledFrameOSVersion())],
   )
-  writeFile(destination, body)
 
 proc downloadReleaseSignature(release: FrameOSReleaseInfo): string =
   ## The .minisig beside the asset. Small (a few hundred bytes), so it is

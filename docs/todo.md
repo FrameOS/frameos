@@ -47,9 +47,11 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   The failure was fatal instead of falling through to the binary's own TLS
   client, which had just fetched the release metadata successfully and sat
   unused in the else branch ("Buildroot images ship neither curl nor
-  wget" — half right). Fixed on this branch: download attempts now chain
-  curl → wget → built-in client, a failing attempt logs and falls through,
-  and a zero-byte "success" counts as failure.
+  wget" — half right). Fixed on this branch by deleting the shell
+  downloaders outright: the release archive now streams to disk through the
+  binary's own bounded TLS client (boundedDownloadToFile — peak memory is
+  one recv window, partial files removed on any failure), so there is no
+  external downloader to be absent, misbuilt, or shadowed.
 
   Chicken-and-egg: the fix rides in the frameos binary, so the stuck frame
   cannot self-upgrade into it — 2026.8.21 still carries the broken
