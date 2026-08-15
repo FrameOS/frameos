@@ -22,11 +22,6 @@ design — the cloud protocol has no shell verbs.
   error tracking) but not survivable. Add a second provider with automatic
   failover, or at least a documented manual cutover. Before charging, not
   before signups.
-- **Telemetry scope backfill** — frames enrolled before 2026-08-03 predate
-  the telemetry scope and ship no logs. Known SQL fix on `linked_clients` +
-  a reconnect; no UI for it. Run the one-off in prod.
-- **Seed `verified_publisher_at`** in prod for the accounts that should
-  have it (SQL one-off; no admin toggle yet — see below).
 - Disposable-email blocking was considered and skipped: Turnstile plus the
   rate limiter covers the automated case. Revisit only if abuse is observed.
 
