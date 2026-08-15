@@ -1,162 +1,119 @@
-# FrameOS — consolidated remaining work
+# FrameOS — remaining work
 
-One tracker for everything still open across the repo (last swept
-2026-08-15; launch-readiness audit added 2026-08-15, backups + uptime
-monitoring shipped the same day). Reference material — principles, permission scopes, store
-decisions, threat models, wire protocols, measurements — stays in the
-linked docs; this file only lists what is left to do. When an item ships,
-delete it here.
+One tracker for everything still open across the repo. Reference material —
+principles, permission scopes, store decisions, threat models, wire
+protocols, measurements — lives in the linked docs; this file only lists
+what is left to do. When an item ships, delete it here.
 
-## ESP32 backend→cloud parity (2026-08 push — closing out)
+Standing rule (also in AGENTS.md): frame-facing features and fixes land on
+BOTH control planes (self-hosted backend and cloud) unless explicitly
+one-sided. Doctrine in `docs/cloud-frames.md`, parity matrix in
+`docs/api-triality.md`. Terminal / ping / debug panels are backend-only by
+design — the cloud protocol has no shell verbs.
 
-Goal: everything the self-hosted backend can do with an ESP32 frame, the
-cloud can too. Standing rule (also in AGENTS.md): frame-facing features and
-fixes land on BOTH control planes unless explicitly one-sided. The doctrine
-behind this push (cloud installs prebuilt binaries only, do as much as
-possible in the browser, the per-surface inventory) lives in
-`docs/cloud-frames.md` and the parity matrix in `docs/api-triality.md`;
-only the open work is listed here.
+## Cloud launch — operator follow-ups
 
-Deliberately not gaps: terminal / ping / debug panels are backend-only
-because the cloud protocol has no shell verbs — structural, nothing to close.
-
-- **Service settings + cloud OTA: verify the Nim client on hardware** — the
-  Linux/Pi client is unit-tested and build-verified only, never run against
-  a real provider. (The ESP32 client has been.) The cloud OTA verb wiring
-  (2026-08-13) is in the same boat: code-complete, unit-tested, no hardware
-  pass. Verifying a full buildroot SD-card cloud install + update covers
-  both.
-
-  2026-08-15: two hardware attempts (buildroot Pi, 2026.8.20 → 2026.8.21)
-  reported nothing after `cloud:upgrade scheduled` and the version never
-  moved. The visibility half is fixed — `frameos upgrade` runs detached and
-  only ever wrote `upgrade-status.json`, which the local admin page polls
-  and the cloud could not see; the hub session now watches that file and
-  forwards every status change (plus a `stalled` line when the child dies
-  silently, and a replay of a terminal status written while the frame was
-  restarting). That watcher only reaches a frame VIA a release, so a frame
-  on 2026.8.20/21 stays silent regardless — the outcome of those attempts
-  is on the device:
-
-      cat /srv/frameos/state/upgrade-status.json
-      tail -50 /srv/frameos/logs/upgrade.log
-
-  ROOT CAUSE (2026-08-15, from the device's upgrade.log): busybox. The
-  downloader picked exactly one tool by `command -v` — and buildroot's
-  busybox provides a `wget` applet, so the probe said yes, but it is built
-  without TLS and refuses any https URL (`wget: not an http or ftp url`).
-  The failure was fatal instead of falling through to the binary's own TLS
-  client, which had just fetched the release metadata successfully and sat
-  unused in the else branch ("Buildroot images ship neither curl nor
-  wget" — half right). Fixed on this branch by deleting the shell
-  downloaders outright: the release archive now streams to disk through the
-  binary's own bounded TLS client (boundedDownloadToFile — peak memory is
-  one recv window, partial files removed on any failure), so there is no
-  external downloader to be absent, misbuilt, or shadowed.
-
-  Chicken-and-egg: the fix rides in the frameos binary, so the stuck frame
-  cannot self-upgrade into it — 2026.8.21 still carries the broken
-  downloader. One manual bootstrap (scp the tarball + stage by hand, or
-  wait for 2026.8.22 and bootstrap once) is needed per already-deployed
-  buildroot frame.
-
-  Same session also killed the noise around the click: the "Also push
-  scenes & settings" tick used to redeliver the unchanged settings+scenes,
-  and the device reloaded its config and re-rendered the panel twice per
-  upgrade click. The workspace now skips the push when nothing is unsaved
-  and the device acked the last one, and the device (next release) acks an
-  idempotent set_settings/set_scenes redelivery without reloading.
+- **Fill in `FRAMEOS_LEGAL_*` in prod** (company name, address, KBO/BCE
+  number, VAT number, representative, contact email). The legal pages show
+  a visible `[TO BE COMPLETED]` warning and `/admin` lists it as a required
+  setting until this is done. Have a lawyer read `/legal/terms`,
+  `/legal/privacy` and `/legal/imprint` before broad signup.
+- **Set `NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`** from a
+  Cloudflare Turnstile widget. The site key is inlined at build time, so it
+  must be present on the machine that runs the build, not only on the
+  server; `/admin` → Live checks reports a half-configured deploy.
+- **Remove the Discord webhook path** (`DISCORD_REPORTS_WEBHOOK_URL`,
+  `signup-notifications.ts`, `discord.ts`) — notifications go through
+  PostHog. The privacy policy already omits Discord, so leave the env var
+  unset until the code is gone.
+- **Second transactional email provider** — Postmark is a single point of
+  failure gating every login; its failure is visible (`/admin` live check,
+  error tracking) but not survivable. Add a second provider with automatic
+  failover, or at least a documented manual cutover. Before charging, not
+  before signups.
+- **Telemetry scope backfill** — frames enrolled before 2026-08-03 predate
+  the telemetry scope and ship no logs. Known SQL fix on `linked_clients` +
+  a reconnect; no UI for it. Run the one-off in prod.
+- **Seed `verified_publisher_at`** in prod for the accounts that should
+  have it (SQL one-off; no admin toggle yet — see below).
+- **Bootstrap already-deployed buildroot frames on ≤ 2026.8.21** once by
+  hand (scp the release tarball and stage it) — their cloud OTA downloader
+  cannot fetch https, so they cannot self-upgrade into the fixed binary.
+- Disposable-email blocking was considered and skipped: Turnstile plus the
+  rate limiter covers the automated case. Revisit only if abuse is observed.
 
 ## Cloud-managed frames
 
 - **Cloud frame settings parity + an honest Settings panel** — cloud-managed
-  Linux/Pi frames currently render nearly the full self-hosted per-frame form,
-  even though cloud save/diff/readback only support the declarative base keys
-  (`name`, `debug`, `interval`, `rotate`, `scaling_mode`, `timezone`; schedule
-  and service secrets use their own paths). Most of those visible controls are
-  therefore unsaveable and may appear to save while being dropped from the
-  cloud payload. First make the surface honest: hide unsupported sections or
-  disable them with a useful explanation, and never render an editable field
-  that the active device profile cannot round-trip.
+  Linux/Pi frames render nearly the full self-hosted per-frame form, but
+  cloud save/diff/readback only support the declarative base keys (`name`,
+  `debug`, `interval`, `rotate`, `scaling_mode`, `timezone`; schedule and
+  service secrets use their own paths). Most visible controls are therefore
+  unsaveable and may appear to save while being dropped. First make the
+  surface honest: hide unsupported sections or disable them with an
+  explanation, and never render an editable field the active device profile
+  cannot round-trip.
 
-  Then widen `set_settings` in deliberately small, validated batches, keeping
-  the shared SPA payload list, auth-web validator/readback, Pi/Nim allowlist,
-  ESP32 handler (where applicable), docs, and drift tests in lockstep:
+  Then widen `set_settings` in small, validated batches, keeping the shared
+  SPA payload list, auth-web validator/readback, Pi/Nim allowlist, ESP32
+  handler (where applicable), docs, and drift tests in lockstep:
 
   - Straightforward Pi/Linux candidates: `flip`, `error_behavior` (mode and
-    retry timings), and `control_code` (enable, placement, size/padding,
-    offsets, and colors).
-  - Useful with explicit bounds/policy: `metrics_interval` (including a clear,
-    actually-working disabled value), platform-capped
-    `max_http_response_bytes`, and `save_assets` (boolean/per-app, respecting
-    disk quotas). For `timezone_updater`, expose only enabled/hour and keep the
-    download endpoint fixed and trusted — never accept an arbitrary update
-    URL from the provider.
-  - Hardware-aware settings are especially worthwhile: custom display
-    `palette` colors, the strict partial-refresh subset of `device_config`
-    (`partial`, `partialMaxAreaPercent`,
-    `partialMaxRefreshesBeforeFull`), and `gpio_buttons` (pin + label). Validate
-    them against the reported panel/platform, advertise capability/version
-    requirements, and restart the runtime/device when the driver only reads
-    them at initialization. Never allow the whole `device_config` object just
-    to carry the partial-refresh fields.
-  - ESP32 follow-ups: `max_http_response_bytes`, noisy/debug logging, and GPIO
-    buttons are plausible because the NVS fields already exist; add only the
-    settings the firmware really consumes and preserve the whole-payload
-    rejection contract. The existing cloud power controls remain their own
-    ESP32-only subset.
-  - Automatic reboot is useful, but the self-hosted `reboot` object is mostly
-    deploy-time configuration rather than a live FrameConfig field. Implement
-    it as a real cloud-safe scheduler capability (possibly through the
-    existing schedule verb) instead of merely persisting an inert object.
-    Brightness is also desirable once the runtime and relevant drivers gain a
-    real brightness setting.
+    retry timings), `control_code` (enable, placement, size/padding,
+    offsets, colors).
+  - With explicit bounds/policy: `metrics_interval` (with a working
+    disabled value), platform-capped `max_http_response_bytes`,
+    `save_assets` (boolean/per-app, respecting disk quotas). For
+    `timezone_updater`, expose only enabled/hour; keep the download endpoint
+    fixed — never accept an arbitrary update URL from the provider.
+  - Hardware-aware: custom display `palette` colors, the strict
+    partial-refresh subset of `device_config` (`partial`,
+    `partialMaxAreaPercent`, `partialMaxRefreshesBeforeFull`), `gpio_buttons`
+    (pin + label). Validate against the reported panel/platform, advertise
+    capability/version requirements, restart the runtime when the driver
+    only reads them at init. Never allow the whole `device_config` object.
+  - ESP32: `max_http_response_bytes`, debug logging, GPIO buttons are
+    plausible (NVS fields exist); add only what the firmware consumes and
+    keep the whole-payload rejection contract. The cloud power controls stay
+    their own ESP32-only subset.
+  - Automatic reboot: implement as a real cloud-safe scheduler capability
+    (possibly via the schedule verb), not a persisted inert object.
+    Brightness once the runtime and drivers gain a real setting.
 
-  Do **not** add `image_engine` to the cloud allowlist. We want to remove
-  ImageMagick, not make it a cloud-facing compatibility promise: converge on
-  Pixie, migrate/ignore old `imagemagick` config values, remove the Settings
-  selector and ImageMagick-specific runtime/build/dependency paths, and test
-  that existing frames degrade to Pixie cleanly.
+  Do **not** add `image_engine` to the cloud allowlist — remove ImageMagick
+  instead: converge on Pixie, migrate/ignore old `imagemagick` values, drop
+  the Settings selector and ImageMagick-specific paths, test that existing
+  frames degrade cleanly.
 
-  Keep provisioning, credentials, and host authority local: deployment mode,
-  panel/driver/VCOM/dimensions, flash and GPIO wiring, SD-card wiring, Wi-Fi
-  and hotspot credentials, private-network elevation, frame HTTP/admin/TLS
-  access and keys, SSH/backend/agent configuration, mountpoints, HTTP-upload
-  URLs/headers, arbitrary update URLs, and service API secrets must not ride
-  `set_settings`. Likewise, do not expose raw `assets_path` or `log_to_file`
-  paths; if those features are wanted remotely, redesign them as bounded
-  toggles using fixed FrameOS-owned directories. Hardware identity reported by
-  the frame should stay authoritative rather than becoming provider-editable.
+  Keep provisioning, credentials, and host authority local: deployment
+  mode, panel/driver/VCOM/dimensions, flash and GPIO wiring, SD-card wiring,
+  Wi-Fi/hotspot credentials, private-network elevation, frame
+  HTTP/admin/TLS access and keys, SSH/backend/agent configuration,
+  mountpoints, HTTP-upload URLs/headers, arbitrary update URLs, and service
+  API secrets must not ride `set_settings`. Do not expose raw `assets_path`
+  or `log_to_file` paths; if wanted remotely, redesign as bounded toggles on
+  fixed FrameOS-owned directories. Hardware identity reported by the frame
+  stays authoritative.
 
-- **Cloud AI chat follow-ups** — the 2026-08-14 chat v2 rebuild (branch
-  `cloud-ai-chat-v2`) replaced the ported pipeline with a streaming agentic
-  loop (`/api/ai/chat`, NDJSON) with tools for the app catalog, docs,
-  GitHub source, frame telemetry, and the store; it added chat persistence
-  (`ai_chats`/`ai_chat_messages`), storable `chatModel`/
-  `chatReasoningEffort` overrides, and a `verified_publisher_at` account
-  flag. Still open: app-code chat (`/api/ai/apps/chat` answers 501), a
-  settings UI for the model overrides and the verified-publisher admin
-  toggle (both API-only today), letting the chat *save/fork* scenes
-  directly (it delivers to the editor; the user saves), and seeding
-  `verified_publisher_at` in prod (SQL one-off).
+- **Cloud AI chat follow-ups** — app-code chat (`/api/ai/apps/chat` answers
+  501); a settings UI for the `chatModel` / `chatReasoningEffort` overrides
+  and the verified-publisher admin toggle (both API-only); letting the chat
+  save/fork scenes directly (today it delivers to the editor and the user
+  saves).
 - **Power section for backend-managed ESP32 frames** — the wire is done
   (settings poll sends deepSleepOnBattery/wakeCheckSeconds/batteryPin/
-  batteryDivider when set in device_config, firmware applies them) but only
-  the esp32 CLOUD profile renders the Power settings UI; backend users
-  configure via USB console / device_config for now.
-- **Account hardening** (next up) — passkeys/TOTP 2FA, re-authentication
-  for sensitive actions (revoking frames, bulk assignment changes, scope
-  grants), per-frame audit trail surfaced in the UI.
+  batteryDivider from device_config, firmware applies them) but only the
+  esp32 CLOUD profile renders the Power UI; backend users configure via USB
+  console / device_config.
+- **Account hardening** — passkeys/TOTP 2FA, re-authentication for sensitive
+  actions (revoking frames, bulk assignment changes, scope grants), per-frame
+  audit trail surfaced in the UI.
 - **Panel-displayed link code** — show the enrollment code/QR on the e-ink
   panel itself (proof of possession), not just the portal/admin page.
-- **Backend↔cloud promotion/demotion ceremony** — the explicit local
-  action that moves a frame between control planes without a reset (exact
-  UX still an open design question).
+- **Backend↔cloud promotion/demotion ceremony** — an explicit local action
+  that moves a frame between control planes without a reset (UX open).
 - **Free-tier quotas** — pick numbers (frame count, backup size, private
   scene count) when provisioning starts, not before.
-- **Telemetry scope backfill** — frames enrolled before 2026-08-03 predate
-  the telemetry scope and ship no logs at all; known SQL fix on
-  `linked_clients` + a reconnect, no UI for it. Run the one-off in prod.
 
 ## ESP32
 
@@ -164,124 +121,35 @@ Memory measurements, the emergency-reserve decision, boot/render cost
 numbers and the measurement tooling live in `docs/esp32-memory.md`.
 
 - **Surface memory over a channel that survives the link being down** — the
-  workspace advisory reads device metrics, so a frame too low on internal RAM
-  to connect reports nothing and cannot be flagged. Today it is preventive
-  only; a frame already over the edge is visible over USB and nowhere else.
+  workspace advisory reads device metrics, so a frame too low on internal
+  RAM to connect reports nothing and cannot be flagged. A frame already over
+  the edge is visible over USB and nowhere else.
 
 ## Buildroot images
 
-- **Boot-test the consolidated platforms, then publish base images
-  BEFORE the next release** — the registry now has exactly three
-  Raspberry Pi platforms: `raspberry-pi-64` (Zero 2 W / Pi 3 / Pi 4 —
-  absorbed the old `raspberry-pi-zero-2-w` single-model platform and is
-  the new default; old key lives on as an alias and canonicalizes on
-  frame create), `raspberry-pi-32` (every ARMv6 board: Zero, Zero W,
-  Pi 1 A/A+/B/B+, CM1 — replaced `raspberry-pi-zero-w`, same alias
-  treatment), and `raspberry-pi-5` (all BCM2712 boards with a DTB in
-  the pinned kernel: Pi 5 C0+D0 and CM5 on either carrier). None has
-  booted on hardware yet; minimum coverage is a Zero 2 W regression
-  boot for pi-64, a Zero W regression boot for pi-32, ideally plus one
-  Pi 1 / Pi 3 / Pi 4 / Pi 5. **Release-blocking**: both old manifest
-  entries were removed and no new platform has a base image, so
-  `docker-publish-multi.yml` now hard-fails ("No Buildroot platforms
-  with cached base images found") until `buildroot-base-image.yml` has
-  been dispatched for at least `raspberry-pi-64` and the manifest
-  commit landed. Do that before merging this branch to main.
-- **Deliberately unsupported Pi models** — Pi 2 (BCM2836, ARMv7) is
-  skipped as a conscious decision: it is the only Pi needing its own
-  32-bit kernel binary (`kernel7.img`) and Buildroot builds one kernel
-  per image. Pi 500 and CM5 Lite are deferred, not declined: their
-  `bcm2712-rpi-500`/`bcm2712-rpi-cm5l-*` DTS files entered rpi-6.6.y
-  after the 2024-04 kernel commit Buildroot 2025.02.13 pins, and the
-  EEPROM bootloader wants the exact model DTB — the next Buildroot (or
-  kernel-pin) bump adds them to the `raspberry-pi-5` image for free;
-  widen its `BR2_LINUX_KERNEL_INTREE_DTS_NAME` then.
-- **Passwordless root is now an explicit choice in the cloud SD builder** —
-  the builder requires either a root password (a `root_password` key in
-  `frameos-cloud.txt`, applied via `chpasswd` on first boot like the
-  self-hosted `frameos-root-password` file, which also re-enables dropbear
-  password logins) or ticking an "enable passwordless root" checkbox that
-  keeps the image default: console-only root with no password, SSH refusing
-  password logins (`dropbear -s -g`, no authorized keys).
+Three Raspberry Pi platforms ship with published base images:
+`raspberry-pi-64` (Zero 2 W / Pi 3 / Pi 4, the default), `raspberry-pi-32`
+(every ARMv6 board: Zero, Zero W, Pi 1, CM1) and `raspberry-pi-5` (Pi 5 /
+CM5).
 
-## Cloud launch readiness — ops + legal (audit 2026-08-15)
-
-Gaps found auditing `cloud/` for "a lot of people can sign up" readiness.
-Landed 2026-08-15; what remains is the operator's own follow-up.
-
-**Done in this batch:**
-
-- **Restore drill rehearsed, both paths, against real production backups.**
-  `cloud/ops/backup/restore-drill.sh` is the repeatable test (fetch newest
-  dump → scratch database → verify → drop); it sums `length(content)` over
-  the blob tables so a truncated `bytea` cannot pass on row counts alone,
-  and exits non-zero on an empty-but-valid restore. Numbers, and the two
-  gotchas the drill found (Debian keeps `postgresql.conf` outside the data
-  directory, so a pgBackRest restore alone will not start; `--type=none`
-  skips `recovery.signal` and fails on the checkpoint record), are recorded
-  in `cloud/docs/backups.md`. Measured RPO ≈ 1 minute, and WAL replay from
-  the Storage Box costs ~1.8 s per 16 MB segment.
-- **Error tracking on PostHog + structured logging + real health endpoint.**
-  All nineteen bare `console.*` in auth-web are now `logInfo/logWarn/
-  reportError` (`src/lib/log.ts`, single-line JSON matching frame-hub, with
-  credential-shaped keys redacted); `reportError` also files a `$exception`
-  in PostHog error tracking, and the browser half is posthog-js
-  `capture_exceptions` in the same project — one vendor, so the privacy
-  policy still names one analytics subprocessor. `/healthz` on auth-web
-  checks Postgres and 503s when it cannot reach it; the uptime timer and
-  `deploy.sh`'s post-deploy check both point at it now instead of `/login`
-  (which renders fine with a dead database), and the uptime check also
-  covers frame-hub on loopback, which nothing watched before.
-- **Email failures surfaced.** Both send paths (`lib/email-verification.ts`,
-  `api/auth/reset/request`) `reportError` instead of swallowing, and
-  `/admin` grew a "Live checks" table that probes Postgres and Postmark —
-  including catching a server left in Sandbox mode, which accepts every
-  message and delivers none.
-- **Legal pages + self-serve deletion and export.** `/legal/terms`,
-  `/legal/privacy`, `/legal/imprint`, linked from a footer on every surface;
-  operator identity comes from `FRAMEOS_LEGAL_*` and the pages show a
-  visible `[TO BE COMPLETED]` warning until it is set. PostHog no longer
-  loads before consent (banner with equal-weight Accept/Decline, withdrawal
-  one click from any footer). Account deletion and a JSON data export are
-  both self-serve on `/account/security`, re-authenticated, with the export
-  asserted in tests to carry no credentials.
-- **Signup abuse gates.** Cloudflare Turnstile on signup and password reset
-  (`src/lib/turnstile.ts`), env-gated so local development needs no
-  Cloudflare account, verified before any database work, and failing CLOSED
-  when Cloudflare is unreachable.
-
-**Left for the operator:**
-
-- **Fill in `FRAMEOS_LEGAL_*` in prod** (the BV's name, address, KBO/BCE
-  number, VAT number, representative, contact email) — the legal pages
-  advertise themselves as incomplete until this is done, and `/admin` lists
-  it as a required setting. Have a lawyer read the three pages before broad
-  signup; they are written to be legally sound and friendly, but they are
-  not legal advice.
-- **Set `NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`** from a
-  Cloudflare Turnstile widget. Without them the forms render unguarded and
-  the Postgres rate limiter is again the only gate.
-- **Second transactional email provider** (parking lot) — Postmark is still
-  a single point of failure gating every login, and the change here only
-  makes its failure *visible*, not survivable. A second provider with
-  automatic failover (or at minimum a documented manual cutover) is the
-  actual fix. Worth doing before charging, not before signups.
-- **Disposable-email blocking** was considered and skipped: Turnstile plus
-  the existing rate limiter covers the automated case, and a blocklist
-  mostly annoys real users with unusual domains. Revisit only if abuse is
-  actually observed.
+- **Deferred models** — Pi 500 and CM5 Lite need `bcm2712-rpi-500` /
+  `bcm2712-rpi-cm5l-*` DTBs that entered rpi-6.6.y after the kernel commit
+  Buildroot 2025.02.13 pins; the next Buildroot (or kernel-pin) bump adds
+  them to `raspberry-pi-5` for free — widen
+  `BR2_LINUX_KERNEL_INTREE_DTS_NAME` then. Pi 2 (BCM2836, ARMv7) is
+  deliberately unsupported: it is the only Pi needing its own 32-bit
+  `kernel7.img` and Buildroot builds one kernel per image.
 
 ## Cloud services (scope table in CLOUD-TODO.md)
 
 - **Apps in the store** (not just scenes) — needs a code-review/signing
-  story first: signing, provenance, maybe human review before public
-  listing.
-- **Photo gallery service** (`gallery:read`) — curated feeds usable as
-  image sources in scenes, quota-limited free tier.
+  story first: signing, provenance, maybe human review before listing.
+- **Photo gallery service** (`gallery:read`) — curated feeds usable as image
+  sources in scenes, quota-limited free tier.
 - **Asset backup** (`backup:assets`) — client-side encryption (key never
   leaves the user), content-addressed chunks, resumable.
-- **Remote access** (`remote:access`) — persistent outbound WebSocket
-  tunnel from backend/frame to a cloud relay (pattern exists in
+- **Remote access** (`remote:access`) — persistent outbound WebSocket tunnel
+  from backend/frame to a cloud relay (pattern in
   `app/ws/remote_bridge.py`); explicit local toggle, visible "tunnel open"
   status.
 - **Direct frame login from the cloud** via that relay (`/admin` handoff).
@@ -293,9 +161,9 @@ Landed 2026-08-15; what remains is the operator's own follow-up.
 ## Store
 
 - Move blobs to object storage + CDN when size demands it; drop the
-  20-version prune. Deliberately deferred: ~100 MB/account caps make
-  Postgres fine for launch; stored sha256 + size_bytes make the move
-  mechanical (`cloud/STORE-TODO.md`).
+  20-version prune. Deferred on purpose: ~100 MB/account caps make Postgres
+  fine for launch; stored sha256 + size_bytes make the move mechanical
+  (`cloud/STORE-TODO.md`).
 
 ## Cloud service (auth-web)
 
@@ -306,11 +174,11 @@ Landed 2026-08-15; what remains is the operator's own follow-up.
   memberships/invitations, hosted backend lifecycle, billing and metered
   quotas, placeholder service/UI packages (`cloud/TODO.md`).
 
-## Security (still open in docs/cloud-security-review.md)
+## Security (open in docs/cloud-security-review.md)
 
 - The frame stores its link token in plaintext (`state/cloud_link.json`,
-  0600) — worth fixing when there is hardware-backed key storage, or by
-  redaction if the state file ever travels (support bundles, backups).
+  0600) — fix when there is hardware-backed key storage, or by redaction if
+  the state file ever travels (support bundles, backups).
 - Frame-side `local_login_enabled` is cosmetic — persist the flag in the
   frame's cloud-link state and enforce it in the admin login before hiding
   local login fields means anything.
@@ -325,12 +193,9 @@ Landed 2026-08-15; what remains is the operator's own follow-up.
 
 - Billing mechanics (Stripe? bundled tiers vs per-service metering) —
   decide before anything paid ships.
-- What the privacy policy can promise about frame data and telemetry
-  retention — decide early, it shapes the legal pages in the launch-
-  readiness batch above.
 - `store:publish` human review: always, only for the public store, or
-  pre-review for risky (shell-app) scenes? Currently automated moderation
-  + badges + post-moderation only.
+  pre-review for risky (shell-app) scenes? Currently automated moderation +
+  badges + post-moderation only.
 - Unpublish policy: owners delete outright today; switch to yank-only +
   support-mediated deletion once anything can depend on a scene.
 - Usernames / publisher handles — the store works without them; the first
@@ -341,56 +206,34 @@ Landed 2026-08-15; what remains is the operator's own follow-up.
 - Fleet-previews doctrine: is browser-side wasm rendering the permanent
   answer, or is an opt-in end-to-end-encrypted screenshot path ever
   acceptable?
+- Thin-client frames on the cloud (ESP32-C3, embedded Pi/Pico): serving
+  them means the cloud renders every frame for them, i.e. free cloud
+  rendering forever for everyone. Decide before building; until then C3
+  boards stay out of the cloud flasher.
 
 ## Ideas parking lot (unscheduled)
 
-- **SVG `<text>` support in render/svg** (investigated 2026-08-15; verdict:
-  1–2 days, ~150–250 lines). Today any `<text>` tag makes the whole SVG fail,
-  and the AI scene prompt tells models to layer render/text instead. Pixie
-  already has all the hard parts: the fork's SVG parser
-  (`pixie/src/pixie/fileformats/svg.nim`) turns every tag into
-  `(Path, SvgProperties)` pairs, and `fonts.nim` already does text→path
-  (`typeset`, `getGlyphPath`, private `computePaths` — exposing it is a
-  one-word change). A `"text"` case in `parseSvgElement` would typeset the
-  inner text and append glyph paths translated by `(x, y − ascent·scale)`
-  (SVG `y` is the baseline; pixie's origin is top-left) — then fill, stroke,
-  gradients, transforms (rotated text), and FrameOS's banded rendering all
-  work for free. The one design question is font resolution: pixie's parser
-  has no font access, so `parseSvg` needs a `resolveTypeface(family)` hook;
-  FrameOS plugs in `getTypeface()` from `frameos/utils/font.nim` (embedded
-  Ubuntu-Regular default + `assets/fonts` + emoji fallback) — unknown
-  families must degrade to the default, never fail. v1 scope cuts: no
-  `<tspan>`, no `textLength`/`letter-spacing`, minimal `dominant-baseline`,
-  no complex shaping (pixie has none), and **no emoji** (color glyphs are
-  bitmaps the path-only element model can't carry — keep the "emoji via
-  render/text" prompt note). `text-anchor` middle/end is cheap via
-  `layoutBounds`. Preferred home: the pixie fork (single parse, sits next to
-  the banding/`renderInto` contract; nimble lock bump via the known
-  manual-checksum recipe). Alternative considered: a FrameOS-side pre-pass
-  replacing `<text>` nodes with computed `<path d>` before `parseSvg` — no
-  fork change, but double XML parse and hand-rolled attribute inheritance.
-  Follow-ons if built: update BOTH cloud AI prompt copies
-  (`cloud/apps/auth-web/src/lib/ai/prompts.ts` + the ai-scene prompt); WASM
-  preview works automatically (default font ships via nimassets); ESP32
-  flash cost near zero (fonts already embedded).
-
-- **Thin-client frames on the cloud (ESP32-C3, embedded Pi/Pico).** Parked
-  2026-08-13 pending a product decision: serving these boards means the
-  cloud renders every frame for them, i.e. offering free cloud rendering
-  forever to everyone — decide if we want that before building. Technical
-  notes: C3 has no on-device render source (the wasm harness is the
-  building block); C3 boards stay out of the cloud flasher until then, and
-  the pico/Inky streaming thin client would depend on a render host the
-  same way.
-- **quickts: parse TypeScript straight into QuickJS.** Teach the engine to
-  strip/ignore TS syntax while parsing, so apps ship `.ts` source and the
-  separate token-transpiler pass — and the transpiled copy every runtime
-  keeps for it — disappear entirely. Would obsolete the parked deploy-time
-  idea below (and the transpile-cache idea, tried and rejected —
-  `docs/esp32-memory.md`).
-- **ESP32: parse/transpile scenes at deploy time, not on boot.** Shelved
-  2026-08-13: cold-boot transpile is only ~3.3 s and shipping readable TS
-  source to the device is a feature (numbers in `docs/esp32-memory.md`).
+- **SVG `<text>` support in render/svg** (~1–2 days, ~150–250 lines).
+  Today any `<text>` tag makes the whole SVG fail, and the AI scene prompt
+  tells models to layer render/text instead. Pixie has the parts: the
+  fork's SVG parser (`pixie/src/pixie/fileformats/svg.nim`) turns tags into
+  `(Path, SvgProperties)` pairs and `fonts.nim` does text→path (`typeset`,
+  `getGlyphPath`, private `computePaths`). A `"text"` case in
+  `parseSvgElement` typesets the inner text and appends glyph paths
+  translated by `(x, y − ascent·scale)`; fill, stroke, gradients,
+  transforms and banded rendering then work for free. Design question: font
+  resolution — `parseSvg` needs a `resolveTypeface(family)` hook, FrameOS
+  plugs in `getTypeface()` from `frameos/utils/font.nim`; unknown families
+  degrade to the default, never fail. v1 cuts: no `<tspan>`, no
+  `textLength`/`letter-spacing`, minimal `dominant-baseline`, no complex
+  shaping, no emoji (color glyphs are bitmaps). Preferred home: the pixie
+  fork. Follow-ons: update BOTH cloud AI prompt copies
+  (`cloud/apps/auth-web/src/lib/ai/prompts.ts` + the ai-scene prompt).
+- **quickts: parse TypeScript straight into QuickJS** — strip TS syntax at
+  parse time so apps ship `.ts` source and the separate transpiler pass, and
+  the transpiled copy every runtime keeps, disappear.
+- **ESP32: parse/transpile scenes at deploy time** — shelved: cold-boot
+  transpile is only ~3.3 s and shipping readable TS source is a feature.
   Revisit only if boot time or flash budget becomes a real constraint.
 - Fleet features: one cloud account administering many backends
   (installer / digital-signage); cloud-side "all my frames" dashboard.
@@ -398,21 +241,19 @@ Landed 2026-08-15; what remains is the operator's own follow-up.
   role (the `cloud_membership` table anticipates this).
 - Notifications: deploy finished / frame offline → push/email.
 - Community scene of the day / featured gallery as an opt-in feed.
-- Hosted backends: run the whole backend in the cloud (explicitly out of
-  scope for the cloud-frames design; separate product if ever).
-- E-ink-friendly weather/calendar data proxy (normalized upstream APIs,
-  one key, cached) so users don't need per-service API keys.
-- Fleet extras (cloud-frames design phase 4): offline
-  alerting/notifications, backups integration, paid-tier gating.
+- Hosted backends: run the whole backend in the cloud (out of scope for the
+  cloud-frames design; separate product if ever).
+- E-ink-friendly weather/calendar data proxy (normalized upstream APIs, one
+  key, cached) so users don't need per-service API keys.
+- Fleet extras: offline alerting/notifications, backups integration,
+  paid-tier gating.
 - ESP32 spill follow-ups: proactive Content-Length trigger; URL+ETag decode
-  cache. (Spilled PNGs stream already; bench numbers in
-  `docs/esp32-memory.md`.)
+  cache.
 - ESP32 board nice-to-haves: parallel firmware builds (shared
   `generated_config.h` + nimcache serialise under the build lock), portal
   Wi-Fi scan list + AP password, mDNS advertisement, log persistence across
   offline periods, firmware artifact GC, deep-sleep improvements.
 - ESP32 internal-RAM headroom, only if it gets tight again: move QuickJS
   allocations to PSRAM (`JS_NewRuntime2` with PSRAM-backed
-  `js_malloc_functions`; `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384` sends
-  sub-16 KB mallocs internal) and cJSON likewise (`cJSON_InitHooks`;
-  measure first, it is broad).
+  `js_malloc_functions`; `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384`) and
+  cJSON likewise (`cJSON_InitHooks`; measure first).
