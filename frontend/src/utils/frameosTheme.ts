@@ -1,4 +1,5 @@
 import { assetUrl } from './assetUrl'
+import { isCloudMode } from './cloudMode'
 
 export type FrameosTheme = 'light' | 'dark'
 
@@ -7,12 +8,23 @@ export type FrameosTheme = 'light' | 'dark'
 // A developer usually has the real deployment open in another tab; the
 // monochrome icon is what tells the two apart at a glance.
 //
+// Two marks, one per product: the self-hosted backend and the on-device
+// admin wear the rectangular FrameOS logo, and FrameOS Cloud wears the
+// cloud-shaped mark its account pages already use — the icon is how the two
+// tabs tell apart, so the workspace must not switch marks depending on which
+// control plane serves it. The cloud files live at the auth-web public ROOT
+// (served for /frames too, same origin), so they take no assets base path.
+//
 // Keep in sync with the inline pre-paint scripts in frontend/src/index.html
 // and cloud-frontend/src/index.html — they run before this module loads and
 // have to reach the same answer, or the icon visibly flips on boot.
-const faviconPaths: Record<FrameosTheme, { colour: string; mono: string }> = {
+const backendFaviconPaths: Record<FrameosTheme, { colour: string; mono: string }> = {
   light: { colour: '/img/logo-2/logo.svg', mono: '/img/logo-2/logo-black.svg' },
   dark: { colour: '/img/logo-2/logo-white-colors.svg', mono: '/img/logo-2/logo-white.svg' },
+}
+const cloudFaviconPaths: Record<FrameosTheme, { colour: string; mono: string }> = {
+  light: { colour: '/logo-light.svg', mono: '/logo-light-mono.svg' },
+  dark: { colour: '/logo-dark.svg', mono: '/logo-dark-mono.svg' },
 }
 
 const darkChromeQuery = '(prefers-color-scheme: dark)'
@@ -69,8 +81,13 @@ export function applyFrameosFavicon(): void {
     return
   }
 
-  const paths = faviconPaths[prefersDarkChrome() ? 'dark' : 'light']
-  const href = assetUrl(isLocalFrameosHost() ? paths.mono : paths.colour)
+  const scheme: FrameosTheme = prefersDarkChrome() ? 'dark' : 'light'
+  const cloud = isCloudMode()
+  const paths = (cloud ? cloudFaviconPaths : backendFaviconPaths)[scheme]
+  const path = isLocalFrameosHost() ? paths.mono : paths.colour
+  // assetUrl would prefix the assets base (/frames-app); the cloud icons are
+  // root-served on purpose so /frames and the account pages share one file.
+  const href = cloud ? path : assetUrl(path)
   let favicon = document.querySelector<HTMLLinkElement>('link[data-frameos-favicon]')
   if (!favicon) {
     favicon = document.createElement('link')

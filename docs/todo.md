@@ -40,15 +40,22 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
       cat /srv/frameos/state/upgrade-status.json
       tail -50 /srv/frameos/logs/upgrade.log
 
-  Checked 2026-08-15: the v2026.8.21 release does publish
-  `frameos-2026.8.21-debian-bookworm-arm64.tar.gz` (the buildroot Zero 2 W
-  target), and 2026.8.20 has the full verb → scheduleFrameOSUpgrade →
-  `frameos upgrade --yes` chain — so the failure (or a reboot_required the
-  cloud never saw) is inside the detached child. One candidate to rule out
-  first: `performFrameOSUpgrade` with setupStatus==2 ends `reboot_required`
-  and deliberately does NOT restart services — the device would then still
-  report 2026.8.20 until someone reboots it, which from the cloud looks
-  exactly like "nothing happened".
+  ROOT CAUSE (2026-08-15, from the device's upgrade.log): busybox. The
+  downloader picked exactly one tool by `command -v` — and buildroot's
+  busybox provides a `wget` applet, so the probe said yes, but it is built
+  without TLS and refuses any https URL (`wget: not an http or ftp url`).
+  The failure was fatal instead of falling through to the binary's own TLS
+  client, which had just fetched the release metadata successfully and sat
+  unused in the else branch ("Buildroot images ship neither curl nor
+  wget" — half right). Fixed on this branch: download attempts now chain
+  curl → wget → built-in client, a failing attempt logs and falls through,
+  and a zero-byte "success" counts as failure.
+
+  Chicken-and-egg: the fix rides in the frameos binary, so the stuck frame
+  cannot self-upgrade into it — 2026.8.21 still carries the broken
+  downloader. One manual bootstrap (scp the tarball + stage by hand, or
+  wait for 2026.8.22 and bootstrap once) is needed per already-deployed
+  buildroot frame.
 
   Same session also killed the noise around the click: the "Also push
   scenes & settings" tick used to redeliver the unchanged settings+scenes,

@@ -127,3 +127,44 @@ describe("favicon follows the browser, not the workspace theme", () => {
     );
   });
 });
+
+// Same rules, different mark: FrameOS Cloud wears the cloud-shaped icon its
+// account pages use (root-served, shared across /frames and /account), never
+// the backend's rectangle — the icon is how a cloud tab and a self-hosted
+// tab tell apart in the strip.
+describe("cloud mode wears the cloud-shaped mark", () => {
+  beforeEach(() => {
+    document.head.innerHTML = "";
+    darkChrome = false;
+    stubMatchMedia();
+    setHostname("cloud.frameos.net");
+    (window as unknown as { FRAMEOS_APP_CONFIG?: object }).FRAMEOS_APP_CONFIG =
+      { cloudMode: true };
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { FRAMEOS_APP_CONFIG?: object })
+      .FRAMEOS_APP_CONFIG;
+    vi.unstubAllGlobals();
+  });
+
+  it("serves the root-level cloud icons on both browser schemes", () => {
+    applyFrameosFavicon();
+    expect(faviconHref()).toBe("/logo-light.svg");
+
+    darkChrome = true;
+    applyFrameosFavicon();
+    expect(faviconHref()).toBe("/logo-dark.svg");
+  });
+
+  it("drops to the mono cloud icons on localhost", () => {
+    setHostname("localhost");
+
+    applyFrameosFavicon();
+    expect(faviconHref()).toBe("/logo-light-mono.svg");
+
+    darkChrome = true;
+    applyFrameosFavicon();
+    expect(faviconHref()).toBe("/logo-dark-mono.svg");
+  });
+});
