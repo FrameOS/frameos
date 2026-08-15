@@ -1,7 +1,8 @@
 # FrameOS — consolidated remaining work
 
 One tracker for everything still open across the repo (last swept
-2026-08-14; launch-readiness audit added 2026-08-15). Reference material — principles, permission scopes, store
+2026-08-15; launch-readiness audit added 2026-08-15, backups + uptime
+monitoring shipped the same day). Reference material — principles, permission scopes, store
 decisions, threat models, wire protocols, measurements — stays in the
 linked docs; this file only lists what is left to do. When an item ships,
 delete it here.
@@ -150,18 +151,24 @@ Gaps found auditing `cloud/` for "a lot of people can sign up" readiness.
 All are prerequisites for broad signups AND for charging; none touch the
 frame/release pipeline. Do these as one batch, then account hardening.
 
-- **Back up the cloud's own Postgres** — nothing exists: no dump script, no
-  offsite copy, no restore procedure anywhere in `cloud/scripts/` or
-  `docs/deployment.md`/`docs/operational-runbooks.md` (every "backup"
-  mention there is the user-facing feature). We must not charge for backups
-  while the database holding accounts, scenes, and link tokens has none.
-  Nightly dump + offsite storage + a documented, *tested* restore drill.
-- **Error tracking, health, and uptime alerting** — no Sentry/aggregation,
-  no structured logging (bare `console.error` ×19 in auth-web), no health
-  endpoint on auth-web (only frame-hub has `/healthz`), no uptime
-  monitoring or alerting. Runbooks exist but nothing announces an incident.
-  Minimum: error aggregation, an auth-web health endpoint, external uptime
-  checks that page someone.
+- **Rehearse a cloud Postgres restore** — backups themselves shipped
+  2026-08-15 (`cloud/docs/backups.md`): pgBackRest continuous WAL
+  archiving to the Hetzner Storage Box (point-in-time recovery, ≤5 min
+  RPO, weekly full + daily diff) plus a nightly `pg_dump` + host-config
+  tarball, both healthchecks-monitored, Storage Box capacity reported in
+  every run. What is still missing is the *drill*: restore last night's
+  dump into a scratch database, and once, rebuild a throwaway Hetzner box
+  from the Storage Box alone (procedure in the doc). Until that has been
+  done once, the backups are a hypothesis.
+- **Error tracking + auth-web health endpoint** — uptime alerting is
+  covered (2026-08-15: `frameos-cloud-uptime.timer` curls the three
+  public URLs every 5 min and pings a healthchecks.io dead-man check —
+  `cloud/ops/monitoring/`, runbook in `docs/operational-runbooks.md`).
+  Still open: no Sentry/aggregation, no structured logging (bare
+  `console.error` ×19 in auth-web), no health endpoint on auth-web (only
+  frame-hub has `/healthz`; the uptime check hits `/login` as a proxy).
+  Minimum: error aggregation + a real auth-web `/healthz` that checks the
+  DB, then point the uptime check at it.
 - **Email is a silent single point of failure gating all logins** — login
   enforces verified email, but Postmark send failures are caught and only
   `console.error`'d (`lib/email-verification.ts`, `api/auth/reset/request`),
