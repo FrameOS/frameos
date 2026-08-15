@@ -216,6 +216,10 @@ stop_other_instances() {
       log "stopping the previous instance on ${port}"
       systemctl stop "${unit_prefix}${port}.service" || true
     fi
+    # An instance that failed to start (a refused deploy) stays in `failed`
+    # forever otherwise, so `systemctl --failed` and --status keep reporting
+    # a problem that was already handled by not flipping to it.
+    systemctl reset-failed "${unit_prefix}${port}.service" 2>/dev/null || true
   done
 }
 
@@ -350,8 +354,9 @@ activate_release() {
 
   if ! wait_for_health "$to"; then
     log "rolling back: stopping ${to}, traffic stays on ${from}"
-    systemctl stop "${unit_prefix}${to}.service" || true
     systemctl status --no-pager --lines=30 "${unit_prefix}${to}.service" >&2 || true
+    systemctl stop "${unit_prefix}${to}.service" || true
+    systemctl reset-failed "${unit_prefix}${to}.service" 2>/dev/null || true
     return 1
   fi
 

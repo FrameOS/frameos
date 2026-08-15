@@ -187,6 +187,9 @@ if systemctl cat "$legacy_unit" >/dev/null 2>&1; then
     run mv -f "$unit_dir/$legacy_unit" "$unit_dir/${legacy_unit}.pre-blue-green"
   fi
   run systemctl daemon-reload
+  # Without this the retired unit lingers in `systemctl --failed` as
+  # "not-found failed" forever, which reads like a broken service.
+  run systemctl reset-failed "$legacy_unit" 2>/dev/null || true
 fi
 
 if [ "$dry_run" = false ]; then

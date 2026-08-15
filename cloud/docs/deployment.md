@@ -105,7 +105,10 @@ Two instances exist, `frameos-cloud-auth-web@3000` and
 3. rewrites `/etc/nginx/conf.d/frameos-cloud-upstream.conf` to point the
    `frameos_cloud_auth_web` upstream at that port and `systemctl reload
 nginx` (graceful: in-flight requests finish on the old workers),
-4. restarts the frame hub, which is not blue/green (see Hard Constraints),
+4. restarts the frame hub, which is not blue/green (see Hard Constraints) —
+   device sockets drop and frames reconnect on their own, measured at about
+   five minutes on 2026-08-15, so a deploy is invisible to the web but not to
+   `connected_frames`,
 5. drains for `FRAMEOS_CLOUD_DRAIN_SECONDS` (30) and stops the old instance.
 
 If the new release never becomes healthy, or nginx rejects the config,
