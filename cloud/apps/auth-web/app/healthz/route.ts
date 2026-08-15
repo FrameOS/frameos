@@ -63,7 +63,11 @@ export async function GET() {
     {
       checks: { database },
       status: database.ok ? "ok" : "degraded",
-      // Set by scripts/deploy.sh on the server; absent in development.
+      // Optional, and nothing sets it automatically: the deploy writes the
+      // SHA to /opt/frameos-cloud/RELEASE as a file, not into the unit's
+      // environment. Add it to /etc/frameos-cloud/auth-web.env by hand (or
+      // teach frameos-cloud-update to rewrite it) if you want the monitor to
+      // report which release answered. Omitted from the payload when unset.
       version: process.env.FRAMEOS_CLOUD_RELEASE?.trim() || undefined,
     },
     {
