@@ -1,18 +1,35 @@
 name: Cloud CI
 
-# The cloud app consumes frameos-wasm and frameos-editor as workspace
-# packages, so its build pulls in the frontend build and the wasm runtime
-# (nim + emscripten). Turbo caches every step: warm runs skip whatever
+# The cloud app consumes frameos-wasm, frameos-editor and cloud-frontend as
+# workspace packages, so its build pulls in the frontend build and the wasm
+# runtime (nim + emscripten). Turbo caches every step: warm runs skip whatever
 # didn't change.
+#
+# These paths are the inputs of everything `turbo run build
+# --filter=@frameos-cloud/auth-web` builds (see turbo.json). A missing one is
+# not a saved CI run — since this workflow deploys, it means the change is
+# merged and silently never reaches production. Check the task graph with
+# `pnpm exec turbo run build --filter=@frameos-cloud/auth-web --dry=json`
+# before trimming anything here.
 on:
   push:
     branches: [main]
     paths:
       - "cloud/**"
       - "frontend/**"
+      # The frames SPA served at /frames, built into auth-web's public/.
+      - "cloud-frontend/**"
+      # Declared input of both the frontend and cloud-frontend builds.
+      - "repo/**"
       - "frameos/wasm/**"
       - "frameos/editor/**"
+      # Inputs of frameos-wasm#build:runtime — the wasm the cloud editor's
+      # live preview runs. If they do not trigger a deploy, the preview
+      # silently drifts from what frames actually render.
       - "frameos/src/wasm/**"
+      - "frameos/src/frameos/**"
+      - "frameos/frameos.nimble"
+      - "frameos/tools/build_wasm.sh"
       - "turbo.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -21,9 +38,17 @@ on:
     paths:
       - "cloud/**"
       - "frontend/**"
+      - "cloud-frontend/**"
+      - "repo/**"
       - "frameos/wasm/**"
       - "frameos/editor/**"
+      # Inputs of frameos-wasm#build:runtime — the wasm the cloud editor's
+      # live preview runs. If they do not trigger a deploy, the preview
+      # silently drifts from what frames actually render.
       - "frameos/src/wasm/**"
+      - "frameos/src/frameos/**"
+      - "frameos/frameos.nimble"
+      - "frameos/tools/build_wasm.sh"
       - "turbo.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"

@@ -233,6 +233,15 @@ the same `pnpm deploy:prod` a person runs — there is no second deploy path to
 keep in sync — so everything above still applies, including that a release
 which never answers `/healthz` is a failed deploy rather than an outage.
 
+Which merges count is the workflow's `paths:` filter, and it mirrors the
+input closure of `turbo run build --filter=@frameos-cloud/auth-web` — the
+shared `frontend/`, the frames SPA in `cloud-frontend/`, `repo/`, and the Nim
+sources the editor's wasm preview is built from, not just `cloud/`. A path
+missing from that list is not a saved CI run: it is a change that merges,
+looks shipped, and never reaches production. Re-derive the closure with
+`pnpm exec turbo run build --filter=@frameos-cloud/auth-web --dry=json`
+before adding a package or trimming the list.
+
 Three things make it stand down instead of deploying:
 
 - **`main` moved on.** Two merges minutes apart both reach the job; the older
