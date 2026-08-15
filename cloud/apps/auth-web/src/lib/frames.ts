@@ -24,6 +24,7 @@ import { linkedClientScopes } from "./backend-auth";
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
+import { logWarn, reportError } from "./log";
 // usage.ts only type-imports from this module, so no runtime cycle.
 import {
   cullFrameLogsOverBudget,
@@ -64,9 +65,11 @@ function limitFromEnv(name: string, fallback: number): number {
   if (!Number.isInteger(parsed) || parsed < 1) {
     // Don't fail the boot over a typo'd limit, but don't silently run with a
     // nonsense one either.
-    console.warn(
-      `${name}="${raw}" is not a positive integer; using default ${fallback}`,
-    );
+    logWarn("frames.invalid_limit_env", {
+      fallback,
+      name,
+      value: raw,
+    });
     return fallback;
   }
   return parsed;
@@ -682,10 +685,7 @@ export async function enqueueServiceSettingsRefreshIfScoped(
     }
     await enqueueServiceSettingsRefresh(db, frameId);
   } catch (error) {
-    console.error(
-      "frames: service-settings nudge failed:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    reportError("frames.service_settings_nudge_failed", error, { frameId });
   }
 }
 

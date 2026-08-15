@@ -10,7 +10,7 @@ import {
   getSuperadminContext,
   listAccountsForAdmin,
 } from "../../src/lib/admin";
-import { runSystemChecks } from "../../src/lib/system-checks";
+import { runLiveChecks, runSystemChecks } from "../../src/lib/system-checks";
 
 export const metadata = { title: "Users" };
 
@@ -32,6 +32,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const query = rawQuery?.trim() || undefined;
 
   const rows = await listAccountsForAdmin(createDb(), query);
+  const liveChecks = await runLiveChecks();
   const users: AdminUser[] = rows.map((row) => ({
     ...row,
     createdAt: row.createdAt.toISOString(),
@@ -65,6 +66,54 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         </form>
 
         <AdminUsersTable selfAccountId={context.accountId} users={users} />
+      </section>
+
+      <section className="section-block">
+        <div className="content-header compact-header">
+          <div>
+            <h2>Live checks</h2>
+            <p className="copy">
+              Probed on every load of this page. A set environment variable is
+              not proof the service behind it works — these are.
+            </p>
+          </div>
+        </div>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th>Status</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            {liveChecks.map((check) => (
+              <tr key={check.name}>
+                <td>{check.name}</td>
+                <td>
+                  <span
+                    className={
+                      check.state === "ok"
+                        ? "pill pill-ok"
+                        : check.state === "not_configured"
+                          ? "pill"
+                          : "pill pill-warning"
+                    }
+                  >
+                    {check.state === "ok"
+                      ? "OK"
+                      : check.state === "not_configured"
+                        ? "Not set"
+                        : check.state === "warning"
+                          ? "Degraded"
+                          : "Failing"}
+                  </span>
+                </td>
+                <td className="copy">{check.detail}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
 
       <section className="section-block">

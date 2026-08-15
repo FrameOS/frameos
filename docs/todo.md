@@ -207,42 +207,69 @@ numbers and the measurement tooling live in `docs/esp32-memory.md`.
 ## Cloud launch readiness — ops + legal (audit 2026-08-15)
 
 Gaps found auditing `cloud/` for "a lot of people can sign up" readiness.
-All are prerequisites for broad signups AND for charging; none touch the
-frame/release pipeline. Do these as one batch, then account hardening.
+Landed 2026-08-15; what remains is the operator's own follow-up.
 
-- **Rehearse a cloud Postgres restore** — backups themselves shipped
-  2026-08-15 (`cloud/docs/backups.md`): pgBackRest continuous WAL
-  archiving to the Hetzner Storage Box (point-in-time recovery, ≤5 min
-  RPO, weekly full + daily diff) plus a nightly `pg_dump` + host-config
-  tarball, both healthchecks-monitored, Storage Box capacity reported in
-  every run. What is still missing is the *drill*: restore last night's
-  dump into a scratch database, and once, rebuild a throwaway Hetzner box
-  from the Storage Box alone (procedure in the doc). Until that has been
-  done once, the backups are a hypothesis.
-- **Error tracking + auth-web health endpoint** — uptime alerting is
-  covered (2026-08-15: `frameos-cloud-uptime.timer` curls the three
-  public URLs every 5 min and pings a healthchecks.io dead-man check —
-  `cloud/ops/monitoring/`, runbook in `docs/operational-runbooks.md`).
-  Still open: no Sentry/aggregation, no structured logging (bare
-  `console.error` ×19 in auth-web), no health endpoint on auth-web (only
-  frame-hub has `/healthz`; the uptime check hits `/login` as a proxy).
-  Minimum: error aggregation + a real auth-web `/healthz` that checks the
-  DB, then point the uptime check at it.
-- **Email is a silent single point of failure gating all logins** — login
-  enforces verified email, but Postmark send failures are caught and only
-  `console.error`'d (`lib/email-verification.ts`, `api/auth/reset/request`),
-  so a bad token or Postmark outage blocks every new signup invisibly.
-  Surface send failures into the error tracking above, and add Postmark
-  delivery to the `/admin` system-checks panel.
-- **Legal pages + self-serve deletion/export** — no terms, no privacy
-  policy, no imprint anywhere under `apps/auth-web/app/`; PostHog loads in
-  the browser with no consent notice; account deletion is superadmin-only
-  and there is no data export. EU-facing hard requirement before broad
-  signup, non-negotiable before charging.
-- **Signup abuse gates** — the only gate is the Postgres rate limiter
-  (10/h/IP); no captcha, no disposable-email blocking. Add Cloudflare
-  Turnstile (or similar) on signup + reset. (Store publishing abuse is
-  already well covered: moderation, caps, bans, reports.)
+**Done in this batch:**
+
+- **Restore drill rehearsed, both paths, against real production backups.**
+  `cloud/ops/backup/restore-drill.sh` is the repeatable test (fetch newest
+  dump → scratch database → verify → drop); it sums `length(content)` over
+  the blob tables so a truncated `bytea` cannot pass on row counts alone,
+  and exits non-zero on an empty-but-valid restore. Numbers, and the two
+  gotchas the drill found (Debian keeps `postgresql.conf` outside the data
+  directory, so a pgBackRest restore alone will not start; `--type=none`
+  skips `recovery.signal` and fails on the checkpoint record), are recorded
+  in `cloud/docs/backups.md`. Measured RPO ≈ 1 minute, and WAL replay from
+  the Storage Box costs ~1.8 s per 16 MB segment.
+- **Error tracking on PostHog + structured logging + real health endpoint.**
+  All nineteen bare `console.*` in auth-web are now `logInfo/logWarn/
+  reportError` (`src/lib/log.ts`, single-line JSON matching frame-hub, with
+  credential-shaped keys redacted); `reportError` also files a `$exception`
+  in PostHog error tracking, and the browser half is posthog-js
+  `capture_exceptions` in the same project — one vendor, so the privacy
+  policy still names one analytics subprocessor. `/healthz` on auth-web
+  checks Postgres and 503s when it cannot reach it; the uptime timer and
+  `deploy.sh`'s post-deploy check both point at it now instead of `/login`
+  (which renders fine with a dead database), and the uptime check also
+  covers frame-hub on loopback, which nothing watched before.
+- **Email failures surfaced.** Both send paths (`lib/email-verification.ts`,
+  `api/auth/reset/request`) `reportError` instead of swallowing, and
+  `/admin` grew a "Live checks" table that probes Postgres and Postmark —
+  including catching a server left in Sandbox mode, which accepts every
+  message and delivers none.
+- **Legal pages + self-serve deletion and export.** `/legal/terms`,
+  `/legal/privacy`, `/legal/imprint`, linked from a footer on every surface;
+  operator identity comes from `FRAMEOS_LEGAL_*` and the pages show a
+  visible `[TO BE COMPLETED]` warning until it is set. PostHog no longer
+  loads before consent (banner with equal-weight Accept/Decline, withdrawal
+  one click from any footer). Account deletion and a JSON data export are
+  both self-serve on `/account/security`, re-authenticated, with the export
+  asserted in tests to carry no credentials.
+- **Signup abuse gates.** Cloudflare Turnstile on signup and password reset
+  (`src/lib/turnstile.ts`), env-gated so local development needs no
+  Cloudflare account, verified before any database work, and failing CLOSED
+  when Cloudflare is unreachable.
+
+**Left for the operator:**
+
+- **Fill in `FRAMEOS_LEGAL_*` in prod** (the BV's name, address, KBO/BCE
+  number, VAT number, representative, contact email) — the legal pages
+  advertise themselves as incomplete until this is done, and `/admin` lists
+  it as a required setting. Have a lawyer read the three pages before broad
+  signup; they are written to be legally sound and friendly, but they are
+  not legal advice.
+- **Set `NEXT_PUBLIC_TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`** from a
+  Cloudflare Turnstile widget. Without them the forms render unguarded and
+  the Postgres rate limiter is again the only gate.
+- **Second transactional email provider** (parking lot) — Postmark is still
+  a single point of failure gating every login, and the change here only
+  makes its failure *visible*, not survivable. A second provider with
+  automatic failover (or at minimum a documented manual cutover) is the
+  actual fix. Worth doing before charging, not before signups.
+- **Disposable-email blocking** was considered and skipped: Turnstile plus
+  the existing rate limiter covers the automated case, and a blocklist
+  mostly annoys real users with unusual domains. Revisit only if abuse is
+  actually observed.
 
 ## Cloud services (scope table in CLOUD-TODO.md)
 

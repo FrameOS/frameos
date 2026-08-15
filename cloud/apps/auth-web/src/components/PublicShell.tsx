@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BackForwardRefresh } from "./BackForwardRefresh";
 import { HeaderBrand } from "./HeaderBrand";
+import { LegalFooter } from "./LegalFooter";
 import {
   getAccountBaseUrl,
   getAccountUrl,
@@ -82,6 +83,7 @@ export function PublicShell({
       <main className={noCapture ? "content ph-no-capture" : "content"}>
         {children}
       </main>
+      <LegalFooter />
       <BackForwardRefresh />
     </div>
   );

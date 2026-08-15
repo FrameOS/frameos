@@ -27,6 +27,7 @@ import {
   supersedePendingCommands,
 } from "./frames";
 import { copySceneCoversIntoFrameCache } from "./scene-images";
+import { reportError } from "./log";
 
 export const maxScenesPerFrame = 20;
 
@@ -301,7 +302,7 @@ export async function assignScenesToFrame(
   try {
     await copySceneCoversIntoFrameCache(db, frame.id, requested);
   } catch (error) {
-    console.error("install-time scene cover copy failed", error);
+    reportError("frame_scenes.cover_copy_failed", error, { frameId: frame.id });
   }
 
   return {

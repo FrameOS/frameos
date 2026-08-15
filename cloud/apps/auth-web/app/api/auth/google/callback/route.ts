@@ -23,6 +23,7 @@ import {
   sessionCookieOptions,
 } from "../../../../../src/lib/session";
 import { notifyNewCloudUser } from "../../../../../src/lib/signup-notifications";
+import { logWarn, reportError } from "../../../../../src/lib/log";
 
 export async function GET(request: NextRequest) {
   const expectedState = request.cookies.get(authCookieNames.state)?.value;
@@ -38,10 +39,7 @@ export async function GET(request: NextRequest) {
   if (error) {
     // Keep the raw provider error in server logs only; the login page maps
     // known codes to copy and shows a generic message for everything else.
-    console.error(
-      "auth/google/callback: provider returned error:",
-      error.slice(0, 200),
-    );
+    logWarn("auth.google_provider_error", { detail: error.slice(0, 200) });
     return NextResponse.redirect(
       new URL(`/login?error=${encodeURIComponent(error)}`, getBaseUrl()),
     );
@@ -85,10 +83,7 @@ export async function GET(request: NextRequest) {
       nonce: expectedNonce,
     });
   } catch (error) {
-    console.error(
-      "auth/google/callback: code exchange or id_token verification failed:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    reportError("auth.google_code_exchange_failed", error);
     return NextResponse.redirect(
       new URL("/login?error=provider_unavailable", getBaseUrl()),
     );

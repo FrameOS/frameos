@@ -3,13 +3,17 @@
 import { UserPlus } from "lucide-react";
 import posthog from "posthog-js";
 import { useState } from "react";
+import { TurnstileWidget } from "./TurnstileWidget";
 
 export function SignupForm({
   googleEnabled,
   returnTo,
+  turnstileSiteKey,
 }: {
   googleEnabled: boolean;
   returnTo?: string | undefined;
+  /** Undefined when Turnstile is not configured; the widget is then omitted. */
+  turnstileSiteKey?: string | undefined;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -17,6 +21,7 @@ export function SignupForm({
   const [error, setError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | undefined>();
 
   const googleHref = `/api/auth/google/start${
     returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ""
@@ -33,6 +38,7 @@ export function SignupForm({
           email,
           name,
           password,
+          ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
           ...(returnTo ? { return_to: returnTo } : {}),
         }),
         headers: { "content-type": "application/json" },
@@ -56,6 +62,10 @@ export function SignupForm({
         );
       } else if (payload?.error === "weak_password" && payload.message) {
         setError(payload.message);
+      } else if (payload?.error === "turnstile_failed") {
+        setError(
+          "The anti-spam check did not pass. Reload the page and try again.",
+        );
       } else if (response.status === 429) {
         setError("Too many attempts. Wait a few minutes and try again.");
       } else {
@@ -126,10 +136,13 @@ export function SignupForm({
           value={password}
         />
       </div>
+      {turnstileSiteKey ? (
+        <TurnstileWidget onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
+      ) : null}
       <div className="actions">
         <button
           className="button button-primary"
-          disabled={submitting}
+          disabled={submitting || (Boolean(turnstileSiteKey) && !turnstileToken)}
           type="submit"
         >
           <UserPlus aria-hidden size={18} />

@@ -2,6 +2,9 @@
 // (scene reports and the like). No-op unless DISCORD_REPORTS_WEBHOOK_URL is
 // configured; failures are logged and never surface to the user — a broken
 // webhook must not break the flow that triggered it.
+
+import { errorField, logWarn } from "./log";
+
 export async function notifyDiscord(content: string) {
   const webhookUrl = process.env.DISCORD_REPORTS_WEBHOOK_URL?.trim();
   if (!webhookUrl) {
@@ -18,11 +21,12 @@ export async function notifyDiscord(content: string) {
       method: "POST",
     });
     if (!response.ok) {
-      console.error(
-        `Discord webhook failed: ${response.status} ${await response.text().catch(() => "")}`,
-      );
+      logWarn("discord.webhook_rejected", {
+        detail: (await response.text().catch(() => "")).slice(0, 200),
+        status: response.status,
+      });
     }
   } catch (error) {
-    console.error("Discord webhook failed:", error);
+    logWarn("discord.webhook_failed", { error: errorField(error) });
   }
 }

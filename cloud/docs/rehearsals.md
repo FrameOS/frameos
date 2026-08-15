@@ -43,6 +43,32 @@ Pass criteria:
 - Revoked linked clients cannot sync inventory or fetch grants.
 - Audit events exist for approval, inventory sync, and revocation.
 
+## Restore Rehearsal
+
+Goal: prove the backups are a backup and not a hypothesis. Quarterly, and
+after any schema change or change to the backup job.
+
+Procedure, findings from the first run (2026-08-15, both paths passed), and
+the two gotchas it uncovered are in [backups.md](backups.md#rehearsal). The
+short version:
+
+1. On a machine that is not the prod box, run
+   `sudo -u postgres ops/backup/restore-drill.sh --sftp --sftp-key <key>`.
+2. Read the row counts and blob sizes it prints; the script asserts the
+   obvious failure modes itself and exits non-zero on them.
+3. Once a year, also walk the whole-box path (host tarball + pgBackRest)
+   against a throwaway instance, since the drill script only covers the
+   logical dump.
+
+Pass criteria:
+
+- `restore-drill.sh` exits 0, with `pg_restore` reporting no errors.
+- Row counts and the migration count match production's order of magnitude.
+- Blob tables sum to non-zero bytes (a truncated `bytea` restores as a row
+  with no content, which row counts alone would wave through).
+- For the whole-box path: `pg_is_in_recovery()` returns false before any
+  numbers are believed, and the recovery point is within the ≤5 min RPO.
+
 ## Local Postgres Rehearsal
 
 Goal: prove a new developer machine can run the auth prototype.

@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { AuthCard } from "../../src/components/AuthCard";
 import { RequestResetForm } from "../../src/components/PasswordResetForms";
 import { authCookieNames } from "../../src/lib/auth-cookies";
+import { getTurnstileSiteKey } from "../../src/lib/turnstile";
 
 export const metadata = { title: "Reset password" };
 
@@ -13,7 +14,10 @@ export default async function ResetPage() {
 
   return (
     <AuthCard eyebrow="Reset password" title="Forgot your password?">
-      <RequestResetForm initialEmail={mergeEmail ?? ""} />
+      <RequestResetForm
+        initialEmail={mergeEmail ?? ""}
+        turnstileSiteKey={getTurnstileSiteKey()}
+      />
     </AuthCard>
   );
 }

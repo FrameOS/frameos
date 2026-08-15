@@ -49,11 +49,19 @@ describe("notifyDiscord", () => {
     process.env.DISCORD_REPORTS_WEBHOOK_URL =
       "https://discord.example/webhook";
     fetchMock.mockRejectedValueOnce(new Error("network down"));
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // A broken ops webhook is a warning, not an error: it does not affect the
+    // user-facing flow that triggered it, and routing it to reportError would
+    // page someone every time Discord hiccups. lib/log.ts writes warnings
+    // through console.warn as structured JSON.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await expect(notifyDiscord("hello")).resolves.toBeUndefined();
 
-    expect(errorSpy).toHaveBeenCalled();
-    errorSpy.mockRestore();
+    expect(warnSpy).toHaveBeenCalled();
+    expect(JSON.parse(String(warnSpy.mock.calls[0]?.[0]))).toMatchObject({
+      event: "discord.webhook_failed",
+      level: "warn",
+    });
+    warnSpy.mockRestore();
   });
 });

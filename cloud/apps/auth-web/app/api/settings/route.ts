@@ -24,6 +24,7 @@ import {
 } from "../../../src/lib/frames";
 import { rateLimitResponse } from "../../../src/lib/rate-limit";
 import { readSession } from "../../../src/lib/session";
+import { reportError } from "../../../src/lib/log";
 
 export const runtime = "nodejs";
 
@@ -82,10 +83,7 @@ async function nudgeManagedFrames(
     }
   } catch (error) {
     // Frame ids and a message; never the settings themselves.
-    console.error(
-      "settings: service-settings nudge failed:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    reportError("settings.service_settings_nudge_failed", error);
   }
 }
 

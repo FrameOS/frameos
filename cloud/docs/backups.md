@@ -42,11 +42,12 @@ Not provided, deliberately: high availability. A dead box means downtime
 until a rebuild ("Restore" below), not a failover — the correct trade at
 this scale.
 
-The kit lives in `cloud/ops/backup/` (`pg-backup.sh`, the two
-`frameos-cloud-backup` units, `backup.env.example`, `rclone.conf.example`,
-`install.sh` — idempotent, honours `FRAMEOS_CLOUD_DEPLOY_HOST` /
-`FRAMEOS_CLOUD_DEPLOY_SSH_KEY`). The pgBackRest side is configured directly
-on the host (this file is its runbook).
+The kit lives in `cloud/ops/backup/` (`pg-backup.sh`, `restore-drill.sh`,
+the two `frameos-cloud-backup` units, `backup.env.example`,
+`rclone.conf.example`, `install.sh` — idempotent, honours
+`FRAMEOS_CLOUD_DEPLOY_HOST` / `FRAMEOS_CLOUD_DEPLOY_SSH_KEY`). The
+pgBackRest side is configured directly on the host (this file is its
+runbook).
 
 ## Credentials and access
 
@@ -136,22 +137,71 @@ throws away everything newer in every other table.
 
 ## Rehearsal
 
-An untested backup is a hypothesis. Quarterly, restore last night's dump
-into a scratch database (safe on the prod box; touches nothing live):
+An untested backup is a hypothesis. `ops/backup/restore-drill.sh` is the
+test: it fetches the newest dump, restores it into a scratch database,
+verifies the contents, and drops the scratch database again. It never
+touches the live database, and its exit status is the result — 0 means the
+backups are known-good, non-zero means someone has to look.
+
+Quarterly, and after any change to the schema or the backup job:
 
 ```sh
-sudo -u postgres createdb frameos_cloud_restore_test
-pg_restore --no-owner -d "postgres://frameos_cloud:...@localhost:5432/frameos_cloud_restore_test" \
-  /var/backups/frameos-cloud/db-<newest>.dump
-psql "postgres://.../frameos_cloud_restore_test" -c \
-  "SELECT (SELECT count(*) FROM accounts) AS accounts,
-          (SELECT count(*) FROM frames) AS frames,
-          (SELECT max(applied_at) FROM schema_migrations) AS last_migration;"
-sudo -u postgres dropdb frameos_cloud_restore_test
+# From a machine that is NOT the prod box — this also proves the backups are
+# readable from somewhere other than the host that wrote them, which is the
+# case that matters when the host is the thing that died.
+sudo -u postgres ./restore-drill.sh --sftp --sftp-key ~/.ssh/hetzner-storage.key
+
+# On the prod box (rclone config lives under root, postgres has no copy):
+sudo -u postgres RCLONE_CONFIG=/root/.config/rclone/rclone.conf \
+  /usr/local/bin/frameos-cloud-restore-drill
 ```
 
-Rehearse the pgBackRest path and the whole-box path once each against a
-throwaway Hetzner instance before trusting them.
+Row counts alone would pass on a dump whose `bytea` columns were truncated,
+so the drill also sums `length(content)` over the blob tables — that forces
+Postgres to read every byte back out of restored TOAST storage — and asserts
+that an empty-but-valid restore fails rather than looking like a pass.
+
+### Results so far
+
+**2026-08-15 — both paths rehearsed for the first time, both passed.** Run
+against real production backups on a throwaway Ubuntu 26.04 VM
+(`raamike.orb.local`) with Postgres 18.4 and pgBackRest 2.58.0, matching
+prod exactly. Everything below was measured, not estimated.
+
+*Logical dump path* (`restore-drill.sh --sftp`): `db-20260815T104038Z.dump`,
+117 MB, 195 TOC entries. Download + restore + verify took 12 s end to end.
+Restored clean (`pg_restore` exit 0, zero errors): 3 accounts, 5 frames, 67
+store scenes, 112 scene versions, 1299 audit events, 31 migrations, 3 MB of
+scene images and 46 MB of frame asset files all readable.
+
+*Whole-box path* (host tarball + pgBackRest, the procedure under "Whole box"
+above): the tarball unpacked to 101 files with the env secrets and
+letsencrypt state present as documented; `pgbackrest info` reached the repo
+from a machine that had never written to it; the restore pulled 156.7 MB /
+1481 files in 10 s, then replayed 42 WAL segments and reached
+`archive recovery complete`. Final state was ~1 minute behind the moment the
+drill started — the ≤5 min RPO claim holds.
+
+Two things the drill found, both now fixed above and worth knowing before
+you are doing this under pressure:
+
+- **The data directory alone will not start.** Debian/Ubuntu keeps
+  `postgresql.conf` in `/etc/postgresql/18/main`, not in the data directory,
+  so a pgBackRest restore yields a cluster Postgres refuses to open
+  (`could not access the server configuration file`). The config is in the
+  host tarball — restore it too, which is why step 2 comes before step 3.
+- **Do not pass `--type=none`.** It skips writing `recovery.signal` and
+  `restore_command`, and Postgres then fails with `could not locate required
+  checkpoint record`. The plain `restore` (or `--type=time` for PITR) shown
+  above is correct.
+
+Also measured: WAL replay from the Storage Box runs at roughly **1.8 s per
+16 MB segment**, because every `archive-get` is its own SFTP round trip. A
+recovery target far from a base backup is therefore minutes-to-hours of
+replay proportional to segment count — budget for it, and prefer restoring
+from the newest differential. Wait for `pg_is_in_recovery()` to return false
+before believing any row counts; querying during replay returns a
+consistent-but-stale database, which reads exactly like a partial restore.
 
 ## Security notes
 

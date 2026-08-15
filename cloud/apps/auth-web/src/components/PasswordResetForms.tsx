@@ -2,15 +2,20 @@
 
 import { KeyRound, MailQuestion } from "lucide-react";
 import { useState } from "react";
+import { TurnstileWidget } from "./TurnstileWidget";
 
 export function RequestResetForm({
   initialEmail = "",
+  turnstileSiteKey,
 }: {
   initialEmail?: string;
+  /** Undefined when Turnstile is not configured; the widget is then omitted. */
+  turnstileSiteKey?: string | undefined;
 }) {
   const [email, setEmail] = useState(initialEmail);
   const [state, setState] = useState<"idle" | "submitting" | "sent">("idle");
   const [error, setError] = useState<string | undefined>();
+  const [turnstileToken, setTurnstileToken] = useState<string | undefined>();
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -19,7 +24,10 @@ export function RequestResetForm({
 
     try {
       const response = await fetch("/api/auth/reset/request", {
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({
+          email,
+          ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
+        }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -29,10 +37,15 @@ export function RequestResetForm({
         return;
       }
 
+      const payload = (await response.json().catch(() => undefined)) as
+        | { error?: string }
+        | undefined;
       setError(
-        response.status === 429
-          ? "Too many attempts. Wait a few minutes and try again."
-          : "Something went wrong. Try again in a moment.",
+        payload?.error === "turnstile_failed"
+          ? "The anti-spam check did not pass. Reload the page and try again."
+          : response.status === 429
+            ? "Too many attempts. Wait a few minutes and try again."
+            : "Something went wrong. Try again in a moment.",
       );
     } catch {
       setError("Something went wrong. Try again in a moment.");
@@ -68,10 +81,16 @@ export function RequestResetForm({
           value={email}
         />
       </div>
+      {turnstileSiteKey ? (
+        <TurnstileWidget onToken={setTurnstileToken} siteKey={turnstileSiteKey} />
+      ) : null}
       <div className="actions">
         <button
           className="button button-primary"
-          disabled={state === "submitting"}
+          disabled={
+            state === "submitting" ||
+            (Boolean(turnstileSiteKey) && !turnstileToken)
+          }
           type="submit"
         >
           <MailQuestion aria-hidden size={18} />

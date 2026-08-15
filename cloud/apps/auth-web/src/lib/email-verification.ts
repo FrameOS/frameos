@@ -7,6 +7,7 @@ import {
 import { recordAuditEvent } from "./audit";
 import { sendEmailVerificationEmail } from "./email";
 import { getBaseUrl } from "./env";
+import { reportError } from "./log";
 import { createSecretToken, hashSecret } from "./secrets";
 
 const verificationTokenMaxAgeMs = 24 * 60 * 60 * 1000;
@@ -33,10 +34,13 @@ export async function beginEmailVerification(
   try {
     await sendEmailVerificationEmail(email, verifyUrl);
   } catch (error) {
-    console.error(
-      "email-verification: sending verification email failed:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    // This is the single point of failure that gates every new signup: login
+    // requires a verified email, so a bad Postmark token or a provider
+    // outage silently locks out everyone who signs up during it, and the
+    // user just sees "check your inbox". reportError, not console.error —
+    // this has to reach the error tracker, because nobody is watching the
+    // journal at 3am and the affected users cannot tell us.
+    reportError("email.verification_send_failed", error, { accountId });
   }
 }
 

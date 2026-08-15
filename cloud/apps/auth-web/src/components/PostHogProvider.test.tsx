@@ -4,7 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { REDACTED } from "../lib/analytics-redaction";
 
 const init = vi.fn();
-vi.mock("posthog-js", () => ({ default: { init } }));
+const optInCapturing = vi.fn();
+const optOutCapturing = vi.fn();
+const reset = vi.fn();
+const setConfig = vi.fn();
+vi.mock("posthog-js", () => ({
+  default: {
+    init,
+    opt_in_capturing: optInCapturing,
+    opt_out_capturing: optOutCapturing,
+    reset,
+    set_config: setConfig,
+  },
+}));
 
 // Imported after the mock is registered.
 const { PostHogProvider } = await import("./PostHogProvider");
@@ -15,7 +27,12 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  document.cookie = "frameos_analytics_consent=; path=/; max-age=0";
   init.mockReset();
+  optInCapturing.mockReset();
+  optOutCapturing.mockReset();
+  reset.mockReset();
+  setConfig.mockReset();
   window.history.pushState({}, "", "/");
   delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
 });

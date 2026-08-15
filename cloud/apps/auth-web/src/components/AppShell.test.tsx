@@ -10,6 +10,9 @@ vi.mock("../lib/env", () => ({
   getAccountUrl: (path?: string) => `https://cloud.example.net${path ?? "/account"}`,
   getCloudBaseUrl: () => "https://cloud.example.net",
   getScenesBaseUrl: () => "https://scenes.example.net",
+  // The shells render LegalFooter, which needs the cookie domain for the
+  // "Cookie settings" button.
+  getSessionCookieDomain: () => undefined,
 }));
 
 afterEach(() => {

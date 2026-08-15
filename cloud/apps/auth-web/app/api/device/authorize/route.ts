@@ -21,6 +21,7 @@ import {
 } from "../../../../src/lib/rate-limit";
 import { createEncryptedSecretToken, hashUserCode } from "../../../../src/lib/secrets";
 import { readSession } from "../../../../src/lib/session";
+import { reportError } from "../../../../src/lib/log";
 
 export const runtime = "nodejs";
 
@@ -176,10 +177,7 @@ export async function POST(request: NextRequest) {
   try {
     credential = createEncryptedSecretToken("fc_link");
   } catch (error) {
-    console.error(
-      "device/authorize: encryption unavailable:",
-      error instanceof Error ? error.message : "unknown error",
-    );
+    reportError("device.encryption_unavailable", error);
     return jsonError("encryption_not_configured", 503);
   }
 

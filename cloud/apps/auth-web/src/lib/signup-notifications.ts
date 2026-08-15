@@ -4,6 +4,8 @@
 // silently, which also keeps integration tests hermetic), has its own
 // timeout, and never throws — a broken notification must not break signup.
 
+import { errorField, logWarn } from "./log";
+
 export type NewCloudUserInput = {
   accountId: string;
   displayName?: string | undefined;
@@ -68,12 +70,14 @@ async function notifyDiscordSignup(input: NewCloudUserInput) {
       signal: AbortSignal.timeout(notificationTimeoutMs),
     });
     if (!response.ok) {
-      console.warn(
-        `signup-notifications: Discord webhook failed: ${response.status}`,
-      );
+      logWarn("signup_notifications.discord_rejected", {
+        status: response.status,
+      });
     }
   } catch (error) {
-    console.warn("signup-notifications: Discord webhook failed:", error);
+    logWarn("signup_notifications.discord_failed", {
+      error: errorField(error),
+    });
   }
 }
 
@@ -95,12 +99,14 @@ async function capturePostHogSignup(input: NewCloudUserInput) {
       signal: AbortSignal.timeout(notificationTimeoutMs),
     });
     if (!response.ok) {
-      console.warn(
-        `signup-notifications: PostHog capture failed: ${response.status}`,
-      );
+      logWarn("signup_notifications.posthog_rejected", {
+        status: response.status,
+      });
     }
   } catch (error) {
-    console.warn("signup-notifications: PostHog capture failed:", error);
+    logWarn("signup_notifications.posthog_failed", {
+      error: errorField(error),
+    });
   }
 }
 

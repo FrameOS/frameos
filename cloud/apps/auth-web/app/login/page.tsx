@@ -98,6 +98,10 @@ function statusMessage(status: string) {
     return "You are signed out.";
   }
 
+  if (status === "account_deleted") {
+    return "Your account and everything in it has been deleted. Thanks for trying FrameOS Cloud — you are welcome back any time.";
+  }
+
   if (status === "reset_complete") {
     return "Your password was updated and your email is verified. Sign in with the new password — or with Google, which will now link automatically.";
   }
