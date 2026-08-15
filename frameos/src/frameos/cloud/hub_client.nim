@@ -1705,6 +1705,18 @@ proc cloudHubThreadMain(frameConfig: FrameConfig) {.thread.} =
         if attempted:
           log(%*{"event": "cloud:enroll:boot", "ok": outcome.ok,
                  "resolved": resolved, "error": outcome.error})
+        else:
+          # No request went out, and until now nothing said so. An expired
+          # claim token deletes the pending file and gives up on enrollment
+          # for the life of the card, and an unreadable one retries into a
+          # growing backoff — both in total silence, which reads from the
+          # logs exactly like a frame that never tried to enroll at all.
+          # (Cost: a Pi 5 that came up healthy and simply never appeared in
+          # the cloud, with no line anywhere to say why.)
+          log(%*{"event": "cloud:enroll:boot:skipped",
+                 "resolved": resolved,
+                 "error": if outcome.error.len > 0: outcome.error
+                          else: "no_pending_enrollment_readable"})
         if resolved:
           enrollBackoff = HubEnrollBackoffMinSeconds
           nextEnrollAttemptAt = 0.0
