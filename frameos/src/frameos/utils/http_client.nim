@@ -353,8 +353,8 @@ when defined(frameosEmbedded) or defined(frameosWasm):
                    maxBytes = maxBytes, maxSeconds = maxSeconds, headers = headers)
 
 else:
-  import std/[httpclient, locks, nativesockets, net, posix, strformat, strutils,
-              tables, times, uri]
+  import std/[httpclient, locks, nativesockets, net, os, posix, strformat,
+              strutils, tables, times, uri]
 
   const
     RecvChunkBytes = 65536
@@ -948,3 +948,41 @@ else:
       # removes its own file.
       discard writer.finish()
       raise
+
+  proc boundedDownloadToFile*(
+      url: string,
+      destination: string,
+      timeoutMs = DefaultFetchTimeoutMs,
+      maxBytes = DefaultFetchMaxBytes,
+      maxSeconds = DefaultFetchMaxSeconds,
+      headers: seq[SimpleHttpHeader] = @[]
+    ) =
+    ## GET streamed straight into a file: each chunk is written as it comes
+    ## off the socket, so peak memory is one recv window, not the document.
+    ##
+    ## This exists so nothing has to shell out to curl or wget for large
+    ## downloads. Probing for shell downloaders is how every buildroot cloud
+    ## upgrade died — busybox ships a `wget` applet that `command -v` happily
+    ## finds but that is built without TLS — and a downloader the binary
+    ## carries itself cannot be absent, misbuilt, or shadowed on the device.
+    ##
+    ## On ANY failure — a non-2xx answer (an unfollowed redirect included),
+    ## the byte/time caps, a full disk — the partial file is removed, so a
+    ## destination that exists is always a complete 2xx body.
+    var output = open(destination, fmWrite)
+    var complete = false
+    try:
+      let response = boundedRequest(url, HttpGet, "", simpleHeaders(headers),
+        timeoutMs, maxBytes, maxSeconds, DefaultFetchMaxRedirects,
+        bodySink = proc(chunk: string) = output.write(chunk))
+      if response.code div 100 != 2:
+        let detail = if response.body.len > 0: ": " & response.body else: ""
+        raise newException(HttpRequestError, "HTTP " & response.status & detail)
+      complete = true
+    finally:
+      output.close()
+      if not complete:
+        try:
+          removeFile(destination)
+        except CatchableError:
+          discard

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FrameOS Cloud</title>
-    <link rel="icon" type="image/svg+xml" href="/frames-app/img/logo-2/logo.svg" />
+    <link rel="icon" type="image/svg+xml" href="/logo-light.svg" data-frameos-favicon />
     <script>
       // Pre-paint theme, mirroring the Next app's inline script in
       // app/layout.tsx: the shared frameos_theme cookie first, then the
@@ -29,6 +29,28 @@
           }
           document.documentElement.dataset.frameosTheme = theme
           document.documentElement.style.colorScheme = theme
+
+          // Same four-icon rule as frontend/src/utils/frameosTheme.ts, which
+          // takes over on mount — but with the CLOUD-shaped mark the account
+          // pages wear, not the backend's rectangle: one product, one icon,
+          // and the icon is how a cloud tab and a self-hosted tab tell
+          // apart. The files are root-served (auth-web public/), shared with
+          // /account and friends. prefers-color-scheme rather than the
+          // `theme` resolved above: the icon lands in the tab strip, so it
+          // has to contrast with the browser's colours, not the workspace's.
+          var favicon = document.querySelector('link[data-frameos-favicon]')
+          if (favicon) {
+            var host = window.location.hostname.toLowerCase()
+            var isLocal =
+              host === 'localhost' ||
+              host.slice(-10) === '.localhost' ||
+              host === '127.0.0.1' ||
+              host === '0.0.0.0' ||
+              host === '::1' ||
+              host === '[::1]'
+            var darkChrome = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+            favicon.href = '/logo-' + (darkChrome ? 'dark' : 'light') + (isLocal ? '-mono' : '') + '.svg'
+          }
         } catch (e) {}
       })()
     </script>

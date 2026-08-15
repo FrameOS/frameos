@@ -554,14 +554,21 @@ export const templatesLogic = kea<templatesLogicType>([
         return
       }
       const scenes = await loadRepositoryTemplateScenes(repository, template)
-      actions.applyTemplate(templateWithSceneOrigins({ ...template, scenes }, repository), openDrawer)
+      const storeSceneId = (template as TemplateType & { sceneId?: string }).sceneId
+      // A cloud store install keeps the published scene ids. They are not a
+      // local detail there: the assignment below is what actually reaches the
+      // device, and the server resolves both the tile's cover image and (on
+      // the next save) the form scene's owning assignment BY those ids. A
+      // re-ided local copy therefore showed a permanently blank tile and got
+      // saved a second time as a private scene of its own.
+      const preserveSceneIds = isCloudMode() && Boolean(storeSceneId)
+      actions.applyTemplate(templateWithSceneOrigins({ ...template, scenes }, repository), openDrawer, preserveSceneIds)
 
       // On the cloud control plane the scene list that actually reaches the
       // device is the server-side store-scene assignment (set_scenes over the
       // hub WS) — the client-side applyTemplate above only shapes the
       // workspace view. Both cloud catalogs (the public store and "my cloud
       // scenes") carry the store scene uuid, so assign it here too.
-      const storeSceneId = (template as TemplateType & { sceneId?: string }).sceneId
       if (isCloudMode() && storeSceneId) {
         longRunningTasksModel.actions.startTask({
           frameId: props.frameId,
@@ -575,7 +582,12 @@ export const templatesLogic = kea<templatesLogicType>([
             frameId: props.frameId,
             kind: 'save',
             status: 'success',
-            detail: assigned ? 'Scene queued for the frame' : 'Scene was already on the frame',
+            // Say what is left to do: the assignment is stored, but the frame
+            // only picks it up once the workspace pushes — and "queued" on its
+            // own read as "nothing more to do here".
+            detail: assigned
+              ? 'Added to this frame — press Save, then Deploy, to send it to the device'
+              : 'Scene was already on the frame',
           })
           if (assigned) {
             // The server now owns this scene; rehydrate frame.scenes from the

@@ -1,6 +1,7 @@
 import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { router } from 'kea-router'
 import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
+import { publishedReleaseModel } from '../../models/publishedReleaseModel'
 import type { frameLogicType } from './frameLogicType'
 import { subscriptions } from 'kea-subscriptions'
 import {
@@ -268,12 +269,39 @@ function isCloudManagedFrame(frame: FrameType | null | undefined): boolean {
  * signal frameNeedsInitialDeploy uses). A mismatch means a push is already
  * queued and travels on its own when the frame syncs, so it is reported as
  * waiting, not as something to deploy again.
+ *
+ * The other thing a cloud frame can be behind on is the FrameOS release
+ * itself, which needs `latestPublishedRelease` (publishedReleaseModel) because
+ * the cloud never ships a version of its own the way a backend does.
  */
-function cloudUndeployedChangeDetails(frame: FrameType | null | undefined): ChangeDetail[] {
-  if (!frame?.assigned_checksum || frame.assigned_checksum === frame.scenes_checksum) {
-    return []
+export function cloudUndeployedChangeDetails(
+  frame: FrameType | null | undefined,
+  latestPublishedRelease?: string | null
+): ChangeDetail[] {
+  const details: ChangeDetail[] = []
+  if (frame?.assigned_checksum && frame.assigned_checksum !== frame.scenes_checksum) {
+    details.push({ label: 'Waiting for the frame to apply the last push', requiresFullDeploy: false })
   }
-  return [{ label: 'Waiting for the frame to apply the last push', requiresFullDeploy: false }]
+  // A device a release behind is something to DO on this frame — it was the
+  // deploy drawer's own `2026.8.20 → 2026.8.21` row, while the button that
+  // opens that drawer stayed idle-white. `null` means the lookup has not
+  // landed (or failed): never claim an upgrade nobody confirmed exists.
+  const deviceVersion = (frame?.frameos_version ?? '').trim().replace(/^v/i, '')
+  if (latestPublishedRelease && deviceVersion && deviceVersion !== latestPublishedRelease) {
+    details.push({
+      label: `FrameOS ${deviceVersion} → ${latestPublishedRelease}`,
+      requiresFullDeploy: false,
+      // Tagged so the dashboard status line reads "upgrade" rather than
+      // "waiting to sync": nothing is queued here, the frame is simply behind
+      // and someone has to ask it to update.
+      frameosVersionChange: {
+        kind: 'upgrade',
+        previousVersion: deviceVersion,
+        currentVersion: latestPublishedRelease,
+      },
+    })
+  }
+  return details
 }
 
 const FRAME_KEYS: (keyof FrameType)[] = [
@@ -1129,12 +1157,34 @@ async function fetchSameOriginImageBlob(imageUrl: string): Promise<Blob | null> 
   return await response.blob()
 }
 
-function buildScenesFromTemplate(template: Partial<TemplateType>, frame: Partial<FrameType>): FrameScene[] {
+/**
+ * @param preserveSceneIds keep the template's own scene ids instead of minting
+ *   fresh ones. Only correct where those ids are a JOIN KEY rather than a local
+ *   detail: a cloud store install is assigned server-side by store scene uuid,
+ *   and the runtime ids inside its published zip are what
+ *   /api/frames/{id}/scene_images resolves a cover through and what the save
+ *   path matches a form scene back to its assignment by. Re-iding the local
+ *   copy left the tile with an id the server could not resolve (blank forever)
+ *   and made the next save create a duplicate private scene out of it.
+ *   Everywhere else a template is a copy, and copies need new ids.
+ */
+export function buildScenesFromTemplate(
+  template: Partial<TemplateType>,
+  frame: Partial<FrameType>,
+  preserveSceneIds = false
+): FrameScene[] {
   if (!('scenes' in template)) {
     return []
   }
 
-  const newScenes = duplicateScenes((template.scenes ?? []).map((scene) => sanitizeScene(scene, frame)))
+  const sanitized = (template.scenes ?? []).map((scene) => sanitizeScene(scene, frame))
+  // Keeping ids means they can collide with what is already on the frame;
+  // those scenes are literally already there, so drop them rather than
+  // adding a second copy under the same id.
+  const existingIds = new Set((frame.scenes ?? []).map((scene) => scene.id))
+  const newScenes = preserveSceneIds
+    ? sanitized.filter((scene) => !existingIds.has(scene.id))
+    : duplicateScenes(sanitized)
   if (newScenes.length === 1) {
     newScenes[0].name = template?.name || newScenes[0].name || 'Untitled scene'
   }
@@ -1655,7 +1705,9 @@ export const frameLogic = kea<frameLogicType>([
   path(['src', 'scenes', 'frame', 'frameLogic']),
   props({} as FrameLogicProps),
   key((props) => props.frameId),
-  connect(() => ({ values: [framesModel, ['frames']] })),
+  connect(() => ({
+    values: [framesModel, ['frames'], publishedReleaseModel, ['latestPublishedRelease']],
+  })),
   actions({
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
@@ -1679,8 +1731,9 @@ export const frameLogic = kea<frameLogicType>([
     clearNextAction: true,
     resetUnsavedChanges: true,
     resetUndeployedChanges: true,
-    applyTemplate: (template: Partial<TemplateType>, openDrawer?: boolean) => ({
+    applyTemplate: (template: Partial<TemplateType>, openDrawer?: boolean, preserveSceneIds?: boolean) => ({
       openDrawer: openDrawer ?? false,
+      preserveSceneIds: preserveSceneIds ?? false,
       template,
     }),
     createBlankScene: (name?: string, openEditor?: boolean, openDrawer?: boolean) => ({
@@ -1745,7 +1798,33 @@ export const frameLogic = kea<frameLogicType>([
           : undefined,
       }),
       submit: async (frame) => {
+        // A cloud Save is not the one quick POST it looks like: it pushes the
+        // settings, may push the schedule, then persists every scene as a new
+        // store-scene version and pushes the assignment list — seconds of
+        // network on a frame with a few scenes, with nothing on screen saying
+        // so. Only the FAILURE path used to report anything, so a slow save
+        // was indistinguishable from a click that did nothing.
+        //
+        // Registered here rather than in the buttons because Save has several
+        // entry points (the unsaved-changes drawer, the scene-control notice,
+        // the frame actions menu, ⌘S); this covers all of them at once, and
+        // the buttons additionally spin off isFrameFormSubmitting.
+        longRunningTasksModel.actions.startTask({
+          frameId: values.frameId,
+          kind: 'save',
+          title: 'Saving frame',
+          detail: isCloudMode() ? 'Saving settings and scenes to your cloud account' : null,
+        })
+        // A throw is left to submitFrameFormFailure below, which fails this
+        // very task with the reason — it is the one place that knows how to
+        // word it.
         await saveFrameForm(frame, values.frameId, values.nextAction)
+        longRunningTasksModel.actions.finishTask({
+          frameId: values.frameId,
+          kind: 'save',
+          status: 'success',
+          detail: 'Saved',
+        })
       },
     },
   })),
@@ -2156,10 +2235,16 @@ export const frameLogic = kea<frameLogicType>([
     ],
     lastDeploy: [(s) => [s.frame], (frame) => deployedFrameBaseline(frame)],
     undeployedChanges: [
-      (s) => [s.frame, s.lastDeploy, s.mode, s.isFrameAdminMode],
-      (frame: FrameType, lastDeploy: Partial<FrameType> | null, mode: FrameType['mode'], isFrameAdminMode: boolean) => {
+      (s) => [s.frame, s.lastDeploy, s.mode, s.isFrameAdminMode, s.latestPublishedRelease],
+      (
+        frame: FrameType,
+        lastDeploy: Partial<FrameType> | null,
+        mode: FrameType['mode'],
+        isFrameAdminMode: boolean,
+        latestPublishedRelease: string | null
+      ) => {
         if (isCloudManagedFrame(frame)) {
-          return !frame?.archived && cloudUndeployedChangeDetails(frame).length > 0
+          return !frame?.archived && cloudUndeployedChangeDetails(frame, latestPublishedRelease).length > 0
         }
         return !isFrameAdminMode && !frame?.archived && deployChangeDetails(lastDeploy, frame, mode).length > 0
       },
@@ -2169,10 +2254,10 @@ export const frameLogic = kea<frameLogicType>([
       (frame, frameForm, mode): ChangeDetail[] => computeChangeDetails(frame, frameForm, mode, false),
     ],
     undeployedChangeDetails: [
-      (s) => [s.lastDeploy, s.frame, s.mode, s.isFrameAdminMode],
-      (lastDeploy, frame, mode, isFrameAdminMode): ChangeDetail[] => {
+      (s) => [s.lastDeploy, s.frame, s.mode, s.isFrameAdminMode, s.latestPublishedRelease],
+      (lastDeploy, frame, mode, isFrameAdminMode, latestPublishedRelease): ChangeDetail[] => {
         if (isCloudManagedFrame(frame)) {
-          return frame?.archived ? [] : cloudUndeployedChangeDetails(frame)
+          return frame?.archived ? [] : cloudUndeployedChangeDetails(frame, latestPublishedRelease)
         }
         return isFrameAdminMode || frame?.archived ? [] : deployChangeDetails(lastDeploy, frame, mode)
       },
@@ -2339,12 +2424,16 @@ export const frameLogic = kea<frameLogicType>([
   listeners(({ asyncActions, actions, values, props }) => {
     // Adds the templates' scenes to the frame form without saving; the user
     // reviews and saves/deploys the change through the normal flow.
-    const appendTemplates = async (templates: Partial<TemplateType>[], openDrawer: boolean): Promise<void> => {
+    const appendTemplates = async (
+      templates: Partial<TemplateType>[],
+      openDrawer: boolean,
+      preserveSceneIds = false
+    ): Promise<void> => {
       const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
       const oldScenes = frameForm.scenes || []
       const sceneGroups = templates
         .map((template) => ({
-          scenes: buildScenesFromTemplate(template, frameForm),
+          scenes: buildScenesFromTemplate(template, frameForm, preserveSceneIds),
           template,
         }))
         .filter(({ scenes }) => scenes.length > 0)
@@ -2449,20 +2538,22 @@ export const frameLogic = kea<frameLogicType>([
         // a trace — most visibly on the cloud, where saving to a frame the
         // owner has not confirmed yet is refused with `frame_not_active`
         // (409) and the workspace just sat there still saying "unsaved".
-        // Field-level validation renders inline; skip its sentinel error.
+        // Field-level validation renders inline; skip its sentinel error —
+        // but the running task the submit handler started is still spinning,
+        // so it has to be closed either way.
         if (error?.message === 'Validation Failed') {
+          longRunningTasksModel.actions.taskFailed({
+            frameId: props.frameId,
+            kind: 'save',
+            detail: 'Some fields need fixing before this can be saved',
+          })
           return
         }
         const detail =
           error?.message?.includes('frame_not_active') && isCloudMode()
             ? 'This frame is still pending — confirm it on its dashboard before saving changes to it.'
             : error?.message || 'Failed to save the frame'
-        longRunningTasksModel.actions.startTask({
-          frameId: props.frameId,
-          kind: 'save',
-          title: 'Saving frame',
-          detail: null,
-        })
+        // No startTask: the submit handler opened one, and this fails it.
         longRunningTasksModel.actions.taskFailed({ frameId: props.frameId, kind: 'save', detail })
       },
       saveAndDeployFrame: async () => {
@@ -2551,8 +2642,8 @@ export const frameLogic = kea<frameLogicType>([
           console.error(`Node ${nodeId} not found in scene ${sceneId}`)
         }
       },
-      applyTemplate: async ({ template, openDrawer }) => {
-        await appendTemplates(templatesFromPayload(template), openDrawer)
+      applyTemplate: async ({ template, openDrawer, preserveSceneIds }) => {
+        await appendTemplates(templatesFromPayload(template), openDrawer, preserveSceneIds)
       },
       createBlankScene: async ({ name, openEditor, openDrawer }) => {
         const frameForm = getCurrentFrameForm(values.frame, values.frameForm)

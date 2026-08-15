@@ -144,3 +144,68 @@ suite "private-network elevation is not a bulk-savable setting":
     let fresh = frontendFramePayloadToRuntimeConfig(
       %*{"network": {"allowLocalNetworkAccess": true}}, %*{})
     check not fresh{"network"}.hasKey("allowLocalNetworkAccess")
+
+suite "no-op settings pushes are detectable":
+  # The cloud's set_settings verb delivers the full allowlisted object on
+  # every "push scenes & settings" click; frameApiUpdateChangesConfig is what
+  # lets the hub client ack values already in effect without a config reload
+  # (which re-inits the scene and re-renders the panel).
+  test "an identical payload reports no change; a different one does":
+    let dir = getTempDir() / "frameos-api-noop-test"
+    createDir(dir)
+    defer:
+      removeDir(dir)
+      delEnv("FRAMEOS_CONFIG")
+    let configPath = dir / "frame.json"
+    putEnv("FRAMEOS_CONFIG", configPath)
+    # Runtime key names, exactly as frame.json stores them — note timeZone,
+    # not timezone: the merge maps the API's snake_case onto these, and a
+    # fixture with the wrong casing makes the merge ADD a key, which reads
+    # (correctly) as a change.
+    writeFile(configPath, $(%*{
+      "name": "Kitchen", "rotate": 90, "interval": 300.0,
+      "scalingMode": "cover", "timeZone": "Europe/Brussels", "debug": false,
+    }))
+
+    check not frameApiUpdateChangesConfig(%*{
+      "name": "Kitchen", "rotate": 90, "interval": 300.0,
+      "scaling_mode": "cover", "timezone": "Europe/Brussels", "debug": false,
+    })
+    check frameApiUpdateChangesConfig(%*{"name": "Hallway"})
+    check frameApiUpdateChangesConfig(%*{"rotate": 180})
+    # Empty and malformed payloads change nothing, by definition.
+    check not frameApiUpdateChangesConfig(%*{})
+    check not frameApiUpdateChangesConfig(newJNull())
+
+  test "the probe agrees with what persistFrameApiUpdate then writes":
+    # The probe runs the SAME merge as the persist — this pins that: a
+    # payload the probe calls unchanged must leave the runtime-visible config
+    # identical after a real persist, and vice versa. `frameApi` is excluded
+    # from the comparison on both sides: it is sync bookkeeping the merge
+    # rewrites on every call (a payload echo plus a fresh revision stamp),
+    # which is exactly why the probe has to ignore it too.
+    proc runtimeVisible(path: string): JsonNode =
+      result = parseJson(readFile(path))
+      if result.hasKey("frameApi"):
+        result.delete("frameApi")
+
+    let dir = getTempDir() / "frameos-api-noop-roundtrip"
+    createDir(dir)
+    defer:
+      removeDir(dir)
+      delEnv("FRAMEOS_CONFIG")
+    let configPath = dir / "frame.json"
+    putEnv("FRAMEOS_CONFIG", configPath)
+    writeFile(configPath, $(%*{"name": "Kitchen", "rotate": 90}))
+
+    let unchanged = %*{"name": "Kitchen", "rotate": 90}
+    check not frameApiUpdateChangesConfig(unchanged)
+    let before = runtimeVisible(configPath)
+    persistFrameApiUpdate(unchanged)
+    check runtimeVisible(configPath) == before
+
+    let changed = %*{"rotate": 270}
+    check frameApiUpdateChangesConfig(changed)
+    persistFrameApiUpdate(changed)
+    check runtimeVisible(configPath){"rotate"}.getInt(0) == 270
+    check not frameApiUpdateChangesConfig(changed)

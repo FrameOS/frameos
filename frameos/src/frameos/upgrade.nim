@@ -39,12 +39,12 @@ type
     dryRun*: bool
     yes*: bool
 
-  StagedFrameOSRelease = object
-    name: string
-    frameosReleaseDir: string
-    remoteReleaseDir: string
-    serviceUser: string
-    setupStatus: int
+  StagedFrameOSRelease* = object
+    name*: string
+    frameosReleaseDir*: string
+    remoteReleaseDir*: string
+    serviceUser*: string
+    setupStatus*: int
 
 proc frameosInstallDir*(): string =
   getEnv("FRAMEOS_DIR", "/srv/frameos").strip(leading = false, trailing = true, chars = {'/'})
@@ -88,6 +88,45 @@ proc readUpgradeStatus*(): JsonNode =
   except CatchableError:
     discard
   %*{"status": "idle"}
+
+const UpgradeTerminalStatuses* = ["success", "reboot_required", "failed", "up_to_date", "idle"]
+
+proc upgradeStatusLogLine*(payload: JsonNode): JsonNode =
+  ## The loggable view of upgrade-status.json.
+  ##
+  ## `frameos upgrade` runs detached, in a process that shares nothing with a
+  ## running FrameOS but this file, so a cloud owner who pressed "Upgrade
+  ## FrameOS" saw the request go out and then heard nothing — whether the
+  ## device downloaded 40 MB, refused as already current, or died on an
+  ## unsupported target. The cloud client watches the file and logs this.
+  ##
+  ## Only the fields worth a log line: the status file also carries the whole
+  ## release JSON and a log path, which say nothing a person reading the log
+  ## wants to know.
+  let status =
+    if payload != nil and payload.kind == JObject: payload{"status"}.getStr("idle")
+    else: "idle"
+  result = %*{"event": "cloud:upgrade", "status": status}
+  if payload == nil or payload.kind != JObject:
+    return
+  for key in ["message", "current_version", "latest_version", "target", "exit_code"]:
+    let value = payload{key}
+    if value == nil or value.kind == JNull:
+      continue
+    if value.kind == JString and value.getStr("").len == 0:
+      continue
+    result[key] = value
+
+proc upgradeStatusMtime*(): float =
+  ## Unix mtime of upgrade-status.json, 0 when it does not exist. A stat, not
+  ## a parse: the cloud client calls this on every watch tick.
+  try:
+    let path = frameosUpgradeStatusPath()
+    if fileExists(path):
+      return getLastModificationTime(path).toUnixFloat()
+  except CatchableError:
+    discard
+  0.0
 
 const UpgradeInFlightMaxAge = initDuration(hours = 2)
 
@@ -423,27 +462,50 @@ proc ensureCompatibleInstalledLayout(release: FrameOSReleaseInfo) =
     raise newException(ValueError, "FrameOS upgrade must run as root or with passwordless sudo")
   discard release
 
-proc downloadReleaseArchive(release: FrameOSReleaseInfo, destination: string) =
+proc downloadReleaseArchive*(release: FrameOSReleaseInfo, destination: string) =
+  ## Streamed to disk by the binary's own bounded TLS client — the same
+  ## client that just fetched the release metadata and is about to fetch the
+  ## signature, so a device that got this far can by construction download
+  ## the archive too.
+  ##
+  ## Deliberately NO curl and NO wget. Picking a downloader by `command -v`
+  ## is how every buildroot cloud upgrade died: busybox provides a `wget`
+  ## applet, so the probe said yes — but it is built without TLS and refuses
+  ## any https URL ("wget: not an http or ftp url"), while the built-in
+  ## client sat unused in the fallback branch. A downloader the binary
+  ## carries itself cannot be absent, misbuilt, or shadowed on the device,
+  ## and the byte/time bounds, redirect policy and partial-file cleanup are
+  ## one audited code path instead of three.
   validateGithubReleaseAssetUrl(release.assetUrl, release.version)
-  if commandExists("curl"):
-    discard runSetupCommand(
-      "curl -fL --proto '=https' --tlsv1.2 " & shellQuote(release.assetUrl) & " -o " & shellQuote(destination)
-    )
-  elif commandExists("wget"):
-    discard runSetupCommand("wget -qO " & shellQuote(destination) & " " & shellQuote(release.assetUrl))
-  else:
-    # Buildroot images ship neither curl nor wget; use the bounded HTTP client.
-    setupLog("FrameOS upgrade: downloading with built-in HTTP client")
-    var headers = newHttpHeaders()
-    headers["User-Agent"] = "FrameOS/" & compiledFrameOSVersion()
-    let body = boundedGetContent(
-      release.assetUrl,
-      headers = headers,
-      timeoutMs = 60_000,
-      maxBytes = MaxReleaseArchiveBytes,
-      maxSeconds = 1800,
-    )
-    writeFile(destination, body)
+  boundedDownloadToFile(
+    release.assetUrl,
+    destination,
+    timeoutMs = 60_000,
+    maxBytes = MaxReleaseArchiveBytes,
+    maxSeconds = 1800,
+    headers = @[("User-Agent", "FrameOS/" & compiledFrameOSVersion())],
+  )
+
+# Test seams for stageFrameOSRelease's two network fetches. nil = the real
+# downloader. They exist so the SECURITY-CRITICAL property of the staging
+# flow — the signature is verified before tar touches the archive — can be
+# pinned by an offline test; the fetchers themselves are covered separately
+# (boundedDownloadToFile in test_http_client, the crypto in test_upgrade).
+type
+  ReleaseArchiveFetcher* = proc(release: FrameOSReleaseInfo, destination: string)
+  ReleaseSignatureFetcher* = proc(release: FrameOSReleaseInfo): string
+
+var releaseArchiveFetcher: ReleaseArchiveFetcher = nil
+var releaseSignatureFetcher: ReleaseSignatureFetcher = nil
+
+proc setReleaseFetchersForTest*(archive: ReleaseArchiveFetcher,
+                                signature: ReleaseSignatureFetcher) =
+  releaseArchiveFetcher = archive
+  releaseSignatureFetcher = signature
+
+proc resetReleaseFetchersForTest*() =
+  releaseArchiveFetcher = nil
+  releaseSignatureFetcher = nil
 
 proc downloadReleaseSignature(release: FrameOSReleaseInfo): string =
   ## The .minisig beside the asset. Small (a few hundred bytes), so it is
@@ -530,7 +592,7 @@ proc copyFirstExistingFile(sources: openArray[string], destination: string) =
       copyFile(source, destination)
       return
 
-proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
+proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
   let timestamp = format(now(), "yyyyMMddHHmmss")
   result.name = "release_upgrade_" & timestamp & "_" & release.version.replace(".", "_")
   result.frameosReleaseDir = frameosInstallDir() / "releases" / result.name
@@ -554,7 +616,10 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
     createDir(frameosAssetsDir())
 
     setupLog("FrameOS upgrade: downloading " & release.assetName)
-    downloadReleaseArchive(release, workDir / "frameos.tar.gz")
+    if releaseArchiveFetcher.isNil:
+      downloadReleaseArchive(release, workDir / "frameos.tar.gz")
+    else:
+      releaseArchiveFetcher(release, workDir / "frameos.tar.gz")
 
     # Verify BEFORE unpacking: `tar -xzf` on an unverified archive is already
     # letting an attacker choose file contents and paths on this device. The
@@ -562,8 +627,10 @@ proc stageFrameOSRelease(release: FrameOSReleaseInfo): StagedFrameOSRelease =
     # compromised provider (or a hijacked download) cannot get code executed
     # here — it can only offer bytes that fail this check.
     setupLog("FrameOS upgrade: verifying the release signature")
-    verifyReleaseArchiveSignature(workDir / "frameos.tar.gz",
-                                  downloadReleaseSignature(release))
+    let minisig =
+      if releaseSignatureFetcher.isNil: downloadReleaseSignature(release)
+      else: releaseSignatureFetcher(release)
+    verifyReleaseArchiveSignature(workDir / "frameos.tar.gz", minisig)
     setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & ")")
 
     discard runSetupCommand("tar -xzf " & shellQuote(workDir / "frameos.tar.gz") & " -C " & shellQuote(workDir / "extract"))

@@ -155,6 +155,35 @@ suite "cloud hub verb dispatcher":
     check recorded.events.len == 1
     check recorded.events[0][0] == "reload"
 
+  test "set_settings that changes nothing is acked without persist or reload":
+    # Every "push scenes & settings" click redelivers the full settings
+    # object; reloading the config for values already in effect re-inits the
+    # active scene and re-renders the panel — an e-ink flash per no-op.
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    ctx.settingsChangedFn = proc(payload: JsonNode): bool {.gcsafe.} = false
+    let reply = handleCloudVerb(ctx, %*{
+      "id": "3b", "type": "set_settings",
+      "settings": {"name": "Kitchen", "rotate": 90},
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.persistedSettings.len == 0
+    check recorded.events.len == 0
+    check "set_settings" in auditedVerbs(recorded)
+
+  test "set_settings with a nil change probe keeps the old always-reload path":
+    # nil = "assume changed": an older or test context that never wires the
+    # probe must not silently lose reloads.
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    check ctx.settingsChangedFn.isNil
+    let reply = handleCloudVerb(ctx, %*{
+      "id": "3c", "type": "set_settings", "settings": {"name": "Kitchen"},
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.persistedSettings.len == 1
+    check recorded.events.len == 1
+
   test "refresh_service_settings needs settings:services and only accepts the nudge":
     let denied = Recorded()
     let refused = handleCloudVerb(makeContext(denied, @["frame:managed"]),
@@ -290,6 +319,53 @@ suite "cloud hub verb dispatcher":
     check reply.extra[0]{"type"}.getStr("") == "scene_ack"
     check reply.extra[0]{"checksum"}.getStr("") == "sum-1"
     check reply.extra[0]{"active_scene"}.getStr("") == "uploaded/scene1"
+
+  test "set_scenes redelivering the applied checksum is acked without a re-upload":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    ctx.scenesChecksum = "sum-1"
+    let reply = handleCloudVerb(ctx, %*{
+      "id": "7b", "type": "set_scenes", "checksum": "sum-1",
+      "scenes": [{"id": "scene1", "name": "Test", "nodes": [], "edges": []}],
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    # No uploadScenes event: re-applying an identical payload re-inits the
+    # scene and re-renders the panel for nothing.
+    check recorded.events.len == 0
+    # The scene_ack still goes out — it is what reconciles the provider's
+    # sync row — and reports the scene ACTUALLY showing, since the runtime
+    # was not touched.
+    check reply.extra.len == 1
+    check reply.extra[0]{"type"}.getStr("") == "scene_ack"
+    check reply.extra[0]{"checksum"}.getStr("") == "sum-1"
+    check reply.extra[0]{"active_scene"}.getStr("") == "sceneA"
+
+  test "set_scenes with a matching checksum still uploads when asked to switch scene":
+    # An unchanged payload plus scene_id (the workspace's "preview on frame")
+    # is new work: the switch and state seed ride the upload event.
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    ctx.scenesChecksum = "sum-1"
+    let reply = handleCloudVerb(ctx, %*{
+      "id": "7c", "type": "set_scenes", "checksum": "sum-1",
+      "scene_id": "scene1",
+      "scenes": [{"id": "scene1", "name": "Test", "nodes": [], "edges": []}],
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.events.len == 1
+    check recorded.events[0][0] == "uploadScenes"
+
+  test "set_scenes with a new checksum always uploads":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    ctx.scenesChecksum = "sum-old"
+    let reply = handleCloudVerb(ctx, %*{
+      "id": "7d", "type": "set_scenes", "checksum": "sum-new",
+      "scenes": [{"id": "scene1", "name": "Test", "nodes": [], "edges": []}],
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.events.len == 1
+    check ctx.scenesChecksum == "sum-new"
 
   test "set_scenes refuses built-in apps that spawn processes":
     # These two apps run child processes against a configured target

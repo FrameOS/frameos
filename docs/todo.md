@@ -26,6 +26,46 @@ because the cloud protocol has no shell verbs — structural, nothing to close.
   pass. Verifying a full buildroot SD-card cloud install + update covers
   both.
 
+  2026-08-15: two hardware attempts (buildroot Pi, 2026.8.20 → 2026.8.21)
+  reported nothing after `cloud:upgrade scheduled` and the version never
+  moved. The visibility half is fixed — `frameos upgrade` runs detached and
+  only ever wrote `upgrade-status.json`, which the local admin page polls
+  and the cloud could not see; the hub session now watches that file and
+  forwards every status change (plus a `stalled` line when the child dies
+  silently, and a replay of a terminal status written while the frame was
+  restarting). That watcher only reaches a frame VIA a release, so a frame
+  on 2026.8.20/21 stays silent regardless — the outcome of those attempts
+  is on the device:
+
+      cat /srv/frameos/state/upgrade-status.json
+      tail -50 /srv/frameos/logs/upgrade.log
+
+  ROOT CAUSE (2026-08-15, from the device's upgrade.log): busybox. The
+  downloader picked exactly one tool by `command -v` — and buildroot's
+  busybox provides a `wget` applet, so the probe said yes, but it is built
+  without TLS and refuses any https URL (`wget: not an http or ftp url`).
+  The failure was fatal instead of falling through to the binary's own TLS
+  client, which had just fetched the release metadata successfully and sat
+  unused in the else branch ("Buildroot images ship neither curl nor
+  wget" — half right). Fixed on this branch by deleting the shell
+  downloaders outright: the release archive now streams to disk through the
+  binary's own bounded TLS client (boundedDownloadToFile — peak memory is
+  one recv window, partial files removed on any failure), so there is no
+  external downloader to be absent, misbuilt, or shadowed.
+
+  Chicken-and-egg: the fix rides in the frameos binary, so the stuck frame
+  cannot self-upgrade into it — 2026.8.21 still carries the broken
+  downloader. One manual bootstrap (scp the tarball + stage by hand, or
+  wait for 2026.8.22 and bootstrap once) is needed per already-deployed
+  buildroot frame.
+
+  Same session also killed the noise around the click: the "Also push
+  scenes & settings" tick used to redeliver the unchanged settings+scenes,
+  and the device reloaded its config and re-rendered the panel twice per
+  upgrade click. The workspace now skips the push when nothing is unsaved
+  and the device acked the last one, and the device (next release) acks an
+  idempotent set_settings/set_scenes redelivery without reloading.
+
 ## Cloud-managed frames
 
 - **Cloud AI chat follow-ups** — the 2026-08-14 chat v2 rebuild (branch

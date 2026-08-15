@@ -46,7 +46,9 @@ export function FrameChangeStatusIcon({
   frameId: FrameId
   variant?: 'sidebar' | 'dashboard'
 }): JSX.Element {
-  const { frame, hasFrameSyncChanges, undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
+  const { frame, hasFrameSyncChanges, undeployedChangeDetails, undeployedChanges, unsavedChanges } = useValues(
+    frameLogic({ frameId })
+  )
   const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
   const { frameChangeDrawerSelection } = useValues(workspaceLogic)
   const { closeFrameChangeDrawer, focusFrame, openFrameChangeDrawer } = useActions(workspaceLogic)
@@ -58,6 +60,13 @@ export function FrameChangeStatusIcon({
     ? 'Undeployed'
     : null
   const drawerKind = unsavedChanges ? 'unsaved' : 'deploy'
+  // Name what is pending rather than just its category: "Undeployed changes"
+  // gave no hint that the thing waiting was a FrameOS release, which is the
+  // one pending change you might want to act on days later.
+  const statusTitle =
+    statusLabel === 'Undeployed' && undeployedChangeDetails.length > 0
+      ? undeployedChangeDetails.map((change) => change.label).join(', ')
+      : `${statusLabel} changes`
   // The deploy drawer is the 'deploy' menu action's dialog, so this icon may
   // only open it where that action exists — the same predicate the "…" menu,
   // the dashboard tile and the scene sidebar use, so every deploy affordance
@@ -65,8 +74,7 @@ export function FrameChangeStatusIcon({
   // through its own FrameLocalDeployMenu and has no drawer; it keeps the
   // change indicator, just not as a button into a dialog it cannot serve.)
   // The 'unsaved' drawer is a different dialog and is never gated here.
-  const canOpenDeployDrawer =
-    drawerKind === 'unsaved' || frameMenuActionIsAllowed(workspaceMode(), 'deploy', frame)
+  const canOpenDeployDrawer = drawerKind === 'unsaved' || frameMenuActionIsAllowed(workspaceMode(), 'deploy', frame)
   const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
   const StatusIcon = unsavedChanges ? CloudArrowUpIcon : hasFrameSyncChanges ? ArrowsRightLeftIcon : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
@@ -132,7 +140,7 @@ export function FrameChangeStatusIcon({
     // Keep reporting the state, drop the affordance.
     return (
       <span
-        title={`${statusLabel} changes`}
+        title={statusTitle}
         className={clsx(
           wrapperClassName,
           'frameos-change-status-button',
@@ -148,7 +156,7 @@ export function FrameChangeStatusIcon({
   return (
     <button
       type="button"
-      title={`${statusLabel} changes`}
+      title={statusTitle}
       aria-label={
         drawerIsOpen
           ? unsavedChanges

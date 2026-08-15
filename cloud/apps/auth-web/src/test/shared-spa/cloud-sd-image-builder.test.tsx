@@ -3,7 +3,7 @@
 // The SD image builder inside the workspace's "Add frame" panel. It lives in
 // cloud-frontend/, which has no test runner, so it is tested from auth-web's
 // vitest across the package boundary (see the other shared-spa tests).
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -271,8 +271,11 @@ describe("SdImageBuilder", () => {
     // ttlDays rides along so the SD image's embedded code outlives the 24h
     // default that suits interactive flows.
     expect(mint).toHaveBeenCalledExactlyOnceWith({ multiUse: true, ttlDays: 90 });
+    // The release version is part of the name: these files outlive the
+    // download, and two builds for the same frame months apart otherwise
+    // differed by nothing at all.
     expect(saved.suggestedName).toBe(
-      "frameos-raspberry-pi-64-kitchen-frame.img.gz",
+      "frameos-raspberry-pi-64-kitchen-frame-1.2.3.img.gz",
     );
     expect(saved.closed).toBe(true);
     expect(saved.aborted).toBe(false);
@@ -576,7 +579,7 @@ describe("SdImageBuilder", () => {
 
     expect(clicked).toHaveLength(1);
     expect(clicked[0]?.download).toBe(
-      "frameos-raspberry-pi-64-kitchen-frame.img.gz",
+      "frameos-raspberry-pi-64-kitchen-frame-1.2.3.img.gz",
     );
     expect(clicked[0]?.href).toBe("blob:mock-url");
     expect(blobs).toHaveLength(1);
@@ -695,5 +698,184 @@ describe("SdImageBuilder", () => {
         String(input).startsWith("/api/frames/sd-image"),
       ),
     ).toHaveLength(0);
+  });
+
+  // Re-download mode: the same builder, mounted from a frame's deploy drawer
+  // to write ANOTHER card for it (a replacement Pi, a dead card). The claim
+  // code is bound to that frame, so the card re-keys the existing row rather
+  // than enrolling a second one.
+  describe("re-download for an existing frame", () => {
+    const reenrollFrame = { id: "f-1", name: "Kitchen Frame" };
+
+    it("mints a frame-bound single-use code and keeps the frame's name", async () => {
+      mockReleaseAndImage();
+      const saved = stubSaveFilePicker();
+      const mint = vi.fn(() => Promise.resolve("FRCT_bound"));
+      render(
+        <SdImageBuilder
+          cloudOrigin={window.location.origin}
+          mintClaimToken={mint}
+          reenrollFrame={reenrollFrame}
+        />,
+      );
+      await screen.findByRole("option", {
+        name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+      });
+
+      // The name comes from the frame row and is not editable — an image that
+      // disagreed with the workspace would only confuse.
+      const nameField = screen.getByPlaceholderText(
+        "Frame name",
+      ) as HTMLInputElement;
+      expect(nameField.value).toBe("Kitchen Frame");
+      expect(nameField.disabled).toBe(true);
+
+      // Bound codes are single-use and one-hour by contract, so the validity
+      // picker is replaced by a statement of that.
+      expect(screen.queryByLabelText("Claim code validity")).toBeNull();
+      expect(
+        screen.getByText(/single-use and valid for one hour/i),
+      ).toBeTruthy();
+
+      // The cover copy has to be honest about what does and does not travel.
+      expect(screen.getByText(/Assets do not travel/)).toBeTruthy();
+
+      const passwordless = screen.getByLabelText(
+        /Enable passwordless root login/,
+      ) as HTMLInputElement;
+      fireEvent.click(passwordless);
+      fireEvent.click(
+        screen.getByRole("button", { name: /download sd image/i }),
+      );
+      await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+
+      expect(mint).toHaveBeenCalledExactlyOnceWith({
+        frameId: "f-1",
+        multiUse: false,
+      });
+      expect(saved.suggestedName).toBe(
+        "frameos-raspberry-pi-64-kitchen-frame-1.2.3.img.gz",
+      );
+    });
+
+    it("never reuses the panel's cached multi-use token", async () => {
+      mockReleaseAndImage();
+      stubSaveFilePicker();
+      const mint = vi.fn(() => Promise.resolve("FRCT_bound"));
+      render(
+        <SdImageBuilder
+          claimToken="FRCT_cached_multi_use"
+          cloudOrigin={window.location.origin}
+          mintClaimToken={mint}
+          reenrollFrame={reenrollFrame}
+        />,
+      );
+      await screen.findByRole("option", {
+        name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+      });
+
+      fireEvent.click(
+        screen.getByLabelText(/Enable passwordless root login/),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: /download sd image/i }),
+      );
+      await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+
+      // A multi-use code would enroll a NEW frame, silently undoing the whole
+      // point of this mode.
+      expect(mint).toHaveBeenCalledExactlyOnceWith({
+        frameId: "f-1",
+        multiUse: false,
+      });
+    });
+
+    // "Pick the display later (setup portal)" is the wrong starting point for
+    // hardware that is already configured — the frame knows its driver and
+    // panel size, so the form starts from them. Still editable: a re-download
+    // is sometimes a move to different hardware.
+    it("preselects the frame's display, dimensions and rotation", async () => {
+      mockReleaseAndImage();
+      render(
+        <SdImageBuilder
+          cloudOrigin={window.location.origin}
+          mintClaimToken={() => Promise.resolve("FRCT_bound")}
+          reenrollFrame={{
+            ...reenrollFrame,
+            device: "framebuffer",
+            width: 800,
+            height: 480,
+            rotate: 90,
+          }}
+        />,
+      );
+      await screen.findByRole("option", {
+        name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+      });
+
+      expect(
+        (screen.getByLabelText("Display") as HTMLSelectElement).value,
+      ).toBe("framebuffer");
+      expect(
+        (screen.getByLabelText("Display width") as HTMLInputElement).value,
+      ).toBe("800");
+      expect(
+        (screen.getByLabelText("Display height") as HTMLInputElement).value,
+      ).toBe("480");
+      expect(
+        (screen.getByLabelText("Rotation") as HTMLSelectElement).value,
+      ).toBe("90");
+    });
+
+    it("falls back to 'pick later' for a device the catalog does not offer", async () => {
+      mockReleaseAndImage();
+      render(
+        <SdImageBuilder
+          cloudOrigin={window.location.origin}
+          mintClaimToken={() => Promise.resolve("FRCT_bound")}
+          reenrollFrame={{ ...reenrollFrame, device: "not.a.real.driver", width: 800 }}
+        />,
+      );
+      await screen.findByRole("option", {
+        name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+      });
+
+      // An unknown value must not silently bake itself into the image while
+      // the select renders the "pick later" option.
+      expect((screen.getByLabelText("Display") as HTMLSelectElement).value).toBe("");
+      expect(screen.queryByLabelText("Display width")).toBeNull();
+    });
+
+    // The enrollment watch looks for a frame that was not in the list before;
+    // re-keying produces none, so it would either hang on "waiting" forever
+    // or latch onto an unrelated enrollment.
+    it("does not wait for a new frame to appear", async () => {
+      mockReleaseAndImage();
+      stubSaveFilePicker();
+      render(
+        <SdImageBuilder
+          cloudOrigin={window.location.origin}
+          mintClaimToken={() => Promise.resolve("FRCT_bound")}
+          reenrollFrame={reenrollFrame}
+        />,
+      );
+      await screen.findByRole("option", {
+        name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+      });
+
+      fireEvent.click(
+        screen.getByLabelText(/Enable passwordless root login/),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: /download sd image/i }),
+      );
+      await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+
+      expect(screen.queryByTestId("sd-image-enrollment")).toBeNull();
+      // …and says what happens instead of waiting: the frame it re-keys.
+      expect(
+        within(screen.getByTestId("sd-image-done")).getByText(/comes back as/i),
+      ).toBeTruthy();
+    });
   });
 });

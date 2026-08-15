@@ -1,5 +1,6 @@
 import std/[base64, json, os, strutils, tables, unittest]
 
+import ../device_setup
 import ../ota_pubkey
 import ../upgrade
 
@@ -217,3 +218,125 @@ suite "FrameOS upgrade helpers":
     let blob = "ED" & parseHexStr(OtaSigningKeyIdHex) & repeat("\x00", 64)
     expect ValueError:
       verifyReleaseArchiveSignature(archive, "untrusted comment: x\n" & encode(blob) & "\n")
+
+suite "upgrade status reporting":
+  # A cloud OTA used to log "scheduled" and then nothing at all: the upgrade
+  # runs detached, and its status file was read by the local admin page only.
+  # The cloud client now watches that file, so the shape of what it logs is
+  # part of the contract.
+  test "the log line keeps what a person needs and drops the rest":
+    let line = upgradeStatusLogLine(%*{
+      "status": "running",
+      "message": "FrameOS upgrade is running.",
+      "current_version": "2026.8.20",
+      "latest_version": "2026.8.21",
+      "target": "debian-bookworm-arm64",
+      "exit_code": 0,
+      # Bulk the log has no use for: the whole release object and a path.
+      "latest_release": {"version": "2026.8.21", "asset_url": "https://example.com/x.tar.gz"},
+      "log_path": "/srv/frameos/logs/upgrade.log",
+      "started_at": "2026-08-14T22:07:35Z",
+    })
+    check line{"event"}.getStr("") == "cloud:upgrade"
+    check line{"status"}.getStr("") == "running"
+    check line{"message"}.getStr("") == "FrameOS upgrade is running."
+    check line{"current_version"}.getStr("") == "2026.8.20"
+    check line{"latest_version"}.getStr("") == "2026.8.21"
+    check line{"target"}.getStr("") == "debian-bookworm-arm64"
+    check line{"exit_code"}.getInt(-1) == 0
+    check not line.hasKey("latest_release")
+    check not line.hasKey("log_path")
+    check not line.hasKey("started_at")
+
+  test "empty and missing fields are omitted rather than logged blank":
+    # The provider names no version in notify_update_available, and a status
+    # written before a target was detected has an empty target. `"target": ""`
+    # in a log line reads as a bug in the frame.
+    let line = upgradeStatusLogLine(%*{"status": "failed", "target": "", "message": "boom"})
+    check line{"status"}.getStr("") == "failed"
+    check line{"message"}.getStr("") == "boom"
+    check not line.hasKey("target")
+    check not line.hasKey("current_version")
+
+  test "a missing or malformed status file reads as idle, never crashes":
+    check upgradeStatusLogLine(nil){"status"}.getStr("") == "idle"
+    check upgradeStatusLogLine(newJNull()){"status"}.getStr("") == "idle"
+    check upgradeStatusLogLine(%*["not", "an", "object"]){"status"}.getStr("") == "idle"
+    check upgradeStatusLogLine(%*{}){"status"}.getStr("") == "idle"
+
+  test "every status the upgrade can end on is recognised as terminal":
+    # The watcher stops polling on these; one missing here would leave a
+    # finished upgrade being re-checked until the session ends.
+    for status in ["success", "reboot_required", "failed", "up_to_date", "idle"]:
+      check status in UpgradeTerminalStatuses
+    # …and the in-flight ones are not, or the outcome would never be logged.
+    for status in ["starting", "running"]:
+      check status notin UpgradeTerminalStatuses
+
+  test "the mtime probe answers 0 for a device that never upgraded":
+    let dir = getTempDir() / "frameos-upgrade-mtime-test"
+    createDir(dir)
+    defer: removeDir(dir)
+    putEnv("FRAMEOS_DIR", dir)
+    defer: delEnv("FRAMEOS_DIR")
+    check upgradeStatusMtime() == 0.0
+
+    writeUpgradeStatus(%*{"status": "starting"})
+    check upgradeStatusMtime() > 0.0
+
+
+suite "staging verifies the signature before anything runs":
+  # The crypto itself is covered above (wrong key, tampered bytes, malformed
+  # sigs) and the transport in test_http_client — but neither pins the WIRING:
+  # that stageFrameOSRelease checks the downloaded bytes against the compiled-
+  # in key BEFORE tar touches them. `tar -xzf` on unverified bytes already
+  # lets an attacker choose file contents and paths on the device, so a
+  # refactor that reorders those two lines must fail here, not in the field.
+  teardown:
+    resetReleaseFetchersForTest()
+    resetSetupCommandRunnerForTest()
+    delEnv("FRAMEOS_DIR")
+    delEnv("FRAMEOS_REMOTE_DIR")
+    delEnv("FRAMEOS_ASSETS_DIR")
+
+  test "an archive that fails verification never reaches tar":
+    let root = getTempDir() / "frameos-stage-sig-test"
+    removeDir(root)
+    createDir(root)
+    defer: removeDir(root)
+    putEnv("FRAMEOS_DIR", root / "frameos")
+    putEnv("FRAMEOS_REMOTE_DIR", root / "remote")
+    putEnv("FRAMEOS_ASSETS_DIR", root / "assets")
+
+    var commands: seq[string] = @[]
+    setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+      commands.add(command)
+      (output: "", exitCode: 0))
+
+    var archiveFetched = false
+    setReleaseFetchersForTest(
+      proc(release: FrameOSReleaseInfo, destination: string) =
+        archiveFetched = true
+        writeFile(destination, "definitely not the bytes that were signed"),
+      proc(release: FrameOSReleaseInfo): string =
+        # Well-formed and from the trusted key id, so it passes parsing and
+        # the failure is the actual Ed25519 verification of the bytes — the
+        # same shape a hijacked download would present.
+        let blob = "ED" & parseHexStr(OtaSigningKeyIdHex) & repeat("\x00", 64)
+        "untrusted comment: x\n" & encode(blob) & "\n")
+
+    expect ValueError:
+      discard stageFrameOSRelease(FrameOSReleaseInfo(
+        version: "9.9.9",
+        tagName: "v9.9.9",
+        target: "debian-bookworm-arm64",
+        assetName: "frameos-9.9.9-debian-bookworm-arm64.tar.gz",
+        assetUrl: GitHubReleaseDownloadPrefix &
+          "v9.9.9/frameos-9.9.9-debian-bookworm-arm64.tar.gz",
+      ))
+
+    check archiveFetched
+    # The one command that must not have run: nothing may unpack (or execute
+    # anything derived from) bytes the key check refused.
+    for command in commands:
+      check not command.contains("tar ")
