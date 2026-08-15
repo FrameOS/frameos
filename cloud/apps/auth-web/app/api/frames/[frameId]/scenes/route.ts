@@ -1,10 +1,5 @@
-import { asc, eq, inArray } from "drizzle-orm";
-import {
-  frames,
-  frameSceneAssignments,
-  storeScenes,
-} from "@frameos-cloud/db";
-import { recordAuditEvent } from "../../../../../src/lib/audit";
+import { asc, eq } from "drizzle-orm";
+import { frameSceneAssignments, storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
@@ -13,27 +8,15 @@ import {
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
 import {
-  buildScenesPayloadForFrame,
-  declaredServiceSettingGroups,
-  enqueueFrameCommand,
-  enqueueServiceSettingsRefreshIfScoped,
-  frameForAccount,
-  pinnedSceneVersion,
-  readServiceSettingGroups,
-  supersedePendingCommands,
-} from "../../../../../src/lib/frames";
+  assignScenesToFrame,
+  maxScenesPerFrame,
+  type RequestedScene,
+} from "../../../../../src/lib/frame-scenes";
+import { frameForAccount } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
-import { copySceneCoversIntoFrameCache } from "../../../../../src/lib/scene-images";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
-
-const maxScenesPerFrame = 20;
-
-// buildScenesPayloadForFrame reports failure by return value; inside the
-// assignment transaction that has to become a throw or the delete+insert
-// commits anyway.
-class PayloadBuildError extends Error {}
 
 export async function GET(
   request: NextRequest,
@@ -140,7 +123,7 @@ export async function POST(
     body.scene_id.length <= 256
       ? body.scene_id
       : undefined;
-  const requested: { sceneId: string; sceneVersion: number | null }[] = [];
+  const requested: RequestedScene[] = [];
   for (const entry of body.scenes) {
     if (!entry || typeof entry !== "object") {
       return jsonError("invalid_scenes", 400);
@@ -170,170 +153,30 @@ export async function POST(
     });
   }
 
-  if (requested.length > 0) {
-    const sceneRows = await db
-      .select({
-        accountId: storeScenes.accountId,
-        id: storeScenes.id,
-        status: storeScenes.status,
-        visibility: storeScenes.visibility,
-      })
-      .from(storeScenes)
-      .where(
-        inArray(
-          storeScenes.id,
-          requested.map((r) => r.sceneId),
-        ),
-      );
-    const byId = new Map(sceneRows.map((row) => [row.id, row]));
-    for (const { sceneId, sceneVersion } of requested) {
-      const scene = byId.get(sceneId);
-      if (!scene || scene.status !== "active") {
-        return jsonError("invalid_scene", 400, { scene_id: sceneId });
-      }
-      const accessible =
-        scene.accountId === session.accountId ||
-        scene.visibility === "public";
-      if (!accessible) {
-        return jsonError("invalid_scene", 400, { scene_id: sceneId });
-      }
-      // The version this push actually pins — not store_scenes.risk_flags,
-      // which is only the latest version's flags. Otherwise "publish shell
-      // v1, publish clean v2, pin v1" walks straight through this gate.
-      const version = await pinnedSceneVersion(db, sceneId, sceneVersion);
-      if (!version) {
-        return jsonError("scene_version_missing", 400, {
-          scene_id: sceneId,
-          scene_version: sceneVersion,
-        });
-      }
-      if (version.riskFlags?.includes("shell")) {
-        return jsonError("scene_not_allowed", 403, {
-          reason: "shell",
-          scene_id: sceneId,
-          scene_version: version.version,
-        });
-      }
-    }
-  }
-
-  // All-or-nothing: committing the new assignments while failing to enqueue
-  // the push would leave GET listing scenes the device was never sent, with
-  // assigned_checksum still describing the old set.
-  let payload: Exclude<
-    Awaited<ReturnType<typeof buildScenesPayloadForFrame>>,
-    { error: string }
-  >;
-  try {
-    payload = await db.transaction(async (tx) => {
-      await tx
-        .delete(frameSceneAssignments)
-        .where(eq(frameSceneAssignments.frameId, frame.id));
-      if (requested.length > 0) {
-        await tx.insert(frameSceneAssignments).values(
-          requested.map((entry, position) => ({
-            frameId: frame.id,
-            position,
-            sceneId: entry.sceneId,
-            sceneVersion: entry.sceneVersion,
-          })),
-        );
-      }
-      const built = await buildScenesPayloadForFrame(tx, frame.id);
-      if ("error" in built) {
-        throw new PayloadBuildError(built.error);
-      }
-      return built;
-    });
-  } catch (error) {
-    if (error instanceof PayloadBuildError) {
-      return jsonError(error.message, 400);
-    }
-    throw error;
-  }
-
-  // Which service-settings groups (unsplash, openAI, …) these scenes declare,
-  // denormalized onto the frame row while we still hold the assembled scenes.
-  // The device's service-settings pull needs this on every poll, and deriving
-  // it there would mean unzipping every assigned scene version (32 MiB apiece
-  // at the store's cap) per request. Group NAMES only — no credential ever
-  // lands in a frames row.
-  const serviceSettingGroups = declaredServiceSettingGroups(payload.scenes);
-  const previousGroups = readServiceSettingGroups(frame.serviceSettingGroups);
-  await db
-    .update(frames)
-    .set({
-      assignedChecksum: payload.checksum,
-      // Per-scene slices of the same payload. The hub promotes this map to
-      // deployed_scene_state when the device acks payload.checksum, so the
-      // workspace can name the scene that is not on the frame yet.
-      assignedSceneState: payload.sceneStates,
-      serviceSettingGroups,
-      updatedAt: new Date(),
-    })
-    .where(eq(frames.id, frame.id));
-
-  // A scene set that declares a DIFFERENT group set changes what the device's
-  // pull answers, so nudge it to re-pull. Both directions matter: a newly
-  // declared group means keys the frame does not have yet (without this it
-  // would render "please provide an API key" until its next `ready`), and a
-  // group that fell away means keys it should stop holding — the pull deletes
-  // every cloud-owned group absent from the answer. Order-insensitive compare:
-  // declaredServiceSettingGroups follows scene order, so reordering the same
-  // scenes must not cost a wake-up. The nudge carries no payload (the keys
-  // travel over the device-authed pull only) and supersedes its own pending
-  // rows, so N assignments while a frame is offline are one re-pull.
-  // A NULL column counts as "declares nothing": a frame that never had the
-  // column computed also never received a key, so going NULL → [] is not a
-  // change worth waking it for.
-  const previous = previousGroups ?? [];
-  const groupsChanged =
-    previous.length !== serviceSettingGroups.length ||
-    !serviceSettingGroups.every((group) => previous.includes(group));
-
-  await supersedePendingCommands(db, frame.id, "set_scenes");
-  const command = await enqueueFrameCommand(db, {
-    createdByAccountId: session.accountId,
-    frameId: frame.id,
-    payload: {
-      checksum: payload.checksum,
-      scenes: payload.scenes,
-      ...(activeSceneId ? { scene_id: activeSceneId } : {}),
-    },
-    type: "set_scenes",
-  });
-
-  if (groupsChanged) {
-    await enqueueServiceSettingsRefreshIfScoped(db, frame.id);
-  }
-
-  await recordAuditEvent(db, {
+  // Everything past validation of the wire shape — the accessibility and
+  // shell-risk gates, the assignment transaction, the set_scenes push, the
+  // audit event — is shared with the chat agent's add_scene_to_frame tool.
+  const outcome = await assignScenesToFrame(db, {
     accountId: session.accountId,
     actor: {
       accountId: session.accountId,
       providerSubject: session.providerSubject,
     },
-    eventType: "frame.scenes_assigned",
-    metadata: {
-      checksum: payload.checksum,
-      sceneCount: requested.length,
-      sceneNames: payload.sceneNames,
-    },
-    target: { commandId: command?.id, frameId: frame.id },
+    frame,
+    requested,
+    ...(activeSceneId ? { activeSceneId } : {}),
   });
-
-  // Install-time cover copy: without it a freshly assigned scene's tile
-  // stays blank until the device renders it and a snapshot fetch lands.
-  // Cosmetic, so a failure must not fail the push that just committed.
-  try {
-    await copySceneCoversIntoFrameCache(db, frame.id, requested);
-  } catch (error) {
-    console.error("install-time scene cover copy failed", error);
+  if (!outcome.ok) {
+    return jsonError(
+      outcome.failure.code,
+      outcome.failure.status,
+      outcome.failure.detail,
+    );
   }
 
   return NextResponse.json({
-    assigned_checksum: payload.checksum,
-    command_id: command?.id,
+    assigned_checksum: outcome.result.assignedChecksum,
+    command_id: outcome.result.commandId,
     status: "queued",
   });
 }
