@@ -49,6 +49,12 @@ TimeoutStartSec=120
 # drains for longer than this before it stops the old instance.
 KillSignal=SIGTERM
 TimeoutStopSec=30
+# Next.js handles SIGTERM and exits 143 (128+15) rather than dying from the
+# signal, and systemd counts any non-zero exit as a failure. The single unit
+# this replaced never showed it because a restart's start immediately
+# superseded the state; blue/green stops the old instance and leaves it
+# stopped, so every deploy left a red `systemctl --failed` entry behind.
+SuccessExitStatus=143
 
 NoNewPrivileges=true
 # ProtectSystem=full, not strict: /opt stays writable, matching the unit this
