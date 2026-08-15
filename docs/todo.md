@@ -68,11 +68,6 @@ design — the cloud protocol has no shell verbs.
     (possibly via the schedule verb), not a persisted inert object.
     Brightness once the runtime and drivers gain a real setting.
 
-  Do **not** add `image_engine` to the cloud allowlist — remove ImageMagick
-  instead: converge on Pixie, migrate/ignore old `imagemagick` values, drop
-  the Settings selector and ImageMagick-specific paths, test that existing
-  frames degrade cleanly.
-
   Keep provisioning, credentials, and host authority local: deployment
   mode, panel/driver/VCOM/dimensions, flash and GPIO wiring, SD-card wiring,
   Wi-Fi/hotspot credentials, private-network elevation, frame
@@ -120,6 +115,11 @@ Three Raspberry Pi platforms ship with published base images:
 (every ARMv6 board: Zero, Zero W, Pi 1, CM1) and `raspberry-pi-5` (Pi 5 /
 CM5).
 
+- **Next base-image rebuild drops ImageMagick** — the defconfig no longer
+  selects `BR2_PACKAGE_IMAGEMAGICK` (the runtime is Pixie-only), but the
+  published base images still carry it. Nothing to do beyond dispatching
+  `buildroot-base-image.yml` for the three platforms whenever the next
+  rebuild happens anyway.
 - **Deferred models** — Pi 500 and CM5 Lite need `bcm2712-rpi-500` /
   `bcm2712-rpi-cm5l-*` DTBs that entered rpi-6.6.y after the kernel commit
   Buildroot 2025.02.13 pins; the next Buildroot (or kernel-pin) bump adds

@@ -576,7 +576,6 @@ class FrameOSSetupScriptTest(unittest.TestCase):
             "FRAMEOS_MAX_HTTP_RESPONSE_BYTES": "67108864",
             "FRAMEOS_DEBUG": "false",
             "FRAMEOS_SCALING_MODE": "contain",
-            "FRAMEOS_IMAGE_ENGINE": "",
             "FRAMEOS_FLIP": "",
             **env,
         }

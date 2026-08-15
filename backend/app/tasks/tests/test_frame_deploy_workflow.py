@@ -786,7 +786,7 @@ async def test_full_plan_corrects_buildroot_mode_when_target_is_ubuntu(monkeypat
     ]
     assert plan.full_deploy is not None
     assert plan.full_deploy.target["distro"] == "ubuntu"
-    assert {pkg.name for pkg in plan.full_deploy.package_plans} >= {"hostapd", "imagemagick", "build-essential", "caddy"}
+    assert {pkg.name for pkg in plan.full_deploy.package_plans} >= {"hostapd", "build-essential", "caddy"}
     assert deployer.logs == [("stdinfo", "🔷 Detected ubuntu; updating frame deployment mode from buildroot to rpios")]
 
 

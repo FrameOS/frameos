@@ -106,7 +106,7 @@ async def test_post_deploy_plan_uses_preview_frame_values(
 
     class FakeWorkflow:
         def __init__(self, *, frame, **_kwargs):
-            captured_frames.append((frame.name, frame.image_engine))
+            captured_frames.append((frame.name, frame.scaling_mode))
 
         async def plan(self, mode: str):
             return type("Plan", (), {"to_dict": lambda self: {"mode": mode, "ok": True}})()
@@ -117,9 +117,9 @@ async def test_post_deploy_plan_uses_preview_frame_values(
 
     response = await async_client.post(
         f"/api/frames/{frame.id}/deploy_plan",
-        json={"name": "Preview Name", "image_engine": "imagemagick"},
+        json={"name": "Preview Name", "scaling_mode": "stretch"},
     )
 
     assert response.status_code == 200
     assert response.json() == {"plan": {"mode": "combined", "ok": True}}
-    assert captured_frames == [("Preview Name", "imagemagick")]
+    assert captured_frames == [("Preview Name", "stretch")]

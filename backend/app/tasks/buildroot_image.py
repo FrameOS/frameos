@@ -1938,7 +1938,6 @@ class BuildrootImageBuilder:
                     "BR2_PACKAGE_KMOD=y",
                     "BR2_PACKAGE_OPENSSL=y",
                     "BR2_PACKAGE_ZLIB=y",
-                    "BR2_PACKAGE_IMAGEMAGICK=y",
                     "BR2_PACKAGE_FFMPEG=y",
                     "BR2_PACKAGE_FFMPEG_FFPROBE=y",
                     "BR2_PACKAGE_FFMPEG_SWSCALE=y",

@@ -327,7 +327,6 @@ class Frame(Base):
     metrics_interval = mapped_column(Double, default=60)
     max_http_response_bytes = mapped_column(Integer, default=DEFAULT_MAX_HTTP_RESPONSE_BYTES)
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
-    image_engine = mapped_column(String(32), nullable=True)  # empty and pixie use Pixie; imagemagick uses ImageMagick
     rotate = mapped_column(Integer, nullable=True)
     flip = mapped_column(String(32), nullable=True)
     log_to_file = mapped_column(String(256), nullable=True)
@@ -393,7 +392,6 @@ class Frame(Base):
             'metrics_interval': self.metrics_interval,
             'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
             'scaling_mode': self.scaling_mode,
-            'image_engine': self.image_engine,
             'rotate': self.rotate,
             'flip': self.flip,
             'background_color': self.background_color,
@@ -627,7 +625,6 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
-        "imageEngine": frame.image_engine or "",
         "rotate": frame.rotate or 0,
         "flip": frame.flip,
         "logToFile": frame.log_to_file,

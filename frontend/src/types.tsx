@@ -211,7 +211,6 @@ export interface FrameType {
   metrics_interval: number
   max_http_response_bytes?: number
   scaling_mode: string
-  image_engine?: '' | 'pixie' | 'imagemagick'
   rotate?: number
   /** ESP32 power management (cloud set_settings mirror, frames.settings). */
   deep_sleep?: boolean

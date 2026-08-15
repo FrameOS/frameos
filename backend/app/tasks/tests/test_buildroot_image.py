@@ -499,7 +499,7 @@ def test_buildroot_config_avoids_ncurses_selecting_packages(tmp_path):
     assert "BR2_PACKAGE_DOSFSTOOLS=y" in config
     assert "BR2_PACKAGE_DOSFSTOOLS_MKFS_FAT=y" in config
     assert "BR2_PACKAGE_NANO=y" in config
-    assert "BR2_PACKAGE_IMAGEMAGICK=y" in config
+    assert "BR2_PACKAGE_IMAGEMAGICK=y" not in config
     assert "BR2_PACKAGE_IPTABLES=y" in config
     assert "BR2_PACKAGE_IPTABLES_NFTABLES=y" in config
     # BR2_PACKAGE_IPTABLES_NFTABLES_DEFAULT does not exist in Buildroot; asking

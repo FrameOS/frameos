@@ -40,7 +40,7 @@ block test_load_config:
         "rotate": 0,
         "debug": true,
         "scalingMode": "cover",
-        "imageEngine": "imagemagick",
+        "imageEngine": "imagemagick",  # legacy key from before ImageMagick was removed; must still parse
         "timeZone": "UTC",
         "settings": {},
         "schedule": {},
@@ -91,8 +91,6 @@ block test_load_config:
         doAssert config.flip == ""
         doAssert config.debug == true
         doAssert config.scalingMode == "cover"
-        doAssert config.imageEngine == "imagemagick"
-        doAssert getRuntimeImageEngine() == "imagemagick"
         doAssert config.settings == %*{}
         doAssert config.settings{"nothere"}{"neitherme"}{"orme"} == nil
         doAssert config.settings{"nothere"}{"neitherme"}{"orme"}.getStr() == ""

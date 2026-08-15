@@ -350,7 +350,7 @@ fi
 
 artifact_root="${{frameos_binary%/*}}"
 
-install_packages hostapd imagemagick
+install_packages hostapd
 install_optional_packages caddy
 systemctl disable --now caddy.service >/dev/null 2>&1 || true
 

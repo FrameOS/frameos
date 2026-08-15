@@ -1399,7 +1399,6 @@ static cJSON *frame_api_frame_json(void)
     cJSON_AddNumberToObject(frame, "metrics_interval", 60);
     cJSON_AddNumberToObject(frame, "max_http_response_bytes", config->max_http_response_bytes);
     cJSON_AddStringToObject(frame, "scaling_mode", config->scaling_mode);
-    cJSON_AddStringToObject(frame, "image_engine", "");
     cJSON_AddNumberToObject(frame, "rotate", fos_config()->rotate);
     cJSON_AddStringToObject(frame, "flip", "");
     cJSON_AddStringToObject(frame, "background_color", "#000000");

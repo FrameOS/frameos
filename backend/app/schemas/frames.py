@@ -93,7 +93,6 @@ class FrameBase(BaseModel):
     metrics_interval: float
     max_http_response_bytes: Optional[int] = None
     scaling_mode: Optional[str]
-    image_engine: Optional[Literal["", "pixie", "imagemagick"]] = None
     rotate: Optional[int]
     flip: Optional[str]
     background_color: Optional[str]
@@ -180,7 +179,6 @@ class FrameUpdateRequest(BaseModel):
     save_assets: Any = None
     upload_fonts: Optional[str] = None
     scaling_mode: Optional[str] = None
-    image_engine: Optional[Literal["", "pixie", "imagemagick"]] = None
     device: Optional[str] = None
     device_config: Optional[Dict[str, Any]] = None
     debug: Optional[bool] = None
