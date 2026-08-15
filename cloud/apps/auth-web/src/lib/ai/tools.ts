@@ -1,10 +1,11 @@
 // Tool definitions + executor for the AI chat agent loop. Tools fall into
 // five groups: knowledge (bundled catalog/docs), source code (GitHub raw,
 // Nim excluded), frames (Postgres telemetry + command queue), store catalog
-// (verified publishers), and scene delivery (create/update with local
-// validation — invalid JSON bounces back to the model as tool output instead
-// of reaching the editor).
-import { and, desc, eq, gt, isNotNull, isNull, or } from "drizzle-orm";
+// (public scenes plus everything the user owns or has installed on a
+// frame), and scene delivery (create/update with local validation — invalid
+// JSON bounces back to the model as tool output instead of reaching the
+// editor).
+import { and, desc, eq, exists, gt, isNull, or } from "drizzle-orm";
 import {
   accounts,
   createDb,
@@ -327,8 +328,9 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
   },
   {
     description:
-      "Search publicly published store scenes from verified publishers. Returns name, slug, description, " +
-      "category, tags and download counts.",
+      "Search store scenes: every public scene plus ALL of the user's own scenes (private ones included). " +
+      "Returns name, slug, description, category, tags, download counts, visibility and whether the " +
+      "publisher is verified. Check here before saying a scene does not exist.",
     name: "search_store_scenes",
     parameters: {
       additionalProperties: false,
@@ -341,8 +343,8 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
   },
   {
     description:
-      "Full scene JSON of a store scene (public scenes, or any scene the user owns). Use before " +
-      "recommending, forking or modifying a store scene.",
+      "Full scene JSON of a store scene (public scenes, any scene the user owns, or any scene installed " +
+      "on one of their frames). Use before recommending, forking or modifying a store scene.",
     name: "get_store_scene",
     parameters: {
       additionalProperties: false,
@@ -683,8 +685,12 @@ export async function executeTool(
     }
     case "search_store_scenes": {
       const query = asString(args.query)?.toLowerCase();
+      // Same visibility rules as the store front (no verified-publisher
+      // gate — verification is a trust signal in the results, not a filter),
+      // widened with the user's own scenes regardless of visibility.
       const rows = await ctx.db
         .select({
+          accountId: storeScenes.accountId,
           category: storeScenes.category,
           description: storeScenes.description,
           downloadCount: storeScenes.downloadCount,
@@ -693,27 +699,43 @@ export async function executeTool(
           publisher: accounts.displayName,
           slug: storeScenes.slug,
           tags: storeScenes.tags,
+          verifiedPublisherAt: accounts.verifiedPublisherAt,
+          visibility: storeScenes.visibility,
         })
         .from(storeScenes)
         .innerJoin(accounts, eq(accounts.id, storeScenes.accountId))
         .where(
           and(
-            eq(storeScenes.visibility, "public"),
             eq(storeScenes.status, "active"),
             gt(storeScenes.latestVersion, 0),
-            isNotNull(accounts.verifiedPublisherAt),
-            isNull(accounts.storeBannedAt),
+            or(
+              eq(storeScenes.accountId, ctx.accountId),
+              and(
+                eq(storeScenes.visibility, "public"),
+                isNull(accounts.storeBannedAt),
+              ),
+            ),
           ),
         )
-        .orderBy(desc(storeScenes.downloadCount), desc(storeScenes.updatedAt))
+        .orderBy(
+          desc(eq(storeScenes.accountId, ctx.accountId)),
+          desc(storeScenes.downloadCount),
+          desc(storeScenes.updatedAt),
+        )
         .limit(100);
-      const results = query
-        ? rows.filter((row) =>
-            `${row.name} ${row.description ?? ""} ${(row.tags ?? []).join(" ")} ${row.category ?? ""}`
-              .toLowerCase()
-              .includes(query),
-          )
-        : rows;
+      const results = (
+        query
+          ? rows.filter((row) =>
+              `${row.name} ${row.description ?? ""} ${(row.tags ?? []).join(" ")} ${row.category ?? ""} ${row.publisher ?? ""}`
+                .toLowerCase()
+                .includes(query),
+            )
+          : rows
+      ).map(({ accountId, verifiedPublisherAt, ...row }) => ({
+        ...row,
+        owned_by_user: accountId === ctx.accountId,
+        verified_publisher: verifiedPublisherAt !== null,
+      }));
       return truncateResult(JSON.stringify({ scenes: results.slice(0, 50) }));
     }
     case "get_store_scene": {
@@ -721,6 +743,22 @@ export async function executeTool(
       if (!sceneId || !/^[0-9a-f-]{36}$/i.test(sceneId)) {
         return JSON.stringify({ error: "scene_id must be a store scene uuid" });
       }
+      // Readable: public scenes, the user's own scenes, and anything
+      // installed on one of the user's frames (even if it has since gone
+      // private or was pulled — the frame already runs those bytes and the
+      // AI needs them to debug or modify what is on the wall).
+      const installedOnOwnFrame = exists(
+        ctx.db
+          .select({ id: frameSceneAssignments.id })
+          .from(frameSceneAssignments)
+          .innerJoin(frames, eq(frames.id, frameSceneAssignments.frameId))
+          .where(
+            and(
+              eq(frameSceneAssignments.sceneId, storeScenes.id),
+              eq(frames.accountId, ctx.accountId),
+            ),
+          ),
+      );
       const [scene] = await ctx.db
         .select()
         .from(storeScenes)
@@ -730,6 +768,7 @@ export async function executeTool(
             or(
               eq(storeScenes.accountId, ctx.accountId),
               and(eq(storeScenes.visibility, "public"), eq(storeScenes.status, "active")),
+              installedOnOwnFrame,
             ),
           ),
         )

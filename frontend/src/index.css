@@ -980,6 +980,62 @@ html[data-frameos-theme='dark'] .apps-source-mode-toggle-button:not(.frameos-pri
   color: #334155;
 }
 
+/* Markdown inside assistant chat bubbles: restore the list/heading styling
+   the Tailwind preflight strips, at chat-bubble scale. */
+.chat-markdown > div > * + * {
+  /* Tighter rhythm than the Markdown component's default space-y-4. */
+  margin-top: 0.5rem;
+}
+.chat-markdown ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin: 0.25rem 0;
+}
+.chat-markdown ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+  margin: 0.25rem 0;
+}
+.chat-markdown li {
+  margin: 0.125rem 0;
+}
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4 {
+  font-weight: 600;
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+.chat-markdown h1 {
+  font-size: 1.1em;
+}
+.chat-markdown h2 {
+  font-size: 1.05em;
+}
+.chat-markdown h3,
+.chat-markdown h4 {
+  font-size: 1em;
+}
+.chat-markdown pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.chat-markdown table {
+  border-collapse: collapse;
+  margin: 0.25rem 0;
+}
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  padding: 0.2rem 0.5rem;
+}
+.chat-markdown blockquote {
+  border-left: 3px solid rgba(148, 163, 184, 0.55);
+  padding-left: 0.75rem;
+  opacity: 0.9;
+}
+
 .frameos-skeleton-line {
   background: rgba(203, 213, 225, 0.72);
 }

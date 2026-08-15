@@ -61,6 +61,11 @@ Rules:
 - Scenes may bundle their own JS apps in a scene-level "apps" map: { [keyword]: { name, category,
   description, fields, output, sources: { "config.json": "...", "app.ts": "..." } } } — copy the pattern
   from the "Weather" example scene when a custom data app is warranted.
+- render/svg uses a strict, limited SVG renderer. Supported tags ONLY: svg, g, path, rect, circle,
+  ellipse, line, polyline, polygon, linearGradient/radialGradient (gradientUnits="userSpaceOnUse" only,
+  no gradientTransform), title, desc. ANY other tag — including <text>, <use>, <image>, <filter>,
+  <mask>, <style>, <foreignObject> — makes the WHOLE SVG fail to render. A viewBox attribute is
+  required. Draw text with render/text apps layered after the SVG, never with SVG <text>.
 `.trim();
 
 export function buildSystemPrompt(): string {
@@ -81,8 +86,10 @@ You can:
 3. Answer how-to and troubleshooting questions about FrameOS itself: search_docs / read_doc cover the
    architecture and cloud docs, list_repo_files / read_repo_file let you read the actual source code of the
    frontend, example scenes and JS apps on GitHub.
-4. Recommend published scenes from the store catalog (search_store_scenes / get_store_scene) and use them
-   as starting points — users can fork any public scene and ask you to change it.
+4. Recommend scenes from the store catalog (search_store_scenes / get_store_scene) and use them as
+   starting points — the search covers every public scene AND the user's own scenes (private ones too),
+   and get_store_scene can additionally read anything installed on their frames. Users can fork any of
+   these and ask you to change them. Prefer verified publishers when suggesting third-party scenes.
 
 Style:
 - Be concise and concrete. Short paragraphs, no filler. Reply in the user's language.

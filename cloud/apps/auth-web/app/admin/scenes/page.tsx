@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createDb } from "@frameos-cloud/db";
 import { AdminPublisherBanButton } from "../../../src/components/AdminPublisherBanButton";
+import { AdminPublisherVerifyButton } from "../../../src/components/AdminPublisherVerifyButton";
 import { AdminRecategorizeButton } from "../../../src/components/AdminRecategorizeButton";
 import { AdminSceneActions } from "../../../src/components/AdminSceneActions";
 import { AdminSceneCategorySelect } from "../../../src/components/AdminSceneCategorySelect";
@@ -112,6 +113,9 @@ export default async function AdminScenesPage({
                   <td>
                     <div>
                       {scene.ownerName ?? "—"}
+                      {scene.ownerVerifiedAt ? (
+                        <span className="pill pill-ok">verified</span>
+                      ) : null}
                       {scene.ownerBannedAt ? (
                         <span className="risk-badge">banned</span>
                       ) : null}
@@ -156,6 +160,13 @@ export default async function AdminScenesPage({
                         name={scene.name}
                         sceneId={scene.id}
                         status={scene.status}
+                      />
+                      <AdminPublisherVerifyButton
+                        accountId={scene.ownerId}
+                        ownerLabel={
+                          scene.ownerName ?? scene.ownerEmail ?? "this account"
+                        }
+                        verified={scene.ownerVerifiedAt !== null}
                       />
                       <AdminPublisherBanButton
                         accountId={scene.ownerId}

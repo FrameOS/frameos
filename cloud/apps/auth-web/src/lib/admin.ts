@@ -81,6 +81,7 @@ export type AdminSceneRow = {
   ownerEmail: string | null;
   ownerId: string;
   ownerName: string | null;
+  ownerVerifiedAt: Date | null;
   pulledReason: string | null;
   riskFlags: string[];
   slug: string;
@@ -117,6 +118,7 @@ export async function listScenesForAdmin(
       ownerEmail: accounts.primaryEmail,
       ownerId: accounts.id,
       ownerName: accounts.displayName,
+      ownerVerifiedAt: accounts.verifiedPublisherAt,
       pulledReason: storeScenes.pulledReason,
       riskFlags: storeScenes.riskFlags,
       slug: storeScenes.slug,
