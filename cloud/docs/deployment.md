@@ -358,6 +358,16 @@ public project key as the browser SDK (no extra secret required).
 
 `/legal/terms`, `/legal/privacy` and `/legal/imprint` are served from the
 cloud origin and linked from the footer of every page, on every surface.
+
+**Quote any value with a space in `/etc/frameos-cloud/auth-web.env`.** The
+legal values are the first settings here that routinely contain spaces, and
+that file is read two ways on the server: systemd's `EnvironmentFile=`
+accepts bare values, but `frameos-cloud-update` `source`s it as shell, where
+`FRAMEOS_LEGAL_ENTITY_NAME=Example Frames BV` means "run `BV`". The deploy
+then fails part-way through streaming the bundle with `BV: command not
+found` and `tar: Write error`, which says nothing about quoting. Production
+is left untouched when this happens — the swap has not run yet — so the fix
+is to quote and redeploy.
 They read the operator's identity from `FRAMEOS_LEGAL_*` (see
 `.env.example` and `src/lib/legal.ts`) and render a visible
 `[TO BE COMPLETED]` warning until `FRAMEOS_LEGAL_ENTITY_NAME` is set — the
