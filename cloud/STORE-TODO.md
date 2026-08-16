@@ -24,9 +24,10 @@ Two sides of this monorepo:
 2. **Immutable versions (npm/crates.io model).** A publish always appends
    version N+1; bytes of a published version never change, so a compromised
    account cannot silently swap content under a version people already
-   installed. Pragmatic deviation: only the newest 20 versions per scene are
-   kept (these are Postgres blobs, not a CDN). *Revisit when:* moving blobs to
-   object storage removes the reason to prune.
+   installed. The pragmatic deviation — keeping only the newest 20 versions,
+   because they were Postgres blobs — was **retired on 2026-08-17** when the
+   blobs moved to object storage (decision 6). Every published version stays
+   downloadable, and identical bytes across versions are stored once.
 3. **Private by default; public is an explicit act.** Publishing from the app
    creates a private scene; making it public is a deliberate toggle (in-app
    choice or on the web). Safer default for a registry that accepts content
@@ -40,9 +41,20 @@ Two sides of this monorepo:
    keeps bytes auditable. *Pull* (per scene, superadmin only): scene disappears
    everywhere, downloads answer 410 Gone, republishing over it is blocked.
    Nothing is hard-deleted by moderation, so there is always an audit trail.
-6. **Postgres bytea storage with hard caps** (8 MB/zip, structural validation,
-   per-account quotas) rather than object storage. Right-sized for launch;
-   the schema keeps sha256 + sizes so migrating blobs out later is mechanical.
+6. **Object storage for blobs, Postgres for everything about them.**
+   Launched on Postgres `bytea` with hard caps (8 MB/zip, structural
+   validation, per-account quotas), on the bet that the stored sha256 + sizes
+   would make the move mechanical. They did: migration 0032 (2026-08-17) added
+   an `object_key` beside each `content`, made `content` nullable, and changed
+   nothing else — rows written before it keep their bytes and keep serving,
+   and `scripts/backfill-object-store.mjs` walks them across whenever.
+   Production is Cloudflare R2 (bucket `frameos-cloud`, public alias
+   `cloud-cdn.frameos.net`); development and CI get a directory under
+   `db/object-storage`, so nobody needs credentials or a fake-S3 daemon to run
+   the tests. Keys are content-addressed and namespaced by kind, so a preview
+   republished a thousand times is one object and a fork copies a reference.
+   Public store objects redirect to the CDN; private ones and every frame
+   snapshot stay proxied through the app, where the session check applies.
 7. **Pre-publish moderation via OpenAI omni-moderation.** Every
    publish — also private ones, illegal content must never be hosted —
    classifies name + description + preview image in one free API call before
@@ -115,9 +127,10 @@ front and repository.json, owner management and superadmin moderation,
 
 ## Remaining work
 
-Tracked in `docs/todo.md` at the repo root (object-storage move when size
-demands it; apps in the store pending a signing/review story; the open
-questions on pre-review, unpublish policy, and usernames).
+Tracked in `docs/todo.md` at the repo root (backfilling the blobs still in
+Postgres; sweeping objects nothing references; apps in the store pending a
+signing/review story; the open questions on pre-review, unpublish policy, and
+usernames).
 
 ## Protocol summary (details in docs/cloud-link.md at the repo root)
 

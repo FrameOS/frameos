@@ -140,17 +140,26 @@ cloud-service items below. What remains open is listed last, with why.
 
 These are also tracked in `docs/todo.md`.
 
-- **The frame stores its link token in plaintext** in `state/cloud_link.json`
-  (mode 0600), where the backend encrypts its copy. The file-handling
-  weaknesses around it are fixed — the file is created 0600 rather than
-  chmod'ed after the write, the state directory is 0700, and the replace is a
-  plain rename so an interrupted write cannot lose the link — but the token
-  itself is still readable. Encrypting it only helps if the key lives somewhere
-  the file does not, and on a Pi with no secure element any key we could derive
-  is on the same SD card; that is obfuscation, not encryption. Worth doing when
-  there is hardware-backed key storage, or if the state file starts travelling
-  (support bundles, asset backups) — in which case the fix is to redact it
-  there, not to encrypt at rest.
+- ~~**The frame stores its link token in plaintext**~~ — **accepted, closed
+  2026-08-17.** The file-handling weaknesses around it were fixed long ago (the
+  file is created 0600 rather than chmod'ed after the write, the state
+  directory is 0700, and the replace is a plain rename so an interrupted write
+  cannot lose the link). What remains is the token being readable by anyone
+  holding the SD card, and that is not a bug to fix — it is what the hardware
+  is. A Raspberry Pi has no secure element; any key FrameOS could derive to
+  encrypt the file would sit on the same card, which is obfuscation with a
+  maintenance burden and a new way to lose a frame's link. The designs that
+  would genuinely help all move the trust elsewhere — a TPM, or an attestation
+  handshake where the cloud refuses a frame it cannot verify — and both are a
+  different product, not a hardening pass.
+
+  So the threat model says it plainly: **physical possession of a frame's SD
+  card is possession of that frame's link.** Revoking the frame in the cloud is
+  the answer, and it works — the device sees a 401 and demotes itself to
+  standalone. What stays open is the narrower thing that is actually fixable:
+  if the state file ever travels (support bundles, backups), the token must be
+  redacted on the way out. Nothing exports it today; the rule is on any code
+  that starts to.
 - ~~Cloud rate limiting is in-memory per process~~ — resolved since this
   review: limits are Postgres-backed (`rate_limit_buckets`, atomic upsert),
   so they hold across replicas and restarts; in-memory buckets remain only

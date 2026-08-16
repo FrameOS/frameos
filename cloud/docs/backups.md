@@ -1,13 +1,34 @@
 # Backups
 
-Everything a restore needs lives in two places: the Postgres database (all
-user data — accounts, sessions, frames, scenes, scene-store bytes, and
-uploaded asset contents are all rows, including the `bytea` blobs) and a
+Everything a restore needs lives in three places now: the Postgres database
+(all user data — accounts, sessions, frames, scenes, and the metadata of every
+stored blob), the **object store** (the blob bytes themselves since migration
+0032 — scene zips, previews, gallery images, cached frame snapshots), and a
 small set of host files that are in neither the repo nor the database (env
 secrets, nginx config, the systemd units, `frameos-cloud-update`,
 letsencrypt state). The application itself is not backed up: any pushed ref
 can be rebuilt and redeployed with `pnpm deploy:prod`
 ([deployment.md](deployment.md)).
+
+**The database backup no longer carries the bytes.** A restore from Postgres
+alone comes back with every scene, every version row and every `object_key`
+intact, and no content behind them — pages render, downloads 404. That is a
+change in what "restored" means, and it is why the object store needs its own
+answer:
+
+- **Blobs are immutable and content-addressed.** A key is the sha256 of its
+  bytes, and nothing ever overwrites one with different content, so the store
+  only ever grows within an account's quota. There is no point-in-time
+  problem to solve, only a durability one.
+- **R2 is the durable copy today.** Cloudflare replicates within the bucket;
+  what is missing is a copy outside Cloudflare, and a bucket-level lifecycle
+  or versioning policy that survives a credential compromise deleting objects.
+  Neither is configured yet. Until it is, treat "someone with the R2 keys
+  deletes the bucket" as an unrecovered scenario and keep the keys to the two
+  services that need them.
+- **Rows written before 0032 still hold their bytes in Postgres** and are
+  covered by the database backups as before, until
+  `scripts/backfill-object-store.mjs` moves them.
 
 Two independent layers ship to the Hetzner Storage Box
 (`u651211.your-storagebox.de`, SFTP port 23, SSH-key auth):
@@ -164,6 +185,12 @@ Row counts alone would pass on a dump whose `bytea` columns were truncated,
 so the drill also sums `length(content)` over the blob tables — that forces
 Postgres to read every byte back out of restored TOAST storage — and asserts
 that an empty-but-valid restore fails rather than looking like a pass.
+
+Since migration 0032 that sum only covers the rows that predate the move to
+object storage, and it will fall to zero once the backfill runs. It is still
+worth keeping (it is the check that catches a truncated dump), but a green
+drill no longer means the blobs are recoverable — that question now belongs to
+the object store, and is not yet rehearsed.
 
 ### Results so far
 
