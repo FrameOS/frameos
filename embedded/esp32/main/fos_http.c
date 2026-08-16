@@ -2751,7 +2751,10 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
 
 static void configure_httpd_defaults(httpd_config_t *config)
 {
-    config->max_uri_handlers = 40;
+    /* 30 fixed routes + 7 captive-portal probes = 37 in portal mode, and a
+     * registration past the cap fails the boot rather than dropping quietly.
+     * Each slot is a small struct, so keep real headroom for the next route. */
+    config->max_uri_handlers = 48;
     config->max_open_sockets = 7;
     config->backlog_conn = 8;
     config->recv_wait_timeout = 5;
