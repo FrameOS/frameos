@@ -114,6 +114,18 @@ CM5).
   render contexts both ways. The real fix is a borrowed, non-owning view (or
   serialised payloads) across the ABI rather than a cast; until then no
   driver or scene library may store or copy a ref it did not allocate.
+- **Drop the `shared` and `shared-scenes` compilation modes** — decided
+  2026-08-16, not started. Only two ways to build a frame will remain:
+  `static` (compile from source, one binary, no `.so` at all — immune to the
+  ABI hazard above) and `precompiled` (the release binary plus its driver
+  `.so`s, scenes interpreted). The scene-as-shared-library path is the largest
+  unaudited ABI surface, has no users we know of, and every mode is another
+  matrix row in `_frame_deployer.py`, `drivers_nim.py`, `scene_nim.py`,
+  `precompiled_frameos.py`, the deploy-plan API and their tests. Work: remove
+  the two constants and their branches, `normalize_compilation_mode` maps
+  legacy `shared`/`shared-scenes` values to `precompiled`, drop the
+  `frameos_scene_init`/`frameos_scene_export` registry codegen and
+  `scenes_bundle.nim`, and prune the Settings UI options and docs.
 - **Next base-image rebuild drops ImageMagick** — the defconfig no longer
   selects `BR2_PACKAGE_IMAGEMAGICK` (the runtime is Pixie-only), but the
   published base images still carry it. `buildroot-base-image.yml` was
