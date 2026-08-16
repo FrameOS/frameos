@@ -2116,8 +2116,6 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
             binary_path=str(frameos_binary),
             driver_library_paths=[],
             driver_library_names=[],
-            scene_library_paths=[],
-            scene_library_names=[],
             cross_compiled=True,
             prebuilt_entry=None,
             prebuilt_target=None,

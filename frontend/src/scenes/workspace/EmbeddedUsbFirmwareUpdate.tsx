@@ -16,6 +16,7 @@ import {
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
+import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
 import {
   POST_FLASH_BOOT_WAIT_MS,
   appendBrowserFlashLog,
@@ -170,7 +171,7 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
   const [alsoPushScenes, setAlsoPushScenes] = useState(true)
   const scenes = frameForm?.scenes ?? frame.scenes ?? []
 
-  const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
+  const webSerialSupported = isWebSerialSupported()
   const busy = phase === 'connecting' || phase === 'preparing' || phase === 'flashing'
 
   useEffect(() => {
@@ -339,11 +340,7 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
   }
 
   if (!webSerialSupported) {
-    return (
-      <div className="frame-tool-muted text-xs leading-5">
-        Updating over USB needs Web Serial, which this browser doesn't support. Use Chrome or Edge.
-      </div>
-    )
+    return <div className="frame-tool-muted text-xs leading-5">{webSerialUnavailableReason('Updating over USB')}</div>
   }
 
   return (

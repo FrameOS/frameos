@@ -52,12 +52,14 @@ export function AnalyticsConsentBanner({
       data-ph-no-capture=""
     >
       <div className="consent-banner__copy">
-        <strong>Analytics, only if you say so.</strong>{" "}
+        <strong>Help us fix what breaks?</strong>{" "}
         <span className="copy">
-          We would like to record which pages you visit and what breaks, using
-          PostHog in the EU, to work out what to fix next. It is not required
-          and nothing else changes if you decline. Details in our{" "}
-          <a href="/legal/privacy">Privacy Policy</a>.
+          Two things go to PostHog in the EU if you say yes: the errors you
+          run into, so we can fix them without waiting for a bug report, and
+          which pages get used, so the next thing we build is one you asked
+          for. That is the entire list — no ad networks, no profile sold on,
+          nothing leaving the EU. Every feature works exactly the same either
+          way. Details in our <a href="/legal/privacy">Privacy Policy</a>.
         </span>
       </div>
       <div className="consent-banner__actions">

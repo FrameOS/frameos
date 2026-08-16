@@ -5,6 +5,7 @@ import { ArrowsRightLeftIcon, CommandLineIcon, StopCircleIcon } from '@heroicons
 import { embeddedUsbLogsModel, isEmbeddedUsbLogStreamOpen } from '../../models/embeddedUsbLogsModel'
 import type { FrameType } from '../../types'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { webSerialSupported as isWebSerialSupported } from '../../utils/webSerial'
 import { frameLogic } from '../frame/frameLogic'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 import { FrameLocalDeployMenu } from './FrameLocalDeployMenu'
@@ -61,8 +62,7 @@ export function FrameSceneSidebarCard({
   // USB serial console is the primary debugging channel — surface it up here
   // with Save/Deploy rather than only inside the Logs toolbar. Connecting
   // also opens the Logs tool, where the stream lands.
-  const showUsbButton =
-    frameSupportsUsbSerialConsole(frame, mode) && typeof navigator !== 'undefined' && 'serial' in navigator
+  const showUsbButton = frameSupportsUsbSerialConsole(frame, mode) && isWebSerialSupported()
   const usbLogStreamState = usbLogStreamStatesByFrameId[frame.id]
   const usbLogStreamOpen = isEmbeddedUsbLogStreamOpen(usbLogStreamState)
   const usbLogStreamBusy =

@@ -6,20 +6,36 @@ import re
 from app.drivers.drivers import Driver
 
 COMPILATION_MODE_STATIC = "static"
-COMPILATION_MODE_SHARED = "shared"
-COMPILATION_MODE_SHARED_SCENES = "shared-scenes"
 COMPILATION_MODE_PRECOMPILED = "precompiled"
 DEFAULT_COMPILATION_MODE = COMPILATION_MODE_PRECOMPILED
 VALID_COMPILATION_MODES = {
     COMPILATION_MODE_STATIC,
-    COMPILATION_MODE_SHARED,
-    COMPILATION_MODE_SHARED_SCENES,
     COMPILATION_MODE_PRECOMPILED,
+}
+
+# Retired 2026-08-16. `shared` built every driver AND every compiled scene as
+# its own `.so`; `shared-scenes` built the drivers into the binary and the
+# scenes as one `scenes.so`. Both handed Nim refs (FrameScene, JsonNode,
+# render contexts) across a `.so` boundary in both directions, and every
+# shared library carries its own ORC runtime — a ref one runtime allocated and
+# the other decref'd crashes the host outright once ORC considers its type
+# cyclic (see docs/todo.md). That is the largest such surface in the tree, it
+# had no known users, and every mode was another row in the deploy matrix.
+#
+# Frames that stored either value still exist, so they map to the mode that
+# gives them the same thing without the hazard: everything compiled into one
+# binary. Note this is a widening, not a downgrade — `static` builds compiled
+# scenes exactly as before, just linked in rather than dlopen'd.
+LEGACY_COMPILATION_MODES = {
+    "shared": COMPILATION_MODE_STATIC,
+    "shared-scenes": COMPILATION_MODE_STATIC,
 }
 
 
 def normalize_compilation_mode(value: str | None) -> str:
     normalized = (value or DEFAULT_COMPILATION_MODE).strip().lower()
+    if normalized in LEGACY_COMPILATION_MODES:
+        return LEGACY_COMPILATION_MODES[normalized]
     if normalized not in VALID_COMPILATION_MODES:
         return DEFAULT_COMPILATION_MODE
     return normalized
@@ -33,19 +49,15 @@ def frame_compilation_mode(frame) -> str:
     return normalize_compilation_mode(rpios_settings.get("compilationMode"))
 
 
-def compilation_mode_uses_shared_libraries(value: str | None) -> bool:
-    return normalize_compilation_mode(value) in {
-        COMPILATION_MODE_SHARED,
-        COMPILATION_MODE_SHARED_SCENES,
-        COMPILATION_MODE_PRECOMPILED,
-    }
-
-
 def compilation_mode_uses_shared_drivers(value: str | None) -> bool:
-    return normalize_compilation_mode(value) in {
-        COMPILATION_MODE_SHARED,
-        COMPILATION_MODE_PRECOMPILED,
-    }
+    """True when the drivers ship as `.so`s the binary dlopens at startup.
+
+    Only `precompiled` does, and only for drivers: the release binary is one
+    prebuilt artifact, so the panel it talks to has to arrive beside it. Scenes
+    never cross a `.so` boundary any more — under `precompiled` they are
+    interpreted, and a frame with compiled scenes builds `static`.
+    """
+    return normalize_compilation_mode(value) == COMPILATION_MODE_PRECOMPILED
 
 
 def compiled_drivers(drivers: dict[str, Driver]) -> list[Driver]:
@@ -248,7 +260,10 @@ proc cloneDriverContext(source: DriverContext): DriverContext =
       logger.enabled = source.logger.enabled
       logger.debug = source.logger.debug
     if not source.frameConfig.isNil:
-      let sourceConfig = source.frameConfig
+      # {.cursor.}: a non-owning view of a ref THIS runtime did not allocate.
+      # A plain `let` would incref and then decref it inside the library's own
+      # ORC runtime, which is the whole hazard (frameos/driver_abi).
+      let sourceConfig {.cursor.} = source.frameConfig
       config.mode = sourceConfig.mode
       config.device = sourceConfig.device
       config.debug = sourceConfig.debug
@@ -434,11 +449,32 @@ var setupLibraries: seq[LibHandle] = @[]
 proc availableDriverNames*(): seq[string] =
   return {available_driver_names_source}
 
-proc hostLog(event: JsonNode) {{.cdecl, gcsafe.}} =
-  hostChannels.log(event)
+proc hostLog(event: cstring) {{.cdecl, gcsafe.}} =
+  ## Borrowed JSON text from the driver `.so` (frameos/driver_abi): parse it
+  ## into THIS runtime's heap before it can reach a channel, and never keep
+  ## the cstring — the buffer belongs to the library and is gone the moment
+  ## this returns.
+  if event.isNil:
+    return
+  let text = $event
+  var payload: JsonNode
+  try:
+    payload = parseJson(text)
+  except CatchableError:
+    payload = %*{{"event": "driver:log:unparseable", "raw": text}}
+  hostChannels.log(payload)
 
-proc hostSendEvent(scene: Option[SceneId], event: string, payload: JsonNode) {{.cdecl, gcsafe.}} =
-  hostChannels.sendEvent(scene, event, payload)
+proc hostSendEvent(sceneId: cstring, event: cstring, payload: cstring) {{.cdecl, gcsafe.}} =
+  if event.isNil:
+    return
+  let sceneText = if sceneId.isNil: "" else: $sceneId
+  let scene = if sceneText.len == 0: none(SceneId) else: some(sceneText.SceneId)
+  var parsed: JsonNode
+  try:
+    parsed = if payload.isNil: newJObject() else: parseJson($payload)
+  except CatchableError:
+    parsed = newJObject()
+  hostChannels.sendEvent(scene, $event, parsed)
 
 proc driverLibraryPath(spec: DriverSpec): string =
   getAppDir() / "drivers" / spec.libraryName
@@ -572,7 +608,10 @@ def write_driver_library_nim(driver: Driver) -> str:
             setup_import = f"import drivers/{driver.setup_import_path} as {setup_driver_alias}\n"
         setup_proc = f"""
 proc frameos_driver_setup*(driverContextPtr: pointer): bool {{.cdecl, exportc, dynlib.}} =
-  let hostContext = cast[DriverContext](driverContextPtr)
+  ## The host owns `driverContextPtr`. Borrowed, never owned: a plain `let`
+  ## binding would give this library's ORC runtime a destructor for a ref the
+  ## host allocated (frameos/driver_abi).
+  let hostContext {{.cursor.}} = cast[DriverContext](driverContextPtr)
   driverContextInstance = cloneDriverContext(hostContext)
   result = {setup_driver_alias}.setup(driverContextInstance).rebootRequired
   syncHostDriverContext(hostContext, driverContextInstance)
@@ -637,7 +676,7 @@ var
 
 proc frameos_driver_init*(driverContextPtr: pointer, logHook: HostLogProc, sendEventHook: HostSendEventProc): pointer {{.cdecl, exportc, dynlib.}} =
   setSharedHostCallbacks(logHook, sendEventHook)
-  let hostContext = cast[DriverContext](driverContextPtr)
+  let hostContext {{.cursor.}} = cast[DriverContext](driverContextPtr)
   driverContextInstance = cloneDriverContext(hostContext)
   driverInstance = {driver.name}Driver.init(driverContextInstance)
   syncHostDriverContext(hostContext, driverContextInstance)

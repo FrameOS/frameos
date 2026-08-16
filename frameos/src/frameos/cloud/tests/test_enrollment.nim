@@ -359,6 +359,32 @@ suite "cloud enrollment":
     for key in ["mode", "frame_id", "ws_path", "access_token", "scenes_checksum"]:
       check not state.hasKey(key)
 
+suite "board detection":
+  # /proc/device-tree/compatible is NUL-separated, and every entry after the
+  # board's own name is a fallback the kernel matches on.
+  test "BCM2712 is the Pi 5 image, on either architecture":
+    check boardForCompatible("raspberrypi,5-model-b\0brcm,bcm2712", "arm64") ==
+      "raspberry-pi-5"
+    check boardForCompatible("raspberrypi,5-compute-module\0brcm,bcm2712", "arm") ==
+      "raspberry-pi-5"
+
+  test "every other Pi is told apart by the architecture it was built for":
+    check boardForCompatible("raspberrypi,3-model-b\0brcm,bcm2837", "arm64") ==
+      "raspberry-pi-64"
+    check boardForCompatible("raspberrypi,model-zero-w\0brcm,bcm2835", "arm") ==
+      "raspberry-pi-32"
+
+  test "a board with no published image reports nothing rather than a guess":
+    check boardForCompatible("luckfox,pico\0rockchip,rv1103", "arm") == ""
+    check boardForCompatible("", "arm64") == ""
+    # A Pi on an architecture FrameOS publishes no image for is still unknown.
+    check boardForCompatible("raspberrypi,2-model-b\0brcm,bcm2836", "i386") == ""
+
+  test "detectBoard is silent when the device tree is not there":
+    # The test host is not a Pi; the point is that it answers rather than
+    # raising, because it runs inside the enrollment payload.
+    check detectBoard() == "" or detectBoard().startsWith("raspberry-pi-")
+
 # No server.close(): it segfaults in mummy's shutdown path *after* the suite
 # has passed, turning a green run into exit code 1. It reproduces on demand —
 # adding close() to test_hub_session.nim (which never had one and never failed)

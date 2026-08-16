@@ -425,12 +425,18 @@ export function FrameosShell({
   const chatDrawerIsOpen = !!chatDrawerSelection
   const chatDrawerSource = router.values.searchParams.drawerSource === 'templates' ? 'templates' : null
   const frameChangeDrawerFrame = frameChangeDrawerSelection ? frames[frameChangeDrawerSelection.frameId] : null
+  // Keyed on the frame id: the drawer stays mounted while you click from one
+  // frame to the next in the rail, and everything it holds in React state
+  // (the SD-image builder's board and display fields above all) was seeded
+  // from the frame that was selected when it mounted. Without the key the
+  // heading followed the new frame while the form underneath kept offering to
+  // write the previous frame's card — same claim code, wrong panel.
   const frameChangeDrawer =
     frameChangeDrawerSelection && frameChangeDrawerFrame ? (
       frameChangeDrawerSelection.kind === 'unsaved' ? (
-        <FrameUnsavedChangesDrawer frame={frameChangeDrawerFrame} />
+        <FrameUnsavedChangesDrawer key={frameChangeDrawerFrame.id} frame={frameChangeDrawerFrame} />
       ) : (
-        <FrameDeployPlanDrawer frame={frameChangeDrawerFrame} />
+        <FrameDeployPlanDrawer key={frameChangeDrawerFrame.id} frame={frameChangeDrawerFrame} />
       )
     ) : null
   const workspaceRightPanel = chatDrawerSelection ? (

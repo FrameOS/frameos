@@ -4,11 +4,8 @@ from types import SimpleNamespace
 
 from app.codegen.drivers_nim import (
     COMPILATION_MODE_PRECOMPILED,
-    COMPILATION_MODE_SHARED,
-    COMPILATION_MODE_SHARED_SCENES,
     COMPILATION_MODE_STATIC,
     compilation_mode_uses_shared_drivers,
-    compilation_mode_uses_shared_libraries,
     driver_library_filename,
     frame_compilation_mode,
     normalize_compilation_mode,
@@ -27,11 +24,20 @@ def test_compilation_mode_defaults_to_precompiled():
     assert frame_compilation_mode(SimpleNamespace(rpios={})) == COMPILATION_MODE_PRECOMPILED
 
 
-def test_compilation_mode_shared_requires_explicit_setting():
-    assert normalize_compilation_mode("shared") == COMPILATION_MODE_SHARED
-    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared"})) == COMPILATION_MODE_SHARED
-    assert normalize_compilation_mode("shared-scenes") == COMPILATION_MODE_SHARED_SCENES
-    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared-scenes"})) == COMPILATION_MODE_SHARED_SCENES
+def test_retired_shared_modes_become_a_single_binary():
+    """Frames saved before 2026-08-16 still carry these; they must not build.
+
+    `static` is the honest landing spot: it produces the same compiled scenes
+    and drivers, linked in rather than dlopen'd, so nothing a frame configured
+    is silently dropped — only the `.so` boundary is.
+    """
+    assert normalize_compilation_mode("shared") == COMPILATION_MODE_STATIC
+    assert normalize_compilation_mode("shared-scenes") == COMPILATION_MODE_STATIC
+    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared"})) == COMPILATION_MODE_STATIC
+    assert (
+        frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared-scenes"}))
+        == COMPILATION_MODE_STATIC
+    )
 
 
 def test_compilation_mode_static_is_valid():
@@ -52,17 +58,17 @@ def test_buildroot_compilation_mode_uses_buildroot_settings():
     )
 
 
-def test_compilation_mode_precompiled_uses_shared_libraries():
+def test_only_precompiled_ships_driver_libraries():
     assert normalize_compilation_mode("precompiled") == COMPILATION_MODE_PRECOMPILED
-    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "precompiled"})) == COMPILATION_MODE_PRECOMPILED
-    assert compilation_mode_uses_shared_libraries("precompiled") is True
-    assert compilation_mode_uses_shared_libraries("shared") is True
-    assert compilation_mode_uses_shared_libraries("shared-scenes") is True
-    assert compilation_mode_uses_shared_libraries("static") is False
+    assert (
+        frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "precompiled"}))
+        == COMPILATION_MODE_PRECOMPILED
+    )
     assert compilation_mode_uses_shared_drivers("precompiled") is True
-    assert compilation_mode_uses_shared_drivers("shared") is True
-    assert compilation_mode_uses_shared_drivers("shared-scenes") is False
     assert compilation_mode_uses_shared_drivers("static") is False
+    # The legacy values normalize to static, so they no longer ask for `.so`s.
+    assert compilation_mode_uses_shared_drivers("shared") is False
+    assert compilation_mode_uses_shared_drivers("shared-scenes") is False
 
 
 def test_waveshare_driver_library_filename_includes_variant():

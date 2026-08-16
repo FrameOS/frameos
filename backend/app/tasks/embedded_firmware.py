@@ -19,12 +19,14 @@ or a checkout at ``~/esp/esp-idf`` (see embedded/esp32/README.md).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
+import signal
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -757,6 +759,17 @@ def _missing_required_sdkconfig(path: Path, required: dict[str, str] | None = No
     }
 
 
+def embedded_build_root() -> Path:
+    """Parent directory for the per-platform build dirs. Defaults to the
+    firmware project, next to a manual idf.py workflow's build/. Deployments
+    where the project lives on an ephemeral container layer (the Docker image,
+    the Home Assistant add-on) point this at a volume instead: a cold ESP-IDF
+    build is ~1300 objects, so discarding the build dir on every restart makes
+    every build a from-scratch build."""
+    override = os.environ.get("FRAMEOS_EMBEDDED_BUILD_ROOT")
+    return Path(override) if override else EMBEDDED_PROJECT_DIR
+
+
 def embedded_build_dir(platform: str, flash_profile: dict[str, Any]) -> Path:
     """Backend builds get a build dir per platform + flash profile (matching
     ci_build_image.sh's -B convention), with the generated sdkconfig inside
@@ -764,7 +777,7 @@ def embedded_build_dir(platform: str, flash_profile: dict[str, Any]) -> Path:
     instead of wiping one shared CMake cache, and backend builds never
     clobber the in-tree build/ + sdkconfig a manual idf.py workflow uses.
     The build-* prefix keeps these out of the source fingerprint."""
-    return EMBEDDED_PROJECT_DIR / f"build-{platform}-{str(flash_profile['flashSize']).lower()}"
+    return embedded_build_root() / f"build-{platform}-{str(flash_profile['flashSize']).lower()}"
 
 
 def _reset_stale_embedded_sdkconfig(build_dir: Path, required: dict[str, str] | None = None) -> dict[str, str]:
@@ -2006,6 +2019,75 @@ async def embedded_firmware_task(ctx: dict[str, Any], id: int, request_id: str |
         raise
 
 
+# Ninja prefixes every completed edge with its position in the build graph.
+_NINJA_PROGRESS_RE = re.compile(r"^\[(\d+)/(\d+)\]")
+# A full ESP-IDF build is thousands of lines, so progress reaches the frame log
+# on whichever of these comes first — enough to prove the build is alive
+# without drowning the log.
+EMBEDDED_BUILD_PROGRESS_PERCENT_STEP = 5.0
+EMBEDDED_BUILD_PROGRESS_MAX_SILENCE_SECONDS = 60.0
+# Longest line kept from the build output. asyncio's StreamReader raises past
+# its own 64KiB limit, and ninja echoes the whole command line of a failed
+# edge — the link step's runs to hundreds of KiB with 1300 objects. Truncating
+# beats losing the error that follows it.
+EMBEDDED_BUILD_MAX_LINE_BYTES = 8192
+# Upper bound on the failure tail carried into the error and the frame log.
+EMBEDDED_BUILD_FAILURE_TAIL_CHARS = 8000
+
+
+def _format_duration(seconds: float) -> str:
+    total = int(seconds)
+    if total < 60:
+        return f"{total}s"
+    return f"{total // 60}m{total % 60:02d}s"
+
+
+async def _iter_process_lines(stream: asyncio.StreamReader):
+    """Yield output lines without StreamReader.readline()'s line-length limit."""
+    buffer = b""
+    while True:
+        chunk = await stream.read(65536)
+        if not chunk:
+            break
+        buffer += chunk
+        while True:
+            newline = buffer.find(b"\n")
+            if newline >= 0:
+                yield buffer[:newline]
+                buffer = buffer[newline + 1:]
+            elif len(buffer) > EMBEDDED_BUILD_MAX_LINE_BYTES:
+                yield buffer[:EMBEDDED_BUILD_MAX_LINE_BYTES]
+                buffer = buffer[EMBEDDED_BUILD_MAX_LINE_BYTES:]
+            else:
+                break
+    if buffer:
+        yield buffer
+
+
+async def _terminate_process_group(process: asyncio.subprocess.Process) -> None:
+    """Kill the build and everything it spawned. The task runs ``bash -c``, so
+    signalling the child alone would leave ninja and its compilers running:
+    they would keep burning the machine's CPU and, worse, collide with the
+    next attempt inside the same build directory."""
+    if process.returncode is not None:
+        return
+    try:
+        group = os.getpgid(process.pid)
+    except (ProcessLookupError, OSError):
+        group = None
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            if group is not None:
+                os.killpg(group, sig)
+            else:
+                process.send_signal(sig)
+        except (ProcessLookupError, OSError):
+            return
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(process.wait(), timeout=10)
+            return
+
+
 async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: str | None) -> None:
     family = embedded_platform_spec_for_frame(frame)["family"]
     if family == "virtual":
@@ -2058,6 +2140,12 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     )
     env["IDF_PATH"] = str(idf_path)
     env["IDF_TARGET"] = str(platform_spec["idfTarget"])
+    # Every frame's image recompiles the same ~1300 objects — all ~50 panel
+    # drivers plus the IDF itself — and only the handful that include
+    # generated_config.h actually differ between frames. idf.py wires ccache in
+    # as the compiler launcher when this is set.
+    if shutil.which("ccache"):
+        env.setdefault("IDF_CCACHE_ENABLE", "1")
     # All panel drivers are compiled into every firmware image; this env var
     # only sets the default panel a plain checkout would bake in. Per-frame
     # builds get the same value via FRAMEOS_DEFAULT_PANEL in generated_config.h
@@ -2109,13 +2197,17 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
     # component globs nimcache/*.c at configure time.
     idf_base = (f'idf.py -B {shlex.quote(str(build_dir))} '
                 f'-D SDKCONFIG={shlex.quote(str(build_dir / "sdkconfig"))}')
+    # The CMake configure output is kept (rather than sent to /dev/null): it is
+    # where a failure in this step explains itself, and the progress filter
+    # below drops it from the log anyway.
     command = (f'source "$IDF_PATH/export.sh" >/dev/null 2>&1 && {nim_step}'
                f'{idf_base} -D SDKCONFIG_DEFAULTS={shlex.quote(sdkconfig_defaults)} '
-               f'reconfigure >/dev/null && {idf_base} build merge-bin')
+               f'reconfigure && {idf_base} build merge-bin')
 
     build_lock_token = await _acquire_embedded_build_lock(redis)
     try:
         async with _build_lock:
+            build_dir.parent.mkdir(parents=True, exist_ok=True)
             generated_header.write_text(generated_config)
             reset_sdkconfig = _reset_stale_embedded_sdkconfig(build_dir, required_sdkconfig)
             if reset_sdkconfig:
@@ -2129,32 +2221,60 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                # Own process group, so a failure or a cancelled task can take
+                # ninja and its compilers down with the shell.
+                start_new_session=True,
             )
             output_tail: list[str] = []
             assert process.stdout is not None
+            build_started = time.monotonic()
             last_heartbeat = datetime.now(timezone.utc)
-            while True:
-                line = await process.stdout.readline()
-                if not line:
-                    break
-                text = line.decode("utf-8", errors="replace").rstrip()
-                if text:
-                    output_tail.append(text)
-                    del output_tail[:-50]
-                now = datetime.now(timezone.utc)
-                if (now - last_heartbeat).total_seconds() >= 15:
-                    last_heartbeat = now
-                    frame = get_fresh_frame(db, int(frame.id)) or frame
-                    current = latest_embedded_firmware(frame) or {}
-                    if current.get("status") == "building":
-                        await _set_firmware_status(db, redis, frame, {**current, "lastHeartbeatAt": _utc_now()})
-            returncode = await process.wait()
+            last_progress_at = build_started
+            last_progress_percent = -EMBEDDED_BUILD_PROGRESS_PERCENT_STEP
+            try:
+                async for line in _iter_process_lines(process.stdout):
+                    text = line.decode("utf-8", errors="replace").rstrip()
+                    if text:
+                        output_tail.append(text)
+                        del output_tail[:-50]
+                    now_monotonic = time.monotonic()
+                    # A full build is silent for tens of minutes on a small
+                    # host; without this it is indistinguishable from a hang.
+                    progress = _NINJA_PROGRESS_RE.match(text) if text else None
+                    if progress:
+                        done, total = int(progress.group(1)), int(progress.group(2))
+                        percent = (100.0 * done / total) if total else 0.0
+                        if percent >= last_progress_percent + EMBEDDED_BUILD_PROGRESS_PERCENT_STEP or \
+                                now_monotonic - last_progress_at >= EMBEDDED_BUILD_PROGRESS_MAX_SILENCE_SECONDS:
+                            last_progress_at = now_monotonic
+                            last_progress_percent = percent
+                            await log(db, redis, int(frame.id), "stdout",
+                                      f"Compiling firmware: {done}/{total} ({percent:.0f}%), "
+                                      f"{_format_duration(now_monotonic - build_started)} elapsed")
+                    now = datetime.now(timezone.utc)
+                    if (now - last_heartbeat).total_seconds() >= 15:
+                        last_heartbeat = now
+                        frame = get_fresh_frame(db, int(frame.id)) or frame
+                        current = latest_embedded_firmware(frame) or {}
+                        if current.get("status") == "building":
+                            await _set_firmware_status(db, redis, frame, {**current, "lastHeartbeatAt": _utc_now()})
+                returncode = await process.wait()
+            except BaseException:
+                # Includes CancelledError: an abandoned build must not keep a
+                # compiler fleet alive against the next attempt's build dir.
+                await _terminate_process_group(process)
+                raise
     finally:
         await _release_embedded_build_lock(redis, build_lock_token)
 
+    build_duration = time.monotonic() - build_started
     if returncode != 0:
-        tail = "\n".join(output_tail[-20:])
+        # Ninja echoes the failing edge's whole command line, and the link
+        # step's is hundreds of KiB — keep the tail readable in a log row.
+        tail = "\n".join(output_tail[-20:])[-EMBEDDED_BUILD_FAILURE_TAIL_CHARS:]
         raise ValueError(f"idf.py build failed with exit code {returncode}:\n{tail}")
+    await log(db, redis, int(frame.id), "stdout",
+              f"ESP-IDF build finished in {_format_duration(build_duration)}")
 
     missing_sdkconfig = _missing_required_sdkconfig(build_dir / "sdkconfig", required_sdkconfig)
     if missing_sdkconfig:

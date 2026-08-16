@@ -20,6 +20,7 @@ import {
 import { embeddedUsbUploadTimeoutMs, framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/framesModel'
 import type { FrameType, FrameId } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
+import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
 import {
   ESP32_PARTITION_TABLE_OFFSET,
   ESP32_PARTITION_TABLE_SIZE,
@@ -607,7 +608,7 @@ export function EmbeddedWebFlasher({
   const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
   const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
 
-  const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
+  const webSerialSupported = isWebSerialSupported()
   const busy = phase === 'connecting' || phase === 'preparing' || phase === 'flashing'
   const usbLogStreamState = usbLogStreamStatesByFrameId[frame.id]
   // Only offer to flash around the settings partition when the firmware status
@@ -817,8 +818,7 @@ export function EmbeddedWebFlasher({
   if (!webSerialSupported) {
     return (
       <div className="frame-tool-muted text-xs leading-5">
-        Flashing from the browser needs Web Serial, which this browser doesn't support. Use Chrome or Edge, or flash
-        with the command above.
+        {webSerialUnavailableReason('Flashing from the browser')} Otherwise flash with the command above.
       </div>
     )
   }

@@ -1,3 +1,6 @@
+import asyncio
+import os
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -1481,3 +1484,81 @@ async def test_pending_commands_surface_and_cancel_a_queued_ota(async_client):
     # Nothing left to cancel is a 404, never a pretend success.
     response = await async_client.delete(f"/api/frames/{frame['id']}/commands/{command_id}")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_build_output_reader_survives_lines_past_the_stream_limit():
+    """Ninja echoes the full command line of a failed edge, and the link
+    step's runs well past asyncio's 64KiB readline limit. The reader has to
+    keep going: the error message follows the command that produced it."""
+    overlong = b"x" * (embedded_firmware_module.EMBEDDED_BUILD_MAX_LINE_BYTES * 3 + 17)
+    payload = b"[1/2] Building C object a.o\n" + overlong + b"\nFAILED: the real error\n"
+
+    reader = asyncio.StreamReader()
+    reader.feed_data(payload)
+    reader.feed_eof()
+
+    lines = [line async for line in embedded_firmware_module._iter_process_lines(reader)]
+
+    assert lines[0] == b"[1/2] Building C object a.o"
+    assert lines[-1] == b"FAILED: the real error"
+    # The overlong line is chunked, never dropped and never fatal.
+    assert b"".join(lines[1:-1]) == overlong
+
+
+@pytest.mark.asyncio
+async def test_build_output_reader_yields_a_trailing_unterminated_line():
+    reader = asyncio.StreamReader()
+    reader.feed_data(b"first\nno trailing newline")
+    reader.feed_eof()
+
+    lines = [line async for line in embedded_firmware_module._iter_process_lines(reader)]
+
+    assert lines == [b"first", b"no trailing newline"]
+
+
+def test_ninja_progress_is_recognised_only_on_progress_lines():
+    match = embedded_firmware_module._NINJA_PROGRESS_RE.match("[247/1318] Building C object esp-idf/main/x.c.obj")
+    assert match is not None
+    assert (int(match.group(1)), int(match.group(2))) == (247, 1318)
+    assert embedded_firmware_module._NINJA_PROGRESS_RE.match("-- Building for target esp32c3") is None
+    assert embedded_firmware_module._NINJA_PROGRESS_RE.match("FAILED: [code=1] x.o") is None
+
+
+def test_format_duration_reads_as_a_wall_clock():
+    assert embedded_firmware_module._format_duration(9.6) == "9s"
+    assert embedded_firmware_module._format_duration(60) == "1m00s"
+    assert embedded_firmware_module._format_duration(1462) == "24m22s"
+
+
+@pytest.mark.asyncio
+async def test_terminating_a_build_kills_the_processes_it_spawned():
+    """The build runs under `bash -c`, so signalling the shell alone would
+    leave ninja and its compilers alive — burning the machine's CPU and
+    colliding with the next attempt inside the same build directory."""
+    process = await asyncio.create_subprocess_exec(
+        "bash", "-c", "sleep 120 & echo $! && wait",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        start_new_session=True,
+    )
+    child_pid = int((await process.stdout.readline()).strip())
+    os.kill(child_pid, 0)  # raises if the grandchild is not running
+
+    await embedded_firmware_module._terminate_process_group(process)
+
+    assert process.returncode is not None
+    with pytest.raises(ProcessLookupError):
+        os.kill(child_pid, 0)
+
+
+def test_build_root_is_redirectable_to_a_persistent_volume(monkeypatch, tmp_path):
+    """The Docker image and the Home Assistant add-on keep the firmware
+    project on an ephemeral container layer; a ~1300-object build dir thrown
+    away on every restart means every build is a from-scratch build."""
+    monkeypatch.delenv("FRAMEOS_EMBEDDED_BUILD_ROOT", raising=False)
+    assert embedded_firmware_module.embedded_build_root() == embedded_firmware_module.EMBEDDED_PROJECT_DIR
+
+    monkeypatch.setenv("FRAMEOS_EMBEDDED_BUILD_ROOT", str(tmp_path))
+    profile = {"flashSize": "16MB"}
+    assert embedded_firmware_module.embedded_build_dir("esp32-c3", profile) == tmp_path / "build-esp32-c3-16mb"

@@ -6,8 +6,6 @@ import pytest
 
 from app.codegen.drivers_nim import (
     COMPILATION_MODE_PRECOMPILED,
-    COMPILATION_MODE_SHARED,
-    COMPILATION_MODE_SHARED_SCENES,
     COMPILATION_MODE_STATIC,
 )
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryPlan
@@ -22,7 +20,7 @@ class FakeDeployer:
         self.local_modification_calls = 0
 
     async def make_local_modifications(
-        self, _source_dir: str, compilation_mode: str = COMPILATION_MODE_SHARED
+        self, _source_dir: str, compilation_mode: str = COMPILATION_MODE_PRECOMPILED
     ) -> None:
         self.local_modification_calls += 1
         return None
@@ -36,7 +34,7 @@ class FakeDeployer:
         _build_dir: str,
         _source_dir: str,
         _arch: str,
-        compilation_mode: str = COMPILATION_MODE_SHARED,
+        compilation_mode: str = COMPILATION_MODE_PRECOMPILED,
     ) -> str:
         return "/tmp/build.tar.gz"
 
@@ -46,11 +44,6 @@ class FakeDeployer:
     def driver_library_names(self, _drivers, _compilation_mode):
         return []
 
-    def scene_library_paths(self, _build_dir, _frame, _compilation_mode):
-        return []
-
-    def scene_library_names(self, _frame, _compilation_mode):
-        return []
 
 
 @pytest.mark.asyncio
@@ -72,15 +65,16 @@ async def test_plan_build_defaults_to_precompiled_with_static_fallback(monkeypat
     plan = await builder.plan_build(
         target_override=TargetMetadata(arch="aarch64", distro="raspios", version="trixie")
     )
-    explicit_shared_plan = await builder.plan_build(
+    legacy_shared_plan = await builder.plan_build(
         target_override=TargetMetadata(arch="aarch64", distro="raspios", version="trixie"),
-        compilation_mode=COMPILATION_MODE_SHARED,
+        compilation_mode="shared",
     )
 
     assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
     assert plan.compilation_mode == COMPILATION_MODE_STATIC
     assert plan.precompiled_skip_reason == "no matching precompiled target"
-    assert explicit_shared_plan.compilation_mode == COMPILATION_MODE_SHARED
+    # A frame still holding the retired `shared` value builds one binary.
+    assert legacy_shared_plan.compilation_mode == COMPILATION_MODE_STATIC
 
 
 @pytest.mark.asyncio
@@ -178,7 +172,7 @@ async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypat
     )
 
     assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
-    assert plan.compilation_mode == COMPILATION_MODE_SHARED_SCENES
+    assert plan.compilation_mode == COMPILATION_MODE_STATIC
     assert plan.will_attempt_precompiled is False
     assert plan.will_attempt_cross_compile is True
     assert plan.precompiled_skip_reason == "1 compiled scene is configured"
@@ -245,8 +239,6 @@ async def test_build_uses_precompiled_release_when_planned(monkeypatch: pytest.M
             binary_path=binary_path,
             driver_library_paths=[driver_path],
             driver_library_names=["frameBuffer.so"],
-            scene_library_paths=[],
-            scene_library_names=[],
             vendor_folders=[],
             archive_path=archive_path,
         )

@@ -26,7 +26,11 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
-from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, frame_compilation_mode
+from app.codegen.drivers_nim import (
+    COMPILATION_MODE_PRECOMPILED,
+    frame_compilation_mode,
+    normalize_compilation_mode,
+)
 from app.models.assets import Assets
 from app.models.frame import (
     Frame,
@@ -882,7 +886,13 @@ def latest_buildroot_sd_image(frame: Frame, current_base_entry: dict[str, Any] |
         return None
     path = sd_image.get("path")
     current_compilation_mode = frame_compilation_mode(frame)
-    if sd_image.get("status") == "ready" and sd_image.get("compilationMode") != current_compilation_mode:
+    # Normalize what was stored, not just what the frame asks for now: an image
+    # written while `shared`/`shared-scenes` existed recorded the raw value, and
+    # those now normalize to `static`. Comparing raw strings would declare every
+    # such image stale and force a pointless 1–2 GB rebuild for a mode change
+    # that did not happen.
+    image_compilation_mode = normalize_compilation_mode(sd_image.get("compilationMode"))
+    if sd_image.get("status") == "ready" and image_compilation_mode != current_compilation_mode:
         return {
             **sd_image,
             "status": "stale",
@@ -1650,7 +1660,6 @@ class BuildrootImageBuilder:
         shutil.copy2(frameos_build.binary_path, release_dir / "frameos")
         os.chmod(release_dir / "frameos", 0o755)
         self._copy_libraries(frameos_build.driver_library_paths, release_dir / "drivers")
-        self._copy_libraries(frameos_build.scene_library_paths, release_dir / "scenes")
 
         (release_dir / "frame.json").write_text(
             json.dumps(get_frame_json(self.db, bootstrap_frame), indent=4) + "\n",

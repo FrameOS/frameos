@@ -88,6 +88,49 @@ proc otherControlPlaneActive*(frameConfig: FrameConfig): bool =
   let host = frameConfig.serverHost.strip().toLowerAscii()
   host.len > 0 and host notin ["localhost", "127.0.0.1", "::1", "[::1]"]
 
+const DEVICE_TREE_COMPATIBLE_PATH* = "/proc/device-tree/compatible"
+
+proc boardForCompatible*(compatible: string, cpu: string): string =
+  ## Map the device tree's `compatible` list onto the Buildroot platform key
+  ## whose SD image this board runs (the keys in
+  ## backend/app/tasks/buildroot_platforms.py). The cloud has no other way to
+  ## learn the board: `hardware.platform` is frame.json's deployment mode
+  ## ("buildroot"), and nothing on the card records which defconfig built it —
+  ## so "write another SD card" opened on "Pick a board…" for every frame.
+  ##
+  ## `compatible` is NUL-separated ("raspberrypi,5-model-b\0brcm,bcm2712"),
+  ## which `contains` does not care about. BCM2712 is the one SoC with its own
+  ## image (raspberry-pi-5); every other Pi is told apart by the architecture
+  ## the running binary was built for, which is exactly what picks the image:
+  ## ARMv6 boards (Zero/Zero W/1/CM1) run raspberry-pi-32, 64-bit boards
+  ## (Zero 2 W / 3 / 4) run raspberry-pi-64.
+  ##
+  ## Anything that is not a Raspberry Pi reports nothing rather than a guess —
+  ## a wrong board is the one field the setup portal cannot recover from,
+  ## because a card for the wrong SoC does not boot far enough to say so.
+  let lower = compatible.toLowerAscii()
+  if "bcm2712" in lower:
+    return "raspberry-pi-5"
+  if "raspberrypi" notin lower and "brcm,bcm2" notin lower:
+    return ""
+  case cpu
+  of "arm64", "aarch64":
+    "raspberry-pi-64"
+  of "arm", "armv6":
+    "raspberry-pi-32"
+  else:
+    ""
+
+proc detectBoard*(): string =
+  ## Best effort, and silent when it cannot tell: an absent `board` leaves the
+  ## SD-card form exactly as it was before this existed.
+  try:
+    if not fileExists(DEVICE_TREE_COMPATIBLE_PATH):
+      return ""
+    boardForCompatible(readFile(DEVICE_TREE_COMPATIBLE_PATH), hostCPU)
+  except CatchableError:
+    ""
+
 proc hardwarePayload*(frameConfig: FrameConfig): JsonNode =
   result = %*{
     "platform": if frameConfig != nil: frameConfig.mode else: "",
@@ -95,6 +138,12 @@ proc hardwarePayload*(frameConfig: FrameConfig): JsonNode =
     "width": if frameConfig != nil: frameConfig.width else: 0,
     "height": if frameConfig != nil: frameConfig.height else: 0,
   }
+  # The board this frame runs on, when it is one FrameOS publishes an image
+  # for. Omitted otherwise — providers drop unknown/missing optional fields,
+  # and an absent key is honest about not knowing.
+  let board = detectBoard()
+  if board.len > 0:
+    result["board"] = %board
   # "color" only lives in raw frame.json (device color variant); include it
   # when present, drop it otherwise — providers must drop unknown/missing
   # optional fields anyway.

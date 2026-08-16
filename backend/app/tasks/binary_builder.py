@@ -16,7 +16,6 @@ from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import (
     COMPILATION_MODE_PRECOMPILED,
     COMPILATION_MODE_STATIC,
-    COMPILATION_MODE_SHARED_SCENES,
     frame_compilation_mode,
     normalize_compilation_mode,
 )
@@ -120,8 +119,6 @@ class FrameBinaryBuildResult:
     binary_path: str | None
     driver_library_paths: list[str]
     driver_library_names: list[str]
-    scene_library_paths: list[str]
-    scene_library_names: list[str]
     cross_compiled: bool
     prebuilt_entry: PrebuiltEntry | None
     prebuilt_target: str | None
@@ -231,9 +228,10 @@ class FrameBinaryBuilder:
             else:
                 will_attempt_precompiled = True
             if not will_attempt_precompiled:
-                resolved_compilation_mode = (
-                    COMPILATION_MODE_SHARED_SCENES if compiled_scene_count > 0 else COMPILATION_MODE_STATIC
-                )
+                # Compiled scenes used to fall back to `shared-scenes`, one
+                # `scenes.so` the binary dlopen'd. That mode is gone; `static`
+                # links the very same scene modules into the binary instead.
+                resolved_compilation_mode = COMPILATION_MODE_STATIC
 
         project_id = getattr(self.frame, "project_id", None)
         build_executor = get_build_executor_config(self.db, project_id)
@@ -303,8 +301,6 @@ class FrameBinaryBuilder:
                 binary_path=precompiled_result.binary_path,
                 driver_library_paths=precompiled_result.driver_library_paths,
                 driver_library_names=precompiled_result.driver_library_names,
-                scene_library_paths=precompiled_result.scene_library_paths,
-                scene_library_names=precompiled_result.scene_library_names,
                 cross_compiled=True,
                 prebuilt_entry=plan.prebuilt_entry,
                 prebuilt_target=plan.prebuilt_target,
@@ -414,15 +410,6 @@ class FrameBinaryBuilder:
             ),
             driver_library_names=self.deployer.driver_library_names(
                 drivers_for_frame(self.frame),
-                plan.compilation_mode,
-            ),
-            scene_library_paths=self.deployer.scene_library_paths(
-                build_dir,
-                self.frame,
-                plan.compilation_mode,
-            ),
-            scene_library_names=self.deployer.scene_library_names(
-                self.frame,
                 plan.compilation_mode,
             ),
             cross_compiled=cross_compiled,

@@ -10,6 +10,11 @@ import { Spinner } from '../../../../components/Spinner'
 import { ArrowDownTrayIcon, ArrowUpTrayIcon, MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/solid'
 import { ChevronRightIcon, ClockIcon, CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
 import { EMBEDDED_ESP32_S3 } from '../../../../devices'
+import {
+  webSerialBlockedByInsecureContext,
+  webSerialSupported as isWebSerialSupported,
+  webSerialUnavailableReason,
+} from '../../../../utils/webSerial'
 import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
 import { frameSupportsUsbSerialConsole, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import {
@@ -363,7 +368,7 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
   const virtuosoKey = `${customScrollParent ? 'main' : 'window'}:${
     compact ? 'compact' : `all:${searchActive ? logSearch.trim() : 'all'}`
   }`
-  const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
+  const webSerialSupported = isWebSerialSupported()
   // Two roads to a USB console: a backend/on-device embedded frame, or a
   // cloud-managed esp32 frame (hardware.platform from enrollment). The cloud
   // case matters most for a board that never joins WiFi — its serial console
@@ -699,6 +704,20 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           {showUsbLogControls && usbLogStreamState?.status === 'error' && usbLogStreamState.error ? (
             <div className="min-w-0 flex-[1_1_12rem] truncate font-sans text-xs font-semibold text-red-500">
               {usbLogStreamState.error}
+            </div>
+          ) : null}
+          {/* An ESP32 frame whose USB console is missing only because the page
+              is not a secure origin: say so here rather than silently hiding
+              the button, since this panel is where someone goes looking. */}
+          {isEsp32Frame && webSerialBlockedByInsecureContext() ? (
+            <div
+              className={clsx(
+                'min-w-0 flex-[1_1_14rem] truncate font-sans text-xs',
+                renderTheme === 'dark' ? 'text-gray-400' : 'text-slate-600'
+              )}
+              title={webSerialUnavailableReason('The USB console')}
+            >
+              {webSerialUnavailableReason('The USB console')}
             </div>
           ) : null}
         </div>

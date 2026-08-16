@@ -59,6 +59,16 @@ host tools under `/opt/esp/idf-tools`, and the Nim toolchain, so firmware builds
 started from the packaged backend run inside the container without mounting a
 separate host toolchain.
 
+Backend builds put their `build-<platform>-<flash>/` directories next to this
+README. `FRAMEOS_EMBEDDED_BUILD_ROOT` moves them elsewhere — the Docker
+entrypoint points it at a volume (`/data` under the Home Assistant add-on,
+`/app/db` otherwise), because a build directory on the container's writable
+layer is discarded on every restart and a cold build is ~1300 objects. The same
+entrypoint parks `CCACHE_DIR` there; `ccache` on the worker's PATH is enough for
+the backend to enable it, and it is what makes a second frame's image cheap.
+A slow host is worth checking before assuming a build has wedged: progress
+reaches the frame log as `Compiling firmware: N/M`.
+
 ## Build and flash by hand
 
 ```bash

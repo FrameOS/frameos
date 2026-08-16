@@ -1,11 +1,10 @@
-.PHONY: run build drivers maybe-driver-libraries maybe-scene-libraries driver-libraries scene-libraries test test-shard debug cross-list release-% release-all
+.PHONY: run build drivers maybe-driver-libraries driver-libraries test test-shard debug cross-list release-% release-all
 
 CROSS_OUT ?= build/cross
 PREBUILT_OUT ?= build/prebuilt-cross
 COMPILATION_MODE ?=
 RELEASE_ARGS ?=
 SKIP_DRIVER_LIBRARIES ?= 0
-SKIP_SCENE_LIBRARIES ?= 0
 COMPILATION_MODE_ARG = $(if $(COMPILATION_MODE),--compilation-mode $(COMPILATION_MODE),)
 NIM ?= nim
 NIMCACHE ?= .nimcache
@@ -23,7 +22,7 @@ run: build
 		./build/frameos --verbose; \
 	fi
 
-build: apploaders drivers maybe-driver-libraries maybe-scene-libraries
+build: apploaders drivers maybe-driver-libraries
 	python3 tools/prepare_assets.py
 	@if [ ! -d quickjs ]; then nimble build_quickjs --silent; fi
 	@if [ ! -f nimble.paths ]; then nimble setup --silent; fi
@@ -40,20 +39,10 @@ maybe-driver-libraries:
 		python3 tools/build_driver_libraries.py --config frame.json --out build/drivers --only-if-shared $(COMPILATION_MODE_ARG); \
 	fi
 
-maybe-scene-libraries:
-	@if [ "$(SKIP_SCENE_LIBRARIES)" = "1" ]; then \
-		echo "Skipping shared scene libraries"; \
-	else \
-		python3 tools/build_scene_libraries.py --config frame.json --out build/scenes --only-if-shared $(COMPILATION_MODE_ARG); \
-	fi
-
 driver-libraries: drivers
 	python3 tools/build_driver_libraries.py --config frame.json --out build/drivers
 
-scene-libraries:
-	python3 tools/build_scene_libraries.py --config frame.json --out build/scenes
-
-debug: apploaders drivers maybe-driver-libraries maybe-scene-libraries
+debug: apploaders drivers maybe-driver-libraries
 	python3 tools/prepare_assets.py
 	@if [ ! -d quickjs ]; then nimble build_quickjs --silent; fi
 	@if [ ! -f nimble.paths ]; then nimble setup --silent; fi

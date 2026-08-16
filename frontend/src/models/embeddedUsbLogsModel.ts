@@ -1,6 +1,7 @@
 import { actions, kea, listeners, path, reducers } from 'kea'
 
 import type { LogType, FrameId } from '../types'
+import { webSerialSupported, webSerialUnavailableReason } from '../utils/webSerial'
 import type { embeddedUsbLogsModelType } from './embeddedUsbLogsModelType'
 
 export type EmbeddedUsbLogStreamStatus = 'idle' | 'selecting' | 'connecting' | 'streaming' | 'stopping' | 'error'
@@ -79,10 +80,6 @@ interface EmbeddedUsbApiCommandOptions {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
-}
-
-function webSerialSupported(): boolean {
-  return typeof navigator !== 'undefined' && 'serial' in navigator
 }
 
 function isPortSelectionCanceled(error: unknown): boolean {
@@ -298,9 +295,9 @@ export function embeddedUsbApiCanPrompt(): boolean {
 
 export async function ensureEmbeddedUsbApiPort(frameId: FrameId): Promise<boolean> {
   if (!webSerialSupported()) {
-    appendUsbLine(frameId, '[USB API] USB port selection failed: Web Serial is not supported in this browser.')
+    appendUsbLine(frameId, `[USB API] USB port selection failed: ${webSerialUnavailableReason('Selecting a USB port')}`)
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
-      error: 'Web Serial is not supported in this browser. Use Chrome or Edge.',
+      error: webSerialUnavailableReason('Selecting a USB port'),
       status: 'error',
       stoppedAt: new Date().toISOString(),
     })
@@ -768,8 +765,8 @@ async function runEmbeddedUsbApiCommandLocked(
   options?: EmbeddedUsbApiCommandOptions
 ): Promise<EmbeddedUsbApiCommandResult> {
   if (!webSerialSupported()) {
-    appendUsbLine(frameId, `[USB API] ${command} failed: Web Serial is not supported in this browser.`)
-    throw new Error('Web Serial is not supported in this browser. Use Chrome or Edge.')
+    appendUsbLine(frameId, `[USB API] ${command} failed: ${webSerialUnavailableReason('Talking to the board')}`)
+    throw new Error(webSerialUnavailableReason('Talking to the board'))
   }
   const hadLogStream = sessions.has(frameId)
   const stoppedPort = hadLogStream ? await stopEmbeddedUsbLogStream(frameId) : null
@@ -1015,7 +1012,7 @@ export async function stopEmbeddedUsbLogStream(frameId: FrameId): Promise<Serial
 export async function startEmbeddedUsbLogStream(frameId: FrameId, port?: SerialPort): Promise<boolean> {
   if (!webSerialSupported()) {
     embeddedUsbLogsModel.actions.setUsbLogStreamState(frameId, {
-      error: 'Web Serial is not supported in this browser. Use Chrome or Edge to stream USB logs.',
+      error: webSerialUnavailableReason('Streaming USB logs'),
       status: 'error',
       stoppedAt: new Date().toISOString(),
     })

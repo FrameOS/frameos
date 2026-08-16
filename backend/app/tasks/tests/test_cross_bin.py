@@ -136,8 +136,6 @@ async def test_build_target_plans_then_builds(monkeypatch: pytest.MonkeyPatch, t
                 binary_path=str(binary_path),
                 driver_library_paths=[],
                 driver_library_names=[],
-                scene_library_paths=[],
-                scene_library_names=[],
             )
 
     monkeypatch.setattr("backend.app.tasks._frame_deployer.FrameDeployer", FakeFrameDeployer)
@@ -357,7 +355,7 @@ def test_compute_release_input_hash_tracks_source_and_target(tmp_path: Path):
     assert second_hash != arm_hash
 
 
-def test_parse_args_accepts_shared_scenes_compilation_mode():
+def test_parse_args_accepts_a_compilation_mode():
     cross_module = load_cross_module()
     args = cross_module.parse_args(
         [
@@ -365,8 +363,8 @@ def test_parse_args_accepts_shared_scenes_compilation_mode():
             "--target",
             "debian-trixie-amd64",
             "--compilation-mode",
-            "shared-scenes",
+            "static",
         ]
     )
     assert args.command == "build"
-    assert args.compilation_mode == "shared-scenes"
+    assert args.compilation_mode == "static"

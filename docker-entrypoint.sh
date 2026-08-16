@@ -9,6 +9,23 @@ else
   echo "REDIS_URL is set ($REDIS_URL). Skipping local Redis."
 fi
 
+# 2. Keep the ESP32 firmware build dir and compiler cache off the container's
+# writable layer. A cold ESP-IDF build is ~1300 objects and ~275MB of output,
+# so restarting the container between builds otherwise means every build is a
+# from-scratch build. /data is the add-on's persistent map; the db volume is
+# what docker-compose persists.
+if [ -z "$FRAMEOS_EMBEDDED_BUILD_ROOT" ]; then
+  if [ -n "$HASSIO_TOKEN" ] && [ -d /data ]; then
+    FRAMEOS_EMBEDDED_BUILD_ROOT=/data/embedded-build
+  else
+    FRAMEOS_EMBEDDED_BUILD_ROOT=/app/db/embedded-build
+  fi
+fi
+export FRAMEOS_EMBEDDED_BUILD_ROOT
+export CCACHE_DIR="${CCACHE_DIR:-$FRAMEOS_EMBEDDED_BUILD_ROOT/ccache}"
+export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-2G}"
+mkdir -p "$FRAMEOS_EMBEDDED_BUILD_ROOT" "$CCACHE_DIR" || true
+
 cd backend
 # Activate your virtual environment
 source .venv/bin/activate
@@ -19,7 +36,7 @@ python -m alembic upgrade head
 echo "⛵️ Launching Arq worker"
 arq app.tasks.worker.WorkerSettings &
 
-# 2. Check for Home Assistant Ingress
+# 3. Check for Home Assistant Ingress
 if [ -n "$HASSIO_TOKEN" ]; then
   echo "🔦 Detected HASSIO_TOKEN -> Running two uvicorns: public (8989) + ingress (8990)"
 

@@ -1,4 +1,8 @@
-when defined(frameosDriverLibrary) or defined(frameosSharedLibrary):
+# `frameosSharedLibrary` used to select this branch too — it built a scene as
+# its own `.so`. Those modes are gone (see LEGACY_COMPILATION_MODES in
+# backend/app/codegen/drivers_nim.py); drivers are the only thing that still
+# crosses a `.so` boundary.
+when defined(frameosDriverLibrary):
   import json
   import options
   import frameos/ids
@@ -12,19 +16,32 @@ when defined(frameosDriverLibrary) or defined(frameosSharedLibrary):
     sharedHostLogHook = logHook
     sharedHostSendEventHook = sendEventHook
 
+  # Serialise before the call, never after: the JSON text has to be a local
+  # whose lifetime spans the callee, and `($node).cstring` as an argument
+  # expression is a temporary the compiler is free to free first. The host
+  # copies what it needs before returning (frameos/driver_abi).
+
   # Send an event to the current scene
   proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
     if not sharedHostSendEventHook.isNil:
-      sharedHostSendEventHook(none(SceneId), event, payload)
+      let payloadText = $payload
+      sharedHostSendEventHook(nil, event.cstring, payloadText.cstring)
 
   # Send an event to a specific scene
   proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
     if not sharedHostSendEventHook.isNil:
-      sharedHostSendEventHook(scene, event, payload)
+      let payloadText = $payload
+      let sceneText = if scene.isSome: scene.get().string else: ""
+      sharedHostSendEventHook(
+        if scene.isSome: sceneText.cstring else: nil,
+        event.cstring,
+        payloadText.cstring,
+      )
 
   proc log*(event: JsonNode) {.gcsafe.} =
     if not sharedHostLogHook.isNil:
-      sharedHostLogHook(event)
+      let eventText = $event
+      sharedHostLogHook(eventText.cstring)
 
   proc debug*(message: string) =
     log(%*{"event": "debug", "message": message})

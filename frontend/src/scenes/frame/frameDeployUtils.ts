@@ -299,9 +299,6 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
     if (!skipReason) {
       return 'Download and install the precompiled FrameOS release'
     }
-    if (skipReason.includes('compiled scene')) {
-      return `${crossCompileText} with scenes bundled in scenes.so; precompiled release skipped (${skipReason})`
-    }
     return `${crossCompileText} as a single executable; precompiled release skipped (${skipReason})`
   }
 
@@ -310,12 +307,6 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
 
 function inferCompilationSummary(frame?: Partial<FrameType> | null): string {
   const compilationMode = frameCompilationMode(frame)
-  if (compilationMode === 'shared') {
-    return 'Shared libraries deployed next to the FrameOS binary'
-  }
-  if (compilationMode === 'shared-scenes') {
-    return 'Compiled scenes bundled into scenes.so next to the FrameOS binary'
-  }
   if (compilationMode === 'precompiled' && !precompiledSkipReason(frame)) {
     return 'Precompiled FrameOS binary and shared driver libraries'
   }
@@ -504,27 +495,12 @@ export function buildFullDeployPlanSummary(
     items.push({ label: 'Drivers', value: stringifyList(fullPlan.drivers) })
   }
   const requestedCompilationMode = fullPlan.binary.requested_compilation_mode ?? fullPlan.binary.compilation_mode
-  if (fullPlan.binary.compilation_mode === 'shared' && requestedCompilationMode !== 'precompiled') {
-    compilationItem = { label: 'Compilation', value: 'Shared libraries deployed next to the FrameOS binary' }
-  }
-  if (fullPlan.binary.compilation_mode === 'shared-scenes' && requestedCompilationMode === 'precompiled') {
-    compilationItem = {
-      label: 'Compilation',
-      value: 'Compiled scenes bundled into scenes.so next to the FrameOS binary',
-    }
-  }
   if (requestedCompilationMode === 'precompiled') {
-    const fallbackMode =
-      fullPlan.binary.compilation_mode === 'static'
-        ? 'Single executable'
-        : fullPlan.binary.compilation_mode === 'shared-scenes'
-        ? 'Bundled scenes library'
-        : 'Shared libraries'
     compilationItem = {
       label: 'Compilation',
       value: fullPlan.binary.will_attempt_precompiled
         ? 'Precompiled FrameOS binary and shared driver libraries'
-        : `${fallbackMode}; precompiled release skipped${
+        : `Single executable; precompiled release skipped${
             fullPlan.binary.precompiled_skip_reason ? ` (${fullPlan.binary.precompiled_skip_reason})` : ''
           }`,
     }

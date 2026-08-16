@@ -608,7 +608,7 @@ async def test_full_plan_buildroot_source_fallback_requires_build_environment(
             return FrameBinaryPlan(
                 build_id="build12345678",
                 target=TargetMetadata(arch="aarch64", distro="buildroot", version="2025.02.13"),
-                compilation_mode="shared-scenes",
+                compilation_mode="static",
                 allow_cross_compile=kwargs["allow_cross_compile"],
                 force_cross_compile=kwargs["force_cross_compile"],
                 cross_compile_supported=True,
@@ -791,7 +791,7 @@ async def test_full_plan_corrects_buildroot_mode_when_target_is_ubuntu(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_full_plan_uses_shared_driver_libraries_when_explicit(monkeypatch: pytest.MonkeyPatch):
+async def test_full_plan_maps_the_retired_shared_mode_to_a_single_binary(monkeypatch: pytest.MonkeyPatch):
     captured_modes: list[str] = []
 
     class CapturingBinaryBuilder(FakeBinaryBuilder):
@@ -825,7 +825,7 @@ async def test_full_plan_uses_shared_driver_libraries_when_explicit(monkeypatch:
 
     await workflow.plan("full")
 
-    assert captured_modes == ["shared"]
+    assert captured_modes == ["static"]
 
 
 @pytest.mark.asyncio
@@ -2168,7 +2168,6 @@ async def test_execute_full_does_not_activate_release_when_setup_fails(monkeypat
             prebuilt_entry=None,
             build_dir="/tmp/build",
             driver_library_paths=[],
-            scene_library_paths=[],
         )
 
     async def fake_prepare_remote_for_full_release(**_kwargs):
@@ -2370,7 +2369,6 @@ async def test_remote_build_uses_x86_feature_flags(monkeypatch: pytest.MonkeyPat
             archive_path=str(archive_path),
             build_dir=str(tmp_path / "build_build12345678"),
             driver_library_paths=[],
-            scene_library_paths=[],
             target=TargetMetadata(arch="x86_64", distro="debian", version="bookworm"),
         ),
         "build12345678",

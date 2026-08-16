@@ -35,7 +35,15 @@ export function CloudFrameSdImageCard({ frame }: { frame: FrameType }): ReactEle
   // Only seed the board when the frame actually records one — normalize on a
   // missing value would hand back the raspberry-pi-64 default, which is a
   // guess, and a guessed board is exactly what does not survive being wrong.
-  const storedPlatform = frame.buildroot?.platform
+  //
+  // `frame.buildroot` is a backend-managed field the cloud's frameSummary has
+  // never carried, so on this bundle the board came from nowhere and the
+  // select always opened on "Pick a board…". `hardware.board` is the device's
+  // own answer, sent at enrollment and refreshed on every hub hello (see
+  // hardwarePayload in frameos/src/frameos/cloud/enrollment.nim); frames on
+  // firmware that predates it still report none, and still get the
+  // placeholder.
+  const storedPlatform = frame.buildroot?.platform || frame.hardware?.board
   const buildrootPlatform = storedPlatform ? normalizeBuildrootPlatform(storedPlatform) : undefined
 
   // The display comes from the device's own `hardware` report, not from the
