@@ -129,21 +129,14 @@ There are two ways to build a frame: `static` (everything in one binary) and
 interpreted). The `shared` and `shared-scenes` modes were removed on
 2026-08-16, and with them the largest unaudited ABI surface.
 
-- **The framebuffer driver accepts a mode of all zeros.** `getScreenInfo`
-  treats any successful `FBIOGET_VSCREENINFO` as a valid probe, so a
-  `/dev/fb0` that exists but carries no mode — vc4 KMS fbdev emulation before,
-  or without, a modeset — hands back `width`/`height`/`bitsPerPixel` of 0, and
-  the retry at the top of `render` then sets `available = true` on it. Every
-  later render pass reaches the display stage, logs `Invalid framebuffer
-  screen info` and returns; the `configuredScreenInfo` fallback the driver
-  carries for exactly this case is never reached, because nothing raised.
-  Seen on a Buildroot Pi 5 on 2026-08-16 straight after an OTA restart: the
-  scene rendered in 1.5 s and was saved and served to the cloud, and nothing
-  reached the display — and with that frame's hour-long interval the probe
-  retries once an hour, since `render` is the only thing that retries it.
-  Treat zero geometry as a failed probe (keep `available = false`, fall back
-  to the configured geometry when there is one) and retry on a short timer
-  rather than only on the next render. *Small.*
+- **Let a driver ask for an earlier retry.** Render hints travel host→driver
+  only (`driver_render_hint.nim` tells the driver how long until the next
+  pass); nothing travels back. So a driver that cannot draw yet — the
+  framebuffer waiting for a KMS modeset is the live example — is re-probed
+  only when the next render comes round, which on an hour-long interval means
+  an hour of blank panel after a boot that was seconds from working. The
+  driver knows it wants to be called back sooner and has no way to say so.
+  Wants a return channel through the `.so` ABI, so it is not a one-liner.
 
 - **Audit driver code for refs it did not allocate.** The rule and its
   reasoning now live at the top of `frameos/src/frameos/driver_abi.nim`: every
