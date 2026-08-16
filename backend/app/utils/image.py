@@ -26,6 +26,7 @@ def render_thumbnail_png(data: bytes, max_edge: int = THUMBNAIL_MAX_EDGE) -> byt
         image.save(out, format="PNG")
     return out.getvalue()
 
+
 def render_line_of_text_png(text: str, width: int, height: int) -> bytes:
     image = Image.new("RGB", (width, height), color=(31, 41, 55))
     draw = ImageDraw.Draw(image)
