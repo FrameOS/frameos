@@ -653,14 +653,16 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   // plane — the cloud speaks asset_put/asset_mkdir/asset_delete/asset_rename
   // through /api/frames/{id}/assets/* since cloud-workspace-fixes.
   //
-  // Embedded frames are excluded for the same reason the API refuses them
-  // (api_frame_assets_sync): their renderers ignore synced fonts. Embedded
-  // hardware reuses the compiled-in typeface for every custom font
-  // (utils/font.nim getTypeface under frameosEmbedded) and virtual frames
-  // render with the fonts bundled into the wasm renderer, so the button could
-  // only ever produce the backend's "not supported" error.
+  // Embedded hardware CAN take fonts, but only onto an SD card: the ESP32
+  // renderer loads a named face from {assets}/fonts (one at a time — see the
+  // frameosEmbedded branch of utils/font.nim), and a board with no card has no
+  // filesystem at all, which is what storageUnmounted reports. Virtual frames
+  // never can: they render in the browser out of the wasm bundle's own fonts.
   const readOnly = false
-  const showSyncAction = workspaceMode() === 'backend' && !isEmbeddedHardwareFrame(frame) && !isVirtualFrame(frame)
+  const showSyncAction =
+    workspaceMode() === 'backend' &&
+    !isVirtualFrame(frame) &&
+    (!isEmbeddedHardwareFrame(frame) || !storageUnmounted)
 
   // syncAssets registers a long-running task toast, so no need to open logs
   const handleSyncAssets = () => {

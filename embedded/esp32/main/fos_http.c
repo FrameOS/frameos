@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 
 #include "freertos/FreeRTOS.h"
@@ -1932,6 +1934,194 @@ static esp_err_t asset_file_get_handler(httpd_req_t *req)
     return err;
 }
 
+/* --- /api/fonts -----------------------------------------------------------
+ *
+ * The canonical fonts contract (docs/api-triality.md): a list of the .ttf
+ * files this frame can draw with, and the bytes of one of them. On a Pi that
+ * is whatever sits in {assets}/fonts; here it is the same directory on the SD
+ * card, plus the empty entry that means "the built-in face" — which is all a
+ * card-less board has.
+ *
+ * The bytes matter as much as the list: the workspace font picker previews a
+ * face by fetching it, and "Sync fonts" only makes sense against a device that
+ * can say which fonts it now has. Fonts the renderer actually uses are loaded
+ * from the same directory (frameos/src/frameos/utils/font.nim, embedded
+ * branch), one parsed face at a time.
+ */
+#define FOS_FONTS_DIR "fonts"
+#define FOS_FONTS_MAX_ENTRIES 200
+
+static char font_lower(char c)
+{
+    return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+static bool font_ends_with_ci(const char *name, const char *suffix)
+{
+    size_t len = strlen(name);
+    size_t slen = strlen(suffix);
+    if (len <= slen) return false;
+    const char *tail = name + len - slen;
+    for (size_t i = 0; i < slen; i++) {
+        if (font_lower(tail[i]) != font_lower(suffix[i])) return false;
+    }
+    return true;
+}
+
+static bool font_contains_ci(const char *name, const char *needle)
+{
+    /* strcasestr is a GNU extension and not reliably present in the IDF's
+     * newlib; the strings here are filenames, so a naive scan is fine. */
+    size_t nlen = strlen(needle);
+    if (nlen == 0) return true;
+    for (const char *p = name; *p; p++) {
+        size_t i = 0;
+        while (i < nlen && p[i] && font_lower(p[i]) == font_lower(needle[i])) i++;
+        if (i == nlen) return true;
+    }
+    return false;
+}
+
+static bool font_name_is_ttf(const char *name)
+{
+    return font_ends_with_ci(name, ".ttf");
+}
+
+/* AppleDouble sidecars (`._Font.ttf`) end in .ttf and are metadata blobs that
+ * blow up a TTF parser; SD cards travel through macOS, so they are common.
+ * Same rule as the Linux runtime's isHiddenOrJunkFile. */
+static bool font_name_is_junk(const char *name)
+{
+    return name[0] == '.';
+}
+
+static esp_err_t fonts_list_get_handler(httpd_req_t *req)
+{
+    REQUIRE_PROTECTED_ACCESS();
+
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return httpd_resp_send_500(req);
+    cJSON *fonts = cJSON_AddArrayToObject(msg, "fonts");
+    if (!fonts) {
+        cJSON_Delete(msg);
+        return httpd_resp_send_500(req);
+    }
+
+    /* The built-in face, named as the empty string exactly as the Linux
+     * runtime names it — scenes that leave `font` unset mean this one. */
+    cJSON *builtin = cJSON_CreateObject();
+    if (builtin) {
+        cJSON_AddStringToObject(builtin, "file", "");
+        cJSON_AddStringToObject(builtin, "name", "Ubuntu-Regular");
+        cJSON_AddNumberToObject(builtin, "weight", 400);
+        cJSON_AddStringToObject(builtin, "weight_title", "Regular");
+        cJSON_AddBoolToObject(builtin, "italic", false);
+        cJSON_AddItemToArray(fonts, builtin);
+    }
+
+    if (fos_assets_available()) {
+        char full[FOS_ASSETS_FULL_PATH_MAX];
+        fos_assets_full_path(full, sizeof(full), FOS_FONTS_DIR);
+        DIR *dir = opendir(full);
+        if (dir) {
+            int count = 0;
+            struct dirent *entry;
+            while ((entry = readdir(dir)) != NULL && count < FOS_FONTS_MAX_ENTRIES) {
+                if (font_name_is_junk(entry->d_name)) continue;
+                if (!font_name_is_ttf(entry->d_name)) continue;
+                cJSON *item = cJSON_CreateObject();
+                if (!item) break;
+                char name[FOS_ASSETS_PATH_MAX];
+                strlcpy(name, entry->d_name, sizeof(name));
+                size_t len = strlen(name);
+                if (len > 4) name[len - 4] = '\0'; /* strip .ttf for the label */
+                cJSON_AddStringToObject(item, "file", entry->d_name);
+                cJSON_AddStringToObject(item, "name", name);
+                cJSON_AddNumberToObject(item, "weight", 400);
+                cJSON_AddStringToObject(item, "weight_title", "Regular");
+                cJSON_AddBoolToObject(item, "italic",
+                                      font_contains_ci(entry->d_name, "italic"));
+                cJSON_AddItemToArray(fonts, item);
+                count++;
+            }
+            closedir(dir);
+        }
+    }
+    /* Absent when there is no card, so a caller can tell "no fonts synced" from
+     * "nowhere to sync them to" — the same distinction assets_list draws. */
+    cJSON_AddBoolToObject(msg, "mounted", fos_assets_available());
+
+    return send_cjson_response(req, msg);
+}
+
+static esp_err_t font_file_get_handler(httpd_req_t *req)
+{
+    REQUIRE_PROTECTED_ACCESS();
+
+    const char *prefix = "/api/fonts/";
+    const char *uri = req->uri;
+    if (strncmp(uri, prefix, strlen(prefix)) != 0) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    char name[FOS_ASSETS_PATH_MAX];
+    strlcpy(name, uri + strlen(prefix), sizeof(name));
+    char *query = strchr(name, '?');
+    if (query) *query = '\0';
+    url_decode(name);
+    if (name[0] == '\0' || strchr(name, '/') || strchr(name, '\\') ||
+        strstr(name, "..")) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid font filename");
+    }
+    if (!fos_assets_available()) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+
+    char rel_raw[FOS_ASSETS_PATH_MAX];
+    int written = snprintf(rel_raw, sizeof(rel_raw), "%s/%s", FOS_FONTS_DIR, name);
+    if (written <= 0 || (size_t)written >= sizeof(rel_raw)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid font filename");
+    }
+    char rel[FOS_ASSETS_PATH_MAX];
+    if (!fos_assets_sanitize_path(rel_raw, rel, sizeof(rel))) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid font filename");
+    }
+    struct stat st;
+    if (fos_assets_stat(rel, &st) != ESP_OK || S_ISDIR(st.st_mode)) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    char full[FOS_ASSETS_FULL_PATH_MAX];
+    fos_assets_full_path(full, sizeof(full), rel);
+    FILE *file = fopen(full, "rb");
+    if (!file) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
+    }
+    httpd_resp_set_type(req, "font/ttf");
+    httpd_resp_set_hdr(req, "Cache-Control", "max-age=86400");
+    size_t cap = 8 * 1024;
+    char *chunk = fos_big_malloc(cap);
+    if (!chunk) {
+        cap = 2048;
+        chunk = malloc(cap);
+    }
+    if (!chunk) {
+        fclose(file);
+        return httpd_resp_send_500(req);
+    }
+    esp_err_t err = ESP_OK;
+    while (err == ESP_OK) {
+        size_t r = fread(chunk, 1, cap, file);
+        if (ferror(file)) {
+            err = ESP_FAIL;
+            break;
+        }
+        err = httpd_resp_send_chunk(req, chunk, r);
+        if (r == 0) break; /* final zero-length chunk ends the response */
+    }
+    free(chunk);
+    fclose(file);
+    return err;
+}
+
 /* How many consecutive soft recv timeouts (recv_wait_timeout, 5s each) to
  * ride out before giving up on an upload chunk. Slow links stall; a stall
  * is only fatal once it outlives ~30s. */
@@ -2494,6 +2684,8 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
     const httpd_uri_t setup = {.uri = "/api/setup", .method = HTTP_POST, .handler = setup_post_handler};
     const httpd_uri_t scenes_info = {.uri = "/api/scenes", .method = HTTP_GET, .handler = scenes_get_handler};
     const httpd_uri_t scene_state = {.uri = "/api/scene-state", .method = HTTP_GET, .handler = scene_state_get_handler};
+    const httpd_uri_t api_fonts = {.uri = "/api/fonts", .method = HTTP_GET, .handler = fonts_list_get_handler};
+    const httpd_uri_t api_font_file = {.uri = "/api/fonts/*", .method = HTTP_GET, .handler = font_file_get_handler};
     REGISTER_ROUTE(root);
     REGISTER_ROUTE(ping);
     REGISTER_ROUTE(status);
@@ -2507,6 +2699,8 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
     REGISTER_ROUTE(setup);
     REGISTER_ROUTE(scenes_info);
     REGISTER_ROUTE(scene_state);
+    REGISTER_ROUTE(api_fonts);
+    REGISTER_ROUTE(api_font_file);
 
     httpd_uri_t render = {.uri = "/api/action/render", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_render_cb};
     httpd_uri_t ota = {.uri = "/api/action/ota", .method = HTTP_POST, .handler = action_handler, .user_ctx = s_ota_cb};

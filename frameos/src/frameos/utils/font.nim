@@ -6,7 +6,10 @@ import algorithm
 import tables
 import strutils
 import assets/fonts as fontAssets
+import frameos/channels
+import frameos/utils/memory
 import frameos/utils/paths
+import json
 when defined(frameosEmbedded) or defined(frameosWasm):
   import zippy
 
@@ -73,6 +76,103 @@ proc withEmojiFallback(typeface: Typeface, assetsPath: string): Typeface =
       if not typeface.hasFallbackTypeface(fallback):
         typeface.fallbacks.add(fallback)
 
+when defined(frameosEmbedded):
+  ## Custom fonts on an ESP32 come off the SD card, one at a time.
+  ##
+  ## This used to hand back the built-in face unconditionally, because a scene
+  ## authored on a desktop names fonts that were never going to be there and
+  ## parsing a TTF is the kind of allocation that ends a render. Now that the
+  ## backend can sync a project's fonts onto the card ("Sync fonts", which
+  ## refuses on a frame with no card), the file usually IS there, and silently
+  ## drawing in the wrong face made the sync a lie.
+  ##
+  ## Three guards keep it honest without keeping it dangerous:
+  ##
+  ## * exactly ONE custom face is cached, and asking for a different one drops
+  ##   the previous — the same one-typeface rule the SVG bridge already
+  ##   follows, for the same reason (internal heap, not PSRAM, is what runs
+  ##   out);
+  ## * a font file over EmbeddedMaxFontBytes is refused unparsed, because a
+  ##   CJK face is tens of megabytes and the failure mode of trying is a reset,
+  ##   not an exception;
+  ## * the parse is skipped when the device is already short of render
+  ##   headroom, and any failure falls back to the built-in face rather than
+  ##   losing the drawing. Text in the wrong face still says what it says.
+  const EmbeddedMaxFontBytes = 1024 * 1024
+  ## Headroom demanded before parsing, over and above the file itself: pixie
+  ## builds glyph tables well past the file size, and a render that is already
+  ## scraping by must not be the thing that pays for a nicer typeface.
+  const EmbeddedFontParseHeadroomBytes = 3 * 1024 * 1024
+
+  var embeddedCustomFontName = ""
+  var embeddedCustomTypeface: Typeface = nil
+  var embeddedRefusedFonts: Table[string, bool] = initTable[string, bool]()
+
+  proc embeddedRefuse(font: string, reason: string, extra: JsonNode = nil) =
+    ## Say why exactly once per font name: a scene that names a missing font
+    ## renders every interval, and one line per render is a log that cannot be
+    ## read.
+    if embeddedRefusedFonts.hasKey(font):
+      return
+    embeddedRefusedFonts[font] = true
+    var payload = %*{"event": "font:embedded:fallback", "font": font,
+                     "reason": reason}
+    if extra != nil:
+      for key, value in extra.pairs:
+        payload[key] = value
+    log(payload)
+
+  proc embeddedTypeface(font: string, assetsPath: string): Typeface =
+    if assetsPath.len == 0 or "/" in font or ".." in font or "~" in font:
+      return getDefaultTypeface()
+    if font == embeddedCustomFontName and embeddedCustomTypeface != nil:
+      return embeddedCustomTypeface
+
+    let fontPath = assetsPath & "/fonts/" & font
+    if not fileExists(fontPath):
+      embeddedRefuse(font, "not on this frame")
+      return getDefaultTypeface()
+
+    var fileBytes = 0
+    try:
+      fileBytes = int(getFileSize(fontPath))
+    except CatchableError:
+      fileBytes = 0
+    if fileBytes <= 0 or fileBytes > EmbeddedMaxFontBytes:
+      embeddedRefuse(font, "font file too large to parse on this device",
+                     %*{"bytes": fileBytes, "maxBytes": EmbeddedMaxFontBytes})
+      return getDefaultTypeface()
+
+    let headroom = availableRenderHeadroomBytes()
+    if headroom > 0 and headroom < fileBytes + EmbeddedFontParseHeadroomBytes:
+      # Not remembered: headroom is a moment, not a property of the font, and
+      # the next render may well have room.
+      log(%*{"event": "font:embedded:fallback", "font": font,
+             "reason": "not enough free memory to parse a font right now",
+             "headroomBytes": headroom, "bytes": fileBytes})
+      return getDefaultTypeface()
+
+    withLock typefaceLock:
+      if font == embeddedCustomFontName and embeddedCustomTypeface != nil:
+        return embeddedCustomTypeface
+      # Drop the previous custom face BEFORE parsing the new one: two parsed
+      # typefaces alive at once is the allocation this whole dance avoids.
+      embeddedCustomFontName = ""
+      embeddedCustomTypeface = nil
+      try:
+        embeddedCustomTypeface = parseTtf(readFile(fontPath))
+        embeddedCustomFontName = font
+        embeddedRefusedFonts.del(font)
+        log(%*{"event": "font:embedded:loaded", "font": font,
+               "bytes": fileBytes})
+      except CatchableError as error:
+        embeddedCustomTypeface = nil
+        embeddedCustomFontName = ""
+        embeddedRefuse(font, "could not be parsed", %*{"error": error.msg})
+    if embeddedCustomTypeface != nil:
+      return embeddedCustomTypeface
+    return getDefaultTypeface()
+
 proc getTypeface*(font: string, assetsPath: string,
     withEmoji = true): Typeface =
   ## `withEmoji = false` skips attaching the color-emoji fallback. Callers that
@@ -85,10 +185,7 @@ proc getTypeface*(font: string, assetsPath: string,
     else:
       getDefaultTypeface()
   when defined(frameosEmbedded):
-    # Custom scene font names often come from desktop/web renders. On embedded
-    # targets, reuse the parsed default typeface to avoid repeated TTF parsing
-    # and scarce internal heap pressure.
-    return getDefaultTypeface()
+    return embeddedTypeface(font, assetsPath)
   else:
     # sanitize input, expect only a legit file name (can't go .. or /etc/passwd)
     if "/" in font or ".." in font or "~" in font:

@@ -38,6 +38,71 @@ async def sync_assets(db: Session, redis: Redis, frame: Frame):
             await log(db, redis, frame.id, "stderr",
                       f"Warning: {assets_path} is not writable, skipping font sync")
 
+
+def _fonts_to_sync(db: Session, frame: Frame) -> list[tuple[str, bytes]]:
+    """(filename, bytes) for every font this project would put on a frame.
+
+    The bundled faces shipped with the repo plus the project's uploaded ones,
+    with the uploads winning on a name collision — the same set
+    upload_font_assets pushes over SSH, gathered as bytes so a transport that
+    is not a filesystem can use it too.
+    """
+    fonts: dict[str, bytes] = {}
+    for root, _, files in os.walk(local_fonts_path):
+        for file in files:
+            if not file.endswith(".ttf"):
+                continue
+            with open(os.path.join(root, file), "rb") as fh:
+                fonts[file] = fh.read()
+    for font in db.query(Assets).filter(
+        Assets.project_id == frame.project_id,
+        Assets.path.like("fonts/%.ttf"),
+    ).all():
+        name = font.path.split("/")[-1]
+        if name and font.data:
+            fonts[name] = font.data
+    return sorted(fonts.items())
+
+
+async def sync_embedded_font_assets(db: Session, redis: Redis, frame: Frame, listing) -> int:
+    """Font sync for an ESP32 with an SD card.
+
+    Same intent as upload_font_assets, different transport: an embedded frame
+    has no shell, so the writes go over its own HTTP asset API
+    (utils/embedded_assets, which chunks anything large). Returns how many
+    fonts were uploaded.
+
+    `listing` is the device's current asset listing, passed in rather than
+    fetched: the caller already had to read it to find out whether there is an
+    SD card at all, and a second round-trip to a board on a slow link is a
+    second chance to time out.
+    """
+    from app.utils import embedded_assets
+
+    assets_path = embedded_assets.embedded_assets_path(frame)
+    remote_sizes = {
+        str(entry.get("path")): int(entry.get("size") or 0)
+        for entry in listing.assets
+        if not entry.get("is_dir")
+    }
+
+    pending: list[tuple[str, bytes]] = []
+    for name, data in _fonts_to_sync(db, frame):
+        remote_path = f"{assets_path}/fonts/{name}"
+        # Size is the only cheap comparison the device offers; it is what the
+        # SSH path compares too.
+        if remote_sizes.get(remote_path) != len(data):
+            pending.append((remote_path, data))
+
+    if not pending:
+        await log(db, redis, frame.id, "stdout", "No fonts to upload")
+        return 0
+
+    await log(db, redis, frame.id, "stdout", f"Uploading {len(pending)} fonts to the SD card")
+    for remote_path, data in pending:
+        await embedded_assets.upload_asset(frame, redis, remote_path, data)
+    return len(pending)
+
 ASSETS_WRITABLE_MARKER = "FRAMEOS_ASSETS_WRITABLE"
 
 async def make_asset_folders(db: Session, redis: Redis, frame: Frame, assets_path: str) -> bool:

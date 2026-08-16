@@ -2568,13 +2568,39 @@ async def api_frame_assets_sync(
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-    if _is_embedded_frame(frame):
-        detail = (
-            "Asset sync is not supported for virtual frames — fonts are bundled with the renderer"
-            if is_virtual_frame(frame)
-            else "Asset sync is not supported for embedded frames — fonts are compiled into the firmware"
+    if is_virtual_frame(frame):
+        # Nowhere to sync to: a virtual frame renders in the browser with the
+        # fonts bundled into the wasm build.
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Asset sync is not supported for virtual frames — fonts are bundled with the renderer",
         )
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=detail)
+    if _is_embedded_frame(frame):
+        # An ESP32 with an SD card DOES have somewhere to keep fonts, and the
+        # renderer loads them from there (one parsed face at a time — see the
+        # embedded branch of frameos/src/frameos/utils/font.nim). Without a
+        # card there is no filesystem at all, and saying so beats pretending
+        # the sync worked.
+        from app.models.assets import sync_embedded_font_assets
+        from app.utils import embedded_assets
+
+        listing = await embedded_assets.list_assets(frame, redis)
+        if listing.mounted is False:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="No SD card on this frame — fonts have nowhere to go. Insert a card and try again.",
+            )
+        try:
+            uploaded = await sync_embedded_font_assets(db, redis, frame, listing)
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+        await _invalidate_frame_assets_cache(redis, frame, embedded_assets.embedded_assets_path(frame))
+        return {
+            "message": "Fonts synced successfully" if uploaded else "Fonts are already up to date",
+            "uploaded": uploaded,
+        }
     try:
         from app.models.assets import sync_assets
 

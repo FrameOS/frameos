@@ -546,15 +546,93 @@ async def test_get_asset_thumb_falls_back_to_original_on_undecodable_image(async
 
 
 @pytest.mark.asyncio
-async def test_assets_sync_refused_for_embedded(async_client, db, redis):
+async def test_assets_sync_refused_without_an_sd_card(async_client, db, redis):
+    # A board with no card has no filesystem at all. Saying so beats claiming
+    # the fonts went somewhere.
     frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([json_response({"assets": [], "mounted": False})])
 
-    with patch("app.models.assets.sync_assets", new=AsyncMock()) as sync_assets:
-        response = await async_client.post(f'/api/frames/{frame.id}/assets/sync')
+    with patch(FETCH, new=device):
+        with patch("app.models.assets.sync_embedded_font_assets", new=AsyncMock()) as sync:
+            response = await async_client.post(f'/api/frames/{frame.id}/assets/sync')
 
     assert response.status_code == 400
-    assert "not supported for embedded frames" in response.json()["detail"]
-    assert "compiled into the firmware" in response.json()["detail"]
+    assert "No SD card" in response.json()["detail"]
+    sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_assets_sync_uploads_fonts_to_the_sd_card(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([json_response({"assets": [], "mounted": True})])
+    uploaded: list[tuple[str, int]] = []
+
+    async def fake_upload(frame_arg, redis_arg, full_path, data):
+        uploaded.append((full_path, len(data)))
+        return {}
+
+    with patch(FETCH, new=device):
+        with patch("app.utils.embedded_assets.upload_asset", new=fake_upload):
+            response = await async_client.post(f'/api/frames/{frame.id}/assets/sync')
+
+    assert response.status_code == 200, response.text
+    assert response.json()["uploaded"] == len(uploaded)
+    assert uploaded, "the bundled fonts should have been pushed to an empty card"
+    # Straight into the fonts directory the device's /api/fonts route reads,
+    # and the renderer loads from.
+    assert all(path.startswith("/srv/assets/fonts/") for path, _ in uploaded)
+    assert all(path.endswith(".ttf") for path, _ in uploaded)
+
+
+@pytest.mark.asyncio
+async def test_assets_sync_skips_fonts_the_card_already_has(async_client, db, redis):
+    from app.models.assets import _fonts_to_sync
+
+    frame = await create_embedded_frame(async_client, db)
+    # Device-relative paths, exactly as the firmware reports them.
+    existing = [
+        {
+            "path": f"fonts/{name}",
+            "size": len(data),
+            "mtime": 0,
+            "is_dir": False,
+        }
+        for name, data in _fonts_to_sync(db, frame)
+    ]
+    device = FakeDevice([json_response({"assets": existing, "mounted": True})])
+    uploaded: list[str] = []
+
+    async def fake_upload(frame_arg, redis_arg, full_path, data):
+        uploaded.append(full_path)
+        return {}
+
+    with patch(FETCH, new=device):
+        with patch("app.utils.embedded_assets.upload_asset", new=fake_upload):
+            response = await async_client.post(f'/api/frames/{frame.id}/assets/sync')
+
+    assert response.status_code == 200, response.text
+    assert response.json()["uploaded"] == 0
+    assert uploaded == []
+
+
+@pytest.mark.asyncio
+async def test_assets_sync_refused_for_virtual_frames(async_client, db, redis):
+    # Virtual frames render in the browser out of the wasm bundle's own fonts.
+    response = await async_client.post('/api/frames/new', json={
+        'name': 'Virtual Frame',
+        'frame_host': '',
+        'server_host': 'localhost',
+        'mode': 'embedded',
+        'platform': 'virtual',
+    })
+    assert response.status_code == 200, response.text
+    frame_id = response.json()['frame']['id']
+
+    with patch("app.models.assets.sync_assets", new=AsyncMock()) as sync_assets:
+        response = await async_client.post(f'/api/frames/{frame_id}/assets/sync')
+
+    assert response.status_code == 400
+    assert "not supported for virtual frames" in response.json()["detail"]
     sync_assets.assert_not_awaited()
 
 
