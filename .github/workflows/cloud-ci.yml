@@ -34,6 +34,20 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - ".github/workflows/cloud-ci.yml"
+  # A release does not reach production through the `push` trigger above, and
+  # cannot be made to. "Release FrameOS" pushes `chore: version X` — which
+  # touches frameos/editor/package.json and frameos/wasm/package.json, both
+  # matched above — using the default GITHUB_TOKEN, and GitHub deliberately
+  # fires no `push` workflows for commits pushed with that token. 2026.8.23
+  # shipped with the cloud still serving 2026.8.22 for exactly this reason.
+  # (A `release: published` trigger would be just as dead: that release is
+  # created with `github.token` too.) `workflow_run` is the one event the
+  # recursion guard does not suppress, and it also lands where we want it —
+  # after the artefacts and images are published, not at the version bump
+  # near the start of the run.
+  workflow_run:
+    workflows: ["Release FrameOS"]
+    types: [completed]
   pull_request:
     paths:
       - "cloud/**"
@@ -62,6 +76,11 @@ concurrency:
 
 jobs:
   verify:
+    # A failed release publishes nothing to deploy, so do not spend a full
+    # verify on it. deploy `needs: verify`, so skipping here stops both.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     # Real Postgres for the backend-linking integration tests.
@@ -80,8 +99,14 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+    # A release run finishes minutes after it pushed the version bump, so a
+    # workflow_run event's own `github.sha` is not necessarily the main this
+    # deploy is about to ship. Verify the tip, so that what passed here is
+    # what goes out.
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && 'refs/heads/main' || '' }}
 
       # Reads the pnpm version from the packageManager field in package.json.
       - uses: pnpm/action-setup@v4
@@ -170,10 +195,16 @@ jobs:
   deploy:
     name: Deploy to production
     needs: verify
+    # Two ways in: a merge to main, and a finished release. A release that
+    # failed is not a release — deploying the half of it that landed is worse
+    # than deploying nothing.
     if: >-
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      vars.FRAMEOS_CLOUD_AUTO_DEPLOY == 'true'
+      vars.FRAMEOS_CLOUD_AUTO_DEPLOY == 'true' &&
+      (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.conclusion == 'success')
+      )
     runs-on: ubuntu-latest
 
     # Deployment history, and the one place the deploy secrets live. Nothing
@@ -197,6 +228,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_run' && 'refs/heads/main' || '' }}
 
       - name: Fetch the remote branches
         run: |
@@ -206,16 +238,35 @@ jobs:
       # Two merges landing minutes apart both reach this job. The older one
       # would deploy older code over newer, so it stands down: the tip's own
       # run is already queued behind this one on the concurrency group.
+      #
+      # A release is the one case where main having moved on is the *point*:
+      # the release run pushed `chore: version X` itself, and no push event
+      # exists for that commit to leave a run queued behind us. Standing down
+      # there would mean never deploying a release at all, which is the bug
+      # this trigger exists to fix — so take whatever main is now.
       - name: Stand down if main has moved on
         id: freshness
         run: |
           set -euo pipefail
           tip="$(git rev-parse origin/main)"
-          if [ "$tip" != "$GITHUB_SHA" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
+            # Re-sync to the tip before the wasm build below: deploy.sh
+            # resolves `main` from the remote itself, and would otherwise
+            # find a tree built from a slightly older commit and refuse it as
+            # dirty. Detaching is safe — the deploy is still named `main`
+            # (deploy.sh takes the ref from its argument), so --release-ref
+            # keeps reporting `main` and the branch guard keeps working.
+            git checkout --quiet --detach "$tip"
+            echo "release deploy: shipping origin/main at $tip" |
+              tee -a "$GITHUB_STEP_SUMMARY"
+            echo "sha=$tip" >>"$GITHUB_OUTPUT"
+            echo "proceed=true" >>"$GITHUB_OUTPUT"
+          elif [ "$tip" != "$GITHUB_SHA" ]; then
             echo "origin/main is now $tip, not $GITHUB_SHA; leaving the deploy to that run." |
               tee -a "$GITHUB_STEP_SUMMARY"
             echo "proceed=false" >>"$GITHUB_OUTPUT"
           else
+            echo "sha=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
             echo "proceed=true" >>"$GITHUB_OUTPUT"
           fi
 
@@ -344,11 +395,15 @@ jobs:
 
       - name: Summarise
         if: steps.live.outputs.proceed == 'true' && success()
+        env:
+          # Not $GITHUB_SHA: on a release-triggered run that is the event's
+          # commit, not the tip this job resolved and shipped.
+          DEPLOYED_SHA: ${{ steps.freshness.outputs.sha }}
         run: |
           {
             echo "### Deployed to production"
             echo
-            echo "\`main\` at \`$GITHUB_SHA\` is live at https://cloud.frameos.net"
+            echo "\`main\` at \`$DEPLOYED_SHA\` is live at https://cloud.frameos.net"
             echo
             echo "Roll back with \`ssh <host> frameos-cloud-update --rollback\`."
           } >>"$GITHUB_STEP_SUMMARY"
