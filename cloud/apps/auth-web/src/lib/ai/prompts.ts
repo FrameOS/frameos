@@ -62,10 +62,20 @@ Rules:
   description, fields, output, sources: { "config.json": "...", "app.ts": "..." } } } — copy the pattern
   from the "Weather" example scene when a custom data app is warranted.
 - render/svg uses a strict, limited SVG renderer. Supported tags ONLY: svg, g, path, rect, circle,
-  ellipse, line, polyline, polygon, linearGradient/radialGradient (gradientUnits="userSpaceOnUse" only,
-  no gradientTransform), title, desc. ANY other tag — including <text>, <use>, <image>, <filter>,
-  <mask>, <style>, <foreignObject> — makes the WHOLE SVG fail to render. A viewBox attribute is
-  required. Draw text with render/text apps layered after the SVG, never with SVG <text>.
+  ellipse, line, polyline, polygon, text/tspan, linearGradient/radialGradient
+  (gradientUnits="userSpaceOnUse" only, no gradientTransform), title, desc. ANY other tag — including
+  <use>, <image>, <filter>, <mask>, <style>, <foreignObject> — makes the WHOLE SVG fail to render. A
+  viewBox attribute is required.
+- SVG <text> is drawn as glyph outlines, so fill, stroke, gradients, opacity and transforms all work on
+  it. Supported: x, y, dx, dy (first value only), font-family, font-size, font-weight, font-style,
+  text-anchor (start/middle/end), dominant-baseline (alphabetic/middle/hanging/ideographic), and <tspan>
+  children with their own position and fill. NOT supported: textPath, textLength, letter-spacing,
+  per-glyph x/y lists, automatic wrapping (one line per text/tspan — position each line yourself), and
+  emoji (color glyphs have no outline). font-family names match the frame's font files loosely
+  ("PT Sans" or "PTSans-Bold.ttf" both find PTSans-Bold.ttf); an unknown family silently falls back to
+  the default face, so name a font from the list above when the exact face matters. On ESP32 frames only
+  the built-in Ubuntu face exists — font-family is ignored there. Prefer render/text apps when you need
+  wrapping, rich-text carets, or precise multi-line layout.
 `.trim();
 
 export function buildSystemPrompt(): string {

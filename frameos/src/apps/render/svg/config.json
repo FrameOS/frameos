@@ -22,7 +22,7 @@
       "value": "",
       "required": true,
       "label": "SVG",
-      "hint": "Provide raw SVG markup or a data URL like data:image/svg+xml;charset=utf-8,<svg...>."
+      "hint": "Provide raw SVG markup or a data URL like data:image/svg+xml;charset=utf-8,<svg...>. <text> is supported: one line per text/tspan (no wrapping), font-family matches the fonts in your assets folder, and unknown fonts fall back to the default."
     },
     {
       "name": "placement",

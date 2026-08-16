@@ -59,11 +59,28 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
       nextNode = -1.NodeId
     of 5.NodeId: # render/image
       self.node5.appConfig.image = block:
-        if cache1.isNone() or epochTime() > cache1Time + 900.0:
-          cache1 = some(block:
-            self.node6.get(context))
-          cache1Time = epochTime()
-        cache1.get()
+        if context.hasImage and not context.image.isNil and
+            context.decodeTargetImage.isNil and context.decodeTargetWidth == 0:
+          context.decodeTargetWidth = context.image.width
+          context.decodeTargetHeight = context.image.height
+          context.decodeTargetOwned = true
+          context.decodeTargetScalingMode = "cover"
+          context.decodeTargetNodeId = 6.NodeId
+          context.decodeTargetClaimedBy = 0.NodeId
+        let frameosFusedValue = block:
+          block:
+            if cache1.isNone() or epochTime() > cache1Time + 900.0:
+              cache1 = some(block:
+                self.node6.get(context))
+              cache1Time = epochTime()
+            cache1.get()
+        context.decodeTargetImage = nil
+        context.decodeTargetScalingMode = ""
+        context.decodeTargetWidth = 0
+        context.decodeTargetHeight = 0
+        context.decodeTargetNodeId = 0.NodeId
+        context.decodeTargetOwned = false
+        frameosFusedValue
       self.node5.run(context)
       nextNode = -1.NodeId
     of 4.NodeId: # render/color
