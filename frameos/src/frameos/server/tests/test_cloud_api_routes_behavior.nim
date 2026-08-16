@@ -104,6 +104,83 @@ suite "cloud enroll route behavior":
     check status.status == 200
     check not parseJson(status.body){"backend_managed"}.getBool(true)
 
+proc writeLinkState(state: JsonNode) =
+  createDir(workDir / "state")
+  writeFile(workDir / "state" / "cloud_link.json", $state)
+
+proc connectedLoginLink(localFallback: bool): JsonNode =
+  %*{
+    "status": "connected",
+    "provider_url": "https://cloud.example.com",
+    "scope": "frame:link auth:login",
+    "access_token": "cloud-token",
+    "local_fallback_enabled": localFallback,
+  }
+
+suite "local password login can be handed to the cloud":
+  setup:
+    drainEventChannel()
+    configureServerState(adminConfig(""))
+
+  test "the login screen and the login route agree that passwords are off":
+    writeLinkState(connectedLoginLink(false))
+    let options = httpRequest(server.port, "GET", "/api/cloud/login/options")
+    check options.status == 200
+    let payload = parseJson(options.body)
+    check payload{"available"}.getBool(false)
+    check not payload{"local_login_enabled"}.getBool(true)
+
+    let login = httpRequest(server.port, "POST", "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}))
+    check login.status == 403
+    check login.body.contains("Sign in with FrameOS Cloud")
+
+  test "a link that is not connected leaves the password working":
+    # The whole safety of the switch: no cloud, no lockout. Same stored flag,
+    # opposite answer, because nothing can take the password's place.
+    var state = connectedLoginLink(false)
+    state["status"] = %"disconnected"
+    writeLinkState(state)
+    check parseJson(httpRequest(server.port, "GET", "/api/cloud/login/options").body){
+      "local_login_enabled"}.getBool(false)
+    check loginAsAdmin().len > 0
+
+    # Same again for a live link that never carried auth:login.
+    state = connectedLoginLink(false)
+    state["scope"] = %"frame:link"
+    writeLinkState(state)
+    check loginAsAdmin().len > 0
+
+  test "turning passwords off needs a cloud link, turning them on never does":
+    writeLinkState(%*{"status": "disconnected", "local_fallback_enabled": false})
+    let cookie = loginAsAdmin()
+
+    let refused = httpRequest(server.port, "POST", "/api/cloud/local-fallback",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{"enabled": false}))
+    check refused.status == 409
+    check refused.body.contains("auth:login")
+
+    let restored = httpRequest(server.port, "POST", "/api/cloud/local-fallback",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{"enabled": true}))
+    check restored.status == 200
+    check parseJson(restored.body){"local_fallback_enabled"}.getBool(false)
+    check parseJson(readFile(workDir / "state" / "cloud_link.json")){
+      "local_fallback_enabled"}.getBool(false)
+
+  test "the switch is admin-only and validates its body":
+    writeLinkState(%*{"status": "disconnected"})
+    check httpRequest(server.port, "POST", "/api/cloud/local-fallback",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"enabled": true})).status == 401
+
+    let cookie = loginAsAdmin()
+    check httpRequest(server.port, "POST", "/api/cloud/local-fallback",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{})).status == 400
+
 # No stopServer/removeDir teardown: like the other behavior tests, the mummy
 # worker threads are torn down by process exit (an explicit close from the
 # main thread races the workers), and the temp workDir lives under the OS

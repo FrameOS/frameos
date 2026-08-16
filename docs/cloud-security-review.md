@@ -182,9 +182,13 @@ These are also tracked in `docs/todo.md`.
   disabled) fails closed, and `not user.password` is checked before the hash
   comparison. The real risk was the opposite — permanent lockout — now fixed.
 - **Can we hide local login on the frame when only cloud login is available?**
-  The backend already does this (`local_login_enabled` from
-  `/api/cloud/login/options`, enforced with a 403, and only disableable while a
-  live grants check passes so you cannot lock yourself out). The frame
-  hardcodes `local_login_enabled: true` and its UI ignores the field. Making it
-  real needs the flag persisted in the frame's cloud-link state plus
-  enforcement in the admin login — otherwise hiding the fields is cosmetic.
+  Yes, since 2026-08-16 — the frame now matches the backend it was measured
+  against. `local_fallback_enabled` lives in the frame's cloud-link state,
+  `POST /api/cloud/local-fallback` sets it behind an admin session, a live
+  grants check and a connected `auth:login` link, and `/api/admin/login`
+  answers 403 while it is off. Both the flag the login screen reads and the
+  check the login route runs go through one helper that ignores the stored
+  value unless cloud login can actually take over, so a dead link, a revoked
+  scope or an unlinked frame brings the password back on its own. Before this
+  the frame hardcoded `local_login_enabled: true` and hiding the fields was
+  cosmetic.

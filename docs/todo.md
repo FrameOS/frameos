@@ -107,11 +107,10 @@ enabled by default on images that have no backend to talk to.
   runs forever as root reconnecting to nothing. Ship `agentEnabled: false`; a
   backend's first deploy turns it on, which is the moment it becomes useful.
   Verify on hardware that backend adoption of a generic card still works.
-  *Small.*
-- **Mint `agentSharedSecret` on first boot when it is empty.** Frames created
-  through a backend get a 32-byte secret; the generic release image ships `""`,
-  so anyone who can point `serverHost` somewhere gets a root PTY with no secret
-  to guess. Independent of the item above and worth doing regardless. *Small.*
+  *Small.* (The companion item, minting a secret at first boot, was withdrawn
+  on 2026-08-16: the agent refuses to handshake at all with an empty secret, so
+  minting one would create a dial-out rather than close a hole. Reasoning in
+  the audit, observation 2.)
 - **Run `frameos.service` as a `frameos` user.** The plan, the privileged call
   sites and the suggested sequencing are in `docs/buildroot-privileges.md` §3.
   Privileged work moves behind one narrow enum-only door (`apply-setup`,
@@ -122,12 +121,21 @@ enabled by default on images that have no backend to talk to.
 
 ---
 
-## Drivers and the `.so` ABI
+## Drivers
 
 There are two ways to build a frame: `static` (everything in one binary) and
 `precompiled` (the published release binary plus its driver `.so`s, scenes
 interpreted). The `shared` and `shared-scenes` modes were removed on
 2026-08-16, and with them the largest unaudited ABI surface.
+
+- **Let a driver ask for an earlier retry.** Render hints travel host→driver
+  only (`driver_render_hint.nim` tells the driver how long until the next
+  pass); nothing travels back. So a driver that cannot draw yet — the
+  framebuffer waiting for a KMS modeset is the live example — is re-probed
+  only when the next render comes round, which on an hour-long interval means
+  an hour of blank panel after a boot that was seconds from working. The
+  driver knows it wants to be called back sooner and has no way to say so.
+  Wants a return channel through the `.so` ABI, so it is not a one-liner.
 
 - **Audit driver code for refs it did not allocate.** The rule and its
   reasoning now live at the top of `frameos/src/frameos/driver_abi.nim`: every
@@ -149,11 +157,7 @@ Three Raspberry Pi platforms ship with published base images: `raspberry-pi-64`
 (Zero 2 W / Pi 3 / Pi 4, the default), `raspberry-pi-32` (every ARMv6 board:
 Zero, Zero W, Pi 1, CM1) and `raspberry-pi-5` (Pi 5 / CM5).
 
-- **Prune the retired platforms from the base-image manifest.**
-  `tools/buildroot-images/manifest.json` still carries `raspberry-pi-zero-2-w`
-  and `raspberry-pi-zero-w` entries pinned at 2026.8.7. Both keys folded into
-  the two current ones and nothing offers them any more, so they are stale rows
-  that a reader has to work out are dead. *Small.*
+Nothing scheduled.
 
 ---
 
@@ -198,10 +202,6 @@ Open items from `docs/cloud-security-review.md`.
 - **The frame stores its link token in plaintext** (`state/cloud_link.json`,
   0600). Fix when there is hardware-backed key storage, or by redaction if the
   state file ever travels — support bundles, backups.
-- **Frame-side `local_login_enabled` is cosmetic.** `/api/cloud/login/options`
-  returns a hardcoded `true`. Persist the flag in the frame's cloud-link state
-  and enforce it in the admin login; until then, hiding the local login fields
-  means nothing. *Small.*
 
 ---
 

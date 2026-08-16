@@ -1531,6 +1531,39 @@ def test_format_duration_reads_as_a_wall_clock():
     assert embedded_firmware_module._format_duration(1462) == "24m22s"
 
 
+def _process_is_running(pid: int) -> bool:
+    """Whether *pid* is a process that can still do work.
+
+    `os.kill(pid, 0)` is not that question. A killed grandchild is an orphan,
+    and until whatever inherits it calls wait() it stays in the table as a
+    zombie: signal 0 keeps succeeding for a process that is already dead. On
+    Linux that wait can be a long time coming — in a container whose PID 1
+    does not reap, it never comes — while macOS reaps it in microseconds,
+    which is the whole difference between this test passing on a laptop and
+    failing in CI. So ask /proc what state the pid is in, and treat "no /proc"
+    (macOS, and a pid that is genuinely gone) as not running.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    if not os.path.isdir("/proc"):
+        # macOS has no zombie oracle; signal 0 is the whole answer there, and
+        # it reaps orphans promptly enough for that to be true.
+        return True
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as handle:
+            # The comm field can contain spaces and parentheses; state is the
+            # first field after the last ')'.
+            return handle.read().rsplit(b")", 1)[1].split()[0] != b"Z"
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+
+
 @pytest.mark.asyncio
 async def test_terminating_a_build_kills_the_processes_it_spawned():
     """The build runs under `bash -c`, so signalling the shell alone would
@@ -1543,13 +1576,18 @@ async def test_terminating_a_build_kills_the_processes_it_spawned():
         start_new_session=True,
     )
     child_pid = int((await process.stdout.readline()).strip())
-    os.kill(child_pid, 0)  # raises if the grandchild is not running
+    assert _process_is_running(child_pid)
 
     await embedded_firmware_module._terminate_process_group(process)
 
     assert process.returncode is not None
-    with pytest.raises(ProcessLookupError):
-        os.kill(child_pid, 0)
+    # The signal has landed by the time the shell is reaped, but the
+    # grandchild's own exit is asynchronous to it; give it a moment.
+    for _ in range(50):
+        if not _process_is_running(child_pid):
+            break
+        await asyncio.sleep(0.1)
+    assert not _process_is_running(child_pid)
 
 
 def test_build_root_is_redirectable_to_a_persistent_volume(monkeypatch, tmp_path):

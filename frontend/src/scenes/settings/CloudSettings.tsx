@@ -297,7 +297,8 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                 </div>
               </div>
             ) : null}
-            {!frameAdminMode && !inHassioIngress() && cloudStatus?.identity && link.scopes.includes('auth:login') ? (
+            {(frameAdminMode || (!inHassioIngress() && cloudStatus?.identity)) &&
+            link.scopes.includes('auth:login') ? (
               <div className="space-y-1 @md:flex @md:items-center @md:gap-2">
                 <div className="@md:w-1/3 @md:shrink-0">
                   <Label>Local password login</Label>
@@ -317,7 +318,9 @@ export function CloudSettingsSection({ headingId = 'settings-cloud' }: { heading
                         Disable local passwords
                       </Button>
                       <span className="frameos-muted">
-                        Requires a verified cloud login by the account that owns this install.
+                        {frameAdminMode
+                          ? 'The cloud link is checked first, and the password comes back by itself if the link ever goes away.'
+                          : 'Requires a verified cloud login by the account that owns this install.'}
                       </span>
                     </>
                   )}

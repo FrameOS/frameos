@@ -529,7 +529,7 @@ POST /api/cloud/login/start       # {"next"?} → {"authorization_url"}
 GET  /api/cloud/login/callback    # ?code&state → session cookie + redirect
 POST /api/cloud/identity/link     # logged-in handoff that links the identity instead
 POST /api/cloud/identity/unlink
-POST /api/cloud/local-fallback    # {"enabled": bool}
+POST /api/cloud/local-fallback    # {"enabled": bool} — turn the admin password off in favour of cloud login
 POST /api/cloud/features          # {"scopes": […]} — change enabled features in place
 POST /api/cloud/features/cancel   # forget a pending feature-change approval
 GET|POST /api/cloud/setup/{status,provider,connect,poll,disconnect}
@@ -556,12 +556,21 @@ GET  /api/cloud/store/drive/image/{sceneId}   # preview image proxy (attaches th
   "can_edit_provider": true,
   "poll_error": null,
   "connection": { "user_code": "…", "verification_uri": "…", "verification_uri_complete": "…", "expires_at": "…", "interval_seconds": 5 },
-  "link": { "linked_client_id": "…", "scopes": ["…"], "account_id": "…", "account_email": "…", "connected_at": "…", "last_inventory_sync_at": "…" }
+  "link": { "linked_client_id": "…", "scopes": ["…"], "account_id": "…", "account_email": "…", "connected_at": "…", "last_inventory_sync_at": "…" },
+  "local_fallback_enabled": true
 }
 ```
 
 `connection` is set only while `connecting`; `link` only while `connected`.
 The access token itself is never included.
+
+`local_fallback_enabled` is the **effective** answer, not the stored flag:
+turning the admin password off only means anything while cloud login can take
+over, so both sides report — and enforce — `true` again the moment the link
+drops or `auth:login` goes away. Turning it off therefore needs a connected
+link with `auth:login` and a provider round trip that proves the token still
+works; turning it back on needs nothing but an admin session. Nothing about
+the state of the cloud can leave an install or a frame with no way in.
 
 ## Running your own provider
 

@@ -48,6 +48,8 @@ type Driver* = ref object of FrameOSDriver
   # see the note on `render`.
   available*: bool
   unavailableLogged*: bool
+  probeFailureLogged*: bool
+  lastProbeError*: string
   renderBuffer: seq[uint8]
 
 proc logFrameBuffer(logger: DriverLogger, payload: JsonNode) =
@@ -158,6 +160,16 @@ proc getScreenInfo(logger: DriverLogger): ScreenInfo =
     var var_info: fb_var_screeninfo
     if ioctl(fd, FBIOGET_VSCREENINFO, addr var_info) != 0:
       raise newException(OSError, &"Unable to read framebuffer screen info from {DEVICE}")
+    # A successful ioctl is not a valid mode. `/dev/fb0` exists before the KMS
+    # driver has set one — and keeps existing when nothing is plugged in — and
+    # then answers with a mode of all zeros. Callers treat a raise as "not
+    # ready, keep the fallback and try again", and that is exactly what a
+    # zero-sized screen is; accepting it instead latched a driver that logged
+    # "Invalid framebuffer screen info" on every pass and never drew.
+    if var_info.xres == 0 or var_info.yres == 0 or var_info.bits_per_pixel == 0:
+      raise newException(OSError,
+        &"Framebuffer device {DEVICE} reports no mode yet " &
+        &"({var_info.xres}x{var_info.yres} @ {var_info.bits_per_pixel}bpp)")
     # The framebuffer can pad each row beyond xres * bytesPerPixel; writes must honor this stride
     var fix_info: fb_fix_screeninfo
     var lineLength = 0'u32
@@ -214,11 +226,13 @@ proc init*(frameOS: DriverContext): Driver =
   let logger = if frameOS.isNil: nil else: frameOS.logger
   var screenInfo: ScreenInfo
   var available = true
+  var probeError = ""
   try:
     tryToDisableCursorBlinking()
     screenInfo = getScreenInfo(logger)
   except DivByZeroDefect as e:
     available = false
+    probeError = e.msg
     screenInfo = configuredScreenInfo(frameOS)
     logFrameBuffer(logger, %*{"event": "driver:frameBuffer",
         "error": "Invalid framebuffer metadata caused division by zero",
@@ -226,6 +240,7 @@ proc init*(frameOS: DriverContext): Driver =
         "fallbackScreenInfo": screenInfo})
   except Exception as e:
     available = false
+    probeError = e.msg
     screenInfo = configuredScreenInfo(frameOS)
     logFrameBuffer(logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to initialize driver", "exception": e.msg,
@@ -241,6 +256,7 @@ proc init*(frameOS: DriverContext): Driver =
     screenInfo: screenInfo,
     logger: logger,
     available: available,
+    lastProbeError: probeError,
   )
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
@@ -277,10 +293,28 @@ proc render*(self: Driver, image: Image) =
     try:
       self.screenInfo = getScreenInfo(self.logger)
       self.available = true
-    except DivByZeroDefect:
-      discard
-    except Exception:
-      discard
+      self.probeFailureLogged = false
+    except DivByZeroDefect as e:
+      self.lastProbeError = e.msg
+    except Exception as e:
+      self.lastProbeError = e.msg
+
+  # Nothing to draw on until a probe lands: the screenInfo we hold is
+  # configuredScreenInfo's fabrication, and writing an invented stride into a
+  # device that has never described itself is a shot in the dark. Say so once
+  # and keep retrying — a frame on a long interval retries once per interval,
+  # which is the honest cost of only ever being asked to draw at render time.
+  if not self.available:
+    if not self.probeFailureLogged:
+      self.probeFailureLogged = true
+      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+          "error": "Framebuffer not ready, skipping renders until it is",
+          "device": DEVICE,
+          "probeError": self.lastProbeError,
+          "hint": "On a Pi 5 the firmware provides no framebuffer of its own " &
+            "(bcm2708_fb is Pi 1-4 only); config.txt needs dtoverlay=vc4-kms-v3d. " &
+            "A fb0 that answers with a 0x0 mode has no display attached yet."})
+    return
 
   let bitsPerPixel = self.screenInfo.bitsPerPixel
   if self.screenInfo.width == 0 or self.screenInfo.height == 0 or bitsPerPixel == 0:

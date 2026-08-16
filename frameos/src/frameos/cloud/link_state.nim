@@ -113,6 +113,9 @@ proc resetLinkState*(state: JsonNode, pollError: string = "") =
               "account_id", "account_email", "scope", "requested_scope",
               "poll_error", "local_origin",
               "connected_at", "last_inventory_sync_at", "login_states",
+              # Local password login is only ever off while cloud login can
+              # take over, so unlinking restores it.
+              "local_fallback_enabled",
               # Cloud-managed mode (docs/cloud-frames.md): leaving managed mode
               # or resetting the link always clears these too.
               "mode", "frame_id", "ws_path", "scenes_checksum", "managed_enroll_error"]:
@@ -133,6 +136,23 @@ proc expireIfNeeded*(state: JsonNode): bool =
 
 proc linkHasScope*(state: JsonNode, scope: string): bool =
   scope in state{"scope"}.getStr("").splitWhitespace()
+
+proc cloudLoginPossible*(state: JsonNode): bool =
+  ## Whether the browser could sign in through the provider right now — a
+  ## connected link that carries `auth:login`. The caller still has to check
+  ## that the admin panel has auth at all; that lives outside this module.
+  state{"status"}.getStr("") == "connected" and linkHasScope(state, "auth:login")
+
+proc localAdminLoginEnabled*(state: JsonNode): bool =
+  ## The effective answer to "may someone still sign in with the admin
+  ## password", never the stored flag on its own. Turning local passwords off
+  ## only means anything while cloud login can take over, so the moment the
+  ## link drops or `auth:login` goes away the password is live again. That is
+  ## what makes the switch safe to offer: no state of the cloud, and no
+  ## network, can leave a frame with no way in.
+  if not cloudLoginPossible(state):
+    return true
+  state{"local_fallback_enabled"}.getBool(true)
 
 proc linkScopes*(state: JsonNode): seq[string] =
   for scope in state{"scope"}.getStr("").splitWhitespace():

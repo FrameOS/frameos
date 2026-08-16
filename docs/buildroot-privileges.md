@@ -113,13 +113,23 @@ Three observations, in order of how much they matter:
 1. **It is not remotely reachable.** It dials out; it never listens. Nobody on
    the LAN or the internet can connect *to* it. This is the reason the finding
    is a hardening item and not an incident.
-2. **The secret is the empty string.** Authentication is
-   `HMAC(agentSharedSecret, serverApiKey || data)` with both halves empty in a
-   shipped image. Anyone who can set `serverHost` — a local admin session, an
-   SD card in hand, a bug in the config save — owns a root PTY with no secret to
-   guess. `ensure_buildroot_frame_defaults` mints a real 32-byte secret, but only
-   for frames created through a *backend*; the generic release image never gets
-   one.
+2. **The secret is the empty string, and that is what holds the door shut.**
+   Authentication is `HMAC(agentSharedSecret, serverApiKey || data)`, and both
+   halves are empty in a shipped image — which reads like "a root PTY with no
+   secret to guess", and this document said so in its first version. It is
+   wrong. `doHandshake` refuses before it sends anything when the secret is
+   empty (*"agent.agentSharedSecret is empty, FrameOS Remote cannot connect"*,
+   `frameos/remote/src/frameos_remote.nim`), so the agent never finishes a
+   handshake, never reaches its receive loop, and never runs a command; every
+   inbound command is then HMAC-verified against the same secret
+   (`verifyEnvelope`) before it is dispatched. An empty secret is fail-closed.
+
+   Which inverts the obvious remedy: minting a secret at first boot would turn
+   an agent that connects to nobody into one that connects to whatever
+   `serverHost` names — commands still unforgeable, but a dial-out where there
+   was none. `ensure_buildroot_frame_defaults` mints a real 32-byte secret for
+   frames created through a *backend*, which is the case where a secret is
+   wanted, and that is the right place for it to stay.
 3. **It is pure cost on a cloud frame.** A resident root process, a
    reconnect loop in the journal, ~2 MB of rootfs, and a `.so`-free but still
    non-trivial attack surface, in service of a control plane that by design does
@@ -141,9 +151,9 @@ by default on images that have no backend**":
 - Ship the release image with `agentEnabled: false`. A frame that later enrolls
   with a self-hosted backend gets the flag from that backend's deploy, which is
   exactly the moment it becomes useful.
-- Mint `agentSharedSecret` at first boot when it is empty, instead of shipping
-  `""`. Cheap, and it removes the "no secret to guess" clause whatever else
-  happens.
+- Leave `agentSharedSecret` empty on the generic image. It is the fail-closed
+  state (observation 2); the backend mints one when it adopts the frame, which
+  is when a secret has someone to share it with.
 - Keep the binary in the image (the backend-adoption path needs it present, and
   the OTA archive carries it anyway).
 
@@ -204,8 +214,8 @@ The split that fits:
    case on a Pi; anything that pokes `/dev/mem` does not, and those drivers
    would have to stay behind the privileged door or lose support.
 
-Sequencing that keeps each step verifiable: mint the shared secret and stop
-enabling Remote by default (§2, days) → enumerate the privileged call sites
+Sequencing that keeps each step verifiable: stop enabling Remote by default
+(§2, days) → enumerate the privileged call sites
 behind a single `privilegedCommand`-shaped chokepoint, which mostly exists
 already → introduce the helper with `reboot` and `apply-setup` only → flip
 `frameos.service` to the `frameos` user on one platform (`raspberry-pi-64`,

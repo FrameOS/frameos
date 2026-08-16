@@ -2,7 +2,8 @@ import json
 import base64
 import times
 import std/[os, strformat, strutils, tables]
-import frameos/utils/process
+import pixie
+import frameos/utils/image
 import checksums/md5
 import mummy
 import mummy/routers
@@ -16,6 +17,17 @@ import ./common
 # MB videos: serving one of those would blow straight through MemoryMax and
 # OOM-kill the service. Refuse anything bigger than this.
 const MaxAssetDownloadBytes* = 50 * 1024 * 1024
+
+# Asset thumbnails. Longest edge, and the cache filename/content type that go
+# with it. PNG because Pixie decodes eleven formats and encodes no JPEG; the
+# alternative was keeping the ImageMagick `convert` shell-out this replaced,
+# and ImageMagick is on no image FrameOS ships any more — which made every
+# thumbnail on a Buildroot frame a 500, in the admin panel, the backend's
+# frame API and the cloud's asset browser alike.
+const
+  ThumbnailMaxEdge* = 320
+  ThumbnailFileSuffix* = ".320x320.png"
+  ThumbnailContentType* = "image/png"
 
 proc contentTypeForAsset*(path: string): string =
   if path.endsWith(".css"):
@@ -254,6 +266,26 @@ proc frameAssetsPayload*(): JsonNode =
 
   return %*assets
 
+proc writeThumbnail*(sourcePath, thumbPath: string) =
+  ## Renders one cached thumbnail, in-process and inside the render memory
+  ## budget: the decode is asked for no more than a thumbnail's worth of
+  ## pixels up front, so a 40-megapixel photo never materialises full size to
+  ## be thrown away a moment later. Writes via a temp file so a concurrent
+  ## request for the same asset can never read a half-written cache entry.
+  var image = readImageWithDisplayBounds(sourcePath,
+    maxEdge = ThumbnailMaxEdge, maxPixels = ThumbnailMaxEdge * ThumbnailMaxEdge)
+  # Fit inside the box, never crop, never upscale — `convert -thumbnail
+  # 320x320` semantics. The bounded decode usually lands here already; a
+  # format whose decoder cannot scale on the way in arrives full size.
+  if image.width > ThumbnailMaxEdge or image.height > ThumbnailMaxEdge:
+    let scale = min(ThumbnailMaxEdge / image.width, ThumbnailMaxEdge / image.height)
+    image = image.resize(
+      max(1, (image.width.float * scale).int),
+      max(1, (image.height.float * scale).int))
+  let tempPath = thumbPath & "." & $getThreadId() & ".tmp"
+  writeFile(tempPath, image.encodeImage(PngFormat))
+  moveFile(tempPath, thumbPath)
+
 proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCode, headers: mummy.HttpHeaders, body: string] =
   let assetsPath = configuredAssetsPath()
   let relPath = path.strip()
@@ -291,7 +323,7 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
 
   let fullMd5 = getMD5(fullPath)
   let thumbRoot = assetsPath / ".thumbs"
-  let thumbPath = normalizedPath(thumbRoot / (fullMd5 & ".320x320.jpg"))
+  let thumbPath = normalizedPath(thumbRoot / (fullMd5 & ThumbnailFileSuffix))
   if not withinBasePath(thumbPath, thumbRoot):
     var headers: mummy.HttpHeaders
     headers["Content-Type"] = "application/json"
@@ -300,17 +332,14 @@ proc getAssetPayload*(path: string, thumb: bool): tuple[status: httpcore.HttpCod
   try:
     if not fileExists(thumbPath):
       createDir(parentDir(thumbPath))
-      let res = runProcessPiped("convert", @[fullPath, "-thumbnail", "320x320", thumbPath],
-                                timeoutMs = 60 * 1000, maxOutputBytes = 1024 * 1024)
-      let output = res.output & res.errorOutput
-      let exitCode = res.exitCode
-      if exitCode != 0:
-        var headers: mummy.HttpHeaders
-        headers["Content-Type"] = "application/json"
-        return (Http500, headers, $(%*{"detail": "Failed to generate thumbnail", "error": output}))
+      writeThumbnail(fullPath, thumbPath)
     var headers: mummy.HttpHeaders
-    headers["Content-Type"] = "image/jpeg"
+    headers["Content-Type"] = ThumbnailContentType
     return (Http200, headers, readFile(thumbPath))
+  except PixieError as e:
+    var headers: mummy.HttpHeaders
+    headers["Content-Type"] = "application/json"
+    return (Http500, headers, $(%*{"detail": "Failed to generate thumbnail", "error": e.msg}))
   except CatchableError as e:
     var headers: mummy.HttpHeaders
     headers["Content-Type"] = "application/json"
