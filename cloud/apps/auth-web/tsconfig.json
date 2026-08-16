@@ -33,6 +33,10 @@
     // legacy workspace components (bare JSX namespace, pre-strict typing).
     // Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/embedded-web-flasher.test.tsx",
+    // Same story: mounts EmbeddedReleaseFlasher, whose import graph reaches
+    // the legacy workspace components through framesModel.
+    // Vitest still runs it; only tsc leaves it out.
+    "src/test/shared-spa/embedded-release-flasher.test.tsx",
     // Same story: frameStatusGroups imports decorators/frame.tsx, which
     // renders the legacy connection dot/spinner components (bare JSX
     // namespace). Vitest still runs it; only tsc leaves it out.
