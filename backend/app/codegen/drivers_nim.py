@@ -420,6 +420,7 @@ import frameos/driver_context as driverContext
 import frameos/device_setup
 import frameos/channels as hostChannels
 import frameos/driver_abi
+import frameos/driver_render_hint
 {newline.join(setup_imports)}
 
 type
@@ -436,6 +437,7 @@ type
     library: LibHandle
     instance: pointer
     render: DriverRenderProc
+    earlierRender: DriverEarlierRenderProc
     toPng: DriverToPngProc
     turnOn: DriverActionProc
     turnOff: DriverActionProc
@@ -484,6 +486,16 @@ proc loadRequiredSymbol[T](library: LibHandle, driverName: string, symbol: strin
   if address.isNil:
     hostChannels.log(%*{{"event": "driver:shared:error", "driver": driverName,
         "error": "Missing symbol", "symbol": symbol}})
+    return nil
+  cast[T](address)
+
+proc loadOptionalSymbol[T](library: LibHandle, symbol: string): T =
+  ## For symbols a driver may legitimately not export (see
+  ## DriverEarlierRenderProc in frameos/driver_abi). Silent by design: a
+  ## missing optional symbol is an older `.so`, not an error to log once per
+  ## driver per boot.
+  let address = symAddr(library, symbol)
+  if address.isNil:
     return nil
   cast[T](address)
 
@@ -537,6 +549,8 @@ proc init*(frameOS: FrameOS) =
     )
     if spec.canRender:
       loaded.render = loadRequiredSymbol[DriverRenderProc](library, spec.name, "frameos_driver_render")
+      loaded.earlierRender = loadOptionalSymbol[DriverEarlierRenderProc](library,
+          "frameos_driver_earlier_render_seconds")
     if spec.canPng:
       loaded.toPng = loadRequiredSymbol[DriverToPngProc](library, spec.name, "frameos_driver_to_png")
     if spec.canTurnOnOff:
@@ -550,6 +564,11 @@ proc render*(image: Image) =
   for driver in loadedDrivers:
     if driver.spec.canRender and not driver.render.isNil:
       driver.render(driver.instance, cast[pointer](image))
+      # "Call me back sooner than the interval" — the library's own copy of
+      # the request (frameos/driver_render_hint), folded into ours. Polled
+      # immediately after the call that could have set it.
+      if not driver.earlierRender.isNil:
+        requestEarlierRender(driver.earlierRender(driver.instance).float)
 
 proc toPng*(rotate: int, flip: string): string =
   for driver in loadedDrivers:
@@ -594,7 +613,7 @@ def write_driver_library_nim(driver: Driver) -> str:
     if not driver.import_path:
         raise ValueError(f"Driver {driver.name} has no import path")
 
-    json_import = "import std/json\n"
+    json_import = "import std/json\nimport std/options\n"
     png_var = "\n  pngBuffer: string" if driver.can_png else ""
 
     image_import = "import pixie\n" if driver.can_render else ""
@@ -624,6 +643,15 @@ proc frameos_driver_render*(driver: pointer, image: pointer) {{.cdecl, exportc, 
   if driver.isNil:
     return
   {driver.name}Driver.render(cast[{driver.name}Driver.Driver](driver), cast[Image](image))
+
+proc frameos_driver_earlier_render_seconds*(driver: pointer): cdouble {{.cdecl, exportc, dynlib.}} =
+  ## Driver -> host: seconds until this driver would like another pass, or a
+  ## negative number for "nothing to ask for". The request lives in THIS
+  ## library's copy of frameos/driver_render_hint (its own ORC runtime, see
+  ## frameos/driver_abi); reading it here is how it reaches the host, and
+  ## reading it clears it, so one request is answered once.
+  let request = takeEarlierRenderRequest()
+  result = if request.isSome: request.get().cdouble else: -1.0
 """
 
     png_proc = ""
@@ -664,6 +692,7 @@ proc frameos_driver_turn_off*(driver: pointer) {{.cdecl, exportc, dynlib.}} =
 import frameos/channels
 import frameos/driver_context
 import frameos/driver_abi
+import frameos/driver_render_hint
 import drivers/{driver.import_path} as {driver.name}Driver
 {setup_import}
 

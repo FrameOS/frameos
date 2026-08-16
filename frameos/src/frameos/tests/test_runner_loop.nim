@@ -2,6 +2,7 @@ import std/[json, options, tables, sequtils, asyncdispatch, unittest, os]
 import pixie
 import ../boot_guard
 import ../config
+import ../driver_render_hint
 import ../runner
 import ../scenes
 import ../types
@@ -81,6 +82,16 @@ proc fastInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persis
     backgroundColor: parseHtmlColor("#ffffff")
   )
 
+proc hourlyInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
+  FrameScene(
+    id: sceneId,
+    frameConfig: frameConfig,
+    logger: logger,
+    state: %*{},
+    refreshInterval: 3600.0,
+    backgroundColor: parseHtmlColor("#ffffff")
+  )
+
 proc unusedRender(scene: FrameScene, context: ExecutionContext): Image =
   context.image
 
@@ -133,6 +144,113 @@ suite "runner loop safety":
     check messageLoop.finished
     check runnerThread.lastRenderAt > 0.0
     check sawRenderEvent
+
+  test "a driver asking for an earlier retry shortens the sleep":
+    # The framebuffer waiting for a KMS modeset is the live example: without
+    # the return channel it is re-probed only on the next scheduled pass, so a
+    # frame on a long interval stays blank for an interval after a boot that
+    # was seconds from working (frameos/driver_render_hint).
+    clearEventChannel()
+    clearEarlierRenderRequest()
+
+    let sceneId = "tests/runner/driver-retry".SceneId
+    var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+    uploaded[sceneId] = ExportedInterpretedScene(
+      name: "Hourly scene",
+      publicStateFields: @[],
+      persistedStateKeys: @[],
+      init: hourlyInit,
+      render: fastRender,
+      runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard
+    )
+    updateUploadedScenes(uploaded)
+
+    var config = loadConfig()
+    config.controlCode = ControlCode(
+      enabled: false,
+      position: "center",
+      size: 0,
+      padding: 0,
+      offsetX: 0,
+      offsetY: 0,
+      qrCodeColor: parseHtmlColor("#000000"),
+      backgroundColor: parseHtmlColor("#ffffff")
+    )
+
+    let store = LogStore(entries: @[])
+    var runnerThread = RunnerThread(
+      frameConfig: config,
+      scenes: initTable[SceneId, FrameScene](),
+      currentSceneId: sceneId,
+      lastRenderAt: 0.0,
+      sleepFuture: none(Future[void]),
+      isRendering: false,
+      triggerRenderNext: false,
+      logger: testLogger(config, store)
+    )
+
+    # Stands in for the driver: the runner reads the request off the same
+    # thread-local slot whether a statically linked driver wrote it or the host
+    # folded it back out of a `.so`.
+    requestEarlierRender(0.3)
+    # Two cycles: the first sleeps (and is the one that must be shortened),
+    # the second breaks out before sleeping again.
+    waitFor runnerThread.startRenderLoop(maxCycles = 2)
+
+    check hasEvent(store, "render:driver:retry")
+    for entry in store.entries:
+      if entry{"event"}.getStr() == "render:driver:retry":
+        check entry{"inSeconds"}.getFloat() == 0.3
+        check entry{"insteadOfSeconds"}.getFloat() > 3000.0
+      if entry{"event"}.getStr() == "render:sleep":
+        check entry{"ms"}.getFloat() == 300.0
+    # Consumed, not left standing for the next pass.
+    check takeEarlierRenderRequest().isNone
+
+  test "a driver request never lengthens a sleep the scene already wants sooner":
+    clearEventChannel()
+    clearEarlierRenderRequest()
+
+    let fastSceneId = "tests/runner/driver-retry-fast".SceneId
+    var fastUploaded = initTable[SceneId, ExportedInterpretedScene]()
+    fastUploaded[fastSceneId] = ExportedInterpretedScene(
+      name: "Fast scene",
+      publicStateFields: @[],
+      persistedStateKeys: @[],
+      init: fastInit,
+      render: fastRender,
+      runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard
+    )
+    updateUploadedScenes(fastUploaded)
+
+    var config = loadConfig()
+    config.controlCode = ControlCode(
+      enabled: false,
+      position: "center",
+      size: 0,
+      padding: 0,
+      offsetX: 0,
+      offsetY: 0,
+      qrCodeColor: parseHtmlColor("#000000"),
+      backgroundColor: parseHtmlColor("#ffffff")
+    )
+
+    let store = LogStore(entries: @[])
+    var runnerThread = RunnerThread(
+      frameConfig: config,
+      scenes: initTable[SceneId, FrameScene](),
+      currentSceneId: fastSceneId,
+      lastRenderAt: 0.0,
+      sleepFuture: none(Future[void]),
+      isRendering: false,
+      triggerRenderNext: false,
+      logger: testLogger(config, store)
+    )
+
+    requestEarlierRender(30.0)
+    waitFor runnerThread.startRenderLoop(maxCycles = 2)
+
+    check not hasEvent(store, "render:driver:retry")
 
   test "scene init errors render as scene errors and clear boot guard count":
     let savedBootGuardState = saveBootGuardState()

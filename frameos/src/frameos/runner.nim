@@ -29,6 +29,9 @@ const INKY_FAST_RENDER_THRESHOLD_MS = 2.0
 const SCENE_INIT_ERROR_REFRESH_SECONDS = 60.0
 const SCENE_INIT_ERROR_STATE_KEY = "__frameosSceneInitError"
 const DRIVER_IDLE_TURN_OFF_HEARTBEAT_SECONDS = 60
+# Floor for a driver's "call me back sooner" request. A driver asking for 0
+# would otherwise turn the render loop into a spin.
+const DRIVER_RETRY_MIN_SECONDS = 0.25
 
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
@@ -318,6 +321,11 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         # otherwise hold tens of MB of dead heap between refreshes.
         reclaimRenderMemory()
         clearNextRenderSeconds()
+      # Read (and clear) whatever the drivers asked for during that render.
+      # Outside the `finally` on purpose: the request has to survive a driver
+      # that raised, which is exactly the driver most likely to want another
+      # try. Applied to the sleep below.
+      let earlierRenderRequest = takeEarlierRenderRequest()
       markRuntimeDone()
 
       if interval < 1 or (nextSleep > 0 and nextSleep < interval):
@@ -363,6 +371,20 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       # If no sleep duration provided by the scene, calculate based on the interval
       sleepDuration = if nextSleep >= 0: nextSleep * 1000
                       else: max((interval - durationToSeconds(getMonoTime() - timer)) * 1000, 0.1)
+      # A driver that could not draw — the framebuffer waiting for a KMS
+      # modeset is the live example — asks to be called back sooner than the
+      # scene's own schedule (frameos/driver_render_hint). Advisory: it can
+      # only ever shorten the wait, never lengthen it, and never below the
+      # floor, so a driver stuck in a "not ready" loop costs one cheap probe
+      # every DRIVER_RETRY_MIN_SECONDS rather than a spinning render thread.
+      if earlierRenderRequest.isSome:
+        let requestedMs = max(earlierRenderRequest.get(), DRIVER_RETRY_MIN_SECONDS) * 1000
+        if requestedMs < sleepDuration:
+          self.logger.log(%*{"event": "render:driver:retry",
+            "device": self.frameConfig.device,
+            "inSeconds": round(requestedMs / 1000, 3),
+            "insteadOfSeconds": round(sleepDuration / 1000, 3)})
+          sleepDuration = requestedMs
       self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
 
       var nextDriverIdleTurnOffAt =

@@ -128,6 +128,7 @@ type
     library: LibHandle
     instance: pointer
     render: DriverRenderProc
+    earlierRender: DriverEarlierRenderProc
     toPng: DriverToPngProc
     turnOn: DriverActionProc
     turnOff: DriverActionProc
@@ -285,6 +286,16 @@ proc loadRequiredSymbol[T](library: LibHandle, driverName: string, symbol: strin
     return nil
   cast[T](address)
 
+proc loadOptionalSymbol[T](library: LibHandle, symbol: string): T =
+  ## For symbols a driver may legitimately not export (see
+  ## DriverEarlierRenderProc in frameos/driver_abi). Silent by design: a
+  ## missing optional symbol is an older `.so`, not an error to log once per
+  ## driver per boot.
+  let address = symAddr(library, symbol)
+  if address.isNil:
+    return nil
+  cast[T](address)
+
 proc setupSharedDriver(spec: DriverSpec, driverCtx: driverContext.DriverContext): SetupResult =
   let path = driverLibraryPath(spec)
   setupLog("FrameOS setup: shared driver " & spec.name & ": loading " & path)
@@ -344,6 +355,8 @@ proc init*(frameOS: FrameOS) =
     )
     if spec.canRender:
       loaded.render = loadRequiredSymbol[DriverRenderProc](library, spec.name, "frameos_driver_render")
+      loaded.earlierRender = loadOptionalSymbol[DriverEarlierRenderProc](library,
+          "frameos_driver_earlier_render_seconds")
     if spec.canPng:
       loaded.toPng = loadRequiredSymbol[DriverToPngProc](library, spec.name, "frameos_driver_to_png")
     if spec.canTurnOnOff:
@@ -357,6 +370,11 @@ proc render*(image: Image) =
   for driver in loadedDrivers:
     if driver.spec.canRender and not driver.render.isNil:
       driver.render(driver.instance, cast[pointer](image))
+      # "Call me back sooner than the interval" — the library's own copy of
+      # the request (frameos/driver_render_hint), folded into ours. Polled
+      # immediately after the call that could have set it.
+      if not driver.earlierRender.isNil:
+        requestEarlierRender(driver.earlierRender(driver.instance).float)
 
 proc toPng*(rotate: int, flip: string): string =
   for driver in loadedDrivers:

@@ -38,5 +38,15 @@ type
   DriverSetupProc* = proc(driverContext: pointer): bool {.cdecl.}
   DriverInitProc* = proc(frameOS: pointer, logHook: HostLogProc, sendEventHook: HostSendEventProc): pointer {.cdecl.}
   DriverRenderProc* = proc(driver: pointer, image: pointer) {.cdecl.}
+  ## Driver → host, the only value that travels back up: seconds until this
+  ## driver would like another render pass, negative for "nothing to ask for"
+  ## (`frameos/driver_render_hint`). A `cdouble` and not a struct on purpose —
+  ## it is the whole return channel, and it copies rather than shares.
+  ##
+  ## OPTIONAL symbol. A `.so` built before this existed does not export it, and
+  ## the host must treat a missing `frameos_driver_earlier_render_seconds` as
+  ## "no request" rather than as a broken driver: release binaries and their
+  ## driver libraries are versioned together, but a hand-copied `.so` is not.
+  DriverEarlierRenderProc* = proc(driver: pointer): cdouble {.cdecl.}
   DriverToPngProc* = proc(driver: pointer, rotate: cint, flip: cstring, length: ptr int): pointer {.cdecl.}
   DriverActionProc* = proc(driver: pointer) {.cdecl.}
