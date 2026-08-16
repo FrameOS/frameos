@@ -26,6 +26,7 @@ import scenes/scene_renderOpacity as scene_renderOpacity
 import scenes/scene_renderSplitData as scene_renderSplitData
 import scenes/scene_renderSplitFlow as scene_renderSplitFlow
 import scenes/scene_renderSplitLoop as scene_renderSplitLoop
+import scenes/scene_renderSvgText as scene_renderSvgText
 import scenes/scene_renderTextOverflow as scene_renderTextOverflow
 import scenes/scene_renderTextPosition as scene_renderTextPosition
 import scenes/scene_renderTextRich as scene_renderTextRich
@@ -43,7 +44,7 @@ import scenes/scene_weatherStackedLow as scene_weatherStackedLow
 
 let defaultSceneId* = some("black".SceneId)
 
-const sceneOptions*: array[38, tuple[id: SceneId, name: string]] = [
+const sceneOptions*: array[39, tuple[id: SceneId, name: string]] = [
   ("black".SceneId, "Black"),
   ("blue".SceneId, "Blue"),
   ("dataCodeFloat".SceneId, "Numeric Code Nodes"),
@@ -68,6 +69,7 @@ const sceneOptions*: array[38, tuple[id: SceneId, name: string]] = [
   ("renderSplitData".SceneId, "Split"),
   ("renderSplitFlow".SceneId, "Split"),
   ("renderSplitLoop".SceneId, "Split Loop"),
+  ("renderSvgText".SceneId, "SVG text"),
   ("renderTextOverflow".SceneId, "Text Overflow"),
   ("renderTextPosition".SceneId, "Text"),
   ("renderTextRich".SceneId, "Rich text"),
@@ -110,6 +112,7 @@ proc getExportedScenes*(): Table[SceneId, ExportedScene] =
   result["renderSplitData".SceneId] = scene_renderSplitData.exportedScene
   result["renderSplitFlow".SceneId] = scene_renderSplitFlow.exportedScene
   result["renderSplitLoop".SceneId] = scene_renderSplitLoop.exportedScene
+  result["renderSvgText".SceneId] = scene_renderSvgText.exportedScene
   result["renderTextOverflow".SceneId] = scene_renderTextOverflow.exportedScene
   result["renderTextPosition".SceneId] = scene_renderTextPosition.exportedScene
   result["renderTextRich".SceneId] = scene_renderTextRich.exportedScene

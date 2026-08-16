@@ -51,7 +51,22 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
       nextNode = -1.NodeId
     of 3.NodeId: # render/image
       self.node3.appConfig.image = block:
-        self.node5.get(context)
+        if context.hasImage and not context.image.isNil and
+            context.decodeTargetImage.isNil and context.decodeTargetWidth == 0:
+          context.decodeTargetImage = context.image
+          context.decodeTargetScalingMode = "center"
+          context.decodeTargetNodeId = 5.NodeId
+          context.decodeTargetClaimedBy = 0.NodeId
+        let frameosFusedValue = block:
+          block:
+            self.node5.get(context)
+        context.decodeTargetImage = nil
+        context.decodeTargetScalingMode = ""
+        context.decodeTargetWidth = 0
+        context.decodeTargetHeight = 0
+        context.decodeTargetNodeId = 0.NodeId
+        context.decodeTargetOwned = false
+        frameosFusedValue
       self.node3.run(context)
       nextNode = -1.NodeId
     of 4.NodeId: # render/image

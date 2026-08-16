@@ -10,22 +10,17 @@ import frameos/channels
 import frameos/utils/image
 import frameos/utils/url
 import frameos/utils/time
-import apps/render/image/app as render_imageApp
-import apps/data/localImage/app as data_localImageApp
-import apps/render/text/app as render_textApp
+import apps/render/svg/app as render_svgApp
 
 const DEBUG = false
 let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
 let PERSISTED_STATE_KEYS*: seq[string] = @[]
 
 type Scene* = ref object of FrameScene
-  node1: render_imageApp.App
-  node2: data_localImageApp.App
-  node3: render_textApp.App
+  node1: render_svgApp.App
 
 {.push hint[XDeclaredButNotUsed]: off.}
-var cache0: Option[Image] = none(Image)
-var cache0Time: float = 0
+
 
 proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   result = VNone()
@@ -39,34 +34,8 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
     currentNode = nextNode
     timer = epochTime()
     case nextNode:
-    of 1.NodeId: # render/image
-      self.node1.appConfig.image = block:
-        if context.hasImage and not context.image.isNil and
-            context.decodeTargetImage.isNil and context.decodeTargetWidth == 0:
-          context.decodeTargetWidth = context.image.width
-          context.decodeTargetHeight = context.image.height
-          context.decodeTargetOwned = true
-          context.decodeTargetScalingMode = "cover"
-          context.decodeTargetNodeId = 2.NodeId
-          context.decodeTargetClaimedBy = 0.NodeId
-        let frameosFusedValue = block:
-          block:
-            if cache0.isNone() or epochTime() > cache0Time + 900.0:
-              cache0 = some(block:
-                self.node2.get(context))
-              cache0Time = epochTime()
-            cache0.get()
-        context.decodeTargetImage = nil
-        context.decodeTargetScalingMode = ""
-        context.decodeTargetWidth = 0
-        context.decodeTargetHeight = 0
-        context.decodeTargetNodeId = 0.NodeId
-        context.decodeTargetOwned = false
-        frameosFusedValue
+    of 1.NodeId: # render/svg
       self.node1.run(context)
-      nextNode = 3.NodeId
-    of 3.NodeId: # render/text
-      self.node3.run(context)
       nextNode = -1.NodeId
     else:
       nextNode = -1.NodeId
@@ -110,41 +79,19 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 300.0, backgroundColor: parseHtmlColor("#000000"))
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 3600.0, backgroundColor: parseHtmlColor("#ffffff"))
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: ExecutionContext) = discard scene.runNode(nodeId, context))
   scene.getDataNode = (proc(nodeId: NodeId, context: ExecutionContext): Value = scene.getDataNode(nodeId, context))
-  scene.node1 = render_imageApp.App(nodeName: "render/image", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_imageApp.AppConfig(
-    inputImage: none(Image),
+  scene.node1 = render_svgApp.App(nodeName: "render/svg", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_svgApp.AppConfig(
+    svg: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"480\" viewBox=\"0 0 320 480\">\n  <rect x=\"0\" y=\"0\" width=\"320\" height=\"480\" fill=\"#ffffff\"/>\n\n  <linearGradient id=\"title\" gradientUnits=\"userSpaceOnUse\" x1=\"20\" y1=\"0\" x2=\"300\" y2=\"0\">\n    <stop offset=\"0\" stop-color=\"#1d4ed8\"/>\n    <stop offset=\"1\" stop-color=\"#be185d\"/>\n  </linearGradient>\n\n  <text x=\"160\" y=\"52\" font-size=\"38\" text-anchor=\"middle\" fill=\"url(#title)\">FrameOS</text>\n  <text x=\"160\" y=\"74\" font-size=\"13\" text-anchor=\"middle\" fill=\"#64748b\"\n        font-family=\"CascadiaMono\">SVG &#60;text&#62; font demo</text>\n  <line x1=\"20\" y1=\"88\" x2=\"300\" y2=\"88\" stroke=\"#cbd5e1\" stroke-width=\"1\"/>\n\n  <g font-size=\"17\" fill=\"#0f172a\">\n    <text x=\"20\" y=\"116\">Ubuntu, the built-in face</text>\n    <text x=\"20\" y=\"142\" font-family=\"PT Sans\">PT Sans, matched by name</text>\n    <text x=\"20\" y=\"168\" font-family=\"PT Sans\" font-weight=\"bold\">PT Sans, asked for bold</text>\n    <text x=\"20\" y=\"194\" font-family=\"Cormorant Garamond\" font-style=\"italic\" font-size=\"20\">Cormorant, asked for italic</text>\n    <text x=\"20\" y=\"220\" font-family=\"Peralta-Regular.ttf\">Peralta, named by file</text>\n    <text x=\"20\" y=\"246\" font-family=\"Nonesuch, sans-serif\" fill=\"#64748b\">Unknown family falls back</text>\n  </g>\n\n  <line x1=\"20\" y1=\"262\" x2=\"300\" y2=\"262\" stroke=\"#cbd5e1\" stroke-width=\"1\"/>\n\n  <line x1=\"160\" y1=\"272\" x2=\"160\" y2=\"330\" stroke=\"#f43f5e\" stroke-width=\"1\"/>\n  <g font-size=\"14\" fill=\"#0f172a\">\n    <text x=\"160\" y=\"288\" text-anchor=\"start\">anchor start</text>\n    <text x=\"160\" y=\"306\" text-anchor=\"middle\">anchor middle</text>\n    <text x=\"160\" y=\"324\" text-anchor=\"end\">anchor end</text>\n  </g>\n\n  <line x1=\"20\" y1=\"356\" x2=\"300\" y2=\"356\" stroke=\"#f43f5e\" stroke-width=\"1\"/>\n  <g font-size=\"13\" fill=\"#0f172a\">\n    <text x=\"24\" y=\"356\" dominant-baseline=\"hanging\">hanging</text>\n    <text x=\"112\" y=\"356\" dominant-baseline=\"middle\">middle</text>\n    <text x=\"190\" y=\"356\">alphabetic</text>\n  </g>\n\n  <text x=\"20\" y=\"392\" font-size=\"15\" fill=\"#0f172a\">one <tspan fill=\"#0f766e\"\n        font-weight=\"bold\">tspan</tspan> keeps the line going</text>\n  <text x=\"20\" y=\"414\" font-size=\"15\" fill=\"#0f172a\">10&#176;C &#8212; 07:45 &#8212; entities &amp; caps</text>\n\n  <g transform=\"translate(160 452) rotate(-5)\">\n    <text x=\"0\" y=\"0\" font-size=\"26\" text-anchor=\"middle\" fill=\"none\"\n          stroke=\"#1d4ed8\" stroke-width=\"0.8\">outlined &#38; rotated</text>\n  </g>\n</svg>",
     placement: "cover",
     offsetX: 0,
     offsetY: 0,
     blendMode: "normal",
-  ))
-  scene.node2 = data_localImageApp.App(nodeName: "data/localImage", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_localImageApp.AppConfig(
-    path: "./assets/image.png",
-    order: "random",
-    counterStateKey: "",
-    metadataStateKey: "",
-    search: "",
-  ))
-  scene.node2.init()
-  scene.node3 = render_textApp.App(nodeName: "render/text", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
-    text: "Activate proton beam",
     inputImage: none(Image),
-    richText: "disabled",
-    position: "center",
-    vAlign: "middle",
-    offsetX: 0.0,
-    offsetY: 0.0,
-    padding: 10.0,
-    fontColor: parseHtmlColor("#ffffff"),
-    fontSize: 32.0,
-    borderColor: parseHtmlColor("#000000"),
-    borderWidth: 2,
-    overflow: "fit-bounds",
   ))
   runEvent(self, context)
   

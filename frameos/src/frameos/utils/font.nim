@@ -149,10 +149,13 @@ proc getAvailableFonts*(assetsPath: string): seq[string] =
 const svgTypefaceBudget =
   when defined(frameosEmbedded): 1
   else: 8
-  ## How many distinct typefaces SVG text may hold in memory at once. Past it,
-  ## further families answer with the default face instead of parsing another
-  ## font: a scene that names a dozen fonts must not be the thing that runs a
-  ## frame out of heap.
+  ## How many fonts SVG text may pull into memory. Past it, further families
+  ## answer with the default face instead of parsing another font: a scene that
+  ## names a dozen fonts must not be the thing that runs a frame out of heap.
+  ##
+  ## Counted per font SVG itself caused to be parsed, not per entry in the
+  ## shared cache: a face a text app already loaded is free to reuse, and one
+  ## app's font list must not decide whether another's text renders.
 
 const genericFontFamilies = [
   "sansserif", "serif", "monospace", "cursive", "fantasy", "systemui",
@@ -167,6 +170,8 @@ var svgFontAssetsPath = "/srv/assets"
 var svgFontChoices: Table[string, string] = initTable[string, string]()
   ## family|weight|italic -> font file name, "" meaning the default face. The
   ## alternative is walking the fonts directory once per text run.
+var svgFontsParsed = 0
+  ## How many fonts SVG text has caused to be parsed, against svgTypefaceBudget.
 
 proc setSvgFontAssetsPath*(assetsPath: string) =
   ## Points SVG font resolution at this frame's assets. Called once at config
@@ -249,9 +254,13 @@ proc svgTypeface(family: string, weight: int, italic: bool): Typeface {.gcsafe.}
         let file = svgFontFileFor(family, weight, italic)
         if file.len == 0:
           return nil
-        if not typefaces.hasKey(file) and typefaces.len >= svgTypefaceBudget:
+        let alreadyParsed = typefaces.hasKey(file)
+        if not alreadyParsed and svgFontsParsed >= svgTypefaceBudget:
           return nil
-        return getTypeface(file, svgFontAssetsPath, withEmoji = false)
+        result = getTypeface(file, svgFontAssetsPath, withEmoji = false)
+        if not alreadyParsed:
+          withLock typefaceLock:
+            inc svgFontsParsed
     except CatchableError:
       # A corrupt TTF, a vanished assets directory: the drawing still renders.
       return nil

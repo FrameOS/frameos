@@ -38,7 +38,22 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
     case nextNode:
     of 1.NodeId: # render/image
       self.node1.appConfig.image = block:
-        self.node2.get(context)
+        if context.hasImage and not context.image.isNil and
+            context.decodeTargetImage.isNil and context.decodeTargetWidth == 0:
+          context.decodeTargetImage = context.image
+          context.decodeTargetScalingMode = "cover"
+          context.decodeTargetNodeId = 2.NodeId
+          context.decodeTargetClaimedBy = 0.NodeId
+        let frameosFusedValue = block:
+          block:
+            self.node2.get(context)
+        context.decodeTargetImage = nil
+        context.decodeTargetScalingMode = ""
+        context.decodeTargetWidth = 0
+        context.decodeTargetHeight = 0
+        context.decodeTargetNodeId = 0.NodeId
+        context.decodeTargetOwned = false
+        frameosFusedValue
       self.node1.run(context)
       nextNode = -1.NodeId
     else:
