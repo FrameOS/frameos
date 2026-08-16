@@ -21,7 +21,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.codegen.drivers_nim import (  # noqa: E402
-    COMPILATION_MODE_SHARED,
+    COMPILATION_MODE_PRECOMPILED,
     compiled_drivers,
     compilation_mode_uses_shared_drivers,
     driver_library_filename,
@@ -94,7 +94,7 @@ async def build_driver_libraries(
         generate_driver_sources(
             frameos_root=source_dir,
             config_path=config_path,
-            compilation_mode=COMPILATION_MODE_SHARED,
+            compilation_mode=COMPILATION_MODE_PRECOMPILED,
         )
 
         if not (source_dir / "quickjs" / "libquickjs.a").exists():

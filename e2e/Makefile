@@ -39,8 +39,6 @@ snapshots:
 	(cd "$$tmpdir" && make build COMPILATION_MODE="$(COMPILATION_MODE)") && \
 	cp "$$tmpdir/build/frameos" ./tmp/frameos-bin && \
 	rm -rf ./tmp/scenes && \
-	mkdir -p ./tmp/scenes && \
-	if [ -d "$$tmpdir/build/scenes" ]; then cp -r "$$tmpdir/build/scenes"/. ./tmp/scenes; fi && \
 	rm -rf ./tmp/drivers && \
 	mkdir -p ./tmp/drivers && \
 	if [ -d "$$tmpdir/build/drivers" ]; then cp -r "$$tmpdir/build/drivers"/. ./tmp/drivers; fi && \

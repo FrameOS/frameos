@@ -1,10 +1,11 @@
 import os
+import shutil
 import sys
 import json
 from pathlib import Path
 
 from app.codegen.drivers_nim import normalize_compilation_mode
-from app.codegen.scene_nim import scene_module_filename, write_scene_library_nim, write_scene_nim, write_scenes_nim
+from app.codegen.scene_nim import write_scene_nim, write_scenes_nim
 from app.models import Frame
 
 FIXTURE_URLS = {
@@ -102,11 +103,11 @@ if __name__ == '__main__':
     filter_str = filter_str.strip().lower()
 
     generated_dir.mkdir(exist_ok=True)
-    shared_generated_dir = generated_dir / 'shared'
-    if shared_generated_dir.exists():
-        for file_path in shared_generated_dir.glob('*.nim'):
-            file_path.unlink()
-    shared_generated_dir.mkdir(exist_ok=True)
+    # `generated/` is copied wholesale over src/scenes, so a `shared/` left
+    # behind by an older checkout would be handed to the build as scene
+    # library wrappers that nothing compiles any more (the `shared` and
+    # `shared-scenes` modes are gone). Clear it rather than leaving it to rot.
+    shutil.rmtree(generated_dir / 'shared', ignore_errors=True)
 
     all_files = sorted(scenes_dir.glob('*.json'))
     all_files_by_stem = {file_path.stem: file_path for file_path in all_files}
@@ -151,9 +152,6 @@ if __name__ == '__main__':
         scene_file_path = generated_dir / f'scene_{scene_name}.nim'
         with open(scene_file_path, 'w') as scene_file:
             scene_file.write(scene_nim)
-        scene_library_path = shared_generated_dir / scene_module_filename(scene_data)
-        with open(scene_library_path, 'w') as scene_library_file:
-            scene_library_file.write(write_scene_library_nim(scene_data))
 
     scenes_nim = write_scenes_nim(frame, compilation_mode=compilation_mode)
     scenes_nim_file_path = generated_dir / 'scenes.nim'
