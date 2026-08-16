@@ -201,6 +201,41 @@ frameos> ota                             # check for an OTA update now
 frameos> factory-reset
 ```
 
+## Self-hosted provisioning (no per-frame build)
+
+A self-hosted backend can flash a blank board two ways, and the deploy
+drawer's firmware card offers both:
+
+* **Flash latest release** writes the published *generic* image
+  (`frameos-<version>-esp32-{s3,c3}-generic.bin`) and then sends this frame's
+  settings over the USB console. Nothing has to be compiled.
+* **Flash from browser** compiles a per-frame image with those settings baked
+  into `main/generated_config.h`. The first build of a chip target is ~1100
+  ESP-IDF objects — tens of minutes on a NUC, over an hour on a Home
+  Assistant box.
+
+The two produce the same frame because every panel driver is compiled into
+every image and each baked value has a `set` key here. The command list the
+first path replays comes from the backend (`embedded_provisioning_plan` in
+`backend/app/tasks/embedded_firmware.py`), built from the same helpers that
+generate the header, so the two cannot drift. By hand it is:
+
+```
+frameos> set hardware xteink_x4          # board bundle FIRST: panel, wiring, buttons, TF socket
+frameos> set panel EPD_4in26             # then anything the frame overrides
+frameos> set pins rst=5,dc=4,cs=21,cs2=-1,busy=6,sck=8,mosi=10,pwr=-1
+frameos> set backend http://10.0.0.5:8989
+frameos> set api_key <the frame's server_api_key>
+frameos> set frame_id 9
+frameos> wifi MySSID MyPassword          # saves and reboots
+```
+
+Four things exist only as compile-time defaults, because the console has no
+key for them: the DHCP hostname, the HTTP response limit, the device's own
+TLS certificate, and the device admin login. A frame that terminates TLS is
+refused by the release path (its backend could not fetch from it); the rest
+are reported as warnings on the button.
+
 ## Cloud enrollment (cloud-managed frames)
 
 Generic firmware can enroll directly with a cloud provider (enrollment flow A

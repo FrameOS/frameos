@@ -1,0 +1,398 @@
+import { useEffect, useState } from 'react'
+import { CloudArrowDownIcon } from '@heroicons/react/24/outline'
+import { useActions } from 'kea'
+import type { Transport as EspTransport } from 'esptool-js'
+
+import { Spinner } from '../../components/Spinner'
+import {
+  embeddedUsbLogStreamSessionPort,
+  prepareSerialPortReconnect,
+  resolveLiveSerialPort,
+  startEmbeddedUsbLogStream,
+  stopEmbeddedUsbLogStream,
+  usbProvisionWifi,
+  usbRestart,
+  usbSet,
+  type EmbeddedUsbConfigKey,
+} from '../../models/embeddedUsbLogsModel'
+import { framesModel, scheduleEmbeddedUsbFrameImageRefresh } from '../../models/framesModel'
+import type { FrameId, FrameType } from '../../types'
+import { apiFetch } from '../../utils/apiFetch'
+import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
+import { downloadReleaseFirmware, releaseFirmwarePlatform } from './EmbeddedUsbFirmwareUpdate'
+import {
+  POST_FLASH_BOOT_WAIT_MS,
+  appendBrowserFlashLog,
+  createUsbLogTerminal,
+  loadEsptoolForFlash,
+  recordTransportTrace,
+  sleep,
+  uploadScenesOverUsbAfterFlash,
+  waitForUsbApiReadyAfterFlash,
+  watchdogResetAfterFlash,
+  type FlashLogTerminal,
+  type FlashPhase,
+  type FlashTraceRecorder,
+} from './EmbeddedWebFlasher'
+import { workspaceLogic } from './workspaceLogic'
+
+// Flash a BLANK board from the published release instead of compiling an
+// image for it.
+//
+// The other browser-flash path (EmbeddedWebFlasher) builds a per-frame image,
+// which bakes this frame's Wi-Fi, backend URL, API key, panel and wiring into
+// generated_config.h. Nothing about that is required: every panel driver is
+// compiled into every image, and each of those values has a `set` key on the
+// device's USB console. So this path writes the stock generic image and then
+// tells the board what it is over the same cable — the shape the cloud's
+// enrollment flasher has always used (Esp32CloudFlasher.tsx). What that buys
+// is the first build of a chip target, which is ~1100 ESP-IDF objects: tens of
+// minutes on a NUC, well over an hour on a Home Assistant box.
+//
+// The command list is the backend's (embedded_provisioning_plan), not this
+// component's: it comes from the same helpers that generate the header, so the
+// two paths cannot drift into producing different frames. It also reports what
+// this path CANNOT do — a frame terminating TLS with its own certificate has
+// no console key for it — and the button is refused for those frames.
+//
+// The counterpart for a board that is already enrolled is
+// EmbeddedUsbFirmwareUpdate: same release bytes, but written around the NVS
+// partition so the device keeps the settings this flow is here to establish.
+
+const PROVISION_COMMAND_TIMEOUT_MS = 15000
+
+export interface EmbeddedProvisioningSetting {
+  key: EmbeddedUsbConfigKey
+  value: string
+  secret: boolean
+}
+
+export interface EmbeddedProvisioningPlan {
+  supported: boolean
+  platform: string
+  releasePlatform: string | null
+  releaseFlashSize: string | null
+  blockers: string[]
+  warnings: string[]
+  settings: EmbeddedProvisioningSetting[]
+  wifi: { ssid: string; password: string } | null
+}
+
+export async function fetchProvisioningPlan(frameId: FrameId): Promise<EmbeddedProvisioningPlan> {
+  const response = await apiFetch(`/api/frames/${frameId}/embedded/provisioning`)
+  if (!response.ok) {
+    throw new Error('Could not work out what to provision this board with.')
+  }
+  return ((await response.json())?.provisioning ?? {}) as EmbeddedProvisioningPlan
+}
+
+/**
+ * Replay the plan over the board's USB API, in the order the backend gave it:
+ * `set hardware` applies a whole board bundle (panel, EPD wiring, buttons, TF
+ * socket), so everything this frame overrides on top of it has to come after.
+ *
+ * Wi-Fi goes last and reboots the board, because that is the point at which it
+ * is finished — a board that reconnects half-provisioned would call home as
+ * something that is not quite this frame.
+ */
+export async function provisionOverUsb(
+  frameId: FrameId,
+  plan: EmbeddedProvisioningPlan,
+  port: SerialPort,
+  onStatus: (message: string) => void
+): Promise<void> {
+  const total = plan.settings.length
+  for (const [index, setting] of plan.settings.entries()) {
+    onStatus(
+      `Provisioning the board (${index + 1}/${total}): ${setting.key}${setting.secret ? '' : ` = ${setting.value}`}`
+    )
+    await usbSet(frameId, setting.key, setting.value, {
+      port,
+      keepOpen: true,
+      timeoutMs: PROVISION_COMMAND_TIMEOUT_MS,
+    })
+  }
+}
+
+export function EmbeddedReleaseFlasher({
+  frame,
+  disabled = false,
+  onBusyChange,
+}: {
+  frame: FrameType
+  disabled?: boolean
+  onBusyChange?: (busy: boolean) => void
+}): JSX.Element | null {
+  const [phase, setPhase] = useState<FlashPhase>('idle')
+  const [message, setMessage] = useState<string | null>(null)
+  const [progress, setProgress] = useState<number | null>(null)
+  const [plan, setPlan] = useState<EmbeddedProvisioningPlan | null>(null)
+  const [planError, setPlanError] = useState<string | null>(null)
+  const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
+
+  const webSerialSupported = isWebSerialSupported()
+  const busy = phase === 'connecting' || phase === 'preparing' || phase === 'flashing'
+
+  useEffect(() => {
+    onBusyChange?.(busy)
+  }, [busy, onBusyChange])
+
+  useEffect(() => {
+    return () => onBusyChange?.(false)
+  }, [onBusyChange])
+
+  // Fetched up front, not on click: whether this frame can be provisioned at
+  // all decides whether the button appears, and its warnings are what the user
+  // needs BEFORE choosing this over a build.
+  useEffect(() => {
+    let cancelled = false
+    setPhase('idle')
+    setMessage(null)
+    setProgress(null)
+    setPlan(null)
+    setPlanError(null)
+    fetchProvisioningPlan(frame.id)
+      .then((fetched) => {
+        if (!cancelled) {
+          setPlan(fetched)
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPlanError(error instanceof Error ? error.message : String(error))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [frame.id])
+
+  const flash = async (): Promise<void> => {
+    if (!plan) {
+      return
+    }
+    let port: SerialPort | null = null
+    let transport: EspTransport | null = null
+    let flashTerminal: FlashLogTerminal | null = null
+    let traceRecorder: FlashTraceRecorder | null = null
+    let flashed = false
+    const setFlashMessage = (nextMessage: string | null): void => {
+      setMessage(nextMessage)
+      if (nextMessage) {
+        appendBrowserFlashLog(frame.id, nextMessage)
+      }
+    }
+
+    setPhase('connecting')
+    setProgress(null)
+    setFlashMessage('Selecting USB port')
+    try {
+      // Must run inside the click gesture, before any other await, or the
+      // browser refuses the port prompt.
+      const activeLogPort = embeddedUsbLogStreamSessionPort(frame.id)
+      port = activeLogPort ? await stopEmbeddedUsbLogStream(frame.id) : await navigator.serial.requestPort()
+      if (!port) {
+        setPhase('idle')
+        setMessage(null)
+        return
+      }
+      await prepareSerialPortReconnect(port)
+      openFrameToolBehindDrawer(frame.id, 'logs')
+
+      setPhase('preparing')
+      const releasePlatform = plan.releasePlatform || releaseFirmwarePlatform(frame)
+      const firmware = await downloadReleaseFirmware(releasePlatform, setFlashMessage)
+
+      // Loaded on demand: esptool-js adds ~380KB we only need when flashing.
+      const { ESPLoader, Transport } = await loadEsptoolForFlash()
+      transport = new Transport(port, false)
+      traceRecorder = recordTransportTrace(frame.id, transport)
+      flashTerminal = createUsbLogTerminal(frame.id)
+
+      setPhase('connecting')
+      setFlashMessage('Connecting to the board')
+      const loader = new ESPLoader({ transport, baudrate: 460800, enableTracing: true, terminal: flashTerminal })
+      const chip = await loader.main()
+
+      setPhase('flashing')
+      setFlashMessage(`Flashing ${firmware.name} to ${chip}`)
+      await loader.writeFlash({
+        // The merged provisioning image is the whole flash from 0x0
+        // (bootloader, partition table, blank otadata, app), so it goes down
+        // as one write. Nothing is spared: this board is not yet a frame, and
+        // its settings are about to be provisioned from scratch anyway.
+        fileArray: [{ address: 0x0, data: firmware.bytes }],
+        flashSize: 'keep',
+        flashMode: 'keep',
+        flashFreq: 'keep',
+        eraseAll: false,
+        compress: true,
+        reportProgress: (_fileIndex, written, total) => {
+          setProgress(total > 0 ? Math.min(100, Math.round((written / total) * 100)) : null)
+        },
+      })
+      flashed = true
+      traceRecorder.expectReboot()
+
+      if (!(await watchdogResetAfterFlash(loader))) {
+        try {
+          await transport.setDTR(false)
+          await transport.setRTS(true)
+          await sleep(100)
+          await transport.setRTS(false)
+          await transport.setDTR(false)
+        } catch (error) {
+          // The port drops if the chip already reset mid-command; the
+          // post-flash wait re-acquires it.
+        }
+      }
+      setPhase('preparing')
+      setProgress(null)
+      setFlashMessage('Firmware written. Waiting for the board to reboot.')
+    } catch (error) {
+      setPhase('error')
+      setProgress(null)
+      const detail = error instanceof Error ? error.message : String(error)
+      if (/No port selected/i.test(detail)) {
+        setPhase('idle')
+        setMessage(null)
+      } else {
+        const displayMessage = /Failed to open serial port/i.test(detail)
+          ? 'Could not open the serial port. Close other serial monitors and try again.'
+          : detail
+        setMessage(displayMessage)
+        appendBrowserFlashLog(frame.id, `Flash failed: ${displayMessage}`)
+        traceRecorder?.dumpAfterFailure()
+      }
+    } finally {
+      flashTerminal?.flush()
+      if (transport) {
+        try {
+          await transport.disconnect()
+        } catch (error) {}
+      }
+      if (flashed && port) {
+        try {
+          await sleep(POST_FLASH_BOOT_WAIT_MS)
+          port = await waitForUsbApiReadyAfterFlash(frame, port, setFlashMessage)
+          await provisionOverUsb(frame.id, plan, port, setMessage)
+          appendBrowserFlashLog(frame.id, `Provisioned ${plan.settings.length} setting(s) over USB.`)
+
+          // Scenes before the Wi-Fi reboot: the board is up and answering, and
+          // pushing them now saves a second boot wait. A frame with none gets
+          // them from the backend once it connects.
+          if (await uploadScenesOverUsbAfterFlash(frame, port, setFlashMessage)) {
+            const completeResponse = await apiFetch(`/api/frames/${frame.id}/embedded/usb_deploy_complete`, {
+              method: 'POST',
+            })
+            if (!completeResponse.ok) {
+              throw new Error('Scene upload completed, but backend deploy state update failed')
+            }
+          }
+
+          if (plan.wifi) {
+            setFlashMessage(`Joining ${plan.wifi.ssid} and restarting`)
+            await usbProvisionWifi(frame.id, plan.wifi.ssid, plan.wifi.password, { port, keepOpen: true })
+          } else {
+            setFlashMessage('Restarting the board')
+            await usbRestart(frame.id, { port, keepOpen: true })
+          }
+          // That reboot re-enumerates the USB device, so the port object the
+          // log stream below is handed has to be the replacement, not the one
+          // that went away with the reset.
+          port = (await resolveLiveSerialPort(port)) ?? port
+
+          framesModel.actions.loadFrame(frame.id)
+          scheduleEmbeddedUsbFrameImageRefresh(frame.id)
+          setPhase('done')
+          setFlashMessage(
+            plan.wifi
+              ? `Flashed the published firmware and provisioned this frame. The board is joining ${plan.wifi.ssid}.`
+              : 'Flashed the published firmware and provisioned this frame. Add a Wi-Fi network, or join one from the board’s setup portal.'
+          )
+        } catch (error) {
+          setPhase('error')
+          const detail = error instanceof Error ? error.message : String(error)
+          setFlashMessage(
+            `Firmware written, but provisioning did not finish: ${detail} The board is running FrameOS — ` +
+              'flash again to retry, or set the remaining values from "Set up over USB".'
+          )
+        }
+        const logStreamStarted = await startEmbeddedUsbLogStream(frame.id, port)
+        openFrameToolBehindDrawer(frame.id, 'logs')
+        if (!logStreamStarted) {
+          appendBrowserFlashLog(frame.id, 'USB serial log stream could not be reopened after flashing.')
+        }
+      }
+    }
+  }
+
+  // Nothing published for this chip (pico, virtual): the card's build path is
+  // the only one, and an explanation nobody asked for is just noise.
+  if (plan && !plan.releasePlatform) {
+    return null
+  }
+  if (!webSerialSupported) {
+    return null
+  }
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={flash}
+        disabled={disabled || busy || !plan?.supported}
+        title={
+          plan && !plan.supported
+            ? plan.blockers.join(' ')
+            : 'Write the latest published firmware and provision this frame over the same cable — no build needed.'
+        }
+        className="frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+      >
+        {busy ? <Spinner /> : <CloudArrowDownIcon className="h-4 w-4" />}
+        {phase === 'flashing' && progress !== null
+          ? `Flashing ${progress}%`
+          : busy
+          ? 'Flashing'
+          : 'Flash latest release'}
+      </button>
+      {planError ? (
+        <div className="frame-tool-muted text-xs leading-5">{planError}</div>
+      ) : plan && !plan.supported ? (
+        <div className="frame-tool-muted text-xs leading-5">
+          This frame has to build its own image: {plan.blockers.join(' ')}
+        </div>
+      ) : plan ? (
+        <div className="frame-tool-muted text-xs leading-5">
+          Writes the published {plan.releasePlatform} image and provisions this frame over USB — seconds instead of a
+          firmware build. Everything the board needs is sent over the cable afterwards.
+          {plan.warnings.length > 0 ? (
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {plan.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+      {phase === 'flashing' && progress !== null ? (
+        <div className="frameos-inset h-2 w-full overflow-hidden rounded-full border">
+          <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+        </div>
+      ) : null}
+      {message ? (
+        <div
+          className={
+            phase === 'error'
+              ? 'text-xs font-semibold text-red-500'
+              : phase === 'done'
+              ? 'text-xs font-semibold text-green-600'
+              : 'frame-tool-muted text-xs leading-5'
+          }
+        >
+          {message}
+        </div>
+      ) : null}
+    </div>
+  )
+}

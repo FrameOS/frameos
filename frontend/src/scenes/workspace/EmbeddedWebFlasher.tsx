@@ -41,7 +41,19 @@ export type FlashLogTerminal = IEspLoaderTerminal & { flush: () => void }
 type TraceableTransportInternals = { trace: (message: string) => void; lastTraceTime?: number }
 
 const FIRMWARE_POLL_INTERVAL_MS = 3000
-const FIRMWARE_POLL_TIMEOUT_MS = 10 * 60 * 1000
+// How long the build may go without the status payload moving at all before
+// it counts as hung. NOT a budget for the build: a first ESP-IDF build of a
+// chip target compiles ~1100 objects, which is half an hour on a NUC and well
+// over an hour on a Home Assistant box — a fixed deadline (this was 10
+// minutes) reported "Timed out waiting for the firmware build" on builds that
+// were running perfectly well, and the next flash then had to start over.
+// The worker republishes lastHeartbeatAt (and its ninja edge count) every 15
+// seconds while it compiles, and the backend itself marks a build failed once
+// that stops for EMBEDDED_FIRMWARE_INACTIVE_AFTER_SECONDS (15 minutes), so a
+// slightly longer stall window here only ever catches a backend that has
+// stopped answering at all.
+const FIRMWARE_STALL_TIMEOUT_MS = 16 * 60 * 1000
+const FIRMWARE_PROGRESS_REPORT_INTERVAL_MS = 60 * 1000
 export const POST_FLASH_BOOT_WAIT_MS = 7000
 // First boot after an erase-all flash formats the 24MB SPIFFS state
 // partition before the console starts — measured ~180s on a XIAO ESP32-S3
@@ -269,43 +281,83 @@ function firmwareFlashSize(frame: FrameType, firmware?: FirmwareStatus | null): 
   return normalizeFlashSize(firmware?.flashSize ?? frame.embedded?.flashSize ?? frame.embedded?.firmware?.flashSize)
 }
 
+function buildStartMessage(status: FirmwareStatus['status']): string {
+  return status === 'stale'
+    ? 'Rebuilding firmware from current settings'
+    : status === 'missing'
+    ? 'Rebuilding missing firmware image'
+    : 'Building firmware image'
+}
+
+/**
+ * What the build looks like from outside: its ninja edge count when the worker
+ * has published one, so the user can tell a build that is 4% done from one
+ * that is stuck. `startedAt` gives the elapsed time, which is the number that
+ * says whether it is worth waiting for.
+ */
+export function firmwareBuildProgressMessage(firmware: FirmwareStatus): string {
+  if (firmware.status === 'queued') {
+    return 'Waiting for a build worker'
+  }
+  const progress = firmware.buildProgress
+  const startedAt = firmware.startedAt ? Date.parse(firmware.startedAt) : NaN
+  const elapsedMinutes = Number.isNaN(startedAt) ? null : Math.floor((Date.now() - startedAt) / 60000)
+  const elapsed = elapsedMinutes && elapsedMinutes > 0 ? `, ${elapsedMinutes}m elapsed` : ''
+  if (!progress || !progress.total) {
+    return `Building firmware image${elapsed}`
+  }
+  return `Building firmware image: ${Math.round(progress.percent)}% (${progress.done}/${progress.total})${elapsed}`
+}
+
+/** Whatever in the status proves the build is still moving. */
+function firmwareActivityKey(firmware: FirmwareStatus): string {
+  return [firmware.status, firmware.lastHeartbeatAt ?? '', firmware.buildProgress?.done ?? ''].join('|')
+}
+
 /** Make sure a fresh firmware image exists, building one if needed. */
 async function ensureFirmwareReady(frameId: FrameId, onStatus: (message: string) => void): Promise<FirmwareStatus> {
   let firmware = await fetchFirmwareStatus(frameId)
   if (firmware.status !== 'ready') {
-    onStatus(
-      firmware.status === 'stale'
-        ? 'Rebuilding firmware from current settings'
-        : firmware.status === 'missing'
-        ? 'Rebuilding missing firmware image'
-        : 'Building firmware image'
-    )
+    onStatus(buildStartMessage(firmware.status))
     firmware = await startFirmwareBuild(frameId, firmware.status === 'stale' || firmware.status === 'missing')
 
-    const deadline = Date.now() + FIRMWARE_POLL_TIMEOUT_MS
     let recoveryAttempts = 0
+    let activityKey = firmwareActivityKey(firmware)
+    let stallDeadline = Date.now() + FIRMWARE_STALL_TIMEOUT_MS
+    let lastReportAt = Date.now()
     while (firmware.status !== 'ready') {
       if (firmware.status === 'missing' || firmware.status === 'stale') {
         if (recoveryAttempts >= 2) {
           throw new Error(firmware.error || 'Firmware image needs to be rebuilt')
         }
         recoveryAttempts += 1
-        onStatus(
-          firmware.status === 'stale'
-            ? 'Rebuilding firmware from current settings'
-            : 'Rebuilding missing firmware image'
-        )
+        onStatus(buildStartMessage(firmware.status))
         firmware = await startFirmwareBuild(frameId, true)
         continue
       }
       if (firmware.status === 'error') {
         throw new Error(firmware.error || 'Firmware build failed')
       }
-      if (Date.now() > deadline) {
-        throw new Error('Timed out waiting for the firmware build')
+      if (Date.now() > stallDeadline) {
+        throw new Error(
+          'The firmware build stopped reporting progress. Check the frame log, then start the flash again — ' +
+            'a build that is still running is picked up where it left off.'
+        )
       }
       await sleep(FIRMWARE_POLL_INTERVAL_MS)
       firmware = await fetchFirmwareStatus(frameId)
+      const nextActivityKey = firmwareActivityKey(firmware)
+      if (nextActivityKey !== activityKey) {
+        activityKey = nextActivityKey
+        stallDeadline = Date.now() + FIRMWARE_STALL_TIMEOUT_MS
+        // Every status message is also a frame-log line, and the build
+        // heartbeats every 15 seconds for anything up to an hour. Report on
+        // the minute instead of writing 240 lines about the same build.
+        if (Date.now() - lastReportAt >= FIRMWARE_PROGRESS_REPORT_INTERVAL_MS) {
+          lastReportAt = Date.now()
+          onStatus(firmwareBuildProgressMessage(firmware))
+        }
+      }
     }
   }
   return firmware
@@ -424,7 +476,11 @@ function scenesArriveFromCloud(frame: FrameType): boolean {
   return isEsp32CloudFrame(frame)
 }
 
-async function uploadScenesOverUsbAfterFlash(
+/** Send the workspace's scenes to a board that has just come back on USB.
+ * Retries: the board answers `status` before its scene store is settled often
+ * enough that one attempt loses a first deploy. Returns false when the frame
+ * has no scenes to send. */
+export async function uploadScenesOverUsbAfterFlash(
   frame: FrameType,
   port: SerialPort,
   onStatus: (message: string) => void
@@ -596,9 +652,11 @@ export function EmbeddedUsbConnectionButton({
 
 export function EmbeddedWebFlasher({
   frame,
+  disabled = false,
   onBusyChange,
 }: {
   frame: FrameType
+  disabled?: boolean
   onBusyChange?: (busy: boolean) => void
 }): JSX.Element {
   const [phase, setPhase] = useState<FlashPhase>('idle')
@@ -658,17 +716,11 @@ export function EmbeddedWebFlasher({
       openFrameToolBehindDrawer(frame.id, 'logs')
       appendBrowserFlashLog(frame.id, 'USB port selected')
 
-      // Loaded on demand: esptool-js adds ~380KB we only need when actually flashing
-      const { ESPLoader, Transport } = await loadEsptoolForFlash()
-      transport = new Transport(port, false)
-      traceRecorder = recordTransportTrace(frame.id, transport)
-      flashTerminal = createUsbLogTerminal(frame.id)
-
-      setFlashMessage('Connecting to the board')
-      const loader = new ESPLoader({ transport, baudrate: 460800, enableTracing: true, terminal: flashTerminal })
-      const chip = await loader.main()
-      setFlashMessage(`Connected to ${chip}`)
-
+      // The image comes first, and the board is only put into download mode
+      // once there are bytes to write. A first build of a chip target takes
+      // tens of minutes; connecting first would hold the chip in the ROM
+      // bootloader for all of it, with the serial port claimed and the frame
+      // showing nothing.
       setPhase('preparing')
       const firmwareStatus = await ensureFirmwareReady(frame.id, setFlashMessage)
       const downloadUrl = firmwareStatus.downloadUrl || `/api/frames/${frame.id}/embedded/firmware/download`
@@ -677,6 +729,18 @@ export function EmbeddedWebFlasher({
       const flashSize = firmwareFlashSize(frame, firmwareStatus)
       setFlashMessage('Downloading firmware image')
       const firmware = await downloadFirmware(downloadUrl)
+
+      // Loaded on demand: esptool-js adds ~380KB we only need when actually flashing
+      const { ESPLoader, Transport } = await loadEsptoolForFlash()
+      transport = new Transport(port, false)
+      traceRecorder = recordTransportTrace(frame.id, transport)
+      flashTerminal = createUsbLogTerminal(frame.id)
+
+      setPhase('connecting')
+      setFlashMessage('Connecting to the board')
+      const loader = new ESPLoader({ transport, baudrate: 460800, enableTracing: true, terminal: flashTerminal })
+      const chip = await loader.main()
+      setFlashMessage(`Connected to ${chip}`)
 
       // Keep-settings: write the image in segments around its NVS partition so
       // whatever the board saved at runtime (Wi-Fi joined over the console,
@@ -829,7 +893,7 @@ export function EmbeddedWebFlasher({
         <button
           type="button"
           onClick={flash}
-          disabled={busy}
+          disabled={disabled || busy}
           className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
         >
           {busy ? <Spinner color="white" /> : <BoltIcon className="h-4 w-4" />}
@@ -839,7 +903,7 @@ export function EmbeddedWebFlasher({
             ? 'Flashing'
             : 'Flash from browser'}
         </button>
-        <EmbeddedUsbConnectionButton frame={frame} disabled={busy} />
+        <EmbeddedUsbConnectionButton frame={frame} disabled={disabled || busy} />
       </div>
       {canKeepSettings ? (
         <label className="frame-tool-muted flex items-center gap-2 text-xs leading-5">

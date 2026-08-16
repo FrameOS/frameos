@@ -80,6 +80,7 @@ import { registeredFramePanel } from './addFramePanelRegistry'
 import { pushScenesOverUsb, pushedScenesMessage } from './embeddedUsbScenePush'
 import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
 import { EmbeddedUsbConnectionButton, EmbeddedWebFlasher } from './EmbeddedWebFlasher'
+import { EmbeddedReleaseFlasher } from './EmbeddedReleaseFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
 import { framePendingCommandsLogic, pendingCommandLabel, type FramePendingCommand } from './framePendingCommandsLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -1937,7 +1938,11 @@ function EmbeddedFirmwareSection({
   onOtaUpdate: () => void
 }): JSX.Element {
   const [copied, setCopied] = useState(false)
-  const [browserFlashBusy, setBrowserFlashBusy] = useState(false)
+  const [buildFlashBusy, setBuildFlashBusy] = useState(false)
+  const [releaseFlashBusy, setReleaseFlashBusy] = useState(false)
+  // Two flashers share one cable and one board; either one running is "busy"
+  // for everything else on this card.
+  const browserFlashBusy = buildFlashBusy || releaseFlashBusy
   const firmware = frame.embedded?.firmware
   const platformLabel = frame.embedded?.platform || 'esp32-s3'
   // Pico-family boards flash a generic UF2 release asset over BOOTSEL and are
@@ -2052,8 +2057,10 @@ function EmbeddedFirmwareSection({
         <>
           <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
             <div className="frame-tool-muted text-sm leading-5">
-              Plug the board into this computer over USB, then flash it straight from the browser. The firmware is built
-              on demand, so the first flash can take a few minutes.
+              Plug the board into this computer over USB, then flash it straight from the browser. “Flash latest
+              release” writes the published image and sends this frame’s settings over the cable — the quick way to a
+              working board. “Flash from browser” compiles an image with those settings baked in instead; the first
+              build of a chip target can take an hour on a small machine.
               {showUsbJtagPortGuidance ? (
                 <span className="mt-2 block">
                   The 13.3&quot; ESP32 board can appear as two serial ports. Choose
@@ -2064,7 +2071,13 @@ function EmbeddedFirmwareSection({
                 </span>
               ) : null}
             </div>
-            <EmbeddedWebFlasher frame={frame} onBusyChange={setBrowserFlashBusy} />
+            {/* Backend mode only, like the release updater below: a device's
+                own frame-admin bundle serves neither /api/frames/firmware nor
+                the provisioning plan. */}
+            {workspaceMode() === 'backend' && hasReleaseFirmwarePlatform(frame) ? (
+              <EmbeddedReleaseFlasher frame={frame} disabled={buildFlashBusy} onBusyChange={setReleaseFlashBusy} />
+            ) : null}
+            <EmbeddedWebFlasher frame={frame} disabled={releaseFlashBusy} onBusyChange={setBuildFlashBusy} />
           </div>
           {/* Backend mode only: the frame-admin bundle renders this section
               too, but a device serves no /api/frames/firmware release pipe —

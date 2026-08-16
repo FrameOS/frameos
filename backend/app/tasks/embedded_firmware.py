@@ -535,6 +535,16 @@ EMBEDDED_FLASH_PROFILES: dict[str, dict[str, Any]] = {
         "otaSupported": True,
     },
 }
+# The published GENERIC images (release assets), and the layout each is built
+# with — the esp32 job in .github/workflows/docker-publish-multi.yml, via
+# embedded/esp32/ci_build_image.sh. They carry no per-frame configuration at
+# all: a board flashed with one is told what it is over the USB console
+# afterwards (embedded_provisioning_plan). Keep in sync with
+# PROVISIONING_ASSETS in app/api/firmware_release.py.
+EMBEDDED_RELEASE_FIRMWARE: dict[str, dict[str, str]] = {
+    "esp32-s3": {"asset": "esp32-s3-generic", "flashSize": "8MB"},
+    "esp32-c3": {"asset": "esp32-c3-generic", "flashSize": "4MB"},
+}
 # Memory guardrail (M4): the on-device renderer composites into an RGBA pixie
 # buffer (4 B/px), packs it to the selected panel format, and needs headroom
 # for the Nim heap + QuickJS. Keep the reserve in sync with
@@ -1425,6 +1435,29 @@ def embedded_firmware_config_hash(frame: Frame) -> str:
     return hashlib.sha256(generated.encode("utf-8")).hexdigest()
 
 
+def embedded_backend_url_for_frame(frame: Frame) -> str:
+    """Where the device reaches this backend: what the built image bakes in as
+    FRAMEOS_DEFAULT_BACKEND_URL, and what console provisioning sends as
+    `set backend`. Empty when the frame has no server host yet."""
+    server_host = str(frame.server_host or "")
+    if not server_host:
+        return ""
+    server_port = int(frame.server_port or 8989)
+    scheme = "https" if server_port == 443 else "http"
+    if server_port in (80, 443):
+        return f"{scheme}://{server_host}"
+    return f"{scheme}://{server_host}:{server_port}"
+
+
+def _embedded_device_config_value(frame: Frame, *keys: str) -> object:
+    """First present of ``keys`` in the frame's device_config (camel or snake)."""
+    device_config = embedded_device_config(frame)
+    for key in keys:
+        if key in device_config:
+            return device_config[key]
+    return None
+
+
 def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: str = "") -> str:
     """Per-frame compile-time defaults baked into the image (NVS overrides win).
 
@@ -1444,12 +1477,7 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
             + '"'
         )
 
-    server_host = str(frame.server_host or "")
-    server_port = int(frame.server_port or 8989)
-    scheme = "https" if server_port == 443 else "http"
-    backend_url = f"{scheme}://{server_host}:{server_port}" if server_host else ""
-    if server_host and server_port in (80, 443):
-        backend_url = f"{scheme}://{server_host}"
+    backend_url = embedded_backend_url_for_frame(frame)
     https_proxy = normalize_https_proxy(frame.https_proxy)
     tls_certs = https_proxy.get("certs", {})
     tls_port = https_proxy.get("port") or 8443
@@ -1502,13 +1530,8 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
 
     # Optional power-management settings (M4). Absent → firmware defaults
     # (no deep sleep, no battery pin); all still overridable from the device.
-    device_config = embedded_device_config(frame)
-
     def _config_value(*keys: str) -> object:
-        for key in keys:
-            if key in device_config:
-                return device_config[key]
-        return None
+        return _embedded_device_config_value(frame, *keys)
 
     deep_sleep = _config_value("deepSleep", "deep_sleep")
     if isinstance(deep_sleep, bool):
@@ -1531,6 +1554,183 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
     if isinstance(battery_divider, (int, float)) and not isinstance(battery_divider, bool):
         lines.append(f"#define FRAMEOS_DEFAULT_BATTERY_DIVIDER {float(battery_divider)}f")
     return "\n".join(lines) + "\n"
+
+
+def _provisioning_setting(key: str, value: object, secret: bool = False) -> dict[str, Any]:
+    return {"key": key, "value": str(value), "secret": secret}
+
+
+def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
+    """What the published GENERIC firmware has to be told to become this frame.
+
+    The browser flasher's other path builds a per-frame image, which bakes
+    every setting below into generated_config.h — a full ESP-IDF compile, tens
+    of minutes on a small self-hosted box for the first build of a chip target.
+    Nothing about that is required: all panel drivers are compiled into every
+    image (embedded/esp32/main/fos_defaults.h) and every baked value here has a
+    `set` key on the device's USB console (cmd_set in fos_console.c). So the
+    stock release image plus this command list is the same frame, minutes
+    sooner — the shape the cloud's enrollment flasher has always used
+    (cloud-frontend/src/components/Esp32CloudFlasher.tsx).
+
+    ``settings`` are `usb_api set <key> <value>` pairs IN ORDER: `hardware`
+    first because a preset applies a whole board bundle (panel, EPD wiring,
+    buttons, TF socket, battery sensing) that this frame's own values must be
+    able to override.
+
+    ``blockers`` are settings that exist only as compile-time defaults, so a
+    frame that needs one cannot be provisioned this way at all and has to build
+    an image. ``warnings`` are differences the user should know about but that
+    still leave a working frame.
+    """
+    platform = embedded_platform_for_frame(frame)
+    release = EMBEDDED_RELEASE_FIRMWARE.get(platform)
+    blockers: list[str] = []
+    warnings: list[str] = []
+    settings: list[dict[str, Any]] = []
+
+    if release is None:
+        label = embedded_platform_spec_for_frame(frame)["label"]
+        blockers.append(f"FrameOS publishes no generic {label} firmware image, so there is nothing to provision.")
+
+    preset = embedded_hardware_preset_for_frame(frame)
+    if preset:
+        settings.append(_provisioning_setting("hardware", preset))
+
+    panel = embedded_panel_for_frame(frame)
+    if panel == "none":
+        warnings.append(
+            "This frame has no e-paper panel selected, so the board will come up without a display driver."
+        )
+    else:
+        settings.append(_provisioning_setting("panel", panel))
+
+    pins = embedded_pins_for_frame(frame)
+    settings.append(_provisioning_setting("pins", ",".join(f"{key}={pins[key]}" for key in EMBEDDED_PIN_KEYS)))
+
+    # The console takes the newline-separated button spec with commas instead.
+    buttons = embedded_gpio_buttons_config(frame).replace("\n", ",")
+    if buttons:
+        settings.append(_provisioning_setting("gpio_buttons", buttons))
+    elif preset and EMBEDDED_HARDWARE_PRESETS[preset].get("gpioButtons"):
+        # `set gpio_buttons ""` is not a thing — the console's argument parser
+        # rejects an empty value — so the preset's buttons stay wired.
+        warnings.append(
+            f"This frame defines no buttons, but the {preset} preset does; the device keeps the preset's buttons. "
+            "Build an image instead if the board must come up with none."
+        )
+
+    backend_url = embedded_backend_url_for_frame(frame)
+    if backend_url:
+        settings.append(_provisioning_setting("backend", backend_url))
+    else:
+        blockers.append("This frame has no server host set, so the device would have no backend to talk to.")
+
+    api_key = str(frame.server_api_key or "")
+    if api_key:
+        settings.append(_provisioning_setting("api_key", api_key, secret=True))
+    else:
+        blockers.append("This frame has no API key, so the device could not authenticate against this backend.")
+
+    settings.append(_provisioning_setting("frame_id", int(frame.id)))
+    settings.append(_provisioning_setting(
+        "render_mode",
+        "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
+    ))
+    settings.append(_provisioning_setting("interval", max(5, int(frame.interval or 300))))
+    settings.append(_provisioning_setting("rotate", int(frame.rotate or 0) % 360))
+    settings.append(_provisioning_setting("scaling_mode", embedded_scaling_mode_for_frame(frame)))
+    settings.append(_provisioning_setting("server_send_logs", 1 if frame.server_send_logs is not False else 0))
+
+    sd_card_assets = embedded_sd_card_assets_for_frame(frame)
+    if sd_card_assets["enabled"]:
+        sd_pins = sd_card_assets["pins"]
+        settings.append(_provisioning_setting(
+            "assets_sd_pins",
+            ",".join(f"{key}={sd_pins[key]}" for key in EMBEDDED_SD_CARD_ASSETS_PIN_KEYS),
+        ))
+        settings.append(_provisioning_setting("assets_sd_freq", sd_card_assets["maxFrequencyKHz"]))
+    # Sent either way: a hardware preset enables the socket it knows about, and
+    # a frame that turned SD assets off must be able to turn it back off.
+    settings.append(_provisioning_setting("assets_sd", 1 if sd_card_assets["enabled"] else 0))
+
+    deep_sleep = _embedded_device_config_value(frame, "deepSleep", "deep_sleep")
+    if isinstance(deep_sleep, bool):
+        settings.append(_provisioning_setting("deep_sleep", 1 if deep_sleep else 0))
+    deep_sleep_on_battery = _embedded_device_config_value(frame, "deepSleepOnBattery", "deep_sleep_on_battery")
+    if isinstance(deep_sleep_on_battery, bool):
+        settings.append(_provisioning_setting("deep_sleep_on_battery", 1 if deep_sleep_on_battery else 0))
+    wake_schedule = _embedded_device_config_value(frame, "wakeSchedule", "wake_schedule")
+    if isinstance(wake_schedule, bool):
+        settings.append(_provisioning_setting("wake_schedule", 1 if wake_schedule else 0))
+    wake_check_seconds = _embedded_device_config_value(frame, "wakeCheckSeconds", "wake_check_seconds")
+    if isinstance(wake_check_seconds, int) and not isinstance(wake_check_seconds, bool):
+        settings.append(_provisioning_setting("wake_check", max(0, wake_check_seconds)))
+    battery_pin = _embedded_device_config_value(frame, "batteryPin", "battery_pin")
+    if isinstance(battery_pin, int) and not isinstance(battery_pin, bool):
+        settings.append(_provisioning_setting("battery_pin", battery_pin))
+    battery_divider = _embedded_device_config_value(frame, "batteryDivider", "battery_divider")
+    if isinstance(battery_divider, (int, float)) and not isinstance(battery_divider, bool):
+        settings.append(_provisioning_setting("battery_divider", float(battery_divider)))
+
+    # Compile-time only: the console has no key for any of these, so a frame
+    # that needs them would come up quietly missing them.
+    https_proxy = normalize_https_proxy(frame.https_proxy)
+    if https_proxy.get("enable"):
+        blockers.append(
+            "This frame terminates TLS with its own certificate, which only exists as a compile-time default."
+        )
+    # Not a blocker: every embedded frame gets a generated device login
+    # (ensure_embedded_frame_defaults), and the cloud's enrollment flasher has
+    # always shipped generic images without one. But the frame row would then
+    # show a password the board does not actually ask for, so say it plainly.
+    admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
+    if admin_auth["enabled"] and admin_auth["user"] and admin_auth["pass"]:
+        warnings.append(
+            "The console cannot set the device admin login, so the board's own web UI answers without the "
+            "password shown for this frame. Build an image if that page must be protected."
+        )
+
+    if frame.frame_host:
+        hostname = embedded_hostname_for_frame(frame)
+        warnings.append(
+            f"The board keeps the firmware's default DHCP hostname instead of \"{hostname}\" — "
+            "the console cannot set a hostname."
+        )
+    if embedded_max_http_response_bytes_for_frame(frame) != EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES:
+        warnings.append(
+            "This frame's HTTP response limit is a compile-time default; the board uses the firmware's."
+        )
+
+    if release is not None:
+        frame_flash_size = embedded_flash_size_for_frame(frame)
+        release_profile = EMBEDDED_FLASH_PROFILES[release["flashSize"]]
+        if frame_flash_size != release["flashSize"]:
+            warnings.append(
+                f"The published image uses the {release['flashSize']} partition layout; this frame is configured "
+                f"for {frame_flash_size} flash, so the rest of the chip stays unused."
+            )
+        if embedded_ota_supported_for_frame(frame) and not release_profile["otaSupported"]:
+            warnings.append(
+                "The published image has no OTA slot, so future firmware updates need the USB cable again."
+            )
+
+    wifi_ssid, wifi_password = embedded_wifi_credentials(frame)
+    if not wifi_ssid:
+        warnings.append(
+            "This frame has no Wi-Fi network configured, so the board starts its setup portal instead of connecting."
+        )
+
+    return {
+        "supported": not blockers,
+        "platform": platform,
+        "releasePlatform": release["asset"] if release else None,
+        "releaseFlashSize": release["flashSize"] if release else None,
+        "blockers": blockers,
+        "warnings": warnings,
+        "settings": settings,
+        "wifi": {"ssid": wifi_ssid, "password": wifi_password} if wifi_ssid else None,
+    }
 
 
 def ensure_embedded_frame_defaults(frame: Frame, platform: str | None = None) -> None:
@@ -2231,6 +2431,11 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
             last_heartbeat = datetime.now(timezone.utc)
             last_progress_at = build_started
             last_progress_percent = -EMBEDDED_BUILD_PROGRESS_PERCENT_STEP
+            # Latest ninja edge count, published on the heartbeat below rather
+            # than written on its own: the browser flasher waits on this to
+            # tell a slow build from a dead one, and a full first build is
+            # ~1100 edges — one status write each would be absurd.
+            build_progress: dict[str, Any] | None = None
             try:
                 async for line in _iter_process_lines(process.stdout):
                     text = line.decode("utf-8", errors="replace").rstrip()
@@ -2244,6 +2449,7 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
                     if progress:
                         done, total = int(progress.group(1)), int(progress.group(2))
                         percent = (100.0 * done / total) if total else 0.0
+                        build_progress = {"done": done, "total": total, "percent": round(percent, 1)}
                         if percent >= last_progress_percent + EMBEDDED_BUILD_PROGRESS_PERCENT_STEP or \
                                 now_monotonic - last_progress_at >= EMBEDDED_BUILD_PROGRESS_MAX_SILENCE_SECONDS:
                             last_progress_at = now_monotonic
@@ -2257,7 +2463,10 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
                         frame = get_fresh_frame(db, int(frame.id)) or frame
                         current = latest_embedded_firmware(frame) or {}
                         if current.get("status") == "building":
-                            await _set_firmware_status(db, redis, frame, {**current, "lastHeartbeatAt": _utc_now()})
+                            heartbeat = {**current, "lastHeartbeatAt": _utc_now()}
+                            if build_progress:
+                                heartbeat["buildProgress"] = build_progress
+                            await _set_firmware_status(db, redis, frame, heartbeat)
                 returncode = await process.wait()
             except BaseException:
                 # Includes CancelledError: an abandoned build must not keep a

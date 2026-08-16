@@ -34,6 +34,7 @@ from app.tasks.embedded_firmware import (
     embedded_pins_for_frame,
     embedded_pixel_format_for_panel,
     embedded_pixie_path,
+    embedded_provisioning_plan,
     embedded_required_sdkconfig_for_frame,
     embedded_render_psram_bytes,
     embedded_render_mode_for_frame,
@@ -1118,6 +1119,166 @@ def test_generated_config_bakes_gpio_buttons():
 
 def test_embedded_hostname_falls_back_for_ip_hosts():
     assert embedded_hostname_for_frame(Frame(id=12, frame_host="192.168.1.50")) == "frame12"
+
+
+def _provisioned(plan) -> dict:
+    """The plan's `set` commands as a key -> value dict, for assertions that do
+    not care about ordering."""
+    return {setting["key"]: setting["value"] for setting in plan["settings"]}
+
+
+def test_provisioning_plan_carries_every_setting_the_image_would_bake_in():
+    """A stock generic image plus these commands is the same frame as a
+    per-frame build — that equivalence is the whole reason the flow exists."""
+    frame = Frame(
+        id=9,
+        embedded={"hardwarePreset": "xteink_x4"},
+        network={"wifiSSID": "Home WiFi", "wifiPassword": "hunter2"},
+        server_host="10.0.0.5",
+        server_port=8989,
+        server_api_key="key-9",
+        interval=600,
+        rotate=90,
+        scaling_mode="contain",
+    )
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame)
+
+    assert plan["supported"] is True
+    assert plan["blockers"] == []
+    assert plan["platform"] == "esp32-c3"
+    assert plan["releasePlatform"] == "esp32-c3-generic"
+    settings = _provisioned(plan)
+    # `set hardware` applies a whole board bundle, so it has to land before
+    # anything this frame overrides on top of it.
+    assert plan["settings"][0]["key"] == "hardware"
+    assert settings["hardware"] == "xteink_x4"
+    assert settings["panel"] == "EPD_4in26"
+    assert settings["pins"] == "rst=5,dc=4,cs=21,cs2=-1,busy=6,sck=8,mosi=10,pwr=-1"
+    assert settings["gpio_buttons"] == "3:POWER"
+    assert settings["backend"] == "http://10.0.0.5:8989"
+    assert settings["api_key"] == "key-9"
+    assert settings["frame_id"] == "9"
+    # No PSRAM on the C3, so it can only ever be a thin client.
+    assert settings["render_mode"] == "remote"
+    assert settings["interval"] == "600"
+    assert settings["rotate"] == "90"
+    assert settings["scaling_mode"] == "contain"
+    assert settings["server_send_logs"] == "1"
+    assert settings["assets_sd"] == "0"
+    assert plan["wifi"] == {"ssid": "Home WiFi", "password": "hunter2"}
+    # The API key must be flagged so the flasher's log redacts it.
+    secrets = {setting["key"] for setting in plan["settings"] if setting["secret"]}
+    assert secrets == {"api_key"}
+
+
+def test_provisioning_plan_warns_about_the_published_images_flash_layout():
+    """The XTEINK X4 has 16MB, but the published C3 asset is the 4MB no-OTA
+    build — it works, it just leaves the rest of the chip and OTA on the table."""
+    frame = Frame(id=9, embedded={"hardwarePreset": "xteink_x4"}, server_host="host",
+                  server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame)
+
+    assert plan["supported"] is True
+    assert plan["releaseFlashSize"] == "4MB"
+    assert any("4MB partition layout" in warning for warning in plan["warnings"])
+    assert any("no OTA slot" in warning for warning in plan["warnings"])
+
+
+def test_provisioning_plan_sends_sd_card_pins_before_enabling_the_socket():
+    frame = Frame(
+        id=9,
+        embedded={"hardwarePreset": "waveshare_esp32_s3_photopainter"},
+        server_host="host",
+        server_api_key="key",
+        network={"wifiSSID": "net"},
+        device_config={
+            "hardwarePreset": "waveshare_esp32_s3_photopainter",
+            "sdCardAssets": {"enabled": True, "pins": {"cs": 38, "sck": 39, "miso": 40, "mosi": 41}},
+        },
+    )
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame)
+    keys = [setting["key"] for setting in plan["settings"]]
+    settings = _provisioned(plan)
+
+    assert settings["assets_sd_pins"] == "cs=38,sck=39,miso=40,mosi=41"
+    assert settings["assets_sd"] == "1"
+    # Enabling the socket before its pins are known would mount the wrong bus.
+    assert keys.index("assets_sd_pins") < keys.index("assets_sd")
+
+
+def test_provisioning_plan_blocks_a_frame_that_terminates_tls_itself():
+    """A TLS certificate has no console key, and a backend expecting https
+    cannot fetch from a device serving plain http — that frame needs a build."""
+    frame = Frame(
+        id=9,
+        device="waveshare.EPD_7in5_V2",
+        server_host="host",
+        server_api_key="key",
+        network={"wifiSSID": "net"},
+        https_proxy={"enable": True, "certs": {"server": "cert", "server_key": "key"}},
+    )
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame)
+
+    assert plan["supported"] is False
+    assert any("TLS" in blocker for blocker in plan["blockers"])
+
+
+def test_provisioning_plan_warns_that_the_device_admin_login_is_not_provisioned():
+    """Every embedded frame gets a generated device login, so refusing on one
+    would refuse every frame. The board simply answers without it — say so."""
+    frame = Frame(id=9, device="waveshare.EPD_7in5_V2", server_host="host",
+                  server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame)
+
+    assert plan["supported"] is True
+    assert any("admin login" in warning for warning in plan["warnings"])
+
+
+def test_provisioning_plan_blocks_a_frame_with_nowhere_to_call_home():
+    """No defaults applied here on purpose: a saved frame always has a server
+    API key, but the plan must not hand the device a half-built identity if
+    one of these is ever missing."""
+    frame = Frame(id=9, device="waveshare.EPD_7in5_V2", server_host="", server_api_key="")
+
+    plan = embedded_provisioning_plan(frame)
+
+    assert plan["supported"] is False
+    assert any("no server host" in blocker for blocker in plan["blockers"])
+    assert any("no API key" in blocker for blocker in plan["blockers"])
+    assert plan["wifi"] is None
+
+
+def test_provisioning_plan_warns_when_the_hostname_cannot_be_provisioned():
+    frame = Frame(id=9, frame_host="kitchen.local", device="waveshare.EPD_7in5_V2",
+                  server_host="host", server_api_key="key", network={"wifiSSID": "net"})
+    ensure_embedded_frame_defaults(frame)
+
+    plan = embedded_provisioning_plan(frame)
+
+    assert plan["supported"] is True
+    assert any("kitchen" in warning for warning in plan["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_provisioning_endpoint_returns_the_plan(async_client):
+    frame = await create_embedded_frame(async_client)
+
+    response = await async_client.get(f"/api/frames/{frame['id']}/embedded/provisioning")
+
+    assert response.status_code == 200, response.text
+    plan = response.json()["provisioning"]
+    assert plan["releasePlatform"] == "esp32-s3-generic"
+    assert {setting["key"] for setting in plan["settings"]} >= {"backend", "api_key", "frame_id", "panel"}
 
 
 def test_generated_config_omits_absent_power_settings():

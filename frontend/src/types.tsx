@@ -1323,5 +1323,13 @@ export interface FrameEmbeddedConfig {
     lastHeartbeatAt?: string
     completedAt?: string
     error?: string
+    /** Ninja's edge count while `status` is "building", republished on the
+     * build's 15-second heartbeat. A first build of a chip target is ~1100
+     * edges, so this is the difference between "slow" and "hung". */
+    buildProgress?: {
+      done: number
+      total: number
+      percent: number
+    }
   }
 }
