@@ -19,6 +19,8 @@ import { POST as mintClaimToken } from "../../../app/api/frames/claim-tokens/rou
 import { POST as enrollFrame } from "../../../app/api/frames/enroll/route";
 import { GET as listFrames } from "../../../app/api/frames/route";
 import { POST as sendCommand } from "../../../app/api/frames/[frameId]/command/route";
+import { GET as listPendingCommands } from "../../../app/api/frames/[frameId]/commands/route";
+import { DELETE as cancelPendingCommand } from "../../../app/api/frames/[frameId]/commands/[commandId]/route";
 import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/route";
 import { GET as getFrameLogs } from "../../../app/api/frames/[frameId]/logs/route";
 import { GET as getFrameLogsFull } from "../../../app/api/frames/[frameId]/logs/full/route";
@@ -94,8 +96,16 @@ function getRequest(path: string, headers: Record<string, string> = {}) {
   return new NextRequest(new URL(path, baseUrl), { headers, method: "GET" });
 }
 
+function deleteRequest(path: string, headers: Record<string, string> = {}) {
+  return new NextRequest(new URL(path, baseUrl), { headers, method: "DELETE" });
+}
+
 const routeParams = (frameId: string) => ({
   params: Promise.resolve({ frameId }),
+});
+
+const commandRouteParams = (frameId: string, commandId: string) => ({
+  params: Promise.resolve({ commandId, frameId }),
 });
 
 async function signIn() {
@@ -1328,6 +1338,175 @@ describe("frame management API", () => {
     expect(((await shell.json()) as { error: string }).error).toBe(
       "invalid_command",
     );
+  });
+
+  it("copies the chosen frame's scenes onto a new frame when the owner confirms it", async () => {
+    // "Start it with the scenes from …" in the add-frame panel: the choice
+    // rides the claim code (the browser that built the SD image is long gone
+    // by the time the card is flashed) and is applied at confirmation.
+    const source = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${source.frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(source.frame_id),
+    );
+    const scene = await createStoreScene(source.accountId, { name: "Kitchen clock" });
+    const assigned = await assignFrameScenes(
+      postJson(
+        `/api/frames/${source.frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(source.frame_id),
+    );
+    expect(assigned.status).toBe(200);
+
+    const minted = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { multi_use: true, scene_source_frame_id: source.frame_id },
+        { origin: baseUrl },
+      ),
+    );
+    expect(minted.status).toBe(200);
+    const { claim_token: claimToken } = (await minted.json()) as {
+      claim_token: string;
+    };
+
+    const enrolled = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    expect(enrolled.status).toBe(200);
+    const { frame_id: newFrameId } = (await enrolled.json()) as {
+      frame_id: string;
+    };
+
+    // Nothing yet: a board nobody confirmed has been sent nothing, which is
+    // the whole reason the intent waits on the frame row rather than being
+    // applied at enrollment.
+    expect(
+      await db
+        .select()
+        .from(frameSceneAssignments)
+        .where(eq(frameSceneAssignments.frameId, newFrameId)),
+    ).toHaveLength(0);
+    expect((await frameRow(newFrameId)).sceneSourceFrameId).toBe(source.frame_id);
+
+    await confirmFrame(
+      postJson(`/api/frames/${newFrameId}/confirm`, {}, { origin: baseUrl }),
+      routeParams(newFrameId),
+    );
+
+    const copied = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, newFrameId));
+    expect(copied.map((row) => row.sceneId)).toEqual([scene.id]);
+    // And the push is queued, so it lands the moment the board connects.
+    const queued = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, newFrameId));
+    expect(queued.map((row) => row.type)).toContain("set_scenes");
+    // Consumed exactly once — a re-confirm must not fight the owner's own
+    // later edits.
+    expect((await frameRow(newFrameId)).sceneSourceFrameId).toBeNull();
+  });
+
+  it("refuses a scene source that is not the caller's frame", async () => {
+    await signIn();
+    const stranger = await enrolledFrame();
+    // A fresh session: `stranger` belongs to the account signed in above it.
+    await signIn();
+    const refused = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { scene_source_frame_id: stranger.frame_id },
+        { origin: baseUrl },
+      ),
+    );
+    // Invisible, not forbidden — the same shape frameForAccount gives every
+    // other cross-account frame reference.
+    expect(refused.status).toBe(404);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "invalid_scene_source_frame",
+    );
+  });
+
+  it("lists what is still waiting for the frame, and cancels one before it lands", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const queued = await sendCommand(
+      postJson(
+        `/api/frames/${frame_id}/command`,
+        { type: "reboot" },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(queued.status).toBe(200);
+    const { command_id: commandId } = (await queued.json()) as {
+      command_id: string;
+    };
+
+    const listed = await listPendingCommands(
+      getRequest(`/api/frames/${frame_id}/commands`),
+      routeParams(frame_id),
+    );
+    expect(listed.status).toBe(200);
+    const { commands } = (await listed.json()) as {
+      commands: { expires_at: string | null; id: string; type: string }[];
+    };
+    expect(commands.map((command) => command.type)).toEqual(["reboot"]);
+    // The TTL is the load-bearing part of the view: a battery frame that
+    // sleeps longer than it will never see this command, and the panel says
+    // so only if the deadline travels.
+    expect(commands[0]?.expires_at).toBeTruthy();
+
+    const cancelled = await cancelPendingCommand(
+      deleteRequest(`/api/frames/${frame_id}/commands/${commandId}`, {
+        origin: baseUrl,
+      }),
+      commandRouteParams(frame_id, commandId),
+    );
+    expect(cancelled.status).toBe(200);
+
+    const after = await listPendingCommands(
+      getRequest(`/api/frames/${frame_id}/commands`),
+      routeParams(frame_id),
+    );
+    expect(((await after.json()) as { commands: unknown[] }).commands).toEqual(
+      [],
+    );
+    // Terminal state the hub's drain already ignores — the row stays as the
+    // record of what was asked for, it is not deleted.
+    const [row] = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.id, commandId));
+    expect(row?.status).toBe("expired");
+    expect(row?.error).toBe("cancelled");
+
+    // Nothing left to cancel is a 404, never a pretend success — the panel
+    // must not claim it stopped something the device already ran.
+    const again = await cancelPendingCommand(
+      deleteRequest(`/api/frames/${frame_id}/commands/${commandId}`, {
+        origin: baseUrl,
+      }),
+      commandRouteParams(frame_id, commandId),
+    );
+    expect(again.status).toBe(404);
+
+    // A malformed id is a 404 too, not a Postgres uuid cast blowing up as a
+    // 500.
+    const malformed = await cancelPendingCommand(
+      deleteRequest(`/api/frames/${frame_id}/commands/not-a-uuid`, {
+        origin: baseUrl,
+      }),
+      commandRouteParams(frame_id, "not-a-uuid"),
+    );
+    expect(malformed.status).toBe(404);
   });
 
   it("accepts exactly the device's settings allowlist, in the device's spelling", async () => {

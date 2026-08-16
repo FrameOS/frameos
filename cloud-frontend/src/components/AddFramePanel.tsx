@@ -111,6 +111,18 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   // minted with; changing the validity in the SD builder mints a fresh one.
   const [multiUseTtlDays, setMultiUseTtlDays] = useState<number | 'forever' | undefined>()
   const [minting, setMinting] = useState(false)
+  // "Start it with the scenes from …": the frame the new one copies its scene
+  // list from, applied the moment the owner confirms the enrollment. Chosen
+  // here rather than after the fact because the whole point is not having to
+  // go and set the frame up again once it boots.
+  const [sceneSourceFrameId, setSceneSourceFrameId] = useState('')
+  const [sceneSourceChoices, setSceneSourceChoices] = useState<{ id: string; name: string }[]>([])
+  // Which source each cached code was minted with. A claim code CARRIES the
+  // choice, so changing it has to mint a new one — reusing the cached code
+  // would enroll frames with the previous answer. Tracked per code because
+  // the install command's and the SD image's are minted at different times.
+  const [installSceneSource, setInstallSceneSource] = useState('')
+  const [multiUseSceneSource, setMultiUseSceneSource] = useState('')
   const abortRef = useRef<AbortController | undefined>(undefined)
   const cancelledRef = useRef(false)
   // One mint per opening, whatever React does with renders. A ref, not state:
@@ -163,6 +175,47 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Frames whose scenes a new one can inherit. Active only: a pending or
+  // revoked frame has no confirmed scene set to copy. Failure is silent —
+  // the picker simply does not appear, and enrollment is unaffected.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await fetch('/api/frames', { headers: { accept: 'application/json' } })
+        if (!response.ok) {
+          return
+        }
+        const data = (await response.json()) as { frames?: { id: string; name?: string; status?: string }[] }
+        if (cancelled) {
+          return
+        }
+        setSceneSourceChoices(
+          (data.frames ?? [])
+            .filter((frame) => frame.status === 'active')
+            .map((frame) => ({ id: frame.id, name: frame.name || 'Untitled frame' }))
+        )
+      } catch {
+        // Nothing to do: no picker, same enrollment.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // The install command's code is minted on open, before the user can have
+  // picked anything, so a later choice has to replace it — the code CARRIES
+  // the choice. Cheap: the server recycles never-used single-use codes.
+  useEffect(() => {
+    if (!mintStartedRef.current || minting || installSceneSource === sceneSourceFrameId) {
+      return
+    }
+    setClaimToken(undefined)
+    void mintInstallCode(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sceneSourceFrameId])
+
   // Minted when the panel opens, so the install command is copyable on sight
   // rather than one click away.
   //
@@ -184,8 +237,11 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   // request and the guard above would not re-issue it; the bundle does not
   // enable StrictMode, and spending a second code to cover a dev-only remount
   // is the worse trade.)
-  async function mintInstallCode(): Promise<void> {
-    if (claimToken || minting) {
+  // `force` re-mints over a code we already hold — the one case is the scene
+  // source changing after the open-time mint, where the held code carries the
+  // wrong answer and setClaimToken(undefined) has not landed yet.
+  async function mintInstallCode(force = false): Promise<void> {
+    if ((claimToken && !force) || minting) {
       return
     }
     setMinting(true)
@@ -195,7 +251,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
     abortRef.current = controller
     try {
       const response = await fetch('/api/frames/claim-tokens', {
-        body: JSON.stringify({}),
+        body: JSON.stringify(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
         signal: controller.signal,
@@ -212,6 +268,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
         return
       }
       setClaimToken(data.claim_token)
+      setInstallSceneSource(sceneSourceFrameId)
     } catch {
       if (!controller.signal.aborted && !cancelledRef.current) {
         setError('network_error')
@@ -240,11 +297,16 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
     multiUse: boolean
     ttlDays?: number | 'forever'
   }): Promise<string> {
-    if (multiUse && multiUseToken && ttlDays === multiUseTtlDays) {
+    if (multiUse && multiUseToken && ttlDays === multiUseTtlDays && multiUseSceneSource === sceneSourceFrameId) {
       return multiUseToken
     }
+    const sceneSource = sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}
     const response = await fetch('/api/frames/claim-tokens', {
-      body: JSON.stringify(multiUse ? { multi_use: true, ...(ttlDays ? { ttl_days: ttlDays } : {}) } : {}),
+      body: JSON.stringify(
+        multiUse
+          ? { multi_use: true, ...(ttlDays ? { ttl_days: ttlDays } : {}), ...sceneSource }
+          : { ...sceneSource }
+      ),
       headers: { 'content-type': 'application/json' },
       method: 'POST',
     })
@@ -260,6 +322,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
       setMultiUseToken(data.claim_token)
       setMultiUseExpiresAt(data.expires_at)
       setMultiUseTtlDays(ttlDays)
+      setMultiUseSceneSource(sceneSourceFrameId)
     }
     return data.claim_token
   }
@@ -319,6 +382,35 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
             All ways to add a frame
           </button>
         )}
+
+        {/* Every claim-code path (script, SD card, ESP32) can carry this; the
+            link path uses the device flow and mints no code, so it is not
+            offered there. A frame that boots into an empty workspace is the
+            thing this removes. */}
+        {path !== undefined && path !== 'link' && sceneSourceChoices.length > 0 ? (
+          <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
+            <span>Start it with the scenes from</span>
+            <select
+              aria-label="Copy scenes from"
+              className="frameos-control w-auto rounded-lg border px-2.5 py-1.5 text-sm focus:border-blue-500 focus:ring-blue-500"
+              onChange={(event) => setSceneSourceFrameId(event.target.value)}
+              value={sceneSourceFrameId}
+            >
+              <option value="">Nothing — start empty</option>
+              {sceneSourceChoices.map((choice) => (
+                <option key={choice.id} value={choice.id}>
+                  {choice.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {path !== undefined && path !== 'link' && sceneSourceFrameId ? (
+          <p className="frameos-muted text-xs">
+            The new frame gets those scenes the moment you confirm it here — it has to reach the network to enroll
+            anyway, so they arrive on its first connection. Assets are not copied.
+          </p>
+        ) : null}
 
         {path === 'script' ? (
           <section className="frameos-card rounded-2xl border border-white/90 p-4 shadow-sm">
@@ -396,7 +488,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
               <CpuChipIcon aria-hidden className="h-5 w-5" />
               Flash an ESP32 from this browser
             </h3>
-            <Esp32CloudFlasher cloudOrigin={cloudOrigin} />
+            <Esp32CloudFlasher cloudOrigin={cloudOrigin} sceneSourceFrameId={sceneSourceFrameId || undefined} />
           </section>
         ) : null}
       </div>

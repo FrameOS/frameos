@@ -1,3 +1,4 @@
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   bigint,
   boolean,
@@ -676,6 +677,14 @@ export const frames = pgTable(
     // WHICH scene is not on the frame yet instead of flagging all of them.
     assignedSceneState: jsonb("assigned_scene_state"),
     deployedSceneState: jsonb("deployed_scene_state"),
+    // Provisioning intent carried from the enrollment token: copy this
+    // frame's scenes onto the new one when the owner CONFIRMS it. Cleared
+    // once applied, so it never fires twice. A pending frame has been sent
+    // nothing — confirmation is still what authorizes the first push.
+    sceneSourceFrameId: uuid("scene_source_frame_id").references(
+      (): AnyPgColumn => frames.id,
+      { onDelete: "set null" },
+    ),
     ...timestamps,
   },
   (table) => ({
@@ -719,6 +728,15 @@ export const frameEnrollmentTokens = pgTable(
     boundFrameId: uuid("bound_frame_id").references(() => frames.id, {
       onDelete: "cascade",
     }),
+    // Provisioning intent: every frame this token enrolls starts with the
+    // scenes of THIS frame. Lives on the token because the browser that
+    // built the SD image is long gone by the time the card is flashed;
+    // copied onto each enrolled frame, because a multi-use card enrolls many
+    // and the token's own frame_id records only the last one.
+    sceneSourceFrameId: uuid("scene_source_frame_id").references(
+      () => frames.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

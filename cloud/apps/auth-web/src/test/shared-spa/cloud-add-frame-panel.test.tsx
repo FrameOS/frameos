@@ -199,12 +199,17 @@ describe("AddFramePanel", () => {
       deliver: (response: Response) => void;
       signal: AbortSignal | undefined;
     }[] = [];
-    fetchMock.mockImplementation(
-      (_input, init) =>
-        new Promise<Response>((resolve) => {
-          pending.push({ deliver: resolve, signal: init?.signal ?? undefined });
-        }),
-    );
+    fetchMock.mockImplementation((input, init) => {
+      // Claim-code mints only. The panel also lists the account's frames (to
+      // offer "start it with the scenes from …"), and that request is not
+      // what this test is about.
+      if (!String(input).includes("/api/frames/claim-tokens")) {
+        return Promise.resolve(Response.json({ frames: [] }));
+      }
+      return new Promise<Response>((resolve) => {
+        pending.push({ deliver: resolve, signal: init?.signal ?? undefined });
+      });
+    });
     const view = renderPanel();
     expect(pending).toHaveLength(1);
 

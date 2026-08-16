@@ -168,6 +168,25 @@ export interface FrameType {
     uploadUrl?: string
     uploadHeaders?: { name: string; value: string }[]
     psramMB?: number
+    /** ESP32 power management, backend-managed frames.
+     *
+     * The cloud pushes these as top-level `set_settings` keys (see
+     * deep_sleep/battery_pin/… below); a backend-managed board reads them
+     * from here — baked into the firmware build as compile-time defaults and
+     * re-sent on every settings poll (embedded_frame_settings in
+     * backend/app/api/embedded_device.py). Both spellings appear in the wild:
+     * the workspace writes camelCase, USB-console provisioning writes
+     * snake_case, and the backend reads either. */
+    deepSleep?: boolean
+    deep_sleep?: boolean
+    deepSleepOnBattery?: boolean
+    deep_sleep_on_battery?: boolean
+    wakeCheckSeconds?: number
+    wake_check_seconds?: number
+    batteryPin?: number
+    battery_pin?: number
+    batteryDivider?: number
+    battery_divider?: number
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
     /** Virtual frames only: how the backend quantizes the rendered image.
@@ -998,6 +1017,9 @@ export interface FrameOSSettings {
     backendApiKey?: string
     model?: string
     chatModel?: string
+    /** Cloud only: reasoning effort for the workspace chat's model
+     * ("minimal" | "low" | "medium" | "high"; empty = the default). */
+    chatReasoningEffort?: string
     sceneModel?: string
     reviewModel?: string
     appChatModel?: string

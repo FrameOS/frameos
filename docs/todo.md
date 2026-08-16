@@ -13,17 +13,10 @@ design — the cloud protocol has no shell verbs.
 
 ## Cloud launch — operator follow-ups
 
-- **Remove the Discord webhook path** (`DISCORD_REPORTS_WEBHOOK_URL`,
-  `signup-notifications.ts`, `discord.ts`) — notifications go through
-  PostHog. The privacy policy already omits Discord, so leave the env var
-  unset until the code is gone.
-- **Second transactional email provider** — Postmark is a single point of
-  failure gating every login; its failure is visible (`/admin` live check,
-  error tracking) but not survivable. Add a second provider with automatic
-  failover, or at least a documented manual cutover. Before charging, not
-  before signups.
 - Disposable-email blocking was considered and skipped: Turnstile plus the
   rate limiter covers the automated case. Revisit only if abuse is observed.
+- The Discord webhook path and a second email provider both moved to the
+  parking lot below — neither is blocking anything today.
 
 ## Cloud-managed frames
 
@@ -73,16 +66,12 @@ design — the cloud protocol has no shell verbs.
   fixed FrameOS-owned directories. Hardware identity reported by the frame
   stays authoritative.
 
-- **Cloud AI chat follow-ups** — app-code chat (`/api/ai/apps/chat` answers
-  501); a settings UI for the `chatModel` / `chatReasoningEffort` overrides
-  and the verified-publisher admin toggle (both API-only); letting the chat
-  save/fork scenes directly (today it delivers to the editor and the user
-  saves).
-- **Power section for backend-managed ESP32 frames** — the wire is done
-  (settings poll sends deepSleepOnBattery/wakeCheckSeconds/batteryPin/
-  batteryDivider from device_config, firmware applies them) but only the
-  esp32 CLOUD profile renders the Power UI; backend users configure via USB
-  console / device_config.
+- **Cloud AI chat: fork with lineage** — `save_scene` saves any scene the chat
+  is holding into the account as a NEW private scene, which covers forking a
+  store scene in practice but records none of the lineage the dedicated fork
+  route does (source scene id in the audit event, carried-over preview image,
+  tags and description). Extract that route's body into a lib and have
+  `save_scene` call it with a `source_scene_id`.
 - **Account hardening** — passkeys/TOTP 2FA, re-authentication for sensitive
   actions (revoking frames, bulk assignment changes, scope grants), per-frame
   audit trail surfaced in the UI.
@@ -90,18 +79,13 @@ design — the cloud protocol has no shell verbs.
   panel itself (proof of possession), not just the portal/admin page.
 - **Backend↔cloud promotion/demotion ceremony** — an explicit local action
   that moves a frame between control planes without a reset (UX open).
-- **Free-tier quotas** — pick numbers (frame count, backup size, private
-  scene count) when provisioning starts, not before.
 
 ## ESP32
 
 Memory measurements, the emergency-reserve decision, boot/render cost
 numbers and the measurement tooling live in `docs/esp32-memory.md`.
 
-- **Surface memory over a channel that survives the link being down** — the
-  workspace advisory reads device metrics, so a frame too low on internal
-  RAM to connect reports nothing and cannot be flagged. A frame already over
-  the edge is visible over USB and nowhere else.
+Nothing scheduled. The out-of-band memory advisory moved to the parking lot.
 
 ## Buildroot images
 
@@ -123,9 +107,9 @@ CM5).
   must not take owning copies of the rendered image.
 - **Next base-image rebuild drops ImageMagick** — the defconfig no longer
   selects `BR2_PACKAGE_IMAGEMAGICK` (the runtime is Pixie-only), but the
-  published base images still carry it. Nothing to do beyond dispatching
-  `buildroot-base-image.yml` for the three platforms whenever the next
-  rebuild happens anyway.
+  published base images still carry it. `buildroot-base-image.yml` was
+  dispatched on 2026-08-16; delete this once the three platforms' manifests
+  are refreshed and a built image is confirmed ImageMagick-free.
 - **Deferred models** — Pi 500 and CM5 Lite need `bcm2712-rpi-500` /
   `bcm2712-rpi-cm5l-*` DTBs that entered rpi-6.6.y after the kernel commit
   Buildroot 2025.02.13 pins; the next Buildroot (or kernel-pin) bump adds
@@ -207,6 +191,24 @@ CM5).
 
 ## Ideas parking lot (unscheduled)
 
+- **Remove the Discord webhook path** (`DISCORD_REPORTS_WEBHOOK_URL`,
+  `signup-notifications.ts`, `discord.ts`) — notifications go through
+  PostHog. Deliberately held: the PostHog path has not had a live report to
+  prove itself on yet, and deleting the fallback before then would mean
+  finding out it does not work by missing a report. Delete the code on the
+  first real notification through the new path. The privacy policy already
+  omits Discord, so the env var stays unset until then.
+- **Second transactional email provider** — Postmark is a single point of
+  failure gating every login; its failure is visible (`/admin` live check,
+  error tracking) but not survivable. Deferred, and not because it is hard:
+  a second provider can be down too, so doing this properly means failover
+  logic, health checks and a tested cutover — real work, for a risk that is
+  currently a handful of mails a day. Revisit when volume reaches dozens of
+  mails a day, or before anything paid ships.
+- **Surface ESP32 memory over a channel that survives the link being down** —
+  the workspace advisory reads device metrics, so a frame too low on internal
+  RAM to connect reports nothing and cannot be flagged. A frame already over
+  the edge is visible over USB and nowhere else.
 - **SVG `<text>` support in render/svg** (~1–2 days, ~150–250 lines).
   Today any `<text>` tag makes the whole SVG fail, and the AI scene prompt
   tells models to layer render/text instead. Pixie has the parts: the

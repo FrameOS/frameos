@@ -1776,6 +1776,79 @@ def _ota_update_request_active(firmware: dict[str, Any] | None) -> bool:
     return isinstance(ota_update, dict) and ota_update.get("status") in ACTIVE_OTA_STATUSES
 
 
+def pending_frame_commands(frame: Frame) -> list[dict[str, Any]]:
+    """Actions recorded against this frame that have NOT reached the device.
+
+    The self-hosted backend has no durable per-frame command queue: deploys,
+    restarts and renders are immediate SSH/HTTP pushes that fail loudly when
+    the device is unreachable, so there is nothing to observe or cancel. The
+    one exception is the ESP32 OTA request — it is recorded on the frame and
+    replayed once the firmware build finishes
+    (``request_pending_embedded_firmware_ota``), so it can sit "queued" for as
+    long as the build takes.
+
+    Shaped like the cloud's ``GET /api/frames/{id}/commands`` rows so the
+    shared workspace panel reads one wire format on both control planes
+    (docs/api-triality.md). ``expires_at`` is always null here: a backend OTA
+    request has no TTL, it waits for its image.
+    """
+    if (frame.mode or "rpios") != "embedded":
+        return []
+    firmware = latest_embedded_firmware(frame) or {}
+    ota_update = firmware.get("otaUpdate")
+    if not isinstance(ota_update, dict) or ota_update.get("status") not in ACTIVE_OTA_STATUSES:
+        return []
+    return [
+        {
+            "id": str(ota_update.get("id") or "ota"),
+            "type": "notify_update_available",
+            # "queued" means no image yet; "requesting" means the push to the
+            # device is in flight. Both are "not applied", which is what the
+            # panel says, so map them onto the cloud's two waiting states.
+            "status": "pending" if ota_update.get("status") == "queued" else "sent",
+            "created_at": ota_update.get("requestedAt"),
+            "expires_at": None,
+            "sent_at": ota_update.get("startedAt"),
+            "detail": (
+                "Waiting for the firmware image to finish building"
+                if ota_update.get("status") == "queued"
+                else "Delivering the update request to the device"
+            ),
+        }
+    ]
+
+
+async def cancel_embedded_firmware_ota(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    command_id: str | None = None,
+) -> bool:
+    """Drop a queued/in-flight ESP32 OTA request. False when there is none.
+
+    Terminal status rather than a delete, matching the cloud's cancel: the
+    record is what the frame log and the firmware panel read back. Cancelling
+    does not touch a build already running — the image is still useful, and
+    the user can ask for the update again without rebuilding.
+    """
+    frame = get_fresh_frame(db, int(frame.id)) or frame
+    firmware = latest_embedded_firmware(frame) or {}
+    ota_update = firmware.get("otaUpdate")
+    if not isinstance(ota_update, dict) or ota_update.get("status") not in ACTIVE_OTA_STATUSES:
+        return False
+    if command_id and str(ota_update.get("id") or "ota") != command_id:
+        return False
+    await _set_ota_update(
+        db,
+        redis,
+        frame,
+        firmware,
+        {**ota_update, "status": "cancelled", "error": None, "completedAt": _utc_now()},
+    )
+    await log(db, redis, int(frame.id), "stdout", "Cancelled the queued ESP32 OTA update")
+    return True
+
+
 def _decode_frame_http_payload(body: bytes, headers: dict[str, str]) -> Any:
     content_type = headers.get("content-type", "")
     if content_type.startswith("application/json"):

@@ -1,0 +1,137 @@
+import { actions, afterMount, beforeUnmount, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { loaders } from 'kea-loaders'
+
+import type { FrameId } from '../../types'
+import { apiFetch } from '../../utils/apiFetch'
+import { workspaceMode } from './workspaceSurfaces'
+
+import type { framePendingCommandsLogicType } from './framePendingCommandsLogicType'
+
+/**
+ * One queued action waiting for a frame to act on it.
+ *
+ * The cloud reads these from its durable `frame_commands` queue; the
+ * self-hosted backend answers the same shape from the one action it records
+ * instead of pushing straight away (a queued ESP32 OTA request). `detail` is
+ * backend-only — the cloud's types speak for themselves.
+ */
+export interface FramePendingCommand {
+  id: string
+  type: string
+  /** `pending` = never written to the device; `sent` = written, not acked. */
+  status: string
+  created_at: string | null
+  expires_at: string | null
+  sent_at: string | null
+  scene_id?: string
+  detail?: string
+}
+
+export interface FramePendingCommandsLogicProps {
+  frameId: FrameId
+}
+
+// A sleeping frame can take hours to answer, so this is a "did anything
+// change while I was looking at the drawer" refresh, not a progress bar.
+const POLL_INTERVAL_MS = 15 * 1000
+
+const commandLabels: Record<string, string> = {
+  get_metrics: 'Collect metrics',
+  notify_update_available: 'Check for a firmware update',
+  reboot: 'Reboot',
+  refresh_service_settings: 'Re-read service API keys',
+  render: 'Render now',
+  restart_runtime: 'Restart FrameOS',
+  set_current_scene: 'Switch scene',
+  set_schedule: 'Update the schedule',
+  set_scenes: 'Push scenes',
+  set_settings: 'Push settings',
+}
+
+export function pendingCommandLabel(command: FramePendingCommand): string {
+  return commandLabels[command.type] ?? command.type.replace(/_/g, ' ')
+}
+
+export const framePendingCommandsLogic = kea<framePendingCommandsLogicType>([
+  path(['src', 'scenes', 'workspace', 'framePendingCommandsLogic']),
+  props({} as FramePendingCommandsLogicProps),
+  key((props) => props.frameId),
+  actions({
+    cancelPendingCommand: (commandId: string) => ({ commandId }),
+    cancelPendingCommandFailure: (error: string) => ({ error }),
+    clearPendingCommandsError: true,
+  }),
+  loaders(({ props }) => ({
+    pendingCommands: [
+      [] as FramePendingCommand[],
+      {
+        loadPendingCommands: async () => {
+          // The on-device admin panel talks to the frame itself, which has no
+          // queue to report on — asking would be a guaranteed 404 on every
+          // poll. Callers gate the panel too; this is the belt.
+          if (workspaceMode() === 'frameAdmin') {
+            return []
+          }
+          const response = await apiFetch(`/api/frames/${props.frameId}/commands`)
+          if (!response.ok) {
+            // A control plane that does not implement the endpoint must look
+            // like "nothing queued", not like an error: the panel hides
+            // itself and the rest of the drawer is unaffected.
+            return []
+          }
+          const data = (await response.json()) as { commands?: FramePendingCommand[] }
+          return Array.isArray(data.commands) ? data.commands : []
+        },
+      },
+    ],
+  })),
+  reducers({
+    cancellingCommandIds: [
+      [] as string[],
+      {
+        cancelPendingCommand: (state, { commandId }) => (state.includes(commandId) ? state : [...state, commandId]),
+        loadPendingCommandsSuccess: () => [],
+        cancelPendingCommandFailure: () => [],
+      },
+    ],
+    pendingCommandsError: [
+      null as string | null,
+      {
+        cancelPendingCommand: () => null,
+        cancelPendingCommandFailure: (_, { error }) => error,
+        clearPendingCommandsError: () => null,
+        loadPendingCommandsSuccess: () => null,
+      },
+    ],
+  }),
+  selectors({
+    hasPendingCommands: [(s) => [s.pendingCommands], (commands): boolean => commands.length > 0],
+  }),
+  listeners(({ actions, props }) => ({
+    cancelPendingCommand: async ({ commandId }) => {
+      const response = await apiFetch(`/api/frames/${props.frameId}/commands/${encodeURIComponent(commandId)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        // 404 is the common case and it is not really a failure: the device
+        // woke up and took the command between the render and the click. Say
+        // that rather than "cancel failed", and reload so the row disappears.
+        actions.cancelPendingCommandFailure(
+          response.status === 404
+            ? 'That action already reached the frame — too late to cancel it.'
+            : 'Could not cancel that action.'
+        )
+      }
+      actions.loadPendingCommands()
+    },
+  })),
+  afterMount(({ actions, cache }) => {
+    actions.loadPendingCommands()
+    cache.pollInterval = window.setInterval(() => actions.loadPendingCommands(), POLL_INTERVAL_MS)
+  }),
+  beforeUnmount(({ cache }) => {
+    if (cache.pollInterval) {
+      window.clearInterval(cache.pollInterval)
+    }
+  }),
+])

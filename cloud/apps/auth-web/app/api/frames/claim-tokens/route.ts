@@ -86,6 +86,25 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Provisioning-time scene intent: every frame this token enrolls starts
+  // with the scenes of a frame the account already owns. Ownership is checked
+  // here, at mint time, by the same frameForAccount that guards re-enrollment
+  // — the enrollment itself is unauthenticated, so it must never be the place
+  // that decides whose scenes travel. Copied per frame at CONFIRMATION, so a
+  // board nobody confirmed is still sent nothing.
+  const sceneSourceFrameId = parseOptionalString(body.scene_source_frame_id);
+  let sceneSourceFrame: Awaited<ReturnType<typeof frameForAccount>>;
+  if (sceneSourceFrameId !== undefined) {
+    sceneSourceFrame = await frameForAccount(
+      db,
+      session.accountId,
+      sceneSourceFrameId,
+    );
+    if (!sceneSourceFrame) {
+      return jsonError("invalid_scene_source_frame", 404);
+    }
+  }
+
   // Multi-use tokens back the SD-image download: one image, many cards,
   // each boot enrolls a distinct pending frame. Budget capped at the frame
   // quota — a leaked image can never enroll more than the account could
@@ -188,6 +207,7 @@ export async function POST(request: NextRequest) {
       expiresAt,
       maxUses,
       name: name ?? null,
+      sceneSourceFrameId: sceneSourceFrame?.id ?? null,
       tokenHash: hashSecret(token),
     })
     .returning({ id: frameEnrollmentTokens.id });
@@ -215,6 +235,7 @@ export async function POST(request: NextRequest) {
     claim_token: token,
     expires_at: expiresAt.toISOString(),
     max_uses: maxUses,
+    ...(sceneSourceFrame ? { scene_source_frame_id: sceneSourceFrame.id } : {}),
     // Echoed so the flasher can assert it is provisioning the frame the user
     // started from, rather than inferring one from a new-frame watch.
     ...(boundFrame ? { frame_id: boundFrame.id } : {}),

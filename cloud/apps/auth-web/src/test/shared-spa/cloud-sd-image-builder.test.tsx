@@ -338,6 +338,33 @@ describe("SdImageBuilder", () => {
     ).toHaveLength(0);
   });
 
+  it("mints an expiring code only when the provisioning limit is ticked", async () => {
+    mockReleaseAndImage();
+    stubSaveFilePicker();
+    const mint = vi.fn(() => Promise.resolve("FRCT_multi_use_token"));
+    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+    });
+
+    nameFrame();
+    // The picker is hidden until the limit is asked for — an unticked box
+    // means "no expiry", not "the default one".
+    expect(screen.queryByLabelText("Claim code validity")).toBeNull();
+    fireEvent.click(
+      screen.getByLabelText(/stop this card from adding frames/i),
+    );
+    fireEvent.change(screen.getByLabelText("Claim code validity"), {
+      target: { value: "7" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /download sd image/i }),
+    );
+
+    await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+    expect(mint).toHaveBeenCalledExactlyOnceWith({ multiUse: true, ttlDays: 7 });
+  });
+
   it("builds a personalized image: mints a multi-use token, patches the placeholder, streams to disk", async () => {
     mockReleaseAndImage();
     const saved = stubSaveFilePicker();
@@ -362,8 +389,13 @@ describe("SdImageBuilder", () => {
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
     // ttlDays rides along so the SD image's embedded code outlives the 24h
-    // default that suits interactive flows.
-    expect(mint).toHaveBeenCalledExactlyOnceWith({ multiUse: true, ttlDays: 90 });
+    // default that suits interactive flows. A card is a physical artifact
+    // that gets flashed whenever it gets flashed, so the default is no
+    // expiry at all — the provisioning limit is opt-in.
+    expect(mint).toHaveBeenCalledExactlyOnceWith({
+      multiUse: true,
+      ttlDays: "forever",
+    });
     // The release version is part of the name: these files outlive the
     // download, and two builds for the same frame months apart otherwise
     // differed by nothing at all.

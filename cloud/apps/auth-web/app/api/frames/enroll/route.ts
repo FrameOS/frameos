@@ -277,6 +277,11 @@ async function enrollWithClaimToken(
           linkedClientId: linkedClient.id,
           name,
           publicKey: input.publicKey,
+          // Carried, not acted on: the owner's confirmation is what copies
+          // these scenes over (app/api/frames/{id}/confirm). A multi-use SD
+          // card enrolls many frames, and the token's own frame_id records
+          // only the last one, so the intent has to ride the frame row.
+          sceneSourceFrameId: token.sceneSourceFrameId,
           status: "pending",
         })
         .returning();
