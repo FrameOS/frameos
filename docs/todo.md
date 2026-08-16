@@ -107,11 +107,10 @@ enabled by default on images that have no backend to talk to.
   runs forever as root reconnecting to nothing. Ship `agentEnabled: false`; a
   backend's first deploy turns it on, which is the moment it becomes useful.
   Verify on hardware that backend adoption of a generic card still works.
-  *Small.*
-- **Mint `agentSharedSecret` on first boot when it is empty.** Frames created
-  through a backend get a 32-byte secret; the generic release image ships `""`,
-  so anyone who can point `serverHost` somewhere gets a root PTY with no secret
-  to guess. Independent of the item above and worth doing regardless. *Small.*
+  *Small.* (The companion item, minting a secret at first boot, was withdrawn
+  on 2026-08-16: the agent refuses to handshake at all with an empty secret, so
+  minting one would create a dial-out rather than close a hole. Reasoning in
+  the audit, observation 2.)
 - **Run `frameos.service` as a `frameos` user.** The plan, the privileged call
   sites and the suggested sequencing are in `docs/buildroot-privileges.md` §3.
   Privileged work moves behind one narrow enum-only door (`apply-setup`,
