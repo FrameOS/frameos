@@ -65,7 +65,7 @@ gh workflow run buildroot-base-image.yml --ref your-branch
 gh workflow run buildroot-base-image.yml --ref your-branch -f platform=raspberry-pi-32
 
 # Build every platform in parallel (one matrix job per platform, each on its
-# default runner; the manifest commit step handles the concurrent pushes):
+# default runner). This is the default when no platform is passed:
 gh workflow run buildroot-base-image.yml --ref your-branch -f platform=all
 
 # Use a custom runner label, for example a larger ARM runner:
@@ -76,10 +76,14 @@ The workflow picks the platform's default runner (`ubuntu-24.04-arm` for the
 64-bit platforms, x86_64 `ubuntu-24.04` for 32-bit ARM platforms so the prebuilt
 Bootlin toolchain applies) and can be dispatched with a custom runner label
 when a larger/self-hosted runner is available. It builds the base image,
-uploads it to R2, verifies the refreshed manifest, and commits the resulting
-`tools/buildroot-images/manifest.json` change back to the selected branch.
-Run it once per platform, or dispatch with `platform=all` to build every
-platform in parallel; the manifest keeps one entry per platform.
+uploads it to R2, and verifies the refreshed manifest.
+
+The manifest is then mirrored back into git by a single `commit-manifest` job
+that waits for every platform to finish, so a `platform=all` run produces **one**
+commit naming all the platforms it published — not one commit per platform
+racing to push the same file. `platform=all` is the default; the manifest keeps
+one entry per platform. If one platform fails, the others are still committed
+and the run is marked failed.
 
 Repository secrets required by the upload step:
 

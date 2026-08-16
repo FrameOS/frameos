@@ -6,7 +6,7 @@ on:
       platform:
         description: "Buildroot platform to publish; 'all' builds every platform in parallel"
         required: true
-        default: raspberry-pi-64
+        default: all
         type: choice
         options:
           - all
@@ -51,13 +51,51 @@ on:
 
 permissions:
   contents: write
+  # commit-manifest reads the per-platform "published" markers back out of the
+  # run's artifacts. Naming any scope here zeroes the rest, so this is not
+  # redundant.
+  actions: read
 
 jobs:
   resolve-matrix:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.resolve.outputs.matrix }}
+      version: ${{ steps.version.outputs.version }}
     steps:
+      - name: Require branch dispatch
+        if: github.ref_type != 'branch'
+        run: |
+          echo "Run this workflow against a branch so the manifest commit has a target."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Resolve the stamped version ONCE for the whole run and hand it to every
+      # job as an output. Base images are published FOR the release that
+      # follows them (publish bases -> merge manifest -> bump versions ->
+      # release), so the stamp is the next CalVer, not the current one.
+      # Resolving per-job would let builds that straddle a month boundary — or
+      # the commit job, which runs an hour after the builds start — disagree
+      # about which version they are publishing.
+      #
+      # base_version.py is deliberately stdlib-only: importing buildroot_images
+      # would drag in the backend app and a minute of pip for one string.
+      - id: version
+        env:
+          FRAMEOS_NEXT_VERSION: ${{ inputs.next_version }}
+        run: |
+          set -euo pipefail
+          version="$(python3 tools/buildroot-images/base_version.py)"
+          echo "Publishing base images as FrameOS ${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
       - id: resolve
         env:
           PLATFORM: ${{ inputs.platform }}
@@ -66,9 +104,9 @@ jobs:
           set -euo pipefail
           # Keep this list in sync with the dispatch choice options above and
           # enabled_buildroot_platforms() in buildroot_platforms.py. Parallel
-          # publishes are safe by design: uploads upsert the R2 manifest (the
-          # source of truth) and the commit step re-downloads the converged
-          # manifest with a push-retry loop instead of rebasing local edits.
+          # publishes are safe by design: uploads upsert the R2 manifest, which
+          # is the source of truth, and a single commit-manifest job mirrors the
+          # converged result into git once every platform has finished.
           if [ "${PLATFORM}" = "all" ]; then
             platforms=(raspberry-pi-32 raspberry-pi-64 raspberry-pi-5)
           else
@@ -116,23 +154,13 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       FRAMEOS_BUILDROOT_JLEVEL: ${{ inputs.buildroot_jlevel }}
       FRAMEOS_BUILDROOT_CACHE_DIR: ${{ github.workspace }}/build/buildroot-images/cache
+      # Pinned by resolve-matrix, not recomputed here — see the comment there.
+      FRAMEOS_NEXT_VERSION: ${{ needs.resolve-matrix.outputs.version }}
     steps:
-      - name: Require branch dispatch
-        if: github.ref_type != 'branch'
-        run: |
-          echo "Run this workflow against a branch so the manifest commit has a target."
-          exit 1
-
       - name: Checkout branch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-          fetch-depth: 0
-
-      - name: Prepare branch checkout
-        run: |
-          set -euo pipefail
-          git checkout -B "${GITHUB_REF_NAME}" "origin/${GITHUB_REF_NAME}"
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -171,21 +199,6 @@ jobs:
           set -euo pipefail
           python3 -m pip install --upgrade pip
           python3 -m pip install -r backend/requirements.txt boto3
-
-      # Resolve the stamped version ONCE and pin it for every later step.
-      # Base images are published FOR the release that follows them (publish
-      # bases -> merge manifest -> bump versions -> release), so the stamp is
-      # the next CalVer, not the current one. Recomputing it per step would
-      # also let a build that runs across a month boundary stamp and verify
-      # two different versions.
-      - name: Resolve target version
-        env:
-          NEXT_VERSION_INPUT: ${{ inputs.next_version }}
-        run: |
-          set -euo pipefail
-          version="$(FRAMEOS_NEXT_VERSION="${NEXT_VERSION_INPUT}" python3 -c "import sys; sys.path.insert(0, 'tools/buildroot-images'); import buildroot_images; print(buildroot_images.next_frameos_version())")"
-          echo "FRAMEOS_NEXT_VERSION=${version}" >> "$GITHUB_ENV"
-          echo "Publishing base image as FrameOS ${version}"
 
       - name: Validate configuration
         env:
@@ -259,8 +272,8 @@ jobs:
           from pathlib import Path
 
           platform = os.environ["PLATFORM"]
-          # The version the image was stamped with (Resolve target version),
-          # not whatever versions.json currently says.
+          # The version resolve-matrix pinned for this run, not whatever
+          # versions.json currently says.
           version = os.environ["FRAMEOS_NEXT_VERSION"]
           manifest = json.loads(Path("tools/buildroot-images/manifest.json").read_text(encoding="utf-8"))
           matches = [
@@ -278,51 +291,24 @@ jobs:
           print(json.dumps(entry, indent=2, sort_keys=True))
           PY
 
-      - name: Commit manifest changes
+      # commit-manifest cannot ask GitHub which legs of a fail-fast:false matrix
+      # succeeded — `needs.publish.result` collapses to a single value — so each
+      # leg leaves a marker naming itself. Written only if every step above
+      # passed, so a failed platform contributes no marker and is not asserted
+      # on. Uploading it (rather than a job output) is what keeps it per-leg:
+      # matrix job outputs overwrite each other.
+      - name: Record published platform
         run: |
           set -euo pipefail
-          git config user.name "frameos-bot"
-          git config user.email "git@frameos.net"
-          # Pinned by the Resolve target version step — the next release's
-          # version, which is what the entry was written under. Asking
-          # versions.json here would look up an entry that was never written.
-          version="${FRAMEOS_NEXT_VERSION}"
-          # The manifest's source of truth is R2 — `upload` already upserted
-          # this build's entry there. The repo copy is a mirror, so parallel
-          # platform builds must NOT rebase their local mutations onto each
-          # other (that ended in a manifest.json merge conflict after a
-          # 90-minute build). Instead: re-download the converged manifest from
-          # R2 on top of the current branch tip and retry when a concurrent
-          # job pushes first.
-          for attempt in 1 2 3 4 5; do
-            git fetch origin "${GITHUB_REF_NAME}"
-            git reset --hard "origin/${GITHUB_REF_NAME}"
-            # --force: the checkout always carries a committed manifest.json,
-            # and the R2 copy is the source of truth we are mirroring over it.
-            python3 tools/buildroot-images/buildroot_images.py \
-              --platform "${PLATFORM}" \
-              --bucket "${R2_BUCKET}" \
-              --prefix "${R2_PREFIX}" \
-              download --force
-            # R2's manifest upsert is read-modify-write: two uploads finishing
-            # in the same instant could drop an entry. Committing a mirror
-            # that lost OUR image would silently unpublish it — fail loudly
-            # instead (rerunning the upload step with force_upload repairs it).
-            python3 -c "import json, os, sys; m = json.load(open('tools/buildroot-images/manifest.json')); p = os.environ['PLATFORM']; v = '${version}'; sys.exit(0 if any(e.get('platform') == p and e.get('frameos_version') == v for e in m.get('entries', [])) else f'R2 manifest lost the {p} {v} entry (concurrent upload race) — rerun with force_upload')"
-            git add tools/buildroot-images/manifest.json
-            if git diff --cached --quiet; then
-              echo "No manifest changes to commit."
-              exit 0
-            fi
-            git commit -m "chore: refresh Buildroot base image manifest for ${version} (${PLATFORM})"
-            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
-              exit 0
-            fi
-            echo "Push rejected — a concurrent build updated the branch; retrying (${attempt}/5)"
-            sleep $((RANDOM % 20 + 5))
-          done
-          echo "Could not push the manifest after 5 attempts."
-          exit 1
+          mkdir -p build/published
+          echo "${FRAMEOS_NEXT_VERSION}" > "build/published/${PLATFORM}"
+
+      - name: Upload published marker
+        uses: actions/upload-artifact@v4
+        with:
+          name: buildroot-published-${{ matrix.platform }}-${{ github.run_id }}
+          path: build/published/${{ matrix.platform }}
+          if-no-files-found: error
 
       - name: Upload build metadata
         if: always()
@@ -333,3 +319,141 @@ jobs:
             build/buildroot-images/${{ matrix.platform }}/**/metadata.json
             tools/buildroot-images/manifest.json
           if-no-files-found: warn
+
+  # One commit for the whole run, after every platform has finished. Previously
+  # each platform committed its own mirror of the manifest, which meant N
+  # commits racing to push the same file: the losers reset, re-downloaded the
+  # already-converged manifest, found nothing left to add and exited with "No
+  # manifest changes to commit" — correct, but it left runs where a platform
+  # published successfully and no commit bore its name, which reads exactly
+  # like a lost build.
+  commit-manifest:
+    name: Commit manifest
+    needs: [resolve-matrix, publish]
+    # Not `always()`: a cancelled run should not push. But a partial failure
+    # should still mirror the platforms that did publish, so this cannot depend
+    # on `publish` succeeding outright either.
+    if: ${{ !cancelled() && needs.resolve-matrix.result == 'success' }}
+    runs-on: ubuntu-24.04
+    env:
+      R2_BUCKET: ${{ inputs.bucket }}
+      R2_PREFIX: ${{ inputs.prefix }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      FRAMEOS_NEXT_VERSION: ${{ needs.resolve-matrix.outputs.version }}
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download published markers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: buildroot-published-*-${{ github.run_id }}
+          path: build/published
+          merge-multiple: true
+
+      - name: Collect published platforms
+        id: published
+        run: |
+          set -euo pipefail
+          # mkdir, not `ls 2>/dev/null`: when every platform failed there are no
+          # marker artifacts, download-artifact creates nothing, and a failing
+          # `ls` at the head of a pipefail pipeline would abort the step before
+          # it could report the empty result.
+          mkdir -p build/published
+          platforms="$(ls build/published | tr '\n' ' ' | sed 's/ $//')"
+          if [ -z "${platforms}" ]; then
+            echo "No platform published successfully — nothing to mirror."
+          else
+            echo "Published: ${platforms}"
+          fi
+          echo "platforms=${platforms}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Python dependencies
+        if: steps.published.outputs.platforms != ''
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r backend/requirements.txt boto3
+
+      - name: Commit manifest changes
+        if: steps.published.outputs.platforms != ''
+        env:
+          PUBLISHED_PLATFORMS: ${{ steps.published.outputs.platforms }}
+        run: |
+          set -euo pipefail
+          git config user.name "frameos-bot"
+          git config user.email "git@frameos.net"
+          version="${FRAMEOS_NEXT_VERSION}"
+          # R2 is the manifest's source of truth — every `upload` already
+          # upserted its entry there. The repo copy is a mirror, so this never
+          # edits it locally: it re-downloads the converged manifest on top of
+          # the branch tip. The retry loop now only covers unrelated pushes to
+          # the branch, not sibling platforms.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+            # --force: the checkout always carries a committed manifest.json,
+            # and the R2 copy is what we are mirroring over it.
+            python3 tools/buildroot-images/buildroot_images.py \
+              --bucket "${R2_BUCKET}" \
+              --prefix "${R2_PREFIX}" \
+              download --force
+            # R2's manifest upsert is read-modify-write: two uploads finishing
+            # in the same instant could drop an entry. Committing a mirror that
+            # lost an image would silently unpublish it — fail loudly instead
+            # (rerunning the upload step with force_upload repairs it).
+            python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["FRAMEOS_NEXT_VERSION"]
+          expected = os.environ["PUBLISHED_PLATFORMS"].split()
+          manifest = json.loads(Path("tools/buildroot-images/manifest.json").read_text(encoding="utf-8"))
+          entries = manifest.get("entries", [])
+          missing = [
+              platform
+              for platform in expected
+              if not any(
+                  entry.get("platform") == platform and entry.get("frameos_version") == version
+                  for entry in entries
+              )
+          ]
+          if missing:
+              raise SystemExit(
+                  f"R2 manifest lost the {version} entry for: {', '.join(missing)} "
+                  "(concurrent upload race) — rerun those platforms with force_upload"
+              )
+          print(f"Manifest carries {version} for: {', '.join(expected)}")
+          PY
+            git add tools/buildroot-images/manifest.json
+            if git diff --cached --quiet; then
+              echo "Manifest already up to date on ${GITHUB_REF_NAME}; nothing to commit."
+              exit 0
+            fi
+            git commit -m "chore: refresh Buildroot base image manifest for ${version} (${PUBLISHED_PLATFORMS// /, })"
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            echo "Push rejected — the branch moved; retrying (${attempt}/5)"
+            sleep $((RANDOM % 20 + 5))
+          done
+          echo "Could not push the manifest after 5 attempts."
+          exit 1
+
+      - name: Fail if any platform did not publish
+        if: ${{ needs.publish.result != 'success' }}
+        run: |
+          echo "At least one platform failed to publish; the manifest mirrors only the ones that succeeded."
+          exit 1

@@ -17,7 +17,6 @@ import tarfile
 import tempfile
 import uuid
 from dataclasses import dataclass, field
-import datetime as dt
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,8 +26,12 @@ BACKEND_ROOT = REPO_ROOT / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
 # tools/ holds update_versions.py, whose CalVer helpers decide what the next
 # release is called; base images are stamped with that (see
-# next_frameos_version) rather than duplicating the rules here.
+# base_version.next_frameos_version) rather than duplicating the rules here.
 sys.path.insert(0, str(REPO_ROOT / "tools"))
+# ...and this file's own directory, for base_version. Not implied by sys.path[0]:
+# the backend tests load this module through importlib.spec_from_file_location,
+# where sys.path[0] is the test runner's cwd, not tools/buildroot-images.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.tasks.buildroot_image import (  # noqa: E402
     BUILDROOT_ASSETS_PARTITION_SIZE,
@@ -68,10 +71,12 @@ from app.models.frame import (  # noqa: E402
     get_frame_json,
 )
 from app.tasks.binary_builder import FrameBinaryBuildResult  # noqa: E402
-from update_versions import (  # noqa: E402
-    _max_base_version,
-    _next_calver,
-    _validate_base_version,
+# Re-exported: the CalVer rules live in base_version.py so CI can resolve the
+# stamped version on a bare checkout, without installing the backend deps that
+# importing this module requires.
+from base_version import (  # noqa: E402,F401
+    next_frameos_version,
+    published_frameos_version,
 )
 from app.utils.cross_compile import TargetMetadata  # noqa: E402
 from app.tasks.setup_json_reset import (  # noqa: E402
@@ -210,30 +215,6 @@ def frameos_version() -> str:
     return published_frameos_version(str(payload.get("frameos") or ""))
 
 
-def next_frameos_version() -> str:
-    """The version a base image is published under.
-
-    Base images are stamped with the version of the release they are FOR, not
-    the one that happens to be current while CI builds them: the workflow
-    order is publish base images -> merge the manifest -> bump versions ->
-    release, so by the time anything consumes these images the current version
-    is this one. Stamping the current version instead left every fresh base
-    image looking a release behind, and the SD builder's version-match then
-    fell through to "newest entry" instead of an exact hit.
-
-    FRAMEOS_NEXT_VERSION pins it explicitly, matching the release workflow's
-    own `next_version` input — pass the same value to both when overriding.
-    The computed default reuses tools/update_versions.py so the CalVer rules
-    cannot drift from the bump that will actually happen.
-    """
-    override = (os.environ.get("FRAMEOS_NEXT_VERSION") or "").strip()
-    if override:
-        return published_frameos_version(_validate_base_version(override))
-    payload = json.loads((REPO_ROOT / "versions.json").read_text(encoding="utf-8"))
-    versions = {key: str(value) for key, value in payload.items() if value}
-    return _next_calver(_max_base_version(versions), dt.date.today())
-
-
 def raw_frameos_version() -> str:
     payload = json.loads((REPO_ROOT / "versions.json").read_text(encoding="utf-8"))
     return str(payload.get("frameos") or "")
@@ -243,10 +224,6 @@ def release_version() -> str:
     payload = json.loads((REPO_ROOT / "versions.json").read_text(encoding="utf-8"))
     version = str(payload.get("docker") or payload.get("frameos") or "")
     return published_frameos_version(version)
-
-
-def published_frameos_version(version: str) -> str:
-    return version.split("+", 1)[0]
 
 
 def sha256(path: Path) -> str:
