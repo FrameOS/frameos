@@ -1,0 +1,17 @@
+[Unit]
+Description=FrameOS Cloud object-store backup (R2 -> Storage Box)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# auth-web.env provides the R2_CLOUD_* credentials the rclone remote is built
+# from (no second copy to rotate); backup.env provides the destination and the
+# healthcheck URL. Both optional (-) so a missing file degrades to the
+# script's defaults instead of failing the unit before it can say why.
+EnvironmentFile=-/etc/frameos-cloud/auth-web.env
+EnvironmentFile=-/etc/frameos-cloud/backup.env
+ExecStart=/usr/local/bin/frameos-cloud-object-backup
+# Never compete with live requests for bandwidth or disk.
+Nice=10
+IOSchedulingClass=idle

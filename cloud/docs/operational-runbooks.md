@@ -136,10 +136,20 @@ message and delivers none.
 ## Admin Live Checks
 
 `/admin` has two tables. **System checks** is configuration presence only.
-**Live checks** actually probes: `select 1` against Postgres, and Postmark's
-`/server` endpoint to confirm the token works and the server is Live rather
-than Sandbox. Both are re-run on every page load, and neither can 500 the
-page — a failing probe renders as a failing row.
+**Live checks** actually probes: `select 1` against Postgres, Postmark's
+`/server` endpoint (to confirm the token works and the server is Live rather
+than Sandbox), and the object store — a probe object written, read back and
+deleted. Both are re-run on every page load, and neither can 500 the page: a
+failing probe renders as a failing row.
+
+Two object-store rows are worth reading carefully. "Object storage" reporting
+the **filesystem** driver is a warning rather than a pass — correct in
+development, but on the production host it means the `R2_CLOUD_*` credentials
+did not reach the process and blobs are landing on local disk where no backup
+will find them. "Frame hub object storage" watches for the other half of the
+same mistake: the hub reads its own environment file, so it can be writing
+bytes into Postgres while auth-web reads R2, and nothing errors — only
+previews go blank for frames that re-rendered.
 
 ## Backups
 
@@ -167,6 +177,35 @@ Run `pnpm db:cleanup` on a schedule (daily is fine). It deletes:
 The retention window defaults to 7 days and can be overridden with
 `FRAMEOS_CLOUD_CLEANUP_RETENTION_DAYS`. Audit and consent events are never
 deleted by this job.
+
+### Sweeping the object store
+
+`scripts/object-store-sweep.sh` deletes blobs no row points at. The app
+already removes an object when the last row referencing it goes; what it
+cannot see is a row that vanishes underneath it — `delete from accounts`
+cascades through scenes, versions, images and frames with no application code
+running, orphaning every object those rows named.
+
+```sh
+# on the app host, from the release directory
+set -a; . /etc/frameos-cloud/auth-web.env; set +a
+cloud/scripts/object-store-sweep.sh              # dry run
+cloud/scripts/object-store-sweep.sh --apply
+```
+
+Monthly is plenty — the waste is bounded by how often accounts are deleted.
+It needs the `r2` rclone remote (`cloud/ops/backup/rclone.conf.example`).
+
+Two safeties worth knowing before trusting it with `--apply`: objects younger
+than `OBJECT_STORE_SWEEP_MIN_AGE` (7 days) are never candidates, because a
+publish writes the object *before* the row that points at it and a sweep
+racing a publish would otherwise delete a live scene; and every candidate is
+re-checked against the database immediately before its delete, so a key
+claimed between the listing and the delete is skipped and said so.
+
+It also reports the opposite problem — a referenced key that is **not** in the
+store, i.e. a row pointing at bytes that are gone. That line should never
+appear.
 
 ## Data Subject Requests
 

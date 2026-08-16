@@ -117,58 +117,13 @@ enabled on images that have no backend to talk to.
 
 ---
 
-## Drivers
-
-There are two ways to build a frame: `static` (everything in one binary) and
-`precompiled` (the published release binary plus its driver `.so`s, scenes
-interpreted). The `shared` and `shared-scenes` modes were removed on
-2026-08-16, and with them the largest unaudited ABI surface.
-
-Nothing scheduled. The return channel a driver uses to ask for an earlier
-retry landed on 2026-08-17 (`frameos_driver_earlier_render_seconds`, optional
-so an older `.so` stays loadable), and every driver was read for refs it did
-not allocate — none found, and `backend/app/drivers/tests/test_driver_abi_rules.py`
-keeps it that way.
-
----
-
-## Buildroot images
-
-Three Raspberry Pi platforms ship with published base images: `raspberry-pi-64`
-(Zero 2 W / Pi 3 / Pi 4, the default), `raspberry-pi-32` (every ARMv6 board:
-Zero, Zero W, Pi 1, CM1) and `raspberry-pi-5` (Pi 5 / CM5).
-
-Nothing scheduled.
-
----
-
-## ESP32
-
-Memory measurements, the emergency-reserve decision, boot/render cost numbers
-and the measurement tooling live in `docs/esp32-memory.md`; the flash breakdown
-is in `docs/esp32-image-size.md`.
-
-Nothing scheduled.
-
----
-
 ## Store
 
-Scene metadata lives in Postgres; the bytes live in object storage (R2 behind
-`cloud-cdn.frameos.net`, a directory under `db/object-storage` in development),
-content-addressed and namespaced.
-
-- **Sweep objects nothing points at.** Deletes drop an object once no row
-  references its key, but rows removed outside those paths (a cascade when a
-  frame or account is deleted) leave the object behind. A periodic sweep of
-  keys with no referencing row belongs next to `db-cleanup.sh`; until then the
-  waste is bounded by how often accounts are deleted.
-- **Back the object store up, and rehearse it.** The Postgres backups no
-  longer carry the blob bytes, so a database restore now comes back with rows
-  whose content is missing. Blobs are immutable and content-addressed, so
-  there is no point-in-time problem — only durability: a copy outside
-  Cloudflare, and a bucket policy that survives a leaked key deleting objects.
-  Neither exists yet (`cloud/docs/backups.md`).
+- **Turn on object versioning in Cloudflare.** A leaked R2 key can still empty
+  the live bucket and take every store image and frame preview down until
+  someone restores from the nightly off-box copy. Bucket-level versioning or a
+  lifecycle policy closes the window; it is Cloudflare API configuration rather
+  than code, which is the only reason it is not done (`cloud/docs/backups.md`).
 
 ---
 
@@ -176,12 +131,6 @@ content-addressed and namespaced.
 
 - **Operator-facing audit/event export** — only once there is an operator
   surface to put it on.
-- Deliberately not built, though the scope names are already reserved in the
-  device-flow allowlist: organizations, projects, memberships/invitations,
-  hosted backend lifecycle, billing and metered quotas, placeholder service/UI
-  packages (`cloud/TODO.md`).
-- Disposable-email blocking was considered and skipped: Turnstile plus the rate
-  limiter covers the automated case. Revisit only if abuse is observed.
 
 ---
 
@@ -189,14 +138,11 @@ content-addressed and namespaced.
 
 Open items from `docs/cloud-security-review.md`.
 
-- **Redact the link token if the state file ever travels.** The token sits in
-  plaintext in `state/cloud_link.json` (0600), and that is now an accepted
-  property rather than an open item: a Pi has no secure element, so any key
-  FrameOS could derive to encrypt it would be on the same SD card. The threat
-  model says it plainly — possession of the card is possession of the link, and
-  revoking the frame is the answer. Reasoning in `docs/cloud-security-review.md`.
-  What stays open is narrower and real: nothing exports that file today, and
-  the first support-bundle or backup path that does must redact it.
+- **Redact the link token in the first thing that exports frame state.**
+  `state/cloud_link.json` holds it in plaintext (0600), which is accepted —
+  possession of the SD card is possession of the link, and a Pi has no secure
+  element to change that. Nothing exports the file today; a support bundle or
+  a device backup would, and must redact it.
 
 ---
 
@@ -204,10 +150,8 @@ Open items from `docs/cloud-security-review.md`.
 
 Matrix in `docs/api-triality.md`.
 
-- ESP32: full web admin shell parity. The fonts routes landed on 2026-08-17
-  (`/api/fonts` lists the built-in face plus the SD card's, `/api/fonts/:font`
-  streams one, and "Sync fonts" uploads a project's fonts onto the card), so
-  what is left is the admin shell itself.
+- ESP32: full web admin shell parity. The device API is close to complete —
+  what is left is the admin UI the Pi serves and the ESP32 does not.
 - Frame import/adoption: standalone export/source payloads, and a backend
   adoption flow for standalone frames.
 
@@ -237,7 +181,11 @@ Matrix in `docs/api-triality.md`.
 ## Parking lot (unscheduled, and fine as it is)
 
 **New cloud services are not being built.** The scope names below are reserved
-and the designs are sketched, but none of them is planned work:
+in the device-flow allowlist and the designs are sketched, but none of them is
+planned work — as with organizations, projects, memberships, hosted backend
+lifecycle and metered billing (`cloud/TODO.md`). Disposable-email blocking
+belongs on the same list: Turnstile plus the rate limiter covers the automated
+case, so it is skipped until abuse is actually observed.
 
 - **Photo gallery service** (`gallery:read`) — curated feeds usable as image
   sources in scenes, quota-limited free tier.

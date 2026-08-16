@@ -26,7 +26,7 @@ import {
   storeFrameAssetFile,
   type FramesDatabase,
 } from "./frames";
-import { isProvablyFullyTransparentImage } from "./store";
+import { detectImageContentType, isProvablyFullyTransparentImage } from "./store";
 
 // (storeSceneId, version) → runtime scene ids in that version's scenes.json.
 // Bounded so a pathological fleet cannot grow it without limit; eviction is
@@ -233,7 +233,10 @@ export async function storeSceneCoverImage(
     }
     return {
       content,
-      contentType: galleryImage.contentType || "image/jpeg",
+      // Sniffed rather than trusted: see the note in the public image route.
+      contentType:
+        detectImageContentType(content) ??
+        (galleryImage.contentType || "image/jpeg"),
     };
   }
   const preview = await readBlob({
@@ -243,7 +246,8 @@ export async function storeSceneCoverImage(
   if (preview && !isTransparentCover(`preview:${storeSceneId}`, preview)) {
     return {
       content: preview,
-      contentType: scene.previewImageType ?? "image/jpeg",
+      contentType:
+        detectImageContentType(preview) ?? scene.previewImageType ?? "image/jpeg",
     };
   }
   return undefined;

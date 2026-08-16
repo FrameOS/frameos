@@ -623,23 +623,32 @@ scene's preview and gallery images redirect (307) to the CDN. Private scenes
 and every frame snapshot are proxied through the app, where the session check
 still applies — the alias has no authentication in front of it.
 
-### Migrating existing rows
+Image content types are sniffed from the bytes when serving, not read from the
+stored column — a `content_type` is only as good as whatever wrote it, and the
+store has rows from before it was sniffed at all. The bytes cannot be wrong
+about themselves. The CDN path is the exception, because the object's own
+stored content type is what the edge returns: whatever writes an image object
+has to hand `storeBlob` a sniffed type, and every current writer does.
 
-Migration `0032_object_storage.sql` adds the columns and changes nothing else:
-rows written before it keep their bytes in Postgres and keep serving, because
-`readBlob()` reads whichever of the two a row is using. Move them when
-convenient:
+### Running a one-off script against production
+
+The release is a Next.js standalone bundle, and its `node_modules` holds only
+what the server traced — third-party packages are compiled into the server
+chunks, so a script placed in the release cannot `import` them. Stage it
+somewhere with its own dependencies instead:
 
 ```sh
-# on the app host, with the auth-web env sourced
-node cloud/apps/auth-web/scripts/backfill-object-store.mjs            # dry run
-node cloud/apps/auth-web/scripts/backfill-object-store.mjs --apply
+mkdir -p /root/frameos-oneoff && cd /root/frameos-oneoff
+npm i postgres aws4fetch
+set -a; . /etc/frameos-cloud/auth-web.env; set +a
+node ./the-script.mjs
 ```
 
-It is resumable (each row is its own transaction, the object is written before
-the row is updated, and re-uploading identical bytes to a digest key is free)
-and its summary prints which driver it used — check that it says `s3` before
-believing it moved anything off the database.
+One gotcha worth inheriting: postgres.js opened with `max: 1` cannot write
+inside a `.cursor()` loop — the cursor holds the only connection, so the write
+queues behind a cursor that cannot advance until the write runs. It does not
+error; it hangs, with Postgres reporting `ClientRead`. Page with `limit N`
+instead.
 
 ## Signup Notifications
 

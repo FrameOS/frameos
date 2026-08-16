@@ -211,6 +211,40 @@ function transparentPng(width = 4, height = 4) {
   ]);
 }
 
+// The same shape as transparentPng, with alpha set: publishing rejects a
+// provably transparent preview, so a test that wants a real PNG needs one
+// whose pixels are opaque.
+function opaquePng(width = 4, height = 4) {
+  const raw = new Uint8Array(height * (1 + width * 4));
+  for (let y = 0; y < height; y++) {
+    const row = y * (1 + width * 4);
+    for (let x = 0; x < width; x++) {
+      raw[row + 1 + x * 4 + 3] = 0xff; // alpha
+    }
+  }
+  const ihdr = new Uint8Array(13);
+  const ihdrView = new DataView(ihdr.buffer);
+  ihdrView.setUint32(0, width);
+  ihdrView.setUint32(4, height);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  const chunk = (type: string, data: Uint8Array) => {
+    const out = new Uint8Array(12 + data.length);
+    new DataView(out.buffer).setUint32(0, data.length);
+    for (let i = 0; i < 4; i++) {
+      out[4 + i] = type.charCodeAt(i);
+    }
+    out.set(data, 8);
+    return Buffer.from(out);
+  };
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlibSync(raw)),
+    chunk("IEND", new Uint8Array(0)),
+  ]);
+}
+
 function publishBody(overrides: Record<string, unknown> = {}) {
   return {
     content_base64: templateZip().toString("base64"),
@@ -1333,6 +1367,40 @@ describe("store publish and distribution", () => {
       ctx(sceneId),
     );
     expect(oldest.status).toBe(200);
+  });
+
+  it("serves an image's real type, not the one the row claims", async () => {
+    // The store has rows from before the preview type was sniffed at publish:
+    // PNG bytes with `image/jpeg` in the column, and (once they moved) in the
+    // object's own content type too. The column is only as good as whatever
+    // wrote it; the bytes cannot be wrong about themselves.
+    const { accessToken } = await linkClient(publishScopes);
+    // PNG bytes behind the zip's conventional image.jpg name — which is how
+    // the mislabelled rows came about in the first place.
+    const scene = (
+      await readJson(
+        await publish(accessToken, {
+          content_base64: templateZip({ imageBytes: opaquePng() }).toString(
+            "base64",
+          ),
+          visibility: "public",
+        }),
+      )
+    ).scene as Record<string, unknown>;
+    const sceneId = scene.id as string;
+
+    // Publishing sniffs, so make the stored column lie the way the old rows do.
+    await db
+      .update(storeScenes)
+      .set({ previewImageType: "image/jpeg" })
+      .where(eq(storeScenes.id, sceneId));
+
+    const image = await getSceneImage(
+      request(`/api/store/scenes/${sceneId}/image`, "GET"),
+      ctx(sceneId),
+    );
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
   });
 
   it("stores validated tags and exposes them in the repository index", async () => {

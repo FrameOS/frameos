@@ -459,10 +459,10 @@ export const storeSceneVersions = pgTable(
   "store_scene_versions",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    // Exactly one of `content` and `objectKey` is set. New publishes write the
-    // zip to object storage and leave `content` null; rows published before
-    // that move keep their bytes here until the backfill runs. readBlob()
-    // hides the difference (cloud/apps/auth-web/src/lib/blobs.ts).
+    // Exactly one of `content` and `objectKey` is set. Publishing writes the
+    // zip to object storage and leaves `content` null; the column survives as
+    // the other half of migration 0032's contract, and readBlob() serves
+    // whichever a row carries (cloud/apps/auth-web/src/lib/blobs.ts).
     content: bytea("content"),
     objectKey: text("object_key"),
     contentType: text("content_type").default("application/zip").notNull(),

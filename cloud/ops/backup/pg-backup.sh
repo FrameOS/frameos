@@ -14,10 +14,11 @@ set -euo pipefail
 #
 # Two artifacts per run, shipped to a Hetzner Storage Box via rclone:
 #
-#   db-<stamp>.dump      pg_dump custom format. Every byte of user data —
-#                        accounts, frames, scenes, uploaded asset contents
-#                        (bytea columns) — lives in Postgres, so this is the
-#                        entire data backup.
+#   db-<stamp>.dump      pg_dump custom format: accounts, frames, scenes and
+#                        the metadata of every stored blob. NOT the blob bytes
+#                        — scene zips, previews and cached frame snapshots
+#                        live in object storage now, and are copied separately
+#                        by frameos-cloud-object-backup. A restore needs both.
 #   host-<stamp>.tar.gz  the parts of the host that are in neither the repo
 #                        nor the database: /etc/frameos-cloud (secrets),
 #                        nginx/postgres/pgbackrest/ufw config, letsencrypt

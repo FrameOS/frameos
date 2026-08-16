@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { publicBlobUrl, readBlob } from "../../../../../../src/lib/blobs";
+import { detectImageContentType } from "../../../../../../src/lib/store";
 import {
   canAccessPrivateScene,
   shareTokenGrantsAccess,
@@ -118,7 +119,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
     headers: {
       "cache-control": cacheControl,
       "content-length": String(preview.length),
-      "content-type": scene.previewImageType ?? "image/jpeg",
+      // Sniffed, not stored. previewImageType is only as good as whatever
+      // wrote it, and rows published before the type was sniffed at all say
+      // "image/jpeg" over PNG bytes. The bytes cannot be wrong about
+      // themselves.
+      "content-type":
+        detectImageContentType(preview) ?? scene.previewImageType ?? "image/jpeg",
       etag,
       "x-content-type-options": "nosniff",
     },

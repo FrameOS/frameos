@@ -2,10 +2,10 @@
 //
 // The rule for every table that used to hold a `bytea`: the row keeps
 // `content` (nullable) AND an `object_key`, and exactly one of them is set.
-// New writes go to the object store and leave `content` null; rows written
-// before the move still carry their bytes and keep working untouched, so the
-// backfill (scripts/backfill-object-store.mjs) is a chore, never a cutover.
-// `readBlob` hides which of the two a row is using.
+// Writes go to the object store and leave `content` null. The column is empty
+// everywhere it has ever been deployed, and stays only as the reading half of
+// migration 0032's contract — `readBlob` serves whichever of the two a row
+// carries, so a row that predates the move would still work.
 //
 // Keys are `<namespace>/<sha256>` — content-addressed, so republishing the
 // same preview PNG a thousand times stores it once and `storeBlob` skips the

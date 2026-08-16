@@ -86,8 +86,8 @@ export function objectStoreDirectory(): string {
     return resolve(configured);
   }
   // cloud/apps/auth-web/src/lib -> repo root is five levels up. Resolved from
-  // cwd rather than import.meta.url so the hub, the Next server and the
-  // backfill script all land on the same directory when run from the repo.
+  // cwd rather than import.meta.url so the hub and the Next server land on the
+  // same directory when run from the repo.
   return resolve(process.cwd(), findRepoRootRelativeDbPath());
 }
 

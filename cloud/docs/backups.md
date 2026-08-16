@@ -20,15 +20,22 @@ answer:
   bytes, and nothing ever overwrites one with different content, so the store
   only ever grows within an account's quota. There is no point-in-time
   problem to solve, only a durability one.
-- **R2 is the durable copy today.** Cloudflare replicates within the bucket;
-  what is missing is a copy outside Cloudflare, and a bucket-level lifecycle
-  or versioning policy that survives a credential compromise deleting objects.
-  Neither is configured yet. Until it is, treat "someone with the R2 keys
-  deletes the bucket" as an unrecovered scenario and keep the keys to the two
-  services that need them.
-- **The backfill ran on 2026-08-17**: 183 rows / ~106 MB moved, and the
-  database went from 157 MB to 23 MB. So no blob bytes remain in Postgres, and
-  the database backups no longer cover any of them.
+- **The object store has its own nightly copy**, to the same Storage Box:
+  `frameos-cloud-object-backup.timer` at 05:17 UTC, an hour after the database
+  job so the object copy can only ever be newer than the rows referencing it.
+  It **copies, never syncs** — a sync would mirror a deletion in R2 onto the
+  backup, which is exactly the failure it exists for. Objects are immutable
+  and named after the sha256 of their own content, so copy-only is also
+  complete: the backup accumulates everything that ever existed, and rclone
+  runs with `--immutable` so a key whose content ever changed fails the run
+  instead of overwriting the good copy.
+- **What is still missing** is a bucket-level versioning or lifecycle policy in
+  Cloudflare. The off-box copy means a leaked R2 key can no longer destroy the
+  only copy, but it can still empty the live bucket and take the site's images
+  down until a restore. Keep the keys to the two services that need them.
+- **No blob bytes remain in Postgres.** The `content` columns are empty
+  everywhere; a database backup carries the rows, the keys and the recorded
+  sizes, and none of the bytes.
 
 Two independent layers ship to the Hetzner Storage Box
 (`u651211.your-storagebox.de`, SFTP port 23, SSH-key auth):
@@ -186,17 +193,30 @@ so the drill also sums `length(content)` over the blob tables — that forces
 Postgres to read every byte back out of restored TOAST storage — and asserts
 that an empty-but-valid restore fails rather than looking like a pass.
 
-Since the 2026-08-17 backfill that sum is **zero** — there are no blob bytes
-left in Postgres. Keep the check (it is what would catch a truncated dump if
-bytes ever came back), but read it for what it is: a green drill no longer says
-anything about whether the blobs are recoverable. That question belongs to the
-object store, and is not yet rehearsed.
+That sum is **zero** now — the blob bytes live in the object store. Keep the
+check (it is what would catch a truncated dump if bytes ever came back), but
+read it for what it is: a green drill no longer says anything about whether the
+blobs are recoverable. That question belongs to the object store, and is not
+yet rehearsed.
 
 What a full recovery needs today, in order: restore Postgres (either path
-above), then confirm the objects the restored rows point at are still in R2.
-`select object_key from …` across the four blob tables is the list; every key
-is a sha256 of its own content, so an object that is present is by construction
-the right one.
+above), then restore the objects the rows point at — from R2 if it still has
+them, otherwise from `storagebox:frameos-cloud-objects`:
+
+```sh
+rclone copy storagebox:frameos-cloud-objects r2:frameos-cloud
+```
+
+Copying the whole backup back is safe and is usually the right move: the store
+only ever grows, keys are content digests, and objects nothing references are
+swept later (`scripts/object-store-sweep.sh`) rather than being a problem.
+
+**Rehearsed 2026-08-17, passed.** The first copy shipped all 173 objects
+(97 MB) in 19 s. Six objects sampled across `store/scene-versions`,
+`store/scene-previews` and `frames/…/cache` were pulled back off the Storage
+Box and hashed: every one matched the sha256 in its own key. That is the whole
+verification — a content-addressed store cannot restore the wrong bytes without
+the name disagreeing with them.
 
 ### Results so far
 

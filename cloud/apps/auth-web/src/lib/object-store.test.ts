@@ -323,8 +323,8 @@ describe("the /admin live check", () => {
 describe("the directory default", () => {
   it("is used verbatim when FRAMEOS_OBJECT_STORE_DIR names one", async () => {
     // Guards the one thing a wrong default would silently break: two
-    // processes (Next, the hub, the backfill script) disagreeing about where
-    // objects live, which reads as "the image vanished".
+    // processes (Next and the hub) disagreeing about where objects live,
+    // which reads as "the image vanished".
     await writeFile(join(root, "marker"), "here");
     await objectStore().put("store/scene-images/k", Buffer.from("v"), "image/png");
     expect(await readFile(join(root, "store/scene-images/k"), "utf8")).toBe("v");

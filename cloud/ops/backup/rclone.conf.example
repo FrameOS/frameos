@@ -12,6 +12,23 @@
 # restricted shell whose checksum tools have BSD names. Seed known_hosts with:
 #   ssh-keyscan -p 23 uXXXXXX.your-storagebox.de >> /root/.ssh/known_hosts
 
+# Cloudflare R2, the blob store (bucket frameos-cloud). Same account and
+# credentials the app uses — read them out of /etc/frameos-cloud/auth-web.env
+# rather than keeping a third copy, and keep this file chmod 600.
+#
+# `provider = Cloudflare` and `region = auto` are what R2 wants over the S3
+# API; getting the region wrong is a 403 that says nothing useful. No
+# `acl`/storage-class settings: R2 rejects them.
+
+[r2]
+type = s3
+provider = Cloudflare
+access_key_id = R2_CLOUD_ACCESS_KEY_ID_HERE
+secret_access_key = R2_CLOUD_SECRET_ACCESS_KEY_HERE
+endpoint = https://ACCOUNTID.r2.cloudflarestorage.com
+region = auto
+no_check_bucket = true
+
 [storagebox]
 type = sftp
 host = uXXXXXX.your-storagebox.de

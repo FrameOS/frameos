@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { storeSceneImages, storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { publicBlobUrl, readBlob } from "../../../../../../../src/lib/blobs";
+import { detectImageContentType } from "../../../../../../../src/lib/store";
 import {
   canAccessPrivateScene,
   shareTokenGrantsAccess,
@@ -101,7 +102,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
     headers: {
       "cache-control": "public, max-age=3600",
       "content-length": String(content.length),
-      "content-type": row.contentType,
+      // The stored content_type defaults to image/jpeg and older rows kept
+      // that default over PNG bytes; the bytes are authoritative.
+      "content-type": detectImageContentType(content) ?? row.contentType,
       "x-content-type-options": "nosniff",
     },
   });

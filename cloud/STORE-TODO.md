@@ -45,9 +45,9 @@ Two sides of this monorepo:
    Launched on Postgres `bytea` with hard caps (8 MB/zip, structural
    validation, per-account quotas), on the bet that the stored sha256 + sizes
    would make the move mechanical. They did: migration 0032 (2026-08-17) added
-   an `object_key` beside each `content`, made `content` nullable, and changed
-   nothing else — rows written before it keep their bytes and keep serving,
-   and `scripts/backfill-object-store.mjs` walks them across whenever.
+   an `object_key` beside each `content` and made `content` nullable, so the
+   move needed no downtime — rows kept serving from whichever column they had
+   until every one of them had been walked across.
    Production is Cloudflare R2 (bucket `frameos-cloud`, public alias
    `cloud-cdn.frameos.net`); development and CI get a directory under
    `db/object-storage`, so nobody needs credentials or a fake-S3 daemon to run
@@ -127,10 +127,9 @@ front and repository.json, owner management and superadmin moderation,
 
 ## Remaining work
 
-Tracked in `docs/todo.md` at the repo root (backfilling the blobs still in
-Postgres; sweeping objects nothing references; apps in the store pending a
-signing/review story; the open questions on pre-review, unpublish policy, and
-usernames).
+Tracked in `docs/todo.md` at the repo root (sweeping objects nothing
+references; backing the bucket up; apps in the store pending a signing/review
+story; the open questions on pre-review, unpublish policy, and usernames).
 
 ## Protocol summary (details in docs/cloud-link.md at the repo root)
 

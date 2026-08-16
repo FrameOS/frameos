@@ -279,8 +279,7 @@ async function checkObjectStoreLive(): Promise<LiveCheck> {
 // auth-web to be reading R2 while the hub keeps writing bytes into Postgres.
 // Nothing errors; previews just go blank for frames that re-rendered. The
 // tell is a frame_asset_files row written RECENTLY that still carries its
-// bytes: rows that predate the move are expected to (until the backfill runs),
-// rows written since are not.
+// bytes: no row should, since nothing writes bytes into that column any more.
 async function checkHubObjectStoreLive(): Promise<LiveCheck> {
   const name = "Frame hub object storage";
   if (!hasDatabaseUrl()) {

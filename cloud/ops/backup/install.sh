@@ -24,7 +24,11 @@ run chmod 755 /usr/local/bin/frameos-cloud-backup
 # means the box always has the current version to hand.
 scp -i "$ssh_key" restore-drill.sh "$deploy_host:/usr/local/bin/frameos-cloud-restore-drill"
 run chmod 755 /usr/local/bin/frameos-cloud-restore-drill
+# The blob bytes are not in the database dump; they get their own copy.
+scp -i "$ssh_key" object-store-backup.sh "$deploy_host:/usr/local/bin/frameos-cloud-object-backup"
+run chmod 755 /usr/local/bin/frameos-cloud-object-backup
 scp -i "$ssh_key" frameos-cloud-backup.service frameos-cloud-backup.timer \
+  frameos-cloud-object-backup.service frameos-cloud-object-backup.timer \
   "$deploy_host:/etc/systemd/system/"
 
 # Seed backup.env only when absent — it holds the healthchecks ping URL and
@@ -43,7 +47,8 @@ fi
 
 run systemctl daemon-reload
 run systemctl enable --now frameos-cloud-backup.timer
-run systemctl list-timers frameos-cloud-backup.timer --no-pager
+run systemctl enable --now frameos-cloud-object-backup.timer
+run systemctl list-timers frameos-cloud-backup.timer frameos-cloud-object-backup.timer --no-pager
 
 # The remote half needs Storage Box credentials, which only a human has.
 # With the remote in place, run a first backup now so "installed" and
@@ -53,6 +58,13 @@ if run "rclone listremotes 2>/dev/null" | grep -q '^storagebox:$'; then
   run frameos-cloud-backup
   echo "Remote contents:"
   run '. /etc/frameos-cloud/backup.env 2>/dev/null; rclone lsl "${RCLONE_REMOTE:-storagebox:frameos-cloud-backups}"'
+  if run "rclone listremotes 2>/dev/null" | grep -q '^r2:$'; then
+    echo "rclone remote 'r2' found — copying the object store now"
+    run systemctl start frameos-cloud-object-backup.service
+    run systemctl status frameos-cloud-object-backup.service --no-pager -n 12 || true
+  else
+    echo "rclone remote 'r2' is not configured — the object-store backup timer will fail until it is (see rclone.conf.example)."
+  fi
 else
   cat <<'NEXT'
 

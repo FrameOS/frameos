@@ -236,7 +236,7 @@ cp -a "$hub_dir/dist" "$stage/cloud/$hub_dir/dist"
 mkdir -p "$stage/cloud/packages/db"
 cp -a packages/db/drizzle "$stage/cloud/packages/db/drizzle"
 mkdir -p "$stage/cloud/scripts"
-cp -a scripts/db-migrate.sh scripts/db-cleanup.sh "$stage/cloud/scripts/"
+cp -a scripts/db-migrate.sh scripts/db-cleanup.sh scripts/object-store-sweep.sh "$stage/cloud/scripts/"
 # The server-side deploy script rides along in the release it deploys, and
 # frameos-cloud-update installs the newer copy over itself once the release is
 # live. Before this the box's copy existed only on the box (and in backups),
