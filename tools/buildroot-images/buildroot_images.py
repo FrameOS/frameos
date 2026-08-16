@@ -814,17 +814,13 @@ async def build_release_image(args: argparse.Namespace) -> None:
                 platform=buildroot_platform.docker_platform,
                 image="debian:bookworm",
             ),
-            compilation_mode=str(metadata.get("compilation_mode") or "shared"),
+            compilation_mode=str(metadata.get("compilation_mode") or "precompiled"),
             source_dir=str(artifact_root),
             build_dir=str(artifact_root),
             archive_path=str(archive_or_dir),
             binary_path=str(artifact_root / "frameos"),
             driver_library_paths=[str(path) for path in sorted((artifact_root / "drivers").glob("*.so"))],
             driver_library_names=list(metadata.get("driver_libraries") or []),
-            scene_library_paths=[str(path) for path in sorted((artifact_root / "scenes").glob("*.so"))]
-            if (artifact_root / "scenes").is_dir()
-            else [],
-            scene_library_names=list(metadata.get("scene_libraries") or []),
             cross_compiled=True,
             prebuilt_entry=None,
             prebuilt_target=target,

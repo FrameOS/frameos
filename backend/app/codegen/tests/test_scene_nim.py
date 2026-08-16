@@ -1,11 +1,8 @@
 from types import SimpleNamespace
 
 from app.codegen.scene_nim import (
-    scene_library_filename,
-    write_scene_library_nim,
     write_scene_nim,
     write_scenes_nim,
-    write_shared_scenes_bundle_library_nim,
 )
 
 
@@ -254,33 +251,6 @@ def test_event_listener_filters_match_configured_payload_fields():
     assert 'eventPayloadValueMatches(context.payload, "code", "13")' in source
 
 
-def test_shared_scene_registry_loads_scene_libraries():
-    frame = SimpleNamespace(
-        scenes=[
-            {
-                "id": "my-scene",
-                "name": "My Scene",
-                "default": True,
-                "settings": {"execution": "compiled"},
-            },
-            {
-                "id": "live-scene",
-                "name": "Live Scene",
-                "settings": {"execution": "interpreted"},
-            },
-        ]
-    )
-
-    source = write_scenes_nim(frame, compilation_mode="shared")
-
-    assert 'libraryName: "scene_myscene.so"' in source
-    assert '"my-scene".SceneId' in source
-    assert "loadLib(path)" in source
-    assert '"frameos_scene_init"' in source
-    assert '"frameos_scene_export"' in source
-    assert "scene_live_scene" not in source
-
-
 def test_static_scene_registry_imports_compiled_scenes():
     frame = SimpleNamespace(
         scenes=[
@@ -298,67 +268,16 @@ def test_static_scene_registry_imports_compiled_scenes():
         ]
     )
 
-    source = write_scenes_nim(frame, compilation_mode="static")
+    for compilation_mode in ("static", "precompiled", "shared", "shared-scenes"):
+        source = write_scenes_nim(frame, compilation_mode=compilation_mode)
 
-    assert "import scenes/scene_myscene as scene_myscene" in source
-    assert 'result["my-scene".SceneId] = scene_myscene.exportedScene' in source
-    assert "loadLib(path)" not in source
-    assert 'libraryName: "scene_myscene.so"' not in source
-    assert "scene_live_scene" not in source
-
-
-def test_scene_library_wrapper_exports_scene_symbols():
-    scene = {"id": "my-scene", "name": "My Scene"}
-    source = write_scene_library_nim(scene)
-
-    assert scene_library_filename(scene) == "scene_myscene.so"
-    assert "import scenes/scene_myscene as sceneModule" in source
-    assert "proc frameos_scene_init*" in source
-    assert "setSharedHostCallbacks(logHook, sendEventHook)" in source
-    assert "proc frameos_scene_export*" in source
-
-
-def test_shared_scene_bundle_registry_loads_scene_symbols_without_wrappers():
-    frame = SimpleNamespace(
-        scenes=[
-            {
-                "id": "my-scene",
-                "name": "My Scene",
-                "default": True,
-                "settings": {"execution": "compiled"},
-            },
-        ]
-    )
-
-    source = write_scenes_nim(frame, compilation_mode="shared-scenes")
-
-    assert 'initSymbol: "frameos_scene_init_myscene"' in source
-    assert 'exportSymbol: "frameos_scene_export_myscene"' in source
-    assert 'libraryName: "scenes.so"' in source
-    assert "loadLib(path)" in source
-    assert "scene_myscene.exportedScene" not in source
-    assert "hostChannels.setSharedHostCallbacks(logHook, sendEventHook)" not in source
-    assert ".frameos_scene_init(logHook, sendEventHook)" not in source
-
-
-def test_shared_scene_bundle_library_exports_scene_symbols_without_scene_wrapper_init():
-    frame = SimpleNamespace(
-        scenes=[
-            {
-                "id": "my-scene",
-                "name": "My Scene",
-                "default": True,
-                "settings": {"execution": "compiled"},
-            },
-        ]
-    )
-
-    source = write_shared_scenes_bundle_library_nim(frame)
-
-    assert "proc frameos_scene_init_myscene*" in source
-    assert "hostChannels.setSharedHostCallbacks(logHook, sendEventHook)" in source
-    assert ".frameos_scene_init(logHook, sendEventHook)" not in source
-    assert "result = cast[pointer](scene_myscene.exportedScene)" in source
+        assert "import scenes/scene_myscene as scene_myscene" in source
+        assert 'result["my-scene".SceneId] = scene_myscene.exportedScene' in source
+        # No mode dlopens a scene any more, including the two retired values a
+        # frame may still have stored.
+        assert "loadLib(path)" not in source
+        assert 'libraryName: "scene_myscene.so"' not in source
+        assert "scene_live_scene" not in source
 
 
 def test_public_state_fields_include_value_and_show_if():

@@ -292,7 +292,7 @@ function deployPlan(frameId: number): Record<string, unknown> {
       drivers: ['web_only'],
       binary: {
         requested_compilation_mode: 'precompiled',
-        compilation_mode: 'shared-scenes',
+        compilation_mode: 'static',
         will_attempt_cross_compile: false,
         will_attempt_precompiled: true,
         cross_compile_supported: true,

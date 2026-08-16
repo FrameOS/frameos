@@ -142,7 +142,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--compilation-mode",
-        choices=("static", "shared", "shared-scenes", "precompiled"),
+        choices=("static", "precompiled"),
         default=None,
         help="Override frame.json rpios.compilationMode when deciding whether to skip",
     )

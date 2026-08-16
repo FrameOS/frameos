@@ -865,11 +865,6 @@ class FrameDeployWorkflow:
             if binary_plan.will_attempt_precompiled:
                 notes.append("Precompiled FrameOS release will be used because all scenes are interpreted.")
             else:
-                fallback = "single executable"
-                if binary_plan.compilation_mode == "shared-scenes":
-                    fallback = "compiled scenes library"
-                elif binary_plan.compilation_mode == "shared":
-                    fallback = "shared libraries"
                 notes.append(
                     "Precompiled FrameOS release will be skipped"
                     + (
@@ -877,7 +872,7 @@ class FrameDeployWorkflow:
                         if binary_plan.precompiled_skip_reason
                         else "."
                     )
-                    + f" Falling back to {fallback}."
+                    + " Falling back to a single executable built from source."
                 )
         if low_memory and not binary_plan.will_attempt_precompiled:
             notes.append("Device is low memory; on-device build path will stop FrameOS before compilation.")
@@ -1507,11 +1502,6 @@ class FrameDeployWorkflow:
             label="driver",
             remote_dir=self._release_driver_dir(build_id),
         )
-        await self._publish_cross_compiled_libraries(
-            local_paths=build_result.scene_library_paths,
-            label="scene",
-            remote_dir=self._release_scene_dir(build_id),
-        )
 
     async def _publish_cross_compiled_libraries(
         self,
@@ -1571,12 +1561,9 @@ class FrameDeployWorkflow:
         await self.deployer.exec_command(
             f"cp {remote_build_dir}/frameos {release_frameos_path}"
         )
-        for local_paths, release_dir in (
-            (build_result.driver_library_paths, self._release_driver_dir(build_id)),
-            (build_result.scene_library_paths, self._release_scene_dir(build_id)),
-        ):
-            if not local_paths:
-                continue
+        local_paths = build_result.driver_library_paths
+        if local_paths:
+            release_dir = self._release_driver_dir(build_id)
             await self.deployer.exec_command(f"mkdir -p {shlex.quote(release_dir)}")
             for local_path in local_paths:
                 relative_path = os.path.relpath(local_path, build_result.build_dir)
@@ -1831,10 +1818,6 @@ class FrameDeployWorkflow:
     @classmethod
     def _release_driver_dir(cls, build_id: str) -> str:
         return f"{cls._release_dir(build_id)}/drivers"
-
-    @classmethod
-    def _release_scene_dir(cls, build_id: str) -> str:
-        return f"{cls._release_dir(build_id)}/scenes"
 
     @staticmethod
     def _remote_build_dir(build_id: str) -> str:

@@ -1,4 +1,8 @@
-when defined(frameosDriverLibrary) or defined(frameosSharedLibrary):
+# `frameosSharedLibrary` used to select this branch too — it built a scene as
+# its own `.so`. Those modes are gone (see LEGACY_COMPILATION_MODES in
+# backend/app/codegen/drivers_nim.py); drivers are the only thing that still
+# crosses a `.so` boundary.
+when defined(frameosDriverLibrary):
   import json
   import options
   import frameos/ids

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import codecs
+import contextlib
 import hashlib
 import json
 import math
@@ -30,25 +31,16 @@ from app.models import get_apps_from_scenes
 from app.codegen.drivers_nim import (
     DEFAULT_COMPILATION_MODE,
     COMPILATION_MODE_STATIC,
-    COMPILATION_MODE_SHARED,
-    COMPILATION_MODE_SHARED_SCENES,
     compiled_drivers,
     compilation_mode_uses_shared_drivers,
-    compilation_mode_uses_shared_libraries,
     driver_library_filename,
     normalize_compilation_mode,
     write_driver_library_nim,
     write_drivers_nim,
 )
 from app.codegen.scene_nim import (
-    compiled_frame_scenes,
-    scene_bundle_library_filename,
-    scene_library_filename,
     scene_module_filename,
-    scene_module_suffix,
-    write_scene_library_nim,
     write_scene_nim,
-    write_shared_scenes_bundle_library_nim,
     write_scenes_nim,
 )
 from app.tasks.utils import find_nimbase_file
@@ -73,10 +65,6 @@ DRIVER_LIBRARY_NIM_FLAGS = (
     "--passC:-fno-asynchronous-unwind-tables",
     "--passC:-fno-unwind-tables",
     "--passL:-Wl,--gc-sections",
-)
-
-SHARED_LIBRARY_NIM_FLAGS = tuple(
-    flag for flag in DRIVER_LIBRARY_NIM_FLAGS if flag != "--define:frameosDriverLibrary"
 )
 
 DRIVER_LIBRARY_CFLAGS = (
@@ -239,7 +227,7 @@ class FrameDeployer:
         drivers: dict[str, Driver],
         compilation_mode: str,
     ) -> list[str]:
-        if not compilation_mode_uses_shared_libraries(compilation_mode):
+        if not compilation_mode_uses_shared_drivers(compilation_mode):
             return []
         return [
             os.path.join(build_dir, "drivers", driver.name, driver_library_filename(driver))
@@ -251,40 +239,9 @@ class FrameDeployer:
         drivers: dict[str, Driver],
         compilation_mode: str,
     ) -> list[str]:
-        if not compilation_mode_uses_shared_libraries(compilation_mode):
+        if not compilation_mode_uses_shared_drivers(compilation_mode):
             return []
         return [driver_library_filename(driver) for driver in compiled_drivers(drivers)]
-
-    @staticmethod
-    def scene_library_paths(
-        build_dir: str,
-        frame: Frame,
-        compilation_mode: str,
-    ) -> list[str]:
-        if not compilation_mode_uses_shared_libraries(compilation_mode):
-            return []
-        compiled_scenes = compiled_frame_scenes(frame)
-        if not compiled_scenes:
-            return []
-        if compilation_mode == COMPILATION_MODE_SHARED_SCENES:
-            return [os.path.join(build_dir, "scenes", scene_bundle_library_filename())]
-        return [
-            os.path.join(build_dir, "scenes", scene_module_suffix(scene), scene_library_filename(scene))
-            for scene in compiled_scenes
-        ]
-
-    @staticmethod
-    def scene_library_names(
-        frame: Frame,
-        compilation_mode: str,
-    ) -> list[str]:
-        if not compilation_mode_uses_shared_libraries(compilation_mode):
-            return []
-        if not compiled_frame_scenes(frame):
-            return []
-        if compilation_mode == COMPILATION_MODE_SHARED_SCENES:
-            return [scene_bundle_library_filename()]
-        return [scene_library_filename(scene) for scene in compiled_frame_scenes(frame)]
 
     async def _upload_frame_json(self, path: str) -> None:
         """Upload the release-specific `frame.json`."""
@@ -464,16 +421,13 @@ class FrameDeployer:
                         f"({scene.get('id','default')}): {e}")
                 raise
 
-        shared_scene_dir = os.path.join(source_dir, "src", "scenes", "shared")
-        shutil.rmtree(shared_scene_dir, ignore_errors=True)
-        if compilation_mode_uses_shared_libraries(compilation_mode):
-            os.makedirs(shared_scene_dir, exist_ok=True)
-            for scene in compiled_frame_scenes(frame):
-                with open(os.path.join(shared_scene_dir, scene_module_filename(scene)), "w") as sf:
-                    sf.write(write_scene_library_nim(scene))
-            if compilation_mode == COMPILATION_MODE_SHARED_SCENES:
-                with open(os.path.join(source_dir, "src", "scenes", "scenes_bundle.nim"), "w") as bf:
-                    bf.write(write_shared_scenes_bundle_library_nim(frame))
+        # Scenes never build as `.so`s any more; clear the wrappers a frame
+        # deployed under the retired `shared`/`shared-scenes` modes left behind
+        # so a reused source tree does not compile them.
+        shutil.rmtree(os.path.join(source_dir, "src", "scenes", "shared"), ignore_errors=True)
+        for stale in ("scenes_bundle.nim",):
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(os.path.join(source_dir, "src", "scenes", stale))
 
         with open(os.path.join(source_dir, "src", "scenes", "scenes.nim"), "w") as f:
             source = write_scenes_nim(frame, compilation_mode=compilation_mode)
@@ -491,7 +445,7 @@ class FrameDeployer:
 
         shared_driver_dir = os.path.join(source_dir, "src", "drivers", "shared")
         shutil.rmtree(shared_driver_dir, ignore_errors=True)
-        if compilation_mode_uses_shared_libraries(compilation_mode):
+        if compilation_mode_uses_shared_drivers(compilation_mode):
             os.makedirs(shared_driver_dir, exist_ok=True)
             for driver in compiled_drivers(drivers):
                 with open(os.path.join(shared_driver_dir, f"{driver.name}.nim"), "w") as sf:
@@ -601,11 +555,8 @@ class FrameDeployer:
         linker_flags: Iterable[str],
         compiler_flags: Iterable[str],
         driver_dirs: list[str] | None = None,
-        scene_dirs: list[str] | None = None,
     ) -> None:
         driver_dirs = driver_dirs or []
-        scene_dirs = scene_dirs or []
-        library_dirs = driver_dirs + scene_dirs
         with open(template_path, "r") as mf_in, open(makefile_path, "w") as mk:
             for ln in mf_in.readlines():
                 if ln.startswith("EXECUTABLE = "):
@@ -622,18 +573,16 @@ class FrameDeployer:
                         + " ".join([f for f in compiler_flags if f != "-c"])
                         + " $(EXTRA_CFLAGS)\n"
                     )
-                if library_dirs and ln.startswith("all:"):
+                if driver_dirs and ln.startswith("all:"):
                     ln = "all: $(EXECUTABLE) shared-libraries\n"
                 mk.write(ln)
 
-            if library_dirs:
-                mk.write("\nLIBRARY_DIRS = " + " ".join(library_dirs) + "\n")
-                mk.write("DRIVER_DIRS = " + " ".join(driver_dirs) + "\n")
-                mk.write("SCENE_DIRS = " + " ".join(scene_dirs) + "\n\n")
-                mk.write(".PHONY: shared-libraries driver-libraries scene-libraries $(LIBRARY_DIRS)\n")
+            if driver_dirs:
+                mk.write("\nLIBRARY_DIRS = " + " ".join(driver_dirs) + "\n")
+                mk.write("DRIVER_DIRS = " + " ".join(driver_dirs) + "\n\n")
+                mk.write(".PHONY: shared-libraries driver-libraries $(LIBRARY_DIRS)\n")
                 mk.write("shared-libraries: $(LIBRARY_DIRS)\n\n")
                 mk.write("driver-libraries: $(DRIVER_DIRS)\n\n")
-                mk.write("scene-libraries: $(SCENE_DIRS)\n\n")
                 mk.write("$(LIBRARY_DIRS):\n")
                 mk.write("\t+$(MAKE) -C $@\n")
 
@@ -964,11 +913,10 @@ $(OBJECTS): pre-build
 
         compilation_mode = normalize_compilation_mode(compilation_mode)
         driver_make_dirs: list[str] = []
-        scene_make_dirs: list[str] = []
-        # Whenever drivers are linked into the main binary (static AND
-        # shared-scenes), the Waveshare C support sources must sit next to the
-        # generated C, or the final link fails with undefined DEV_*/EPD_*
-        # symbols: nim --genScript does not copy {.compile.} files anywhere.
+        # Whenever drivers are linked into the main binary (i.e. `static`), the
+        # Waveshare C support sources must sit next to the generated C, or the
+        # final link fails with undefined DEV_*/EPD_* symbols: nim --genScript
+        # does not copy {.compile.} files anywhere.
         if not compilation_mode_uses_shared_drivers(compilation_mode):
             self._copy_waveshare_build_files(source_dir, build_dir, drivers)
 
@@ -986,8 +934,7 @@ $(OBJECTS): pre-build
             + main_driver_linker_flags
         )
 
-        if compilation_mode_uses_shared_libraries(compilation_mode):
-            compiled_scenes = compiled_frame_scenes(frame)
+        if compilation_mode_uses_shared_drivers(compilation_mode):
             for driver in compiled_drivers(drivers):
                 driver_dir = os.path.join(build_dir, "drivers", driver.name)
                 os.makedirs(driver_dir, exist_ok=True)
@@ -1027,76 +974,6 @@ $(OBJECTS): pre-build
                 )
                 driver_make_dirs.append(os.path.join("drivers", driver.name))
 
-            if compilation_mode == COMPILATION_MODE_SHARED:
-                for scene in compiled_scenes:
-                    scene_dir_name = scene_module_suffix(scene)
-                    scene_dir = os.path.join(build_dir, "scenes", scene_dir_name)
-                    os.makedirs(scene_dir, exist_ok=True)
-                    output_name = scene_library_filename(scene)
-                    await self.log("stdout", f"🔥 Generating C sources for scene {scene.get('id', 'default')}.")
-                    scene_cmd = (
-                        f"cd {source_dir} && {nim_path} compile --app:lib --os:linux --cpu:{cpu} "
-                        f"--define:frameosSharedLibrary {' '.join(SHARED_LIBRARY_NIM_FLAGS)} "
-                        f"--compileOnly --genScript --nimcache:{scene_dir} --out:{output_name} "
-                        f"{debug_options} src/scenes/shared/{scene_module_filename(scene)} 2>&1"
-                    )
-                    scene_status, scene_out, scene_err = await exec_local_command(db, redis, frame, scene_cmd)
-                    if scene_status != 0:
-                        raise Exception(
-                            f"Failed to generate scene library sources for {scene.get('id', 'default')}: "
-                            f"{scene_err or scene_out or 'see logs'}"
-                        )
-                    shutil.copy(nimbase_path, os.path.join(scene_dir, "nimbase.h"))
-
-                    scene_script_path = self._find_compile_script(scene_dir)
-                    scene_linker_flags, scene_compiler_flags = self._extract_compile_flags(
-                        scene_script_path, output_name
-                    )
-                    scene_linker_flags = self._dedupe_preserve_order(
-                        scene_linker_flags + ["../../quickjs/libquickjs.a"]
-                    )
-                    self._write_driver_makefile(
-                        makefile_path=os.path.join(scene_dir, "Makefile"),
-                        output_name=output_name,
-                        linker_flags=scene_linker_flags,
-                        compiler_flags=scene_compiler_flags,
-                        library_kind="scene",
-                    )
-                    scene_make_dirs.append(os.path.join("scenes", scene_dir_name))
-            elif compilation_mode == COMPILATION_MODE_SHARED_SCENES and compiled_scenes:
-                scene_dir = os.path.join(build_dir, "scenes")
-                os.makedirs(scene_dir, exist_ok=True)
-                output_name = scene_bundle_library_filename()
-                await self.log("stdout", "🔥 Generating C sources for bundled shared scenes.")
-                scene_cmd = (
-                    f"cd {source_dir} && {nim_path} compile --app:lib --os:linux --cpu:{cpu} "
-                    f"--define:frameosSharedLibrary {' '.join(SHARED_LIBRARY_NIM_FLAGS)} "
-                    f"--compileOnly --genScript --nimcache:{scene_dir} --out:{output_name} "
-                    f"{debug_options} src/scenes/scenes_bundle.nim 2>&1"
-                )
-                scene_status, scene_out, scene_err = await exec_local_command(db, redis, frame, scene_cmd)
-                if scene_status != 0:
-                    raise Exception(
-                        f"Failed to generate bundled scene library sources: {scene_err or scene_out or 'see logs'}"
-                    )
-                shutil.copy(nimbase_path, os.path.join(scene_dir, "nimbase.h"))
-
-                scene_script_path = self._find_compile_script(scene_dir)
-                scene_linker_flags, scene_compiler_flags = self._extract_compile_flags(
-                    scene_script_path, output_name
-                )
-                scene_linker_flags = self._dedupe_preserve_order(
-                    scene_linker_flags + ["../quickjs/libquickjs.a"]
-                )
-                self._write_driver_makefile(
-                    makefile_path=os.path.join(scene_dir, "Makefile"),
-                    output_name=output_name,
-                    linker_flags=scene_linker_flags,
-                    compiler_flags=scene_compiler_flags,
-                    library_kind="scene",
-                )
-                scene_make_dirs.append("scenes")
-
         self._write_c_makefile(
             makefile_path=os.path.join(build_dir, "Makefile"),
             template_path=os.path.join(source_dir, "tools", "nimc.Makefile"),
@@ -1104,7 +981,6 @@ $(OBJECTS): pre-build
             linker_flags=linker_flags,
             compiler_flags=compiler_flags,
             driver_dirs=driver_make_dirs,
-            scene_dirs=scene_make_dirs,
         )
 
         archive_path = os.path.join(temp_dir, f"build_{build_id}.tar.gz")

@@ -21,7 +21,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.codegen.drivers_nim import (  # noqa: E402
     compiled_drivers,
-    compilation_mode_uses_shared_libraries,
+    compilation_mode_uses_shared_drivers,
     frame_compilation_mode,
     normalize_compilation_mode,
     write_driver_library_nim,
@@ -86,7 +86,7 @@ def generate_driver_sources(
 
     shared_dir = drivers_dir / "shared"
     shutil.rmtree(shared_dir, ignore_errors=True)
-    if compilation_mode_uses_shared_libraries(mode):
+    if compilation_mode_uses_shared_drivers(mode):
         shared_dir.mkdir(parents=True, exist_ok=True)
         for driver in compiled_drivers(drivers):
             (shared_dir / f"{driver.name}.nim").write_text(
@@ -103,7 +103,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--config", default=str(FRAMEOS_ROOT / "frame.json"), help="Frame config JSON")
     parser.add_argument(
         "--compilation-mode",
-        choices=("static", "shared", "shared-scenes", "precompiled"),
+        choices=("static", "precompiled"),
         default=None,
         help="Override frame.json rpios.compilationMode",
     )
