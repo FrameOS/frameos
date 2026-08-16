@@ -105,8 +105,14 @@ proc notifyImageAvailable*(self: Driver) =
   self.logger.log(%*{"event": "render:dither", "info": "Dithered image available, starting render"})
 
 proc imageForPanel(self: Driver, image: Image): Image =
+  ## Returns a panel-sized copy when the host's image does not fit, else nil.
+  ## Deliberately never returns `image` itself: this driver is a shared
+  ## library with its own ORC runtime, and an owning copy of a ref the host
+  ## allocated makes two runtimes bookkeep one object — the host then dies in
+  ## unregisterCycle after the render. Only images this library allocated may
+  ## be owned here.
   if image.width == self.panel.width and image.height == self.panel.height:
-    return image
+    return nil
 
   self.logger.log(%*{
     "event": "driver:inky",
@@ -179,7 +185,9 @@ proc render*(self: Driver, image: Image) =
       self.logger.log(%*{"event": "driver:inky", "error": "Render skipped; driver is not initialized", "exception": e.msg})
       return
 
-  let panelImage = self.imageForPanel(image)
+  let scaledImage = self.imageForPanel(image)
+  # A template, not a `let`, so no owning copy of the host's `image` is made.
+  template panelImage(): Image = (if scaledImage.isNil: image else: scaledImage)
   let currentImageHash = hashImageData(panelImage)
   if self.lastImageBytes == panelImage.dataLen and self.lastImageHash == currentImageHash and
       self.lastRenderAt > epochTime() - 12 * 60 * 60:

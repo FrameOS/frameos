@@ -31,7 +31,7 @@ import {
   sceneBytesTotal,
 } from "./usage";
 
-type PublishActor =
+export type PublishActor =
   | { accountId: string; providerSubject: string }
   | { linkedClientId: string };
 

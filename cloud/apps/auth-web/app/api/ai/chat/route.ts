@@ -234,6 +234,8 @@ export async function POST(request: NextRequest) {
         },
         frameId,
         prompt,
+        // Audit actor for save_scene's store write.
+        providerSubject: session.providerSubject,
       };
 
       try {

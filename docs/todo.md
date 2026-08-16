@@ -13,17 +13,10 @@ design — the cloud protocol has no shell verbs.
 
 ## Cloud launch — operator follow-ups
 
-- **Remove the Discord webhook path** (`DISCORD_REPORTS_WEBHOOK_URL`,
-  `signup-notifications.ts`, `discord.ts`) — notifications go through
-  PostHog. The privacy policy already omits Discord, so leave the env var
-  unset until the code is gone.
-- **Second transactional email provider** — Postmark is a single point of
-  failure gating every login; its failure is visible (`/admin` live check,
-  error tracking) but not survivable. Add a second provider with automatic
-  failover, or at least a documented manual cutover. Before charging, not
-  before signups.
 - Disposable-email blocking was considered and skipped: Turnstile plus the
   rate limiter covers the automated case. Revisit only if abuse is observed.
+- The Discord webhook path and a second email provider both moved to the
+  parking lot below — neither is blocking anything today.
 
 ## Cloud-managed frames
 
@@ -73,16 +66,12 @@ design — the cloud protocol has no shell verbs.
   fixed FrameOS-owned directories. Hardware identity reported by the frame
   stays authoritative.
 
-- **Cloud AI chat follow-ups** — app-code chat (`/api/ai/apps/chat` answers
-  501); a settings UI for the `chatModel` / `chatReasoningEffort` overrides
-  and the verified-publisher admin toggle (both API-only); letting the chat
-  save/fork scenes directly (today it delivers to the editor and the user
-  saves).
-- **Power section for backend-managed ESP32 frames** — the wire is done
-  (settings poll sends deepSleepOnBattery/wakeCheckSeconds/batteryPin/
-  batteryDivider from device_config, firmware applies them) but only the
-  esp32 CLOUD profile renders the Power UI; backend users configure via USB
-  console / device_config.
+- **Cloud AI chat: fork with lineage** — `save_scene` saves any scene the chat
+  is holding into the account as a NEW private scene, which covers forking a
+  store scene in practice but records none of the lineage the dedicated fork
+  route does (source scene id in the audit event, carried-over preview image,
+  tags and description). Extract that route's body into a lib and have
+  `save_scene` call it with a `source_scene_id`.
 - **Account hardening** — passkeys/TOTP 2FA, re-authentication for sensitive
   actions (revoking frames, bulk assignment changes, scope grants), per-frame
   audit trail surfaced in the UI.
@@ -90,18 +79,13 @@ design — the cloud protocol has no shell verbs.
   panel itself (proof of possession), not just the portal/admin page.
 - **Backend↔cloud promotion/demotion ceremony** — an explicit local action
   that moves a frame between control planes without a reset (UX open).
-- **Free-tier quotas** — pick numbers (frame count, backup size, private
-  scene count) when provisioning starts, not before.
 
 ## ESP32
 
 Memory measurements, the emergency-reserve decision, boot/render cost
 numbers and the measurement tooling live in `docs/esp32-memory.md`.
 
-- **Surface memory over a channel that survives the link being down** — the
-  workspace advisory reads device metrics, so a frame too low on internal
-  RAM to connect reports nothing and cannot be flagged. A frame already over
-  the edge is visible over USB and nowhere else.
+Nothing scheduled. The out-of-band memory advisory moved to the parking lot.
 
 ## Buildroot images
 
@@ -110,22 +94,43 @@ Three Raspberry Pi platforms ship with published base images:
 (every ARMv6 board: Zero, Zero W, Pi 1, CM1) and `raspberry-pi-5` (Pi 5 /
 CM5).
 
-- **Drivers own pixie refs they did not allocate** — the shared driver
-  libraries each carry their own ARC/ORC runtime, and
-  `frameos_driver_render` hands them the host's `Image` via
-  `cast[Image](image)`. Anything in a driver that copies that ref (a plain
-  `var renderImage = image` will do it) has a second cycle collector
-  bookkeeping one object; the host then dies releasing the image at the end
-  of its render loop, with a stack that names only `runner.nim`. Cost one
-  crash-looping Pi 5 already (see the framebuffer note in
-  `drivers/frameBuffer/frameBuffer.nim`). The real fix is a borrowed,
-  non-owning view across the ABI rather than a cast — until then, drivers
-  must not take owning copies of the rendered image.
+- **Refs crossing the driver/scene `.so` ABI are borrowed, never owned** —
+  every shared library carries its own ORC runtime, so a ref that one runtime
+  allocated must never be incref/decref'd by the other *if ORC considers its
+  type cyclic*: the non-final decref registers the object in the caller's
+  cycle roots, the owner's final decref unregisters it from a different list,
+  and the owner dies in `unregisterCycle` (stack names only `runner.nim`).
+  Acyclic types are safe on plain refcounts. This is why v2026.8.17-.23
+  crash-looped every HDMI/HyperPixel/Inky frame: the pixie image-views fork
+  added `root: Image`, making `Image` cyclic overnight; fixed by
+  `Image* {.acyclic.}` in the fork (110778c) plus no owning copies in
+  `frameBuffer.nim`/`inky.nim`. Still unaudited and still only "works because
+  nobody holds on to it": `JsonNode` log/event payloads the driver `.so`
+  hands to the host callbacks (`hostLog`/`hostSendEvent`; cyclic type,
+  survives because the host only channel-copies and never keeps the ref),
+  the host `DriverContext` read by `cloneDriverContext` in
+  `frameos_driver_setup`, and — much larger — the `shared`/`shared-scenes`
+  compilation modes, where scene `.so`s pass `FrameScene`, `JsonNode` and
+  render contexts both ways. The real fix is a borrowed, non-owning view (or
+  serialised payloads) across the ABI rather than a cast; until then no
+  driver or scene library may store or copy a ref it did not allocate.
+- **Drop the `shared` and `shared-scenes` compilation modes** — decided
+  2026-08-16, not started. Only two ways to build a frame will remain:
+  `static` (compile from source, one binary, no `.so` at all — immune to the
+  ABI hazard above) and `precompiled` (the release binary plus its driver
+  `.so`s, scenes interpreted). The scene-as-shared-library path is the largest
+  unaudited ABI surface, has no users we know of, and every mode is another
+  matrix row in `_frame_deployer.py`, `drivers_nim.py`, `scene_nim.py`,
+  `precompiled_frameos.py`, the deploy-plan API and their tests. Work: remove
+  the two constants and their branches, `normalize_compilation_mode` maps
+  legacy `shared`/`shared-scenes` values to `precompiled`, drop the
+  `frameos_scene_init`/`frameos_scene_export` registry codegen and
+  `scenes_bundle.nim`, and prune the Settings UI options and docs.
 - **Next base-image rebuild drops ImageMagick** — the defconfig no longer
   selects `BR2_PACKAGE_IMAGEMAGICK` (the runtime is Pixie-only), but the
-  published base images still carry it. Nothing to do beyond dispatching
-  `buildroot-base-image.yml` for the three platforms whenever the next
-  rebuild happens anyway.
+  published base images still carry it. `buildroot-base-image.yml` was
+  dispatched on 2026-08-16; delete this once the three platforms' manifests
+  are refreshed and a built image is confirmed ImageMagick-free.
 - **Deferred models** — Pi 500 and CM5 Lite need `bcm2712-rpi-500` /
   `bcm2712-rpi-cm5l-*` DTBs that entered rpi-6.6.y after the kernel commit
   Buildroot 2025.02.13 pins; the next Buildroot (or kernel-pin) bump adds
@@ -207,6 +212,24 @@ CM5).
 
 ## Ideas parking lot (unscheduled)
 
+- **Remove the Discord webhook path** (`DISCORD_REPORTS_WEBHOOK_URL`,
+  `signup-notifications.ts`, `discord.ts`) — notifications go through
+  PostHog. Deliberately held: the PostHog path has not had a live report to
+  prove itself on yet, and deleting the fallback before then would mean
+  finding out it does not work by missing a report. Delete the code on the
+  first real notification through the new path. The privacy policy already
+  omits Discord, so the env var stays unset until then.
+- **Second transactional email provider** — Postmark is a single point of
+  failure gating every login; its failure is visible (`/admin` live check,
+  error tracking) but not survivable. Deferred, and not because it is hard:
+  a second provider can be down too, so doing this properly means failover
+  logic, health checks and a tested cutover — real work, for a risk that is
+  currently a handful of mails a day. Revisit when volume reaches dozens of
+  mails a day, or before anything paid ships.
+- **Surface ESP32 memory over a channel that survives the link being down** —
+  the workspace advisory reads device metrics, so a frame too low on internal
+  RAM to connect reports nothing and cannot be flagged. A frame already over
+  the edge is visible over USB and nowhere else.
 - **SVG `<text>` support in render/svg** (~1–2 days, ~150–250 lines).
   Today any `<text>` tag makes the whole SVG fail, and the AI scene prompt
   tells models to layer render/text instead. Pixie has the parts: the

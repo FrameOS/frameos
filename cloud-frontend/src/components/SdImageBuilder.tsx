@@ -51,16 +51,18 @@ function findDeviceOption(value: string) {
 
 const rotationChoices = ['0', '90', '180', '270'] as const
 
-// How long the multi-use claim code embedded in the image accepts new frames.
-// Expiry only gates NEW enrollments — frames already confirmed stay connected.
-// 'forever' mints a code that never expires (every enrollment still needs
-// owner confirmation, and the frame quota bounds a leaked image).
+// How long the multi-use claim code embedded in the image keeps accepting new
+// frames. Off by default — the card is a physical artifact that gets flashed
+// weeks or months later, and an expired code turns it into a coaster with no
+// error message that says so. Expiry only gates NEW enrollments; frames
+// already confirmed stay connected either way, every enrollment still needs
+// owner confirmation, and the frame quota bounds a leaked image.
 const claimValidityChoices = [
   { label: '1 day', value: '1' },
   { label: '1 week', value: '7' },
-  { label: '3 months (default)', value: '90' },
+  { label: '1 month', value: '30' },
+  { label: '3 months', value: '90' },
   { label: '1 year', value: '365' },
-  { label: 'Forever', value: 'forever' },
 ] as const
 const defaultClaimValidity = '90'
 
@@ -210,6 +212,7 @@ export function SdImageBuilder({
   )
   const [vcom, setVcom] = useState('')
   const [uploadUrl, setUploadUrl] = useState('')
+  const [limitClaimValidity, setLimitClaimValidity] = useState(false)
   const [claimValidity, setClaimValidity] = useState<string>(defaultClaimValidity)
   const [phase, setPhase] = useState<BuildPhase>('idle')
   const [status, setStatus] = useState('')
@@ -430,7 +433,7 @@ export function SdImageBuilder({
             ? { frameId: reenrollFrame.id, multiUse: false }
             : {
                 multiUse: true,
-                ttlDays: claimValidity === 'forever' ? 'forever' : Number(claimValidity),
+                ttlDays: limitClaimValidity ? Number(claimValidity) : 'forever',
               }
         )
       }
@@ -789,22 +792,40 @@ export function SdImageBuilder({
               lasts, or build another image here.
             </p>
           ) : (
-            <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
-              <span>Claim code accepts new frames for</span>
-              <select
-                aria-label="Claim code validity"
-                className={`${controlClassName} w-auto`}
-                disabled={building}
-                onChange={(event) => setClaimValidity(event.target.value)}
-                value={claimValidity}
-              >
-                {claimValidityChoices.map((choice) => (
-                  <option key={choice.value} value={choice.value}>
-                    {choice.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="space-y-1.5">
+              <label className="frameos-muted flex items-center gap-2 text-xs">
+                <input
+                  checked={limitClaimValidity}
+                  disabled={building}
+                  onChange={(event) => setLimitClaimValidity(event.target.checked)}
+                  type="checkbox"
+                />
+                Stop this card from adding frames after a while
+              </label>
+              {limitClaimValidity ? (
+                <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
+                  <span>Card stops adding frames after</span>
+                  <select
+                    aria-label="Claim code validity"
+                    className={`${controlClassName} w-auto`}
+                    disabled={building}
+                    onChange={(event) => setClaimValidity(event.target.value)}
+                    value={claimValidity}
+                  >
+                    {claimValidityChoices.map((choice) => (
+                      <option key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <p className="frameos-muted text-xs">
+                  The card keeps working for as long as you keep it. Every frame it adds still waits for your
+                  confirmation here, and your frame limit caps how many it can ever add.
+                </p>
+              )}
+            </div>
           )}
           {!canStreamToDisk ? (
             <p className="frameos-muted flex items-start gap-1.5 text-xs">

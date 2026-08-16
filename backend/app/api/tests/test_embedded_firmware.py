@@ -1437,3 +1437,47 @@ async def test_embedded_build_lock_is_globally_exclusive(redis, monkeypatch):
 
     await embedded_firmware_module._release_embedded_build_lock(redis, token)
     assert await redis.get(embedded_firmware_module.EMBEDDED_BUILD_LOCK_KEY) is None
+
+
+@pytest.mark.asyncio
+async def test_pending_commands_surface_and_cancel_a_queued_ota(async_client):
+    """The backend's half of the cloud's queue-observability endpoints.
+
+    A self-hosted backend pushes deploys/restarts/renders immediately and
+    fails loudly when the device is unreachable, so there is nothing durable
+    to observe — except an ESP32 OTA request, which waits for its firmware
+    image. That is what this reports, in the cloud's wire shape, and what the
+    workspace's "Waiting for the frame" panel lets you take back.
+    """
+    frame = await create_embedded_frame(async_client)
+
+    # Nothing queued yet.
+    response = await async_client.get(f"/api/frames/{frame['id']}/commands")
+    assert response.status_code == 200
+    assert response.json() == {'commands': []}
+
+    with patch('app.tasks.embedded_firmware.embedded_toolchain_available', return_value=True):
+        response = await async_client.post(f"/api/frames/{frame['id']}/embedded/firmware/ota")
+    assert response.status_code == 200, response.text
+
+    response = await async_client.get(f"/api/frames/{frame['id']}/commands")
+    assert response.status_code == 200
+    commands = response.json()['commands']
+    assert len(commands) == 1
+    assert commands[0]['type'] == 'notify_update_available'
+    # "queued" (no image yet) maps onto the cloud's "pending" so one shared
+    # panel reads both control planes.
+    assert commands[0]['status'] == 'pending'
+    assert commands[0]['expires_at'] is None
+    command_id = commands[0]['id']
+
+    response = await async_client.delete(f"/api/frames/{frame['id']}/commands/{command_id}")
+    assert response.status_code == 200
+    assert response.json()['status'] == 'cancelled'
+
+    response = await async_client.get(f"/api/frames/{frame['id']}/commands")
+    assert response.json() == {'commands': []}
+
+    # Nothing left to cancel is a 404, never a pretend success.
+    response = await async_client.delete(f"/api/frames/{frame['id']}/commands/{command_id}")
+    assert response.status_code == 404

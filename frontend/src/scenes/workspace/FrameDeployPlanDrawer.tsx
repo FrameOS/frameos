@@ -25,7 +25,7 @@ import { Spinner } from '../../components/Spinner'
 import { Switch } from '../../components/Switch'
 import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
-import { frameHasActivityLog, frameHost } from '../../decorators/frame'
+import { formatFrameRelativeTime, frameHasActivityLog, frameHost } from '../../decorators/frame'
 import {
   EMBEDDED_VIRTUAL,
   buildrootPlatforms,
@@ -81,6 +81,7 @@ import { pushScenesOverUsb, pushedScenesMessage } from './embeddedUsbScenePush'
 import { EmbeddedUsbSetup } from './EmbeddedUsbSetup'
 import { EmbeddedUsbConnectionButton, EmbeddedWebFlasher } from './EmbeddedWebFlasher'
 import { frameBootstrapLogic } from './frameBootstrapLogic'
+import { framePendingCommandsLogic, pendingCommandLabel, type FramePendingCommand } from './framePendingCommandsLogic'
 import { workspaceLogic } from './workspaceLogic'
 import {
   frameMenuActionDisabledReason,
@@ -770,6 +771,106 @@ function DrawerHeading({ action, children }: { action?: JSX.Element; children: R
       {action}
     </div>
   )
+}
+
+/**
+ * What is still waiting for the frame to wake up and take it.
+ *
+ * A cloud frame's actions are queued, not applied — the reboot, the render,
+ * the scene push and the firmware notification all sit in the account's
+ * command queue until the device connects. On a battery ESP32 that sleeps for
+ * hours, that made "sent" and "done" indistinguishable in the workspace. This
+ * lists the queue, says how long each entry has left, and lets the owner take
+ * one back off it while it is still undelivered.
+ *
+ * Renders nothing when the queue is empty, which is also what a control plane
+ * without a queue looks like (the loader turns any non-200 into an empty
+ * list), so it is safe to mount on every deploy drawer.
+ */
+function PendingActionsSection({ frame, className }: { frame: FrameType; className?: string }): JSX.Element | null {
+  const logic = framePendingCommandsLogic({ frameId: frame.id })
+  const { pendingCommands, pendingCommandsError, cancellingCommandIds } = useValues(logic)
+  const { cancelPendingCommand, loadPendingCommands } = useActions(logic)
+
+  if (pendingCommands.length === 0) {
+    return null
+  }
+
+  return (
+    <section className={clsx('space-y-2', className)}>
+      <DrawerHeading
+        action={
+          <button
+            type="button"
+            onClick={() => loadPendingCommands()}
+            className="frameos-secondary-button rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Refresh
+          </button>
+        }
+      >
+        Waiting for the frame
+      </DrawerHeading>
+      <div className="frame-tool-card space-y-2 rounded-[22px] p-4">
+        <div className="frame-tool-muted text-xs leading-5">
+          {frame.connected === false
+            ? 'Queued on the account. The frame applies these the next time it connects.'
+            : 'Queued on the account and being delivered now.'}
+        </div>
+        {pendingCommands.map((command) => {
+          const cancelling = cancellingCommandIds.includes(command.id)
+          return (
+            <div
+              key={command.id}
+              data-testid="pending-command-row"
+              className="flex items-start justify-between gap-3 border-t border-slate-200/70 pt-2 first-of-type:border-0 first-of-type:pt-0"
+            >
+              <div className="min-w-0">
+                <div className="frame-tool-heading text-sm font-semibold">{pendingCommandLabel(command)}</div>
+                <div className="frame-tool-muted text-xs leading-5">{pendingCommandDetail(command)}</div>
+              </div>
+              <button
+                type="button"
+                disabled={cancelling}
+                onClick={() => cancelPendingCommand(command.id)}
+                className="frameos-secondary-button shrink-0 rounded-lg px-2.5 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
+              >
+                {cancelling ? 'Cancelling…' : 'Cancel'}
+              </button>
+            </div>
+          )
+        })}
+        {pendingCommandsError ? <div className="text-xs font-semibold text-red-500">{pendingCommandsError}</div> : null}
+      </div>
+    </section>
+  )
+}
+
+// "Queued 3 minutes ago · expires in 4 minutes". The expiry matters more than
+// it looks: "now" commands (render, reboot) are deliberately short-lived so a
+// reboot queued on Monday cannot fire on Friday, and a frame that sleeps
+// longer than the TTL will simply never see them.
+function pendingCommandDetail(command: FramePendingCommand): string {
+  const parts: string[] = []
+  const queued = formatFrameRelativeTime(command.created_at)
+  parts.push(
+    command.status === 'sent' ? 'Delivered, waiting for the frame to confirm' : `Queued ${queued ?? 'just now'}`
+  )
+  const expiresAt = command.expires_at ? Date.parse(command.expires_at) : Number.NaN
+  if (Number.isFinite(expiresAt)) {
+    const minutes = Math.round((expiresAt - Date.now()) / 60000)
+    parts.push(
+      minutes <= 0
+        ? 'expiring now'
+        : minutes < 60
+        ? `expires in ${minutes} minute${minutes === 1 ? '' : 's'}`
+        : `expires in ${Math.round(minutes / 60)} hour${Math.round(minutes / 60) === 1 ? '' : 's'}`
+    )
+  }
+  if (command.detail) {
+    parts.push(command.detail)
+  }
+  return parts.join(' · ')
 }
 
 function BackToDeployButton({ onClick }: { onClick: () => void }): JSX.Element {
@@ -2980,6 +3081,9 @@ function CloudDeploySection({
   return (
     <div className="space-y-5">
       <CloudDeployStatus frame={frame} isEsp32={isEsp32} releaseInfo={releaseInfo} />
+      {/* Directly under the status rows: "Offline — pushes queue on the
+          account" is the sentence this section answers. */}
+      <PendingActionsSection frame={frame} />
       {!isEsp32 ? (
         <>
           <CloudScenesPushCard frame={frame} onPushed={onClose} />
@@ -3202,6 +3306,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
             <ScriptInstallSection frame={frame} onBack={showMainDeployView} />
           ) : (
             <>
+              {/* Backend frames push over SSH/HTTP the moment you click, so
+                  this is normally empty. The exception is an ESP32 OTA
+                  request recorded while its firmware is still building. */}
+              <PendingActionsSection frame={frame} className="mb-4" />
               {!isEmbeddedFrame ? <AlternativesSection onSelect={showDeployDrawerView} /> : null}
               {canBootstrapFrameOS ? (
                 <div className="mb-4">

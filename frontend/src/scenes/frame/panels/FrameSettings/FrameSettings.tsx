@@ -21,6 +21,7 @@ import { frameCompilationModeOptions } from '../../../../utils/frameBuildOptions
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { PartialRefreshSettingsFields } from '../../../../components/PartialRefreshSettingsFields'
+import { PowerSettingsFields, type PowerSettingsValues } from '../../../../components/PowerSettingsFields'
 import {
   devices,
   partialRefreshDefaultsByDevice,
@@ -1240,6 +1241,73 @@ export function FrameSettings({
   const virtualUrlOrigin = typeof window !== 'undefined' ? window.location.origin : ''
   const virtualImageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/image?k=${virtualUrlToken}`
   const virtualPageUrl = `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/page?k=${virtualUrlToken}`
+  // ESP32 power management, one component, two homes. The cloud pushes these
+  // as top-level `set_settings` keys; the backend keeps them in device_config
+  // and the device's settings poll reads them from there
+  // (embedded_frame_settings in backend/app/api/embedded_device.py). Both
+  // spellings of each key are accepted on read for the same reason the
+  // backend accepts both — a device provisioned over its USB console writes
+  // snake_case.
+  const powerDeviceConfig = frameForm.device_config ?? frame.device_config ?? {}
+  const cloudPowerSettings: PowerSettingsValues = {
+    batteryDivider: frameForm.battery_divider,
+    batteryPin: frameForm.battery_pin,
+    deepSleep: frameForm.deep_sleep === true,
+    deepSleepOnBattery: frameForm.deep_sleep_on_battery === true,
+    wakeCheckSeconds: frameForm.wake_check_seconds,
+  }
+  const setCloudPowerSettings = (patch: Partial<PowerSettingsValues>): void => {
+    setFrameFormValues({
+      ...('batteryDivider' in patch ? { battery_divider: patch.batteryDivider } : {}),
+      ...('batteryPin' in patch ? { battery_pin: patch.batteryPin } : {}),
+      ...('deepSleep' in patch ? { deep_sleep: patch.deepSleep } : {}),
+      ...('deepSleepOnBattery' in patch ? { deep_sleep_on_battery: patch.deepSleepOnBattery } : {}),
+      ...('wakeCheckSeconds' in patch ? { wake_check_seconds: patch.wakeCheckSeconds } : {}),
+    })
+  }
+  const embeddedPowerSettings: PowerSettingsValues = {
+    batteryDivider: powerDeviceConfig.batteryDivider ?? powerDeviceConfig.battery_divider,
+    batteryPin: powerDeviceConfig.batteryPin ?? powerDeviceConfig.battery_pin,
+    deepSleep: (powerDeviceConfig.deepSleep ?? powerDeviceConfig.deep_sleep) === true,
+    deepSleepOnBattery: (powerDeviceConfig.deepSleepOnBattery ?? powerDeviceConfig.deep_sleep_on_battery) === true,
+    wakeCheckSeconds: powerDeviceConfig.wakeCheckSeconds ?? powerDeviceConfig.wake_check_seconds,
+  }
+  const setEmbeddedPowerSettings = (patch: Partial<PowerSettingsValues>): void => {
+    const next: NonNullable<FrameType['device_config']> = { ...powerDeviceConfig }
+    const write = (
+      key: 'deepSleep' | 'deepSleepOnBattery' | 'wakeCheckSeconds' | 'batteryPin' | 'batteryDivider',
+      snakeKey: 'deep_sleep' | 'deep_sleep_on_battery' | 'wake_check_seconds' | 'battery_pin' | 'battery_divider'
+    ): void => {
+      if (!(key in patch)) {
+        return
+      }
+      const value = patch[key]
+      // The snake_case twin is what a USB-console provisioning writes. Drop it
+      // whenever the camelCase one is written, or the device would keep
+      // reading the stale copy it happens to check first.
+      delete next[snakeKey]
+      if (value === undefined) {
+        delete next[key]
+      } else {
+        next[key] = value as never
+      }
+    }
+    write('deepSleep', 'deep_sleep')
+    write('deepSleepOnBattery', 'deep_sleep_on_battery')
+    write('wakeCheckSeconds', 'wake_check_seconds')
+    write('batteryPin', 'battery_pin')
+    write('batteryDivider', 'battery_divider')
+    setFrameFormValues({ device_config: next })
+  }
+  // Backend/on-device planes: real ESP32 hardware only. A virtual frame has
+  // no battery and never sleeps, and the Pico family runs a firmware that
+  // implements none of this.
+  const showEmbeddedPowerSection =
+    !hideForCloud &&
+    isEmbeddedMode &&
+    !isVirtualPlatform &&
+    !(frameForm.embedded?.platform ?? frame.embedded?.platform ?? '').startsWith('pico') &&
+    frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-power', frame)
   const configuredGpioButtons = !isEmbeddedMode ? configuredGpioButtonsForDevice(frameForm.device) : null
   const showWifiCredentials = isBuildrootMode || isEmbeddedMode
   const maxHttpResponsePlaceholder = String(
@@ -1558,95 +1626,12 @@ export function FrameSettings({
             <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
               <H6 id="frame-settings-power">Power</H6>
             </div>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Field
-                name="deep_sleep"
-                label="Between renders"
-                tooltip={
-                  <>
-                    Deep sleep powers the frame almost completely off between renders — best for battery frames. While
-                    asleep it is offline: cloud commands queue and land on the next wake. "On battery" relies on the
-                    battery sense GPIO below; without one the frame cannot tell and stays connected.
-                  </>
-                }
-              >
-                {({ value, onChange }) => (
-                  <Select
-                    value={value ? 'always' : frameForm.deep_sleep_on_battery ? 'battery' : 'connected'}
-                    onChange={(mode) => {
-                      onChange(mode === 'always')
-                      setFrameFormValues({ deep_sleep_on_battery: mode === 'battery' })
-                    }}
-                    options={[
-                      { value: 'connected', label: 'Stay connected (default)' },
-                      { value: 'battery', label: 'Deep sleep when on battery' },
-                      { value: 'always', label: 'Always deep sleep' },
-                    ]}
-                  />
-                )}
-              </Field>
-              {frameForm.deep_sleep || frameForm.deep_sleep_on_battery ? (
-                <Field
-                  name="wake_check_seconds"
-                  label="Check for commands while sleeping"
-                  tooltip={
-                    <>
-                      Extra wake-ups between renders that connect to the cloud, fetch queued commands and scene
-                      updates, and go back to sleep without refreshing the panel. The scheduled render still happens
-                      on time. Each check-in costs battery — pick the longest interval you can live with.
-                    </>
-                  }
-                >
-                  {({ value, onChange }) => (
-                    <Select
-                      value={String(value ?? 0)}
-                      onChange={(seconds) => onChange(parseInt(seconds))}
-                      options={[
-                        { value: '0', label: 'Only wake to render' },
-                        { value: '900', label: 'Every 15 minutes' },
-                        { value: '1800', label: 'Every 30 minutes' },
-                        { value: '3600', label: 'Every hour' },
-                        { value: '10800', label: 'Every 3 hours' },
-                        { value: '21600', label: 'Every 6 hours' },
-                        { value: '43200', label: 'Every 12 hours' },
-                        { value: '86400', label: 'Once a day' },
-                        ...(value && !['0', '900', '1800', '3600', '10800', '21600', '43200', '86400'].includes(String(value))
-                          ? [{ value: String(value), label: `Every ${value} seconds` }]
-                          : []),
-                      ]}
-                    />
-                  )}
-                </Field>
-              ) : null}
-              <Field
-                name="battery_pin"
-                label="Battery sense GPIO"
-                tooltip={
-                  <>
-                    ADC1-capable GPIO wired to the battery through a voltage divider. Enables the battery percentage
-                    in metrics, the low-battery render guard and "deep sleep when on battery". Set -1 (or leave empty)
-                    when the board has no battery tap. Saving a change reboots the frame to re-init the ADC. The
-                    Waveshare 13.3" E6 board uses GPIO 8 with a 3.0 divider.
-                  </>
-                }
-              >
-                <NumberTextInput name="battery_pin" placeholder="-1 = no battery" />
-              </Field>
-              <Field
-                name="battery_divider"
-                label="Battery voltage divider"
-                tooltip={
-                  <>
-                    Vbat = Vpin × divider. 2.0 for the classic 100k/100k tap, 3.0 on the Waveshare 13.3" E6 board.
-                  </>
-                }
-              >
-                <NumberTextInput name="battery_divider" placeholder="2.0" />
-              </Field>
-              <p className="frameos-muted text-sm">
-                Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings
-                push. Update the frame first if saving fails.
-              </p>
+            <div className="pl-2 @md:pl-8">
+              <PowerSettingsFields
+                value={cloudPowerSettings}
+                onChange={setCloudPowerSettings}
+                footnote="Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings push. Update the frame first if saving fails."
+              />
             </div>
           </>
         ) : null}
@@ -2366,6 +2351,26 @@ export function FrameSettings({
                   )}
                 </Field>
               </Group>
+            </div>
+          </>
+        ) : null}
+
+        {/* Power management for a backend-managed ESP32. Same knobs the cloud
+            pushes over set_settings, stored in device_config here: the
+            firmware build bakes them as defaults and the device's settings
+            poll re-reads them, so a change takes effect without a reflash.
+            Before this, backend users had to set them over the USB console. */}
+        {showEmbeddedPowerSection ? (
+          <>
+            <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
+              <H6 id="frame-settings-power">Power</H6>
+            </div>
+            <div className="pl-2 @md:pl-8">
+              <PowerSettingsFields
+                value={embeddedPowerSettings}
+                onChange={setEmbeddedPowerSettings}
+                footnote="These reach the board on its next settings poll, and are baked into the next firmware build as its defaults. Firmware from 2026.8.21 on applies them live; older firmware picks them up when you reflash."
+              />
             </div>
           </>
         ) : null}

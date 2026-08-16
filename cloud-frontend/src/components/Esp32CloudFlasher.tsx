@@ -456,6 +456,7 @@ const controlClassName =
 export function Esp32CloudFlasher({
   cloudOrigin,
   reenrollFrame,
+  sceneSourceFrameId,
 }: {
   // Provisioned into the board's NVS as cloud_url, so it must be the
   // deployment's public URL, not whatever host the browser is pointed at.
@@ -466,6 +467,10 @@ export function Esp32CloudFlasher({
   // "Re-enrollment") — which also means there is no new frame to watch for
   // and no name to ask for: both already exist.
   reenrollFrame?: { id: string; name: string }
+  // "Start it with the scenes from <frame>", chosen in the add-frame panel.
+  // Rides on the claim code and is applied when the owner confirms the new
+  // frame; ignored in re-enrollment mode, where the frame keeps its own.
+  sceneSourceFrameId?: string | undefined
 }): ReactElement {
   const [phase, setPhase] = useState<FlashPhase>('idle')
   // Each enrollment path names its own frame — the SD builder keeps its own
@@ -563,7 +568,12 @@ export function Esp32CloudFlasher({
   async function mintEnrollmentCode(): Promise<string> {
     const response = await fetch('/api/frames/claim-tokens', {
       body: JSON.stringify(
-        reenrollFrame ? { frame_id: reenrollFrame.id } : { name: frameName.trim() }
+        reenrollFrame
+          ? { frame_id: reenrollFrame.id }
+          : {
+              name: frameName.trim(),
+              ...(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
+            }
       ),
       headers: { 'content-type': 'application/json' },
       method: 'POST',

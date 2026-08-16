@@ -14,7 +14,7 @@
 // Defaults are deliberately generous; paid tiers can raise them later (the
 // limits ride along in every usage payload so UIs never hardcode them).
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, gt, or, sql } from "drizzle-orm";
 import {
   clientBackups,
   frameLogs,
@@ -23,11 +23,57 @@ import {
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
+import { logWarn } from "./log";
 import type { FramesDatabase } from "./frames";
 
-export const maxPrivateSceneBytesPerAccount = 100 * 1024 * 1024;
-export const maxBackupBytesPerAccount = 100 * 1024 * 1024;
-export const maxFrameLogBytesPerAccount = 100 * 1024 * 1024;
+// THE free tier. These three plus maxFramesPerAccount (frames.ts) are every
+// number an account is measured against, and each is overridable per
+// deployment so a paid tier is a config change rather than a code change —
+// the limits also ride along in every usage payload, so no UI hardcodes them.
+//
+// Numbers unchanged from when they were plain constants: they were chosen to
+// be generous enough that no hobbyist meets them, and naming them "the free
+// tier" must not be the thing that takes storage away from anyone.
+function megabyteLimitFromEnv(name: string, fallbackMb: number): number {
+  const raw = process.env[name]?.trim();
+  const parsed = raw ? Number(raw) : Number.NaN;
+  if (raw && (!Number.isFinite(parsed) || parsed <= 0)) {
+    // A typo'd limit must not fail the boot, and must not silently run either.
+    logWarn("usage.invalid_limit_env", { fallbackMb, name, value: raw });
+  }
+  const mb = Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMb;
+  return Math.round(mb * 1024 * 1024);
+}
+
+// How many frames an account may hold. Lives here rather than in frames.ts
+// so the whole free tier is one block; frames.ts re-exports it, because
+// usage.ts may only TYPE-import from frames.ts (frames.ts imports this module
+// at runtime, and a cycle in the other direction would bite at module load).
+export const maxFramesPerAccount = (() => {
+  const raw = process.env.FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT?.trim();
+  const parsed = raw ? Number(raw) : Number.NaN;
+  if (raw && (!Number.isInteger(parsed) || parsed < 1)) {
+    logWarn("usage.invalid_limit_env", {
+      fallback: 50,
+      name: "FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT",
+      value: raw,
+    });
+  }
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 50;
+})();
+
+export const maxPrivateSceneBytesPerAccount = megabyteLimitFromEnv(
+  "FRAMEOS_CLOUD_MAX_PRIVATE_SCENE_MB",
+  100,
+);
+export const maxBackupBytesPerAccount = megabyteLimitFromEnv(
+  "FRAMEOS_CLOUD_MAX_BACKUP_MB",
+  100,
+);
+export const maxFrameLogBytesPerAccount = megabyteLimitFromEnv(
+  "FRAMEOS_CLOUD_MAX_FRAME_LOG_MB",
+  100,
+);
 
 export interface SceneBytesBreakdown {
   privateBytes: number;
@@ -141,6 +187,32 @@ export async function backupBytesForAccount(
   return Number(row?.bytes ?? 0);
 }
 
+// Frames revoked within this window still count toward the account quota.
+// Without it the quota is freely cycleable (revoke → enroll → revoke → …)
+// and the dead rows — with their command queues and retained logs — pile up
+// unboundedly. Actually deleting them belongs in db-cleanup.sh, which today
+// prunes logs by age but never dead frame rows.
+export const revokedFrameQuotaGraceMs = 24 * 60 * 60 * 1000;
+
+/** Frames counting against the quota — the number enrollment refuses on, and
+ *  therefore the only number the account page may display. */
+export async function countFramesForAccount(
+  db: FramesDatabase,
+  accountId: string,
+): Promise<number> {
+  const graceCutoff = new Date(Date.now() - revokedFrameQuotaGraceMs);
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(frames)
+    .where(
+      and(
+        eq(frames.accountId, accountId),
+        or(sql`${frames.status} <> 'revoked'`, gt(frames.updatedAt, graceCutoff)),
+      ),
+    );
+  return row?.count ?? 0;
+}
+
 export async function frameLogBytesForAccount(
   db: FramesDatabase,
   accountId: string,
@@ -162,15 +234,24 @@ export async function frameLogBytesForAccount(
  * third-party reimplementations.
  */
 export async function accountUsage(db: FramesDatabase, accountId: string) {
-  const [scenes, backups, logs] = await Promise.all([
+  const [scenes, backups, logs, frameCount] = await Promise.all([
     sceneBytesForAccount(db, accountId),
     backupBytesForAccount(db, accountId),
     frameLogBytesForAccount(db, accountId),
+    countFramesForAccount(db, accountId),
   ]);
   return {
     backups: {
       bytes: Math.round(backups),
       max_bytes: maxBackupBytesPerAccount,
+    },
+    // Not bytes, but the same shape of promise to the account: here is the
+    // limit, here is where you are against it. Revoked frames still hold a
+    // row and still count — same rule the enrollment quota enforces, so the
+    // display cannot disagree with the refusal.
+    frames: {
+      count: frameCount,
+      max_count: maxFramesPerAccount,
     },
     frame_logs: {
       bytes: Math.round(logs),
