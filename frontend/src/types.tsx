@@ -78,6 +78,12 @@ export interface FrameType {
    * report only the first six fields, so all of it stays optional. */
   hardware?: {
     platform?: string | null
+    /** Linux/Pi frames only: the Buildroot platform key of the board the
+     * device detected itself to be (`raspberry-pi-5` / `raspberry-pi-64` /
+     * `raspberry-pi-32`), i.e. which SD image it runs. Absent on boards
+     * FrameOS publishes no image for and on firmware older than 2026.8 —
+     * `platform` above is the deployment MODE ("buildroot"), never a board. */
+    board?: string | null
     device?: string | null
     panel?: string | null
     width?: number | null

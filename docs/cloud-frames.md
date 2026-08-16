@@ -57,6 +57,7 @@ POST {provider}/api/frames/enroll
   "public_key": "base64 Ed25519 public key, generated on-device",
   "hardware": {
     "platform": "pi-zero2w | pi | esp32 | …",
+    "board": "raspberry-pi-5 | raspberry-pi-64 | raspberry-pi-32",
     "device": "…driver name…",
     "width": 800, "height": 480, "color": "…"
   },
@@ -271,6 +272,13 @@ should persist it on each successful session start so its copy tracks the
 device (cloud.frameos.net does, size-capped at the same 4 KiB the enroll
 route applies). Without that refresh the enrollment-time snapshot goes stale
 the first time the panel or firmware changes.
+
+`platform` is frame.json's deployment MODE (`buildroot`, `rpios`, `esp32-s3`,
+…), never a board. Linux frames additionally send **`board`** — the Buildroot
+platform key of the hardware they detected themselves to be, i.e. which SD
+image they run — so a provider can offer "write another card for this frame"
+without asking. It is derived from `/proc/device-tree/compatible`, and it is
+omitted rather than guessed on boards FrameOS publishes no image for.
 
 The provider must verify the signature against the enrolled public key and
 close the socket on mismatch, with WebSocket close code **4401** (also used
