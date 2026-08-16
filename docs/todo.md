@@ -300,6 +300,10 @@ Everything else parked:
   key, cached) so users do not need per-service API keys.
 - ESP32 spill follow-ups: a proactive Content-Length trigger; a URL+ETag decode
   cache.
+- Publish a 16MB ESP32-C3 release asset. "Flash latest release" provisions a
+  XTEINK X4 from the 4MB no-OTA generic image today, which works but leaves
+  three quarters of the chip and OTA unused — the flasher warns about exactly
+  this. A `esp32-c3-16mb` asset in the release job removes the warning.
 - ESP32 board nice-to-haves: parallel firmware builds (shared
   `generated_config.h` and nimcache serialise under the build lock), a portal
   Wi-Fi scan list and AP password, mDNS advertisement, log persistence across

@@ -102,7 +102,7 @@ export async function fetchReleaseFirmwareListing(): Promise<ReleaseFirmwareList
   return (await listingResponse.json()) as ReleaseFirmwareListing
 }
 
-async function downloadReleaseFirmware(
+export async function downloadReleaseFirmware(
   platform: string,
   log: (message: string) => void
 ): Promise<{ bytes: Uint8Array; name: string; release: string }> {

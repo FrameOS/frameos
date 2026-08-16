@@ -144,6 +144,7 @@ from app.tasks.embedded_firmware import (
     embedded_toolchain_available,
     latest_embedded_firmware,
     embedded_platform_spec_for_frame,
+    embedded_provisioning_plan,
     is_virtual_frame,
     normalize_embedded_platform,
     refresh_embedded_firmware_status,
@@ -3253,6 +3254,26 @@ async def api_frame_embedded_firmware_status(
             "otaSupported": ota_supported,
         })
     }
+
+
+@api_project.get("/frames/{id:int}/embedded/provisioning")
+async def api_frame_embedded_provisioning(
+    id: int,
+    db: Session = Depends(get_db),
+):
+    """The console command list that turns a stock release image into this
+    frame — the alternative to compiling a per-frame image for a first flash.
+    Carries the frame's API key and Wi-Fi password, which the frame payload
+    this same session already fetches carries too."""
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    if (frame.mode or "rpios") != "embedded":
+        _bad_request("Firmware provisioning is only available for embedded frames")
+    try:
+        return {"provisioning": embedded_provisioning_plan(frame)}
+    except ValueError as exc:
+        _bad_request(str(exc))
 
 
 @api_project.post("/frames/{id:int}/embedded/firmware")

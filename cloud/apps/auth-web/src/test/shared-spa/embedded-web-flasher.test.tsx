@@ -20,6 +20,7 @@ import { initKea } from "../../../../../../frontend/src/initKea";
 import { framesModel } from "../../../../../../frontend/src/models/framesModel";
 import {
   EmbeddedWebFlasher,
+  firmwareBuildProgressMessage,
   planServerFirmwareWrite,
 } from "../../../../../../frontend/src/scenes/workspace/EmbeddedWebFlasher";
 import type { FrameType } from "../../../../../../frontend/src/types";
@@ -306,6 +307,110 @@ describe("EmbeddedWebFlasher keep-settings flashing", () => {
     expect(screen.getByText(/frameos has been updated/i)).toBeTruthy();
     // The board is never touched: the failure happens before any write.
     expect(esptool.state.writeFlashCalls).toHaveLength(0);
+  });
+});
+
+describe("EmbeddedWebFlasher waiting for the firmware build", () => {
+  // The flasher used to give up after a fixed ten minutes. A first ESP-IDF
+  // build of a chip target is ~1100 objects, so on a Home Assistant box that
+  // deadline hit while the build was perfectly healthy — and the user was told
+  // the flash had timed out. What it waits on now is the build's heartbeat.
+  function mockBuildingBackend(buildingPolls: number) {
+    let polls = 0;
+    apiFetchMock.mockImplementation((input: string) => {
+      const url = String(input);
+      if (url.startsWith("/api/frames/1/embedded/firmware/download")) {
+        return Promise.resolve(new Response(image.slice()));
+      }
+      if (url.startsWith("/api/frames/1/embedded/firmware")) {
+        polls += 1;
+        if (polls > buildingPolls) {
+          return Promise.resolve(
+            Response.json({
+              firmware: {
+                status: "ready",
+                flashOffset: "0x0",
+                flashSize: "8MB",
+                downloadUrl: "/api/frames/1/embedded/firmware/download",
+              },
+            }),
+          );
+        }
+        return Promise.resolve(
+          Response.json({
+            firmware: {
+              status: "building",
+              startedAt: new Date(Date.now() - 60_000).toISOString(),
+              // Both of these move on every poll — the proof of life the wait
+              // is looking for.
+              lastHeartbeatAt: new Date().toISOString(),
+              buildProgress: { done: polls, total: 1114, percent: (100 * polls) / 1114 },
+            },
+          }),
+        );
+      }
+      return Promise.resolve(new Response("null", { status: 404 }));
+    });
+    return () => polls;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps waiting while the build reports progress, well past the old ten-minute deadline", async () => {
+    // 250 polls at 3s is 12.5 minutes of build — the old fixed deadline would
+    // have thrown a quarter of the way through.
+    const polls = mockBuildingBackend(250);
+    render(<EmbeddedWebFlasher frame={backendEsp32Frame({ status: "idle" })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /flash from browser/i }));
+    for (let minute = 0; minute < 15; minute += 1) {
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+
+    expect(polls()).toBeGreaterThan(250);
+    expect(esptool.state.writeFlashCalls.length).toBe(1);
+  });
+
+  it("gives up on a build whose status stops moving at all", async () => {
+    apiFetchMock.mockImplementation((input: string) => {
+      const url = String(input);
+      if (url.startsWith("/api/frames/1/embedded/firmware")) {
+        // Same payload forever: no heartbeat, no edge count, no progress.
+        return Promise.resolve(Response.json({ firmware: { status: "building" } }));
+      }
+      return Promise.resolve(new Response("null", { status: 404 }));
+    });
+    render(<EmbeddedWebFlasher frame={backendEsp32Frame({ status: "idle" })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /flash from browser/i }));
+    for (let minute = 0; minute < 18; minute += 1) {
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+
+    expect(screen.getByText(/stopped reporting progress/i)).toBeTruthy();
+    expect(esptool.state.writeFlashCalls.length).toBe(0);
+  });
+});
+
+describe("firmwareBuildProgressMessage", () => {
+  it("names the edge count, so a slow build is visibly a moving one", () => {
+    expect(
+      firmwareBuildProgressMessage({
+        status: "building",
+        startedAt: new Date(Date.now() - 9 * 60_000).toISOString(),
+        buildProgress: { done: 198, total: 1114, percent: 17.8 },
+      }),
+    ).toBe("Building firmware image: 18% (198/1114), 9m elapsed");
+  });
+
+  it("says what a queued build is waiting for", () => {
+    expect(firmwareBuildProgressMessage({ status: "queued" })).toBe("Waiting for a build worker");
   });
 });
 

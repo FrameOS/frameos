@@ -55,7 +55,7 @@ const lastPorts = new Map<FrameId, SerialPort>()
 const usbApiCommandLocks = new Map<FrameId, Promise<void>>()
 const serialPortReconnectEligible = new WeakMap<SerialPort, boolean>()
 
-interface EmbeddedUsbApiCommandOptions {
+export interface EmbeddedUsbApiCommandOptions {
   payload?: string | Uint8Array
   timeoutMs?: number
   promptIfNeeded?: boolean
@@ -76,6 +76,10 @@ interface EmbeddedUsbApiCommandOptions {
   // its failures are the expected case, so keep them out of the log — the
   // caller reports the progress and the final error itself.
   probe?: boolean
+  // What the log view calls this command, when the command line itself must
+  // not appear there: `set api_key <key>` and `set wifi_pass <password>` are
+  // sent verbatim to the device but logged as "set api_key (redacted)".
+  logLabel?: string
 }
 
 function sleep(ms: number): Promise<void> {
@@ -764,8 +768,12 @@ async function runEmbeddedUsbApiCommandLocked(
   command: string,
   options?: EmbeddedUsbApiCommandOptions
 ): Promise<EmbeddedUsbApiCommandResult> {
+  // What the log calls this command. Commands that carry a secret (the API
+  // key, a Wi-Fi password) pass a redacted label — the value goes down the
+  // wire, never into the log view.
+  const label = options?.logLabel ?? command
   if (!webSerialSupported()) {
-    appendUsbLine(frameId, `[USB API] ${command} failed: ${webSerialUnavailableReason('Talking to the board')}`)
+    appendUsbLine(frameId, `[USB API] ${label} failed: ${webSerialUnavailableReason('Talking to the board')}`)
     throw new Error(webSerialUnavailableReason('Talking to the board'))
   }
   const hadLogStream = sessions.has(frameId)
@@ -779,7 +787,7 @@ async function runEmbeddedUsbApiCommandLocked(
     port = await navigator.serial.requestPort()
   }
   if (!port) {
-    appendUsbLine(frameId, `[USB API] ${command} failed: No USB serial port selected for this frame`)
+    appendUsbLine(frameId, `[USB API] ${label} failed: No USB serial port selected for this frame`)
     throw new Error('No USB serial port selected for this frame')
   }
   appendSelectedUsbPort(frameId, port)
@@ -788,9 +796,9 @@ async function runEmbeddedUsbApiCommandLocked(
   }
   const payload = typeof options?.payload === 'string' ? new TextEncoder().encode(options.payload) : options?.payload
   if (!options?.probe) {
-    appendUsbLine(frameId, `[USB API] ${command}${payload ? ` (${payload.byteLength} bytes)` : ''}`)
+    appendUsbLine(frameId, `[USB API] ${label}${payload ? ` (${payload.byteLength} bytes)` : ''}`)
     if (payload) {
-      appendUsbLine(frameId, `[USB API] waiting for ${command} ready marker`)
+      appendUsbLine(frameId, `[USB API] waiting for ${label} ready marker`)
     }
   }
   const mirrorSerialText = options?.mirrorOutput !== false && usbApiResponseCommand(command) !== 'image'
@@ -841,7 +849,7 @@ async function runEmbeddedUsbApiCommandLocked(
         }
         throw error
       }
-      appendUsbLine(frameId, `[USB API] USB device re-enumerated; retrying ${command} on the new port`)
+      appendUsbLine(frameId, `[USB API] USB device re-enumerated; retrying ${label} on the new port`)
       port = replacement
       appendSelectedUsbPort(frameId, port)
       result = await runUsbApiCommandOnPort(
@@ -855,14 +863,14 @@ async function runEmbeddedUsbApiCommandLocked(
     }
     flushCommandLogText()
     if (!options?.probe) {
-      appendUsbLine(frameId, `[USB API] ${command} complete`)
+      appendUsbLine(frameId, `[USB API] ${label} complete`)
     }
     rebootAcknowledged = options?.expectReboot === true
     return result
   } catch (error) {
     flushCommandLogText()
     if (!options?.probe) {
-      appendUsbLine(frameId, `[USB API] ${command} failed: ${serialErrorMessage(error)}`)
+      appendUsbLine(frameId, `[USB API] ${label} failed: ${serialErrorMessage(error)}`)
     }
     throw error
   } finally {
@@ -1127,12 +1135,20 @@ export type EmbeddedUsbConfigKey =
   | 'hardware'
   | 'panel'
   | 'render_mode'
+  | 'rotate'
+  | 'scaling_mode'
   | 'interval'
   | 'server_send_logs'
   | 'assets_path'
   | 'assets_sd'
+  | 'assets_sd_pins'
+  | 'assets_sd_freq'
   | 'deep_sleep'
+  | 'deep_sleep_on_battery'
   | 'wake_schedule'
+  | 'wake_check'
+  | 'battery_pin'
+  | 'battery_divider'
   | 'pins'
   | 'gpio_buttons'
 
@@ -1195,16 +1211,43 @@ export async function usbStatus(frameId: FrameId): Promise<EmbeddedUsbStatus> {
 }
 
 /**
- * `usb_api set <key> <value...>` — persist one config value. Values may
- * contain spaces (the console re-joins the arguments), but runs of
- * whitespace collapse to single spaces and empty values are rejected by
- * the console's argument parser.
+ * Quote one value for the device console.
+ *
+ * esp_console_split_argv (ESP-IDF components/console/split_argv.c, reached
+ * through esp_console_run in fos_console.c) understands double quotes and
+ * backslash escapes: inside "…" a space is a literal space, and the only
+ * recognized escapes are \\, \" and backslash-space. Quoting the whole value
+ * and escaping backslashes and quotes is therefore exactly expressible, and
+ * it is what keeps a Wi-Fi password of "a  b" from arriving as "a b" — the
+ * argument re-join in cmd_set collapses runs of whitespace.
  */
-export async function usbSet(frameId: FrameId, key: EmbeddedUsbConfigKey, value: string): Promise<void> {
+export function quoteEmbeddedUsbConsoleValue(value: string): string {
+  return `"${value.replace(/[\\"]/g, '\\$&')}"`
+}
+
+/** Config keys whose value must never reach the log view. */
+const USB_SECRET_CONFIG_KEYS = new Set<EmbeddedUsbConfigKey>(['api_key', 'wifi_pass', 'claim_token'])
+
+/**
+ * `usb_api set <key> <value>` — persist one config value. The value is quoted,
+ * so spaces and punctuation survive intact; an empty value is rejected by the
+ * console's argument parser and so refused here, with a message that says
+ * which key it was. Secrets go down the wire but reach the log redacted.
+ */
+export async function usbSet(
+  frameId: FrameId,
+  key: EmbeddedUsbConfigKey,
+  value: string,
+  options?: EmbeddedUsbApiCommandOptions
+): Promise<void> {
   if (!value.trim()) {
     throw new Error(`The USB console cannot store an empty value for ${key}`)
   }
-  await runEmbeddedUsbApiCommand(frameId, `set ${key} ${value}`, { timeoutMs: USB_SET_TIMEOUT_MS })
+  await runEmbeddedUsbApiCommand(frameId, `set ${key} ${quoteEmbeddedUsbConsoleValue(value)}`, {
+    timeoutMs: USB_SET_TIMEOUT_MS,
+    ...(USB_SECRET_CONFIG_KEYS.has(key) ? { logLabel: `set ${key} (redacted)` } : {}),
+    ...options,
+  })
 }
 
 /** `usb_api wifi-scan` — list visible networks (strongest first). */
@@ -1231,10 +1274,11 @@ export async function usbWifiScan(frameId: FrameId): Promise<EmbeddedUsbWifiScan
 }
 
 /** `usb_api restart` — acks OK, reboots, then reconnects the serial session. */
-export async function usbRestart(frameId: FrameId): Promise<void> {
+export async function usbRestart(frameId: FrameId, options?: EmbeddedUsbApiCommandOptions): Promise<void> {
   await runEmbeddedUsbApiCommand(frameId, 'restart', {
     timeoutMs: USB_REBOOT_COMMAND_TIMEOUT_MS,
     expectReboot: true,
+    ...options,
   })
 }
 
@@ -1317,27 +1361,29 @@ export async function loadEmbeddedUsbLogHistory(frameId: FrameId): Promise<numbe
 /**
  * Provision Wi-Fi credentials and reboot into them. Uses `set wifi_ssid` +
  * `set wifi_pass` + `restart` (NOT the positional `wifi <ssid> <pass>`),
- * so SSIDs and passwords containing spaces survive the console's argument
- * splitting. Open networks fall back to `wifi <ssid>` because `set` cannot
- * store an empty wifi_pass — that path only works for SSIDs without spaces.
+ * because `set` is the path that can store an empty value's counterpart —
+ * an open network has no password, and `set wifi_pass ""` is refused by the
+ * console's argument parser, so that case takes the positional command.
+ * Both quote their arguments, so spaces survive either way.
  */
-export async function usbProvisionWifi(frameId: FrameId, ssid: string, password: string): Promise<void> {
+export async function usbProvisionWifi(
+  frameId: FrameId,
+  ssid: string,
+  password: string,
+  options?: EmbeddedUsbApiCommandOptions
+): Promise<void> {
   if (!ssid.trim()) {
     throw new Error('Wi-Fi network name is required')
   }
   if (!password) {
-    if (/\s/.test(ssid)) {
-      throw new Error(
-        'The device console cannot join an open network whose name contains spaces. Set a password, or rename the network.'
-      )
-    }
-    await runEmbeddedUsbApiCommand(frameId, `wifi ${ssid}`, {
+    await runEmbeddedUsbApiCommand(frameId, `wifi ${quoteEmbeddedUsbConsoleValue(ssid)}`, {
       timeoutMs: USB_REBOOT_COMMAND_TIMEOUT_MS,
       expectReboot: true,
+      ...options,
     })
     return
   }
-  await usbSet(frameId, 'wifi_ssid', ssid)
-  await usbSet(frameId, 'wifi_pass', password)
-  await usbRestart(frameId)
+  await usbSet(frameId, 'wifi_ssid', ssid, options)
+  await usbSet(frameId, 'wifi_pass', password, options)
+  await usbRestart(frameId, options)
 }
