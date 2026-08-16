@@ -19,12 +19,14 @@ or a checkout at ``~/esp/esp-idf`` (see embedded/esp32/README.md).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
+import signal
 import time
 from datetime import datetime, timezone
 from pathlib import Path
