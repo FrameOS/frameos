@@ -28,6 +28,11 @@ beforeEach(async () => {
   delete process.env.R2_CLOUD_ACCESS_KEY_ID;
   delete process.env.R2_CLOUD_SECRET_ACCESS_KEY;
   delete process.env.R2_CLOUD_PUBLIC_BASE_URL;
+  // runLiveChecks() below probes Postgres and Postmark too; unset both so a
+  // developer with a database exported does not turn a unit test into a
+  // network call.
+  delete process.env.DATABASE_URL;
+  delete process.env.POSTMARK_SERVER_TOKEN;
   resetObjectStoreForTests();
 });
 
@@ -270,6 +275,45 @@ describe("the S3 driver's requests", () => {
       await expect(objectStore().get("store/scene-images/x")).rejects.toThrow(
         /Object store GET/,
       );
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe("the /admin live check", () => {
+  // The check exists because credentials that parse are not credentials that
+  // work: a wrong endpoint, a missing bucket and a revoked key all look
+  // identical to a presence check.
+  it("writes, reads back and cleans up a probe object", async () => {
+    const { runLiveChecks } = await import("./system-checks");
+    const checks = await runLiveChecks();
+    const objects = checks.find((check) => check.name === "Object storage (blobs)");
+
+    expect(objects).toBeDefined();
+    // The filesystem driver is a warning, not a pass: on a production host it
+    // means blobs are landing on local disk where no backup will find them.
+    expect(objects!.state).toBe("warning");
+    expect(objects!.detail).toContain("Filesystem driver");
+    // And it leaves nothing behind.
+    expect(await objectStore().head("health/object-store-probe")).toBeUndefined();
+  });
+
+  it("fails loudly when the store cannot answer", async () => {
+    process.env.R2_CLOUD_ENDPOINT = "https://accountid.r2.cloudflarestorage.com";
+    process.env.R2_CLOUD_ACCESS_KEY_ID = "key";
+    process.env.R2_CLOUD_SECRET_ACCESS_KEY = "secret";
+    resetObjectStoreForTests();
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("no such bucket", { status: 403 })) as typeof fetch;
+    try {
+      const { runLiveChecks } = await import("./system-checks");
+      const checks = await runLiveChecks();
+      const objects = checks.find((check) => check.name === "Object storage (blobs)");
+      expect(objects!.state).toBe("failing");
+      expect(objects!.detail).toContain("403");
     } finally {
       globalThis.fetch = realFetch;
     }

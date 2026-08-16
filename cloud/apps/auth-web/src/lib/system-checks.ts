@@ -11,10 +11,11 @@
 // have — a dead database and silently undelivered mail — both look perfectly
 // healthy to a presence check.
 
-import { sql } from "drizzle-orm";
-import { createDb } from "@frameos-cloud/db";
+import { and, gt, isNotNull, sql } from "drizzle-orm";
+import { createDb, frameAssetFiles } from "@frameos-cloud/db";
 import { checkEmailDelivery } from "./email";
 import { hasDatabaseUrl } from "./env";
+import { objectStore } from "./object-store";
 import { getTurnstileSiteKey } from "./turnstile";
 
 export type SystemCheck = {
@@ -134,6 +135,16 @@ export function runSystemChecks(): SystemCheck[] {
       required: false,
     },
     {
+      configured:
+        isSet("R2_CLOUD_ENDPOINT") &&
+        isSet("R2_CLOUD_ACCESS_KEY_ID") &&
+        isSet("R2_CLOUD_SECRET_ACCESS_KEY"),
+      detail:
+        "Object storage for scene zips, previews and frame snapshots. Without all three the app falls back to a directory on this host — correct in development, almost certainly wrong in production. The same three belong in the frame-hub's environment.",
+      name: "R2_CLOUD_ENDPOINT + R2_CLOUD_ACCESS_KEY_ID + R2_CLOUD_SECRET_ACCESS_KEY",
+      required: false,
+    },
+    {
       configured: isSet("FRAMEOS_LEGAL_ENTITY_NAME"),
       detail:
         "Operator identity on /legal/imprint, /legal/terms, and /legal/privacy. Required by EU law before broad signup.",
@@ -213,16 +224,114 @@ function checkTurnstileLive(): LiveCheck {
   };
 }
 
-// Both remote probes in parallel; each already resolves to a result rather
+// Credentials that parse are not credentials that work: a wrong endpoint, a
+// bucket that does not exist and a revoked key all look identical to a
+// presence check, and the first thing to notice would otherwise be a publish
+// failing or a preview 404ing. So write a small object, read it back, and
+// delete it.
+const objectStoreProbeKey = "health/object-store-probe";
+
+async function checkObjectStoreLive(): Promise<LiveCheck> {
+  const store = objectStore();
+  const name = "Object storage (blobs)";
+  const startedAt = Date.now();
+  const payload = Buffer.from(`frameos-cloud probe ${startedAt}`);
+  try {
+    await store.put(objectStoreProbeKey, payload, "text/plain");
+    const read = await store.get(objectStoreProbeKey);
+    await store.delete(objectStoreProbeKey);
+    if (!read || !read.equals(payload)) {
+      return {
+        detail: `Wrote a probe object through the ${store.driver} driver and read back ${
+          read ? "different bytes" : "nothing"
+        }.`,
+        name,
+        state: "failing",
+      };
+    }
+    const elapsed = Date.now() - startedAt;
+    if (store.driver === "fs") {
+      // Not an error — it is the development default — but on a production
+      // host it means blobs are landing on the app server's local disk, where
+      // no backup will find them.
+      return {
+        detail: `Filesystem driver: wrote, read and deleted a probe in ${elapsed} ms. Correct in development; in production it means R2_CLOUD_* is missing and blobs are on this host's disk.`,
+        name,
+        state: "warning",
+      };
+    }
+    return {
+      detail: `Wrote, read and deleted a probe object in ${elapsed} ms.`,
+      name,
+      state: "ok",
+    };
+  } catch (error) {
+    return {
+      detail: error instanceof Error ? error.message : "unknown error",
+      name,
+      state: "failing",
+    };
+  }
+}
+
+// The frame hub writes device snapshots through the same code auth-web reads
+// them with, from its OWN environment file — so it is entirely possible for
+// auth-web to be reading R2 while the hub keeps writing bytes into Postgres.
+// Nothing errors; previews just go blank for frames that re-rendered. The
+// tell is a frame_asset_files row written RECENTLY that still carries its
+// bytes: rows that predate the move are expected to (until the backfill runs),
+// rows written since are not.
+async function checkHubObjectStoreLive(): Promise<LiveCheck> {
+  const name = "Frame hub object storage";
+  if (!hasDatabaseUrl()) {
+    return { detail: "DATABASE_URL is not set.", name, state: "failing" };
+  }
+  try {
+    const [row] = await createDb()
+      .select({ count: sql<number>`count(*)::int` })
+      .from(frameAssetFiles)
+      .where(
+        and(
+          isNotNull(frameAssetFiles.content),
+          gt(frameAssetFiles.updatedAt, new Date(Date.now() - 60 * 60 * 1000)),
+        ),
+      );
+    const count = Number(row?.count ?? 0);
+    if (count === 0) {
+      return {
+        detail: "No recently written snapshot is holding its bytes in Postgres.",
+        name,
+        state: "ok",
+      };
+    }
+    return {
+      detail: `${count} snapshot row(s) written in the last hour still hold their bytes in Postgres — the hub is not using the object store. Put R2_CLOUD_* in /etc/frameos-cloud/frame-hub.env and restart it. (Expected briefly during a rolling deploy.)`,
+      name,
+      state: "warning",
+    };
+  } catch (error) {
+    return {
+      detail: error instanceof Error ? error.message : "unknown error",
+      name,
+      state: "failing",
+    };
+  }
+}
+
+// Every remote probe in parallel; each already resolves to a result rather
 // than throwing, so one failing service cannot blank the whole panel.
 export async function runLiveChecks(): Promise<LiveCheck[]> {
-  const [database, email] = await Promise.all([
+  const [database, email, objects, hubObjects] = await Promise.all([
     checkDatabaseLive(),
     checkEmailDelivery(),
+    checkObjectStoreLive(),
+    checkHubObjectStoreLive(),
   ]);
   return [
     database,
     { ...email, name: "Postmark (email delivery)" },
+    objects,
+    hubObjects,
     checkTurnstileLive(),
   ];
 }
