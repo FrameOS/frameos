@@ -273,6 +273,21 @@ suite "upgrade status reporting":
     for status in ["starting", "running"]:
       check status notin UpgradeTerminalStatuses
 
+  test "an upgrade that needs a boot reboots itself":
+    # The frame is on a wall, not on a desk: an upgrade that ends on
+    # "reboot required" and then waits for a human leaves the device running
+    # the OLD binary with the new release already symlinked in as current.
+    check upgradeFinishAction(rebootRequired = false, mayReboot = true) == restartServices
+    check upgradeFinishAction(rebootRequired = false, mayReboot = false) == restartServices
+    check upgradeFinishAction(rebootRequired = true, mayReboot = true) == rebootDevice
+    check upgradeFinishAction(rebootRequired = true, mayReboot = false) == stayPut
+
+  test "--no-reboot is the only way to keep an upgrade from rebooting":
+    check not parseFrameOSUpgradeOptions(@["--yes"]).noReboot
+    check parseFrameOSUpgradeOptions(@["--yes", "--no-reboot"]).noReboot
+    expect ValueError:
+      discard parseFrameOSUpgradeOptions(@["--no-restart"])
+
   test "the mtime probe answers 0 for a device that never upgraded":
     let dir = getTempDir() / "frameos-upgrade-mtime-test"
     createDir(dir)

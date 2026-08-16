@@ -26,6 +26,7 @@ proc printHelp() =
   echo "          --reboot-if-required to let setup reboot after changes that require it"
   echo "  upgrade Upgrade this installed frame to the latest GitHub release"
   echo "          --dry-run to validate and print the upgrade plan without changing files"
+  echo "          --no-reboot to stop after staging when the new release needs a reboot"
   echo "  help    Show this help"
 
 when isMainModule:

@@ -720,6 +720,7 @@ def test_buildroot_partition_scripts_create_frameos_and_assets_partitions(tmp_pa
     assert 'resize2fs -M "$rootfs_image"' in post_image
     assert "console=tty1" in post_image
     assert "fbcon=logo-count:1" in post_image
+    assert "cgroup_enable=memory cgroup_memory=1" in post_image
     assert "gpu_mem=32" in post_image
     assert "partition frameos" in post_image
     assert "partition assets" in post_image

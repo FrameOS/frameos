@@ -72,6 +72,13 @@ proc privilegedCommand*(command: string): string =
 proc privilegedAptCommand(command: string): string =
   sudoPrefix() & "env DEBIAN_FRONTEND=noninteractive " & command
 
+proc scheduleSystemReboot*(delaySeconds = 2) =
+  ## Reboot the device shortly after the caller returns. The delay exists so the
+  ## caller can finish writing its status file (and, over HTTP, flush a
+  ## response) before init tears the process down.
+  let command = "(sleep " & $delaySeconds & "; systemctl reboot || reboot) >/dev/null 2>&1 &"
+  discard runSetupCommand(privilegedShell(command), raiseOnError = false)
+
 # --- writing to a read-only root filesystem --------------------------------
 #
 # Buildroot frames run with `/` mounted read-only: the kernel command line asks

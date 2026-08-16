@@ -3487,6 +3487,13 @@ if [ -f "$cmdline" ]; then
   if ! grep -Eq '(^|[[:space:]])fbcon=logo-count:' "$tmp_cmdline"; then
     printf ' fbcon=logo-count:1' >> "$tmp_cmdline"
   fi
+  # The memory clamps in frameos.service need the memory cgroup controller.
+  # FrameOS setup would add this on the device, but a cmdline change only takes
+  # effect after a reboot, which would turn every fresh frame's first upgrade
+  # into a reboot. Ship it enabled instead.
+  if ! grep -Eq '(^|[[:space:]])cgroup_enable=memory([[:space:]]|$)' "$tmp_cmdline"; then
+    printf ' cgroup_enable=memory cgroup_memory=1' >> "$tmp_cmdline"
+  fi
   printf '\\n' >> "$tmp_cmdline"
   mv "$tmp_cmdline" "$cmdline"
 fi

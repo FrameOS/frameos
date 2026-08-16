@@ -592,9 +592,7 @@ proc scheduleSetupRebootIfRequired*(setupResult: SetupResult, reason = "FrameOS 
   if not setupResult.rebootRequired:
     return false
   setupLog(reason & ": reboot required; scheduling reboot")
-  let command =
-    "(sleep " & $delaySeconds & "; systemctl reboot || reboot) >/dev/null 2>&1 &"
-  discard runSetupCommand(privilegedCommand("sh -c " & shellQuote(command)))
+  scheduleSystemReboot(delaySeconds)
   true
 
 proc writeSetupReleasePayload*(

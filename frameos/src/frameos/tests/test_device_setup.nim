@@ -96,6 +96,24 @@ block test_write_privileged_file_falls_back_after_direct_write_failure:
   finally:
     resetSetupCommandRunnerForTest()
 
+block test_schedule_system_reboot_detaches_and_falls_back:
+  # The reboot has to outlive the process asking for it (setup and the upgrade
+  # both reboot the device out from under themselves), and `systemctl` is not
+  # the only init a frame can run.
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    scheduleSystemReboot(7)
+    doAssert commands.len == 1
+    doAssert commands[0].contains("sleep 7")
+    doAssert commands[0].contains("systemctl reboot || reboot")
+    doAssert commands[0].endsWith("&'")
+  finally:
+    resetSetupCommandRunnerForTest()
+
 block test_setup_spi_enables_when_raspi_config_reports_disabled:
   var commands: seq[string] = @[]
   setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
