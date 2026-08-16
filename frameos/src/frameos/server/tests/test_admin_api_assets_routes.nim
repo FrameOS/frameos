@@ -4,6 +4,7 @@ import strutils
 import mummy
 import json
 import httpcore
+import pixie
 
 import ../routes/admin_api_assets_routes
 import ../state
@@ -91,6 +92,44 @@ suite "Server admin api asset helpers":
     check int(foundFile.status) == int(Http200)
     check foundFile.headers["Content-Type"] == "application/octet-stream"
     check foundFile.body == "asset-body"
+
+  test "getAssetPayload renders and caches thumbnails without ImageMagick":
+    let tempRoot = getTempDir() / "frameos-api-asset-thumbs"
+    removeDir(tempRoot)
+    createDir(tempRoot)
+    let source = newImage(1600, 900)
+    source.fill(rgba(10, 120, 200, 255))
+    writeFile(tempRoot / "wide.png", source.encodeImage(PngFormat))
+    globalFrameConfig = baseConfig(tempRoot)
+
+    let thumb = getAssetPayload("wide.png", true)
+    check int(thumb.status) == int(Http200)
+    check thumb.headers["Content-Type"] == ThumbnailContentType
+    let decoded = decodeImage(thumb.body)
+    # Fit inside the box, aspect kept: 1600x900 -> 320x180.
+    check decoded.width == ThumbnailMaxEdge
+    check decoded.height == 180
+
+    # Cached on disk under .thumbs, and served from there the second time.
+    var cachedFiles: seq[string] = @[]
+    for file in walkDirRec(tempRoot / ".thumbs"):
+      cachedFiles.add(file)
+    check cachedFiles.len == 1
+    check cachedFiles[0].endsWith(ThumbnailFileSuffix)
+    writeFile(cachedFiles[0], newImage(4, 4).encodeImage(PngFormat))
+    let cached = getAssetPayload("wide.png", true)
+    check decodeImage(cached.body).width == 4
+
+  test "getAssetPayload reports why a thumbnail could not be made":
+    let tempRoot = getTempDir() / "frameos-api-asset-thumb-errors"
+    removeDir(tempRoot)
+    createDir(tempRoot)
+    writeFile(tempRoot / "notes.txt", "not an image")
+    globalFrameConfig = baseConfig(tempRoot)
+
+    let failed = getAssetPayload("notes.txt", true)
+    check int(failed.status) == int(Http500)
+    check failed.body.contains("Failed to generate thumbnail")
 
   test "asset mutation helpers stay scoped to the configured assets root":
     let tempRoot = getTempDir() / "frameos-api-asset-mutations"

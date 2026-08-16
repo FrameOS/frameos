@@ -66,7 +66,12 @@ from app.utils.ssh_utils import (
     exec_command,
     remove_ssh_connection,
 )
-from app.utils.image import render_line_of_text_png
+from app.utils.image import (
+    THUMBNAIL_CONTENT_TYPE,
+    THUMBNAIL_FILE_SUFFIX,
+    render_line_of_text_png,
+    render_thumbnail_png,
+)
 from app.schemas.frames import (
     FramesListResponse,
     FrameResponse,
@@ -1845,29 +1850,37 @@ async def api_frame_get_asset(
                 _bad_request("Invalid asset path")
             await redis.set(md5_key, full_md5, ex=86400 * 30)
 
-        cache_key = f"asset:thumb:{full_md5}"
+        # Keyed by format as well as content: caches written before frames
+        # generated PNGs hold JPEG bytes, and serving those under the PNG
+        # media type below would hand the browser a lie.
+        cache_key = f"asset:thumb:png:{full_md5}"
         if cached := await redis.get(cache_key):
             data = cached
         else:
             thumb_root = os.path.join(assets_path, ".thumbs")
-            thumb_rel = full_md5 + ".320x320.jpg"
+            thumb_rel = full_md5 + THUMBNAIL_FILE_SUFFIX
             thumb_full = os.path.normpath(os.path.join(thumb_root, thumb_rel))
 
             try:
                 data = await _remote_download_file(db, redis, frame, thumb_full)
                 await redis.set(cache_key, data, ex=86400 * 30)
             except Exception:
-                cmd = (
-                    f"mkdir -p {shlex.quote(os.path.dirname(thumb_full))} && "
-                    f"convert {shlex.quote(full_path)} -thumbnail 320x320 "
-                    f"{shlex.quote(thumb_full)}"
-                )
-                await exec_shell_on_frame(frame.id, cmd, redis=redis)
-
-                data = await _remote_download_file(db, redis, frame, thumb_full)
+                # The frame renders its own thumbnails now (Pixie, in-process),
+                # so the fallback is no longer a shell on the device: no image
+                # FrameOS ships has ImageMagick to run, and asking a frame for
+                # a shell to resize a photo was never a fair trade. Pull the
+                # original once and render the preview here.
+                original = await _remote_download_file(db, redis, frame, full_path)
+                try:
+                    data = render_thumbnail_png(original)
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                        detail=f"Could not generate a thumbnail: {exc}",
+                    ) from exc
                 await redis.set(cache_key, data, ex=86400 * 30)
 
-        return StreamingResponse(io.BytesIO(data), media_type="image/jpeg")
+        return StreamingResponse(io.BytesIO(data), media_type=THUMBNAIL_CONTENT_TYPE)
 
     if await _use_remote(frame, redis):
         try:

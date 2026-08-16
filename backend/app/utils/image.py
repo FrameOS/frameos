@@ -1,6 +1,31 @@
 import io
 from PIL import Image, ImageDraw, ImageFont
 
+# Asset thumbnails, kept in step with the device runtime
+# (frameos/src/frameos/server/routes/admin_api_assets_routes.nim): a frame
+# caches them under .thumbs/<md5><suffix> and serves them with this type.
+# PNG rather than JPEG because the frame encodes with Pixie, which reads a
+# dozen formats and writes no JPEG.
+THUMBNAIL_MAX_EDGE = 320
+THUMBNAIL_FILE_SUFFIX = ".320x320.png"
+THUMBNAIL_CONTENT_TYPE = "image/png"
+
+
+def render_thumbnail_png(data: bytes, max_edge: int = THUMBNAIL_MAX_EDGE) -> bytes:
+    """Fit an image inside a max_edge box and encode it as PNG.
+
+    Fit, never crop, and never upscale — the same shape as the frame's own
+    thumbnailer, so a preview looks the same whichever side produced it.
+    """
+    with Image.open(io.BytesIO(data)) as image:
+        image.load()
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+        image.thumbnail((max_edge, max_edge), Image.LANCZOS)
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+    return out.getvalue()
+
 def render_line_of_text_png(text: str, width: int, height: int) -> bytes:
     image = Image.new("RGB", (width, height), color=(31, 41, 55))
     draw = ImageDraw.Draw(image)

@@ -166,8 +166,12 @@ type
     ## One asset read for `asset_get`. `error` is empty on success and one of
     ## the wire contract's per-verb errors otherwise (invalid_path, not_found,
     ## is_directory, too_large, read_failed). `data` holds the raw bytes —
-    ## base64 happens at chunking time, never here.
+    ## base64 happens at chunking time, never here. `detail` never reaches the
+    ## provider: the wire carries the fixed code, the frame's own log carries
+    ## why — without it a failed thumbnail and an unreadable file are the same
+    ## word, `read_failed`, and neither says which.
     error*: string
+    detail*: string
     data*: string
     contentType*: string
     mtime*: BiggestInt
@@ -474,15 +478,25 @@ proc defaultReadAsset(path: string, thumb: bool): AssetReadResult {.gcsafe.} =
       return AssetReadResult(error: "too_large")
     let (status, _, body) = getAssetPayload(path, thumb)
     if status != Http200:
+      # The route answers failures as JSON; keep its wording for the log.
+      var detail = $status
+      try:
+        let parsed = parseJson(body)
+        if parsed.kind == JObject:
+          detail = parsed{"detail"}.getStr(detail) & (
+            if parsed{"error"}.getStr("").len > 0: ": " & parsed{"error"}.getStr() else: "")
+      except CatchableError:
+        discard
       return AssetReadResult(
-        error: if status == Http413: "too_large" else: "read_failed")
+        error: if status == Http413: "too_large" else: "read_failed",
+        detail: detail)
     if body.len > HubMaxAssetFileBytes:
       return AssetReadResult(error: "too_large")
     AssetReadResult(
       data: body,
-      # Thumbnails are always the generated 320x320 JPEG; originals go by
+      # Thumbnails are always the generated 320x320 preview; originals go by
       # extension (same table getAssetPayload uses for its own header).
-      contentType: if thumb: "image/jpeg" else: contentTypeForFilePath(fullPath),
+      contentType: if thumb: ThumbnailContentType else: contentTypeForFilePath(fullPath),
       mtime: getFileInfo(fullPath).lastWriteTime.toUnix())
 
 proc defaultWriteAsset(path: string, data: string): JsonNode {.gcsafe.} =
@@ -880,7 +894,8 @@ proc handleAssetGet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVe
       ctx.audit("asset_get", false, "read_failed: " & error.msg)
       return CloudVerbReply(ack: ackError(id, "read_failed"))
   if asset.error.len > 0:
-    ctx.audit("asset_get", false, asset.error)
+    ctx.audit("asset_get", false,
+      if asset.detail.len > 0: asset.error & ": " & asset.detail else: asset.error)
     return CloudVerbReply(ack: ackError(id, asset.error))
   ctx.audit("asset_get", true)
   CloudVerbReply(ack: ackOk(id), extra: assetChunkExtras(id, asset))
