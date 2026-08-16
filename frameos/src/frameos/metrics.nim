@@ -2,6 +2,7 @@ import json, os, strutils, sequtils, posix, sets
 import frameos/types
 import frameos/channels
 import frameos/runtime_diagnostics
+import frameos/utils/system
 
 type
   MetricsLoggerThread = ref object
@@ -157,9 +158,14 @@ proc getMountDiskUsage(mount: string): tuple[total, used, available: int64, perc
     if fstatvfs(fd, stats) != 0:
       return (0'i64, 0'i64, 0'i64, 0.0)
 
-    result.total = (stats.f_blocks * stats.f_frsize).int64
-    let free = (stats.f_bfree * stats.f_frsize).int64
-    result.available = (stats.f_bavail * stats.f_frsize).int64
+    # 64-bit arithmetic, always: see blocksToBytes. A 32-bit frame otherwise
+    # raises OverflowDefect here on any filesystem over 2 GiB, and since the
+    # whole sample is built in one expression, that killed every metrics line
+    # the frame would ever have logged.
+    let blockSize = stats.f_frsize.int64
+    result.total = blocksToBytes(stats.f_blocks.int64, blockSize)
+    let free = blocksToBytes(stats.f_bfree.int64, blockSize)
+    result.available = blocksToBytes(stats.f_bavail.int64, blockSize)
     result.used = max(0'i64, result.total - free)
     if result.total > 0:
       result.percentage = (result.used.float / result.total.float) * 100.0
