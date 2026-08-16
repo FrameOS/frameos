@@ -122,12 +122,28 @@ enabled by default on images that have no backend to talk to.
 
 ---
 
-## Drivers and the `.so` ABI
+## Drivers
 
 There are two ways to build a frame: `static` (everything in one binary) and
 `precompiled` (the published release binary plus its driver `.so`s, scenes
 interpreted). The `shared` and `shared-scenes` modes were removed on
 2026-08-16, and with them the largest unaudited ABI surface.
+
+- **The framebuffer driver accepts a mode of all zeros.** `getScreenInfo`
+  treats any successful `FBIOGET_VSCREENINFO` as a valid probe, so a
+  `/dev/fb0` that exists but carries no mode — vc4 KMS fbdev emulation before,
+  or without, a modeset — hands back `width`/`height`/`bitsPerPixel` of 0, and
+  the retry at the top of `render` then sets `available = true` on it. Every
+  later render pass reaches the display stage, logs `Invalid framebuffer
+  screen info` and returns; the `configuredScreenInfo` fallback the driver
+  carries for exactly this case is never reached, because nothing raised.
+  Seen on a Buildroot Pi 5 on 2026-08-16 straight after an OTA restart: the
+  scene rendered in 1.5 s and was saved and served to the cloud, and nothing
+  reached the display — and with that frame's hour-long interval the probe
+  retries once an hour, since `render` is the only thing that retries it.
+  Treat zero geometry as a failed probe (keep `available = false`, fall back
+  to the configured geometry when there is one) and retry on a short timer
+  rather than only on the next render. *Small.*
 
 - **Audit driver code for refs it did not allocate.** The rule and its
   reasoning now live at the top of `frameos/src/frameos/driver_abi.nim`: every
@@ -148,6 +164,21 @@ interpreted). The `shared` and `shared-scenes` modes were removed on
 Three Raspberry Pi platforms ship with published base images: `raspberry-pi-64`
 (Zero 2 W / Pi 3 / Pi 4, the default), `raspberry-pi-32` (every ARMv6 board:
 Zero, Zero W, Pi 1, CM1) and `raspberry-pi-5` (Pi 5 / CM5).
+
+- **Thumbnails shell out to a binary Buildroot does not ship.**
+  `getAssetPayload` (`frameos/src/frameos/server/routes/admin_api_assets_routes.nim`)
+  builds the cached 320×320 JPEG by running ImageMagick's `convert`, but
+  ImageMagick left the runtime when every frame moved to Pixie decoding, and
+  the three current base images carry only *host*-imagemagick — the build
+  host's copy, nothing on the device. (The two retired manifest entries did
+  ship a target build, which is why this never showed up before.) So every
+  thumbnail request on a Buildroot frame fails, in all three control planes at
+  once: the frame's own admin assets panel, the backend's frame-API proxy and
+  the cloud's `asset_get` with `thumb` — the `read_failed` a Pi 5 logged on
+  2026-08-16. Generate the thumbnail with Pixie in-process, under the existing
+  decode budgets, and keep the `.thumbs` md5 cache as it is. While there: the
+  cloud path discards the 500's body and audits a bare `read_failed`, so the
+  frame log cannot say a thumbnail was what failed — carry the reason through.
 
 - **Prune the retired platforms from the base-image manifest.**
   `tools/buildroot-images/manifest.json` still carries `raspberry-pi-zero-2-w`
