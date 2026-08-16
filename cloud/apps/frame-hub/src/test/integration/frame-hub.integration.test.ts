@@ -793,6 +793,86 @@ describe("command redelivery", () => {
   });
 });
 
+describe("preview push", () => {
+  // The fleet-preview doctrine: a device announces that it wrote a fresh
+  // snapshot, and the hub fetches it only while someone has the frame open.
+  // Nothing is rendered in the cloud and no device is asked to screenshot.
+  async function snapshotFetches(frameId: string) {
+    return await db
+      .select({ payload: frameCommands.payload })
+      .from(frameCommands)
+      .where(
+        and(
+          eq(frameCommands.frameId, frameId),
+          eq(frameCommands.type, "asset_get"),
+        ),
+      );
+  }
+
+  it("ignores a render announcement for a frame nobody is watching", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    device.send({ active_scene: "scene-a", type: "render" });
+    // Nothing to wait *for*, so wait out a window in which the fetch would
+    // have been queued and assert it was not.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await snapshotFetches(frame.id)).toHaveLength(0);
+    device.ws.close();
+  });
+
+  it("fetches the scene thumbnail when a viewer is present", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    await db
+      .update(frames)
+      .set({ previewWatchedAt: new Date() })
+      .where(eq(frames.id, frame.id));
+
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    device.send({ active_scene: "scene-a", type: "render" });
+
+    const queued = await waitFor(async () => {
+      const rows = await snapshotFetches(frame.id);
+      return rows.length > 0 ? rows : undefined;
+    }, "snapshot fetch queued");
+    // Only the thumbnail: the full-size copy is fetched on a later render,
+    // once something has actually asked for one.
+    expect(queued).toHaveLength(1);
+    const payload = queued[0]!.payload as Record<string, unknown>;
+    expect(payload.thumb).toBe(true);
+    expect(String(payload.path)).toMatch(
+      /^\.frameos\/scene_images\/scene-a-[0-9a-f]{32}\.png$/,
+    );
+
+    // The device is told to send it, over the same asset_get verb the tile
+    // route uses on demand.
+    const command = await device.next(
+      (msg) => msg.type === "asset_get",
+      "asset_get delivered",
+    );
+    expect(command.thumb).toBe(true);
+    device.ws.close();
+  });
+
+  it("stops asking once the viewer has been gone for the watch window", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    await db
+      .update(frames)
+      .set({ previewWatchedAt: new Date(Date.now() - 10 * 60 * 1000) })
+      .where(eq(frames.id, frame.id));
+
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    device.send({ active_scene: "scene-a", type: "render" });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(await snapshotFetches(frame.id)).toHaveLength(0);
+    device.ws.close();
+  });
+});
+
 describe("telemetry", () => {
   it("stores log batches, caps them, and pushes new_log to browsers", async () => {
     const { account, frame, privateKey, token } = await createFrameFixture();

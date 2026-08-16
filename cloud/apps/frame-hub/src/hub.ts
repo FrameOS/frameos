@@ -32,11 +32,14 @@ import {
 // header comment in cloud/apps/auth-web/src/lib/frames.ts).
 import { authenticateLinkedClient, linkedClientScopes } from "../../auth-web/src/lib/backend-auth";
 import {
+  enqueueFrameCommand,
   frameCommandsNotifyChannel,
   frameForLinkedClient,
   frameImageAssetPath,
+  framePreviewIsWatched,
   frameTelemetryLogsScope,
   frameTelemetryMetricsScope,
+  markFramePreviewWatched,
   maxAssetFileBytes,
   parseAssetEntries,
   storeFrameAssetFile,
@@ -45,6 +48,12 @@ import {
   storeFrameMetrics,
   verifyFrameSignature,
 } from "../../auth-web/src/lib/frames";
+import {
+  cachedAssetFile,
+  assetFetchCommandTtlMs,
+  outstandingAssetGet,
+  sceneSnapshotAssetPath,
+} from "../../auth-web/src/lib/frame-asset-cache";
 import {
   allowsPrivateNetworkOrigins,
   getAllowedBrowserOrigins,
@@ -136,6 +145,12 @@ const commandRedeliverAfterMs = 180_000;
 // hub insert, prune, select and fan out. A device batches at most every 2s
 // (docs/cloud-frames.md), so 120 batches/minute is ~4x headroom.
 const logBatchRateLimit = { limit: 120, windowMs: 60_000 };
+
+// Snapshot fetches triggered by a device's "render" announcement, per frame.
+// The device already throttles itself to one snapshot write a minute
+// (SCENE_IMAGE_MAX_AGE_SECONDS); this is the ceiling that holds even if a
+// firmware forgets to, so a chatty frame cannot turn a preview into a stream.
+const renderPreviewRateLimit = { limit: 4, windowMs: 60_000 };
 
 // Unauthenticated upgrade attempts are cheap for the client and cost the hub a
 // database select each, so they are limited per client IP through the shared
@@ -771,6 +786,71 @@ export async function startFrameHub(
     await broadcastFrameUpdate(session.frame.id);
   }
 
+  // "I wrote a fresh snapshot of the scene I am showing." The device says
+  // this and nothing more (frameos/src/frameos/cloud/hub_client.nim); whether
+  // it costs the frame an upload is decided here, by whether anyone has the
+  // frame open. That is the fleet-preview doctrine in one function: the cloud
+  // keeps a copy of what the device already drew for itself, while someone is
+  // looking, and otherwise leaves the frame alone. It never renders scenes
+  // itself and never asks a device to screenshot on demand.
+  async function handleRender(
+    session: DeviceSession,
+    msg: Record<string, unknown>,
+  ) {
+    const activeScene =
+      typeof msg.active_scene === "string" && msg.active_scene.length > 0
+        ? msg.active_scene
+        : undefined;
+    if (!activeScene) {
+      return;
+    }
+    // Re-read: `session.frame` is the row as it was at connect, and viewers
+    // come and go over the life of a socket.
+    const [frame] = await db
+      .select({
+        accountId: frames.accountId,
+        previewWatchedAt: frames.previewWatchedAt,
+      })
+      .from(frames)
+      .where(eq(frames.id, session.frame.id))
+      .limit(1);
+    if (!frame || !framePreviewIsWatched(frame)) {
+      return;
+    }
+    // Cheap frequency cap on top of the device's own (it writes a snapshot at
+    // most once a minute): a device that announces more often than that gets
+    // one fetch per window, not one per announcement.
+    if (
+      !checkMemoryRateLimit(
+        `frame_render_preview:${session.frame.id}`,
+        renderPreviewRateLimit,
+      ).allowed
+    ) {
+      return;
+    }
+    const path = sceneSnapshotAssetPath(activeScene);
+    // The thumb is what the workspace tiles show, so it is always worth
+    // having. The full-size copy is fetched only when one is already cached —
+    // i.e. somebody has opened this scene at full size before — so the common
+    // case costs the frame one small PNG.
+    const variants: boolean[] = [true];
+    if (await cachedAssetFile(db, session.frame.id, path, false)) {
+      variants.push(false);
+    }
+    for (const thumb of variants) {
+      if (await outstandingAssetGet(db, session.frame.id, path, thumb)) {
+        continue;
+      }
+      await enqueueFrameCommand(db, {
+        createdByAccountId: frame.accountId,
+        frameId: session.frame.id,
+        payload: { path, ...(thumb ? { thumb: true } : {}) },
+        ttlMs: assetFetchCommandTtlMs,
+        type: "asset_get",
+      });
+    }
+  }
+
   async function handleLogBatch(
     session: DeviceSession,
     msg: Record<string, unknown>,
@@ -1060,6 +1140,9 @@ export async function startFrameHub(
         break;
       case "state":
         await handleState(session, msg);
+        break;
+      case "render":
+        await handleRender(session, msg);
         break;
       case "log_batch":
         await handleLogBatch(session, msg);
@@ -1381,6 +1464,11 @@ export async function startFrameHub(
         trackConnection(ws);
         attachBrowserSocket(ws, frameBrowserSockets, frameId, session);
       });
+      // A browser socket on one frame is the strongest "someone is looking"
+      // signal there is: the workspace opens it when the frame's page is on
+      // screen. Stamping it here means the first render after a page load is
+      // already fetched, without waiting for a tile request.
+      void markFramePreviewWatched(db, frameId).catch(() => undefined);
       return;
     }
 

@@ -259,6 +259,9 @@ importers:
       '@frameos-cloud/db':
         specifier: workspace:*
         version: link:../../packages/db
+      aws4fetch:
+        specifier: ^1.0.20
+        version: 1.0.20
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)
@@ -335,6 +338,9 @@ importers:
       '@frameos-cloud/db':
         specifier: workspace:*
         version: link:../../packages/db
+      aws4fetch:
+        specifier: ^1.0.20
+        version: 1.0.20
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)
@@ -3080,6 +3086,9 @@ packages:
     hasBin: true
     peerDependencies:
       postcss: '>=8.5.23'
+
+  aws4fetch@1.0.20:
+    resolution: {integrity: sha512-/djoAN709iY65ETD6LKCtyyEI04XIBP5xVvfmNxsEP0uJB5tyaGBztSryRr4HqMStr9R06PisQE7m9zDTXKu6g==}
 
   babel-plugin-polyfill-corejs2@0.4.16:
     resolution: {integrity: sha512-xaVwwSfebXf0ooE11BJovZYKhFjIvQo7TsyVpETuIeH2JHv0k/T6Y5j22pPTvqYqmpkxdlPAJlyJ0tfOJAoMxw==}
@@ -8316,6 +8325,8 @@ snapshots:
       picocolors: 1.1.1
       postcss: 8.5.26
       postcss-value-parser: 4.2.0
+
+  aws4fetch@1.0.20: {}
 
   babel-plugin-polyfill-corejs2@0.4.16(@babel/core@7.29.7):
     dependencies:

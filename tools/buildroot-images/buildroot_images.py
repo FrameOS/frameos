@@ -360,9 +360,19 @@ class ReleaseImageFrame:
             "wifiHotspotTimeoutSeconds": 300,
         }
     )
+    # FrameOS Remote ships OFF on a generic release image (audit:
+    # docs/buildroot-privileges.md §2). The image has no backend to talk to:
+    # `serverHost` is empty on purpose so cloud enrollment stays possible, so
+    # an enabled agent is a resident root process dialling ws://:8989 forever
+    # and failing. A backend that adopts the card writes its own frame.json
+    # with the flag on and a real shared secret (`_ensure_frame_bootstrap_enabled`
+    # / `buildroot_agent_defaults`), and `frameos setup` installs and enables
+    # the unit then — the moment it becomes useful. The secret stays empty
+    # here because empty is the fail-closed state: `doHandshake` refuses to
+    # connect at all without one.
     agent: dict[str, Any] = field(
         default_factory=lambda: {
-            "agentEnabled": True,
+            "agentEnabled": False,
             "agentRunCommands": True,
             "deployWithAgent": True,
             "agentSharedSecret": "",

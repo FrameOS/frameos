@@ -56,7 +56,7 @@ export default async function AccountScenesPage({
     ? await createDb()
         .select({
           downloadCount: storeScenes.downloadCount,
-          hasPreview: sql<boolean>`${storeScenes.previewImage} is not null`,
+          hasPreview: sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`,
           featuredAt: storeScenes.featuredAt,
           id: storeScenes.id,
           latestVersion: storeScenes.latestVersion,

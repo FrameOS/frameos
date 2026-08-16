@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { storeSceneImages, storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
+import { publicBlobUrl, readBlob } from "../../../../../../../src/lib/blobs";
 import {
   canAccessPrivateScene,
   shareTokenGrantsAccess,
@@ -44,6 +45,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       accountId: storeScenes.accountId,
       content: storeSceneImages.content,
       contentType: storeSceneImages.contentType,
+      objectKey: storeSceneImages.objectKey,
       shareToken: storeScenes.shareToken,
       status: storeScenes.status,
       visibility: storeScenes.visibility,
@@ -81,10 +83,24 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
   }
 
-  return new NextResponse(Buffer.from(row.content), {
+  const cdnUrl =
+    row.visibility === "public" ? publicBlobUrl(row.objectKey) : undefined;
+  if (cdnUrl) {
+    return NextResponse.redirect(cdnUrl, {
+      headers: { "cache-control": "public, max-age=3600" },
+      status: 307,
+    });
+  }
+
+  const content = await readBlob(row);
+  if (!content) {
+    return jsonError("image_not_found", 404);
+  }
+
+  return new NextResponse(new Uint8Array(content), {
     headers: {
       "cache-control": "public, max-age=3600",
-      "content-length": String(row.content.length),
+      "content-length": String(content.length),
       "content-type": row.contentType,
       "x-content-type-options": "nosniff",
     },

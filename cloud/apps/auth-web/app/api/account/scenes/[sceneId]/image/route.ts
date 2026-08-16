@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { storeSceneImages, storeScenes } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
+import { readBlob } from "../../../../../../src/lib/blobs";
 import { jsonError } from "../../../../../../src/lib/device-flow";
 import { maxSceneZipBytes } from "../../../../../../src/lib/store";
 import { syncLatestSceneZipPreview } from "../../../../../../src/lib/store-image-sync";
@@ -24,12 +25,15 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (scene.status === "pulled") {
     return jsonError("scene_pulled", 403);
   }
-  if (!scene.previewImage) {
+  if (!scene.previewImage && !scene.previewObjectKey) {
     return jsonError("image_not_found", 404);
   }
 
   const [galleryLead] = await db
-    .select({ content: storeSceneImages.content })
+    .select({
+      content: storeSceneImages.content,
+      objectKey: storeSceneImages.objectKey,
+    })
     .from(storeSceneImages)
     .where(eq(storeSceneImages.sceneId, scene.id))
     .orderBy(
@@ -37,10 +41,11 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       asc(storeSceneImages.createdAt),
     )
     .limit(1);
+  const galleryLeadContent = await readBlob(galleryLead);
   const synced = await syncLatestSceneZipPreview(
     db,
     scene,
-    galleryLead ? Buffer.from(galleryLead.content) : undefined,
+    galleryLeadContent ? Buffer.from(galleryLeadContent) : undefined,
   );
   if (!synced.ok) {
     return syncError(synced.error);
@@ -51,8 +56,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     .set({
       previewImage: null,
       previewImageHeight: null,
+      previewImageSizeBytes: null,
       previewImageType: null,
       previewImageWidth: null,
+      previewObjectKey: null,
       updatedAt: new Date(),
     })
     .where(eq(storeScenes.id, scene.id));

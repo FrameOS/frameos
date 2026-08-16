@@ -45,6 +45,7 @@ import {
   supersedePendingCommands,
 } from "../frames";
 import { createAccountScene } from "../account-scene-create";
+import { readBlob } from "../blobs";
 import { extractScenesFromZip } from "../scene-title";
 
 export type ScenesEvent = {
@@ -984,8 +985,9 @@ export async function executeTool(
         )
         .orderBy(desc(storeSceneVersions.version))
         .limit(1);
-      const scenesJson = version
-        ? extractScenesFromZip(version.content)
+      const versionContent = await readBlob(version);
+      const scenesJson = versionContent
+        ? extractScenesFromZip(versionContent)
         : undefined;
       if (!scenesJson) {
         return JSON.stringify({ error: "This store scene has no readable scenes.json." });

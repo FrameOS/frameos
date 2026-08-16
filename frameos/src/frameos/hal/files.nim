@@ -15,11 +15,13 @@ when defined(frameosEmbedded):
   proc writeTextFile*(path, content: string) = raise noFs(path)
   proc appendTextLine*(path, line: string) = raise noFs(path)
   proc storedFileExists*(path: string): bool = false
+  proc storedFileAgeSeconds*(path: string): float = -1.0
   proc removeStoredFile*(path: string) = raise noFs(path)
   proc ensureDir*(path: string) = discard
   proc ensureParentDir*(path: string) = discard
 else:
   import std/os
+  import std/times
 
   proc readTextFile*(path: string): string {.inline.} =
     readFile(path)
@@ -38,6 +40,18 @@ else:
 
   proc storedFileExists*(path: string): bool {.inline.} =
     fileExists(path)
+
+  proc storedFileAgeSeconds*(path: string): float =
+    ## Seconds since `path` was last written, or -1 when it is not there (or
+    ## cannot be stat'ed). Negative means "no file", never "brand new" — a
+    ## caller comparing against a staleness threshold must not read a missing
+    ## file as fresh.
+    try:
+      if not fileExists(path):
+        return -1.0
+      (epochTime() - getLastModificationTime(path).toUnixFloat())
+    except OSError:
+      -1.0
 
   proc removeStoredFile*(path: string) {.inline.} =
     removeFile(path)

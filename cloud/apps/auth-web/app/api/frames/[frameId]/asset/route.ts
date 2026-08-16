@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { readBlob } from "../../../../../src/lib/blobs";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import {
   cachedAssetFile,
@@ -57,11 +58,20 @@ function contentDisposition(kind: "attachment" | "inline", filename: string) {
   return `${kind}; filename="${safe || "asset"}"`;
 }
 
-function assetResponse(
-  row: { content: Buffer; contentType: string; sizeBytes: number },
+async function assetResponse(
+  row: {
+    content: Buffer | null;
+    contentType: string;
+    objectKey: string | null;
+    sizeBytes: number;
+  },
   mode: string | null,
   filename: string | null,
 ) {
+  const content = await readBlob(row);
+  if (!content) {
+    return jsonError("asset_fetch_failed", 404);
+  }
   const headers: Record<string, string> = {
     // Private: these bytes came off a specific user's frame. The browser may
     // keep them briefly so a re-render does not re-download every thumbnail.
@@ -77,7 +87,7 @@ function assetResponse(
   } else if (filename) {
     headers["content-disposition"] = contentDisposition("inline", filename);
   }
-  return new NextResponse(new Uint8Array(row.content), { headers });
+  return new NextResponse(new Uint8Array(content), { headers });
 }
 
 // One asset's bytes, in the shape the shared SPA's frameAssetUrl() requests:
@@ -130,7 +140,7 @@ export async function GET(
   if (cached) {
     // Stale-while-revalidate: the refresh (if any) was queued above and the
     // next request picks up the new bytes.
-    return assetResponse(cached, mode, filename);
+    return await assetResponse(cached, mode, filename);
   }
   if (frame.status !== "active") {
     return jsonError("frame_not_active", 409);
@@ -141,7 +151,7 @@ export async function GET(
     await sleep(longPollStepMs);
     const row = await cachedAssetFile(db, frame.id, path, thumb);
     if (row) {
-      return assetResponse(row, mode, filename);
+      return await assetResponse(row, mode, filename);
     }
     // The device may have refused (not_found, too_large…): the command then
     // sits failed with an error, and waiting out the clock would just hold

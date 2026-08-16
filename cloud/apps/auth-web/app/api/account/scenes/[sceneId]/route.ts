@@ -1,8 +1,12 @@
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
-import { sha256Hex } from "../../../../../src/lib/backups";
+import {
+  blobNamespaces,
+  readBlob,
+  storeBlob,
+} from "../../../../../src/lib/blobs";
 import {
   jsonError,
   parseOptionalString,
@@ -12,7 +16,6 @@ import { normalizeCategory } from "../../../../../src/lib/categories";
 import { moderateStoreContent } from "../../../../../src/lib/moderation";
 import {
   maxSceneZipBytes,
-  maxVersionsPerScene,
   normalizeFrameosVersion,
   normalizeTags,
   rebuildZipWithFrameosVersion,
@@ -173,7 +176,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   let nextVersionContent: Buffer | undefined;
   if (frameosVersionChanged) {
     const [latest] = await db
-      .select({ content: storeSceneVersions.content })
+      .select({
+        content: storeSceneVersions.content,
+        objectKey: storeSceneVersions.objectKey,
+      })
       .from(storeSceneVersions)
       .where(
         and(
@@ -182,11 +188,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         ),
       )
       .limit(1);
-    if (!latest) {
+    const latestContent = await readBlob(latest);
+    if (!latestContent) {
       return jsonError("version_not_found", 404);
     }
     nextVersionContent = rebuildZipWithFrameosVersion(
-      Buffer.from(latest.content),
+      Buffer.from(latestContent),
       requestedFrameosVersion ?? null,
     );
     if (!nextVersionContent) {
@@ -202,29 +209,32 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     changes.latestVersion = scene.latestVersion + 1;
   }
 
+  // Outside the transaction on purpose: the upload is a network call, and a
+  // transaction held open across it would pin a Postgres connection for its
+  // duration. A stored object with no row pointing at it is harmless (the
+  // key is its digest, so the next publish of the same bytes re-uses it).
+  const storedVersion =
+    frameosVersionChanged && nextVersionContent
+      ? await storeBlob(
+          blobNamespaces.sceneVersion,
+          nextVersionContent,
+          "application/zip",
+          { extension: "zip" },
+        )
+      : undefined;
+
   const updated = await db.transaction(async (tx) => {
-    if (frameosVersionChanged && nextVersionContent) {
+    if (storedVersion) {
       await tx.insert(storeSceneVersions).values({
-        content: nextVersionContent,
         contentType: "application/zip",
         frameosVersion: requestedFrameosVersion ?? null,
+        objectKey: storedVersion.objectKey,
         riskFlags: scene.riskFlags,
         sceneId: scene.id,
-        sha256: sha256Hex(nextVersionContent),
-        sizeBytes: nextVersionContent.length,
+        sha256: storedVersion.sha256,
+        sizeBytes: storedVersion.sizeBytes,
         version: scene.latestVersion + 1,
       });
-      await tx
-        .delete(storeSceneVersions)
-        .where(
-          and(
-            eq(storeSceneVersions.sceneId, scene.id),
-            lt(
-              storeSceneVersions.version,
-              scene.latestVersion + 1 - maxVersionsPerScene + 1,
-            ),
-          ),
-        );
     }
     const [row] = await tx
       .update(storeScenes)

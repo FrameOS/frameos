@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { readBlob } from "../../../../../../src/lib/blobs";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
 import {
   cachedAssetFile,
@@ -6,7 +7,10 @@ import {
   recentFailedAssetGet,
   sceneSnapshotAssetPath,
 } from "../../../../../../src/lib/frame-asset-cache";
-import { frameForAccount } from "../../../../../../src/lib/frames";
+import {
+  frameForAccount,
+  markFramePreviewWatched,
+} from "../../../../../../src/lib/frames";
 import {
   resolveStoreSceneForFrameScene,
   storeSceneCoverImage,
@@ -94,6 +98,12 @@ export async function GET(
     return jsonError("invalid_frame", 404);
   }
 
+  // Someone has this frame's scenes on screen. The device's next "render"
+  // announcement is then worth an asset_get; without this stamp the hub
+  // ignores it, and previews only refresh when a tile happens to ask
+  // (lib/frames.ts, previewWatchWindowMs).
+  await markFramePreviewWatched(db, frame.id);
+
   const thumb = request.nextUrl.searchParams.get("thumb") === "1";
   const snapshotPath = sceneSnapshotAssetPath(sceneId);
 
@@ -119,9 +129,10 @@ export async function GET(
       thumb,
     );
   }
-  if (cached) {
+  const cachedContent = await readBlob(cached);
+  if (cachedContent) {
     // Stale-while-revalidate: the refresh (if any) was queued above.
-    return imageResponse(cached.content, cached.contentType, snapshotBrowserMaxAge);
+    return imageResponse(cachedContent, cached!.contentType, snapshotBrowserMaxAge);
   }
 
   const cover = await storeSceneCover(db, frame.id, sceneId);
@@ -139,8 +150,9 @@ export async function GET(
   while (Date.now() < deadline) {
     await sleep(longPollStepMs);
     const row = await cachedAssetFile(db, frame.id, snapshotPath, thumb);
-    if (row) {
-      return imageResponse(row.content, row.contentType, snapshotBrowserMaxAge);
+    const rowContent = await readBlob(row);
+    if (rowContent) {
+      return imageResponse(rowContent, row!.contentType, snapshotBrowserMaxAge);
     }
     refused = await recentFailedAssetGet(
       db,

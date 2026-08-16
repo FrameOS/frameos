@@ -1474,6 +1474,11 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   var lastMetricsSentAt = 0.0
   var lastStateCheckAt = 0.0
   var lastActiveScene = ""
+  # Starts at the current value, so a reconnect does not announce a render that
+  # happened while the link was down: the provider's own staleness check covers
+  # that, and a fleet reconnecting after a hub restart must not all ask to be
+  # scraped at once.
+  var lastSceneImageGeneration = sceneImageGenerationValue()
   var logsGranted = "telemetry:logs" in link.scopes
   var metricsGranted = "telemetry:metrics" in link.scopes
   let metricsInterval = max(frameConfig.metricsInterval, 5.0)
@@ -1662,6 +1667,16 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
           var stateMessage = helloStatePayload(frameConfig, ctx.scenesChecksum)
           stateMessage["type"] = %"state"
           await socket.send($stateMessage)
+        # "There is a fresh preview of this scene on disk." Not the preview
+        # itself: the provider decides whether anyone is looking before it
+        # spends the frame's uplink on an asset_get, and a frame nobody has
+        # open costs one small JSON message per snapshot write (at most one a
+        # minute, SCENE_IMAGE_MAX_AGE_SECONDS). docs/cloud-frames.md.
+        let sceneImageGeneration = sceneImageGenerationValue()
+        if sceneImageGeneration != lastSceneImageGeneration:
+          lastSceneImageGeneration = sceneImageGeneration
+          await socket.send($(%*{"type": "render",
+                                 "active_scene": sceneId.string}))
   except CloudHubAuthError:
     # Handshake-level rejection: let the thread count it toward demotion.
     raise

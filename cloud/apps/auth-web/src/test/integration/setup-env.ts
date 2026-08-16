@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveTestDatabaseUrl } from "./test-database-url";
 
 // Force every environment value the route handlers read so the suite is
@@ -18,3 +21,15 @@ process.env.SESSION_SECRET = "frameos-cloud-integration-test-session-secret";
 delete process.env.FRAMEOS_CLOUD_DISCORD_REPORTS_WEBHOOK_URL;
 delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
 delete process.env.NEXT_PUBLIC_POSTHOG_HOST;
+
+// Blobs live in object storage now (src/lib/object-store.ts). Point the
+// filesystem driver at a scratch directory per run so the suite never writes
+// into a developer's db/object-storage, and so a stale object from an earlier
+// run cannot make a test pass.
+process.env.FRAMEOS_OBJECT_STORE_DIR = mkdtempSync(
+  join(tmpdir(), "frameos-cloud-test-objects-"),
+);
+delete process.env.R2_CLOUD_ENDPOINT;
+delete process.env.R2_CLOUD_ACCESS_KEY_ID;
+delete process.env.R2_CLOUD_SECRET_ACCESS_KEY;
+delete process.env.R2_CLOUD_PUBLIC_BASE_URL;

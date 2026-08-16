@@ -2,6 +2,10 @@ import { and, asc, eq, ne } from "drizzle-orm";
 import { storeSceneImages } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  deleteBlobIfUnreferenced,
+  readBlob,
+} from "../../../../../../../src/lib/blobs";
 import { jsonError } from "../../../../../../../src/lib/device-flow";
 import { maxSceneZipBytes } from "../../../../../../../src/lib/store";
 import { syncLatestSceneZipPreview } from "../../../../../../../src/lib/store-image-sync";
@@ -30,7 +34,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
 
   const [target] = await db
-    .select({ id: storeSceneImages.id })
+    .select({ id: storeSceneImages.id, objectKey: storeSceneImages.objectKey })
     .from(storeSceneImages)
     .where(
       and(
@@ -44,7 +48,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
 
   let version: number | undefined;
-  if (!scene.previewImage) {
+  if (!scene.previewImage && !scene.previewObjectKey) {
     const [lead] = await db
       .select({ id: storeSceneImages.id })
       .from(storeSceneImages)
@@ -56,7 +60,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       .limit(1);
     if (lead?.id === imageId) {
       const [nextLead] = await db
-        .select({ content: storeSceneImages.content })
+        .select({
+          content: storeSceneImages.content,
+          objectKey: storeSceneImages.objectKey,
+        })
         .from(storeSceneImages)
         .where(
           and(
@@ -69,10 +76,11 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
           asc(storeSceneImages.createdAt),
         )
         .limit(1);
+      const nextLeadContent = await readBlob(nextLead);
       const synced = await syncLatestSceneZipPreview(
         db,
         scene,
-        nextLead ? Buffer.from(nextLead.content) : undefined,
+        nextLeadContent ? Buffer.from(nextLeadContent) : undefined,
       );
       if (!synced.ok) {
         return syncError(synced.error);
@@ -93,6 +101,17 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (!deleted) {
     return jsonError("image_not_found", 404);
   }
+
+  // Object keys are the content digest, so two gallery rows holding identical
+  // bytes share one object; only drop it once nothing points at it any more.
+  await deleteBlobIfUnreferenced(target.objectKey, async () => {
+    const [remaining] = await db
+      .select({ id: storeSceneImages.id })
+      .from(storeSceneImages)
+      .where(eq(storeSceneImages.objectKey, target.objectKey!))
+      .limit(1);
+    return Boolean(remaining);
+  });
 
   await recordAuditEvent(db, {
     accountId: session.accountId,

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
+import { publicBlobUrl, readBlob } from "../../../../../../src/lib/blobs";
 import {
   canAccessPrivateScene,
   shareTokenGrantsAccess,
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       latestVersion: storeScenes.latestVersion,
       previewImage: storeScenes.previewImage,
       previewImageType: storeScenes.previewImageType,
+      previewObjectKey: storeScenes.previewObjectKey,
       shareToken: storeScenes.shareToken,
       status: storeScenes.status,
       visibility: storeScenes.visibility,
@@ -47,7 +49,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     .where(eq(storeScenes.id, sceneId))
     .limit(1);
 
-  if (!scene || !scene.previewImage) {
+  if (!scene || (!scene.previewImage && !scene.previewObjectKey)) {
     return jsonError("scene_not_found", 404);
   }
   if (scene.status === "pulled") {
@@ -92,10 +94,30 @@ export async function GET(request: NextRequest, context: RouteContext) {
     });
   }
 
-  return new NextResponse(Buffer.from(scene.previewImage), {
+  // A public scene's preview is public by construction, so hand the browser
+  // the CDN URL and let the edge serve the bytes. Private scenes (and any
+  // deployment without a public alias — every dev machine) are proxied here,
+  // where the authorization above still applies.
+  const cdnUrl = isPublic ? publicBlobUrl(scene.previewObjectKey) : undefined;
+  if (cdnUrl) {
+    return NextResponse.redirect(cdnUrl, {
+      headers: { "cache-control": cacheControl, etag },
+      status: 307,
+    });
+  }
+
+  const preview = await readBlob({
+    content: scene.previewImage,
+    objectKey: scene.previewObjectKey,
+  });
+  if (!preview) {
+    return jsonError("scene_not_found", 404);
+  }
+
+  return new NextResponse(new Uint8Array(preview), {
     headers: {
       "cache-control": cacheControl,
-      "content-length": String(scene.previewImage.length),
+      "content-length": String(preview.length),
       "content-type": scene.previewImageType ?? "image/jpeg",
       etag,
       "x-content-type-options": "nosniff",

@@ -4,6 +4,7 @@ import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { getSuperadminContext } from "../../../../../src/lib/admin";
+import { readBlob } from "../../../../../src/lib/blobs";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
   jsonError,
@@ -92,7 +93,10 @@ export async function POST(request: NextRequest) {
     let appKeywords: string[] = [];
     if (scene.latestVersion > 0) {
       const [latest] = await db
-        .select({ content: storeSceneVersions.content })
+        .select({
+          content: storeSceneVersions.content,
+          objectKey: storeSceneVersions.objectKey,
+        })
         .from(storeSceneVersions)
         .where(
           and(
@@ -101,8 +105,9 @@ export async function POST(request: NextRequest) {
           ),
         )
         .limit(1);
-      if (latest) {
-        appKeywords = appKeywordsFromZip(Buffer.from(latest.content));
+      const latestContent = await readBlob(latest);
+      if (latestContent) {
+        appKeywords = appKeywordsFromZip(Buffer.from(latestContent));
       }
     }
 

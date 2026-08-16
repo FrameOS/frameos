@@ -580,6 +580,67 @@ keeps working. Set `POSTMARK_SERVER_TOKEN` and `POSTMARK_FROM_EMAIL` so
 password reset emails are delivered; without them reset links are only written
 to the server log.
 
+## Object Storage
+
+Blobs — store scene zips, scene previews and gallery images, and the per-frame
+device-snapshot cache — live in Cloudflare R2 (bucket `frameos-cloud`, public
+alias `cloud-cdn.frameos.net`), not in Postgres. Set in **both**
+`/etc/frameos-cloud/auth-web.env` and `/etc/frameos-cloud/frame-hub.env`:
+
+```text
+R2_CLOUD_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+R2_CLOUD_ACCESS_KEY_ID=…
+R2_CLOUD_SECRET_ACCESS_KEY=…
+R2_CLOUD_BUCKET=frameos-cloud                       # optional, this is the default
+R2_CLOUD_PUBLIC_BASE_URL=https://cloud-cdn.frameos.net
+```
+
+Both services, because the hub writes device snapshots through the same code
+path auth-web reads them with. A hub missing these keys is the failure worth
+naming: it keeps writing bytes into Postgres while auth-web looks for them in
+R2, and the symptom is preview tiles that go blank only for frames that
+re-rendered since the deploy.
+
+With any of endpoint/key/secret unset the code falls back to a directory
+(`db/object-storage`, override with `FRAMEOS_OBJECT_STORE_DIR`). That is the
+development and CI default and needs no bucket, no credentials and no extra
+process — but on the production host it silently means "blobs on the app
+server's local disk", so check `/healthz`-adjacent logs after a credential
+change.
+
+Keys are content-addressed and namespaced, so the same preview PNG republished
+a thousand times is one object:
+
+```text
+store/scene-versions/<sha256>.zip
+store/scene-previews/<sha256>
+store/scene-images/<sha256>
+frames/<frame-id>/cache/<sha256>
+```
+
+`R2_CLOUD_PUBLIC_BASE_URL` only affects **public** store objects: a public
+scene's preview and gallery images redirect (307) to the CDN. Private scenes
+and every frame snapshot are proxied through the app, where the session check
+still applies — the alias has no authentication in front of it.
+
+### Migrating existing rows
+
+Migration `0032_object_storage.sql` adds the columns and changes nothing else:
+rows written before it keep their bytes in Postgres and keep serving, because
+`readBlob()` reads whichever of the two a row is using. Move them when
+convenient:
+
+```sh
+# on the app host, with the auth-web env sourced
+node cloud/apps/auth-web/scripts/backfill-object-store.mjs            # dry run
+node cloud/apps/auth-web/scripts/backfill-object-store.mjs --apply
+```
+
+It is resumable (each row is its own transaction, the object is written before
+the row is updated, and re-uploading identical bytes to a digest key is free)
+and its summary prints which driver it used — check that it says `s3` before
+believing it moved anything off the database.
+
 ## Signup Notifications
 
 When a brand new account is created (password signup or first Google

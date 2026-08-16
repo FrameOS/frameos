@@ -32,6 +32,21 @@ def test_release_image_frame_uses_hotspot_without_wifi_credentials():
     assert frame_json["device"] == "framebuffer"
 
 
+def test_release_image_ships_frameos_remote_disabled():
+    # docs/buildroot-privileges.md §2: a generic card has no backend to talk
+    # to, so an enabled agent is a root process reconnecting to ws://:8989
+    # forever. The backend that adopts the card turns it on (and mints the
+    # secret) on its first deploy. The empty secret stays empty — that is the
+    # fail-closed state, not a hole.
+    module = load_buildroot_images_module()
+    frame = module.ReleaseImageFrame()
+    frame_json = module.get_frame_json(None, frame)
+
+    assert frame_json["agent"]["agentEnabled"] is False
+    assert frame_json["agent"]["agentSharedSecret"] == ""
+    assert frame_json["serverHost"] == ""
+
+
 def test_base_bootstrap_overlay_enables_frameos_service(tmp_path):
     module = load_buildroot_images_module()
 

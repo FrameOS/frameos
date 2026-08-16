@@ -382,8 +382,42 @@ lines), nothing retained across disconnects, and error acks are ignored.
 | `scene_ack` | `{"checksum", "active_scene"}` | after a successful `set_scenes`, drives provider-side sync state. When the acked checksum matches the provider's current assigned set, the provider also promotes its per-scene deploy ledger (`assigned_scene_state` → `deployed_scene_state` on the frame row) so the workspace can name WHICH scene is still pending on later edits |
 | `assets` | `{"id", "assets": […], "truncated"?}` | reply to `assets_list`; the provider caches the latest listing per frame (the reference provider rejects listings over **256 KiB** of JSON rather than truncating them) |
 | `asset_chunk` | `{"id", "seq", "data", "done", …}` | reply stream to `asset_get`; the provider reassembles in order, bounds the total at its per-file cap, and discards the partial file on a chunk carrying `"error"` or on disconnect |
+| `render` | `{"active_scene": "…"}` | "I have written a fresh snapshot of this scene." Announcement only, never bytes — see Previews below. A provider that does not want it can ignore it entirely |
 
 A provider must tolerate unknown frame→provider types (forward compatibility).
+
+### Previews
+
+**The cloud never renders a frame's scenes, and never asks a device to take a
+screenshot on demand.** Both were considered and refused: server-side
+rendering means the provider holds every scene's data sources and API keys,
+and an on-demand screenshot verb is a camera into someone's home that a stolen
+account could point wherever it liked. The two things that *are* allowed are
+narrower:
+
+- **Before deploy**, a scene is previewed by running it in the browser, in
+  the WebAssembly build of the FrameOS runtime. The data stays with whoever
+  opened the page; the server renders nothing.
+- **After deploy**, the provider may keep a copy of the snapshot the device
+  already writes for itself. The runner saves a PNG per scene under
+  `{assets}/.frameos/scene_images/` on every scene switch and whenever the
+  one on disk is over a minute old, because the on-device admin uses it too.
+  Nothing new is rendered for the cloud's benefit.
+
+The `render` message is what makes the second one timely without making it
+expensive. The device announces the write; the provider decides whether to
+spend the frame's uplink on fetching it, and the reference provider fetches
+only while somebody has that frame open in a browser (`preview_watched_at`,
+stamped by the preview routes and by an attached browser socket, with a
+three-minute window). A frame nobody is looking at costs one small JSON
+message per snapshot write and nothing else — no polling, no scraping, and no
+standing stream of images out of a home.
+
+The fetch itself is the ordinary `asset_get` verb, so a provider that ignores
+`render` entirely still gets previews the moment a tile asks for one; it just
+gets them a render late. Devices must not send `render` more than once per
+snapshot write, and providers should cap the resulting fetches per frame
+regardless (the reference hub allows four a minute).
 
 A provider acks `log_batch` and `metrics` with `ok: false` and `rate_limited`
 when the frame exceeds its ingestion budget, or `payload_too_large` when a

@@ -2,6 +2,7 @@ import pixie, json, linuxfb, posix, posix/termios, strformat
 import std/exitprocs
 import frameos/device_setup
 import frameos/driver_context
+import frameos/driver_render_hint
 import frameos/utils/process
 
 const DEVICE = "/dev/fb0"
@@ -13,6 +14,12 @@ const KD_TEXT = 0x00
 # vcgencmd talks to the VideoCore mailbox and can hang in uninterruptible
 # sleep when the GPU firmware is wedged; never wait for it without a bound.
 const DISPLAY_COMMAND_TIMEOUT_MS = 10 * 1000
+# How soon to ask for another render while /dev/fb0 has no mode yet, and the
+# ceiling that backoff climbs to. Two seconds is fast enough that a Pi 5 whose
+# KMS fbdev registers after frameos started draws almost immediately; a minute
+# is slow enough that a board with nothing plugged in costs one ioctl a minute.
+const PROBE_RETRY_START_SECONDS = 2.0
+const PROBE_RETRY_MAX_SECONDS = 60.0
 
 var consoleClaimAttempted = false
 var consoleModeClaimed = false
@@ -50,6 +57,9 @@ type Driver* = ref object of FrameOSDriver
   unavailableLogged*: bool
   probeFailureLogged*: bool
   lastProbeError*: string
+  # Seconds to ask the host to wait before the next probe. Doubles on every
+  # failed pass up to PROBE_RETRY_MAX_SECONDS, resets once the panel answers.
+  probeRetrySeconds*: float
   renderBuffer: seq[uint8]
 
 proc logFrameBuffer(logger: DriverLogger, payload: JsonNode) =
@@ -257,6 +267,7 @@ proc init*(frameOS: DriverContext): Driver =
     logger: logger,
     available: available,
     lastProbeError: probeError,
+    probeRetrySeconds: PROBE_RETRY_START_SECONDS,
   )
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
@@ -294,6 +305,7 @@ proc render*(self: Driver, image: Image) =
       self.screenInfo = getScreenInfo(self.logger)
       self.available = true
       self.probeFailureLogged = false
+      self.probeRetrySeconds = PROBE_RETRY_START_SECONDS
     except DivByZeroDefect as e:
       self.lastProbeError = e.msg
     except Exception as e:
@@ -301,10 +313,20 @@ proc render*(self: Driver, image: Image) =
 
   # Nothing to draw on until a probe lands: the screenInfo we hold is
   # configuredScreenInfo's fabrication, and writing an invented stride into a
-  # device that has never described itself is a shot in the dark. Say so once
-  # and keep retrying — a frame on a long interval retries once per interval,
-  # which is the honest cost of only ever being asked to draw at render time.
+  # device that has never described itself is a shot in the dark. Say so once,
+  # and ask the host to come back before the scene's own interval would — a
+  # frame on an hour-long interval would otherwise sit blank for an hour after
+  # a boot that was seconds from working (frameos/driver_render_hint). The
+  # backoff keeps a permanently headless board down to one cheap ioctl a
+  # minute instead of one every few seconds, forever.
   if not self.available:
+    # Guard rather than trust the field: the HyperPixel drivers subclass this
+    # Driver and build it themselves, so an unset (0.0) backoff would ask to
+    # be called back immediately, forever.
+    if self.probeRetrySeconds <= 0:
+      self.probeRetrySeconds = PROBE_RETRY_START_SECONDS
+    requestEarlierRender(self.probeRetrySeconds)
+    self.probeRetrySeconds = min(self.probeRetrySeconds * 2, PROBE_RETRY_MAX_SECONDS)
     if not self.probeFailureLogged:
       self.probeFailureLogged = true
       logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",

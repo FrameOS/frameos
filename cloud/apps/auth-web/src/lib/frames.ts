@@ -21,6 +21,12 @@ import {
 } from "@frameos-cloud/db";
 import { unzipSync } from "fflate";
 import { linkedClientScopes } from "./backend-auth";
+import {
+  deleteBlobIfUnreferenced,
+  frameCacheNamespace,
+  readBlob,
+  storeBlob,
+} from "./blobs";
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
@@ -979,6 +985,7 @@ export async function buildScenesPayloadForFrame(
     const versionRows = await db
       .select({
         content: storeSceneVersions.content,
+        objectKey: storeSceneVersions.objectKey,
         riskFlags: storeSceneVersions.riskFlags,
         version: storeSceneVersions.version,
       })
@@ -1005,7 +1012,11 @@ export async function buildScenesPayloadForFrame(
     if (versionRow.riskFlags?.includes("shell")) {
       return { error: "scene_not_allowed" };
     }
-    const extracted = extractScenesJson(versionRow.content);
+    const versionContent = await readBlob(versionRow);
+    if (!versionContent) {
+      return { error: "scene_version_missing" };
+    }
+    const extracted = extractScenesJson(versionContent);
     if (!extracted) {
       return { error: "invalid_scene_payload" };
     }
@@ -1118,6 +1129,72 @@ export const frameImageAssetPath = ".frame/image";
 export const maxAssetFilesPerFrame = 64;
 export const maxAssetCacheBytesPerFrame = 24 * 1024 * 1024;
 
+// --- Preview viewer presence ------------------------------------------------
+//
+// The fleet-preview doctrine (docs/cloud-frames.md, "Previews"): the cloud
+// never renders a frame's scenes and never runs a screenshot service. What it
+// may do is keep a copy of the snapshot the DEVICE already writes for itself —
+// and only while a person is actually looking, because the alternative is
+// scraping every frame in every account forever for images nobody opened.
+//
+// "Looking" is one timestamp per frame, stamped by the surfaces that render a
+// frame's images and by an attached browser socket. Everything else reads it.
+
+// How long after the last stamp a frame still counts as watched. Long enough
+// to cover a tab left open between renders, short enough that a closed laptop
+// stops costing the device anything within minutes.
+export const previewWatchWindowMs = 3 * 60 * 1000;
+// The stamp is a write on a hot read path (every tile, every poll), so it is
+// only refreshed this often. Losing one costs a preview that refreshes on the
+// next page load instead of instantly.
+const previewWatchThrottleMs = 30 * 1000;
+
+const lastPreviewWatchWrite = new Map<string, number>();
+
+/**
+ * Record that someone is looking at this frame's images. Cheap by design:
+ * in-process throttle first, then one UPDATE.
+ */
+export async function markFramePreviewWatched(
+  db: FramesDatabase,
+  frameId: string,
+): Promise<void> {
+  const now = Date.now();
+  const previous = lastPreviewWatchWrite.get(frameId) ?? 0;
+  if (now - previous < previewWatchThrottleMs) {
+    return;
+  }
+  lastPreviewWatchWrite.set(frameId, now);
+  // Bounded: a fleet larger than this just loses throttling, not correctness.
+  if (lastPreviewWatchWrite.size > 10_000) {
+    lastPreviewWatchWrite.clear();
+  }
+  try {
+    await db
+      .update(frames)
+      .set({ previewWatchedAt: new Date(now) })
+      .where(eq(frames.id, frameId));
+  } catch (error) {
+    // Presence is an optimisation; a failed stamp must never fail the request
+    // that was actually asked for.
+    logWarn("frames.preview_watch_failed", { error: String(error), frameId });
+  }
+}
+
+export function framePreviewIsWatched(
+  frame: { previewWatchedAt: Date | null },
+  now = Date.now(),
+): boolean {
+  return (
+    frame.previewWatchedAt !== null &&
+    now - frame.previewWatchedAt.getTime() <= previewWatchWindowMs
+  );
+}
+
+export function resetFramePreviewWatchThrottleForTests() {
+  lastPreviewWatchWrite.clear();
+}
+
 export interface FrameAssetEntry {
   path: string;
   size: number;
@@ -1198,23 +1275,50 @@ export async function storeFrameAssetFile(
     return false;
   }
   const now = new Date();
+  // The bytes go to object storage before the row does, and outside the
+  // transaction: a snapshot upload is a network call, and holding a Postgres
+  // connection open across it is how a busy fleet exhausts the pool. An
+  // object with no row is inert — the key is its digest, so the next write of
+  // the same bytes finds it and uploads nothing.
+  const stored = await storeBlob(
+    frameCacheNamespace(frameId),
+    file.content,
+    file.contentType,
+  );
+  const evicted: string[] = [];
+  const replaced: string[] = [];
   await db.transaction(async (tx) => {
+    const [previous] = await tx
+      .select({ objectKey: frameAssetFiles.objectKey })
+      .from(frameAssetFiles)
+      .where(
+        and(
+          eq(frameAssetFiles.frameId, frameId),
+          eq(frameAssetFiles.path, file.path),
+          eq(frameAssetFiles.thumb, file.thumb),
+        ),
+      )
+      .limit(1);
+    if (previous?.objectKey && previous.objectKey !== stored.objectKey) {
+      replaced.push(previous.objectKey);
+    }
     await tx
       .insert(frameAssetFiles)
       .values({
-        content: file.content,
         contentType: file.contentType,
         frameId,
+        objectKey: stored.objectKey,
         path: file.path,
-        sizeBytes: file.content.length,
+        sizeBytes: stored.sizeBytes,
         thumb: file.thumb,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         set: {
-          content: file.content,
+          content: null,
           contentType: file.contentType,
-          sizeBytes: file.content.length,
+          objectKey: stored.objectKey,
+          sizeBytes: stored.sizeBytes,
           updatedAt: now,
         },
         target: [frameAssetFiles.frameId, frameAssetFiles.path, frameAssetFiles.thumb],
@@ -1225,6 +1329,7 @@ export async function storeFrameAssetFile(
     const rows = await tx
       .select({
         id: frameAssetFiles.id,
+        objectKey: frameAssetFiles.objectKey,
         sizeBytes: frameAssetFiles.sizeBytes,
       })
       .from(frameAssetFiles)
@@ -1236,12 +1341,28 @@ export async function storeFrameAssetFile(
       total += row.sizeBytes;
       if (index >= maxAssetFilesPerFrame || total > maxAssetCacheBytesPerFrame) {
         evict.push(row.id);
+        if (row.objectKey) {
+          evicted.push(row.objectKey);
+        }
       }
     });
     if (evict.length > 0) {
       await tx.delete(frameAssetFiles).where(inArray(frameAssetFiles.id, evict));
     }
   });
+  // After the commit, and only for keys nothing points at any more: two rows
+  // of one frame can hold identical bytes (a thumb of an unchanged scene, the
+  // same cover copied onto several scenes), and they share the object.
+  for (const objectKey of [...evicted, ...replaced]) {
+    await deleteBlobIfUnreferenced(objectKey, async () => {
+      const [remaining] = await db
+        .select({ id: frameAssetFiles.id })
+        .from(frameAssetFiles)
+        .where(eq(frameAssetFiles.objectKey, objectKey))
+        .limit(1);
+      return Boolean(remaining);
+    });
+  }
   return true;
 }
 

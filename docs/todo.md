@@ -97,20 +97,16 @@ Audited 2026-08-16; findings and the full reasoning in
 `docs/buildroot-privileges.md`. The short version: a stolen cloud account
 already cannot get a shell, cannot reach the LAN from the frame (default-deny
 lifted only by a code read off the panel) and cannot install unsigned software.
-What is left is that everything on the device runs as root, and that FrameOS
-Remote — the root agent with `shell`, a PTY and arbitrary file write — is
-enabled by default on images that have no backend to talk to.
+What is left is that everything on the device runs as root. FrameOS Remote —
+the root agent with `shell`, a PTY and arbitrary file write — no longer ships
+enabled on images that have no backend to talk to.
 
-- **Stop shipping FrameOS Remote enabled on generic release images.** The
-  published `frame.json` has `agentEnabled: true` with an *empty*
-  `agentSharedSecret` and an empty `serverHost`, so on a cloud frame the unit
-  runs forever as root reconnecting to nothing. Ship `agentEnabled: false`; a
-  backend's first deploy turns it on, which is the moment it becomes useful.
-  Verify on hardware that backend adoption of a generic card still works.
-  *Small.* (The companion item, minting a secret at first boot, was withdrawn
-  on 2026-08-16: the agent refuses to handshake at all with an empty secret, so
-  minting one would create a dial-out rather than close a hole. Reasoning in
-  the audit, observation 2.)
+- **Verify on hardware that a generic card still adopts.** Release images now
+  ship `agentEnabled: false` (the audit's §2 recommendation), so a Buildroot
+  frame flashed from a generic image and *then* adopted by a backend needs the
+  one `systemctl enable` that the backend's first deploy already does through
+  `frameos setup`. The cost looks like zero, and that is worth seeing on a real
+  card before believing it.
 - **Run `frameos.service` as a `frameos` user.** The plan, the privileged call
   sites and the suggested sequencing are in `docs/buildroot-privileges.md` §3.
   Privileged work moves behind one narrow enum-only door (`apply-setup`,
@@ -128,26 +124,11 @@ There are two ways to build a frame: `static` (everything in one binary) and
 interpreted). The `shared` and `shared-scenes` modes were removed on
 2026-08-16, and with them the largest unaudited ABI surface.
 
-- **Let a driver ask for an earlier retry.** Render hints travel host→driver
-  only (`driver_render_hint.nim` tells the driver how long until the next
-  pass); nothing travels back. So a driver that cannot draw yet — the
-  framebuffer waiting for a KMS modeset is the live example — is re-probed
-  only when the next render comes round, which on an hour-long interval means
-  an hour of blank panel after a boot that was seconds from working. The
-  driver knows it wants to be called back sooner and has no way to say so.
-  Wants a return channel through the `.so` ABI, so it is not a one-liner.
-
-- **Audit driver code for refs it did not allocate.** The rule and its
-  reasoning now live at the top of `frameos/src/frameos/driver_abi.nim`: every
-  shared library carries its own ORC runtime, so a ref allocated by one and
-  incref'd/decref'd by the other crashes the host inside `unregisterCycle` as
-  soon as ORC considers the type cyclic. The boundary itself is fixed — log and
-  event payloads cross as `cstring` JSON, the driver context is bound
-  `{.cursor.}` and its types are `{.acyclic.}` — but the *drivers* have not been
-  read with this in mind. What to look for: a driver storing the `Image` it is
-  handed in a field or a global, or keeping any part of the `DriverContext`
-  past the call that gave it. `frameBuffer`, `inky`, `waveshare` and the
-  HyperPixel path are where a violation would hurt.
+Nothing scheduled. The return channel a driver uses to ask for an earlier
+retry landed on 2026-08-17 (`frameos_driver_earlier_render_seconds`, optional
+so an older `.so` stays loadable), and every driver was read for refs it did
+not allocate — none found, and `backend/app/drivers/tests/test_driver_abi_rules.py`
+keeps it that way.
 
 ---
 
@@ -173,12 +154,28 @@ Nothing scheduled.
 
 ## Store
 
-The scene store lives in Postgres today: blobs, versions and all.
+Scene metadata lives in Postgres; the bytes live in object storage (R2 behind
+`cloud-cdn.frameos.net`, a directory under `db/object-storage` in development),
+content-addressed and namespaced.
 
-- **Move blobs to object storage + CDN when size demands it**, and drop the
-  20-version prune. Deferred on purpose — the ~100 MB/account cap makes
-  Postgres fine, and the stored sha256 + `size_bytes` make the move mechanical
-  (`cloud/STORE-TODO.md`).
+- **Back-fill the blobs still in Postgres.** Scene zips, previews, gallery
+  images and the frame snapshot cache moved to object storage (R2 in
+  production, `db/object-storage` in development) on 2026-08-17, and the
+  20-version prune went with them. Rows written before migration 0032 keep
+  their bytes in the database and keep serving; `pnpm --filter
+  @frameos-cloud/auth-web objects:backfill -- --apply` walks them across when
+  convenient. Nothing breaks until it runs — it is a chore, not a cutover.
+- **Sweep objects nothing points at.** Deletes drop an object once no row
+  references its key, but rows removed outside those paths (a cascade when a
+  frame or account is deleted) leave the object behind. A periodic sweep of
+  keys with no referencing row belongs next to `db-cleanup.sh`; until then the
+  waste is bounded by how often accounts are deleted.
+- **Back the object store up, and rehearse it.** The Postgres backups no
+  longer carry the blob bytes, so a database restore now comes back with rows
+  whose content is missing. Blobs are immutable and content-addressed, so
+  there is no point-in-time problem — only durability: a copy outside
+  Cloudflare, and a bucket policy that survives a leaked key deleting objects.
+  Neither exists yet (`cloud/docs/backups.md`).
 
 ---
 
@@ -199,9 +196,14 @@ The scene store lives in Postgres today: blobs, versions and all.
 
 Open items from `docs/cloud-security-review.md`.
 
-- **The frame stores its link token in plaintext** (`state/cloud_link.json`,
-  0600). Fix when there is hardware-backed key storage, or by redaction if the
-  state file ever travels — support bundles, backups.
+- **Redact the link token if the state file ever travels.** The token sits in
+  plaintext in `state/cloud_link.json` (0600), and that is now an accepted
+  property rather than an open item: a Pi has no secure element, so any key
+  FrameOS could derive to encrypt it would be on the same SD card. The threat
+  model says it plainly — possession of the card is possession of the link, and
+  revoking the frame is the answer. Reasoning in `docs/cloud-security-review.md`.
+  What stays open is narrower and real: nothing exports that file today, and
+  the first support-bundle or backup path that does must redact it.
 
 ---
 
@@ -209,7 +211,10 @@ Open items from `docs/cloud-security-review.md`.
 
 Matrix in `docs/api-triality.md`.
 
-- ESP32: fonts list/file routes, full web admin shell parity.
+- ESP32: full web admin shell parity. The fonts routes landed on 2026-08-17
+  (`/api/fonts` lists the built-in face plus the SD card's, `/api/fonts/:font`
+  streams one, and "Sync fonts" uploads a project's fonts onto the card), so
+  what is left is the admin shell itself.
 - Frame import/adoption: standalone export/source payloads, and a backend
   adoption flow for standalone frames.
 
@@ -229,8 +234,6 @@ Matrix in `docs/api-triality.md`.
 - Asset-backup key recovery UX. The answer has to remain "we cannot read your
   photos".
 - One backend link per installation, or per organization/project?
-- Fleet-previews doctrine: is browser-side wasm rendering the permanent answer,
-  or is an opt-in end-to-end-encrypted screenshot path ever acceptable?
 - Thin-client frames on the cloud (ESP32-C3, embedded Pi/Pico): serving them
   means the cloud renders every frame for them — free cloud rendering forever,
   for everyone. Decide before building; until then C3 boards stay out of the

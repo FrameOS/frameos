@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
+import { readBlob } from "../../../../../../src/lib/blobs";
 import {
   canAccessPrivateScene,
   shareTokenGrantsAccess,
@@ -102,11 +103,16 @@ export async function GET(request: NextRequest, context: RouteContext) {
       () => undefined,
     );
 
-  return new NextResponse(Buffer.from(version.content), {
+  const content = await readBlob(version);
+  if (!content) {
+    return jsonError("version_not_found", 404);
+  }
+
+  return new NextResponse(new Uint8Array(content), {
     headers: {
       "cache-control": "no-store",
       "content-disposition": `attachment; filename="${scene.slug}-v${version.version}.zip"`,
-      "content-length": String(version.content.length),
+      "content-length": String(content.length),
       "content-type": version.contentType,
       "x-scene-sha256": version.sha256,
       "x-scene-version": String(version.version),

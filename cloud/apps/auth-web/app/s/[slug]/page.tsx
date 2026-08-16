@@ -62,7 +62,7 @@ export async function generateMetadata({
   const [scene] = await db
     .select({
       description: storeScenes.description,
-      hasPreview: sql<boolean>`${storeScenes.previewImage} is not null`,
+      hasPreview: sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`,
       id: storeScenes.id,
       name: storeScenes.name,
       previewImageHeight: storeScenes.previewImageHeight,
@@ -155,7 +155,7 @@ export default async function ScenePage({
       downloadCount: storeScenes.downloadCount,
       featuredAt: storeScenes.featuredAt,
       frameosVersion: storeScenes.frameosVersion,
-      hasPreview: sql<boolean>`${storeScenes.previewImage} is not null`,
+      hasPreview: sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,

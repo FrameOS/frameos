@@ -83,6 +83,12 @@ elif defined(frameosEmbedded) or defined(frameosWasm):
 
   proc triggerServerRender*() =
     discard
+
+  proc noteSceneImageSaved*() {.gcsafe.} =
+    discard
+
+  proc sceneImageGenerationValue*(): int {.gcsafe.} =
+    0
 else:
   import json
   import options
@@ -166,3 +172,17 @@ else:
 
   proc triggerServerRender*() =
     discard serverChannel.trySend(true)
+
+  # Bumped every time the runner writes a per-scene snapshot PNG. The cloud
+  # hub client polls it (an int read, not a channel, because several readers
+  # must be able to observe the same render and a channel has one consumer)
+  # and tells the provider "there is a new preview to fetch" — but only while
+  # someone has the frame open, so an unwatched frame costs one atomic
+  # increment and nothing else. See docs/cloud-frames.md, "Previews".
+  var sceneImageGeneration: Atomic[int]
+
+  proc noteSceneImageSaved*() {.gcsafe.} =
+    atomicInc(sceneImageGeneration)
+
+  proc sceneImageGenerationValue*(): int {.gcsafe.} =
+    sceneImageGeneration.load(moRelaxed)
