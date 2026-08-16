@@ -3,6 +3,7 @@ import zippy
 import frameos/hal/files
 import frameos/local_access
 import frameos/types
+import frameos/utils/font
 import frameos/utils/image
 import lib/tz
 
@@ -308,6 +309,10 @@ proc loadConfig*(configPath = ""): FrameConfig =
   if result.assetsPath.endswith("/"):
     result.assetsPath = result.assetsPath.strip(leading = false, trailing = true, chars = {'/'})
   setConfigDefaults(result)
+  # SVG <text> resolves font-family names against the same fonts directory the
+  # text apps use. pixie asks through a global hook, so it has to be told where
+  # the assets live once, here, rather than per render.
+  setSvgFontAssetsPath(result.assetsPath)
   # The private-network elevation lives in state/, not here — a backend deploy
   # rewrites frame.json wholesale and would drop it. Fold the stored value in
   # on every load, including the reload after a deploy, so the in-memory config

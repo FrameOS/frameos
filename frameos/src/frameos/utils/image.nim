@@ -10,7 +10,6 @@ import sequtils
 import strutils
 import strformat
 import uri
-import std/xmlparser
 import std/xmltree
 import std/strtabs
 
@@ -154,7 +153,10 @@ proc renderSvgBanded(svg: string, width, height, bandHeight: int): Image =
   ## the root shifted up by the band's offset, so shapes are clipped by the
   ## band's scanline range rather than being cut geometrically: coverage for
   ## an output row is computed from the full shape either way.
-  let root = parseXml(svg)
+  # parseSvgXml, not parseXml: the whitespace a `<text>` element needs survives
+  # only when the parser is asked for it, and a band render must land the same
+  # pixels as a whole one.
+  let root = parseSvgXml(svg)
   let attrs = root.attrs
   if attrs.isNil:
     # No attributes means no viewBox; parseSvg would reject it anyway.

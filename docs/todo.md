@@ -207,22 +207,6 @@ CM5).
 
 ## Ideas parking lot (unscheduled)
 
-- **SVG `<text>` support in render/svg** (~1–2 days, ~150–250 lines).
-  Today any `<text>` tag makes the whole SVG fail, and the AI scene prompt
-  tells models to layer render/text instead. Pixie has the parts: the
-  fork's SVG parser (`pixie/src/pixie/fileformats/svg.nim`) turns tags into
-  `(Path, SvgProperties)` pairs and `fonts.nim` does text→path (`typeset`,
-  `getGlyphPath`, private `computePaths`). A `"text"` case in
-  `parseSvgElement` typesets the inner text and appends glyph paths
-  translated by `(x, y − ascent·scale)`; fill, stroke, gradients,
-  transforms and banded rendering then work for free. Design question: font
-  resolution — `parseSvg` needs a `resolveTypeface(family)` hook, FrameOS
-  plugs in `getTypeface()` from `frameos/utils/font.nim`; unknown families
-  degrade to the default, never fail. v1 cuts: no `<tspan>`, no
-  `textLength`/`letter-spacing`, minimal `dominant-baseline`, no complex
-  shaping, no emoji (color glyphs are bitmaps). Preferred home: the pixie
-  fork. Follow-ons: update BOTH cloud AI prompt copies
-  (`cloud/apps/auth-web/src/lib/ai/prompts.ts` + the ai-scene prompt).
 - **quickts: parse TypeScript straight into QuickJS** — strip TS syntax at
   parse time so apps ship `.ts` source and the separate transpiler pass, and
   the transpiled copy every runtime keeps, disappear.
