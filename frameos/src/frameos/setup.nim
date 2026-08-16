@@ -215,7 +215,7 @@ proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -
     "MemoryHigh=" & memoryLimits.high & "\n" &
     "MemoryMax=" & memoryLimits.max & "\n" &
     "MemorySwapMax=64M\n" &
-    "ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf \"serviceResult=%s\\nexitCode=%s\\nexitStatus=%s\\n\" \"$SERVICE_RESULT\" \"$EXIT_CODE\" \"$EXIT_STATUS\" > /srv/frameos/runtime/frameos-last-exit'\n"
+    "ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf \"serviceResult=%%s\\nexitCode=%%s\\nexitStatus=%%s\\n\" \"$SERVICE_RESULT\" \"$EXIT_CODE\" \"$EXIT_STATUS\" > /srv/frameos/runtime/frameos-last-exit'\n"
   if framebufferConsole:
     result &= "TTYPath=/dev/tty1\n" &
       "StandardInput=tty-force\n" &

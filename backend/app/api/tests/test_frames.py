@@ -112,6 +112,9 @@ async def test_api_frame_bootstrap_command_enables_remote_and_returns_script(asy
     assert 'TTYReset=yes' in script
     assert 'ExecStopPost=-+/bin/sh -lc' in script
     assert '/srv/frameos/runtime/frameos-last-exit' in script
+    # A bare %s in a unit file is systemd's "user shell" specifier, not printf's.
+    assert 'printf "serviceResult=%%s\\nexitCode=%%s\\nexitStatus=%%s\\n"' in script
+    assert "serviceResult=%s" not in script
     assert (
         "ExecStopPost=-+/bin/systemd-run --quiet --collect --on-active=10 "
         "/bin/sh -lc '/bin/systemctl show -p ActiveState --value frameos.service 2>/dev/null | "

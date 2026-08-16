@@ -123,6 +123,10 @@ block test_frameos_service_contents_uses_detected_user:
   doAssert service.contains("RestartSec=5")
   doAssert service.contains("ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime")
   doAssert service.contains("/srv/frameos/runtime/frameos-last-exit")
+  # systemd expands a bare %s in ExecStopPost= to the user's shell, which
+  # made every reboot reason read "/bin/sh"; the printf specifiers must be %%s.
+  doAssert service.contains("printf \"serviceResult=%%s\\nexitCode=%%s\\nexitStatus=%%s\\n\"")
+  doAssert not service.contains("serviceResult=%s")
   doAssert not service.contains("StandardOutput=journal+console")
   doAssert not service.contains("StandardError=journal+console")
 
