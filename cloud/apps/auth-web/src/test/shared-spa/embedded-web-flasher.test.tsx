@@ -38,6 +38,7 @@ const esptool = vi.hoisted(() => {
   const state = {
     deviceTable: null as Uint8Array | null,
     readFlashError: null as Error | null,
+    loadError: null as Error | null,
     writeFlashCalls: [] as unknown[],
   };
   class FakeESPLoader {
@@ -81,7 +82,10 @@ const esptool = vi.hoisted(() => {
 
 vi.mock(
   "../../../../../../frontend/src/scenes/workspace/esptoolLoader",
-  () => ({ loadEsptool: () => Promise.resolve(esptool.module) }),
+  () => ({
+    loadEsptool: () =>
+      esptool.state.loadError ? Promise.reject(esptool.state.loadError) : Promise.resolve(esptool.module),
+  }),
 );
 
 // The backend API, as the flasher sees it through apiFetch. Mocked at the
@@ -185,6 +189,7 @@ beforeEach(() => {
   apiFetchMock.mockReset();
   esptool.state.deviceTable = null;
   esptool.state.readFlashError = null;
+  esptool.state.loadError = null;
   esptool.state.writeFlashCalls = [];
   stubSerial();
   // Fresh kea context per test; framesModel is mounted explicitly because the
@@ -279,6 +284,28 @@ describe("EmbeddedWebFlasher keep-settings flashing", () => {
     // mismatch — the guarantee then rests on the image alone.
     expect(options.fileArray).toHaveLength(2);
     expect(options.fileArray.map((segment) => segment.address)).toEqual([0, 0xd000]);
+  });
+
+  // esptool-js is imported on demand, at click time — so a tab left open
+  // across a FrameOS upgrade asks for a chunk hash the new build no longer
+  // serves. The browser's own wording ("Failed to fetch dynamically imported
+  // module") names neither the cause nor the fix.
+  it("says to reload the page when the on-demand esptool chunk is gone", async () => {
+    const frame = backendEsp32Frame();
+    mockBackendApi(frame);
+    esptool.state.loadError = new TypeError(
+      "Failed to fetch dynamically imported module: /static/lib-V3PFKNTH.js",
+    );
+    render(<EmbeddedWebFlasher frame={frame} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /flash from browser/i }));
+
+    await waitFor(() => expect(screen.getByText(/reload the page and flash again/i)).toBeTruthy(), {
+      timeout: 5000,
+    });
+    expect(screen.getByText(/frameos has been updated/i)).toBeTruthy();
+    // The board is never touched: the failure happens before any write.
+    expect(esptool.state.writeFlashCalls).toHaveLength(0);
   });
 });
 

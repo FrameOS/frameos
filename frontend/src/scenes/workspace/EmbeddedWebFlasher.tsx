@@ -57,6 +57,28 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+export const STALE_BUNDLE_FLASH_ERROR =
+  'Could not load the flasher: FrameOS has been updated since this page was opened. Reload the page and flash again.'
+
+/**
+ * esptool-js is fetched the first time someone flashes, which is often long
+ * after the page loaded — and if FrameOS was upgraded in between, that hashed
+ * chunk no longer exists on the server. The browser reports it as "Failed to
+ * fetch dynamically imported module", which names neither the cause nor the
+ * fix, so say both. Nothing else in this flow imports on demand, so a failure
+ * here can only be the chunk.
+ */
+export async function loadEsptoolForFlash(): Promise<Awaited<ReturnType<typeof loadEsptool>>> {
+  try {
+    return await loadEsptool()
+  } catch (error) {
+    // Keep the browser's own wording out of the UI but not out of reach: if
+    // this ever fires for some other reason, the console still says what.
+    console.error('Failed to load esptool-js:', error)
+    throw new Error(STALE_BUNDLE_FLASH_ERROR)
+  }
+}
+
 // (watchdogResetAfterFlash — the post-flash RTC watchdog reset — lives in
 // esp32WatchdogReset.ts, shared with the cloud enrollment flasher, and is
 // re-exported above for its existing importers.)
@@ -636,7 +658,7 @@ export function EmbeddedWebFlasher({
       appendBrowserFlashLog(frame.id, 'USB port selected')
 
       // Loaded on demand: esptool-js adds ~380KB we only need when actually flashing
-      const { ESPLoader, Transport } = await loadEsptool()
+      const { ESPLoader, Transport } = await loadEsptoolForFlash()
       transport = new Transport(port, false)
       traceRecorder = recordTransportTrace(frame.id, transport)
       flashTerminal = createUsbLogTerminal(frame.id)

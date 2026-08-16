@@ -60,6 +60,25 @@ else:
     app.include_router(api_user, prefix="/api", dependencies=[Depends(get_current_user)])
     app.include_router(api_project, prefix="/api/projects/{project_id}", dependencies=[Depends(get_current_project)])
 
+# Everything the frontend build emits under a hashed filename. A request for
+# one of these that misses must fail as a 404 rather than fall through to the
+# SPA shell below: a browser running a bundle older than the server's (a tab
+# left open across an upgrade) asks for chunk hashes this build no longer has,
+# and answering those with `200 text/html` turns a plain "that file is gone"
+# into "Failed to fetch dynamically imported module" at whatever import
+# happened to need it first.
+STATIC_ASSET_PREFIXES = ("/static/", "/assets/", "/img/", "/frameos-wasm/")
+
+
+def is_static_asset_path(path: str) -> bool:
+    return any(path.startswith(prefix) for prefix in STATIC_ASSET_PREFIXES)
+
+
+# The SPA shell names the hashed entrypoint it loads, so a cached copy pins the
+# browser to a bundle the server may already have replaced. It is small and
+# always served by us — never let it go stale.
+INDEX_HTML_HEADERS = {"Cache-Control": "no-store, must-revalidate"}
+
 # Serve HTML and static files in all cases except for public HASSIO_RUN_MODE
 serve_html = config.HASSIO_RUN_MODE != "public"
 if serve_html:
@@ -110,24 +129,32 @@ if serve_html:
         def index_html(request: Request | None = None) -> str:
             return index_html_template
 
+    def index_response(request: Request | None = None) -> HTMLResponse:
+        return HTMLResponse(index_html(request), headers=INDEX_HTML_HEADERS)
+
     @app.get("/")
     async def read_index(request: Request):
-        return HTMLResponse(index_html(request))
+        return index_response(request)
 
     @app.exception_handler(StarletteHTTPException)
     async def custom_404_handler(request: Request, exc: StarletteHTTPException):
-        if os.environ.get("TEST") == "1" or exc.status_code != 404 or request.url.path.startswith("/api"):
+        if (
+            os.environ.get("TEST") == "1"
+            or exc.status_code != 404
+            or request.url.path.startswith("/api")
+            or is_static_asset_path(request.url.path)
+        ):
             return JSONResponse(
                 status_code=exc.status_code,
                 content={"detail": exc.detail or f"Error {exc.status_code}"}
             )
-        return HTMLResponse(index_html(request))
+        return index_response(request)
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         if os.environ.get("TEST") == "1" or request.url.path.startswith("/api"):
             return await request_validation_exception_handler(request, exc)
-        return HTMLResponse(index_html(request))
+        return index_response(request)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):

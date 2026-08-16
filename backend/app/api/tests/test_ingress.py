@@ -55,6 +55,24 @@ def test_normalize_ingress_path():
     assert normalize_ingress_path("https://homeassistant.local:8123/api/hassio_ingress/abc/") == "/api/hassio_ingress/abc"
 
 
+def test_is_static_asset_path():
+    from app.fastapi import is_static_asset_path
+
+    # A hashed chunk the running bundle wants but this build no longer has:
+    # must 404 instead of falling through to the SPA shell.
+    assert is_static_asset_path("/static/lib-V3PFKNTH.js")
+    assert is_static_asset_path("/assets/inter-latin.woff2")
+    assert is_static_asset_path("/img/logo.png")
+    assert is_static_asset_path("/frameos-wasm/frameos.wasm")
+
+    # Client-side routes still have to render index.html.
+    assert not is_static_asset_path("/")
+    assert not is_static_asset_path("/frames/1")
+    assert not is_static_asset_path("/settings")
+    # Prefix match, not substring: only the mounted directories count.
+    assert not is_static_asset_path("/statically-wrong")
+
+
 @pytest.mark.asyncio
 async def test_no_hassio_env(clear_env):
     """
@@ -79,9 +97,11 @@ async def test_no_hassio_env(clear_env):
     resp_auth_needed = client.get("/api/projects")
     assert resp_auth_needed.status_code == 401
 
-    # Root => 200
+    # Root => 200, and never cached: it names the hashed entrypoint, so a
+    # stale copy pins the browser to a bundle this server may have replaced.
     resp_root = client.get("/")
     assert resp_root.status_code == 200
+    assert resp_root.headers["cache-control"] == "no-store, must-revalidate"
 
 
 @pytest.mark.asyncio
