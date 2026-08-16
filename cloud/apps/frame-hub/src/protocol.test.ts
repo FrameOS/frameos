@@ -369,6 +369,8 @@ describe("browser event shaping", () => {
       // frame's scenes want); no field or value ever does.
       serviceSettingGroups: ["unsplash"],
       settings: { interval: 300, rotate: 90 },
+      // Provisioning intent, cleared once applied — it never reaches the wire.
+      sceneSourceFrameId: null,
       status: "active",
       updatedAt: now,
     } satisfies FrameRow;
@@ -420,6 +422,7 @@ describe("browser event shaping", () => {
       deployedSceneState: null,
       serviceSettingGroups: null,
       settings: null,
+      sceneSourceFrameId: null,
       status: "active",
       updatedAt: now,
     } satisfies FrameRow;

@@ -215,7 +215,7 @@ proc frameosServiceContents*(user: string, consoleOutput = false, memTotalKb = -
     "MemoryHigh=" & memoryLimits.high & "\n" &
     "MemoryMax=" & memoryLimits.max & "\n" &
     "MemorySwapMax=64M\n" &
-    "ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf \"serviceResult=%s\\nexitCode=%s\\nexitStatus=%s\\n\" \"$SERVICE_RESULT\" \"$EXIT_CODE\" \"$EXIT_STATUS\" > /srv/frameos/runtime/frameos-last-exit'\n"
+    "ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf \"serviceResult=%%s\\nexitCode=%%s\\nexitStatus=%%s\\n\" \"$SERVICE_RESULT\" \"$EXIT_CODE\" \"$EXIT_STATUS\" > /srv/frameos/runtime/frameos-last-exit'\n"
   if framebufferConsole:
     result &= "TTYPath=/dev/tty1\n" &
       "StandardInput=tty-force\n" &
@@ -292,21 +292,25 @@ proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
     setupLog("FrameOS setup: systemd services: systemctl not found, skipping")
     return setupOk()
 
-  setupLog("FrameOS setup: systemd services: ensuring service directories")
-  ensureSystemdServiceDirectories()
+  # Every step below writes to /etc/systemd/system, unit files and `systemctl
+  # enable`'s wants/ symlinks alike, so the whole block runs inside one
+  # writable scope instead of remounting per file (see withWritableMount).
+  withWritableMount("/etc/systemd/system"):
+    setupLog("FrameOS setup: systemd services: ensuring service directories")
+    ensureSystemdServiceDirectories()
 
-  setupLog("FrameOS setup: systemd services: installing frameos.service")
-  installFrameOSServiceFile(frameOS)
+    setupLog("FrameOS setup: systemd services: installing frameos.service")
+    installFrameOSServiceFile(frameOS)
 
-  if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
-    setupLog("FrameOS setup: systemd services: installing frameos-remote.service")
-    installServiceFile("/srv/frameos/remote/current/frameos-remote.service", "/etc/systemd/system/frameos-remote.service")
-  else:
-    discard runSetupCommand(privilegedCommand("systemctl disable frameos-remote.service"), raiseOnError = false)
+    if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
+      setupLog("FrameOS setup: systemd services: installing frameos-remote.service")
+      installServiceFile("/srv/frameos/remote/current/frameos-remote.service", "/etc/systemd/system/frameos-remote.service")
+    else:
+      discard runSetupCommand(privilegedCommand("systemctl disable frameos-remote.service"), raiseOnError = false)
 
-  discard runSetupCommand(privilegedCommand("systemctl daemon-reload"))
-  discard runSetupCommand(privilegedCommand("systemctl enable " & systemdServiceNames(frameOS).join(" ")))
-  discard runSetupCommand(scheduleLegacyRemoteCleanupCommand(), raiseOnError = false)
+    discard runSetupCommand(privilegedCommand("systemctl daemon-reload"))
+    discard runSetupCommand(privilegedCommand("systemctl enable " & systemdServiceNames(frameOS).join(" ")))
+    discard runSetupCommand(scheduleLegacyRemoteCleanupCommand(), raiseOnError = false)
 
   result = setupOk()
 
@@ -366,9 +370,10 @@ proc setupSystemHardening*(liveApply = true): SetupResult =
     const watchdogConf = "[Manager]\nRuntimeWatchdogSec=15s\nRebootWatchdogSec=2min\n"
     if privilegedFileNeedsUpdate(watchdogConfPath, watchdogConf):
       setupLog("FrameOS setup: system hardening: enabling hardware watchdog")
-      discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/systemd/system.conf.d"),
-        raiseOnError = false)
-      writePrivilegedFile(watchdogConfPath, watchdogConf)
+      withWritableMount(watchdogConfPath):
+        discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/systemd/system.conf.d"),
+          raiseOnError = false)
+        writePrivilegedFile(watchdogConfPath, watchdogConf)
       if liveApply:
         # Apply without a reboot; PID 1 re-executes in place.
         discard runSetupCommand(privilegedCommand("systemctl daemon-reexec"), raiseOnError = false)
@@ -396,9 +401,10 @@ proc setupSystemHardening*(liveApply = true): SetupResult =
       const powersaveConf = "[connection]\n# 2 = disable wifi power saving\nwifi.powersave = 2\n"
       if privilegedFileNeedsUpdate(powersaveConfPath, powersaveConf):
         setupLog("FrameOS setup: system hardening: disabling wifi power save")
-        discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/NetworkManager/conf.d"),
-          raiseOnError = false)
-        writePrivilegedFile(powersaveConfPath, powersaveConf)
+        withWritableMount(powersaveConfPath):
+          discard runSetupCommand(privilegedCommand("install -d -m 755 /etc/NetworkManager/conf.d"),
+            raiseOnError = false)
+          writePrivilegedFile(powersaveConfPath, powersaveConf)
         if liveApply:
           # reload (unlike restart) re-reads config without dropping connections
           discard runSetupCommand(privilegedCommand("systemctl reload NetworkManager"), raiseOnError = false)
@@ -484,8 +490,9 @@ proc setupTimezone*(timeZone: string): SetupResult =
       return setupOk()
 
   setupLog("FrameOS setup: timezone: setting " & normalized)
-  writePrivilegedFile("/etc/timezone", normalized & "\n")
-  discard runSetupCommand(privilegedCommand("ln -sfn " & shellQuote(zoneinfoPath) & " /etc/localtime"))
+  withWritableMount("/etc/localtime"):
+    writePrivilegedFile("/etc/timezone", normalized & "\n")
+    discard runSetupCommand(privilegedCommand("ln -sfn " & shellQuote(zoneinfoPath) & " /etc/localtime"))
   result = setupOk()
 
 proc startFrameOSSystemdServices*(configPath = "") =
@@ -585,9 +592,7 @@ proc scheduleSetupRebootIfRequired*(setupResult: SetupResult, reason = "FrameOS 
   if not setupResult.rebootRequired:
     return false
   setupLog(reason & ": reboot required; scheduling reboot")
-  let command =
-    "(sleep " & $delaySeconds & "; systemctl reboot || reboot) >/dev/null 2>&1 &"
-  discard runSetupCommand(privilegedCommand("sh -c " & shellQuote(command)))
+  scheduleSystemReboot(delaySeconds)
   true
 
 proc writeSetupReleasePayload*(

@@ -157,6 +157,37 @@ the browser flasher mints one for the frame on screen, provisions it over
 serial, and reports success against that same row — no new-frame watch, no
 confirmation step.
 
+### A3. Provisioning-time scene intent
+
+"Start it with the scenes from *that* frame", chosen while building the SD
+image or flashing the board. A frame that boots into an empty workspace is
+the thing this removes — most people adding a second Pi want what the first
+one is already showing.
+
+```http
+POST {provider}/api/frames/claim-tokens
+{"multi_use": true, "scene_source_frame_id": "…a frame this account owns…"}
+```
+
+Ownership is checked at MINT time, by the same lookup that guards
+re-enrollment (`404 invalid_scene_source_frame` otherwise) — enrollment
+itself is unauthenticated, so it must never be the step that decides whose
+scenes travel.
+
+The intent then makes two hops, and needs a column for each. It rides the
+token, because the browser that built the image is long gone by the time the
+card is flashed; and it is copied onto every frame that token enrolls,
+because a multi-use card enrolls many and the token's own `frame_id` records
+only the last one.
+
+Nothing reaches the device until the owner CONFIRMS the frame. At that point
+the copy runs through exactly the gates a workspace deploy runs through
+(accessibility, pinned version, shell-risk refusal) and enqueues the ordinary
+`set_scenes` push, so the scenes land on the board's first connection. The
+intent is then cleared — it fires once and never fights the owner's own later
+edits. A source frame deleted in the meantime simply means there is nothing
+left to copy.
+
 ### B. Link code on the device (RFC 8628)
 
 The device-authorization flow from `docs/cloud-link.md`, initiated from the
@@ -368,6 +399,44 @@ before its ack stays queued and is redelivered on the next session, so a
 device may see the same `id` twice: every verb is idempotent, and a device
 should ack a repeat exactly as it acked the original. Action verbs carry a TTL
 and are expired rather than redelivered once it passes.
+
+### Queue observability
+
+A queued command is an intention, not an event: a battery frame that sleeps
+for hours takes the reboot, the render and the scene push on its next wake,
+and until then "sent" and "applied" look identical from the account side. Two
+endpoints make the difference visible.
+
+`GET /api/frames/{id}/commands` returns what is still waiting, oldest first —
+the same order the hub drains in:
+
+```json
+{"commands": [
+  {"id": "…", "type": "reboot", "status": "pending",
+   "created_at": "…", "expires_at": "…", "sent_at": null}
+]}
+```
+
+`status` is `pending` (never written to a socket) or `sent` (written, not
+acked — the hub redelivers those, so they are still waiting). Rows past their
+TTL are filtered out rather than swept: reading the queue must not mutate it.
+Payloads are deliberately NOT echoed — a `set_scenes` payload is a whole scene
+bundle, and the only payload field worth reporting is `set_current_scene`'s
+`scene_id`, a public store id the owner already sees.
+
+`DELETE /api/frames/{id}/commands/{command_id}` cancels one while it is still
+undelivered, moving it to the same terminal state a superseded command gets
+(`expired`, with `cancelled` in `error`) rather than deleting the row. It
+answers 404 when there is nothing to cancel — already delivered, already
+expired, already cancelled — because a pretend success would have the UI claim
+it stopped something the device had already run. Nothing can recall a command
+the device already has; that is exactly why action verbs carry short TTLs.
+
+The self-hosted backend implements the same two routes over the one action it
+records instead of pushing immediately (a queued ESP32 OTA request); its
+deploys, restarts and renders are immediate SSH/HTTP pushes with nothing
+durable to observe. Same wire shape either way, so the workspace's "Waiting
+for the frame" panel is one component (docs/api-triality.md).
 
 ## Service settings
 
@@ -699,7 +768,7 @@ These are the endpoints the management UI uses; they are provider-internal
 but documented so the shared frontend's cloud adapter is reimplementable:
 
 ```http
-POST {provider}/api/frames/claim-tokens        # mint a claim token ("Add frame"); {"frame_id": …} binds it to an existing frame (re-enrollment)
+POST {provider}/api/frames/claim-tokens        # mint a claim token ("Add frame"); {"frame_id": …} binds it to an existing frame (re-enrollment); {"scene_source_frame_id": …} starts every frame it enrolls with that frame's scenes
 GET  {provider}/api/frames                     # list the account's frames
 GET  {provider}/api/frames/{id}                # one frame, state + sync status
 GET  {provider}/api/frames/{id}/metrics        # retained metrics + `reboots` markers (telemetry:metrics)
@@ -712,6 +781,8 @@ POST {provider}/api/frames/{id}/scenes         # assign scene versions → enque
 POST {provider}/api/frames/{id}/settings       # declarative settings → persists them, enqueues set_settings
 POST {provider}/api/frames/{id}/schedule       # {"schedule": {…}, "utcOffsetMinutes"?: N} → persists the schedule, enqueues set_schedule (disabled events stripped from the push)
 POST {provider}/api/frames/{id}/command        # {"type": "render" | "reboot" | "restart_runtime" | "set_current_scene", …}
+GET  {provider}/api/frames/{id}/commands       # what is still QUEUED for this frame (see "Queue observability")
+DELETE {provider}/api/frames/{id}/commands/{command_id}  # cancel one, while it is still undelivered
 GET  {provider}/api/frames/{id}/service-settings          # DEVICE-authed, not session: see "Service settings"
 POST {provider}/api/frames/{id}/service-settings/enabled  # {"enabled": bool} → grants/revokes settings:services, nudges on enable
 WS   {provider}/api/frames/{id}/updates        # browser socket: update_frame / new_log / new_metrics events

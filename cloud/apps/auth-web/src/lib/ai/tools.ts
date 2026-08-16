@@ -44,6 +44,7 @@ import {
   frameSummary,
   supersedePendingCommands,
 } from "../frames";
+import { createAccountScene } from "../account-scene-create";
 import { extractScenesFromZip } from "../scene-title";
 
 export type ScenesEvent = {
@@ -64,6 +65,11 @@ export type ToolContext = {
   // Set when a create_scenes/update_scene call validated and was delivered;
   // the loop reports it as the overall "tool" of the turn.
   deliveredTool?: "build_scene" | "modify_scene";
+  // The scenes of the most recent successful delivery, so save_scene can save
+  // "what you just made" without the model re-sending the whole JSON.
+  deliveredScenes?: unknown[];
+  // Audit actor for anything save_scene writes. Undefined only in tests.
+  providerSubject?: string | undefined;
 };
 
 const MAX_TOOL_OUTPUT_CHARS = 60_000;
@@ -411,6 +417,38 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
   },
   {
     description:
+      "Save a scene to the user's account as a NEW private store scene, so it survives closing the editor " +
+      "and can be installed on a frame or forked later. With no arguments it saves whatever you just " +
+      "delivered with create_scenes/update_scene; pass `scenes` to save something else (for example a store " +
+      "scene from get_store_scene — that is how you fork one for them). It always creates a copy and never " +
+      "overwrites an existing saved scene, so say which name it landed under. Call it when the user asks to " +
+      "save, keep or fork — not on every build.",
+    name: "save_scene",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        description: {
+          description: "Optional one-line description for the store listing.",
+          type: "string",
+        },
+        name: {
+          description:
+            "Name to save under. Defaults to the scene's own name; a clash gets ' 2' appended.",
+          type: "string",
+        },
+        scenes: {
+          description:
+            "Complete scene JSON to save. Omit to save the scene you just delivered.",
+          items: { type: "object" },
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    type: "function",
+  },
+  {
+    description:
       "Deliver a modified version of the user's CURRENT scene to the editor. Send the complete updated " +
       "scene JSON (not a diff). Keeps the current scene id. Validates first; fix reported issues and retry.",
     name: "update_scene",
@@ -441,6 +479,7 @@ export const toolLabels: Record<string, string> = {
   read_doc: "Reading documentation",
   read_repo_file: "Reading source code",
   request_live_metrics: "Requesting live metrics",
+  save_scene: "Saving scene to your account",
   search_apps: "Searching apps",
   search_docs: "Searching documentation",
   search_examples: "Searching examples",
@@ -523,6 +562,7 @@ function deliverScenes(
   splitStateNodesByApp(payload);
   stampScenePrompt(payload.scenes as unknown[], ctx.prompt);
   ctx.deliveredTool = tool;
+  ctx.deliveredScenes = payload.scenes as unknown[];
   ctx.emitScenes({
     scenes: payload.scenes as unknown[],
     ...(title ? { title } : {}),
@@ -531,8 +571,69 @@ function deliverScenes(
   });
   return JSON.stringify({
     delivered: true,
-    note: "The scene is now in the user's editor as an unsaved change. Remind them to review and save.",
+    note:
+      "The scene is now in the user's editor as an unsaved change. Either remind them to review and save, " +
+      "or call save_scene to save a copy to their account for them.",
     ok: true,
+  });
+}
+
+// Save whatever the chat is holding into the user's account as a NEW private
+// scene. Never an overwrite: a chat that could rewrite a saved scene in place
+// would be one bad turn away from destroying work the user did not ask it to
+// touch, and "save a copy" is also exactly what forking someone else's store
+// scene means. The user renames or deletes from the store page afterwards.
+async function saveSceneToAccount(
+  ctx: ToolContext,
+  args: JsonObject,
+): Promise<string> {
+  const explicit = Array.isArray(args.scenes) ? (args.scenes as unknown[]) : null;
+  const scenes =
+    explicit ??
+    ctx.deliveredScenes ??
+    (ctx.currentScene ? [ctx.currentScene] : null);
+  if (!scenes || scenes.length === 0) {
+    return JSON.stringify({
+      error:
+        "Nothing to save. Build the scene with create_scenes (or ask the user to open one) before calling save_scene.",
+    });
+  }
+  const requestedName =
+    asString(args.name) ??
+    (typeof (scenes[0] as JsonObject)?.name === "string"
+      ? ((scenes[0] as JsonObject).name as string)
+      : undefined) ??
+    "Untitled scene";
+  const description = asString(args.description);
+
+  const response = await createAccountScene(ctx.db, {
+    accountId: ctx.accountId,
+    actor: {
+      accountId: ctx.accountId,
+      providerSubject: ctx.providerSubject ?? "",
+    },
+    ...(description ? { description } : {}),
+    name: requestedName,
+    scenes,
+  });
+  const body = (await response.json().catch(() => ({}))) as {
+    error?: string;
+    scene?: { id?: string; name?: string; slug?: string };
+  };
+  if (!response.ok) {
+    // The refusal codes are the store's own (quota, moderation, size) — hand
+    // them back so the model can explain rather than retry blindly.
+    return JSON.stringify({
+      error: body.error ?? `save_failed_${response.status}`,
+      ok: false,
+    });
+  }
+  return JSON.stringify({
+    note:
+      "Saved as a PRIVATE scene in the user's account. It is a copy — the editor still holds their unsaved " +
+      "version, and nothing was overwritten.",
+    ok: true,
+    scene: body.scene ?? null,
   });
 }
 
@@ -901,6 +1002,9 @@ export async function executeTool(
     }
     case "create_scenes": {
       return deliverScenes(ctx, args.scenes, "build_scene", asString(args.title));
+    }
+    case "save_scene": {
+      return saveSceneToAccount(ctx, args);
     }
     case "update_scene": {
       if (!ctx.currentScene && !ctx.currentSceneId) {

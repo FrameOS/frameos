@@ -12,6 +12,15 @@ interface MeterBucket {
   bytes: number;
   label: string;
   maxBytes: number;
+  // Frames are counted, not measured — same meter, different words on the
+  // right-hand side. Anything else formats as bytes.
+  unit?: "frames";
+}
+
+function meterValue(bucket: MeterBucket): string {
+  return bucket.unit === "frames"
+    ? `${bucket.bytes} / ${bucket.maxBytes}`
+    : `${formatBytes(bucket.bytes)} / ${formatBytes(bucket.maxBytes)}`;
 }
 
 function meterFill(bucket: MeterBucket) {
@@ -36,6 +45,14 @@ export function StorageUsageMeters({ usage }: { usage: AccountUsage }) {
     usage.backups.bytes +
     usage.frame_logs.bytes;
   const meters: MeterBucket[] = [
+    // First, because it is the quota people actually meet: storage is
+    // generous, frames are a countable thing you add one at a time.
+    {
+      bytes: usage.frames.count,
+      label: "Frames",
+      maxBytes: usage.frames.max_count,
+      unit: "frames",
+    },
     {
       bytes: usage.scenes.private_bytes,
       label: "Private scenes",
@@ -52,7 +69,11 @@ export function StorageUsageMeters({ usage }: { usage: AccountUsage }) {
   return (
     <div className="storage-usage">
       <div className="storage-usage__total">
-        <span className="storage-usage__total-label">Storage used</span>
+        {/* Named, because an unnamed limit reads as a bug the first time you
+            meet it. Every number below is deployment-tunable
+            (FRAMEOS_CLOUD_MAX_*), so a paid tier raises them without a code
+            change — see src/lib/usage.ts. */}
+        <span className="storage-usage__total-label">Free plan · storage used</span>
         <span className="storage-usage__total-value">{formatBytes(totalBytes)}</span>
       </div>
       {meters.map((bucket) => {
@@ -61,15 +82,13 @@ export function StorageUsageMeters({ usage }: { usage: AccountUsage }) {
           <div
             className="storage-usage__row"
             key={bucket.label}
-            title={`${bucket.label}: ${formatBytes(bucket.bytes)} of ${formatBytes(bucket.maxBytes)}`}
+            title={`${bucket.label}: ${meterValue(bucket).replace(" / ", " of ")}`}
           >
             <span className="storage-usage__label">{bucket.label}</span>
             <span className="storage-usage__track">
               <span className={fill.className} style={{ width: fill.width }} />
             </span>
-            <span className="storage-usage__value">
-              {formatBytes(bucket.bytes)} / {formatBytes(bucket.maxBytes)}
-            </span>
+            <span className="storage-usage__value">{meterValue(bucket)}</span>
           </div>
         );
       })}

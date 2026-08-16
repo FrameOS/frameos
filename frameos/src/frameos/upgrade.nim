@@ -38,6 +38,12 @@ type
   FrameOSUpgradeOptions* = object
     dryRun*: bool
     yes*: bool
+    noReboot*: bool
+
+  UpgradeFinishAction* = enum
+    restartServices  ## the new release can take over in place
+    rebootDevice     ## setup changed something only a boot re-reads
+    stayPut          ## a reboot is needed but the caller asked us not to
 
   StagedFrameOSRelease* = object
     name*: string
@@ -668,12 +674,20 @@ proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
       # Buildroot service files carry image-specific settings (User=root,
       # FRAMEOS_HOME and LD_LIBRARY_PATH pointing into the release); carry them
       # over instead of generating the Raspberry Pi OS variants.
+      #
+      # The INSTALLED unit is the source of truth, not the release directory's
+      # copy: images built before this was fixed staged the two from different
+      # renderers, and the release copy is missing the NetworkManager
+      # Wants=/After= lines that the installed one has. Preferring the release
+      # copy made the upgrade rewrite /etc/systemd/system/frameos.service on
+      # every single run — a write the read-only Buildroot rootfs refuses, and
+      # a needless downgrade of the unit even where it succeeds.
       copyFirstExistingFile(
-        [oldReleaseDir / "frameos.service", "/etc/systemd/system/frameos.service"],
+        ["/etc/systemd/system/frameos.service", oldReleaseDir / "frameos.service"],
         result.frameosReleaseDir / "frameos.service",
       )
       copyFirstExistingFile(
-        [oldRemoteReleaseDir / "frameos-remote.service", "/etc/systemd/system/frameos-remote.service"],
+        ["/etc/systemd/system/frameos-remote.service", oldRemoteReleaseDir / "frameos-remote.service"],
         result.remoteReleaseDir / "frameos-remote.service",
       )
     if not fileExists(result.frameosReleaseDir / "frameos.service"):
@@ -721,14 +735,34 @@ proc remoteEnabled(): bool =
   let config = currentFrameConfig()
   config{"agent"}{"agentEnabled"}.getBool(false)
 
-proc restartFrameOSServices(rebootRequired: bool) =
-  if rebootRequired:
-    setupLog("FrameOS upgrade: reboot required; services not restarted")
-    return
-  var services = @["frameos.service"]
-  if remoteEnabled():
-    services.add("frameos-remote.service")
-  discard runSetupCommand(privilegedCommand("systemctl --no-block restart " & services.join(" ")), raiseOnError = false)
+proc upgradeFinishAction*(rebootRequired, mayReboot: bool): UpgradeFinishAction =
+  ## How a staged-and-activated release is put into service.
+  ##
+  ## `setup` exits 2 when it changed something only a boot re-reads (kernel
+  ## cmdline, boot config). The new release is already `current` by then, so
+  ## doing nothing leaves the frame running the old binary until somebody
+  ## power-cycles it — which, on a frame hanging on a wall halfway around the
+  ## world, may be never. Nobody is standing there to press reset, so an
+  ## unattended upgrade finishes itself.
+  if not rebootRequired:
+    return restartServices
+  if mayReboot: rebootDevice else: stayPut
+
+proc finishFrameOSUpgrade(action: UpgradeFinishAction) =
+  case action
+  of stayPut:
+    setupLog("FrameOS upgrade: reboot required; --no-reboot given, services not restarted")
+  of rebootDevice:
+    # The delay is generous on purpose: the cloud hub polls upgrade-status.json
+    # every 5s and batches log lines, so this buys the owner the final status
+    # line before the link goes down.
+    setupLog("FrameOS upgrade: reboot required; rebooting")
+    scheduleSystemReboot(10)
+  of restartServices:
+    var services = @["frameos.service"]
+    if remoteEnabled():
+      services.add("frameos-remote.service")
+    discard runSetupCommand(privilegedCommand("systemctl --no-block restart " & services.join(" ")), raiseOnError = false)
 
 proc activateStagedRelease(staged: var StagedFrameOSRelease) =
   let previousFrameosCurrent = realPath(frameosInstallDir() / "current")
@@ -794,9 +828,12 @@ proc performFrameOSUpgrade*(options: FrameOSUpgradeOptions): JsonNode =
     activateStagedRelease(staged)
 
     let rebootRequired = staged.setupStatus == 2
+    let finishAction = upgradeFinishAction(rebootRequired, mayReboot = not options.noReboot)
     result = statusPayload(
       if rebootRequired: "reboot_required" else: "success",
-      if rebootRequired:
+      if finishAction == rebootDevice:
+        "FrameOS upgraded to " & release.version & ". Rebooting to finish."
+      elif rebootRequired:
         "FrameOS upgraded to " & release.version & ". Reboot required before services restart."
       else:
         "FrameOS upgraded to " & release.version & ". Restarting services.",
@@ -808,7 +845,7 @@ proc performFrameOSUpgrade*(options: FrameOSUpgradeOptions): JsonNode =
     result["update_available"] = %false
     writeUpgradeStatus(result)
     setupLog(result["message"].getStr())
-    restartFrameOSServices(rebootRequired)
+    finishFrameOSUpgrade(finishAction)
   except CatchableError as error:
     result = statusPayload("failed", error.msg, release, exitCode = 1)
     result["finished_at"] = %nowIso()
@@ -831,6 +868,8 @@ proc parseFrameOSUpgradeOptions*(args: seq[string]): FrameOSUpgradeOptions =
       result.dryRun = true
     of "--yes", "-y", "--non-interactive":
       result.yes = true
+    of "--no-reboot":
+      result.noReboot = true
     else:
       raise newException(ValueError, "Unknown FrameOS upgrade option: " & arg)
 

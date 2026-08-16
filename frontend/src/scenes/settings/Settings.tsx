@@ -938,13 +938,55 @@ export function Settings() {
                         <TextInput name="apiKey" />
                       </Field>
                       {!showBackendOnlyFields ? (
-                        <Field
-                          name="backendApiKey"
-                          label="API key for AI chat"
-                          secret={!!savedSettings?.openAI?.backendApiKey}
-                        >
-                          <TextInput name="backendApiKey" />
-                        </Field>
+                        <>
+                          <Field
+                            name="backendApiKey"
+                            label="API key for AI chat"
+                            secret={!!savedSettings?.openAI?.backendApiKey}
+                          >
+                            <TextInput name="backendApiKey" />
+                          </Field>
+                          {/* Both were API-only (POST /api/settings accepted
+                              them, nothing rendered them), so the only way to
+                              try a different model was curl. Folded behind the
+                              same disclosure the backend uses: the defaults
+                              are right for almost everyone. */}
+                          <div className="pt-1">
+                            <Button size="small" color="secondary" onClick={toggleOpenAiModelOverrides}>
+                              {openAiModelOverridesExpanded ? 'Hide model settings' : 'Show model settings'}
+                            </Button>
+                          </div>
+                          {openAiModelOverridesExpanded ? (
+                            <div className="space-y-2 border-t border-slate-500/20 pt-3">
+                              <Field
+                                name="chatModel"
+                                label="Chat model"
+                                tooltip="OpenAI model the workspace chat runs on. Leave empty for the default."
+                              >
+                                <TextInput name="chatModel" placeholder="gpt-5.5" />
+                              </Field>
+                              <Field
+                                name="chatReasoningEffort"
+                                label="Reasoning effort"
+                                tooltip="How much the model thinks before answering. Higher is slower and costs more; it mostly pays off on complex scene builds. Ignored by models without reasoning."
+                              >
+                                {({ value, onChange }) => (
+                                  <Select
+                                    value={typeof value === 'string' ? value : ''}
+                                    onChange={onChange}
+                                    options={[
+                                      { value: '', label: 'Default (low)' },
+                                      { value: 'minimal', label: 'Minimal' },
+                                      { value: 'low', label: 'Low' },
+                                      { value: 'medium', label: 'Medium' },
+                                      { value: 'high', label: 'High' },
+                                    ]}
+                                  />
+                                )}
+                              </Field>
+                            </div>
+                          ) : null}
+                        </>
                       ) : null}
                       {showBackendOnlyFields ? (
                         <>

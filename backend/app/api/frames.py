@@ -131,7 +131,9 @@ from app.utils.versions import current_frameos_version
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.embedded_firmware import (
+    cancel_embedded_firmware_ota,
     ensure_embedded_frame_defaults,
+    pending_frame_commands,
     embedded_flash_size_for_frame,
     embedded_ota_supported_for_frame,
     embedded_toolchain_available,
@@ -3347,6 +3349,39 @@ async def api_frame_embedded_firmware_ota(
         "firmware": firmware,
         "device": device_payload,
     }
+
+
+@api_project.get("/frames/{id:int}/commands")
+async def api_frame_pending_commands(id: int, db: Session = Depends(get_db)):
+    """What is still waiting for this frame to act on it.
+
+    Cloud parity endpoint (docs/api-triality.md): the cloud answers this from
+    its durable `frame_commands` queue, the backend from the one action it
+    records instead of pushing immediately — a queued ESP32 OTA request. Same
+    wire shape either way, so the workspace's pending-actions panel is one
+    component.
+    """
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    return {"commands": pending_frame_commands(frame)}
+
+
+@api_project.delete("/frames/{id:int}/commands/{command_id}")
+async def api_frame_cancel_pending_command(
+    id: int,
+    command_id: str,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    if not await cancel_embedded_firmware_ota(db, redis, frame, command_id):
+        # Already delivered, already cancelled, or never queued — all "there
+        # is nothing here to stop", and none of them a success.
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No pending action with that id")
+    return {"status": "cancelled"}
 
 
 @api_project.get("/frames/{id:int}/deploy_plan")

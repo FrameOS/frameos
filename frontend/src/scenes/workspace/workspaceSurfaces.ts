@@ -155,9 +155,9 @@ export const allowedFrameMenuActions: Record<WorkspaceMode, readonly FrameMenuAc
 export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string[]> = {
   backend: [
     'frame-settings-info',
-    // Only the esp32 cloud profile renders Power today; the per-frame gate
-    // (esp32OnlyFrameSettingsSections) refuses it everywhere else. Listed
-    // here so the allow-list hygiene invariant (cloud ⊆ backend) holds.
+    // ESP32 frames only; the per-frame gate (esp32OnlyFrameSettingsSections)
+    // refuses it for every other device. Backend-managed ESP32s render the
+    // same fields as the cloud profile, stored in `device_config`.
     'frame-settings-power',
     'frame-settings-device',
     'frame-settings-ssh',
@@ -581,8 +581,16 @@ export function frameSupportsUsbSerialConsole(
  */
 const esp32CloudFrameSettingsSections: readonly string[] = ['frame-settings-power']
 
-/** Sections only the esp32 cloud profile renders — for everyone else the
- * anchor does not exist, so the nav entry must not either. */
+/**
+ * Sections only ESP32 frames render — for everyone else the anchor does not
+ * exist, so the nav entry must not either.
+ *
+ * "ESP32" here means the cloud esp32 profile OR a backend/on-device frame in
+ * embedded mode: both render Power, they just store it differently (top-level
+ * pushed settings on the cloud, `device_config` on the backend — see
+ * PowerSettingsFields). Virtual frames are embedded mode too and have no
+ * battery, so they are excluded.
+ */
 const esp32OnlyFrameSettingsSections: readonly string[] = ['frame-settings-power']
 
 /**
@@ -614,7 +622,9 @@ export function frameSettingsSectionIsAllowed(
     if (!esp32CloudFrameSettingsSections.includes(sectionId)) {
       return false
     }
-  } else if (esp32OnlyFrameSettingsSections.includes(sectionId)) {
+  } else if (esp32OnlyFrameSettingsSections.includes(sectionId) && !isEsp32Platform(frame?.embedded?.platform)) {
+    // A backend-managed ESP32 renders Power too — it just stores the values
+    // in device_config instead of pushing them as settings.
     return false
   }
   if (

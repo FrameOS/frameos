@@ -188,6 +188,7 @@ function FrameTree(): JSX.Element {
             selectedFrameId={selectedFrameId}
             onSelect={handleFrameClick}
             onOpen={handleFrameDoubleClick}
+            action={<SidebarAddFrameButton />}
           />
           <FrameTreeGroup
             title="Inactive"
@@ -312,6 +313,42 @@ function FrameTreeLoadingPlaceholder(): JSX.Element {
   )
 }
 
+/**
+ * A small "add frame" affordance for the frame tree's group header, rendered
+ * between the group title and its count. It is the same action as the
+ * shell's primary "Add frame" button — the sidebar is where the frame list
+ * lives, so the shortcut belongs there too.
+ *
+ * Hidden in the on-device admin bundle: that panel manages the one frame it
+ * runs on and cannot create another (workspaceSurfaces' addFrameFlows keeps
+ * the backend form there only because FramesHome is shared code).
+ */
+function SidebarAddFrameButton(): JSX.Element | null {
+  const { showForm } = useActions(newFrameForm)
+  const { closeSceneControl, closeTemplateDrawer } = useActions(workspaceLogic)
+
+  if (workspaceMode() === 'frameAdmin') {
+    return null
+  }
+
+  return (
+    <button
+      type="button"
+      title="Add frame"
+      aria-label="Add frame"
+      data-testid="sidebar-add-frame"
+      onClick={() => {
+        closeSceneControl()
+        closeTemplateDrawer()
+        showForm()
+      }}
+      className="frameos-icon-button flex h-5 w-5 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <PlusIcon className="h-3.5 w-3.5" />
+    </button>
+  )
+}
+
 function FrameTreeGroup({
   title,
   frames,
@@ -321,6 +358,7 @@ function FrameTreeGroup({
   expanded,
   onToggle,
   inactive,
+  action,
 }: {
   title: string
   frames: FrameType[]
@@ -330,6 +368,10 @@ function FrameTreeGroup({
   expanded?: boolean
   onToggle?: () => void
   inactive?: boolean
+  // Rendered between the title and the count. Only honoured on the
+  // non-collapsible header — the collapsible one IS a button, and a button
+  // inside a button is invalid HTML the browser silently unnests.
+  action?: JSX.Element | null
 }): JSX.Element | null {
   if (frames.length === 0) {
     return null
@@ -355,6 +397,7 @@ function FrameTreeGroup({
       ) : (
         <div className="mb-2 flex w-full items-center gap-2 px-2 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
           <span className="flex-1">{title}</span>
+          {action}
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
             {frames.length}
           </span>

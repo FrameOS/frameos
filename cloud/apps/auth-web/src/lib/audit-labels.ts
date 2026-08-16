@@ -19,6 +19,7 @@ const eventLabels: Record<string, string> = {
   "device_authorization.approved": "Device link approved",
   "device_authorization.denied": "Device link denied",
   "frame.claim_token_created": "Frame claim code created",
+  "frame.command_cancelled": "Queued frame command cancelled",
   "frame.command_sent": "Command sent to a frame",
   "frame.confirmed": "Frame enrollment confirmed",
   "frame.enrolled": "Frame enrolled",

@@ -72,6 +72,121 @@ proc privilegedCommand*(command: string): string =
 proc privilegedAptCommand(command: string): string =
   sudoPrefix() & "env DEBIAN_FRONTEND=noninteractive " & command
 
+proc scheduleSystemReboot*(delaySeconds = 2) =
+  ## Reboot the device shortly after the caller returns. The delay exists so the
+  ## caller can finish writing its status file (and, over HTTP, flush a
+  ## response) before init tears the process down.
+  let command = "(sleep " & $delaySeconds & "; systemctl reboot || reboot) >/dev/null 2>&1 &"
+  discard runSetupCommand(privilegedShell(command), raiseOnError = false)
+
+# --- writing to a read-only root filesystem --------------------------------
+#
+# Buildroot frames run with `/` mounted read-only: the kernel command line asks
+# for neither `ro` nor `rw` (so the kernel default, read-only, wins) and the
+# generated /etc/fstab has no `/` entry for systemd-remount-fs to act on — only
+# the first-boot scripts remount it, briefly. Every setup step that writes to
+# the root filesystem therefore failed with EROFS on those frames, which is
+# what aborted every Buildroot OTA upgrade in `frameos setup` after the release
+# had been downloaded and its signature verified:
+#
+#   install: cannot remove '/etc/systemd/system/frameos.service': Read-only file system
+#
+# Leaving the rootfs writable is not the fix: a frame loses power at arbitrary
+# moments and only /srv is expected to be dirty when it does. So setup remounts
+# read-write around the writes and puts the mount back afterwards.
+
+proc unescapeMountField(value: string): string =
+  ## /proc/mounts octal-escapes the characters that would otherwise split a
+  ## field. Only these four are escaped by the kernel.
+  value.multiReplace(("\\040", " "), ("\\011", "\t"), ("\\012", "\n"), ("\\134", "\\"))
+
+proc mountPointForPath*(mounts, path: string): tuple[mountPoint: string, readOnly: bool] =
+  ## The /proc/mounts entry `path` lives on: the longest mount point that is a
+  ## prefix of it, last entry winning among equals (that is what an overmount
+  ## means). Pure, and `path` need not exist yet — the file we are about to
+  ## write usually does not.
+  result = ("", false)
+  if not path.startsWith("/"):
+    return
+  for line in mounts.splitLines():
+    let fields = line.splitWhitespace()
+    if fields.len < 4:
+      continue
+    let mountPoint = unescapeMountField(fields[1])
+    if not mountPoint.startsWith("/"):
+      continue
+    if not (mountPoint == "/" or path == mountPoint or path.startsWith(mountPoint & "/")):
+      continue
+    if mountPoint.len < result.mountPoint.len:
+      continue
+    result.mountPoint = mountPoint
+    result.readOnly = "ro" in unescapeMountField(fields[3]).split(',')
+
+proc procMountsPath(): string =
+  ## FRAMEOS_PROC_MOUNTS is a test seam, mirroring FRAMEOS_BOOT_CONFIG.
+  getEnv("FRAMEOS_PROC_MOUNTS", "/proc/mounts")
+
+proc readOnlyMountPointFor*(path: string): string =
+  ## The mount point `path` sits on, but only while that mount is read-only.
+  ## "" when it is writable, or when /proc/mounts cannot be read at all (macOS,
+  ## a container, a test) — there setup simply writes and reports whatever
+  ## error it gets, exactly as it did before.
+  try:
+    let mountsPath = procMountsPath()
+    if not fileExists(mountsPath):
+      return ""
+    let entry = mountPointForPath(readFile(mountsPath), path)
+    if entry.readOnly:
+      return entry.mountPoint
+  except CatchableError:
+    discard
+  ""
+
+proc beginWritableMount*(path: string): string =
+  ## Remounts the filesystem `path` lives on read-write and returns the mount
+  ## point to hand back to endWritableMount. Returns "" when nothing was
+  ## remounted: already writable (including by an enclosing scope — /proc/mounts
+  ## is the nesting counter), or the remount failed, in which case the write
+  ## below fails with its own, more informative, error.
+  let mountPoint = readOnlyMountPointFor(path)
+  if mountPoint.len == 0:
+    return ""
+  setupLog("FrameOS setup: remounting " & mountPoint & " read-write")
+  let remounted = runSetupCommand(
+    privilegedCommand("mount -o remount,rw " & shellQuote(mountPoint)),
+    raiseOnError = false,
+  )
+  if remounted.exitCode != 0:
+    setupLog("FrameOS setup: could not remount " & mountPoint & " read-write")
+    return ""
+  mountPoint
+
+proc endWritableMount*(mountPoint: string) =
+  if mountPoint.len == 0:
+    return
+  setupLog("FrameOS setup: restoring " & mountPoint & " to read-only")
+  # Flush first, exactly as the backend deploy path does before its own
+  # remount: a remount,ro that races unwritten data is how a frame comes back
+  # from an upgrade with a truncated unit file.
+  discard runSetupCommand(privilegedCommand("sync"), raiseOnError = false)
+  let restored = runSetupCommand(
+    privilegedCommand("mount -o remount,ro " & shellQuote(mountPoint)),
+    raiseOnError = false,
+  )
+  if restored.exitCode != 0:
+    setupLog("FrameOS setup: could not restore " & mountPoint &
+      " to read-only; it stays writable until the next boot")
+
+template withWritableMount*(path: string, body: untyped) =
+  ## Runs `body` with the filesystem behind `path` writable. Restores the mount
+  ## even when `body` raises — a half-finished setup must not leave the rootfs
+  ## writable for the rest of the device's uptime.
+  let frameosWritableMountPoint = beginWritableMount(path)
+  try:
+    body
+  finally:
+    endWritableMount(frameosWritableMountPoint)
+
 proc isValidAptPackageName*(name: string): bool =
   let normalized = name.strip()
   if normalized.len == 0:
@@ -193,22 +308,23 @@ proc writePrivilegedFile*(path: string, content: string) =
     except CatchableError:
       discard
 
-  try:
-    writeFile(path, content)
-  except CatchableError as writeError:
-    let writeErrorMessage = writeError.msg
-    let tmpPath = getTempDir() / ("frameos-setup-" & $epochTime().int64 & "-" & lastPathPart(path))
-    writeFile(tmpPath, content)
+  withWritableMount(path):
     try:
-      discard runSetupCommand(privilegedShell("install -m 644 " & shellQuote(tmpPath) & " " & shellQuote(path)))
-    except CatchableError as installError:
-      raise newException(
-        OSError,
-        "Cannot write " & path & ": " & writeErrorMessage & "; privileged install failed: " & installError.msg,
-      )
-    finally:
-      if fileExists(tmpPath):
-        removeFile(tmpPath)
+      writeFile(path, content)
+    except CatchableError as writeError:
+      let writeErrorMessage = writeError.msg
+      let tmpPath = getTempDir() / ("frameos-setup-" & $epochTime().int64 & "-" & lastPathPart(path))
+      writeFile(tmpPath, content)
+      try:
+        discard runSetupCommand(privilegedShell("install -m 644 " & shellQuote(tmpPath) & " " & shellQuote(path)))
+      except CatchableError as installError:
+        raise newException(
+          OSError,
+          "Cannot write " & path & ": " & writeErrorMessage & "; privileged install failed: " & installError.msg,
+        )
+      finally:
+        if fileExists(tmpPath):
+          removeFile(tmpPath)
 
 proc setupBootConfig*(requestedLines: seq[string], bootConfigPath = ""): SetupResult =
   if requestedLines.len == 0:

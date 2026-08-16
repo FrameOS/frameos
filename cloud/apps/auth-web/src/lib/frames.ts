@@ -75,10 +75,10 @@ function limitFromEnv(name: string, fallback: number): number {
   return parsed;
 }
 
-export const maxFramesPerAccount = limitFromEnv(
-  "FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT",
-  50,
-);
+// The frame quota is part of the free tier, so it is defined with the rest of
+// it in usage.ts and re-exported here for the many callers that already import
+// it from this module.
+export { maxFramesPerAccount } from "./usage";
 // Outstanding unused claim codes. This bounds how many enrollment secrets can
 // be live at once; it is not a product limit, so when an account reaches it we
 // evict its oldest unused single-use code rather than refuse (see
@@ -611,6 +611,115 @@ export async function supersedePendingCommands(
         inArray(frameCommands.status, ["pending", "sent"]),
       ),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Queue observability (GET/DELETE /api/frames/{id}/commands)
+// ---------------------------------------------------------------------------
+
+// What a queued command looks like to its owner. Deliberately NOT the raw
+// row: `payload` can carry a scene bundle (set_scenes) or a settings object,
+// and the queue view is a list of intentions, not a data dump. Only the
+// scene-id payload of set_current_scene is small and meaningful enough to
+// echo, and it is a public store id the owner already sees in the workspace.
+export interface PendingFrameCommand {
+  id: string;
+  type: string;
+  status: string;
+  created_at: string;
+  expires_at: string | null;
+  sent_at: string | null;
+  scene_id?: string;
+}
+
+function pendingCommandView(
+  row: typeof frameCommands.$inferSelect,
+): PendingFrameCommand {
+  const payload = row.payload;
+  const sceneId =
+    row.type === "set_current_scene" &&
+    payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    typeof (payload as Record<string, unknown>).scene_id === "string"
+      ? ((payload as Record<string, unknown>).scene_id as string)
+      : undefined;
+  return {
+    created_at: row.createdAt.toISOString(),
+    expires_at: row.expiresAt ? row.expiresAt.toISOString() : null,
+    id: row.id,
+    sent_at: row.sentAt ? row.sentAt.toISOString() : null,
+    status: row.status,
+    type: row.type,
+    ...(sceneId ? { scene_id: sceneId } : {}),
+  };
+}
+
+// Commands still waiting for the device, oldest first — the same order the
+// hub drains them in (drainCommands). Already-expired rows are filtered here
+// rather than swept: the sweep belongs to the hub and to db-cleanup.sh, and a
+// read-only view must not be the thing that mutates the queue.
+//
+// "sent" counts as waiting. It means the hub wrote the command to a socket
+// and the device has not acked it, which for a frame that went back to sleep
+// mid-delivery is indistinguishable from pending — and the hub will redeliver
+// it (redeliverSentCommands), so the owner can still meaningfully cancel it.
+export async function listPendingFrameCommands(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+  limit = 50,
+): Promise<PendingFrameCommand[]> {
+  const rows = await db
+    .select()
+    .from(frameCommands)
+    .where(
+      and(
+        eq(frameCommands.frameId, frameId),
+        inArray(frameCommands.status, ["pending", "sent"]),
+        or(
+          isNull(frameCommands.expiresAt),
+          gt(frameCommands.expiresAt, new Date()),
+        ),
+      ),
+    )
+    .orderBy(asc(frameCommands.createdAt), asc(frameCommands.id))
+    .limit(limit);
+  return rows.map(pendingCommandView);
+}
+
+/**
+ * Drop one queued command on the owner's say-so.
+ *
+ * Same terminal state supersedePendingCommands uses (`expired`, with a reason
+ * in `error`) rather than a DELETE: the row is the audit trail of what was
+ * asked for, and the hub's drain already ignores anything not `pending`.
+ *
+ * "sent" is cancellable for the same reason it is listed: the hub requeues
+ * unacked sent rows, so leaving one alone would let a cancelled reboot land
+ * on the next reconnect. What cancelling cannot do is recall a command the
+ * device already received and acted on — the queue is the only thing under
+ * our control, which is exactly why fast-expiring "now" commands exist.
+ *
+ * Returns false when nothing matched: an unknown id, another frame's command,
+ * or one that finished (or expired) between the list and the click.
+ */
+export async function cancelFrameCommand(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+  commandId: string,
+): Promise<boolean> {
+  const cancelled = await db
+    .update(frameCommands)
+    .set({ error: "cancelled", status: "expired" })
+    .where(
+      and(
+        eq(frameCommands.id, commandId),
+        eq(frameCommands.frameId, frameId),
+        inArray(frameCommands.status, ["pending", "sent"]),
+      ),
+    )
+    .returning({ id: frameCommands.id });
+  return cancelled.length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1277,32 +1386,10 @@ export async function countActiveClaimTokens(
   return row?.count ?? 0;
 }
 
-// Frames revoked within this window still count toward the account quota.
-// Without it the quota is freely cycleable (revoke → enroll → revoke → …)
-// and the dead rows — with their command queues and retained logs — pile up
-// unboundedly. Actually deleting them belongs in db-cleanup.sh, which today
-// prunes logs by age but never dead frame rows.
-export const revokedFrameQuotaGraceMs = 24 * 60 * 60 * 1000;
-
-export async function countFramesForAccount(
-  db: FramesDatabase,
-  accountId: string,
-) {
-  const graceCutoff = new Date(Date.now() - revokedFrameQuotaGraceMs);
-  const [row] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(frames)
-    .where(
-      and(
-        eq(frames.accountId, accountId),
-        or(
-          sql`${frames.status} <> 'revoked'`,
-          gt(frames.updatedAt, graceCutoff),
-        ),
-      ),
-    );
-  return row?.count ?? 0;
-}
+// Both live with the rest of the free tier in usage.ts, so the number the
+// account page displays and the number enrollment refuses on cannot drift.
+// Re-exported here for the callers that already import them from this module.
+export { countFramesForAccount, revokedFrameQuotaGraceMs } from "./usage";
 
 // ---------------------------------------------------------------------------
 // Metrics retention (scope telemetry:metrics)
