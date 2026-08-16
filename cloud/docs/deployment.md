@@ -242,11 +242,28 @@ looks shipped, and never reaches production. Re-derive the closure with
 `pnpm exec turbo run build --filter=@frameos-cloud/auth-web --dry=json`
 before adding a package or trimming the list.
 
+Releases come in through a second trigger, and they have to. "Release FrameOS"
+pushes its `chore: version X` commit with the default `GITHUB_TOKEN`, and
+GitHub fires no `push` workflows for commits pushed with that token — so even
+though that commit touches paths in the filter above, no run is ever created
+for it. 2026.8.23 shipped with the cloud still serving 2026.8.22 for exactly
+that reason. (`release: published` would be no better: the release is created
+with `github.token` too.) Cloud CI therefore also runs on `workflow_run` when
+"Release FrameOS" completes successfully, which is the event the recursion
+guard does not suppress — and it lands after the artefacts and images are
+published, rather than at the version bump near the start of that run.
+
+On that path the job deploys whatever `origin/main` is when it runs, not the
+event's commit, and it verifies that same tip first.
+
 Three things make it stand down instead of deploying:
 
 - **`main` moved on.** Two merges minutes apart both reach the job; the older
   one would deploy older code over newer, so it defers to the tip's own run
   (which is queued behind it on the `frameos-cloud-deploy` concurrency group).
+  This one does not apply to a release: the release run pushed the version
+  bump itself and left no queued run to defer to, so standing down there would
+  mean never deploying a release at all.
 - **Production is running a branch.** Deploying a branch here is normal, and
   an automatic deploy must not silently take it away mid-session. The job asks
   the box `frameos-cloud-update --release-ref` and only proceeds when the
