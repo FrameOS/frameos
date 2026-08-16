@@ -202,10 +202,6 @@ Open items from `docs/cloud-security-review.md`.
 - **The frame stores its link token in plaintext** (`state/cloud_link.json`,
   0600). Fix when there is hardware-backed key storage, or by redaction if the
   state file ever travels — support bundles, backups.
-- **Frame-side `local_login_enabled` is cosmetic.** `/api/cloud/login/options`
-  returns a hardcoded `true`. Persist the flag in the frame's cloud-link state
-  and enforce it in the admin login; until then, hiding the local login fields
-  means nothing. *Small.*
 
 ---
 

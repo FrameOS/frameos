@@ -58,6 +58,9 @@ proc cloudStatusPayload(state: JsonNode): JsonNode =
     "connection": newJNull(),
     "link": newJNull(),
     "backend_managed": backendManaged,
+    # Effective, not stored: see localAdminLoginEnabled. The panel should show
+    # what actually happens at the login screen.
+    "local_fallback_enabled": localAdminLoginEnabled(state),
   }
   if status == "connecting":
     result["connection"] = %*{
@@ -537,15 +540,16 @@ proc addCloudApiRoutes*(router: var Router) =
         return
       withLock cloudLinkLock:
         let state = loadCloudLinkState()
-        let available = state{"status"}.getStr("") == "connected" and
-          linkHasScope(state, "auth:login") and adminAuthEnabled()
+        let available = cloudLoginPossible(state) and adminAuthEnabled()
         # Anonymous callers learn only whether the cloud button should render.
         # The provider URL follows only when it should, since that is the one
         # case where the browser has to be sent there anyway.
         jsonResponse(request, Http200, %*{
           "available": available,
           "provider_url": (if available: %providerUrlFromState(state) else: newJNull()),
-          "local_login_enabled": true,
+          # The same answer /api/admin/login enforces, so the screen never
+          # offers a password field that the frame will refuse.
+          "local_login_enabled": localAdminLoginEnabled(state) or not adminAuthEnabled(),
           "setup_mode": false,
         })
   )
@@ -707,6 +711,79 @@ proc addCloudApiRoutes*(router: var Router) =
       headers["Set-Cookie"] = adminSessionCookieHeader(request, sessionToken)
       headers["Location"] = "/admin"
       request.respond(303, headers, "")
+  )
+
+  router.post("/api/cloud/local-fallback", proc(request: Request) {.gcsafe.} =
+    ## Turn the admin password off (or back on) for this frame, mirroring the
+    ## self-hosted backend's `/api/cloud/local-fallback`. Turning it off is the
+    ## direction that needs care, so it is the direction with all the checks;
+    ## turning it back on is always allowed, from any admin session.
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    {.gcsafe.}:
+      let payload = try:
+          parseJson(if request.body == "": "{}" else: request.body)
+        except CatchableError:
+          jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+          return
+      if payload{"enabled"} == nil or payload{"enabled"}.kind != JBool:
+        jsonResponse(request, Http400, %*{"detail": "Send {\"enabled\": true|false}"})
+        return
+      let enabled = payload{"enabled"}.getBool()
+
+      if enabled:
+        withLock cloudLinkLock:
+          let state = loadCloudLinkState()
+          state["local_fallback_enabled"] = %true
+          saveCloudLinkState(state)
+          jsonResponse(request, Http200, cloudStatusPayload(state))
+        return
+
+      if not adminAuthEnabled():
+        jsonResponse(request, Http409, %*{"detail": "The admin panel is disabled on this frame"})
+        return
+      var providerUrl = ""
+      var accessToken = ""
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        if not cloudLoginPossible(state):
+          jsonResponse(request, Http409,
+            %*{"detail": "Connect this frame to FrameOS Cloud with the auth:login permission first"})
+          return
+        providerUrl = providerUrlFromState(state)
+        accessToken = state{"access_token"}.getStr("")
+      if accessToken.len == 0:
+        jsonResponse(request, Http409, %*{"detail": "This frame is not linked to FrameOS Cloud"})
+        return
+
+      # A link that says "connected" in a state file is not a link that works.
+      # Ask the provider now, without the lock: disabling the password on the
+      # strength of a stale token is how a frame ends up with no way in.
+      var grantsCode = 0
+      try:
+        (grantsCode, _) = cloudRequest(providerUrl, "/api/backends/grants",
+          httpMethod = HttpGet, accessToken = accessToken)
+      except CatchableError as error:
+        jsonResponse(request, Http502,
+          %*{"detail": "Could not reach " & providerUrl & ": " & error.msg})
+        return
+      if grantsCode != 200:
+        jsonResponse(request, Http502,
+          %*{"detail": "The cloud link did not verify; local login stays enabled"})
+        return
+
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        # Re-read under the lock: the link can have gone away during the round
+        # trip above, and localAdminLoginEnabled would then ignore the flag.
+        if not cloudLoginPossible(state):
+          jsonResponse(request, Http409,
+            %*{"detail": "The cloud link changed while checking; local login stays enabled"})
+          return
+        state["local_fallback_enabled"] = %false
+        saveCloudLinkState(state)
+        jsonResponse(request, Http200, cloudStatusPayload(state))
   )
 
   router.post("/api/cloud/disconnect", proc(request: Request) {.gcsafe.} =

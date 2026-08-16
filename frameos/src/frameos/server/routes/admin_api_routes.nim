@@ -3,9 +3,11 @@ import strutils
 import mummy
 import mummy/routers
 import httpcore
+import locks
 import frameos/channels
 import frameos/local_access
 import frameos/upgrade
+import frameos/cloud/link_state
 import ../auth
 import ../api
 import ../rate_limit
@@ -44,6 +46,17 @@ proc addAdminApiRoutes*(router: var Router) =
       except CatchableError:
         jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
         return
+    # The owner can switch the password off in favour of cloud login. The flag
+    # only bites while cloud login can actually take over (localAdminLoginEnabled),
+    # so a frame whose link is gone still opens with a password.
+    var localLoginEnabled = true
+    {.gcsafe.}:
+      withLock cloudLinkLock:
+        localLoginEnabled = localAdminLoginEnabled(loadCloudLinkState())
+    if not localLoginEnabled:
+      jsonResponse(request, Http403, %*{
+        "detail": "Local password login is disabled on this frame. Sign in with FrameOS Cloud."})
+      return
     let username = payload{"username"}.getStr("")
     let password = payload{"password"}.getStr("")
     if validateAdminCredentials(username, password):
