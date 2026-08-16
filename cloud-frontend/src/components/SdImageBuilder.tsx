@@ -800,7 +800,7 @@ export function SdImageBuilder({
                   onChange={(event) => setLimitClaimValidity(event.target.checked)}
                   type="checkbox"
                 />
-                Stop this card from adding frames after a while
+                Stop this SD card from adding frames after a while
               </label>
               {limitClaimValidity ? (
                 <label className="frameos-muted flex items-center justify-between gap-2 text-xs">
