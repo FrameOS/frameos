@@ -19,6 +19,7 @@ import {
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
+import { readBlob } from "./blobs";
 import { cachedAssetFile, sceneSnapshotAssetPath } from "./frame-asset-cache";
 import {
   extractScenesJson,
@@ -124,7 +125,10 @@ async function runtimeIdsForVersion(
     return cached;
   }
   const [row] = await db
-    .select({ content: storeSceneVersions.content })
+    .select({
+      content: storeSceneVersions.content,
+      objectKey: storeSceneVersions.objectKey,
+    })
     .from(storeSceneVersions)
     .where(
       and(
@@ -133,7 +137,8 @@ async function runtimeIdsForVersion(
       ),
     )
     .limit(1);
-  const ids = row ? runtimeIdsFromZip(row.content) : new Set<string>();
+  const content = await readBlob(row);
+  const ids = content ? runtimeIdsFromZip(content) : new Set<string>();
   rememberRuntimeIds(key, ids);
   return ids;
 }
@@ -196,6 +201,7 @@ export async function storeSceneCoverImage(
     .select({
       previewImage: storeScenes.previewImage,
       previewImageType: storeScenes.previewImageType,
+      previewObjectKey: storeScenes.previewObjectKey,
       status: storeScenes.status,
     })
     .from(storeScenes)
@@ -212,25 +218,31 @@ export async function storeSceneCoverImage(
       content: storeSceneImages.content,
       contentType: storeSceneImages.contentType,
       id: storeSceneImages.id,
+      objectKey: storeSceneImages.objectKey,
     })
     .from(storeSceneImages)
     .where(eq(storeSceneImages.sceneId, storeSceneId))
     .orderBy(asc(storeSceneImages.position), asc(storeSceneImages.createdAt));
   for (const galleryImage of galleryImages) {
-    if (isTransparentCover(`image:${galleryImage.id}`, galleryImage.content)) {
+    const content = await readBlob(galleryImage);
+    if (!content) {
+      continue;
+    }
+    if (isTransparentCover(`image:${galleryImage.id}`, content)) {
       continue;
     }
     return {
-      content: galleryImage.content,
+      content,
       contentType: galleryImage.contentType || "image/jpeg",
     };
   }
-  if (
-    scene.previewImage &&
-    !isTransparentCover(`preview:${storeSceneId}`, scene.previewImage)
-  ) {
+  const preview = await readBlob({
+    content: scene.previewImage,
+    objectKey: scene.previewObjectKey,
+  });
+  if (preview && !isTransparentCover(`preview:${storeSceneId}`, preview)) {
     return {
-      content: scene.previewImage,
+      content: preview,
       contentType: scene.previewImageType ?? "image/jpeg",
     };
   }

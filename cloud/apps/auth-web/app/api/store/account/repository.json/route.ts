@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
       authorName: accounts.displayName,
       description: storeScenes.description,
       frameosVersion: storeScenes.frameosVersion,
-      hasPreview: sql<boolean>`${storeScenes.previewImage} is not null`,
+      hasPreview: sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,

@@ -3,6 +3,7 @@ import { storeSceneImages } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { decodeBackupContent } from "../../../../../../src/lib/backups";
+import { blobNamespaces, storeBlob } from "../../../../../../src/lib/blobs";
 import { jsonError, readJsonObject } from "../../../../../../src/lib/device-flow";
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import {
@@ -112,13 +113,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     .from(storeSceneImages)
     .where(eq(storeSceneImages.sceneId, scene.id));
 
+  const stored = await storeBlob(blobNamespaces.sceneImage, content, contentType);
   const [created] = await db
     .insert(storeSceneImages)
     .values({
-      content,
       contentType,
+      objectKey: stored.objectKey,
       position: (maxPosition?.position ?? 0) + 1,
       sceneId: scene.id,
+      sizeBytes: stored.sizeBytes,
     })
     .returning({ id: storeSceneImages.id });
   if (!created) {
@@ -129,7 +132,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // preview. Append a version whose ZIP contains it, preserving all older
   // versions exactly as published.
   let version: number | undefined;
-  if (!scene.previewImage && (counted?.count ?? 0) === 0) {
+  if (!scene.previewImage && !scene.previewObjectKey && (counted?.count ?? 0) === 0) {
     const synced = await syncLatestSceneZipPreview(db, scene, content);
     if (!synced.ok) {
       await db

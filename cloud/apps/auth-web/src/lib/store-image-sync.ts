@@ -1,13 +1,12 @@
-import { and, desc, eq, isNull, lt } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import {
   type createDb,
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
-import { sha256Hex } from "./backups";
+import { blobNamespaces, readBlob, storeBlob } from "./blobs";
 import {
   maxSceneZipBytes,
-  maxVersionsPerScene,
   rebuildZipWithPreview,
   validateSceneZip,
 } from "./store";
@@ -30,6 +29,7 @@ export async function syncLatestSceneZipPreview(
     .select({
       content: storeSceneVersions.content,
       frameosVersion: storeSceneVersions.frameosVersion,
+      objectKey: storeSceneVersions.objectKey,
     })
     .from(storeSceneVersions)
     .where(
@@ -43,11 +43,12 @@ export async function syncLatestSceneZipPreview(
   if (!latest) {
     return { ok: false, error: "version_not_found" };
   }
+  const latestContent = await readBlob(latest);
+  if (!latestContent) {
+    return { ok: false, error: "version_not_found" };
+  }
 
-  const content = rebuildZipWithPreview(
-    Buffer.from(latest.content),
-    previewImage,
-  );
+  const content = rebuildZipWithPreview(Buffer.from(latestContent), previewImage);
   if (!content) {
     return { ok: false, error: "invalid_scene_zip" };
   }
@@ -61,24 +62,25 @@ export async function syncLatestSceneZipPreview(
   }
 
   const nextVersion = scene.latestVersion + 1;
-  await db.insert(storeSceneVersions).values({
+  const stored = await storeBlob(
+    blobNamespaces.sceneVersion,
     content,
+    "application/zip",
+    { extension: "zip" },
+  );
+  await db.insert(storeSceneVersions).values({
     contentType: "application/zip",
     frameosVersion: validated.value.frameosVersion ?? latest.frameosVersion,
+    objectKey: stored.objectKey,
     riskFlags: validated.value.riskFlags,
     sceneId: scene.id,
-    sha256: sha256Hex(content),
-    sizeBytes: content.length,
+    sha256: stored.sha256,
+    sizeBytes: stored.sizeBytes,
     version: nextVersion,
   });
-  await db
-    .delete(storeSceneVersions)
-    .where(
-      and(
-        eq(storeSceneVersions.sceneId, scene.id),
-        lt(storeSceneVersions.version, nextVersion - maxVersionsPerScene + 1),
-      ),
-    );
+  // No version prune any more: the bytes are not Postgres blobs, so the
+  // documented deviation from immutable-versions-forever (STORE-TODO
+  // decision 2) has nothing left to buy.
   await db
     .update(storeScenes)
     .set({

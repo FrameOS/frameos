@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@frameos-cloud/db": "workspace:*",
+    "aws4fetch": "^1.0.20",
     "drizzle-orm": "^0.45.2",
     "jose": "^6.2.3",
     "postgres": "^3.4.9",

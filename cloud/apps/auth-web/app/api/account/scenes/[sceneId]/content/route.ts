@@ -1,11 +1,15 @@
-import { and, desc, eq, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import {
   storeSceneVersions,
   storeScenes,
 } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
-import { sha256Hex } from "../../../../../../src/lib/backups";
+import {
+  blobNamespaces,
+  readBlob,
+  storeBlob,
+} from "../../../../../../src/lib/blobs";
 import { jsonError, readJsonObject } from "../../../../../../src/lib/device-flow";
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import { identityRateLimitResponse } from "../../../../../../src/lib/rate-limit";
@@ -17,7 +21,6 @@ import {
   maxSceneEditsPer15Minutes,
   maxSceneEditsPerHour,
   maxSceneZipBytes,
-  maxVersionsPerScene,
   rebuildZipWithScenes,
   sceneSummary,
   validateSceneZip,
@@ -77,6 +80,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     .select({
       content: storeSceneVersions.content,
       frameosVersion: storeSceneVersions.frameosVersion,
+      objectKey: storeSceneVersions.objectKey,
     })
     .from(storeSceneVersions)
     .where(
@@ -88,6 +92,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     .orderBy(desc(storeSceneVersions.version))
     .limit(1);
   if (!latest) {
+    return jsonError("version_not_found", 404);
+  }
+  const latestContent = await readBlob(latest);
+  if (!latestContent) {
     return jsonError("version_not_found", 404);
   }
 
@@ -102,7 +110,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // the listing a different title from the scene keeps that title, and a
   // multi-scene pack is never retitled by an unrelated edit.
   const previousSceneName = sceneDisplayName(
-    extractScenesFromZip(Buffer.from(latest.content)),
+    extractScenesFromZip(Buffer.from(latestContent)),
   );
   const nextSceneName = sceneDisplayName(body.scenes);
   let renameTo: string | undefined;
@@ -157,7 +165,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const content = rebuildZipWithScenes(
-    Buffer.from(latest.content),
+    Buffer.from(latestContent),
     JSON.stringify(body.scenes, null, 2),
     renameTo,
   );
@@ -186,24 +194,24 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const nextVersion = scene.latestVersion + 1;
-  await db.insert(storeSceneVersions).values({
+  const stored = await storeBlob(
+    blobNamespaces.sceneVersion,
     content,
+    "application/zip",
+    { extension: "zip" },
+  );
+  await db.insert(storeSceneVersions).values({
     contentType: "application/zip",
     frameosVersion: validated.value.frameosVersion ?? latest.frameosVersion,
+    objectKey: stored.objectKey,
     riskFlags: validated.value.riskFlags,
     sceneId: scene.id,
-    sha256: sha256Hex(content),
-    sizeBytes: content.length,
+    sha256: stored.sha256,
+    sizeBytes: stored.sizeBytes,
     version: nextVersion,
   });
-  await db
-    .delete(storeSceneVersions)
-    .where(
-      and(
-        eq(storeSceneVersions.sceneId, scene.id),
-        lt(storeSceneVersions.version, nextVersion - maxVersionsPerScene + 1),
-      ),
-    );
+  // Every editor save keeps its version; see the note in store-publish.ts on
+  // retiring the 20-version prune.
 
   const [updated] = await db
     .update(storeScenes)

@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import {
   accounts,
   type createDb,
@@ -8,7 +8,7 @@ import {
 } from "@frameos-cloud/db";
 import { NextResponse } from "next/server";
 import { recordAuditEvent } from "./audit";
-import { sha256Hex } from "./backups";
+import { blobNamespaces, readBlob, storeBlob } from "./blobs";
 import { jsonError } from "./device-flow";
 import { getScenesBaseUrl } from "./env";
 import { moderateStoreContent } from "./moderation";
@@ -18,7 +18,6 @@ import {
   maxNewScenesPerDay,
   maxScenesPerAccount,
   maxSceneZipBytes,
-  maxVersionsPerScene,
   rebuildZipWithPreview,
   sceneSummary,
   slugifyName,
@@ -112,15 +111,19 @@ export async function publishStoreScene(
   // version so publishing cannot put the page and its download out of sync.
   if (existing && !uploadedPreview) {
     const [galleryLead] = await db
-      .select({ content: storeSceneImages.content })
+      .select({
+        content: storeSceneImages.content,
+        objectKey: storeSceneImages.objectKey,
+      })
       .from(storeSceneImages)
       .where(eq(storeSceneImages.sceneId, existing.id))
       .orderBy(asc(storeSceneImages.position), asc(storeSceneImages.createdAt))
       .limit(1);
-    if (galleryLead) {
+    const galleryLeadContent = await readBlob(galleryLead);
+    if (galleryLeadContent) {
       const rebuilt = rebuildZipWithPreview(
         content,
-        Buffer.from(galleryLead.content),
+        Buffer.from(galleryLeadContent),
       );
       if (!rebuilt) {
         return jsonError("invalid_scene_zip", 500);
@@ -234,26 +237,36 @@ export async function publishStoreScene(
   }
 
   const nextVersion = scene.latestVersion + 1;
-  await db.insert(storeSceneVersions).values({
+  const storedVersion = await storeBlob(
+    blobNamespaces.sceneVersion,
     content,
+    "application/zip",
+    { extension: "zip" },
+  );
+  await db.insert(storeSceneVersions).values({
     contentType: "application/zip",
     frameosVersion: validated.value.frameosVersion ?? null,
+    objectKey: storedVersion.objectKey,
     ...(linkedClientId ? { publishedByLinkedClientId: linkedClientId } : {}),
     riskFlags: validated.value.riskFlags,
     sceneId: scene.id,
-    sha256: sha256Hex(content),
-    sizeBytes: content.length,
+    sha256: storedVersion.sha256,
+    sizeBytes: storedVersion.sizeBytes,
     version: nextVersion,
   });
 
-  await db
-    .delete(storeSceneVersions)
-    .where(
-      and(
-        eq(storeSceneVersions.sceneId, scene.id),
-        lt(storeSceneVersions.version, nextVersion - maxVersionsPerScene + 1),
-      ),
-    );
+  // Versions used to be pruned to the newest 20 (STORE-TODO decision 2, a
+  // deviation from immutable-forever taken because they were Postgres blobs).
+  // They are objects now, deduplicated by digest, so the deviation is retired
+  // and every published version stays downloadable.
+
+  const storedPreview = uploadedPreview
+    ? await storeBlob(
+        blobNamespaces.scenePreview,
+        uploadedPreview,
+        detectImageContentType(uploadedPreview) ?? "image/jpeg",
+      )
+    : undefined;
 
   const [updated] = await db
     .update(storeScenes)
@@ -269,8 +282,10 @@ export async function publishStoreScene(
       // FrameOS client published this latest version.
       linkedClientId: linkedClientId ?? null,
       name,
-      previewImage: uploadedPreview ?? null,
+      previewImage: null,
+      previewObjectKey: storedPreview?.objectKey ?? null,
       previewImageHeight: uploadedPreviewHeight ?? null,
+      previewImageSizeBytes: storedPreview?.sizeBytes ?? null,
       // The zip's conventional image.jpg path says nothing about the real
       // format — PNG/WebP/GIF bytes are stored untranscoded, so sniff them.
       previewImageType: uploadedPreview

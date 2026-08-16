@@ -80,6 +80,13 @@ export interface SceneBytesBreakdown {
   publicBytes: number;
 }
 
+// Blob sizes now come from a column, because the bytes themselves have moved
+// to object storage and octet_length() has nothing left to measure. Rows
+// written before migration 0032 still hold their bytes in Postgres, so the
+// column falls back to measuring them — one expression, both eras.
+const sceneImageBytes = sql`coalesce(${storeSceneImages.sizeBytes}, octet_length(${storeSceneImages.content}), 0)`;
+const scenePreviewBytes = sql`coalesce(${storeScenes.previewImageSizeBytes}, octet_length(${storeScenes.previewImage}), 0)`;
+
 const publicCase = (bytes: ReturnType<typeof sql>) =>
   sql<number>`coalesce(sum(case when ${storeScenes.visibility} = 'public' then ${bytes} else 0 end), 0)::float8`;
 const privateCase = (bytes: ReturnType<typeof sql>) =>
@@ -104,20 +111,16 @@ export async function sceneBytesForAccount(
       .where(eq(storeScenes.accountId, accountId)),
     db
       .select({
-        privateBytes: privateCase(sql`octet_length(${storeSceneImages.content})`),
-        publicBytes: publicCase(sql`octet_length(${storeSceneImages.content})`),
+        privateBytes: privateCase(sceneImageBytes),
+        publicBytes: publicCase(sceneImageBytes),
       })
       .from(storeSceneImages)
       .innerJoin(storeScenes, eq(storeScenes.id, storeSceneImages.sceneId))
       .where(eq(storeScenes.accountId, accountId)),
     db
       .select({
-        privateBytes: privateCase(
-          sql`coalesce(octet_length(${storeScenes.previewImage}), 0)`,
-        ),
-        publicBytes: publicCase(
-          sql`coalesce(octet_length(${storeScenes.previewImage}), 0)`,
-        ),
+        privateBytes: privateCase(scenePreviewBytes),
+        publicBytes: publicCase(scenePreviewBytes),
       })
       .from(storeScenes)
       .where(eq(storeScenes.accountId, accountId)),
@@ -156,13 +159,13 @@ export async function sceneBytesTotal(
       .where(eq(storeSceneVersions.sceneId, sceneId)),
     db
       .select({
-        bytes: sql<number>`coalesce(sum(octet_length(${storeSceneImages.content})), 0)::float8`,
+        bytes: sql<number>`coalesce(sum(${sceneImageBytes}), 0)::float8`,
       })
       .from(storeSceneImages)
       .where(eq(storeSceneImages.sceneId, sceneId)),
     db
       .select({
-        bytes: sql<number>`coalesce(octet_length(${storeScenes.previewImage}), 0)::float8`,
+        bytes: sql<number>`coalesce(${scenePreviewBytes}, 0)::float8`,
       })
       .from(storeScenes)
       .where(eq(storeScenes.id, sceneId)),

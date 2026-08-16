@@ -22,6 +22,7 @@ import {
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getSceneImage } from "../../../app/api/frames/[frameId]/scene_images/[sceneId]/route";
 import { POST as assignFrameScenes } from "../../../app/api/frames/[frameId]/scenes/route";
+import { readBlob } from "../../lib/blobs";
 import { sceneSnapshotAssetPath } from "../../lib/frame-asset-cache";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { resetSceneImageCacheForTests } from "../../lib/scene-images";
@@ -569,11 +570,22 @@ describe("POST /api/frames/{id}/scenes cover copy", () => {
       .select({
         content: frameAssetFiles.content,
         contentType: frameAssetFiles.contentType,
+        objectKey: frameAssetFiles.objectKey,
         path: frameAssetFiles.path,
         thumb: frameAssetFiles.thumb,
       })
       .from(frameAssetFiles)
       .where(eq(frameAssetFiles.frameId, frameId));
+  }
+
+  // Rows written since migration 0032 keep their bytes in the object store;
+  // rows seeded by these tests with a literal `content` still hold them in
+  // Postgres. Both are legal, and readBlob is what production reads with.
+  async function assetBytes(row: {
+    content: Buffer | null;
+    objectKey: string | null;
+  }) {
+    return (await readBlob(row))?.toString();
   }
 
   it("copies the cover under every runtime scene id, full and thumb", async () => {
@@ -608,7 +620,7 @@ describe("POST /api/frames/{id}/scenes cover copy", () => {
       ),
     );
     for (const row of rows) {
-      expect(Buffer.from(row.content).toString()).toBe("cover-bytes");
+      expect(await assetBytes(row)).toBe("cover-bytes");
       expect(row.contentType).toBe("image/jpeg");
     }
 
@@ -649,8 +661,8 @@ describe("POST /api/frames/{id}/scenes cover copy", () => {
     const full = rows.find((row) => !row.thumb);
     const thumb = rows.find((row) => row.thumb);
     // The device's render survives; only the missing thumb slot is filled.
-    expect(Buffer.from(full!.content).toString()).toBe("device-render");
-    expect(Buffer.from(thumb!.content).toString()).toBe("cover-bytes");
+    expect(await assetBytes(full!)).toBe("device-render");
+    expect(await assetBytes(thumb!)).toBe("cover-bytes");
   });
 
   it("copies nothing for a scene with no cover, without failing the push", async () => {

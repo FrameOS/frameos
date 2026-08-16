@@ -21,6 +21,12 @@ import {
 } from "@frameos-cloud/db";
 import { unzipSync } from "fflate";
 import { linkedClientScopes } from "./backend-auth";
+import {
+  deleteBlobIfUnreferenced,
+  frameCacheNamespace,
+  readBlob,
+  storeBlob,
+} from "./blobs";
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
@@ -979,6 +985,7 @@ export async function buildScenesPayloadForFrame(
     const versionRows = await db
       .select({
         content: storeSceneVersions.content,
+        objectKey: storeSceneVersions.objectKey,
         riskFlags: storeSceneVersions.riskFlags,
         version: storeSceneVersions.version,
       })
@@ -1005,7 +1012,11 @@ export async function buildScenesPayloadForFrame(
     if (versionRow.riskFlags?.includes("shell")) {
       return { error: "scene_not_allowed" };
     }
-    const extracted = extractScenesJson(versionRow.content);
+    const versionContent = await readBlob(versionRow);
+    if (!versionContent) {
+      return { error: "scene_version_missing" };
+    }
+    const extracted = extractScenesJson(versionContent);
     if (!extracted) {
       return { error: "invalid_scene_payload" };
     }
@@ -1198,23 +1209,50 @@ export async function storeFrameAssetFile(
     return false;
   }
   const now = new Date();
+  // The bytes go to object storage before the row does, and outside the
+  // transaction: a snapshot upload is a network call, and holding a Postgres
+  // connection open across it is how a busy fleet exhausts the pool. An
+  // object with no row is inert — the key is its digest, so the next write of
+  // the same bytes finds it and uploads nothing.
+  const stored = await storeBlob(
+    frameCacheNamespace(frameId),
+    file.content,
+    file.contentType,
+  );
+  const evicted: string[] = [];
+  const replaced: string[] = [];
   await db.transaction(async (tx) => {
+    const [previous] = await tx
+      .select({ objectKey: frameAssetFiles.objectKey })
+      .from(frameAssetFiles)
+      .where(
+        and(
+          eq(frameAssetFiles.frameId, frameId),
+          eq(frameAssetFiles.path, file.path),
+          eq(frameAssetFiles.thumb, file.thumb),
+        ),
+      )
+      .limit(1);
+    if (previous?.objectKey && previous.objectKey !== stored.objectKey) {
+      replaced.push(previous.objectKey);
+    }
     await tx
       .insert(frameAssetFiles)
       .values({
-        content: file.content,
         contentType: file.contentType,
         frameId,
+        objectKey: stored.objectKey,
         path: file.path,
-        sizeBytes: file.content.length,
+        sizeBytes: stored.sizeBytes,
         thumb: file.thumb,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         set: {
-          content: file.content,
+          content: null,
           contentType: file.contentType,
-          sizeBytes: file.content.length,
+          objectKey: stored.objectKey,
+          sizeBytes: stored.sizeBytes,
           updatedAt: now,
         },
         target: [frameAssetFiles.frameId, frameAssetFiles.path, frameAssetFiles.thumb],
@@ -1225,6 +1263,7 @@ export async function storeFrameAssetFile(
     const rows = await tx
       .select({
         id: frameAssetFiles.id,
+        objectKey: frameAssetFiles.objectKey,
         sizeBytes: frameAssetFiles.sizeBytes,
       })
       .from(frameAssetFiles)
@@ -1236,12 +1275,28 @@ export async function storeFrameAssetFile(
       total += row.sizeBytes;
       if (index >= maxAssetFilesPerFrame || total > maxAssetCacheBytesPerFrame) {
         evict.push(row.id);
+        if (row.objectKey) {
+          evicted.push(row.objectKey);
+        }
       }
     });
     if (evict.length > 0) {
       await tx.delete(frameAssetFiles).where(inArray(frameAssetFiles.id, evict));
     }
   });
+  // After the commit, and only for keys nothing points at any more: two rows
+  // of one frame can hold identical bytes (a thumb of an unchanged scene, the
+  // same cover copied onto several scenes), and they share the object.
+  for (const objectKey of [...evicted, ...replaced]) {
+    await deleteBlobIfUnreferenced(objectKey, async () => {
+      const [remaining] = await db
+        .select({ id: frameAssetFiles.id })
+        .from(frameAssetFiles)
+        .where(eq(frameAssetFiles.objectKey, objectKey))
+        .limit(1);
+      return Boolean(remaining);
+    });
+  }
   return true;
 }
 

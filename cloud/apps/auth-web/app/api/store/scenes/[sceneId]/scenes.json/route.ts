@@ -2,6 +2,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { unzipSync } from "fflate";
 import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
+import { readBlob } from "../../../../../../src/lib/blobs";
 import {
   canAccessPrivateScene,
   shareTokenGrantsAccess,
@@ -65,6 +66,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const [version] = await db
     .select({
       content: storeSceneVersions.content,
+      objectKey: storeSceneVersions.objectKey,
       version: storeSceneVersions.version,
     })
     .from(storeSceneVersions)
@@ -81,7 +83,12 @@ export async function GET(request: NextRequest, context: RouteContext) {
     return jsonError("version_not_found", 404);
   }
 
-  const scenes = extractScenesJson(Buffer.from(version.content));
+  const versionContent = await readBlob(version);
+  if (!versionContent) {
+    return jsonError("version_not_found", 404);
+  }
+
+  const scenes = extractScenesJson(Buffer.from(versionContent));
   if (!scenes) {
     return jsonError("invalid_scene_zip", 500);
   }

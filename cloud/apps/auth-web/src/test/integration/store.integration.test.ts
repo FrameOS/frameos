@@ -11,6 +11,7 @@ import {
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { readBlob } from "../../lib/blobs";
 import HomePage from "../../../app/page";
 import { PATCH as adminPatchScene } from "../../../app/api/admin/scenes/[sceneId]/route";
 import { generateMetadata as generateSceneMetadata } from "../../../app/s/[slug]/page";
@@ -399,17 +400,20 @@ describe("store publish and distribution", () => {
       .select({
         content: storeSceneImages.content,
         contentType: storeSceneImages.contentType,
+        objectKey: storeSceneImages.objectKey,
         position: storeSceneImages.position,
       })
       .from(storeSceneImages)
       .where(eq(storeSceneImages.sceneId, forked.id as string))
       .orderBy(storeSceneImages.position);
     expect(
-      copiedImages.map((image) => ({
-        content: Buffer.from(image.content),
-        contentType: image.contentType,
-        position: image.position,
-      })),
+      await Promise.all(
+        copiedImages.map(async (image) => ({
+          content: (await readBlob(image))!,
+          contentType: image.contentType,
+          position: image.position,
+        })),
+      ),
     ).toEqual(
       galleryImages.map(({ content, contentType, position }) => ({
         content,
@@ -1310,11 +1314,25 @@ describe("store publish and distribution", () => {
       .where(eq(storeScenes.id, sceneId));
     expect(stored?.latestVersion).toBe(101);
 
+    // Every version is kept. The 20-version prune existed only because the
+    // zips were Postgres blobs (STORE-TODO decision 2); they are objects now,
+    // keyed by digest, so 100 saves of a scene that barely changes cost about
+    // as much as one. Immutable versions are the whole point of the model.
     const retainedVersions = await db
-      .select({ version: storeSceneVersions.version })
+      .select({
+        objectKey: storeSceneVersions.objectKey,
+        version: storeSceneVersions.version,
+      })
       .from(storeSceneVersions)
       .where(eq(storeSceneVersions.sceneId, sceneId));
-    expect(retainedVersions).toHaveLength(20);
+    expect(retainedVersions).toHaveLength(101);
+    expect(retainedVersions.every((row) => row.objectKey)).toBe(true);
+    // Version 1 is still downloadable, which is what the prune used to break.
+    const oldest = await downloadScene(
+      request(`/api/store/scenes/${sceneId}/download?version=1`),
+      ctx(sceneId),
+    );
+    expect(oldest.status).toBe(200);
   });
 
   it("stores validated tags and exposes them in the repository index", async () => {

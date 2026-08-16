@@ -413,8 +413,13 @@ export const storeScenes = pgTable(
     ),
     latestVersion: integer("latest_version").default(0).notNull(),
     name: text("name").notNull(),
+    // Preview bytes, in Postgres (legacy rows) or object storage (everything
+    // written since 0032). previewImageSizeBytes is recorded either way, so
+    // storage accounting no longer needs octet_length() on the blob.
     previewImage: bytea("preview_image"),
+    previewObjectKey: text("preview_object_key"),
     previewImageHeight: integer("preview_image_height"),
+    previewImageSizeBytes: integer("preview_image_size_bytes"),
     previewImageType: text("preview_image_type"),
     previewImageWidth: integer("preview_image_width"),
     pulledAt: timestamp("pulled_at", { withTimezone: true }),
@@ -454,7 +459,12 @@ export const storeSceneVersions = pgTable(
   "store_scene_versions",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    content: bytea("content").notNull(),
+    // Exactly one of `content` and `objectKey` is set. New publishes write the
+    // zip to object storage and leave `content` null; rows published before
+    // that move keep their bytes here until the backfill runs. readBlob()
+    // hides the difference (cloud/apps/auth-web/src/lib/blobs.ts).
+    content: bytea("content"),
+    objectKey: text("object_key"),
     contentType: text("content_type").default("application/zip").notNull(),
     // Minimum compatible FrameOS version declared by this payload.
     frameosVersion: text("frameos_version"),
@@ -491,9 +501,11 @@ export const storeSceneImages = pgTable(
   "store_scene_images",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    content: bytea("content").notNull(),
+    content: bytea("content"),
+    objectKey: text("object_key"),
     contentType: text("content_type").default("image/jpeg").notNull(),
     position: integer("position").default(0).notNull(),
+    sizeBytes: integer("size_bytes"),
     sceneId: uuid("scene_id")
       .notNull()
       .references(() => storeScenes.id, { onDelete: "cascade" }),
@@ -847,7 +859,8 @@ export const frameAssetFiles = pgTable(
     path: text("path").notNull(),
     thumb: boolean("thumb").default(false).notNull(),
     contentType: text("content_type").notNull(),
-    content: bytea("content").notNull(),
+    content: bytea("content"),
+    objectKey: text("object_key"),
     sizeBytes: integer("size_bytes").notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()

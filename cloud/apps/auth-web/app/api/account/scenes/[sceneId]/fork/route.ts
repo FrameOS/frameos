@@ -6,7 +6,11 @@ import {
 } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
-import { sha256Hex } from "../../../../../../src/lib/backups";
+import {
+  blobNamespaces,
+  readBlob,
+  storeBlob,
+} from "../../../../../../src/lib/blobs";
 import { csrfResponse } from "../../../../../../src/lib/csrf";
 import {
   jsonError,
@@ -115,6 +119,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     .select({
       content: storeSceneVersions.content,
       frameosVersion: storeSceneVersions.frameosVersion,
+      objectKey: storeSceneVersions.objectKey,
     })
     .from(storeSceneVersions)
     .where(
@@ -128,13 +133,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (!latest) {
     return jsonError("version_not_found", 404);
   }
+  const latestContent = await readBlob(latest);
+  if (!latestContent) {
+    return jsonError("version_not_found", 404);
+  }
 
+  // Copied by reference, not by value: object keys are content digests, so a
+  // fork of a 6 MB scene pack re-uses the same objects and uploads nothing.
+  // Legacy rows that still hold their bytes in Postgres copy those instead.
   const sourceImages = await db
     .select({
       content: storeSceneImages.content,
       contentType: storeSceneImages.contentType,
       createdAt: storeSceneImages.createdAt,
+      objectKey: storeSceneImages.objectKey,
       position: storeSceneImages.position,
+      sizeBytes: storeSceneImages.sizeBytes,
     })
     .from(storeSceneImages)
     .where(eq(storeSceneImages.sceneId, source.id))
@@ -160,7 +174,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const content = rebuildZipWithScenes(
-    Buffer.from(latest.content),
+    Buffer.from(latestContent),
     JSON.stringify(body.scenes, null, 2),
     name,
   );
@@ -196,6 +210,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return jsonError("moderation_unavailable", 503);
   }
 
+  const storedFork = await storeBlob(
+    blobNamespaces.sceneVersion,
+    content,
+    "application/zip",
+    { extension: "zip" },
+  );
+
   const base = slugifyName(name);
   const result = await db.transaction(async (tx) => {
     // Globally unique slug, random suffix on collision (same as publishing).
@@ -219,13 +240,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     await tx.insert(storeSceneVersions).values({
-      content,
       contentType: "application/zip",
       frameosVersion: validated.value.frameosVersion ?? latest.frameosVersion,
+      objectKey: storedFork.objectKey,
       riskFlags: validated.value.riskFlags,
       sceneId: created.id,
-      sha256: sha256Hex(content),
-      sizeBytes: content.length,
+      sha256: storedFork.sha256,
+      sizeBytes: storedFork.sizeBytes,
       version: 1,
     });
 
@@ -237,8 +258,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
         latestVersion: 1,
         previewImage: source.previewImage,
         previewImageHeight: source.previewImageHeight,
+        previewImageSizeBytes: source.previewImageSizeBytes,
         previewImageType: source.previewImageType,
         previewImageWidth: source.previewImageWidth,
+        previewObjectKey: source.previewObjectKey,
         riskFlags: validated.value.riskFlags,
         tags: source.tags,
         updatedAt: new Date(),
@@ -256,8 +279,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
           content: image.content,
           contentType: image.contentType,
           createdAt: image.createdAt,
+          objectKey: image.objectKey,
           position: image.position,
           sceneId: updated.id,
+          sizeBytes: image.sizeBytes,
         })),
       );
     }

@@ -1,6 +1,7 @@
 import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { frameAssetFiles, frameCommands } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
+import { readBlob } from "../../../../../src/lib/blobs";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import {
   enqueueFrameCommand,
@@ -64,8 +65,16 @@ async function outstandingImageGet(db: Db, frameId: string) {
   return row;
 }
 
-function imageResponse(row: { content: Buffer; contentType: string }) {
-  return new NextResponse(new Uint8Array(row.content), {
+async function imageResponse(row: {
+  content: Buffer | null;
+  contentType: string;
+  objectKey: string | null;
+}) {
+  const content = await readBlob(row);
+  if (!content) {
+    return jsonError("image_unavailable", 404);
+  }
+  return new NextResponse(new Uint8Array(content), {
     headers: {
       // The panel cache-busts with ?t=…; the bytes themselves must not stick.
       "cache-control": "no-store",
@@ -126,7 +135,7 @@ export async function GET(
   }
   const canWaitForFresh = frame.status === "active";
   if (cached && !(wantsFresh && needsFetch && canWaitForFresh)) {
-    return imageResponse(cached);
+    return await imageResponse(cached);
   }
   if (frame.status !== "active") {
     return jsonError("frame_not_active", 409);
@@ -140,7 +149,7 @@ export async function GET(
     await sleep(longPollStepMs);
     const row = await cachedImage(db, frame.id);
     if (row && row.updatedAt.getTime() > previousUpdatedAt) {
-      return imageResponse(row);
+      return await imageResponse(row);
     }
     const [refused] = await db
       .select({ error: frameCommands.error })
@@ -159,13 +168,13 @@ export async function GET(
       // rebooting, nothing rendered yet). For a refresh of an existing image
       // the stale copy beats an error page.
       if (cached) {
-        return imageResponse(cached);
+        return await imageResponse(cached);
       }
       return jsonError(refused.error ?? "image_unavailable", 404);
     }
   }
   if (cached) {
-    return imageResponse(cached);
+    return await imageResponse(cached);
   }
   return jsonError("image_unavailable", 504);
 }

@@ -10,6 +10,7 @@
     "prebuild": "node scripts/copy-wasm-assets.mjs && node scripts/copy-editor-assets.mjs && node scripts/copy-frames-app-assets.mjs && node scripts/copy-install-script.mjs && node scripts/generate-ai-context.mjs",
     "build": "next build",
     "prestart": "node scripts/require-database-url.mjs production",
+    "objects:backfill": "node scripts/backfill-object-store.mjs",
     "scene:scrub-transparent-previews": "node scripts/scrub-transparent-previews.mjs",
     "scene:set-preview": "node scripts/set-scene-preview.mjs",
     "scene:sync-preview": "node scripts/sync-scene-preview.mjs",
@@ -22,6 +23,7 @@
   "dependencies": {
     "@frameos-cloud/auth-client": "workspace:*",
     "@frameos-cloud/db": "workspace:*",
+    "aws4fetch": "^1.0.20",
     "drizzle-orm": "^0.45.2",
     "fflate": "^0.8.3",
     "frameos-wasm": "workspace:*",

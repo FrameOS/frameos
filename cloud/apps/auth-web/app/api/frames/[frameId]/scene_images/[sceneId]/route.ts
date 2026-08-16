@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { readBlob } from "../../../../../../src/lib/blobs";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
 import {
   cachedAssetFile,
@@ -119,9 +120,10 @@ export async function GET(
       thumb,
     );
   }
-  if (cached) {
+  const cachedContent = await readBlob(cached);
+  if (cachedContent) {
     // Stale-while-revalidate: the refresh (if any) was queued above.
-    return imageResponse(cached.content, cached.contentType, snapshotBrowserMaxAge);
+    return imageResponse(cachedContent, cached!.contentType, snapshotBrowserMaxAge);
   }
 
   const cover = await storeSceneCover(db, frame.id, sceneId);
@@ -139,8 +141,9 @@ export async function GET(
   while (Date.now() < deadline) {
     await sleep(longPollStepMs);
     const row = await cachedAssetFile(db, frame.id, snapshotPath, thumb);
-    if (row) {
-      return imageResponse(row.content, row.contentType, snapshotBrowserMaxAge);
+    const rowContent = await readBlob(row);
+    if (rowContent) {
+      return imageResponse(rowContent, row!.contentType, snapshotBrowserMaxAge);
     }
     refused = await recentFailedAssetGet(
       db,
