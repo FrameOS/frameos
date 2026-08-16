@@ -1,6 +1,6 @@
 {
-  "frameos": "2026.8.23+1cce030c52bd43819abae4c2ddcc0feefdcc5ad9",
-  "editor": "2026.8.23+94e7615be978a67d45d6579136a9ebb551069cd4",
+  "frameos": "2026.8.24+fe4af1fda280dc0fb44750fcb0b7552430e3bfed",
+  "editor": "2026.8.24+fad3d0ec2fb8b15bfbcc6dafa4edfa0404ccb7e3",
   "remote": "2026.8.23+8e978e9488584aff6f9bd022c6d5d5dbd08796e2",
-  "docker": "2026.8.23+accef9af401f81f6f1755c65b3b6cbbd97f60ac6"
+  "docker": "2026.8.24+02dd41505385679e3af5016d6a8dca647f6365ee"
 }
