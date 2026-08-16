@@ -19,6 +19,7 @@ import {
   type EmbeddedUsbWifiNetwork,
 } from '../../models/embeddedUsbLogsModel'
 import type { FrameType } from '../../types'
+import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
 import { EmbeddedUsbConnectionButton } from './EmbeddedWebFlasher'
 import { isEsp32CloudFrame } from './workspaceSurfaces'
 
@@ -71,7 +72,7 @@ export function EmbeddedUsbSetup({
   title?: string
   description?: string
 }): JSX.Element | null {
-  const webSerialSupported = typeof navigator !== 'undefined' && 'serial' in navigator
+  const webSerialSupported = isWebSerialSupported()
   const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
   const usbLogStreamState = usbLogStreamStatesByFrameId[frame.id]
   const usbLogStreamOpen = isEmbeddedUsbLogStreamOpen(usbLogStreamState)
@@ -220,9 +221,7 @@ export function EmbeddedUsbSetup({
       </div>
 
       {!webSerialSupported ? (
-        <div className="frame-tool-muted text-xs leading-5">
-          USB setup needs Web Serial, which this browser doesn't support. Use Chrome or Edge.
-        </div>
+        <div className="frame-tool-muted text-xs leading-5">{webSerialUnavailableReason('USB setup')}</div>
       ) : !usbConnected ? (
         <div className="flex flex-wrap items-center gap-3">
           <EmbeddedUsbConnectionButton frame={frame} />
