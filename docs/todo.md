@@ -158,13 +158,6 @@ Scene metadata lives in Postgres; the bytes live in object storage (R2 behind
 `cloud-cdn.frameos.net`, a directory under `db/object-storage` in development),
 content-addressed and namespaced.
 
-- **Back-fill the blobs still in Postgres.** Scene zips, previews, gallery
-  images and the frame snapshot cache moved to object storage (R2 in
-  production, `db/object-storage` in development) on 2026-08-17, and the
-  20-version prune went with them. Rows written before migration 0032 keep
-  their bytes in the database and keep serving; `pnpm --filter
-  @frameos-cloud/auth-web objects:backfill -- --apply` walks them across when
-  convenient. Nothing breaks until it runs — it is a chore, not a cutover.
 - **Sweep objects nothing points at.** Deletes drop an object once no row
   references its key, but rows removed outside those paths (a cascade when a
   frame or account is deleted) leave the object behind. A periodic sweep of

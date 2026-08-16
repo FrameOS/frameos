@@ -26,9 +26,9 @@ answer:
   Neither is configured yet. Until it is, treat "someone with the R2 keys
   deletes the bucket" as an unrecovered scenario and keep the keys to the two
   services that need them.
-- **Rows written before 0032 still hold their bytes in Postgres** and are
-  covered by the database backups as before, until
-  `scripts/backfill-object-store.mjs` moves them.
+- **The backfill ran on 2026-08-17**: 183 rows / ~106 MB moved, and the
+  database went from 157 MB to 23 MB. So no blob bytes remain in Postgres, and
+  the database backups no longer cover any of them.
 
 Two independent layers ship to the Hetzner Storage Box
 (`u651211.your-storagebox.de`, SFTP port 23, SSH-key auth):
@@ -186,11 +186,17 @@ so the drill also sums `length(content)` over the blob tables — that forces
 Postgres to read every byte back out of restored TOAST storage — and asserts
 that an empty-but-valid restore fails rather than looking like a pass.
 
-Since migration 0032 that sum only covers the rows that predate the move to
-object storage, and it will fall to zero once the backfill runs. It is still
-worth keeping (it is the check that catches a truncated dump), but a green
-drill no longer means the blobs are recoverable — that question now belongs to
-the object store, and is not yet rehearsed.
+Since the 2026-08-17 backfill that sum is **zero** — there are no blob bytes
+left in Postgres. Keep the check (it is what would catch a truncated dump if
+bytes ever came back), but read it for what it is: a green drill no longer says
+anything about whether the blobs are recoverable. That question belongs to the
+object store, and is not yet rehearsed.
+
+What a full recovery needs today, in order: restore Postgres (either path
+above), then confirm the objects the restored rows point at are still in R2.
+`select object_key from …` across the four blob tables is the list; every key
+is a sha256 of its own content, so an object that is present is by construction
+the right one.
 
 ### Results so far
 

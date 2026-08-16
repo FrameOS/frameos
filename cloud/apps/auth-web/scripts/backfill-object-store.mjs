@@ -115,19 +115,37 @@ const sql = postgres(process.env.DATABASE_URL, {
 
 const store = createStore();
 
+// How many rows to hold in memory at once. These are blobs (up to 8 MB
+// apiece), and the whole point of the exercise is that they no longer have to
+// fit anywhere all at once.
+const PAGE_SIZE = 5;
+
 // (namespace, extension) mirror blobNamespaces in src/lib/blobs.ts. Kept as
 // literals rather than imported so this script stays runnable against an
 // older checkout of the app if a backfill ever has to be replayed.
+//
+// Each job is three queries rather than one cursor, and that is not a style
+// choice: postgres.js runs this with a single connection, a `.cursor()` holds
+// that connection for the whole iteration, and the UPDATE issued inside the
+// loop then queues behind a cursor that cannot advance until the update runs.
+// The result is a process that hangs with Postgres reporting `ClientRead` and
+// nothing moved. Paging instead also keeps the transaction short, which
+// matters when each step waits on an upload to another continent.
 const jobs = [
   {
     contentType: () => "application/zip",
     extension: "zip",
     label: "store_scene_versions",
     namespace: "store/scene-versions",
-    rows: () =>
+    count: () =>
+      sql`select count(*)::int as rows, coalesce(sum(octet_length(content)), 0)::bigint as bytes
+            from store_scene_versions
+           where content is not null and object_key is null`,
+    page: () =>
       sql`select id, content from store_scene_versions
            where content is not null and object_key is null
-           order by created_at asc`,
+           order by created_at asc
+           limit ${PAGE_SIZE}`,
     update: (row, key) =>
       sql`update store_scene_versions
              set object_key = ${key}, content = null
@@ -137,11 +155,16 @@ const jobs = [
     contentType: (row) => row.preview_image_type ?? "image/jpeg",
     label: "store_scenes.preview_image",
     namespace: "store/scene-previews",
-    rows: () =>
+    count: () =>
+      sql`select count(*)::int as rows, coalesce(sum(octet_length(preview_image)), 0)::bigint as bytes
+            from store_scenes
+           where preview_image is not null and preview_object_key is null`,
+    page: () =>
       sql`select id, preview_image as content, preview_image_type
             from store_scenes
            where preview_image is not null and preview_object_key is null
-           order by created_at asc`,
+           order by created_at asc
+           limit ${PAGE_SIZE}`,
     update: (row, key, size) =>
       sql`update store_scenes
              set preview_object_key = ${key},
@@ -153,10 +176,15 @@ const jobs = [
     contentType: (row) => row.content_type ?? "image/jpeg",
     label: "store_scene_images",
     namespace: "store/scene-images",
-    rows: () =>
+    count: () =>
+      sql`select count(*)::int as rows, coalesce(sum(octet_length(content)), 0)::bigint as bytes
+            from store_scene_images
+           where content is not null and object_key is null`,
+    page: () =>
       sql`select id, content, content_type from store_scene_images
            where content is not null and object_key is null
-           order by created_at asc`,
+           order by created_at asc
+           limit ${PAGE_SIZE}`,
     update: (row, key, size) =>
       sql`update store_scene_images
              set object_key = ${key}, size_bytes = ${size}, content = null
@@ -167,10 +195,15 @@ const jobs = [
     label: "frame_asset_files",
     // Per-frame namespace, so the key depends on the row.
     namespace: (row) => `frames/${row.frame_id}/cache`,
-    rows: () =>
+    count: () =>
+      sql`select count(*)::int as rows, coalesce(sum(octet_length(content)), 0)::bigint as bytes
+            from frame_asset_files
+           where content is not null and object_key is null`,
+    page: () =>
       sql`select id, frame_id, content, content_type from frame_asset_files
            where content is not null and object_key is null
-           order by updated_at asc`,
+           order by updated_at asc
+           limit ${PAGE_SIZE}`,
     update: (row, key, size) =>
       sql`update frame_asset_files
              set object_key = ${key}, size_bytes = ${size}, content = null
@@ -187,32 +220,61 @@ const summary = {
   sampleKey: undefined,
 };
 
+function objectKeyFor(job, row, content) {
+  const namespace =
+    typeof job.namespace === "function" ? job.namespace(row) : job.namespace;
+  const digest = createHash("sha256").update(content).digest("hex");
+  return `${namespace}/${digest}${job.extension ? `.${job.extension}` : ""}`;
+}
+
 try {
   for (const job of jobs) {
+    // A dry run only has to answer "how much is left", and one aggregate is a
+    // far cheaper way to ask than reading every blob out of TOAST storage.
+    if (!apply) {
+      const [totals] = await job.count();
+      summary.moved[job.label] = Number(totals?.rows ?? 0);
+      summary.bytes[job.label] = Number(totals?.bytes ?? 0);
+      if (summary.sampleKey === undefined && Number(totals?.rows ?? 0) > 0) {
+        const [sample] = await job.page();
+        if (sample) {
+          summary.sampleKey = objectKeyFor(job, sample, Buffer.from(sample.content));
+        }
+      }
+      continue;
+    }
+
     let moved = 0;
     let bytes = 0;
-    // Cursor in small batches: these are blobs, and the point of the exercise
-    // is that they no longer have to fit anywhere all at once.
-    for await (const rows of job.rows().cursor(5)) {
+    // Page rather than cursor. A moved row stops matching the page's own
+    // WHERE (it now has an object_key), so re-running the same query walks
+    // forward without an offset — and a run interrupted half way resumes
+    // exactly where it stopped.
+    for (;;) {
+      const rows = await job.page();
+      if (rows.length === 0) {
+        break;
+      }
+      let updated = 0;
       for (const row of rows) {
         const content = Buffer.from(row.content);
-        const namespace =
-          typeof job.namespace === "function" ? job.namespace(row) : job.namespace;
-        const digest = createHash("sha256").update(content).digest("hex");
-        const key = `${namespace}/${digest}${job.extension ? `.${job.extension}` : ""}`;
-        moved += 1;
-        bytes += content.length;
+        const key = objectKeyFor(job, row, content);
         summary.sampleKey ??= key;
-        if (!apply) {
-          continue;
-        }
         const existing = await store.head(key);
         if (existing !== content.length) {
           await store.put(key, content, job.contentType(row));
         }
         // `and object_key is null` in every update: if a concurrent write
         // already moved this row, leave its key alone.
-        await job.update(row, key, content.length);
+        const result = await job.update(row, key, content.length);
+        updated += result.count ?? 0;
+        moved += 1;
+        bytes += content.length;
+      }
+      if (updated === 0) {
+        // Nothing in that page could be claimed — another writer owns them.
+        // Stop rather than fetch the same page forever.
+        break;
       }
     }
     summary.moved[job.label] = moved;
