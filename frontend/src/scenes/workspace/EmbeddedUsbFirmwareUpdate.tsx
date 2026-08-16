@@ -20,6 +20,7 @@ import {
   POST_FLASH_BOOT_WAIT_MS,
   appendBrowserFlashLog,
   createUsbLogTerminal,
+  loadEsptoolForFlash,
   recordTransportTrace,
   sleep,
   waitForUsbApiReadyAfterFlash,
@@ -36,7 +37,6 @@ import {
   parseEsp32PartitionTable,
   type FirmwareUpdateWritePlan,
 } from './embeddedFlashImage'
-import { loadEsptool } from './esptoolLoader'
 import { workspaceLogic } from './workspaceLogic'
 
 // USB firmware update for a frame that is ALREADY enrolled — the counterpart
@@ -216,7 +216,7 @@ export function EmbeddedUsbFirmwareUpdate({ frame }: { frame: FrameType }): JSX.
       const plan = firmwareUpdateWritePlan(firmware.bytes)
 
       // Loaded on demand: esptool-js adds ~380KB we only need when flashing.
-      const { ESPLoader, Transport } = await loadEsptool()
+      const { ESPLoader, Transport } = await loadEsptoolForFlash()
       transport = new Transport(port, false)
       traceRecorder = recordTransportTrace(frame.id, transport)
       flashTerminal = createUsbLogTerminal(frame.id)

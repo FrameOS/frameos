@@ -352,7 +352,7 @@ describe("SdImageBuilder", () => {
     // means "no expiry", not "the default one".
     expect(screen.queryByLabelText("Claim code validity")).toBeNull();
     fireEvent.click(
-      screen.getByLabelText(/stop this card from adding frames/i),
+      screen.getByLabelText(/stop this SD card from adding frames/i),
     );
     fireEvent.change(screen.getByLabelText("Claim code validity"), {
       target: { value: "7" },
