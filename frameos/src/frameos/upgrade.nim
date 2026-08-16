@@ -668,12 +668,20 @@ proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
       # Buildroot service files carry image-specific settings (User=root,
       # FRAMEOS_HOME and LD_LIBRARY_PATH pointing into the release); carry them
       # over instead of generating the Raspberry Pi OS variants.
+      #
+      # The INSTALLED unit is the source of truth, not the release directory's
+      # copy: images built before this was fixed staged the two from different
+      # renderers, and the release copy is missing the NetworkManager
+      # Wants=/After= lines that the installed one has. Preferring the release
+      # copy made the upgrade rewrite /etc/systemd/system/frameos.service on
+      # every single run — a write the read-only Buildroot rootfs refuses, and
+      # a needless downgrade of the unit even where it succeeds.
       copyFirstExistingFile(
-        [oldReleaseDir / "frameos.service", "/etc/systemd/system/frameos.service"],
+        ["/etc/systemd/system/frameos.service", oldReleaseDir / "frameos.service"],
         result.frameosReleaseDir / "frameos.service",
       )
       copyFirstExistingFile(
-        [oldRemoteReleaseDir / "frameos-remote.service", "/etc/systemd/system/frameos-remote.service"],
+        ["/etc/systemd/system/frameos-remote.service", oldRemoteReleaseDir / "frameos-remote.service"],
         result.remoteReleaseDir / "frameos-remote.service",
       )
     if not fileExists(result.frameosReleaseDir / "frameos.service"):

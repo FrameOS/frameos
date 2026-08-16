@@ -1668,16 +1668,18 @@ class BuildrootImageBuilder:
                 mtime=0,
             )
         )
+        # Byte-identical to the unit staged into /etc/systemd/system (see
+        # stage_buildroot_frameos_service). It must be: `frameos setup` copies
+        # the release directory's unit over the installed one on every upgrade,
+        # so any difference — this used to miss render_buildroot_frameos_service's
+        # NetworkManager Wants=/After= lines — turns each upgrade into a write
+        # to the read-only rootfs that has no business happening at all.
+        #
         # No console_output: frameos draws to the framebuffer on the same VT,
         # so mirroring its logs to tty1 would scribble over the rendered image.
-        self._write_service(
-            REPO_ROOT / "frameos" / "frameos.service",
-            release_dir / "frameos.service",
-            user="root",
-            environment={
-                "FRAMEOS_HOME": "/srv/frameos/current",
-                "LD_LIBRARY_PATH": "/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib",
-            },
+        (release_dir / "frameos.service").write_text(
+            render_buildroot_frameos_service(self.platform.uses_network_manager),
+            encoding="utf-8",
         )
 
         shutil.copy2(remote_binary, remote_release_dir / "frameos_remote")

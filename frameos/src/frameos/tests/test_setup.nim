@@ -447,3 +447,121 @@ block test_samba_mount_failures_do_not_raise:
     doAssert commands.anyIt(it.contains("mount -a -t cifs"))
   finally:
     resetSetupCommandRunnerForTest()
+
+block test_mount_point_for_path_finds_the_longest_matching_mount:
+  # A Buildroot frame: read-only rootfs, the writable data partition on top.
+  const mounts = """/dev/root / ext4 ro,relatime 0 0
+devtmpfs /dev devtmpfs rw,nosuid 0 0
+/dev/mmcblk0p3 /srv/frameos ext4 rw,noatime 0 0
+/dev/mmcblk0p1 /boot vfat rw,noatime,umask=077 0 0
+"""
+
+  doAssert mountPointForPath(mounts, "/etc/systemd/system/frameos.service") == ("/", true)
+  doAssert mountPointForPath(mounts, "/srv/frameos/logs/upgrade.log") == ("/srv/frameos", false)
+  doAssert mountPointForPath(mounts, "/boot/config.txt") == ("/boot", false)
+  # /srv is on the rootfs; only /srv/frameos is not. Prefix matching must be
+  # per path component, or "/srv/frameos-backup" would resolve to /srv/frameos.
+  doAssert mountPointForPath(mounts, "/srv/frameos-backup/x") == ("/", true)
+  doAssert mountPointForPath(mounts, "relative/path") == ("", false)
+
+block test_mount_point_for_path_handles_escapes_and_overmounts:
+  const mounts = """/dev/root / ext4 rw,relatime 0 0
+/dev/sda1 /mnt/my\040share ext4 ro,relatime 0 0
+/dev/sdb1 /mnt/over ext4 rw 0 0
+/dev/sdc1 /mnt/over ext4 ro 0 0
+"""
+
+  doAssert mountPointForPath(mounts, "/mnt/my share/file") == ("/mnt/my share", true)
+  # Last mount of the same point wins: that is what an overmount does.
+  doAssert mountPointForPath(mounts, "/mnt/over/file") == ("/mnt/over", true)
+  # "rw" must not match a mount whose options merely contain the letters.
+  doAssert mountPointForPath("/dev/root / ext4 rw,errors=remount-ro 0 0\n", "/etc/x") == ("/", false)
+
+block test_writable_mount_remounts_a_read_only_root_and_restores_it:
+  let mountsPath = getTempDir() / ("frameos-mounts-" & $epochTime().int64)
+  writeFile(mountsPath, "/dev/root / ext4 ro,relatime 0 0\n")
+  putEnv("FRAMEOS_PROC_MOUNTS", mountsPath)
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    withWritableMount("/etc/systemd/system/frameos.service"):
+      commands.add("<body>")
+
+    doAssert commands.len == 4
+    doAssert commands[0].endsWith("mount -o remount,rw '/'")
+    doAssert commands[1] == "<body>"
+    doAssert commands[2].endsWith("sync")
+    doAssert commands[3].endsWith("mount -o remount,ro '/'")
+  finally:
+    resetSetupCommandRunnerForTest()
+    delEnv("FRAMEOS_PROC_MOUNTS")
+    removeFile(mountsPath)
+
+block test_writable_mount_restores_the_mount_when_the_body_raises:
+  let mountsPath = getTempDir() / ("frameos-mounts-raise-" & $epochTime().int64)
+  writeFile(mountsPath, "/dev/root / ext4 ro,relatime 0 0\n")
+  putEnv("FRAMEOS_PROC_MOUNTS", mountsPath)
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    var raised = false
+    try:
+      withWritableMount("/etc/timezone"):
+        raise newException(OSError, "boom")
+    except OSError:
+      raised = true
+    doAssert raised
+    doAssert commands.len == 3
+    doAssert commands[2].endsWith("mount -o remount,ro '/'")
+  finally:
+    resetSetupCommandRunnerForTest()
+    delEnv("FRAMEOS_PROC_MOUNTS")
+    removeFile(mountsPath)
+
+block test_writable_mount_is_a_no_op_on_a_writable_filesystem:
+  let mountsPath = getTempDir() / ("frameos-mounts-rw-" & $epochTime().int64)
+  writeFile(mountsPath, "/dev/root / ext4 rw,relatime 0 0\n")
+  putEnv("FRAMEOS_PROC_MOUNTS", mountsPath)
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    withWritableMount("/etc/systemd/system/frameos.service"):
+      discard
+    doAssert commands.len == 0
+  finally:
+    resetSetupCommandRunnerForTest()
+    delEnv("FRAMEOS_PROC_MOUNTS")
+    removeFile(mountsPath)
+
+block test_writable_mount_leaves_the_mount_alone_when_the_remount_fails:
+  # A frame where the remount is refused must still attempt the write, so the
+  # caller reports the real EROFS error instead of a remount failure.
+  let mountsPath = getTempDir() / ("frameos-mounts-fail-" & $epochTime().int64)
+  writeFile(mountsPath, "/dev/root / ext4 ro,relatime 0 0\n")
+  putEnv("FRAMEOS_PROC_MOUNTS", mountsPath)
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("remount,rw"):
+      return ("mount: permission denied", 1)
+    ("", 0)
+  )
+  try:
+    withWritableMount("/etc/systemd/system/frameos.service"):
+      commands.add("<body>")
+    doAssert commands.len == 2
+    doAssert commands[1] == "<body>"
+    doAssert not commands.anyIt(it.contains("remount,ro"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    delEnv("FRAMEOS_PROC_MOUNTS")
+    removeFile(mountsPath)

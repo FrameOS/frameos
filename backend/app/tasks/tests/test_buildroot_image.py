@@ -2155,6 +2155,16 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     )
     assert "StandardOutput=journal+console" not in frameos_service
     assert "StandardError=journal+console" not in frameos_service
+    # `frameos setup` copies the release directory's unit over the installed
+    # one on every upgrade, so the two renderers must agree byte for byte. When
+    # they did not, the release copy was missing the NetworkManager Wants=/
+    # After= lines and each Buildroot upgrade tried to rewrite a file on the
+    # read-only rootfs — which is what made cloud OTA fail outright.
+    installed_root = tmp_path / "installed-unit"
+    stage_buildroot_frameos_service(installed_root, builder.platform.uses_network_manager)
+    assert frameos_service == (
+        installed_root / "etc" / "systemd" / "system" / "frameos.service"
+    ).read_text(encoding="utf-8")
     assert (remote_release_dir / "frameos-remote.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos.service").exists()
     assert not (overlay_dir / "etc" / "systemd" / "system" / "frameos-remote.service").exists()
