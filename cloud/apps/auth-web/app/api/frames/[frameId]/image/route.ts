@@ -7,6 +7,7 @@ import {
   enqueueFrameCommand,
   frameForAccount,
   frameImageAssetPath,
+  markFramePreviewWatched,
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
@@ -112,6 +113,8 @@ export async function GET(
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
+
+  await markFramePreviewWatched(db, frame.id);
 
   const cached = await cachedImage(db, frame.id);
   const now = Date.now();

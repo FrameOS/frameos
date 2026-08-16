@@ -1329,7 +1329,7 @@ describe("store publish and distribution", () => {
     expect(retainedVersions.every((row) => row.objectKey)).toBe(true);
     // Version 1 is still downloadable, which is what the prune used to break.
     const oldest = await downloadScene(
-      request(`/api/store/scenes/${sceneId}/download?version=1`),
+      request(`/api/store/scenes/${sceneId}/download?version=1`, "GET"),
       ctx(sceneId),
     );
     expect(oldest.status).toBe(200);

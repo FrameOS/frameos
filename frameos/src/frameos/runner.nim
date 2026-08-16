@@ -266,9 +266,15 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       var lastRotatedImage = renderResult[0]
       let nextSleep = renderResult[1]
       reclaimRetiredExportedScenes(currentExportedScenesGeneration(), self.logger)
-      if sceneChangedThisCycle or not sceneImageExists(self.frameConfig.assetsPath, currentScene.id):
+      # Refresh the scene's snapshot on a switch, and otherwise whenever the
+      # one on disk has gone stale. Writing it only once per scene — which is
+      # what "not sceneImageExists" alone did — left the workspace showing a
+      # frame's boot render for as long as it stayed on one scene, which is
+      # forever for most frames.
+      if sceneChangedThisCycle or sceneImageIsStale(self.frameConfig.assetsPath, currentScene.id):
         try:
           let savedImage = saveLastSceneImagePng(self.frameConfig.assetsPath, currentScene.id)
+          noteSceneImageSaved()
           self.logger.log(%*{
             "event": "render:sceneImage:saved",
             "sceneId": currentScene.id.string,

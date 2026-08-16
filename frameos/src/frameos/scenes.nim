@@ -383,6 +383,22 @@ proc sceneImageRelativePath*(assetsPath, path: string): string =
 proc sceneImageExists*(assetsPath: string, sceneId: SceneId): bool =
   storedFileExists(sceneImagePath(assetsPath, sceneId.string))
 
+# How old a per-scene snapshot may get before the next render rewrites it.
+#
+# The snapshot used to be written once — on the first render of a scene and on
+# every scene switch — which meant a frame that sits on one scene showed its
+# boot render in the workspace forever. Rewriting on every pass is not the fix
+# either: it is a full-canvas copy plus a PNG encode, and a scene on a
+# sub-second interval would spend most of its time encoding previews nobody
+# asked for. A minute is the compromise: a preview at most a minute behind the
+# panel, and at most one encode a minute however fast the scene renders.
+const SCENE_IMAGE_MAX_AGE_SECONDS* = 60.0
+
+proc sceneImageIsStale*(assetsPath: string, sceneId: SceneId): bool =
+  ## True when the snapshot is missing or older than SCENE_IMAGE_MAX_AGE_SECONDS.
+  let age = storedFileAgeSeconds(sceneImagePath(assetsPath, sceneId.string))
+  age < 0 or age >= SCENE_IMAGE_MAX_AGE_SECONDS
+
 proc removePersistedState*(sceneId: SceneId) =
   if lastPersistedStates.hasKey(sceneId.string):
     lastPersistedStates.delete(sceneId.string)

@@ -7,7 +7,10 @@ import {
   recentFailedAssetGet,
   sceneSnapshotAssetPath,
 } from "../../../../../../src/lib/frame-asset-cache";
-import { frameForAccount } from "../../../../../../src/lib/frames";
+import {
+  frameForAccount,
+  markFramePreviewWatched,
+} from "../../../../../../src/lib/frames";
 import {
   resolveStoreSceneForFrameScene,
   storeSceneCoverImage,
@@ -94,6 +97,12 @@ export async function GET(
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
+
+  // Someone has this frame's scenes on screen. The device's next "render"
+  // announcement is then worth an asset_get; without this stamp the hub
+  // ignores it, and previews only refresh when a tile happens to ask
+  // (lib/frames.ts, previewWatchWindowMs).
+  await markFramePreviewWatched(db, frame.id);
 
   const thumb = request.nextUrl.searchParams.get("thumb") === "1";
   const snapshotPath = sceneSnapshotAssetPath(sceneId);

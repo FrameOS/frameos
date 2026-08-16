@@ -658,6 +658,12 @@ export const frames = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     lastState: jsonb("last_state"),
     lastMetrics: jsonb("last_metrics"),
+    // "Someone had this frame's images on screen, roughly now." Stamped by
+    // every surface that renders a preview, throttled to one write per frame
+    // per 30s, and read by the hub to decide whether a device's "render"
+    // announcement is worth an asset_get. An unwatched frame is never
+    // scraped (lib/frames.ts, previewWatchWindowMs).
+    previewWatchedAt: timestamp("preview_watched_at", { withTimezone: true }),
     // Wake/event schedule pushed to the device via set_schedule (shape per
     // embedded/esp32/main/fos_schedule.h: {events: [...], disabled?}). Stored
     // so the panel can render it and edits survive the device being offline.

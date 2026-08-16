@@ -1129,6 +1129,72 @@ export const frameImageAssetPath = ".frame/image";
 export const maxAssetFilesPerFrame = 64;
 export const maxAssetCacheBytesPerFrame = 24 * 1024 * 1024;
 
+// --- Preview viewer presence ------------------------------------------------
+//
+// The fleet-preview doctrine (docs/cloud-frames.md, "Previews"): the cloud
+// never renders a frame's scenes and never runs a screenshot service. What it
+// may do is keep a copy of the snapshot the DEVICE already writes for itself —
+// and only while a person is actually looking, because the alternative is
+// scraping every frame in every account forever for images nobody opened.
+//
+// "Looking" is one timestamp per frame, stamped by the surfaces that render a
+// frame's images and by an attached browser socket. Everything else reads it.
+
+// How long after the last stamp a frame still counts as watched. Long enough
+// to cover a tab left open between renders, short enough that a closed laptop
+// stops costing the device anything within minutes.
+export const previewWatchWindowMs = 3 * 60 * 1000;
+// The stamp is a write on a hot read path (every tile, every poll), so it is
+// only refreshed this often. Losing one costs a preview that refreshes on the
+// next page load instead of instantly.
+const previewWatchThrottleMs = 30 * 1000;
+
+const lastPreviewWatchWrite = new Map<string, number>();
+
+/**
+ * Record that someone is looking at this frame's images. Cheap by design:
+ * in-process throttle first, then one UPDATE.
+ */
+export async function markFramePreviewWatched(
+  db: FramesDatabase,
+  frameId: string,
+): Promise<void> {
+  const now = Date.now();
+  const previous = lastPreviewWatchWrite.get(frameId) ?? 0;
+  if (now - previous < previewWatchThrottleMs) {
+    return;
+  }
+  lastPreviewWatchWrite.set(frameId, now);
+  // Bounded: a fleet larger than this just loses throttling, not correctness.
+  if (lastPreviewWatchWrite.size > 10_000) {
+    lastPreviewWatchWrite.clear();
+  }
+  try {
+    await db
+      .update(frames)
+      .set({ previewWatchedAt: new Date(now) })
+      .where(eq(frames.id, frameId));
+  } catch (error) {
+    // Presence is an optimisation; a failed stamp must never fail the request
+    // that was actually asked for.
+    logWarn("frames.preview_watch_failed", { error: String(error), frameId });
+  }
+}
+
+export function framePreviewIsWatched(
+  frame: { previewWatchedAt: Date | null },
+  now = Date.now(),
+): boolean {
+  return (
+    frame.previewWatchedAt !== null &&
+    now - frame.previewWatchedAt.getTime() <= previewWatchWindowMs
+  );
+}
+
+export function resetFramePreviewWatchThrottleForTests() {
+  lastPreviewWatchWrite.clear();
+}
+
 export interface FrameAssetEntry {
   path: string;
   size: number;
