@@ -16,19 +16,32 @@ when defined(frameosDriverLibrary):
     sharedHostLogHook = logHook
     sharedHostSendEventHook = sendEventHook
 
+  # Serialise before the call, never after: the JSON text has to be a local
+  # whose lifetime spans the callee, and `($node).cstring` as an argument
+  # expression is a temporary the compiler is free to free first. The host
+  # copies what it needs before returning (frameos/driver_abi).
+
   # Send an event to the current scene
   proc sendEvent*(event: string, payload: JsonNode) {.gcsafe.} =
     if not sharedHostSendEventHook.isNil:
-      sharedHostSendEventHook(none(SceneId), event, payload)
+      let payloadText = $payload
+      sharedHostSendEventHook(nil, event.cstring, payloadText.cstring)
 
   # Send an event to a specific scene
   proc sendEvent*(scene: Option[SceneId], event: string, payload: JsonNode) {.gcsafe.} =
     if not sharedHostSendEventHook.isNil:
-      sharedHostSendEventHook(scene, event, payload)
+      let payloadText = $payload
+      let sceneText = if scene.isSome: scene.get().string else: ""
+      sharedHostSendEventHook(
+        if scene.isSome: sceneText.cstring else: nil,
+        event.cstring,
+        payloadText.cstring,
+      )
 
   proc log*(event: JsonNode) {.gcsafe.} =
     if not sharedHostLogHook.isNil:
-      sharedHostLogHook(event)
+      let eventText = $event
+      sharedHostLogHook(eventText.cstring)
 
   proc debug*(message: string) =
     log(%*{"event": "debug", "message": message})

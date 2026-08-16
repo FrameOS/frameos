@@ -655,7 +655,11 @@ proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
     discard runSetupCommand("install -m 0755 " & shellQuote(remoteBinary) & " " & shellQuote(result.remoteReleaseDir / "frameos_remote"))
 
     copyDirIfExists(artifactRoot / "drivers", result.frameosReleaseDir / "drivers")
-    copyDirIfExists(artifactRoot / "scenes", result.frameosReleaseDir / "scenes")
+    # No `scenes/` any more: release archives never carried scene `.so`s, and
+    # the modes that built them are gone. The stale `current/scenes` entry in
+    # LD_LIBRARY_PATH stays — a directory that does not exist costs a linker
+    # nothing, and rewriting it would rewrite the installed unit (and the
+    # published base images' hashes) for no gain.
     if dirExists(artifactRoot / "vendor"):
       createDir(frameosInstallDir() / "vendor")
       discard runSetupCommand("cp -R " & shellQuote(artifactRoot / "vendor" / ".") & " " & shellQuote(frameosInstallDir() / "vendor" / ""))

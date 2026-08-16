@@ -260,7 +260,10 @@ proc cloneDriverContext(source: DriverContext): DriverContext =
       logger.enabled = source.logger.enabled
       logger.debug = source.logger.debug
     if not source.frameConfig.isNil:
-      let sourceConfig = source.frameConfig
+      # {.cursor.}: a non-owning view of a ref THIS runtime did not allocate.
+      # A plain `let` would incref and then decref it inside the library's own
+      # ORC runtime, which is the whole hazard (frameos/driver_abi).
+      let sourceConfig {.cursor.} = source.frameConfig
       config.mode = sourceConfig.mode
       config.device = sourceConfig.device
       config.debug = sourceConfig.debug
@@ -446,11 +449,32 @@ var setupLibraries: seq[LibHandle] = @[]
 proc availableDriverNames*(): seq[string] =
   return {available_driver_names_source}
 
-proc hostLog(event: JsonNode) {{.cdecl, gcsafe.}} =
-  hostChannels.log(event)
+proc hostLog(event: cstring) {{.cdecl, gcsafe.}} =
+  ## Borrowed JSON text from the driver `.so` (frameos/driver_abi): parse it
+  ## into THIS runtime's heap before it can reach a channel, and never keep
+  ## the cstring — the buffer belongs to the library and is gone the moment
+  ## this returns.
+  if event.isNil:
+    return
+  let text = $event
+  var payload: JsonNode
+  try:
+    payload = parseJson(text)
+  except CatchableError:
+    payload = %*{{"event": "driver:log:unparseable", "raw": text}}
+  hostChannels.log(payload)
 
-proc hostSendEvent(scene: Option[SceneId], event: string, payload: JsonNode) {{.cdecl, gcsafe.}} =
-  hostChannels.sendEvent(scene, event, payload)
+proc hostSendEvent(sceneId: cstring, event: cstring, payload: cstring) {{.cdecl, gcsafe.}} =
+  if event.isNil:
+    return
+  let sceneText = if sceneId.isNil: "" else: $sceneId
+  let scene = if sceneText.len == 0: none(SceneId) else: some(sceneText.SceneId)
+  var parsed: JsonNode
+  try:
+    parsed = if payload.isNil: newJObject() else: parseJson($payload)
+  except CatchableError:
+    parsed = newJObject()
+  hostChannels.sendEvent(scene, $event, parsed)
 
 proc driverLibraryPath(spec: DriverSpec): string =
   getAppDir() / "drivers" / spec.libraryName
@@ -584,7 +608,10 @@ def write_driver_library_nim(driver: Driver) -> str:
             setup_import = f"import drivers/{driver.setup_import_path} as {setup_driver_alias}\n"
         setup_proc = f"""
 proc frameos_driver_setup*(driverContextPtr: pointer): bool {{.cdecl, exportc, dynlib.}} =
-  let hostContext = cast[DriverContext](driverContextPtr)
+  ## The host owns `driverContextPtr`. Borrowed, never owned: a plain `let`
+  ## binding would give this library's ORC runtime a destructor for a ref the
+  ## host allocated (frameos/driver_abi).
+  let hostContext {{.cursor.}} = cast[DriverContext](driverContextPtr)
   driverContextInstance = cloneDriverContext(hostContext)
   result = {setup_driver_alias}.setup(driverContextInstance).rebootRequired
   syncHostDriverContext(hostContext, driverContextInstance)
@@ -649,7 +676,7 @@ var
 
 proc frameos_driver_init*(driverContextPtr: pointer, logHook: HostLogProc, sendEventHook: HostSendEventProc): pointer {{.cdecl, exportc, dynlib.}} =
   setSharedHostCallbacks(logHook, sendEventHook)
-  let hostContext = cast[DriverContext](driverContextPtr)
+  let hostContext {{.cursor.}} = cast[DriverContext](driverContextPtr)
   driverContextInstance = cloneDriverContext(hostContext)
   driverInstance = {driver.name}Driver.init(driverContextInstance)
   syncHostDriverContext(hostContext, driverContextInstance)

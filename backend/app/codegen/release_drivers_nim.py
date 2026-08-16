@@ -141,11 +141,32 @@ var setupLibraries: seq[LibHandle] = @[]
 proc availableDriverNames*(): seq[string] =
   return {available_driver_names_source}
 
-proc hostLog(event: JsonNode) {{.cdecl, gcsafe.}} =
-  hostChannels.log(event)
+proc hostLog(event: cstring) {{.cdecl, gcsafe.}} =
+  ## Borrowed JSON text from the driver `.so` (frameos/driver_abi): parse it
+  ## into THIS runtime's heap before it can reach a channel, and never keep
+  ## the cstring — the buffer belongs to the library and is gone the moment
+  ## this returns.
+  if event.isNil:
+    return
+  let text = $event
+  var payload: JsonNode
+  try:
+    payload = parseJson(text)
+  except CatchableError:
+    payload = %*{{"event": "driver:log:unparseable", "raw": text}}
+  hostChannels.log(payload)
 
-proc hostSendEvent(scene: Option[SceneId], event: string, payload: JsonNode) {{.cdecl, gcsafe.}} =
-  hostChannels.sendEvent(scene, event, payload)
+proc hostSendEvent(sceneId: cstring, event: cstring, payload: cstring) {{.cdecl, gcsafe.}} =
+  if event.isNil:
+    return
+  let sceneText = if sceneId.isNil: "" else: $sceneId
+  let scene = if sceneText.len == 0: none(SceneId) else: some(sceneText.SceneId)
+  var parsed: JsonNode
+  try:
+    parsed = if payload.isNil: newJObject() else: parseJson($payload)
+  except CatchableError:
+    parsed = newJObject()
+  hostChannels.sendEvent(scene, $event, parsed)
 
 proc isInkyButtonDevice(device: string): bool =
   device in [
