@@ -158,11 +158,7 @@ Three Raspberry Pi platforms ship with published base images: `raspberry-pi-64`
 (Zero 2 W / Pi 3 / Pi 4, the default), `raspberry-pi-32` (every ARMv6 board:
 Zero, Zero W, Pi 1, CM1) and `raspberry-pi-5` (Pi 5 / CM5).
 
-- **Prune the retired platforms from the base-image manifest.**
-  `tools/buildroot-images/manifest.json` still carries `raspberry-pi-zero-2-w`
-  and `raspberry-pi-zero-w` entries pinned at 2026.8.7. Both keys folded into
-  the two current ones and nothing offers them any more, so they are stale rows
-  that a reader has to work out are dead. *Small.*
+Nothing scheduled.
 
 ---
 
