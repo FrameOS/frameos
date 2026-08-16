@@ -94,17 +94,26 @@ Three Raspberry Pi platforms ship with published base images:
 (every ARMv6 board: Zero, Zero W, Pi 1, CM1) and `raspberry-pi-5` (Pi 5 /
 CM5).
 
-- **Drivers own pixie refs they did not allocate** — the shared driver
-  libraries each carry their own ARC/ORC runtime, and
-  `frameos_driver_render` hands them the host's `Image` via
-  `cast[Image](image)`. Anything in a driver that copies that ref (a plain
-  `var renderImage = image` will do it) has a second cycle collector
-  bookkeeping one object; the host then dies releasing the image at the end
-  of its render loop, with a stack that names only `runner.nim`. Cost one
-  crash-looping Pi 5 already (see the framebuffer note in
-  `drivers/frameBuffer/frameBuffer.nim`). The real fix is a borrowed,
-  non-owning view across the ABI rather than a cast — until then, drivers
-  must not take owning copies of the rendered image.
+- **Refs crossing the driver/scene `.so` ABI are borrowed, never owned** —
+  every shared library carries its own ORC runtime, so a ref that one runtime
+  allocated must never be incref/decref'd by the other *if ORC considers its
+  type cyclic*: the non-final decref registers the object in the caller's
+  cycle roots, the owner's final decref unregisters it from a different list,
+  and the owner dies in `unregisterCycle` (stack names only `runner.nim`).
+  Acyclic types are safe on plain refcounts. This is why v2026.8.17-.23
+  crash-looped every HDMI/HyperPixel/Inky frame: the pixie image-views fork
+  added `root: Image`, making `Image` cyclic overnight; fixed by
+  `Image* {.acyclic.}` in the fork (110778c) plus no owning copies in
+  `frameBuffer.nim`/`inky.nim`. Still unaudited and still only "works because
+  nobody holds on to it": `JsonNode` log/event payloads the driver `.so`
+  hands to the host callbacks (`hostLog`/`hostSendEvent`; cyclic type,
+  survives because the host only channel-copies and never keeps the ref),
+  the host `DriverContext` read by `cloneDriverContext` in
+  `frameos_driver_setup`, and — much larger — the `shared`/`shared-scenes`
+  compilation modes, where scene `.so`s pass `FrameScene`, `JsonNode` and
+  render contexts both ways. The real fix is a borrowed, non-owning view (or
+  serialised payloads) across the ABI rather than a cast; until then no
+  driver or scene library may store or copy a ref it did not allocate.
 - **Next base-image rebuild drops ImageMagick** — the defconfig no longer
   selects `BR2_PACKAGE_IMAGEMAGICK` (the runtime is Pixie-only), but the
   published base images still carry it. `buildroot-base-image.yml` was
