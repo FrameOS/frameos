@@ -112,6 +112,7 @@ import frameos/driver_context as driverContext
 import frameos/device_setup
 import frameos/channels as hostChannels
 import frameos/driver_abi
+import frameos/driver_render_hint
 {newline.join(setup_imports)}
 
 type
