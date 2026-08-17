@@ -145,6 +145,11 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
       "Assets",
       "Logs",
       "Reboot",
+      // Power belongs to the ESP32 profile alone: the Pi runtime's allowlist
+      // has no power keys, so pushing them would refuse the whole save. Its
+      // controls carry no form `name`, so only a heading check catches it —
+      // which is how it slipped through the first version of this file.
+      "Power",
     ]) {
       expect(
         screen.queryByText(heading),
@@ -155,6 +160,12 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
 });
 
 describe("the Settings panel on a cloud-managed ESP32", () => {
+  it("keeps Power, which only its firmware consumes", () => {
+    renderPanel(cloudFrame("esp32-s3"));
+
+    expect(screen.queryByText("Power")).toBeTruthy();
+  });
+
   it("keeps its narrower set: no timezone or debug the firmware ignores", () => {
     renderPanel(cloudFrame("esp32-s3"));
 

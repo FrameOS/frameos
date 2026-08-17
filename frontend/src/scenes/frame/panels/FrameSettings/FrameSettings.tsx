@@ -1647,16 +1647,23 @@ export function FrameSettings({
                   : 'These are the settings a cloud-managed frame accepts. Everything else this frame runs on — its panel and display driver, network and WiFi, GPIO buttons, mount points, palette, error behaviour and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
               </p>
             </div>
-            <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
-              <H6 id="frame-settings-power">Power</H6>
-            </div>
-            <div className="pl-2 @md:pl-8">
-              <PowerSettingsFields
-                value={cloudPowerSettings}
-                onChange={setCloudPowerSettings}
-                footnote="Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings push. Update the frame first if saving fails."
-              />
-            </div>
+            {/* ESP32 only. The Pi runtime's CLOUD_SETTINGS_ALLOWLIST does not
+                know the power keys, so pushing them at a Linux frame refuses
+                the whole verb — every other setting in the same save included. */}
+            {esp32CloudProfile ? (
+              <>
+                <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
+                  <H6 id="frame-settings-power">Power</H6>
+                </div>
+                <div className="pl-2 @md:pl-8">
+                  <PowerSettingsFields
+                    value={cloudPowerSettings}
+                    onChange={setCloudPowerSettings}
+                    footnote="Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings push. Update the frame first if saving fails."
+                  />
+                </div>
+              </>
+            ) : null}
           </>
         ) : null}
         {/* Cloud-only, and above the fold on both profiles: "why is my scene
