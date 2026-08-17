@@ -52,6 +52,55 @@ export function getAppOrigins() {
   ]);
 }
 
+/**
+ * The origin the browser actually used, for URLs that have to work outside
+ * this process.
+ *
+ * `new URL(request.url).origin` cannot answer that question. Behind nginx,
+ * Next reports the address it is listening on, which in production is
+ * `https://localhost:3000` — so anything built from it points at a host only
+ * the server can reach. That shipped: /install.sh stamped
+ * FRAMEOS_CLOUD_URL_DEFAULT="https://localhost:3000" into the installer, and
+ * the FrameOS login redirect sent people to localhost.
+ *
+ * The Host header does carry the truth, but trusting it verbatim would let
+ * anyone able to set it stamp their own hostname into an install command
+ * piped to a shell. So it is matched against the origins this deployment has
+ * configured, and anything unrecognised falls back to the cloud origin.
+ */
+export function getPublicOrigin(request: {
+  headers: Headers;
+  url: string;
+}): string {
+  const header =
+    request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "";
+  // A proxy chain can leave a list; the first entry is the client's.
+  const host = header.split(",")[0]?.trim().toLowerCase() ?? "";
+  const ownOrigin = safeOrigin(request.url);
+  // No Host header means nothing is proxying us, so the URL this process was
+  // asked for is the whole truth — that is the development case, Next serving
+  // a LAN address directly so a frame can enrol against a laptop.
+  if (!host) {
+    return ownOrigin ?? new URL(getCloudBaseUrl()).origin;
+  }
+  // Otherwise the header is only trusted when it names an origin this
+  // deployment has configured, or the one this process is itself serving.
+  for (const origin of [...getAppOrigins(), ownOrigin]) {
+    if (origin && new URL(origin).host.toLowerCase() === host) {
+      return origin;
+    }
+  }
+  return new URL(getCloudBaseUrl()).origin;
+}
+
+function safeOrigin(url: string): string | undefined {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 function pathMatchesAccountFrames(path: string) {
   return path === "/account/frames" || path.startsWith("/account/frames/");
 }

@@ -33,9 +33,18 @@ describe("GET /api/fonts/[file]", () => {
   it("points at the static copy rather than streaming it through Node", async () => {
     const response = await getFile(...fileRequest("CascadiaMono.ttf"));
     expect(response.status).toBe(307);
-    expect(new URL(response.headers.get("location")!).pathname).toBe(
-      "/fonts/CascadiaMono.ttf",
-    );
+    expect(response.headers.get("location")).toBe("/fonts/CascadiaMono.ttf");
+  });
+
+  it("redirects relatively, never to the origin the server sees", async () => {
+    // Production caught this one: an absolute Location built from request.url
+    // is https://localhost:3000/… behind nginx, so every font 404s at an
+    // address only the server can reach.
+    const response = await getFile(...fileRequest("CascadiaMono.ttf"));
+    const location = response.headers.get("location")!;
+    expect(location.startsWith("/")).toBe(true);
+    expect(location).not.toContain("localhost");
+    expect(location).not.toMatch(/^https?:/);
   });
 
   it("404s a name that is not in the catalogue", async () => {

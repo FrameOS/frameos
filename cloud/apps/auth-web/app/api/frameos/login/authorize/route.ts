@@ -7,6 +7,7 @@ import {
 import { NextRequest, NextResponse } from "next/server";
 import { linkedClientHasScope } from "../../../../../src/lib/backend-auth";
 import { requireDatabase } from "../../../../../src/lib/device-flow";
+import { getPublicOrigin } from "../../../../../src/lib/env";
 import {
   loginCodeExpiresInSeconds,
   verifyFrameosLoginRequestToken,
@@ -18,19 +19,22 @@ import { readSession } from "../../../../../src/lib/session";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
+  // Both redirects below go to our own /login. request.url would build them
+  // against the address Next listens on — in production that sent people to
+  // https://localhost:3000/login, so signing in from a frame dead-ended for
+  // anyone without a session already.
+  const origin = getPublicOrigin(request);
   const requestToken = request.nextUrl.searchParams.get("request") ?? "";
   const loginRequest = await verifyFrameosLoginRequestToken(requestToken);
   if (!loginRequest) {
-    return NextResponse.redirect(
-      new URL("/login?error=invalid_state", request.url),
-    );
+    return NextResponse.redirect(new URL("/login?error=invalid_state", origin));
   }
 
   const session = await readSession();
   if (!session?.accountId) {
     const returnTo = `/api/frameos/login/authorize?request=${encodeURIComponent(requestToken)}`;
     return NextResponse.redirect(
-      new URL(`/login?return_to=${encodeURIComponent(returnTo)}`, request.url),
+      new URL(`/login?return_to=${encodeURIComponent(returnTo)}`, origin),
     );
   }
 

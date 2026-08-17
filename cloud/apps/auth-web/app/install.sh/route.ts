@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { NextRequest, NextResponse } from "next/server";
+import { getPublicOrigin } from "../../src/lib/env";
 
 export const runtime = "nodejs";
 
@@ -83,8 +84,15 @@ export async function GET(request: NextRequest) {
 
   // The frame will POST its enrollment here, so it must be the origin the user
   // actually reached us on — a LAN IP during development, the public hostname
-  // in production — not a configured guess.
-  const origin = new URL(request.url).origin;
+  // in production.
+  //
+  // Not from request.url: behind nginx that is the address Next listens on, so
+  // production served every installer with
+  // FRAMEOS_CLOUD_URL_DEFAULT="https://localhost:3000" — a frame enrolling
+  // against itself. getPublicOrigin reads the forwarded host and checks it
+  // against the origins this deployment has configured, which also stops a
+  // spoofed Host from writing a hostname into a command people pipe to a shell.
+  const origin = getPublicOrigin(request);
   let stamped = script.replace(
     line,
     `FRAMEOS_CLOUD_URL_DEFAULT="${origin}" ${originAnchor}`,
