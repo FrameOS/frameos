@@ -1,0 +1,493 @@
+{
+  "fonts": [
+    {
+      "file": "CascadiaMono.ttf",
+      "italic": false,
+      "name": "Cascadia Mono",
+      "size": 714804,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "CascadiaMonoItalic.ttf",
+      "italic": true,
+      "name": "Cascadia Mono",
+      "size": 524380,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "ComicRelief-Bold.ttf",
+      "italic": false,
+      "name": "Comic Relief",
+      "size": 80704,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "ComicRelief.ttf",
+      "italic": false,
+      "name": "Comic Relief",
+      "size": 70516,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "CormorantGaramond-Bold.ttf",
+      "italic": false,
+      "name": "Cormorant Garamond",
+      "size": 685776,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "CormorantGaramond-BoldItalic.ttf",
+      "italic": true,
+      "name": "Cormorant Garamond",
+      "size": 414744,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "CormorantGaramond-Italic.ttf",
+      "italic": true,
+      "name": "Cormorant Garamond",
+      "size": 413600,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "CormorantGaramond-Light.ttf",
+      "italic": false,
+      "name": "Cormorant Garamond",
+      "size": 687700,
+      "weight": 300,
+      "weight_title": "Light"
+    },
+    {
+      "file": "CormorantGaramond-LightItalic.ttf",
+      "italic": true,
+      "name": "Cormorant Garamond",
+      "size": 415544,
+      "weight": 300,
+      "weight_title": "Light"
+    },
+    {
+      "file": "CormorantGaramond-Medium.ttf",
+      "italic": false,
+      "name": "Cormorant Garamond",
+      "size": 685472,
+      "weight": 500,
+      "weight_title": "Medium"
+    },
+    {
+      "file": "CormorantGaramond-MediumItalic.ttf",
+      "italic": true,
+      "name": "Cormorant Garamond",
+      "size": 413748,
+      "weight": 500,
+      "weight_title": "Medium"
+    },
+    {
+      "file": "CormorantGaramond-Regular.ttf",
+      "italic": false,
+      "name": "Cormorant Garamond",
+      "size": 686664,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "CormorantGaramond-SemiBold.ttf",
+      "italic": false,
+      "name": "Cormorant Garamond",
+      "size": 685732,
+      "weight": 600,
+      "weight_title": "Semibold"
+    },
+    {
+      "file": "CormorantGaramond-SemiBoldItalic.ttf",
+      "italic": true,
+      "name": "Cormorant Garamond",
+      "size": 413908,
+      "weight": 600,
+      "weight_title": "Semibold"
+    },
+    {
+      "file": "FiraGO-Bold.ttf",
+      "italic": false,
+      "name": "FiraGO",
+      "size": 807140,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "FiraGO-BoldItalic.ttf",
+      "italic": true,
+      "name": "FiraGO",
+      "size": 813028,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "FiraGO-Book.ttf",
+      "italic": false,
+      "name": "FiraGO",
+      "size": 805308,
+      "weight": 350,
+      "weight_title": "Book"
+    },
+    {
+      "file": "FiraGO-BookItalic.ttf",
+      "italic": true,
+      "name": "FiraGO",
+      "size": 811792,
+      "weight": 350,
+      "weight_title": "Book"
+    },
+    {
+      "file": "FiraGO-ExtraBold.ttf",
+      "italic": false,
+      "name": "FiraGO",
+      "size": 805876,
+      "weight": 800,
+      "weight_title": "Extrabold"
+    },
+    {
+      "file": "FiraGO-ExtraBoldItalic.ttf",
+      "italic": true,
+      "name": "FiraGO",
+      "size": 812624,
+      "weight": 800,
+      "weight_title": "Extrabold"
+    },
+    {
+      "file": "FiraGO-ExtraLight.ttf",
+      "italic": false,
+      "name": "FiraGO",
+      "size": 805744,
+      "weight": 200,
+      "weight_title": "Extralight"
+    },
+    {
+      "file": "FiraGO-ExtraLightItalic.ttf",
+      "italic": true,
+      "name": "FiraGO",
+      "size": 813732,
+      "weight": 200,
+      "weight_title": "Extralight"
+    },
+    {
+      "file": "FiraGO-Heavy.ttf",
+      "italic": false,
+      "name": "FiraGO",
+      "size": 719748,
+      "weight": 900,
+      "weight_title": "Heavy"
+    },
+    {
+      "file": "FiraGO-HeavyItalic.ttf",
+      "italic": true,
+      "name": "FiraGO",
+      "size": 730912,
+      "weight": 900,
+      "weight_title": "Heavy"
+    },
+    {
+      "file": "FiraGO-Italic.ttf",
+      "italic": true,
+      "name": "FiraGO",
+      "size": 813116,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "FiraGO-Light.ttf",
+      "italic": false,
+      "name": "FiraGO",
+      "size": 805292,
+      "weight": 300,
+      "weight_title": "Light"
+    },
+    {
+      "file": "FiraGO-LightItalic.ttf",
+      "italic": true,
+      "name": "FiraGO",
+      "size": 812940,
+      "weight": 300,
+      "weight_title": "Light"
+    },
+    {
+      "file": "FiraGO-Medium.ttf",
+      "italic": false,
+      "name": "FiraGO",
+      "size": 806400,
+      "weight": 500,
+      "weight_title": "Medium"
+    },
+    {
+      "file": "FiraGO-MediumItalic.ttf",
+      "italic": true,
+      "name": "FiraGO",
+      "size": 813936,
+      "weight": 500,
+      "weight_title": "Medium"
+    },
+    {
+      "file": "FiraGO-Regular.ttf",
+      "italic": false,
+      "name": "FiraGO",
+      "size": 804888,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "FiraGO-SemiBold.ttf",
+      "italic": false,
+      "name": "FiraGO",
+      "size": 806684,
+      "weight": 600,
+      "weight_title": "Semibold"
+    },
+    {
+      "file": "FiraGO-SemiBoldItalic.ttf",
+      "italic": true,
+      "name": "FiraGO",
+      "size": 813732,
+      "weight": 600,
+      "weight_title": "Semibold"
+    },
+    {
+      "file": "FiraGO-Thin.ttf",
+      "italic": false,
+      "name": "FiraGO",
+      "size": 793404,
+      "weight": 100,
+      "weight_title": "Thin"
+    },
+    {
+      "file": "FiraGO-ThinItalic.ttf",
+      "italic": true,
+      "name": "FiraGO",
+      "size": 802064,
+      "weight": 100,
+      "weight_title": "Thin"
+    },
+    {
+      "file": "Galindo-Regular.ttf",
+      "italic": false,
+      "name": "Galindo",
+      "size": 56696,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "LiberationMono-Bold.ttf",
+      "italic": false,
+      "name": "Liberation Mono",
+      "size": 307996,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "LiberationMono-BoldItalic.ttf",
+      "italic": true,
+      "name": "Liberation Mono",
+      "size": 284068,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "LiberationMono-Italic.ttf",
+      "italic": true,
+      "name": "Liberation Mono",
+      "size": 281536,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "LiberationMono-Regular.ttf",
+      "italic": false,
+      "name": "Liberation Mono",
+      "size": 319508,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "LiberationSans-Bold.ttf",
+      "italic": false,
+      "name": "Liberation Sans",
+      "size": 414456,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "LiberationSans-BoldItalic.ttf",
+      "italic": true,
+      "name": "Liberation Sans",
+      "size": 408996,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "LiberationSans-Italic.ttf",
+      "italic": true,
+      "name": "Liberation Sans",
+      "size": 415816,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "LiberationSans-Regular.ttf",
+      "italic": false,
+      "name": "Liberation Sans",
+      "size": 410712,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "LiberationSerif-Bold.ttf",
+      "italic": false,
+      "name": "Liberation Serif",
+      "size": 370096,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "LiberationSerif-BoldItalic.ttf",
+      "italic": true,
+      "name": "Liberation Serif",
+      "size": 376772,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "LiberationSerif-Italic.ttf",
+      "italic": true,
+      "name": "Liberation Serif",
+      "size": 375632,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "LiberationSerif-Regular.ttf",
+      "italic": false,
+      "name": "Liberation Serif",
+      "size": 393576,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "NotoColorEmoji.ttf",
+      "italic": false,
+      "name": "Noto Color Emoji",
+      "size": 10673480,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "PTSans-Bold.ttf",
+      "italic": false,
+      "name": "PT Sans",
+      "size": 288340,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "PTSans-BoldItalic.ttf",
+      "italic": true,
+      "name": "PT Sans",
+      "size": 210224,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "PTSans-Italic.ttf",
+      "italic": true,
+      "name": "PT Sans",
+      "size": 270920,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "PTSans-Regular.ttf",
+      "italic": false,
+      "name": "PT Sans",
+      "size": 278612,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "Peralta-Regular.ttf",
+      "italic": false,
+      "name": "Peralta",
+      "size": 57968,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "Ubuntu-Bold.ttf",
+      "italic": false,
+      "name": "Ubuntu",
+      "size": 270164,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "Ubuntu-BoldItalic.ttf",
+      "italic": true,
+      "name": "Ubuntu",
+      "size": 283444,
+      "weight": 700,
+      "weight_title": "Bold"
+    },
+    {
+      "file": "Ubuntu-Italic.ttf",
+      "italic": true,
+      "name": "Ubuntu",
+      "size": 326932,
+      "weight": 400,
+      "weight_title": "Regular"
+    },
+    {
+      "file": "Ubuntu-Light.ttf",
+      "italic": false,
+      "name": "Ubuntu",
+      "size": 362552,
+      "weight": 300,
+      "weight_title": "Light"
+    },
+    {
+      "file": "Ubuntu-LightItalic.ttf",
+      "italic": true,
+      "name": "Ubuntu",
+      "size": 350208,
+      "weight": 300,
+      "weight_title": "Light"
+    },
+    {
+      "file": "Ubuntu-Medium.ttf",
+      "italic": false,
+      "name": "Ubuntu",
+      "size": 285136,
+      "weight": 500,
+      "weight_title": "Medium"
+    },
+    {
+      "file": "Ubuntu-MediumItalic.ttf",
+      "italic": true,
+      "name": "Ubuntu",
+      "size": 309648,
+      "weight": 500,
+      "weight_title": "Medium"
+    },
+    {
+      "file": "Ubuntu-Regular.ttf",
+      "italic": false,
+      "name": "Ubuntu",
+      "size": 299684,
+      "weight": 400,
+      "weight_title": "Regular"
+    }
+  ],
+  "total_bytes": 41574824
+}

@@ -652,27 +652,26 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     useActions(assetsLogic(assetsLogicProps))
   const { toggleShowSystemFolders, toggleShowHiddenFiles } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
-  // Font sync copies the BACKEND's font store — the faces bundled with the
-  // repo plus the project's uploaded ones — onto the frame. Only a self-hosted
-  // backend has such a store, so on the cloud and the on-device panel there is
-  // nothing to sync from.
-  //
-  // Hiding the action there was worse than useless: "where is Sync fonts" got
-  // no answer, and the thing that DOES work went unmentioned. Every control
-  // plane can write assets (the cloud speaks asset_put/asset_mkdir/…), and a
-  // font dropped into fonts/ lands exactly where sync would have put it —
-  // which is where the renderer looks (utils/font.nim: {assets}/fonts/<name>,
+  // Font sync copies a control plane's font store onto the frame, into the
+  // fonts/ directory the renderer reads (utils/font.nim: {assets}/fonts/<name>,
   // one parsed face at a time on embedded).
   //
-  // So the action is always offered, and says why when it cannot run.
+  // A backend syncs the faces bundled with the repo plus the project's own
+  // uploads, over SSH. The cloud has no project asset store, so it syncs the
+  // bundled set only, one asset_put per font — minutes of work it streams
+  // progress for. The on-device panel is the only place with nothing to sync
+  // FROM: it is the device.
+  //
+  // The action is always offered and says why when it cannot run, because
+  // hiding it answered no one's "where is Sync fonts".
   const readOnly = false
   const syncDisabledReason = isVirtualFrame(frame)
     ? 'Virtual frames render in your browser, with the fonts bundled into the renderer.'
-    : workspaceMode() !== 'backend'
-      ? 'Fonts sync from a self-hosted backend’s font store, which this control plane does not have. Upload a .ttf into the fonts/ folder here instead — the frame reads the same place.'
-      : isEmbeddedHardwareFrame(frame) && storageUnmounted
-        ? 'No SD card in this frame, so fonts have nowhere to go. Insert one and refresh.'
-        : null
+    : workspaceMode() === 'frameAdmin'
+    ? 'This panel runs on the frame itself, so there is no font store to copy from. Upload a .ttf into the fonts/ folder here instead — the renderer reads the same place.'
+    : isEmbeddedHardwareFrame(frame) && storageUnmounted
+    ? 'No SD card in this frame, so fonts have nowhere to go. Insert one and refresh.'
+    : null
   const showSyncAction = true
 
   // syncAssets registers a long-running task toast, so no need to open logs

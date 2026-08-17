@@ -18,6 +18,9 @@ coverage/
 apps/auth-web/public/frameos-wasm/
 apps/auth-web/public/frameos-editor/
 apps/auth-web/public/frames-app/
+# Copied from frameos/assets/copied/fonts by copy-font-assets.mjs — the same
+# bytes are already in the repo one directory up.
+apps/auth-web/public/fonts/
 .env.local
 apps/auth-web/public/install.template.sh
 

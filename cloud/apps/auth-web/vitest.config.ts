@@ -10,6 +10,11 @@ export default defineConfig({
     environment: "node",
     // Integration tests need a Postgres database and run separately via
     // `pnpm test:integration` (vitest.integration.config.ts).
-    exclude: [...configDefaults.exclude, "**/*.integration.test.ts"],
+    //
+    // .next is excluded because `next build` copies the whole source tree —
+    // test files included — into .next/standalone. Collected from there they
+    // fail on a tsconfig that no longer resolves its `extends`, so running the
+    // suite after a build reported 85 failed files and 0 failed tests.
+    exclude: [...configDefaults.exclude, "**/*.integration.test.ts", "**/.next/**"],
   },
 });

@@ -5,9 +5,9 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/require-database-url.mjs development && node scripts/build-frames-app.mjs && node scripts/copy-wasm-assets.mjs && node scripts/copy-editor-assets.mjs && node scripts/copy-frames-app-assets.mjs && node scripts/copy-install-script.mjs && node scripts/generate-ai-context.mjs",
+    "predev": "node scripts/require-database-url.mjs development && node scripts/build-frames-app.mjs && node scripts/copy-wasm-assets.mjs && node scripts/copy-editor-assets.mjs && node scripts/copy-frames-app-assets.mjs && node scripts/copy-install-script.mjs && node scripts/copy-font-assets.mjs && node scripts/generate-ai-context.mjs",
     "dev": "next dev --turbopack",
-    "prebuild": "node scripts/copy-wasm-assets.mjs && node scripts/copy-editor-assets.mjs && node scripts/copy-frames-app-assets.mjs && node scripts/copy-install-script.mjs && node scripts/generate-ai-context.mjs",
+    "prebuild": "node scripts/copy-wasm-assets.mjs && node scripts/copy-editor-assets.mjs && node scripts/copy-frames-app-assets.mjs && node scripts/copy-install-script.mjs && node scripts/copy-font-assets.mjs && node scripts/generate-ai-context.mjs",
     "build": "next build",
     "prestart": "node scripts/require-database-url.mjs production",
     "scene:scrub-transparent-previews": "node scripts/scrub-transparent-previews.mjs",

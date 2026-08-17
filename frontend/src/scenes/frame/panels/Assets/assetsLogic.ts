@@ -15,6 +15,7 @@ import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { isHiddenOrJunkAssetPath } from '../../../../utils/hiddenFiles'
+import { consumeFontSyncStream, isFontSyncStream } from '../../../../utils/fontSyncStream'
 
 export interface AssetsLogicProps {
   frameId: FrameId
@@ -360,9 +361,11 @@ export const assetsLogic = kea<assetsLogicType>([
       false,
       {
         syncAssets: async () => {
-          // Font sync is a backend feature; the on-device panel and the cloud
-          // (read-only asset verbs) have nothing to sync from.
-          if (workspaceMode() !== 'backend') {
+          // The on-device panel has no font store to sync from — it IS the
+          // device. The backend and the cloud both do, and answer the same
+          // path; the cloud streams its progress, which is handled below.
+          const mode = workspaceMode()
+          if (mode !== 'backend' && mode !== 'cloud') {
             return true
           }
           const taskId = `asset-sync:${props.frameId}:${Date.now()}`
@@ -380,11 +383,37 @@ export const assetsLogic = kea<assetsLogicType>([
             if (!response.ok) {
               throw new Error(await responseErrorMessage(response, 'Failed to sync fonts'))
             }
+            // The cloud pushes one font per device round trip and reports each
+            // as an NDJSON line, because the whole run takes minutes. The
+            // backend copies over SSH and answers once, at the end.
+            const summary = isFontSyncStream(response)
+              ? await consumeFontSyncStream(response, (progress) => {
+                  longRunningTasksModel.actions.updateTaskProgress({
+                    taskId,
+                    frameId: props.frameId,
+                    kind: 'upload',
+                    progressCurrent: progress.done,
+                    progressTotal: progress.total,
+                    detail: progress.detail,
+                  })
+                })
+              : null
+            if (summary && !summary.ok) {
+              // Some fonts did land; saying "synced" would hide the rest.
+              longRunningTasksModel.actions.taskFailed({
+                taskId,
+                frameId: props.frameId,
+                kind: 'upload',
+                detail: summary.detail,
+              })
+              actions.loadAssets()
+              return false
+            }
             longRunningTasksModel.actions.finishTask({
               taskId,
               frameId: props.frameId,
               kind: 'upload',
-              detail: 'Fonts synced',
+              detail: summary?.detail ?? 'Fonts synced',
             })
             actions.loadAssets()
             return true

@@ -68,7 +68,9 @@ function routeToAuthStatus(status: FirstUserStatus): Promise<never> {
 //
 // If the cloud ever grows one of these for real, delete its line — leaving it
 // here would mask the new endpoint. (/api/settings lived here until the cloud
-// grew account settings — app/api/settings/route.ts.)
+// grew account settings — app/api/settings/route.ts; /api/fonts until it grew
+// the font catalogue — app/api/fonts/route.ts, which is also what made the
+// scene editor's font picker work there.)
 const cloudEmptyCatalogs: Record<string, string> = {
   '/api/apps': '{"apps":{}}',
   // The workspace's uploaded-asset catalog (settingsLogic loadCustomFonts
@@ -80,7 +82,6 @@ const cloudEmptyCatalogs: Record<string, string> = {
   '/api/cloud/status':
     '{"enabled":false,"provider_url":null,"default_provider_url":null,"status":"disconnected",' +
     '"can_edit_provider":false,"poll_error":null,"connection":null,"link":null}',
-  '/api/fonts': '{"fonts":[]}',
   '/api/templates': '[]',
 }
 

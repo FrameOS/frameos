@@ -73,6 +73,16 @@ commands; everything else stays local to the device.
   redesign them as bounded toggles on fixed FrameOS-owned directories. Hardware
   identity reported by the frame stays authoritative.
 
+- **A chunked cloud→device asset upload.** `asset_put` carries its bytes
+  base64-encoded in a single WebSocket frame, so the cloud cannot put anything
+  larger than ~2.5 MB on a frame (`maxAssetUploadBytes`, mirroring
+  `HubMaxAssetUploadBytes`). The font sync trips over this today: it copies 60
+  of the 61 bundled fonts and skips `NotoColorEmoji.ttf` at 10.7 MB, which is
+  exactly the font someone wants when their scene renders emoji as blanks. The
+  device→cloud direction already solved this once (the offset-based chunk
+  protocol the ESP32 asset upload uses); this is the same idea pointed the
+  other way, and it also unblocks pushing a photo or a video frame to a card.
+
 - **Cloud AI chat: fork with lineage.** `save_scene` writes whatever scene the
   chat is holding into the account as a new private scene. That covers forking
   a store scene in practice, but records none of the lineage the dedicated fork

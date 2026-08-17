@@ -6,6 +6,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // /api/apps, /api/fonts, /api/templates are self-hosted-backend surfaces —
 // so every page load logged three 404s and three "Failed to fetch …" errors
 // on the way to fallbacks the callers already had.
+//
+// /api/fonts has since become real (app/api/fonts/route.ts), so it belongs in
+// the "reaches the network" group below: leaving it stubbed would have kept
+// the scene editor's font picker empty no matter what the cloud served.
 
 describe("cloud mode backend catalogs", () => {
   let apiFetch: typeof import("../../../../../../frontend/src/utils/apiFetch").apiFetch;
@@ -29,9 +33,6 @@ describe("cloud mode backend catalogs", () => {
     const apps = await apiFetch("/api/apps");
     expect(apps.status).toBe(200);
     expect(await apps.json()).toEqual({ apps: {} });
-
-    const fonts = await apiFetch("/api/fonts");
-    expect(await fonts.json()).toEqual({ fonts: [] });
 
     const templates = await apiFetch("/api/templates");
     expect(await templates.json()).toEqual([]);
@@ -75,5 +76,13 @@ describe("cloud mode backend catalogs", () => {
     // for real (app/api/settings/route.ts), so it must reach the network.
     await apiFetch("/api/settings");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Same story for the font catalogue: stubbing it empty here would beat
+    // anything app/api/fonts/route.ts answers, and the picker would stay bare.
+    await apiFetch("/api/fonts");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    await apiFetch("/api/fonts/CascadiaMono.ttf");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
