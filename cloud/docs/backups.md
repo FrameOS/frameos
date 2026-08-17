@@ -29,10 +29,10 @@ answer:
   complete: the backup accumulates everything that ever existed, and rclone
   runs with `--immutable` so a key whose content ever changed fails the run
   instead of overwriting the good copy.
-- **What is still missing** is a bucket-level versioning or lifecycle policy in
-  Cloudflare. The off-box copy means a leaked R2 key can no longer destroy the
-  only copy, but it can still empty the live bucket and take the site's images
-  down until a restore. Keep the keys to the two services that need them.
+- **What is still missing** is a bucket lock (see below). The off-box copy
+  means a leaked R2 key can no longer destroy the only copy, but it can still
+  empty the live bucket and take the site's images down until a restore. Keep
+  the keys to the two services that need them.
 - **No blob bytes remain in Postgres.** The `content` columns are empty
   everywhere; a database backup carries the rows, the keys and the recorded
   sizes, and none of the bytes.
@@ -198,6 +198,56 @@ check (it is what would catch a truncated dump if bytes ever came back), but
 read it for what it is: a green drill no longer says anything about whether the
 blobs are recoverable. That question belongs to the object store, and is not
 yet rehearsed.
+
+### Bucket locks (not yet enabled)
+
+R2 has **no object versioning**. Its equivalent is a *bucket lock*: prefix-
+scoped retention rules that make R2 refuse to delete or overwrite a matching
+object until the retention passes. Locks take precedence over lifecycle rules,
+and a bucket cannot be emptied while any lock exists — which is exactly the
+protection wanted against a leaked key.
+
+**Lock `store/`, never `frames/`.** The two prefixes have opposite jobs.
+`store/` holds published scenes, previews and gallery images: irreplaceable
+user content, deleted only when an owner removes something. `frames/<id>/cache/`
+is a per-frame LRU of device snapshots that is *supposed* to evict, and every
+byte of it can be re-fetched from the device; locking it would pin the cache
+forever and grow the bill for nothing.
+
+**Retention is a trade-off, not a maximum.** Indefinite retention on `store/`
+would mean a scene an owner deleted stays in the bucket forever, which
+collides with the deletion rights in the data-subject runbook. A finite window
+(30 days is a reasonable start) covers the gap between an object being written
+and the nightly off-box copy picking it up, plus enough time to notice a wipe
+and respond — while still letting a real deletion take effect eventually.
+
+Configure it with a token that can **edit R2 bucket configuration**; the app's
+own credentials deliberately cannot (they answer 403 to bucket-config calls,
+which is the correct blast radius for a key that sits in a web server).
+
+Dashboard: **R2 → `frameos-cloud` → Settings → Bucket lock rules → Add rule**,
+prefix `store/`, retention 30 days.
+
+Or with Wrangler, authenticated as an account admin (`npx wrangler login`):
+
+```sh
+npx wrangler r2 bucket lock add frameos-cloud store-retention store/ \
+  --retention-days 30
+npx wrangler r2 bucket lock list frameos-cloud
+```
+
+`--retention-date YYYY-MM-DD` and `--retention-indefinite` are the other two
+conditions; `wrangler r2 bucket lock remove frameos-cloud --name store-retention`
+takes a rule off again.
+
+The app is already prepared for a lock: `deleteBlobIfUnreferenced` logs a
+refused delete (`object_store.delete_failed`) and carries on rather than
+failing the request that removed the row, and the sweep reports refusals
+instead of aborting. Both leave the object as garbage to collect after the
+retention passes, so **run the sweep after enabling a lock and expect refusals
+in its output** — that is the lock working.
+
+## Restoring
 
 What a full recovery needs today, in order: restore Postgres (either path
 above), then restore the objects the rows point at — from R2 if it still has

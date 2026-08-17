@@ -181,6 +181,33 @@ describe("content-addressed blobs", () => {
     });
     expect(asked).toBe(false);
   });
+
+  it("survives a store that refuses the delete", async () => {
+    // A bucket lock answers 403. The row is already gone by then, so throwing
+    // would 500 a delete that succeeded; the object becomes sweep fodder
+    // instead.
+    process.env.R2_CLOUD_ENDPOINT = "https://accountid.r2.cloudflarestorage.com";
+    process.env.R2_CLOUD_ACCESS_KEY_ID = "key";
+    process.env.R2_CLOUD_SECRET_ACCESS_KEY = "secret";
+    resetObjectStoreForTests();
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("<Error><Code>AccessDenied</Code></Error>", {
+        status: 403,
+      })) as typeof fetch;
+    try {
+      await expect(
+        deleteBlobIfUnreferenced("store/scene-images/locked", async () => false),
+      ).resolves.toBeUndefined();
+      // The strict driver still reports it, for callers that do care.
+      await expect(
+        objectStore().delete("store/scene-images/locked"),
+      ).rejects.toThrow(/403/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
 });
 
 describe("public URLs", () => {

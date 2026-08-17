@@ -15,6 +15,7 @@
 // rather than guessing.
 
 import { createHash } from "node:crypto";
+import { logWarn } from "./log";
 import { isValidObjectKey, objectStore } from "./object-store";
 
 /** Namespaces, one per kind of thing, because this bucket will hold more. */
@@ -123,7 +124,20 @@ export async function deleteBlobIfUnreferenced(
   if (await stillReferenced()) {
     return;
   }
-  await objectStore().delete(objectKey);
+  try {
+    await objectStore().delete(objectKey);
+  } catch (error) {
+    // Reclaiming space is never worth failing the request that freed it. The
+    // row is already gone by the time this runs, so throwing here would 500 a
+    // delete that actually succeeded. A bucket lock refusing the delete (R2
+    // retention rules answer 403), a credential that lost delete permission,
+    // and a transient R2 error all land here; the object becomes garbage that
+    // scripts/object-store-sweep.sh collects once the reason goes away.
+    logWarn("object_store.delete_failed", {
+      error: error instanceof Error ? error.message : String(error),
+      objectKey,
+    });
+  }
 }
 
 /**

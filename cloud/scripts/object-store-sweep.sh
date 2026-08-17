@@ -79,6 +79,7 @@ if [ "$missing_count" != "0" ]; then
 fi
 
 deleted=0
+retained=0
 while IFS= read -r key; do
   [ -n "$key" ] || continue
   # Re-check immediately before deleting: the listing above is a snapshot, and
@@ -98,8 +99,15 @@ SQL
     continue
   fi
   if [ "$apply" = true ]; then
-    rclone deletefile "$remote/$key"
-    deleted=$((deleted + 1))
+    # A bucket lock refuses the delete outright (cloud/docs/backups.md). That
+    # is the lock doing its job, not a sweep failure: report it and carry on
+    # rather than aborting the run under `set -e`.
+    if rclone deletefile "$remote/$key"; then
+      deleted=$((deleted + 1))
+    else
+      echo "  refused (retained by a bucket lock?): $key"
+      retained=$((retained + 1))
+    fi
   else
     echo "  would delete: $key"
   fi
@@ -107,6 +115,7 @@ done < "$work/orphans"
 
 if [ "$apply" = true ]; then
   echo "Deleted $deleted object(s)."
+  [ "$retained" = "0" ] || echo "$retained object(s) were refused — still under a bucket lock."
 else
   echo
   echo "Dry run. Re-run with --apply to delete."

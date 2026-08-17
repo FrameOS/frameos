@@ -119,11 +119,15 @@ enabled on images that have no backend to talk to.
 
 ## Store
 
-- **Turn on object versioning in Cloudflare.** A leaked R2 key can still empty
-  the live bucket and take every store image and frame preview down until
-  someone restores from the nightly off-box copy. Bucket-level versioning or a
-  lifecycle policy closes the window; it is Cloudflare API configuration rather
-  than code, which is the only reason it is not done (`cloud/docs/backups.md`).
+- **Put a bucket lock on `store/`.** A leaked R2 key can still empty the live
+  bucket and take every store image down until someone restores from the
+  nightly off-box copy. R2 has no object versioning; its answer is bucket lock
+  rules (prefix-scoped retention that refuses deletes), and the app is ready
+  for one — a refused delete is logged and left to the sweep. Lock `store/`
+  only, never `frames/`: that prefix is a regenerable LRU cache whose whole job
+  is to evict. Steps and the retention trade-off in
+  `cloud/docs/backups.md`. Needs a token that can edit bucket configuration,
+  which the app's own key deliberately is not.
 
 ---
 
