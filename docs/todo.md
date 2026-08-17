@@ -134,15 +134,6 @@ enabled on images that have no backend to talk to.
   state its own policy. Not urgent — the CDN redirect already moved the bytes
   off the origin, which is the expensive part — but the comments in those
   routes currently describe behaviour that is not happening.
-- **Put a bucket lock on `store/`.** A leaked R2 key can still empty the live
-  bucket and take every store image down until someone restores from the
-  nightly off-box copy. R2 has no object versioning; its answer is bucket lock
-  rules (prefix-scoped retention that refuses deletes), and the app is ready
-  for one — a refused delete is logged and left to the sweep. Lock `store/`
-  only, never `frames/`: that prefix is a regenerable LRU cache whose whole job
-  is to evict. Steps and the retention trade-off in
-  `cloud/docs/backups.md`. Needs a token that can edit bucket configuration,
-  which the app's own key deliberately is not.
 
 ---
 

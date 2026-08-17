@@ -29,10 +29,11 @@ answer:
   complete: the backup accumulates everything that ever existed, and rclone
   runs with `--immutable` so a key whose content ever changed fails the run
   instead of overwriting the good copy.
-- **What is still missing** is a bucket lock (see below). The off-box copy
-  means a leaked R2 key can no longer destroy the only copy, but it can still
-  empty the live bucket and take the site's images down until a restore. Keep
-  the keys to the two services that need them.
+- **A bucket lock protects `store/`** (see below): 30-day retention, so a
+  leaked R2 key can neither destroy the only copy nor empty the live prefix.
+  `frames/` stays deletable on purpose — it is a cache whose job is to evict.
+  Keep the keys to the two services that need them regardless: the lock buys
+  30 days, not immunity.
 - **No blob bytes remain in Postgres.** The `content` columns are empty
   everywhere; a database backup carries the rows, the keys and the recorded
   sizes, and none of the bytes.
@@ -199,7 +200,7 @@ read it for what it is: a green drill no longer says anything about whether the
 blobs are recoverable. That question belongs to the object store, and is not
 yet rehearsed.
 
-### Bucket locks (not yet enabled)
+### Bucket lock: `store-lock`, prefix `store/`, 30 days (enabled 2026-08-17)
 
 R2 has **no object versioning**. Its equivalent is a *bucket lock*: prefix-
 scoped retention rules that make R2 refuse to delete or overwrite a matching
@@ -221,23 +222,24 @@ collides with the deletion rights in the data-subject runbook. A finite window
 and the nightly off-box copy picking it up, plus enough time to notice a wipe
 and respond — while still letting a real deletion take effect eventually.
 
-Configure it with a token that can **edit R2 bucket configuration**; the app's
+Changing it needs a token that can **edit R2 bucket configuration**; the app's
 own credentials deliberately cannot (they answer 403 to bucket-config calls,
-which is the correct blast radius for a key that sits in a web server).
+which is the correct blast radius for a key that sits in a web server). That
+also means nothing in this repo can read the rule back — the dashboard is the
+only source of truth for whether it is still on.
 
-Dashboard: **R2 → `frameos-cloud` → Settings → Bucket lock rules → Add rule**,
-prefix `store/`, retention 30 days.
+Dashboard: **R2 → `frameos-cloud` → Settings → Bucket lock rules**.
 
 Or with Wrangler, authenticated as an account admin (`npx wrangler login`):
 
 ```sh
-npx wrangler r2 bucket lock add frameos-cloud store-retention store/ \
-  --retention-days 30
 npx wrangler r2 bucket lock list frameos-cloud
+npx wrangler r2 bucket lock add frameos-cloud store-lock store/ \
+  --retention-days 30
 ```
 
 `--retention-date YYYY-MM-DD` and `--retention-indefinite` are the other two
-conditions; `wrangler r2 bucket lock remove frameos-cloud --name store-retention`
+conditions; `wrangler r2 bucket lock remove frameos-cloud --name store-lock`
 takes a rule off again.
 
 The app is already prepared for a lock: `deleteBlobIfUnreferenced` logs a
@@ -246,8 +248,15 @@ failing the request that removed the row, and the sweep reports refusals
 instead of aborting. R2 answers **409 Conflict** for an object still under
 retention — not 403, which is what a permission problem looks like, so the two
 stay distinguishable in the logs. Both leave the object as garbage to collect after the
-retention passes, so **run the sweep after enabling a lock and expect refusals
-in its output** — that is the lock working.
+retention passes, so **expect refusals in the sweep's output** — that is the
+lock working, not a fault.
+
+**Verified 2026-08-17**, the day the rule went on: deleting an object under
+`store/` answered 409 Conflict and the object stayed readable, while the same
+call under `frames/` succeeded — so the rule is matching the intended prefix
+and only that one. A sweep that reports no `object_store.delete_failed`
+refusals at all is worth a second look: either there was genuinely nothing to
+collect under `store/`, or the lock is no longer on.
 
 ## Restoring
 
