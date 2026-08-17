@@ -20,9 +20,17 @@
 ## Statically linked drivers share the host's copy and skip the round trip.
 ## Only a float ever crosses the boundary.
 ##
-## The request is *advisory*: the runner takes the earliest one asked for since
-## the last pass, clamps it to a floor so a driver cannot spin the loop, and
-## ignores it when the scene already renders sooner.
+## The request is *advisory*, and it asks for a DRIVER callback — not a render.
+## The runner takes the earliest one asked for since the last pass, clamps it to
+## a floor so a driver cannot spin the loop, and then, during its sleep, calls
+## the driver again with the frame it already has. The scene's own schedule is
+## untouched.
+##
+## That distinction is the whole design. Re-rendering the scene to satisfy a
+## driver runs its apps — HTTP fetches, image generation — to produce a frame
+## the driver was already handed, and a panel that never appears would pay that
+## every backoff step forever. Ask for a callback; the pixels are already
+## drawn.
 
 import std/options
 
