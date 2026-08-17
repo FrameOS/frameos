@@ -82,13 +82,13 @@ proc fastInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persis
     backgroundColor: parseHtmlColor("#ffffff")
   )
 
-proc hourlyInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
+proc oneSecondInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
   FrameScene(
     id: sceneId,
     frameConfig: frameConfig,
     logger: logger,
     state: %*{},
-    refreshInterval: 3600.0,
+    refreshInterval: 1.0,
     backgroundColor: parseHtmlColor("#ffffff")
   )
 
@@ -145,21 +145,26 @@ suite "runner loop safety":
     check runnerThread.lastRenderAt > 0.0
     check sawRenderEvent
 
-  test "a driver asking for an earlier retry shortens the sleep":
+  test "a driver asking for an earlier retry is called back without re-rendering":
     # The framebuffer waiting for a KMS modeset is the live example: without
     # the return channel it is re-probed only on the next scheduled pass, so a
     # frame on a long interval stays blank for an interval after a boot that
     # was seconds from working (frameos/driver_render_hint).
+    #
+    # What it must NOT do is shorten the scene's own schedule. The first
+    # version did, and a headless frame on an hourly interval re-rendered
+    # every 60 seconds forever — running the scene's apps, HTTP fetches and
+    # image generation included — to produce a frame the driver already had.
     clearEventChannel()
     clearEarlierRenderRequest()
 
     let sceneId = "tests/runner/driver-retry".SceneId
     var uploaded = initTable[SceneId, ExportedInterpretedScene]()
     uploaded[sceneId] = ExportedInterpretedScene(
-      name: "Hourly scene",
+      name: "One second scene",
       publicStateFields: @[],
       persistedStateKeys: @[],
-      init: hourlyInit,
+      init: oneSecondInit,
       render: fastRender,
       runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard
     )
@@ -192,22 +197,24 @@ suite "runner loop safety":
     # Stands in for the driver: the runner reads the request off the same
     # thread-local slot whether a statically linked driver wrote it or the host
     # folded it back out of a `.so`.
-    requestEarlierRender(0.3)
-    # Two cycles: the first sleeps (and is the one that must be shortened),
-    # the second breaks out before sleeping again.
+    requestEarlierRender(0.25)
+    # Two cycles: the first sleeps (and is where the callback happens), the
+    # second breaks out before sleeping again.
     waitFor runnerThread.startRenderLoop(maxCycles = 2)
 
-    check hasEvent(store, "render:driver:retry")
+    # The scene keeps its own schedule — the whole point of the fix. (The
+    # sleep is the interval minus the render that just happened, so it lands
+    # just under a second; what matters is that it is nowhere near the 250 ms
+    # the driver asked for.)
     for entry in store.entries:
-      if entry{"event"}.getStr() == "render:driver:retry":
-        check entry{"inSeconds"}.getFloat() == 0.3
-        check entry{"insteadOfSeconds"}.getFloat() > 3000.0
       if entry{"event"}.getStr() == "render:sleep":
-        check entry{"ms"}.getFloat() == 300.0
+        check entry{"ms"}.getFloat() > 900.0
+    # Exactly one scene render per cycle, not one per driver callback.
+    check countEvent(store, "render:done") == 2
     # Consumed, not left standing for the next pass.
     check takeEarlierRenderRequest().isNone
 
-  test "a driver request never lengthens a sleep the scene already wants sooner":
+  test "a driver request leaves a fast scene's schedule alone":
     clearEventChannel()
     clearEarlierRenderRequest()
 
@@ -250,7 +257,12 @@ suite "runner loop safety":
     requestEarlierRender(30.0)
     waitFor runnerThread.startRenderLoop(maxCycles = 2)
 
+    # A request far beyond the scene's own interval never fires inside the
+    # sleep, and never delays the next render either.
     check not hasEvent(store, "render:driver:retry")
+    for entry in store.entries:
+      if entry{"event"}.getStr() == "render:sleep":
+        check entry{"ms"}.getFloat() <= 50.0
 
   test "scene init errors render as scene errors and clear boot guard count":
     let savedBootGuardState = saveBootGuardState()

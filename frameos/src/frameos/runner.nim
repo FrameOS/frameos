@@ -302,6 +302,12 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       driverTimer = getMonoTime()
       markRuntimeCheckpoint("driver:start", currentSceneId = currentScene.id.string, device = self.frameConfig.device,
         clearNode = true)
+      # Set when a driver asks to be called back before the next scheduled
+      # pass. Holding the canvas is the point: the driver wants THIS frame
+      # again, and re-rendering the scene to get another copy of it would run
+      # the scene's apps — HTTP fetches, image generation — once per retry.
+      var driverRetryImage: Image = nil
+      var driverRetrySeconds = 0.0
       try:
         let nextRenderSeconds = if nextSleep >= 0:
             nextSleep
@@ -321,17 +327,22 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       except Exception as e:
         self.logger.log(%*{"event": "render:driver:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
       finally:
+        # Read the drivers' answer while the image is still in hand. A driver
+        # that raised is exactly the one most likely to want another try, so
+        # this belongs in the `finally` rather than after it.
+        let earlierRenderRequest = takeEarlierRenderRequest()
+        if earlierRenderRequest.isSome:
+          driverRetrySeconds = max(earlierRenderRequest.get(), DRIVER_RETRY_MIN_SECONDS)
+          driverRetryImage = lastRotatedImage
         lastRotatedImage = nil
         renderResult[0] = nil
         # Return decode/render spikes to the OS on every device; e-ink frames
-        # otherwise hold tens of MB of dead heap between refreshes.
-        reclaimRenderMemory()
+        # otherwise hold tens of MB of dead heap between refreshes. Skipped
+        # while a retry holds the canvas — one canvas for the length of a
+        # retry window is far cheaper than the render that would rebuild it.
+        if driverRetryImage.isNil:
+          reclaimRenderMemory()
         clearNextRenderSeconds()
-      # Read (and clear) whatever the drivers asked for during that render.
-      # Outside the `finally` on purpose: the request has to survive a driver
-      # that raised, which is exactly the driver most likely to want another
-      # try. Applied to the sleep below.
-      let earlierRenderRequest = takeEarlierRenderRequest()
       markRuntimeDone()
 
       if interval < 1 or (nextSleep > 0 and nextSleep < interval):
@@ -377,20 +388,6 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       # If no sleep duration provided by the scene, calculate based on the interval
       sleepDuration = if nextSleep >= 0: nextSleep * 1000
                       else: max((interval - durationToSeconds(getMonoTime() - timer)) * 1000, 0.1)
-      # A driver that could not draw — the framebuffer waiting for a KMS
-      # modeset is the live example — asks to be called back sooner than the
-      # scene's own schedule (frameos/driver_render_hint). Advisory: it can
-      # only ever shorten the wait, never lengthen it, and never below the
-      # floor, so a driver stuck in a "not ready" loop costs one cheap probe
-      # every DRIVER_RETRY_MIN_SECONDS rather than a spinning render thread.
-      if earlierRenderRequest.isSome:
-        let requestedMs = max(earlierRenderRequest.get(), DRIVER_RETRY_MIN_SECONDS) * 1000
-        if requestedMs < sleepDuration:
-          self.logger.log(%*{"event": "render:driver:retry",
-            "device": self.frameConfig.device,
-            "inSeconds": round(requestedMs / 1000, 3),
-            "insteadOfSeconds": round(sleepDuration / 1000, 3)})
-          sleepDuration = requestedMs
       self.logger.log(%*{"event": "render:sleep", "ms": round(sleepDuration, 3)})
 
       var nextDriverIdleTurnOffAt =
@@ -398,6 +395,16 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           some(getMonoTime() + initDuration(seconds = DRIVER_IDLE_TURN_OFF_HEARTBEAT_SECONDS))
         else:
           none(MonoTime)
+      # "Call me back sooner" from a driver that could not draw — the
+      # framebuffer waiting for a KMS modeset is the live example. It re-runs
+      # the DRIVER against the frame already rendered; it does not re-run the
+      # scene. A panel that never appears therefore costs one cheap ioctl per
+      # backoff step, not a scene render: the first version shortened this
+      # sleep instead, and a headless frame on an hourly interval re-rendered
+      # every 60 seconds forever, apps and all.
+      var nextDriverRetryAt =
+        if driverRetryImage.isNil: none(MonoTime)
+        else: some(getMonoTime() + initDuration(milliseconds = int(driverRetrySeconds * 1000)))
       var remainingSleepMs = sleepDuration
       while remainingSleepMs > 0:
         if self.triggerRenderNext:
@@ -406,9 +413,35 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if nextDriverIdleTurnOffAt.isSome and now >= nextDriverIdleTurnOffAt.get():
           drivers.turnOff()
           nextDriverIdleTurnOffAt = some(now + initDuration(seconds = DRIVER_IDLE_TURN_OFF_HEARTBEAT_SECONDS))
+        if nextDriverRetryAt.isSome and now >= nextDriverRetryAt.get():
+          try:
+            setNextRenderSeconds(remainingSleepMs / 1000)
+            drivers.render(driverRetryImage)
+          except Exception as e:
+            self.logger.log(%*{"event": "render:driver:error", "error": $e.msg})
+          finally:
+            clearNextRenderSeconds()
+          let againRequest = takeEarlierRenderRequest()
+          if againRequest.isSome:
+            let againSeconds = max(againRequest.get(), DRIVER_RETRY_MIN_SECONDS)
+            nextDriverRetryAt = some(getMonoTime() + initDuration(milliseconds = int(againSeconds * 1000)))
+            self.logger.log(%*{"event": "render:driver:retry",
+              "device": self.frameConfig.device,
+              "inSeconds": round(againSeconds, 3)})
+          else:
+            # It drew. Stop holding the canvas and give the memory back.
+            nextDriverRetryAt = none(MonoTime)
+            driverRetryImage = nil
+            reclaimRenderMemory()
+            self.logger.log(%*{"event": "render:driver:drew",
+              "device": self.frameConfig.device})
         let nextSleepMs = min(remainingSleepMs, RENDER_SLEEP_SLICE_MS)
         await sleepAsync(nextSleepMs)
         remainingSleepMs -= nextSleepMs
+      if not driverRetryImage.isNil:
+        # The next pass renders its own frame; do not carry this one into it.
+        driverRetryImage = nil
+        reclaimRenderMemory()
     except Exception as e:
       # Never let one escaped exception kill the render thread (and with it
       # the whole process under systemd). Log, reset state, and back off.
