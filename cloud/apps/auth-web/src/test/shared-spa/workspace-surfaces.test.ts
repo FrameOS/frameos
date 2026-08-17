@@ -106,6 +106,49 @@ describe("cloud mode hides everything the protocol cannot do", () => {
     }
   });
 
+  it("renders no settings section the cloud cannot save", () => {
+    // The honest-surface rule: a cloud-managed frame shows the declarative
+    // set_settings keys and nothing else. Every section below describes
+    // something the device owns — the cloud has no verb to push it and no
+    // value to show — and each one used to render as an editable field that
+    // silently dropped whatever you typed, because `set_settings` refuses the
+    // WHOLE push on an unknown key rather than ignoring it.
+    for (const section of [
+      "frame-settings-device",
+      "frame-settings-network",
+      "frame-settings-admin",
+      "frame-settings-mountpoints",
+      "frame-settings-defaults",
+      "frame-settings-error-behavior",
+      "frame-settings-palette",
+      "frame-settings-qr",
+      "frame-settings-assets",
+      "frame-settings-gpio",
+      "frame-settings-logs",
+      "frame-settings-reboot",
+      "frame-http-api-section",
+      "frame-http-proxy-section",
+    ]) {
+      expect(frameSettingsSectionIsAllowed("cloud", section)).toBe(false);
+    }
+  });
+
+  it("keeps Power for a cloud ESP32 and denies it to everyone else", () => {
+    const esp32 = { hardware: { platform: "esp32-s3" } };
+    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-power", esp32)).toBe(
+      true,
+    );
+    // A cloud Linux frame has no power profile, so the nav is empty for it —
+    // the settings block is the first thing the panel draws, and a link that
+    // scrolls to the top of the panel is noise.
+    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-power")).toBe(
+      false,
+    );
+    expect(
+      frameSettingsSectionIsAllowed("cloud", "frame-settings-info"),
+    ).toBe(false);
+  });
+
   it("keeps only the service-key sections of the GLOBAL settings page", () => {
     // The cloud's /frames/settings page persists service API keys
     // (account_settings via /api/settings) and nothing else: no local

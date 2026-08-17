@@ -197,26 +197,17 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-logs',
     'frame-settings-reboot',
   ],
-  // No SSH, no FrameOS Remote agent, and no "frame → backend" reporting: the
-  // cloud frame talks to the hub and nothing else.
-  cloud: [
-    'frame-settings-info',
-    'frame-settings-power',
-    'frame-settings-device',
-    'frame-http-api-section',
-    'frame-settings-admin',
-    'frame-http-proxy-section',
-    'frame-settings-network',
-    'frame-settings-mountpoints',
-    'frame-settings-defaults',
-    'frame-settings-error-behavior',
-    'frame-settings-palette',
-    'frame-settings-qr',
-    'frame-settings-assets',
-    'frame-settings-gpio',
-    'frame-settings-logs',
-    'frame-settings-reboot',
-  ],
+  // A cloud-managed frame renders only what the cloud can actually save: the
+  // declarative `set_settings` keys, plus Power on an ESP32. Everything else
+  // this panel knows how to draw — device, network, admin, mountpoints,
+  // palette, QR, assets, GPIO, logs, reboot — is owned by the device, and the
+  // cloud has neither a verb to push it nor a value to show.
+  //
+  // Only Power is listed: the settings block itself is the first thing the
+  // panel renders, so a nav link to it scrolls nowhere (the same reason
+  // esp32CloudFrameSettingsSections omits Info). With no ESP32 that leaves
+  // the nav empty, which is correct — there is nothing to jump to.
+  cloud: ['frame-settings-power'],
 }
 
 /**

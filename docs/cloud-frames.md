@@ -838,6 +838,17 @@ spelling, so the Settings panel renders current state rather than blanks
 after a reload — and an edit made while the device is offline survives until
 the device reconnects.
 
+**The panel shows only these keys.** A cloud-managed frame's Settings panel
+renders an editable field for the allowlisted settings and nothing else — no
+display driver, network, mountpoints, palette, GPIO or log configuration, even
+though the same shared component draws all of them for a self-hosted frame.
+That is not tidiness: `set_settings` refuses the *whole* push on a key the
+device does not know, so an editable field for something outside the allowlist
+cannot be made to work by trying harder — it either silently drops what was
+typed or takes the rest of the push down with it. A provider adding a key must
+therefore ship it to the devices first (or gate it on a reported version), and
+only then let the surface offer it.
+
 The frame summary those routes (and the hub's `update_frame` event) return
 also carries the service-settings picture, so the workspace can explain a
 scene that wants a key it does not have:

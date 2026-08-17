@@ -25,17 +25,20 @@ A cloud frame talks to `frame-hub` over one outbound WebSocket. The provider
 can push scenes, a short allowlist of declarative settings and a handful of
 commands; everything else stays local to the device.
 
-- **Cloud frame settings parity + an honest Settings panel.** Cloud-managed
-  Linux/Pi frames render nearly the full self-hosted per-frame form, but cloud
-  save/diff/readback only support the declarative base keys (`name`, `debug`,
-  `interval`, `rotate`, `scaling_mode`, `timezone`; schedule and service
-  secrets use their own paths). Most visible controls are therefore unsaveable
-  and may appear to save while being dropped.
+- **Widen cloud `set_settings`, in small validated batches.** The panel is
+  honest now — a cloud frame renders only the six declarative keys it can
+  actually save (and Power on an ESP32) — so what is left is making more of
+  the form saveable rather than hiding it.
 
-  First make the surface honest: hide unsupported sections or disable them with
-  an explanation, and never render an editable field the active device profile
-  cannot round-trip. Then widen `set_settings` in small validated batches,
-  keeping the shared SPA payload list, the auth-web validator/readback, the
+  **The hazard that shapes every batch:** the device refuses the WHOLE
+  `set_settings` push on a key it does not recognise. A key added to the cloud
+  before the frames understand it therefore breaks saving outright for every
+  frame still on older firmware — not just for the new key. So a batch needs a
+  version or capability gate before it needs anything else, and the ESP32
+  Power fields are the shape to copy (they carry a "needs firmware ≥ 2026.8.21"
+  footnote and the SPA only sends them to esp32 frames).
+
+  Keep the shared SPA payload list, the auth-web validator/readback, the
   Pi/Nim allowlist, the ESP32 handler where applicable, the docs and the drift
   tests in lockstep:
 
