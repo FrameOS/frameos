@@ -119,6 +119,18 @@ enabled on images that have no backend to talk to.
 
 ## Store
 
+- **Public store reads cannot be edge-cached.** `next.config.ts` stamps
+  `Cache-Control: no-store` on all of `/api/:path*`, and a `headers()` rule
+  overrides whatever a route handler set — so the deliberate caching in the
+  store's read routes (the immutable `?v=` preview, `scenes.json`'s five
+  minutes, the CDN redirect) does nothing in production. The blanket rule is
+  right for an API surface where most routes are session-scoped, and a static
+  rule cannot tell a public scene from a private one because they share a URL
+  shape. Fixing it properly means either serving public bytes from a path
+  outside `/api/`, or exempting `/api/store/` and making every route there
+  state its own policy. Not urgent — the CDN redirect already moved the bytes
+  off the origin, which is the expensive part — but the comments in those
+  routes currently describe behaviour that is not happening.
 - **Put a bucket lock on `store/`.** A leaked R2 key can still empty the live
   bucket and take every store image down until someone restores from the
   nightly off-box copy. R2 has no object versioning; its answer is bucket lock
