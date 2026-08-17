@@ -1153,13 +1153,19 @@ export function FrameSettings({
   // not exist in the cloud protocol, so their settings are never rendered.
   const workspaceSurfaceMode = workspaceMode()
   const hideForCloud = workspaceSurfaceMode === 'cloud'
-  // A cloud-managed ESP32 accepts only its set_settings subset from the
-  // cloud — name, refresh interval, rotation, scaling mode and the power
-  // keys. Everything else on this panel (mounts, network, palette, GPIO, …)
-  // either does not exist on the firmware or is provisioned on the device
-  // itself, so rendering those sections was an invitation to edit values
-  // that can never be saved.
+  // A cloud-managed frame accepts only the declarative `set_settings` subset
+  // from the cloud. Everything else on this panel (mounts, network, palette,
+  // GPIO, …) is either absent from the device profile or provisioned on the
+  // frame itself, so rendering those sections is an invitation to edit values
+  // that can never be saved — the device does not merely ignore an unknown
+  // key, it refuses the whole push.
+  //
+  // Both cloud profiles therefore render the compact block below instead of
+  // the full surface; they differ only in which keys their device actually
+  // applies. cloudFrameSettingKeys / esp32CloudFrameSettingKeys in
+  // utils/cloudFrameSettings.ts are the lists this mirrors.
   const esp32CloudProfile = hideForCloud && isEsp32CloudFrame(frame)
+  const cloudProfile = hideForCloud
   const showBackendSection = frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-backend')
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
     frameForm.embedded?.hardwarePreset ?? frameForm.device_config?.hardwarePreset
@@ -1562,7 +1568,7 @@ export function FrameSettings({
         className="space-y-4 @container"
         enableFormOnSubmit
       >
-        {esp32CloudProfile ? (
+        {cloudProfile ? (
           <>
             <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
               <H6 id="frame-settings-info">Frame settings</H6>
@@ -1617,29 +1623,54 @@ export function FrameSettings({
                   />
                 )}
               </Field>
+              {!esp32CloudProfile ? (
+                <>
+                  <Field
+                    name="timezone"
+                    label="Time zone"
+                    tooltip="The time zone scenes render in. Applied on the next render — no reboot."
+                  >
+                    <Select name="timezone" options={frameTimezoneOptions} />
+                  </Field>
+                  <Field
+                    name="debug"
+                    label="Debug logging"
+                    tooltip="Verbose per-render logging on the device. Useful while a scene misbehaves; noisy otherwise."
+                  >
+                    <Switch name="debug" fullWidth />
+                  </Field>
+                </>
+              ) : null}
               <p className="frameos-muted text-sm">
-                This ESP32 frame accepts its name, refresh interval, rotation, scaling mode and the power settings
-                below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the
-                device itself — over its USB console or the FrameOS-Setup portal.
+                {esp32CloudProfile
+                  ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or the FrameOS-Setup portal.'
+                  : 'These are the settings a cloud-managed frame accepts. Everything else this frame runs on — its panel and display driver, network and WiFi, GPIO buttons, mount points, palette, error behaviour and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
               </p>
             </div>
-            <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
-              <H6 id="frame-settings-power">Power</H6>
-            </div>
-            <div className="pl-2 @md:pl-8">
-              <PowerSettingsFields
-                value={cloudPowerSettings}
-                onChange={setCloudPowerSettings}
-                footnote="Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings push. Update the frame first if saving fails."
-              />
-            </div>
+            {/* ESP32 only. The Pi runtime's CLOUD_SETTINGS_ALLOWLIST does not
+                know the power keys, so pushing them at a Linux frame refuses
+                the whole verb — every other setting in the same save included. */}
+            {esp32CloudProfile ? (
+              <>
+                <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
+                  <H6 id="frame-settings-power">Power</H6>
+                </div>
+                <div className="pl-2 @md:pl-8">
+                  <PowerSettingsFields
+                    value={cloudPowerSettings}
+                    onChange={setCloudPowerSettings}
+                    footnote="Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings push. Update the frame first if saving fails."
+                  />
+                </div>
+              </>
+            ) : null}
           </>
         ) : null}
         {/* Cloud-only, and above the fold on both profiles: "why is my scene
             asking for an API key" is answered here, not in the account-wide
             secrets page. */}
         {hideForCloud ? <CloudServiceSettingsSection /> : null}
-        {!esp32CloudProfile && showFrameInfo ? (
+        {!cloudProfile && showFrameInfo ? (
           <>
             <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
               <H6 id="frame-settings-info">Frame info</H6>
@@ -1706,9 +1737,10 @@ export function FrameSettings({
             </div>
           </>
         ) : null}
-        {/* Everything below is the full settings surface; the esp32 cloud
-            profile renders only the compact block above instead. */}
-        {!esp32CloudProfile ? (
+        {/* Everything below is the full settings surface; a cloud-managed
+            frame renders only the compact block above instead, because the
+            cloud cannot save any of it. */}
+        {!cloudProfile ? (
           <>
         {inFrameAdminMode ? <FrameAdminUpgradeSection /> : null}
         {inFrameAdminMode ? <FrameAdminServiceSecretsSection /> : null}
