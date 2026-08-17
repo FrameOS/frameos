@@ -20,6 +20,7 @@ import { POST as logout } from "../../../app/api/auth/logout/route";
 import { POST as resetConfirm } from "../../../app/api/auth/reset/confirm/route";
 import { POST as resetRequest } from "../../../app/api/auth/reset/request/route";
 import { POST as signup } from "../../../app/api/auth/signup/route";
+import LoginPage from "../../../app/login/page";
 import { confirmEmailVerification } from "../../lib/email-verification";
 import { resolveGoogleSignIn } from "../../lib/google-account";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
@@ -919,5 +920,67 @@ describe("sliding sessions", () => {
   it("ignores requests without a session cookie, including device traffic", async () => {
     const response = await visit(undefined, "/api/frames/enroll");
     expect(response.headers.get("set-cookie")).toBeNull();
+  });
+});
+
+describe("the login page with a live session", () => {
+  // Where redirect() sends the visitor, or undefined when the page renders.
+  // redirect() signals by throwing; the destination rides in the digest.
+  async function loginDestination(params: Record<string, string> = {}) {
+    try {
+      await LoginPage({ searchParams: Promise.resolve(params) });
+    } catch (error) {
+      const digest = (error as { digest?: unknown }).digest;
+      if (typeof digest === "string" && digest.startsWith("NEXT_REDIRECT;")) {
+        return digest.split(";")[2];
+      }
+      throw error;
+    }
+    return undefined;
+  }
+
+  it("shows the form to a signed-out visitor", async () => {
+    expect(await loginDestination()).toBeUndefined();
+  });
+
+  // Stale links and browsers that cached the old permanent redirect from the
+  // cloud root land here with a perfectly good session.
+  it("sends a signed-in visitor to the account home", async () => {
+    const user = await signUpUser();
+    await establishSession(user.accountId, user.email);
+
+    expect(await loginDestination()).toBe(`${baseUrl}/account`);
+  });
+
+  it("honours a safe return_to and ignores a foreign one", async () => {
+    const user = await signUpUser();
+    await establishSession(user.accountId, user.email);
+
+    expect(await loginDestination({ return_to: "/frames" })).toBe("/frames");
+    expect(
+      await loginDestination({ return_to: "https://evil.example/steal" }),
+    ).toBe(`${baseUrl}/account`);
+  });
+
+  // An error describes something about this session that the visitor has to
+  // act on, so the page still renders rather than bouncing them onward.
+  it("still renders when the query carries an error", async () => {
+    const user = await signUpUser();
+    await establishSession(user.accountId, user.email);
+
+    expect(
+      await loginDestination({ error: "verify_before_google_link" }),
+    ).toBeUndefined();
+  });
+
+  it("does not follow a revoked session's cookie", async () => {
+    const user = await signUpUser();
+    const token = await establishSession(user.accountId, user.email);
+    await db
+      .update(sessions)
+      .set({ revokedAt: new Date() })
+      .where(eq(sessions.tokenHash, hashSecret(token)));
+
+    expect(await loginDestination()).toBeUndefined();
   });
 });

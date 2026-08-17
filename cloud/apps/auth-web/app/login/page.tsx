@@ -1,11 +1,13 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { AuthCard } from "../../src/components/AuthCard";
 import { LoginForm } from "../../src/components/LoginForm";
 import {
   authCookieNames,
   safeAuthReturnPath,
 } from "../../src/lib/auth-cookies";
-import { hasGoogleOAuth } from "../../src/lib/env";
+import { getAccountUrl, hasGoogleOAuth } from "../../src/lib/env";
+import { readSession } from "../../src/lib/session";
 
 export const metadata = { title: "Sign in" };
 
@@ -18,6 +20,20 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const error = readParam(params.error);
   const status = readParam(params.status);
   const returnTo = safeAuthReturnPath(readParam(params.return_to));
+
+  // Already signed in: send them where they were headed instead of showing a
+  // sign-in form to someone who is signed in. Stale links and cached redirects
+  // land here — a browser that cached the old permanent /→/login redirect
+  // never asks the server for the root again — and so does every "Sign in"
+  // link followed in a second tab. An `error` means the caller has something
+  // to say about this session (an unverified Google link, an expired flow), so
+  // that page is still rendered.
+  if (!error) {
+    const session = await readSession();
+    if (session) {
+      redirect(returnTo ?? getAccountUrl());
+    }
+  }
 
   // A Google sign-in that matched an unverified password account: the user
   // must prove they own the email (via password reset) before the accounts

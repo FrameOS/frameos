@@ -13,8 +13,8 @@ import { resolveSurfaceRoute } from "./src/lib/surfaces";
 
 export async function proxy(request: NextRequest) {
   const response = routeSurface(request);
-  // A 308 to another surface carries no session decision; the request it
-  // sends the browser to will refresh instead.
+  // A surface redirect carries no session decision; the request it sends the
+  // browser to will refresh instead.
   if (response.status < 300 || response.status >= 400) {
     await refreshSessionCookie(request, response);
   }
@@ -30,7 +30,15 @@ function routeSurface(request: NextRequest) {
     return NextResponse.next();
   }
   if (route.kind === "redirect") {
-    return NextResponse.redirect(route.destination, 308);
+    // 307, never 308: which host serves which path is deployment config, and
+    // it has changed under browsers before — the cloud root used to redirect
+    // to /login, and every browser that cached that permanent redirect kept
+    // going there long after the root became the account home. A temporary
+    // redirect with no-store keeps a routing change from freezing into caches.
+    return NextResponse.redirect(route.destination, {
+      status: 307,
+      headers: { "cache-control": "no-store" },
+    });
   }
 
   const requestHeaders = new Headers(request.headers);
