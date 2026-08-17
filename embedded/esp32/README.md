@@ -415,6 +415,20 @@ thin-client mode. Backend local-render builds run the same check
 default 8MB) and fail early with an actionable error; backend-rendered
 thin-client builds are allowed for panels that exceed local PSRAM.
 
+**Thin clients reserve their framebuffer at boot.** A PSRAM-less board (every
+supported ESP32-C3) has no second heap to put the packed panel buffer in, so
+`fos_big_malloc` lands it on internal RAM — and an XTEINK X4 asking a
+Wi-Fi-fragmented C3 heap for 96000 contiguous bytes fails with six figures
+still free. `fos_framebuffer_reserve()` therefore takes that buffer once in
+`app_main`, right after the panel is known and before the network stack
+starts, and `fos_framebuffer_acquire()/release()` lend the same pointer to
+every full-frame call site (render, portal status screen, `display_test`).
+Peak usage is unchanged; what changes is that the allocation can no longer
+fail later. PSRAM boards skip the reservation and keep allocating per render.
+The reservation is skipped, with a log line saying so, if it would leave less
+than `FOS_FRAMEBUFFER_MIN_HEAP_AFTER_RESERVE` (96 KB) for Wi-Fi and TLS — a
+frame that renders but cannot fetch is no better than one that retries.
+
 **No image proxies, ever:** when a remote image source serves files too large
 to decode on-device (e.g. multi-MB PNGs), the fix is a streaming decoder —
 incremental inflate with row-by-row unfilter/scale into the render target, so
@@ -431,6 +445,12 @@ Default pins target the XIAO ESP32-S3: CS=GPIO3 (D2), DC=GPIO4 (D3), RST=GPIO5 (
 BUSY=GPIO6 (D5), SCK=GPIO7 (D8), MOSI=GPIO9 (D10). Remap at runtime with `set pins`,
 in the portal, or per-frame via `deviceConfig.pins` in the backend. The 13.3-inch
 Spectra 6 panel (`EPD_13in3e`) has two controllers and requires `cs2`.
+
+`GET /status` reports the chip it is actually running on (`board.target` from
+`CONFIG_IDF_TARGET`, `board.module` and `config.hardwarePreset` from the preset
+the backend baked in). It also reports `memory.internalLargestBlock` next to
+`internalFree`, because on a fragmented heap only the first of those explains
+a failed allocation.
 
 When connected, the device serves `GET /status` (heap/PSRAM/Wi-Fi/render stats JSON)
 and `POST /api/action/render` / `POST /api/action/ota` on port 80. If

@@ -1986,7 +1986,9 @@ async def test_execute_embedded_fast_failure_includes_status_context(monkeypatch
             return 200, json.dumps({
                 "version": "v2026.6.29-14-gd17bbe05",
                 "storage": {"stateBytes": 25165824, "flashBytes": 33554432},
-                "memory": {"internalFree": 123456, "psramFree": 4567890},
+                # A PSRAM-less C3 reports exactly this shape when a render
+                # fails: six figures free, no block big enough to use.
+                "memory": {"internalFree": 123456, "internalLargestBlock": 15872, "psramFree": 0},
                 "scenes": {"loaded": 0, "available": 0},
             }).encode("utf-8"), {}
         return 500, b"UNKNOWN ERROR", {}
@@ -2016,6 +2018,8 @@ async def test_execute_embedded_fast_failure_includes_status_context(monkeypatch
     assert "UNKNOWN ERROR" in str(exc.value)
     assert "version=v2026.6.29-14-gd17bbe05" in str(exc.value)
     assert "stateBytes=25165824" in str(exc.value)
+    assert "internalFree=123456" in str(exc.value)
+    assert "internalLargestBlock=15872" in str(exc.value)
     assert "scenes.loaded=0" in str(exc.value)
     assert frame.status == "uninitialized"
 

@@ -32,6 +32,7 @@
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_console.h"
+#include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
@@ -151,6 +152,15 @@ void app_main(void)
     BOOTMEM("after-config");
     if (fos_display_init(&display_config) != ESP_OK) {
         ESP_LOGW(TAG, "display init failed, continuing headless");
+    }
+
+    /* Claim the panel buffer here — the panel size is known and Wi-Fi, lwIP,
+     * httpd and SPIFFS have not yet carved up the internal heap. On a
+     * PSRAM-less C3 this is the difference between a frame that renders and
+     * one that reports "out of memory for 96000 byte framebuffer" with 120 KB
+     * free but no block that size. No-op on PSRAM boards. */
+    if (fos_display_present()) {
+        fos_framebuffer_reserve(fos_display_buffer_size());
     }
 
     /* fos_assets_sd_mount emits its own structured "assets:sd" line into the

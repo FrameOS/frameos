@@ -29,6 +29,7 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_mem.h"
 #include "fos_ota.h"
@@ -713,8 +714,7 @@ static int cmd_display_test(int argc, char **argv)
         return 1;
     }
 
-    uint8_t *buf = fos_big_malloc(len);
-    if (!buf) buf = malloc(len);
+    uint8_t *buf = fos_framebuffer_acquire(len);
     if (!buf) {
         printf("display_test: allocation failed (%u bytes)\n", (unsigned)len);
         return 1;
@@ -746,7 +746,7 @@ static int cmd_display_test(int argc, char **argv)
     printf("display_test: mode=%s panel=%s %dx%d format=%d bytes=%u\n",
            mode, fos_display_selected_panel(), width, height, (int)format, (unsigned)len);
     esp_err_t err = fos_display_blit(buf, len);
-    free(buf);
+    fos_framebuffer_release(buf);
     printf("display_test: %s (%d)\n", err == ESP_OK ? "ESP_OK" : esp_err_to_name(err), (int)err);
     return err == ESP_OK ? 0 : 1;
 }

@@ -26,6 +26,7 @@
 #include "fos_buttons.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_framebuffer.h"
 #include "fos_mem.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
@@ -679,10 +680,18 @@ static esp_err_t render_once(void)
         err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
     } else {
-        buf = fos_big_malloc(buf_len);
-        if (!buf) buf = malloc(buf_len);
+        buf = fos_framebuffer_acquire(buf_len);
         if (!buf) {
-            ESP_LOGE(TAG, "out of memory for %u byte framebuffer", (unsigned)buf_len);
+            /* Free bytes alone never explained this failure — a C3 with 120 KB
+             * free and a largest block of 16 KB cannot hold 96000 contiguous
+             * bytes. Print what actually decides it. */
+            ESP_LOGE(TAG, "out of memory for %u byte framebuffer "
+                          "(internal free=%u largest=%u, psram total=%u, reserved=%u)",
+                     (unsigned)buf_len,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                     (unsigned)heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+                     (unsigned)fos_framebuffer_reserved_bytes());
             log_render_event("render:error", scene_id, scene_name, "error", "allocate",
                              mode, "none", "out-of-memory", render_attempt,
                              (esp_timer_get_time() - start) / 1000, width, height,
@@ -768,7 +777,9 @@ static esp_err_t render_once(void)
                      err == ESP_OK ? s_render_count : render_attempt, total_ms,
                      width, height, format, buf_len, err);
     frameos_nim_flush_logs();
-    free(buf);
+    /* Returns the reservation to the pool, or frees a one-off allocation —
+     * including the Nim renderer's buffer on the local-render path. */
+    fos_framebuffer_release(buf);
     if (err != ESP_OK) {
         render_failure_recover(scene_name);
     }

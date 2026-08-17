@@ -111,7 +111,7 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
 EMBEDDED_PLATFORM_ALIASES = EMBEDDED_PLATFORMS[SUPPORTED_EMBEDDED_PLATFORM]["aliases"]
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 46  # ESP32-C3 platform, TRMNL/XTEINK/Sticky boards, EPD_7in5yr + EPD_3in97 panels
+EMBEDDED_FIRMWARE_VERSION = 47  # boot-time framebuffer reservation (C3 thin-client OOM), honest board.target
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")

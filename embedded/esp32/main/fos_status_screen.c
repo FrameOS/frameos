@@ -1,5 +1,5 @@
 #include "fos_status_screen.h"
-#include "fos_mem.h"
+#include "fos_framebuffer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -208,9 +208,9 @@ esp_err_t fos_status_screen_show_portal(const char *ssid, const char *ip)
     int height = fos_display_height();
     fos_pixel_format_t format = fos_display_format();
     size_t len = fos_display_buffer_size();
-    uint8_t *buf = fos_big_malloc(len);
+    uint8_t *buf = fos_framebuffer_acquire(len);
     if (!buf) {
-        ESP_LOGE(TAG, "out of PSRAM for %u byte status screen", (unsigned)len);
+        ESP_LOGE(TAG, "out of memory for %u byte status screen", (unsigned)len);
         return ESP_ERR_NO_MEM;
     }
     memset(buf, white_fill(format), len);
@@ -240,7 +240,7 @@ esp_err_t fos_status_screen_show_portal(const char *ssid, const char *ip)
     draw_centered(buf, width, height, format, ip_line, y, scale);
 
     esp_err_t err = fos_display_blit(buf, len);
-    free(buf);
+    fos_framebuffer_release(buf);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "portal status screen rendered: ssid=%s ip=%s",
                  ssid_line, ip && ip[0] ? ip : "192.168.4.1");
