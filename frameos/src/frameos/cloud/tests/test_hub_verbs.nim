@@ -1,4 +1,4 @@
-import std/[base64, json, sequtils, strutils, unittest]
+import std/[base64, json, sequtils, strutils, tables, unittest]
 
 import ../hub_client
 import ../../types
@@ -14,6 +14,9 @@ type
     assetReads: seq[(string, bool)]
     assetData: string ## what readAssetFn serves for "photos/cat.jpg"
     assetWrites: seq[(string, string)]
+    ## asset_put_chunk parts, upload_id → bytes so far (an in-memory stand-in
+    ## for the device's part files, with the same offset semantics).
+    chunkParts: Table[string, string]
     assetMkdirs: seq[string]
     assetDeletes: seq[string]
     assetRenames: seq[(string, string)]
@@ -67,6 +70,23 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
         raise newException(ValueError, "Invalid asset path")
       recorded.assetWrites.add((path, data))
       %*{"path": path, "size": data.len, "mtime": 1700000003, "is_dir": false},
+    putAssetChunkFn: proc(uploadId: string, offset: BiggestInt, data: string,
+                          finalPath: string): JsonNode {.gcsafe.} =
+      if finalPath == "denied.bin":
+        raise newException(ValueError, "Invalid asset path")
+      var part = recorded.chunkParts.getOrDefault(uploadId, "")
+      if offset <= 0:
+        part = data
+      elif part.len < offset:
+        raise newException(ValueError, "chunk_gap")
+      else:
+        part = part[0 ..< offset.int] & data
+      if finalPath.len == 0:
+        recorded.chunkParts[uploadId] = part
+        return %*{"received": part.len}
+      recorded.chunkParts.del(uploadId)
+      recorded.assetWrites.add((finalPath, part))
+      %*{"path": finalPath, "size": part.len, "mtime": 1700000004, "is_dir": false},
     mkdirAssetFn: proc(path: string) {.gcsafe.} =
       recorded.assetMkdirs.add(path),
     deleteAssetFn: proc(path: string) {.gcsafe.} =
@@ -697,6 +717,70 @@ suite "cloud hub verb dispatcher":
     check handleCloudVerb(ctx, %*{
       "type": "asset_put", "path": "denied.bin", "data": encode("x"),
     }).ack{"error"}.getStr("") == "invalid_path"
+    check recorded.assetWrites.len == 0
+
+  test "asset_put_chunk assembles a file across acked chunks, offsets make retries idempotent":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    let first = handleCloudVerb(ctx, %*{
+      "id": "c1", "type": "asset_put_chunk", "upload_id": "up_1",
+      "offset": 0, "data": encode("hello "),
+    })
+    check first.ack{"ok"}.getBool(false) == true
+    check first.ack{"received"}.getInt(0) == 6
+    check first.ack.hasKey("asset") == false
+    # At-least-once delivery: the same chunk again lands on the same bytes.
+    let again = handleCloudVerb(ctx, %*{
+      "id": "c1", "type": "asset_put_chunk", "upload_id": "up_1",
+      "offset": 0, "data": encode("hello "),
+    })
+    check again.ack{"received"}.getInt(0) == 6
+    let second = handleCloudVerb(ctx, %*{
+      "id": "c2", "type": "asset_put_chunk", "upload_id": "up_1",
+      "offset": 6, "data": encode("wor"),
+    })
+    check second.ack{"received"}.getInt(0) == 9
+    let last = handleCloudVerb(ctx, %*{
+      "id": "c3", "type": "asset_put_chunk", "upload_id": "up_1",
+      "offset": 9, "data": encode("ld"), "complete": true, "path": "fonts/big.ttf",
+    })
+    check last.ack{"ok"}.getBool(false) == true
+    check last.ack{"asset"}{"path"}.getStr("") == "fonts/big.ttf"
+    check last.ack{"asset"}{"size"}.getInt(0) == 11
+    check recorded.assetWrites == @[("fonts/big.ttf", "hello world")]
+    check "up_1" notin recorded.chunkParts
+
+  test "asset_put_chunk reports a hole as chunk_gap and refuses bad envelopes":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_put_chunk", "upload_id": "up_2", "offset": 0, "data": encode("abc"),
+    }).ack{"ok"}.getBool(false) == true
+    # Offset past the part's end: an earlier chunk was lost — restart, don't append.
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_put_chunk", "upload_id": "up_2", "offset": 10, "data": encode("x"),
+    }).ack{"error"}.getStr("") == "chunk_gap"
+    for (message, error) in [
+      (%*{"type": "asset_put_chunk", "offset": 0, "data": encode("x")}, "invalid_upload_id"),
+      (%*{"type": "asset_put_chunk", "upload_id": "../evil", "offset": 0, "data": encode("x")}, "invalid_upload_id"),
+      (%*{"type": "asset_put_chunk", "upload_id": "a".repeat(65), "offset": 0, "data": encode("x")}, "invalid_upload_id"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "data": encode("x")}, "invalid_offset"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": -1, "data": encode("x")}, "invalid_offset"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": "0", "data": encode("x")}, "invalid_offset"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": 0, "data": ""}, "invalid_data"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": 0, "data": "!!!"}, "invalid_data"),
+      # The destination is checked on the final chunk, dot-directories included.
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": 0, "data": encode("x"),
+          "complete": true}, "invalid_path"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": 0, "data": encode("x"),
+          "complete": true, "path": ".thumbs/x.bin"}, "invalid_path"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": 0, "data": encode("x"),
+          "complete": true, "path": "denied.bin"}, "invalid_path"),
+      # Past the assembled-file ceiling.
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": HubMaxChunkedUploadBytes,
+          "data": encode("x")}, "too_large"),
+    ]:
+      check handleCloudVerb(ctx, message).ack{"error"}.getStr("") == error
     check recorded.assetWrites.len == 0
 
   test "asset write verbs never touch dot-directories":

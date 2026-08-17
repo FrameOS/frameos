@@ -11,7 +11,8 @@
 ## the code for those capabilities simply does not exist here, so no
 ## provider-side compromise or configuration flag can reach them. The only
 ## file access is the asset verb family (`assets_list`/`asset_get` plus the
-## write verbs `asset_put`/`asset_mkdir`/`asset_delete`/`asset_rename`):
+## write verbs `asset_put`/`asset_put_chunk`/`asset_mkdir`/`asset_delete`/
+## `asset_rename`):
 ## resolved and bounded on-device inside the assets directory
 ## (admin_api_assets_routes' resolveAssetPath — the same guard the local
 ## Assets panel uses), with writes additionally refused for dot-directories
@@ -113,10 +114,18 @@ const
   # folder. Over the cap the listing says `truncated: true` — never a silent
   # stop (a partial listing that looks complete is worse than none).
   HubMaxAssetListEntries* = 5000
-  # `asset_put` rides a single inbound frame (there is no cloud→device chunk
-  # stream), so the raw payload must survive base64 inflation plus envelope
-  # inside HubMaxInboundBytes. 2.5 MiB raw ≈ 3.4 MiB encoded.
+  # `asset_put` rides a single inbound frame, so the raw payload must survive
+  # base64 inflation plus envelope inside HubMaxInboundBytes. 2.5 MiB raw ≈
+  # 3.4 MiB encoded. Bigger files ride `asset_put_chunk` (below), one chunk of
+  # at most this size per frame.
   HubMaxAssetUploadBytes* = 2_621_440
+  # `asset_put_chunk` assembles a file across frames, so its ceiling is a disk
+  # question, not a frame-size one. 64 MiB covers the biggest bundled font
+  # (NotoColorEmoji, 10.7 MB) several times over and any photo a scene would
+  # want; a video that needs more belongs on the card, not on the socket.
+  HubMaxChunkedUploadBytes* = 64 * 1024 * 1024
+  # upload_id is a filename component on the device: [A-Za-z0-9_-], bounded.
+  HubMaxUploadIdLen* = 64
   # Service settings (docs/cloud-frames.md): the contract's own triggers are a
   # pull at every `ready` and a pull per `refresh_service_settings` nudge. This
   # slow timer is the "whenever the device decides its copy may be stale" leg —
@@ -230,6 +239,14 @@ type
     ## ValueError for a path the guard refuses and OSError for a filesystem
     ## failure — the handlers translate those into wire errors.
     writeAssetFn*: proc(path: string, data: string): JsonNode {.gcsafe.}
+    ## `asset_put_chunk`: write `data` at `offset` into the part named by
+    ## `uploadId`; with a non-empty `finalPath` also move the finished part
+    ## there and return the stored entry (like writeAssetFn), otherwise
+    ## return {"received": <part size>}. Raises ValueError("chunk_gap") when
+    ## `offset` is past what has landed, ValueError for a guard refusal and
+    ## OSError for filesystem trouble.
+    putAssetChunkFn*: proc(uploadId: string, offset: BiggestInt, data: string,
+                           finalPath: string): JsonNode {.gcsafe.}
     mkdirAssetFn*: proc(path: string) {.gcsafe.}
     deleteAssetFn*: proc(path: string) {.gcsafe.}
     renameAssetFn*: proc(src: string, dst: string) {.gcsafe.}
@@ -536,6 +553,19 @@ proc defaultWriteAsset(path: string, data: string): JsonNode {.gcsafe.} =
     payload["path"] = %relativeAssetPath(payload{"path"}.getStr(""))
     payload
 
+proc defaultPutAssetChunk(uploadId: string, offset: BiggestInt, data: string,
+                          finalPath: string): JsonNode {.gcsafe.} =
+  ## One `asset_put_chunk` write. The part lives outside the assets directory
+  ## (the admin upload temp root) until the final chunk moves it into place,
+  ## so a half-uploaded file is never listable or renderable.
+  {.gcsafe.}:
+    let received = writeAssetUploadChunk(uploadId, offset, data)
+    if finalPath.len == 0:
+      return %*{"received": received}
+    var payload = finishAssetUploadChunks(uploadId, finalPath)
+    payload["path"] = %relativeAssetPath(payload{"path"}.getStr(""))
+    payload
+
 var
   ## Set by the `refresh_service_settings` verb (and cleared by the session
   ## loop once the pull starts). The nudge is advisory, so accepting it is
@@ -589,6 +619,10 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
       writeAssetFn: proc(path: string, data: string): JsonNode {.gcsafe.} =
         {.gcsafe.}:
           defaultWriteAsset(path, data),
+      putAssetChunkFn: proc(uploadId: string, offset: BiggestInt, data: string,
+                            finalPath: string): JsonNode {.gcsafe.} =
+        {.gcsafe.}:
+          defaultPutAssetChunk(uploadId, offset, data, finalPath),
       mkdirAssetFn: proc(path: string) {.gcsafe.} =
         {.gcsafe.}:
           createAssetDirectory(path),
@@ -1134,6 +1168,72 @@ proc handleAssetPut(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVe
     ctx.audit("asset_put", false, wireError)
     CloudVerbReply(ack: ackError(id, wireError))
 
+proc validCloudUploadId*(uploadId: string): bool =
+  ## [A-Za-z0-9_-]{1,64}: it becomes a filename component on the device.
+  if uploadId.len == 0 or uploadId.len > HubMaxUploadIdLen:
+    return false
+  for ch in uploadId:
+    if not (ch.isAlphaNumeric() or ch in {'-', '_'}):
+      return false
+  true
+
+proc handleAssetPutChunk(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  ## The cloud→device half of the chunk protocol (docs/cloud-frames.md
+  ## `asset_put_chunk`): the provider streams a file as offset-addressed
+  ## chunks under one `upload_id`, waiting for each ack, and marks the last
+  ## one `complete` with the destination `path`. Offsets make redelivery
+  ## idempotent — hub delivery is at-least-once, and a chunk that arrives
+  ## twice overwrites itself instead of appending. Nothing is visible in the
+  ## assets directory until the final chunk lands.
+  if ctx.putAssetChunkFn.isNil:
+    ctx.audit("asset_put_chunk", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let uploadId = msg{"upload_id"}.getStr("")
+  if not validCloudUploadId(uploadId):
+    ctx.audit("asset_put_chunk", false, "invalid_upload_id")
+    return CloudVerbReply(ack: ackError(id, "invalid_upload_id"))
+  let offsetNode = msg{"offset"}
+  if offsetNode == nil or offsetNode.kind != JInt or offsetNode.getBiggestInt() < 0:
+    ctx.audit("asset_put_chunk", false, "invalid_offset")
+    return CloudVerbReply(ack: ackError(id, "invalid_offset"))
+  let offset = offsetNode.getBiggestInt()
+  let complete = msg{"complete"}.getBool(false)
+  let path = msg{"path"}.getStr("")
+  # The destination is only needed (and only checked) on the final chunk;
+  # the part itself never lives in the assets directory.
+  if complete and (path.len == 0 or refusedWritePath(path)):
+    ctx.audit("asset_put_chunk", false, "invalid_path")
+    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+  var data: string
+  try:
+    data = decode(msg{"data"}.getStr(""))
+  except CatchableError:
+    ctx.audit("asset_put_chunk", false, "invalid_data")
+    return CloudVerbReply(ack: ackError(id, "invalid_data"))
+  if data.len == 0 or data.len > HubMaxAssetUploadBytes:
+    ctx.audit("asset_put_chunk", false,
+              if data.len == 0: "invalid_data" else: "too_large")
+    return CloudVerbReply(ack: ackError(id, if data.len == 0: "invalid_data" else: "too_large"))
+  if offset + data.len > HubMaxChunkedUploadBytes:
+    ctx.audit("asset_put_chunk", false, "too_large")
+    return CloudVerbReply(ack: ackError(id, "too_large"))
+  try:
+    let stored = ctx.putAssetChunkFn(uploadId, offset, data, if complete: path else: "")
+    ctx.audit("asset_put_chunk", true)
+    var ack = ackOk(id)
+    if complete:
+      ack["asset"] = stored
+    else:
+      ack["received"] = stored{"received"}
+    CloudVerbReply(ack: ack)
+  except CatchableError as error:
+    # A hole in the part is the sender's cue to restart from offset 0 — say
+    # so distinctly, it is the one write error that is not the device's.
+    let wireError = if error of ValueError and error.msg == "chunk_gap": "chunk_gap"
+                    else: assetWriteError(error)
+    ctx.audit("asset_put_chunk", false, wireError)
+    CloudVerbReply(ack: ackError(id, wireError))
+
 proc handleAssetMkdir(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if ctx.mkdirAssetFn.isNil:
     ctx.audit("asset_mkdir", false, "unsupported_verb")
@@ -1253,6 +1353,8 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = handleAssetGet(ctx, id, msg)
   of "asset_put":
     result = handleAssetPut(ctx, id, msg)
+  of "asset_put_chunk":
+    result = handleAssetPutChunk(ctx, id, msg)
   of "asset_mkdir":
     result = handleAssetMkdir(ctx, id, msg)
   of "asset_delete":
@@ -1662,6 +1764,13 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   try:
     let ready = await runHandshake(socket, ctx)
     log(%*{"event": "cloud:hub:connected", "provider": link.providerUrl})
+    # Parts of chunked uploads that never completed (the provider gave up,
+    # or the previous session died mid-file) are only ever finished by the
+    # session that started them; sweep the stale ones on every fresh start.
+    try:
+      cleanupStaleAssetUploadChunks()
+    except CatchableError:
+      discard
     # The hub announces the link's granted scopes in `ready`. Merge anything
     # new into the local link state — this is how frames whose enroll response
     # under-reported the grant (older providers said only frame:managed)

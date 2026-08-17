@@ -4,14 +4,16 @@ import { catalogueFonts } from "../../../../../../src/lib/fonts";
 import {
   assetWriteRequestContext,
   runAssetWriteCommand,
+  uploadAssetBytes,
 } from "../../../../../../src/lib/frame-asset-write";
 import { POST } from "./route";
 
-// Font sync for a cloud-managed frame. Every font is one asset_put whose ack
-// the device sends after writing to an SD card, so the interesting behaviour
-// is all in the loop: what it skips, what it reports, and when it gives up.
-// The command layer is mocked (its own ack/timeout handling is tested with
-// frame-asset-write); this pins the contract the panel reads.
+// Font sync for a cloud-managed frame. Every font is one upload (a single
+// asset_put, or a run of asset_put_chunk for the big ones) whose ack the
+// device sends after writing to an SD card, so the interesting behaviour is
+// all in the loop: what it skips, what it reports, and when it gives up. The
+// upload layer is mocked (its own ack/timeout/chunking handling is tested
+// with frame-asset-write); this pins the contract the panel reads.
 
 vi.mock("../../../../../../src/lib/frame-asset-write", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -19,10 +21,12 @@ vi.mock("../../../../../../src/lib/frame-asset-write", async (importOriginal) =>
   invalidateCachedAssetSubtree: vi.fn(() => Promise.resolve()),
   queueAssetsListRefresh: vi.fn(() => Promise.resolve()),
   runAssetWriteCommand: vi.fn(() => Promise.resolve({ ok: true as const })),
+  uploadAssetBytes: vi.fn(() => Promise.resolve({ ok: true as const })),
 }));
 
 const contextMock = vi.mocked(assetWriteRequestContext);
 const commandMock = vi.mocked(runAssetWriteCommand);
+const uploadMock = vi.mocked(uploadAssetBytes);
 
 const frameId = "11111111-2222-3333-4444-555555555555";
 const accountId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -70,16 +74,16 @@ async function runSync(): Promise<SyncEvent[]> {
 }
 
 function putPaths(): string[] {
-  return commandMock.mock.calls
-    .filter((call) => call[3] === "asset_put")
-    .map((call) => String((call[4] as { path: string }).path));
+  return uploadMock.mock.calls.map((call) => String(call[3]));
 }
 
+// NotoColorEmoji: too big for one WS frame, so it rides asset_put_chunk.
 const oversizedFont = catalogueFonts.find((font) => font.size > 2_621_440)!;
 
 beforeEach(() => {
   vi.clearAllMocks();
   commandMock.mockResolvedValue({ ok: true });
+  uploadMock.mockResolvedValue({ ok: true });
 });
 
 describe("font sync for a cloud frame", () => {
@@ -111,12 +115,16 @@ describe("font sync for a cloud frame", () => {
     for (const path of paths) {
       expect(path.startsWith("fonts/")).toBe(true);
     }
-    // Everything except the one font that cannot ride a single WS frame.
-    expect(paths.length).toBe(catalogueFonts.length - 1);
+    // Every font, the emoji one included — it rides asset_put_chunk.
+    expect(paths.length).toBe(catalogueFonts.length);
+    expect(paths).toContain(`fonts/${oversizedFont.file}`);
+    // Real bytes go out, not a base64 string: the upload layer encodes per
+    // chunk.
+    expect(uploadMock.mock.calls[0]![4]).toBeInstanceOf(Uint8Array);
 
     const done = events.at(-1)!;
     expect(done.type).toBe("done");
-    expect(done.uploaded).toBe(catalogueFonts.length - 1);
+    expect(done.uploaded).toBe(catalogueFonts.length);
     expect(done.failed).toBe(0);
     expect(done.stopped).toBeUndefined();
   });
@@ -128,16 +136,23 @@ describe("font sync for a cloud frame", () => {
     expect(commandMock.mock.calls[0]![4]).toEqual({ path: "fonts" });
   });
 
-  it("says which font is too large rather than failing it", async () => {
+  it("says when a frame's firmware predates chunked uploads", async () => {
+    // Older firmware answers asset_put_chunk with unknown_verb; the panel
+    // should read "update the frame", not a bare error code.
     grantAccess();
+    uploadMock.mockImplementation(async (_db, _account, _frame, path) =>
+      path === `fonts/${oversizedFont.file}`
+        ? { error: "chunked_upload_unsupported", ok: false }
+        : { ok: true },
+    );
     const events = await runSync();
 
     const emoji = events.find((event) => event.file === oversizedFont.file)!;
-    expect(emoji.status).toBe("skipped");
-    expect(String(emoji.reason)).toContain("too large");
-    // The number in the message is the font's real size, so "why" is checkable.
-    expect(String(emoji.reason)).toContain((oversizedFont.size / 1_000_000).toFixed(1));
-    expect(putPaths()).not.toContain(`fonts/${oversizedFont.file}`);
+    expect(emoji.status).toBe("failed");
+    expect(String(emoji.reason)).toContain("newer FrameOS");
+    const done = events.at(-1)!;
+    expect(done.failed).toBe(1);
+    expect(done.stopped).toBeUndefined();
   });
 
   it("skips a font the frame already has at the same size", async () => {
@@ -175,7 +190,7 @@ describe("font sync for a cloud frame", () => {
 
   it("stops early when the frame stops answering", async () => {
     grantAccess();
-    commandMock.mockResolvedValue({
+    uploadMock.mockResolvedValue({
       error: "frame_unreachable",
       ok: false,
       timedOut: true,
@@ -194,10 +209,7 @@ describe("font sync for a cloud frame", () => {
   it("keeps going when a single font is refused", async () => {
     grantAccess();
     let call = 0;
-    commandMock.mockImplementation(async (_db, _account, _frame, type) => {
-      if (type !== "asset_put") {
-        return { ok: true };
-      }
+    uploadMock.mockImplementation(async () => {
       call += 1;
       return call === 2 ? { error: "no_space", ok: false } : { ok: true };
     });
@@ -206,7 +218,7 @@ describe("font sync for a cloud frame", () => {
     const done = events.at(-1)!;
     expect(done.failed).toBe(1);
     expect(done.stopped).toBeUndefined();
-    expect(done.uploaded).toBe(catalogueFonts.length - 2);
+    expect(done.uploaded).toBe(catalogueFonts.length - 1);
     const failure = events.find((event) => event.status === "failed")!;
     expect(failure.reason).toBe("no_space");
   });

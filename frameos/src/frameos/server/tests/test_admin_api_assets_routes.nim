@@ -176,3 +176,42 @@ suite "Server admin api asset helpers":
     let uploadedImage = finishChunkedImageUpload("upload-image", "sample.png")
     check uploadedImage{"path"}.getStr().startsWith("uploads/sample.")
     check uploadedImage{"filename"}.getStr().endsWith(".png")
+
+  test "offset-addressed cloud upload chunks overwrite on retry and refuse holes":
+    let tempRoot = getTempDir() / "frameos-api-cloud-chunked-assets"
+    removeDir(tempRoot)
+    createDir(tempRoot)
+    globalFrameConfig = baseConfig(tempRoot)
+
+    check writeAssetUploadChunk("cloud-up-a", 0, "hel") == 3
+    check writeAssetUploadChunk("cloud-up-a", 3, "lo ") == 6
+    # A redelivered chunk lands on the same bytes rather than appending.
+    check writeAssetUploadChunk("cloud-up-a", 3, "lo ") == 6
+    check writeAssetUploadChunk("cloud-up-a", 6, "world") == 11
+    expect ValueError:
+      discard writeAssetUploadChunk("cloud-up-a", 20, "gap")
+    let finalized = finishAssetUploadChunks("cloud-up-a", "fonts/../fonts/Big Font.ttf")
+    # Same filename sanitizing as a single-shot upload; the part is gone.
+    check finalized{"path"}.getStr() == tempRoot / "fonts" / "Big_Font.ttf"
+    check readFile(tempRoot / "fonts" / "Big_Font.ttf") == "hello world"
+    expect OSError:
+      discard finishAssetUploadChunks("cloud-up-a", "fonts/again.ttf")
+
+    # Offset 0 restarts an upload; parts never escape the temp root.
+    check writeAssetUploadChunk("cloud-up-b", 0, "first try") == 9
+    check writeAssetUploadChunk("cloud-up-b", 0, "again") == 5
+    discardAssetUploadChunks("cloud-up-b")
+    expect OSError:
+      discard finishAssetUploadChunks("cloud-up-b", "x.bin")
+    expect ValueError:
+      discard writeAssetUploadChunk("", 0, "x")
+
+    # Stale sweep: parts older than the cutoff go, younger ones stay. A
+    # just-written part is younger than a six-hour cutoff and older than a
+    # cutoff in the future (negative age).
+    check writeAssetUploadChunk("cloud-up-old", 0, "old") == 3
+    cleanupStaleAssetUploadChunks()
+    check writeAssetUploadChunk("cloud-up-old", 3, "er") == 5
+    cleanupStaleAssetUploadChunks(maxAgeSeconds = -60)
+    expect OSError:
+      discard finishAssetUploadChunks("cloud-up-old", "old.bin")
