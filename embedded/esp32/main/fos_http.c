@@ -27,9 +27,11 @@
 #include "fos_assets.h"
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
+#include "fos_board.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_framebuffer.h"
 #include "fos_mem.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
@@ -695,6 +697,11 @@ char *fos_http_status_json(void)
     const char *snapshot_mode = fos_client_snapshot_mode();
     bool display_state_ready = fos_client_display_state_ready();
     size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    /* Free bytes on their own mislead: the render that fails at 96000 bytes
+     * often does so with six figures free, because none of it is contiguous.
+     * Report the largest block next to the total so a log can tell the two
+     * apart. */
+    size_t internal_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
     const char *scene_json = frameos_nim_scene_info_json();
@@ -711,6 +718,11 @@ char *fos_http_status_json(void)
     char *partition = json_escape_dup(running ? running->label : "?");
     char *ip = json_escape_dup(fos_wifi_ip());
     char *panel = json_escape_dup(config->panel);
+    /* The preset key ("xteink_x4") is the one field that says which physical
+     * board this is; without it a log cannot distinguish a C3 thin client
+     * from an S3 with the same panel. NVS-settable, so it gets escaped. */
+    char *hardware_preset = json_escape_dup(config->hardware_preset);
+    char *board_module = json_escape_dup(fos_board_module(config->hardware_preset));
     char *pins_json = json_escape_dup(pins);
     char *sd_pins_json = json_escape_dup(sd_pins);
     char *assets_path = json_escape_dup(config->assets_path);
@@ -721,10 +733,12 @@ char *fos_http_status_json(void)
      * what makes SD problems unanswerable from the panel. */
     char *sd_error = json_escape_dup(fos_assets_sd_last_error());
     if (!app_name || !app_version || !idf_version || !partition || !ip ||
-        !panel || !pins_json || !sd_pins_json || !assets_path || !backend || !ssid || !nim_info ||
+        !panel || !hardware_preset || !board_module ||
+        !pins_json || !sd_pins_json || !assets_path || !backend || !ssid || !nim_info ||
         !sd_error || !cloud_url || !cloud_frame_id || !cloud_error) {
         free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
-        free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+        free(panel); free(hardware_preset); free(board_module);
+        free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
         free(sd_error);
         free(cloud_url); free(cloud_frame_id); free(cloud_error);
         return NULL;
@@ -734,8 +748,9 @@ char *fos_http_status_json(void)
     int len = asprintf(&json,
         "{\"app\":\"%s\",\"version\":\"%s\",\"elfSha256\":\"%s\",\"idf\":\"%s\",\"partition\":\"%s\","
         "\"uptimeSec\":%lld,"
-        "\"board\":{\"target\":\"esp32-s3\",\"module\":\"Seeed XIAO ESP32-S3 class\",\"display\":\"%s\"},"
-        "\"memory\":{\"internalFree\":%u,\"psramFree\":%u,\"psramTotal\":%u},"
+        "\"board\":{\"target\":\"%s\",\"module\":\"%s\",\"display\":\"%s\"},"
+        "\"memory\":{\"internalFree\":%u,\"psramFree\":%u,\"psramTotal\":%u,"
+        "\"internalLargestBlock\":%u,\"framebufferReserved\":%u},"
         "\"storage\":{\"flashBytes\":%u,\"nvsBytes\":%u,\"otadataBytes\":%u,\"phyBytes\":%u,"
         "\"factorySlotBytes\":%u,\"otaSlots\":%u,\"otaSlotBytes\":%u,\"otaBytes\":%u,"
         "\"stateBytes\":%u},"
@@ -755,15 +770,17 @@ char *fos_http_status_json(void)
         /* enrollment state only — no claim token, access token, or key */
         "\"cloud\":{\"state\":\"%s\",\"url\":\"%s\",\"frameId\":\"%s\","
         "\"wsConnected\":%s,\"error\":\"%s\"},"
-        "\"config\":{\"frameId\":%lu,\"panel\":\"%s\",\"renderMode\":\"%s\","
+        "\"config\":{\"frameId\":%lu,\"panel\":\"%s\","
+        "\"hardwarePreset\":\"%s\",\"renderMode\":\"%s\","
         "\"intervalSec\":%lu,\"maxHttpResponseBytes\":%lu,"
         "\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
         "\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
         "\"backendUrl\":\"%s\",\"wifiSsid\":\"%s\"}}",
         app_name, app_version, elf_sha, idf_version, partition,
         esp_timer_get_time() / 1000000,
-        panel,
+        fos_board_target(), board_module, panel,
         (unsigned)internal_free, (unsigned)psram_free, (unsigned)psram_total,
+        (unsigned)internal_largest, (unsigned)fos_framebuffer_reserved_bytes(),
         (unsigned)storage.flash_bytes, (unsigned)storage.nvs_bytes,
         (unsigned)storage.otadata_bytes, (unsigned)storage.phy_bytes,
         (unsigned)storage.factory_slot_bytes, (unsigned)storage.ota_slots,
@@ -790,7 +807,7 @@ char *fos_http_status_json(void)
         nim_info, scene_json,
         fos_cloud_state_name(), cloud_url, cloud_frame_id,
         fos_cloud_ws_connected() ? "true" : "false", cloud_error,
-        (unsigned long)config->frame_id, panel,
+        (unsigned long)config->frame_id, panel, hardware_preset,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
         (unsigned long)config->interval_sec,
         (unsigned long)config->max_http_response_bytes,
@@ -800,7 +817,8 @@ char *fos_http_status_json(void)
         config->wake_schedule ? "true" : "false",
         pins_json, backend, ssid);
     free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
-    free(panel); free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+    free(panel); free(hardware_preset); free(board_module);
+    free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
     free(sd_error);
     free(cloud_url); free(cloud_frame_id); free(cloud_error);
     if (len < 0 || !json) {

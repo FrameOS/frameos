@@ -117,9 +117,16 @@ def _embedded_status_failure_context(body: bytes) -> str | None:
     memory = status.get("memory")
     if isinstance(memory, dict):
         internal_free = memory.get("internalFree")
+        # Free bytes alone read as "plenty of room" on a board that just failed
+        # to allocate: a PSRAM-less C3 can report 120 KB free and still have no
+        # single block big enough for a 96 KB framebuffer. Carry the largest
+        # block whenever the firmware reports it.
+        internal_largest = memory.get("internalLargestBlock")
         psram_free = memory.get("psramFree")
         if isinstance(internal_free, int):
             parts.append(f"internalFree={internal_free}")
+        if isinstance(internal_largest, int):
+            parts.append(f"internalLargestBlock={internal_largest}")
         if isinstance(psram_free, int):
             parts.append(f"psramFree={psram_free}")
 
