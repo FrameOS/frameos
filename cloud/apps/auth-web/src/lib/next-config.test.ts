@@ -31,7 +31,10 @@ describe("API cache headers", () => {
     );
     expect(apiRule).toBeTruthy();
     // Compile the source exactly as Next does and probe the paths that matter.
-    const { pathToRegexp } = await import("next/dist/compiled/path-to-regexp");
+    // @ts-expect-error -- Next ships this vendored dependency without types.
+    const { pathToRegexp } = (await import("next/dist/compiled/path-to-regexp")) as {
+      pathToRegexp: (source: string) => RegExp;
+    };
     const matcher = pathToRegexp(apiRule!.source);
     for (const covered of [
       "/api/frames/1/settings",

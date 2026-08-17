@@ -1,0 +1,133 @@
+[
+  {
+    "id": "589b58e1-8dc1-4ab1-979f-71e51509e0aa",
+    "name": "Abstract Architecture",
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 86400,
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "name": "seconds",
+        "label": "Seconds to show one image",
+        "type": "float",
+        "persist": "disk",
+        "access": "public",
+        "value": "3600"
+      }
+    ],
+    "nodes": [
+      {
+        "data": {
+          "keyword": "render"
+        },
+        "id": "9eb12a2c-9606-4663-80c5-b8a61fd23fa7",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "type": "event"
+      },
+      {
+        "id": "fde55dc0-5e96-4048-a899-3510ebf42e63",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {}
+        },
+        "type": "app"
+      },
+      {
+        "id": "9f106977-5929-4c9a-884e-35b0bc7b51d4",
+        "position": {
+          "x": 355,
+          "y": -192
+        },
+        "data": {
+          "keyword": "data/frameOSGallery",
+          "config": {
+            "category": "building-art-styles"
+          },
+          "cache": {
+            "duration": "60",
+            "durationEnabled": true,
+            "enabled": true,
+            "inputEnabled": true
+          }
+        },
+        "type": "app"
+      },
+      {
+        "id": "044f1ee0-f444-45c7-9a91-5c0983c8f8df",
+        "position": {
+          "x": 804,
+          "y": 30
+        },
+        "data": {
+          "keyword": "logic/nextSleepDuration",
+          "config": {}
+        },
+        "type": "app"
+      },
+      {
+        "id": "5cf5e8b8-5b81-4fd3-993f-1461741c67ef",
+        "position": {
+          "x": 772,
+          "y": -66
+        },
+        "data": {
+          "keyword": "seconds"
+        },
+        "type": "state"
+      }
+    ],
+    "edges": [
+      {
+        "id": "f9671947-579c-4b67-be4d-c346b2757c82",
+        "source": "9eb12a2c-9606-4663-80c5-b8a61fd23fa7",
+        "sourceHandle": "next",
+        "target": "fde55dc0-5e96-4048-a899-3510ebf42e63",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "6c1d6b53-d37e-49ed-847d-7cfaef52f573",
+        "target": "fde55dc0-5e96-4048-a899-3510ebf42e63",
+        "targetHandle": "fieldInput/image",
+        "source": "9f106977-5929-4c9a-884e-35b0bc7b51d4",
+        "sourceHandle": "fieldOutput",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "bdfa8d5e-06c4-46e7-9736-7d033dae664d",
+        "target": "044f1ee0-f444-45c7-9a91-5c0983c8f8df",
+        "targetHandle": "prev",
+        "source": "fde55dc0-5e96-4048-a899-3510ebf42e63",
+        "sourceHandle": "next",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "a5403363-ec22-4572-8e32-04d3f94df376",
+        "source": "5cf5e8b8-5b81-4fd3-993f-1461741c67ef",
+        "sourceHandle": "fieldOutput",
+        "target": "044f1ee0-f444-45c7-9a91-5c0983c8f8df",
+        "targetHandle": "fieldInput/duration",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "apps": {},
+    "customEvents": [],
+    "origin": {
+      "repositoryId": "system-cloud-store",
+      "repositoryUrl": "/api/store/repository.json",
+      "templateId": "abstract-architecture",
+      "templateName": "Abstract Architecture",
+      "sceneId": "589b58e1-8dc1-4ab1-979f-71e51509e0aa",
+      "version": "7"
+    }
+  }
+]

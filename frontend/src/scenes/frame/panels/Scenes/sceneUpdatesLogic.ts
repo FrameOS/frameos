@@ -11,6 +11,7 @@ import {
   sceneUpdateVersion,
 } from '../../../../utils/sceneOrigin'
 import { remapSceneIds } from '../../../../utils/duplicateScenes'
+import { isCloudMode } from '../../../../utils/cloudMode'
 
 import type { sceneUpdatesLogicType } from './sceneUpdatesLogicType'
 
@@ -44,6 +45,15 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
       (s) => [s.installedScenes, s.repositories],
       (installedScenes, repositories): Record<string, string> => {
         const versions: Record<string, string> = {}
+        // Cloud frames track store scenes through their assignments (unpinned
+        // ones follow the latest version by themselves); the origin stamp is
+        // not written on the cloud any more, and the legacy stamps still
+        // embedded in some stored copies lag the published version by one
+        // forever — a badge on them was a perpetual "update available" whose
+        // update republished the scene one more time.
+        if (isCloudMode()) {
+          return versions
+        }
         for (const scene of installedScenes) {
           const version = sceneUpdateVersion(scene, repositories)
           if (version) {

@@ -27,7 +27,7 @@ import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
 import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import { cloudFrameSettingKeys, extendedCloudFrameSettingKeys } from '../../utils/cloudFrameSettings'
-import { persistAndPushCloudFrameScenes } from '../../utils/cloudFrameScenesSave'
+import { persistAndPushCloudFrameScenes, type CloudScenePersistOptions } from '../../utils/cloudFrameScenesSave'
 import { clearCloudSceneJsonCache } from '../../models/framesModel'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
@@ -1629,6 +1629,29 @@ export function buildSplitScene(
   )
 }
 
+/**
+ * What the cloud scene save needs to tell an edited scene from an unedited
+ * one, and a hydrated scene from an orphan. The form holds SANITIZED scenes
+ * (positions filled, defaults materialized), so the store's raw scenes.json
+ * has to go through the same sanitizer — against the server's frame, the one
+ * the form was hydrated with — before the workspace's own scene equality can
+ * judge it. Without this every settings save republished every owned scene
+ * and forked every assigned scene the account does not own into a private
+ * copy ("Abstract Architecture 2" … "8"). `sources` is the hydration record
+ * of which assignment each runtime scene came from, so a pack whose
+ * scenes.json cannot be re-read mid-save keeps its scenes claimed instead of
+ * having them created again.
+ */
+function cloudScenePersistOptions(frameId: FrameId, fallbackFrame: Partial<FrameType>): CloudScenePersistOptions {
+  const serverFrame = framesModel.findMounted()?.values.frames?.[frameId]
+  const frame = serverFrame ?? fallbackFrame
+  return {
+    sceneUnchanged: (stored, form) =>
+      sceneEqualForComparison(sanitizeScene(stored, frame), sanitizeScene(form, frame)),
+    sources: serverFrame?.cloud_scene_sources ?? null,
+  }
+}
+
 async function saveFrameForm(frame: Partial<FrameType>, frameId: FrameId, nextAction: FrameNextAction): Promise<void> {
   const normalizedFrame = normalizeFrameForSubmit(frame)
   if (isCloudMode()) {
@@ -1653,7 +1676,12 @@ async function saveFrameForm(frame: Partial<FrameType>, frameId: FrameId, nextAc
     }
     const scenes = normalizedFrame.scenes ?? []
     if (scenes.length > 0) {
-      const outcome = await persistAndPushCloudFrameScenes(frameId, scenes, normalizedFrame.active_scene_id)
+      const outcome = await persistAndPushCloudFrameScenes(
+        frameId,
+        scenes,
+        normalizedFrame.active_scene_id,
+        cloudScenePersistOptions(frameId, normalizedFrame)
+      )
       for (const storeSceneId of outcome.changedStoreSceneIds) {
         clearCloudSceneJsonCache(storeSceneId)
       }
@@ -2524,7 +2552,12 @@ export const frameLogic = kea<frameLogicType>([
         detail: 'Saving scenes to your cloud account',
       })
       try {
-        const outcome = await persistAndPushCloudFrameScenes(props.frameId, scenes, values.frame?.active_scene_id)
+        const outcome = await persistAndPushCloudFrameScenes(
+          props.frameId,
+          scenes,
+          values.frame?.active_scene_id,
+          cloudScenePersistOptions(props.frameId, values.frameForm ?? values.frame ?? {})
+        )
         for (const storeSceneId of outcome.changedStoreSceneIds) {
           clearCloudSceneJsonCache(storeSceneId)
         }
