@@ -243,7 +243,9 @@ takes a rule off again.
 The app is already prepared for a lock: `deleteBlobIfUnreferenced` logs a
 refused delete (`object_store.delete_failed`) and carries on rather than
 failing the request that removed the row, and the sweep reports refusals
-instead of aborting. Both leave the object as garbage to collect after the
+instead of aborting. R2 answers **409 Conflict** for an object still under
+retention — not 403, which is what a permission problem looks like, so the two
+stay distinguishable in the logs. Both leave the object as garbage to collect after the
 retention passes, so **run the sweep after enabling a lock and expect refusals
 in its output** — that is the lock working.
 

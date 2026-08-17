@@ -183,7 +183,7 @@ describe("content-addressed blobs", () => {
   });
 
   it("survives a store that refuses the delete", async () => {
-    // A bucket lock answers 403. The row is already gone by then, so throwing
+    // A bucket lock answers 409. The row is already gone by then, so throwing
     // would 500 a delete that succeeded; the object becomes sweep fodder
     // instead.
     process.env.R2_CLOUD_ENDPOINT = "https://accountid.r2.cloudflarestorage.com";
@@ -193,8 +193,8 @@ describe("content-addressed blobs", () => {
 
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async () =>
-      new Response("<Error><Code>AccessDenied</Code></Error>", {
-        status: 403,
+      new Response("<Error><Code>ObjectLockedError</Code></Error>", {
+        status: 409,
       })) as typeof fetch;
     try {
       await expect(
@@ -203,7 +203,7 @@ describe("content-addressed blobs", () => {
       // The strict driver still reports it, for callers that do care.
       await expect(
         objectStore().delete("store/scene-images/locked"),
-      ).rejects.toThrow(/403/);
+      ).rejects.toThrow(/409/);
     } finally {
       globalThis.fetch = realFetch;
     }

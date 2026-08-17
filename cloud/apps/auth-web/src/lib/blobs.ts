@@ -130,9 +130,10 @@ export async function deleteBlobIfUnreferenced(
     // Reclaiming space is never worth failing the request that freed it. The
     // row is already gone by the time this runs, so throwing here would 500 a
     // delete that actually succeeded. A bucket lock refusing the delete (R2
-    // retention rules answer 403), a credential that lost delete permission,
-    // and a transient R2 error all land here; the object becomes garbage that
-    // scripts/object-store-sweep.sh collects once the reason goes away.
+    // answers 409 Conflict for an object still under retention), a credential
+    // that lost delete permission, and a transient R2 error all land here; the
+    // object becomes garbage that scripts/object-store-sweep.sh collects once
+    // the reason goes away.
     logWarn("object_store.delete_failed", {
       error: error instanceof Error ? error.message : String(error),
       objectKey,
