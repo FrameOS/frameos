@@ -2,9 +2,14 @@ import type { FrameSchedule, FrameScene, FrameType } from '../types'
 import { apiFetch } from './apiFetch'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
 import {
+  allCloudFrameSettingKeys,
   cloudFrameSettingKeys,
+  cloudFrameSettingKeysForVersion,
   cloudFrameSettingsPayload,
+  cloudFrameSupportsExtendedSettings,
   esp32CloudFrameSettingKeys,
+  extendedCloudFrameSettingKeys,
+  extendedCloudFrameSettingsMinVersion,
   type CloudFrameSettingKey,
 } from './cloudFrameSettings'
 import { isEsp32CloudFrame } from '../scenes/workspace/workspaceSurfaces'
@@ -30,13 +35,20 @@ export type CloudFrameCommand =
 // The settings allowlist and its payload builder live in the import-free
 // cloudFrameSettings module (it is unit-tested from the cloud app's node
 // suite); re-exported here so callers keep one import.
-export { cloudFrameSettingKeys, cloudFrameSettingsPayload }
+export {
+  cloudFrameSettingKeys,
+  cloudFrameSettingKeysForVersion,
+  cloudFrameSettingsPayload,
+  cloudFrameSupportsExtendedSettings,
+  extendedCloudFrameSettingKeys,
+  extendedCloudFrameSettingsMinVersion,
+}
 export type { CloudFrameSettingKey }
 export type { CloudFrameSceneRow }
 
 // Compile-time guard: every allowlisted key must be a real FrameType field, so
 // a rename in the form cannot leave a dead key on the wire.
-const cloudFrameSettingKeysAreFrameFields: readonly (keyof FrameType)[] = cloudFrameSettingKeys
+const cloudFrameSettingKeysAreFrameFields: readonly (keyof FrameType)[] = allCloudFrameSettingKeys
 void cloudFrameSettingKeysAreFrameFields
 
 async function assertOk(response: Response, fallback: string): Promise<void> {
@@ -67,8 +79,13 @@ export async function sendCloudFrameCommand(
  */
 export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<FrameType>): Promise<boolean> {
   // The power keys exist only in the ESP32 firmware's set_settings profile;
-  // the Pi runtime refuses the whole push on a key it does not know.
-  const keys = isEsp32CloudFrame(frame) ? esp32CloudFrameSettingKeys : cloudFrameSettingKeys
+  // the Pi runtime refuses the whole push on a key it does not know. The
+  // extended batch is the mirror image: Pi/Linux only, and only on firmware
+  // that knows it (cloudFrameSupportsExtendedSettings) — older firmware
+  // refuses the whole push on the first unknown key.
+  const keys = isEsp32CloudFrame(frame)
+    ? esp32CloudFrameSettingKeys
+    : cloudFrameSettingKeysForVersion(frame.frameos_version)
   const settings = cloudFrameSettingsPayload(frame, keys)
   if (Object.keys(settings).length === 0) {
     return false
@@ -78,7 +95,17 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ settings }),
   })
-  await assertOk(response, 'Failed to save the frame settings')
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({}))) as { error?: string; min_frameos_version?: string }
+    if (detail.error === 'settings_need_newer_firmware') {
+      throw new Error(
+        `Some of these settings need FrameOS ${detail.min_frameos_version ?? extendedCloudFrameSettingsMinVersion} or newer on the frame — update it first`
+      )
+    }
+    throw new Error(
+      detail.error ? `Failed to save the frame settings (${detail.error})` : 'Failed to save the frame settings'
+    )
+  }
   return true
 }
 

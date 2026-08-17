@@ -41,7 +41,11 @@ import {
   virtualColorModes,
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
-import { setCloudFrameServiceSettingsEnabled } from '../../../../utils/cloudFrameApi'
+import {
+  cloudFrameSupportsExtendedSettings,
+  extendedCloudFrameSettingsMinVersion,
+  setCloudFrameServiceSettingsEnabled,
+} from '../../../../utils/cloudFrameApi'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
 import { Spinner } from '../../../../components/Spinner'
@@ -1166,6 +1170,10 @@ export function FrameSettings({
   // utils/cloudFrameSettings.ts are the lists this mirrors.
   const esp32CloudProfile = hideForCloud && isEsp32CloudFrame(frame)
   const cloudProfile = hideForCloud
+  // The 2026.8.30 batch (flip, error handling, control code, …) needs firmware
+  // that knows the keys; see cloudFrameSupportsExtendedSettings for what an
+  // unknown or missing version means.
+  const cloudExtendedSettingsSupported = cloudProfile && cloudFrameSupportsExtendedSettings(frame.frameos_version)
   const showBackendSection = frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-backend')
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
     frameForm.embedded?.hardwarePreset ?? frameForm.device_config?.hardwarePreset
@@ -1550,6 +1558,310 @@ export function FrameSettings({
     />
   )
 
+  // Shared between the full settings surface and the cloud profile block
+  // (which renders them for Pi/Linux frames whose firmware knows the
+  // extended settings batch). Same fields, same form keys, one definition.
+  const flipField = (
+    <Field name="flip" label="Flip">
+      {({ value, onChange }) => (
+        <Select
+          value={value || ''}
+          onChange={(v) => onChange(v)}
+          name="flip"
+          options={[
+            { value: '', label: '-' },
+            { value: 'horizontal', label: 'horizontal' },
+            { value: 'vertical', label: 'vertical' },
+            { value: 'both', label: 'both' },
+          ]}
+        />
+      )}
+    </Field>
+  )
+  const metricsIntervalField = (
+    <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">
+      <TextInput name="metrics_interval" placeholder="60" />
+    </Field>
+  )
+  const timezoneUpdaterFields = (
+    <Group name="timezone_updater">
+      <Field
+        name="enabled"
+        label="Update timezone data"
+        tooltip="Download updated timezone rules on this frame so daylight saving changes stay current."
+      >
+        {({ value, onChange }) => {
+          const enabled = value ?? true
+          return (
+            <div className="space-y-3">
+              <div className="flex w-full items-start gap-3">
+                <Switch value={enabled} onChange={onChange} />
+                {enabled ? (
+                  <details className="min-w-0 flex-1">
+                    <summary className="frameos-link cursor-pointer list-none text-sm font-semibold">
+                      advanced
+                    </summary>
+                    <div className="mt-3 w-full space-y-2">
+                      <div className="space-y-1 @md:flex @md:gap-2">
+                        <Label className="@md:w-1/3">
+                          Timezone update hour
+                          <Tooltip title="Hour of day on the frame when timezone data updates run." />
+                        </Label>
+                        <div className="w-full">
+                          <TextInput
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            placeholder={String(DEFAULT_TIMEZONE_UPDATE_HOUR)}
+                            value={timezoneUpdateHourValue}
+                            onChange={setTimezoneUpdateHour}
+                          />
+                        </div>
+                      </div>
+                      {/* The URL stays local: a cloud push carries only
+                          enabled/hour, and the device keeps whatever
+                          endpoint it already uses. */}
+                      {!hideForCloud ? (
+                        <div className="space-y-1 @md:flex @md:gap-2">
+                          <Label className="@md:w-1/3">Timezone update URL</Label>
+                          <div className="w-full">
+                            <TextInput
+                              placeholder={DEFAULT_TIMEZONE_UPDATE_URL}
+                              value={timezoneUpdateUrlValue}
+                              onChange={(url) => setTimezoneUpdaterValue({ url: url || undefined })}
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </details>
+                ) : null}
+              </div>
+            </div>
+          )
+        }}
+      </Field>
+    </Group>
+  )
+  const maxHttpResponseBytesField = (
+    <Field
+      name="max_http_response_bytes"
+      label="Maximum HTTP response size for apps"
+      tooltip={
+        <>
+          Maximum number of bytes that FrameOS apps may download in a single HTTP response. Increase this for
+          larger calendar feeds, images, or APIs. ESP32 frames default to 4 MiB to avoid large PSRAM allocations.
+        </>
+      }
+    >
+      <NumberTextInput name="max_http_response_bytes" placeholder={maxHttpResponsePlaceholder} />
+    </Field>
+  )
+  const errorBehaviorFields = (
+    <>
+      <Field name="error_behavior.mode" label="Unrecoverable error behavior">
+        <div className="grid w-full gap-2 @xl:grid-cols-3">
+          {errorBehaviorModes.map((option) => {
+            const selected = errorBehavior.mode === option.value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setErrorBehavior({ mode: option.value })}
+                className={clsx(
+                  'frame-tool-row min-h-28 rounded-lg p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  selected ? 'border-blue-500 ring-2 ring-blue-500/30' : 'hover:border-slate-400'
+                )}
+                aria-pressed={selected}
+              >
+                <span className="frameos-strong block text-sm font-semibold">{option.title}</span>
+                <span className="frame-tool-muted mt-1 block text-xs leading-5">{option.description}</span>
+              </button>
+            )
+          })}
+        </div>
+      </Field>
+      {errorBehavior.mode === 'show_error_retry' ? (
+        <Field
+          name="error_behavior.retry_seconds"
+          label="Retry delay"
+          tooltip="After a fatal error, render the error screen and retry after this many seconds."
+        >
+          <NumberTextInput
+            value={errorBehavior.retry_seconds ?? DEFAULT_FRAME_ERROR_BEHAVIOR.retry_seconds}
+            onChange={(value) => setErrorBehavior({ retry_seconds: value })}
+            placeholder="60"
+          />
+        </Field>
+      ) : null}
+      {errorBehavior.mode === 'silent_retry' ? (
+        <>
+          <Field
+            name="error_behavior.silent_retry_seconds"
+            label="Silent retry delay"
+            tooltip="While retrying silently, keep the current frame image and retry after this many seconds."
+          >
+            <NumberTextInput
+              value={errorBehavior.silent_retry_seconds ?? DEFAULT_FRAME_ERROR_BEHAVIOR.silent_retry_seconds}
+              onChange={(value) => setErrorBehavior({ silent_retry_seconds: value })}
+              placeholder="60"
+            />
+          </Field>
+          <Field
+            name="error_behavior.silent_retry_forever"
+            label="Retry silently forever"
+            tooltip="When enabled, the frame never replaces the current image with a fatal error screen."
+          >
+            <Switch
+              value={!!errorBehavior.silent_retry_forever}
+              onChange={(value) => setErrorBehavior({ silent_retry_forever: value })}
+              fullWidth
+            />
+          </Field>
+          {!errorBehavior.silent_retry_forever ? (
+            <>
+              <Field
+                name="error_behavior.silent_window_minutes"
+                label="Silent window"
+                tooltip="Retry silently for this many minutes before switching to the visible error screen."
+              >
+                <NumberTextInput
+                  value={errorBehavior.silent_window_minutes ?? DEFAULT_FRAME_ERROR_BEHAVIOR.silent_window_minutes}
+                  onChange={(value) => setErrorBehavior({ silent_window_minutes: value })}
+                  placeholder="10"
+                />
+              </Field>
+              <Field
+                name="error_behavior.show_error_retry_seconds"
+                label="Visible retry delay"
+                tooltip="After the silent window expires, render the error screen and retry after this many seconds."
+              >
+                <NumberTextInput
+                  value={
+                    errorBehavior.show_error_retry_seconds ?? DEFAULT_FRAME_ERROR_BEHAVIOR.show_error_retry_seconds
+                  }
+                  onChange={(value) => setErrorBehavior({ show_error_retry_seconds: value })}
+                  placeholder="60"
+                />
+              </Field>
+            </>
+          ) : null}
+        </>
+      ) : null}
+    </>
+  )
+  const controlCodeFields = (
+    <Group name="control_code">
+      <Field name="enabled" label="QR Control Code">
+        <Select
+          name="enabled"
+          options={[
+            { value: 'false', label: 'Disabled' },
+            { value: 'true', label: 'Enabled' },
+          ]}
+        />
+      </Field>
+      {String(frameForm.control_code?.enabled) === 'true' && (
+        <>
+          <Field name="position" label="Position">
+            {({ value, onChange }) => (
+              <Select
+                name="position"
+                value={value ?? 'top-right'}
+                onChange={onChange}
+                options={[
+                  { value: 'top-left', label: 'Top Left' },
+                  { value: 'top-right', label: 'Top Right' },
+                  { value: 'bottom-left', label: 'Bottom Left' },
+                  { value: 'bottom-right', label: 'Bottom Right' },
+                  { value: 'center', label: 'Center' },
+                ]}
+              />
+            )}
+          </Field>
+          <Field name="size" label="Size of each square in pixels">
+            <TextInput name="size" placeholder="2" />
+          </Field>
+          <Field name="padding" label="Padding around code">
+            <TextInput name="padding" placeholder="1" />
+          </Field>
+          <Field name="offsetX" label="X offset">
+            <TextInput name="offsetX" placeholder="0" />
+          </Field>
+          <Field name="offsetY" label="Y offset">
+            <TextInput name="offsetY" placeholder="0" />
+          </Field>
+          <Field name="qrCodeColor" label="QR code color">
+            <ColorInput
+              name="qrCodeColor"
+              value={frameForm.control_code?.qrCodeColor ?? '#000000'}
+              placeholder="#000000"
+            />
+          </Field>
+          <Field name="backgroundColor" label="Background color">
+            <ColorInput
+              name="backgroundColor"
+              value={frameForm.control_code?.backgroundColor ?? '#ffffff'}
+              placeholder="#ffffff"
+            />
+          </Field>
+        </>
+      )}
+    </Group>
+  )
+  const saveAssetsField = (
+    <Field
+      name="save_assets"
+      label={<div>Save downloaded images as assets</div>}
+      tooltip="This controls the 'auto' setting for 'Save assets' in the following apps. Please note that individual apps/scenes may have overridden the default set here."
+    >
+      {/* Render-prop form: the checkboxes read and write frameForm.save_assets
+          themselves, so kea's cloned value/onChange would only land on a div
+          (and a Fragment child warns about the id it is handed). */}
+      {() => (
+        <div className="space-y-2 w-full">
+          {Object.entries({
+            _all: 'All',
+            ...appsWithSaveAssets,
+          }).map(([keyword, name]) => (
+            <label key={keyword} className="flex gap-1">
+              <input
+                type="checkbox"
+                name={keyword === '_all' ? 'save_assets' : undefined}
+                checked={
+                  typeof frameForm.save_assets === 'boolean'
+                    ? frameForm.save_assets
+                    : !!frameForm.save_assets?.[keyword]
+                }
+                value={'true'}
+                onChange={(e) => {
+                  const checked = !!e.target.checked
+                  if (keyword === '_all') {
+                    setFrameFormValues({ save_assets: checked })
+                  } else {
+                    const prevValues =
+                      typeof frameForm.save_assets === 'object'
+                        ? frameForm.save_assets
+                        : frameForm.save_assets === true
+                        ? Object.fromEntries(Object.entries(appsWithSaveAssets).map(([k]) => [k, true]))
+                        : {}
+                    setFrameFormValues({
+                      save_assets: {
+                        ...prevValues,
+                        [keyword]: checked,
+                      },
+                    })
+                  }
+                  touchFrameFormField('save_assets')
+                }}
+              />
+              {name}
+            </label>
+          ))}
+        </div>
+      )}
+    </Field>
+  )
+
   return (
     <div
       className={clsx(
@@ -1644,9 +1956,43 @@ export function FrameSettings({
               <p className="frameos-muted text-sm">
                 {esp32CloudProfile
                   ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or the FrameOS-Setup portal.'
-                  : 'These are the settings a cloud-managed frame accepts. Everything else this frame runs on — its panel and display driver, network and WiFi, GPIO buttons, mount points, palette, error behaviour and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
+                  : 'These are the settings a cloud-managed frame accepts. Everything else this frame runs on — its panel and display driver, network and WiFi, GPIO buttons, mount points, palette and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
               </p>
             </div>
+            {/* Pi/Linux only, and only on firmware that knows the keys: the
+                2026.8.30 batch (extendedCloudFrameSettingKeys). A frame below
+                the floor refuses the WHOLE push on the first unknown key, so
+                the fields render disabled — never hidden — with the reason,
+                and pushCloudFrameSettings leaves them out of the payload. */}
+            {!esp32CloudProfile ? (
+              <fieldset disabled={!cloudExtendedSettingsSupported} className="min-w-0 space-y-4">
+                <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
+                  <H6 id="frame-settings-defaults">Defaults</H6>
+                </div>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  {!cloudExtendedSettingsSupported ? (
+                    <p className="frameos-muted text-sm">
+                      {frame.frameos_version
+                        ? `These settings need FrameOS ${extendedCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to edit them here.`
+                        : `These settings need FrameOS ${extendedCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`}
+                    </p>
+                  ) : null}
+                  {flipField}
+                  {metricsIntervalField}
+                  {timezoneUpdaterFields}
+                  {maxHttpResponseBytesField}
+                  {saveAssetsField}
+                </div>
+                <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
+                  <H6 id="frame-settings-error-behavior">Global errors</H6>
+                </div>
+                <div className="pl-2 @md:pl-8 space-y-3">{errorBehaviorFields}</div>
+                <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
+                  <H6 id="frame-settings-qr">QR Control Code</H6>
+                </div>
+                <div className="pl-2 @md:pl-8 space-y-2">{controlCodeFields}</div>
+              </fieldset>
+            ) : null}
             {/* ESP32 only. The Pi runtime's CLOUD_SETTINGS_ALLOWLIST does not
                 know the power keys, so pushing them at a Linux frame refuses
                 the whole verb — every other setting in the same save included. */}
@@ -1960,21 +2306,7 @@ export function FrameSettings({
               />
             )}
           </Field>
-          <Field name="flip" label="Flip">
-            {({ value, onChange }) => (
-              <Select
-                value={value || ''}
-                onChange={(v) => onChange(v)}
-                name="flip"
-                options={[
-                  { value: '', label: '-' },
-                  { value: 'horizontal', label: 'horizontal' },
-                  { value: 'vertical', label: 'vertical' },
-                  { value: 'both', label: 'both' },
-                ]}
-              />
-            )}
-          </Field>
+          {flipField}
           {isBuildrootMode ? (
             <Group name="buildroot">
               <Field name="platform" label="Platform">
@@ -3158,73 +3490,9 @@ export function FrameSettings({
           >
             <TextInput name="interval" placeholder="300" />
           </Field>
-          <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">
-            <TextInput name="metrics_interval" placeholder="60" />
-          </Field>
-          <Group name="timezone_updater">
-            <Field
-              name="enabled"
-              label="Update timezone data"
-              tooltip="Download updated timezone rules on this frame so daylight saving changes stay current."
-            >
-              {({ value, onChange }) => {
-                const enabled = value ?? true
-                return (
-                  <div className="space-y-3">
-                    <div className="flex w-full items-start gap-3">
-                      <Switch value={enabled} onChange={onChange} />
-                      {enabled ? (
-                        <details className="min-w-0 flex-1">
-                          <summary className="frameos-link cursor-pointer list-none text-sm font-semibold">
-                            advanced
-                          </summary>
-                          <div className="mt-3 w-full space-y-2">
-                            <div className="space-y-1 @md:flex @md:gap-2">
-                              <Label className="@md:w-1/3">
-                                Timezone update hour
-                                <Tooltip title="Hour of day on the frame when timezone data updates run." />
-                              </Label>
-                              <div className="w-full">
-                                <TextInput
-                                  inputMode="numeric"
-                                  pattern="[0-9]*"
-                                  placeholder={String(DEFAULT_TIMEZONE_UPDATE_HOUR)}
-                                  value={timezoneUpdateHourValue}
-                                  onChange={setTimezoneUpdateHour}
-                                />
-                              </div>
-                            </div>
-                            <div className="space-y-1 @md:flex @md:gap-2">
-                              <Label className="@md:w-1/3">Timezone update URL</Label>
-                              <div className="w-full">
-                                <TextInput
-                                  placeholder={DEFAULT_TIMEZONE_UPDATE_URL}
-                                  value={timezoneUpdateUrlValue}
-                                  onChange={(url) => setTimezoneUpdaterValue({ url: url || undefined })}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        </details>
-                      ) : null}
-                    </div>
-                  </div>
-                )
-              }}
-            </Field>
-          </Group>
-          <Field
-            name="max_http_response_bytes"
-            label="Maximum HTTP response size for apps"
-            tooltip={
-              <>
-                Maximum number of bytes that FrameOS apps may download in a single HTTP response. Increase this for
-                larger calendar feeds, images, or APIs. ESP32 frames default to 4 MiB to avoid large PSRAM allocations.
-              </>
-            }
-          >
-            <NumberTextInput name="max_http_response_bytes" placeholder={maxHttpResponsePlaceholder} />
-          </Field>
+          {metricsIntervalField}
+          {timezoneUpdaterFields}
+          {maxHttpResponseBytesField}
           <Field name="scaling_mode" label="Scaling mode">
             <Select
               name="scaling_mode"
@@ -3240,95 +3508,7 @@ export function FrameSettings({
 
         <H6 id="frame-settings-error-behavior">Global errors</H6>
         <div className="pl-2 @md:pl-8 space-y-3">
-          <Field name="error_behavior.mode" label="Unrecoverable error behavior">
-            <div className="grid w-full gap-2 @xl:grid-cols-3">
-              {errorBehaviorModes.map((option) => {
-                const selected = errorBehavior.mode === option.value
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setErrorBehavior({ mode: option.value })}
-                    className={clsx(
-                      'frame-tool-row min-h-28 rounded-lg p-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-                      selected ? 'border-blue-500 ring-2 ring-blue-500/30' : 'hover:border-slate-400'
-                    )}
-                    aria-pressed={selected}
-                  >
-                    <span className="frameos-strong block text-sm font-semibold">{option.title}</span>
-                    <span className="frame-tool-muted mt-1 block text-xs leading-5">{option.description}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </Field>
-          {errorBehavior.mode === 'show_error_retry' ? (
-            <Field
-              name="error_behavior.retry_seconds"
-              label="Retry delay"
-              tooltip="After a fatal error, render the error screen and retry after this many seconds."
-            >
-              <NumberTextInput
-                value={errorBehavior.retry_seconds ?? DEFAULT_FRAME_ERROR_BEHAVIOR.retry_seconds}
-                onChange={(value) => setErrorBehavior({ retry_seconds: value })}
-                placeholder="60"
-              />
-            </Field>
-          ) : null}
-          {errorBehavior.mode === 'silent_retry' ? (
-            <>
-              <Field
-                name="error_behavior.silent_retry_seconds"
-                label="Silent retry delay"
-                tooltip="While retrying silently, keep the current frame image and retry after this many seconds."
-              >
-                <NumberTextInput
-                  value={errorBehavior.silent_retry_seconds ?? DEFAULT_FRAME_ERROR_BEHAVIOR.silent_retry_seconds}
-                  onChange={(value) => setErrorBehavior({ silent_retry_seconds: value })}
-                  placeholder="60"
-                />
-              </Field>
-              <Field
-                name="error_behavior.silent_retry_forever"
-                label="Retry silently forever"
-                tooltip="When enabled, the frame never replaces the current image with a fatal error screen."
-              >
-                <Switch
-                  value={!!errorBehavior.silent_retry_forever}
-                  onChange={(value) => setErrorBehavior({ silent_retry_forever: value })}
-                  fullWidth
-                />
-              </Field>
-              {!errorBehavior.silent_retry_forever ? (
-                <>
-                  <Field
-                    name="error_behavior.silent_window_minutes"
-                    label="Silent window"
-                    tooltip="Retry silently for this many minutes before switching to the visible error screen."
-                  >
-                    <NumberTextInput
-                      value={errorBehavior.silent_window_minutes ?? DEFAULT_FRAME_ERROR_BEHAVIOR.silent_window_minutes}
-                      onChange={(value) => setErrorBehavior({ silent_window_minutes: value })}
-                      placeholder="10"
-                    />
-                  </Field>
-                  <Field
-                    name="error_behavior.show_error_retry_seconds"
-                    label="Visible retry delay"
-                    tooltip="After the silent window expires, render the error screen and retry after this many seconds."
-                  >
-                    <NumberTextInput
-                      value={
-                        errorBehavior.show_error_retry_seconds ?? DEFAULT_FRAME_ERROR_BEHAVIOR.show_error_retry_seconds
-                      }
-                      onChange={(value) => setErrorBehavior({ show_error_retry_seconds: value })}
-                      placeholder="60"
-                    />
-                  </Field>
-                </>
-              ) : null}
-            </>
-          ) : null}
+          {errorBehaviorFields}
         </div>
 
         <H6 id="frame-settings-palette">Palette</H6>
@@ -3395,63 +3575,7 @@ export function FrameSettings({
 
         <H6 id="frame-settings-qr">QR Control Code</H6>
         <div className="pl-2 @md:pl-8 space-y-2">
-          <Group name="control_code">
-            <Field name="enabled" label="QR Control Code">
-              <Select
-                name="enabled"
-                options={[
-                  { value: 'false', label: 'Disabled' },
-                  { value: 'true', label: 'Enabled' },
-                ]}
-              />
-            </Field>
-            {String(frameForm.control_code?.enabled) === 'true' && (
-              <>
-                <Field name="position" label="Position">
-                  {({ value, onChange }) => (
-                    <Select
-                      name="position"
-                      value={value ?? 'top-right'}
-                      onChange={onChange}
-                      options={[
-                        { value: 'top-left', label: 'Top Left' },
-                        { value: 'top-right', label: 'Top Right' },
-                        { value: 'bottom-left', label: 'Bottom Left' },
-                        { value: 'bottom-right', label: 'Bottom Right' },
-                        { value: 'center', label: 'Center' },
-                      ]}
-                    />
-                  )}
-                </Field>
-                <Field name="size" label="Size of each square in pixels">
-                  <TextInput name="size" placeholder="2" />
-                </Field>
-                <Field name="padding" label="Padding around code">
-                  <TextInput name="padding" placeholder="1" />
-                </Field>
-                <Field name="offsetX" label="X offset">
-                  <TextInput name="offsetX" placeholder="0" />
-                </Field>
-                <Field name="offsetY" label="Y offset">
-                  <TextInput name="offsetY" placeholder="0" />
-                </Field>
-                <Field name="qrCodeColor" label="QR code color">
-                  <ColorInput
-                    name="qrCodeColor"
-                    value={frameForm.control_code?.qrCodeColor ?? '#000000'}
-                    placeholder="#000000"
-                  />
-                </Field>
-                <Field name="backgroundColor" label="Background color">
-                  <ColorInput
-                    name="backgroundColor"
-                    value={frameForm.control_code?.backgroundColor ?? '#ffffff'}
-                    placeholder="#ffffff"
-                  />
-                </Field>
-              </>
-            )}
-          </Group>
+          {controlCodeFields}
         </div>
         {!isEmbeddedMode ? (
           <>
@@ -3489,53 +3613,7 @@ export function FrameSettings({
                   />
                 )}
               </Field>
-              <Field
-                name="save_assets"
-                label={<div>Save downloaded images as assets</div>}
-                tooltip="This controls the 'auto' setting for 'Save assets' in the following apps. Please note that individual apps/scenes may have overridden the default set here."
-              >
-                <>
-                  <div className="space-y-2 w-full">
-                    {Object.entries({
-                      _all: 'All',
-                      ...appsWithSaveAssets,
-                    }).map(([keyword, name]) => (
-                      <label key={keyword} className="flex gap-1">
-                        <input
-                          type="checkbox"
-                          checked={
-                            typeof frameForm.save_assets === 'boolean'
-                              ? frameForm.save_assets
-                              : !!frameForm.save_assets?.[keyword]
-                          }
-                          value={'true'}
-                          onChange={(e) => {
-                            const checked = !!e.target.checked
-                            if (keyword === '_all') {
-                              setFrameFormValues({ save_assets: checked })
-                            } else {
-                              const prevValues =
-                                typeof frameForm.save_assets === 'object'
-                                  ? frameForm.save_assets
-                                  : frameForm.save_assets === true
-                                  ? Object.fromEntries(Object.entries(appsWithSaveAssets).map(([k]) => [k, true]))
-                                  : {}
-                              setFrameFormValues({
-                                save_assets: {
-                                  ...prevValues,
-                                  [keyword]: checked,
-                                },
-                              })
-                            }
-                            touchFrameFormField('save_assets')
-                          }}
-                        />
-                        {name}
-                      </label>
-                    ))}
-                  </div>
-                </>
-              </Field>
+              {saveAssetsField}
               {!inFrameAdminMode && !hideForCloud ? (
                 <Field
                   name="upload_fonts"

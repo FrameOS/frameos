@@ -12,7 +12,9 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.width == 0: config.width = 1920
   if config.height == 0: config.height = 1080
   if config.device == "": config.device = "web_only"
-  if config.metricsInterval == 0: config.metricsInterval = 60
+  # 0 means "metrics disabled" (metrics.nim); only a negative value — never a
+  # real period — falls back to the default. An absent key defaults in loadConfig.
+  if config.metricsInterval < 0: config.metricsInterval = 60
   if config.maxHttpResponseBytes <= 0: config.maxHttpResponseBytes = DefaultMaxHttpResponseBytes
   if config.rotate == 0: config.rotate = 0
   if config.flip == "": config.flip = ""
@@ -284,7 +286,7 @@ proc loadConfig*(configPath = ""): FrameConfig =
     height: data{"height"}.getInt(),
     device: data{"device"}.getStr(),
     deviceConfig: loadDeviceConfig(data{"deviceConfig"}),
-    metricsInterval: data{"metricsInterval"}.getFloat(),
+    metricsInterval: data{"metricsInterval"}.getFloat(60),
     maxHttpResponseBytes: data{"maxHttpResponseBytes"}.getInt(DefaultMaxHttpResponseBytes),
     rotate: data{"rotate"}.getInt(),
     flip: data{"flip"}.getStr(""),

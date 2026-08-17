@@ -26,7 +26,7 @@ import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
 import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
-import { cloudFrameSettingKeys } from '../../utils/cloudFrameSettings'
+import { cloudFrameSettingKeys, extendedCloudFrameSettingKeys } from '../../utils/cloudFrameSettings'
 import { persistAndPushCloudFrameScenes } from '../../utils/cloudFrameScenesSave'
 import { clearCloudSceneJsonCache } from '../../models/framesModel'
 import { getBasePath } from '../../utils/getBasePath'
@@ -648,7 +648,16 @@ function frameDiffKeys(): (keyof FrameType)[] {
     // `schedule` rides its own verb (POST /api/frames/{id}/schedule →
     // set_schedule), not the settings allowlist — but it round-trips through
     // GET /api/frames/{id} like the settings do, so it diffs cleanly.
-    return [...(cloudFrameSettingKeys as readonly (keyof FrameType)[]), 'scenes', 'schedule']
+    // The extended batch diffs on every cloud frame, supported or not: a
+    // frame below the firmware floor renders the fields disabled, so they
+    // never change, and normalizeFrameKeyValueForComparison keeps the form's
+    // materialized defaults from reading as edits.
+    return [
+      ...(cloudFrameSettingKeys as readonly (keyof FrameType)[]),
+      ...(extendedCloudFrameSettingKeys as readonly (keyof FrameType)[]),
+      'scenes',
+      'schedule',
+    ]
   }
   return FRAME_KEYS
 }
@@ -946,6 +955,22 @@ function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknow
     return compactTimezoneUpdaterForSubmit(value as FrameType['timezone_updater'] | null | undefined)
   }
 
+  // Both blocks are materialized with defaults by sanitizeFrame (error
+  // handling) or arrive from the cloud in the runtime's shape (a boolean
+  // control-code `enabled`, numbers) while the form keeps the Select-friendly
+  // strings — compare canonical forms so neither reads as an unsaved edit.
+  if (key === 'error_behavior') {
+    return normalizeFrameErrorBehavior(value as Partial<FrameErrorBehavior> | null | undefined)
+  }
+
+  if (key === 'control_code') {
+    return normalizeControlCodeForComparison(value)
+  }
+
+  if (key === 'flip') {
+    return value || ''
+  }
+
   if (key !== 'https_proxy' || !value || typeof value !== 'object') {
     return value
   }
@@ -958,6 +983,31 @@ function normalizeFrameKeyValueForComparison(key: keyof FrameType, value: unknow
   } = httpsProxy
 
   return rest
+}
+
+function normalizeControlCodeForComparison(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const raw = value as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const [subKey, subValue] of Object.entries(raw)) {
+    if (subValue === undefined || subValue === null || subValue === '') {
+      continue
+    }
+    if (subKey === 'enabled') {
+      out.enabled = subValue === true || subValue === 'true'
+    } else if (['size', 'padding', 'offsetX', 'offsetY'].includes(subKey)) {
+      out[subKey] = normalizeNumericFrameValue(subValue)
+    } else {
+      out[subKey] = subValue
+    }
+  }
+  // A control code that is off (and says nothing else) equals no control code.
+  if (Object.keys(out).length === 0 || (Object.keys(out).length === 1 && out.enabled === false)) {
+    return null
+  }
+  return out
 }
 
 function frameKeyEqual(key: keyof FrameType, previous: unknown, next: unknown): boolean {

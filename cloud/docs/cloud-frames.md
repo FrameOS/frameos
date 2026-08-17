@@ -139,9 +139,12 @@ Cloud-profile verb set (complete):
 
 - `set_scenes` — interpreted scene JSON, validated on device, hot-reloaded
   via the existing uploaded-scenes path.
-- `set_schedule`, `set_settings` — declarative allowlist only (brightness,
-  rotation, timezone, scene schedule, display options). Never SSH config,
-  admin credentials, network config, update URLs, or agent/profile state.
+- `set_schedule`, `set_settings` — declarative allowlist only (rotation,
+  flip, interval, timezone, error handling, control code, metrics interval,
+  asset saving, tz-updater on/off, scene schedule; brightness once the runtime
+  has it). Never SSH config, admin credentials, network config, update URLs,
+  or agent/profile state. The full key list and its firmware gating live in
+  `docs/cloud-frames.md` (`set_settings`).
 - `get_state`, `get_logs`, `get_metrics` — gated by the `telemetry:*` scopes
   the owner granted.
 - `reboot`, `restart_runtime`.

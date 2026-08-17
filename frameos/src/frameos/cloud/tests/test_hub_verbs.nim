@@ -155,6 +155,94 @@ suite "cloud hub verb dispatcher":
     check recorded.events.len == 1
     check recorded.events[0][0] == "reload"
 
+  test "set_settings applies the 2026.8.30 extended keys and shape-checks them":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    ctx.frameConfig.timeZoneUpdates = TimeZoneUpdatesConfig(
+      enabled: true, hour: 3, url: "https://tz.example.test/custom.json.gz")
+    let reply = handleCloudVerb(ctx, %*{
+      "id": "3x", "type": "set_settings",
+      "settings": {
+        "flip": "horizontal",
+        "error_behavior": {"mode": "silent_retry", "retry_seconds": 30,
+                           "silent_retry_forever": true, "silent_window_minutes": 15},
+        "control_code": {"enabled": true, "position": "bottom-left", "size": 3,
+                         "padding": 2, "offsetX": -4, "offsetY": 10,
+                         "qrCodeColor": "#112233", "backgroundColor": "#FFFFFF"},
+        "metrics_interval": 0,
+        "max_http_response_bytes": 8 * 1024 * 1024,
+        "save_assets": {"unsplash": true, "openai": false},
+        "timezone_updater": {"enabled": false, "hour": 5},
+      },
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.persistedSettings.len == 1
+    let persisted = recorded.persistedSettings[0]
+    check persisted{"flip"}.getStr("") == "horizontal"
+    check persisted{"control_code"}{"enabled"}.getBool(false) == true
+    check persisted{"metrics_interval"}.getFloat(-1) == 0
+    # The download URL is never the provider's to set: the frame's own URL
+    # rides along so the whole-object persist cannot reset it.
+    check persisted{"timezone_updater"}{"url"}.getStr("") == "https://tz.example.test/custom.json.gz"
+    check persisted{"timezone_updater"}{"enabled"}.getBool(true) == false
+    check recorded.events.len == 1
+    check recorded.events[0][0] == "reload"
+
+  test "set_settings refuses bad values for allowlisted keys with invalid_settings":
+    let bad = [
+      %*{"flip": "diagonal"},
+      %*{"flip": true},
+      %*{"error_behavior": {"mode": "explode"}},
+      %*{"error_behavior": {"retry_seconds": 0}},
+      %*{"error_behavior": {"mode": "safe_mode", "shell": "rm -rf /"}},
+      %*{"control_code": {"enabled": "true"}},
+      %*{"control_code": {"position": "middle"}},
+      %*{"control_code": {"qrCodeColor": "red"}},
+      %*{"control_code": {"size": 0}},
+      %*{"metrics_interval": -1},
+      %*{"metrics_interval": "60"},
+      %*{"max_http_response_bytes": 1},
+      %*{"max_http_response_bytes": CloudMaxHttpResponseBytesCeiling + 1},
+      %*{"save_assets": "yes"},
+      %*{"save_assets": {"unsplash": "true"}},
+      %*{"timezone_updater": {"url": "https://evil.example/tz.json.gz"}},
+      %*{"timezone_updater": {"hour": 24}},
+      %*{"timezone_updater": {"enabled": true, "url": "https://evil.example/tz.json.gz"}},
+      %*{"rotate": 45},
+      %*{"interval": 0},
+      %*{"name": ""},
+      %*{"debug": "true"},
+    ]
+    for settings in bad:
+      let recorded = Recorded()
+      var withValid = %*{"name": "Kitchen"}
+      for key in settings.keys:
+        withValid[key] = settings[key]
+      let reply = handleCloudVerb(makeContext(recorded), %*{
+        "id": "bad", "type": "set_settings", "settings": withValid})
+      check reply.ack{"ok"}.getBool(true) == false
+      check reply.ack{"error"}.getStr("") == "invalid_settings"
+      check recorded.persistedSettings.len == 0
+      check recorded.events.len == 0
+
+  test "every allowlisted key has a validator that accepts a sane value":
+    # A key with no rule falls through validateCloudSetting's `else` and
+    # refuses every value — which would make the key unsettable while still
+    # advertised. Pin one accepted value per key.
+    let samples = %*{
+      "name": "Kitchen", "rotate": 180, "interval": 300, "scaling_mode": "contain",
+      "timezone": "Europe/Tallinn", "debug": true, "flip": "",
+      "error_behavior": {"mode": "show_error_retry", "show_error_retry_seconds": 60},
+      "control_code": {"enabled": false},
+      "metrics_interval": 60, "max_http_response_bytes": 64 * 1024 * 1024,
+      "save_assets": true, "timezone_updater": {"enabled": true, "hour": 3},
+    }
+    for key in CLOUD_SETTINGS_ALLOWLIST:
+      check samples.hasKey(key)
+      check validateCloudSetting(key, samples[key])
+      check validateCloudSetting(key, newJNull()) == false
+    check validateCloudSetting("not_a_setting", %"x") == false
+
   test "set_settings that changes nothing is acked without persist or reload":
     # Every "push scenes & settings" click redelivers the full settings
     # object; reloading the config for values already in effect re-inits the

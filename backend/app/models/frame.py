@@ -621,7 +621,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "device": frame.device or "web_only",
         "deviceConfig": serialize_device_config(device_config),
         "interval": frame.interval or 300.0,
-        "metricsInterval": frame.metrics_interval or 60.0,
+        # 0 is the documented "disabled" value (frameos/src/frameos/metrics.nim);
+        # only an unset column falls back to the 60s default.
+        "metricsInterval": 60.0 if frame.metrics_interval is None else frame.metrics_interval,
         "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",

@@ -149,10 +149,36 @@ const
 
 # Declarative settings a provider may push; every key maps onto an existing
 # frame.json field through the same persist path the local admin uses. Must
-# stay in sync with docs/cloud-frames.md (`set_settings`).
+# stay in sync with docs/cloud-frames.md (`set_settings`), allowedFrameSettings
+# in cloud/apps/auth-web/src/lib/frames.ts and the SPA's
+# frontend/src/utils/cloudFrameSettings.ts.
+#
+# Two tiers, one list. The first six shipped with the cloud link and every
+# managed frame understands them. The rest arrived in 2026.8.30 — a provider
+# gates them on the frame's reported `frameos_version`, because a frame on
+# older firmware refuses the WHOLE verb on a key it does not know (see
+# handleSetSettings): one new key in the push would take `name` and
+# `interval` down with it. Structured values are shape-checked below
+# (validateCloudSetting) before they reach the persist path — the allowlist
+# says which keys, the validators say which values, and the provider's own
+# validation is UX, not the boundary.
 const CLOUD_SETTINGS_ALLOWLIST* = [
   "name", "rotate", "interval", "scaling_mode", "timezone", "debug",
+  "flip", "error_behavior", "control_code", "metrics_interval",
+  "max_http_response_bytes", "save_assets", "timezone_updater",
 ]
+
+# Ceilings for the numeric extended settings. maxHttpResponseBytes is a
+# per-request memory bound on a Pi Zero as much as a policy knob, so the
+# provider cannot lift it past what the platform's default already allows.
+const
+  CloudMaxHttpResponseBytesFloor* = 64 * 1024
+  CloudMaxHttpResponseBytesCeiling* = DefaultMaxHttpResponseBytes
+  CloudMetricsIntervalCeilingSeconds* = 24 * 60 * 60.0
+  CloudErrorRetryCeilingSeconds* = 24 * 60 * 60.0
+  CloudErrorWindowCeilingMinutes* = 7 * 24 * 60.0
+  # A saveAssets object names apps by keyword; keep it small and simple.
+  CloudSaveAssetsMaxEntries* = 64
 
 # CLOUD_REFUSED_APP_KEYWORDS / refusedCloudAppKeyword moved to
 # cloud/scene_guard.nim (re-exported below): the scene registry now re-checks
@@ -743,6 +769,139 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
     sceneAck["id"] = id
   CloudVerbReply(ack: ackOk(id), extra: @[sceneAck])
 
+# ---------------------------------------------------------------------------
+# set_settings value validation
+# ---------------------------------------------------------------------------
+
+proc isJsonNumber(node: JsonNode): bool =
+  node != nil and node.kind in {JInt, JFloat}
+
+proc numberInRange(node: JsonNode, low, high: float): bool =
+  isJsonNumber(node) and node.getFloat() >= low and node.getFloat() <= high
+
+proc intInRange(node: JsonNode, low, high: int): bool =
+  node != nil and node.kind == JInt and node.getInt() >= low and node.getInt() <= high
+
+proc isHtmlHexColor(node: JsonNode): bool =
+  ## "#rrggbb" only — the one spelling every producer of these values (the
+  ## SPA's ColorInput, the backend's frame.json writer) uses, and the one
+  ## loadControlCode's parseHtmlColor cannot choke on.
+  if node == nil or node.kind != JString:
+    return false
+  let value = node.getStr("")
+  if value.len != 7 or value[0] != '#':
+    return false
+  for ch in value[1 .. ^1]:
+    if ch notin {'0'..'9', 'a'..'f', 'A'..'F'}:
+      return false
+  true
+
+proc onlyKeys(node: JsonNode, allowed: openArray[string]): bool =
+  ## Object shape guard: every key present must be one of `allowed`. An
+  ## unknown sub-key is refused for the same reason an unknown top-level key
+  ## is — the provider does not get to invent fields the runtime never
+  ## validated, even inside an object it is allowed to set.
+  if node == nil or node.kind != JObject:
+    return false
+  for key in node.keys:
+    if key notin allowed:
+      return false
+  true
+
+proc validateCloudSetting*(key: string, value: JsonNode): bool =
+  ## Is `value` an acceptable value for allowlisted setting `key`? The device
+  ## is the security boundary, so every key on CLOUD_SETTINGS_ALLOWLIST has a
+  ## rule here — including the original six, whose provider-side validators
+  ## these mirror. Anything this rejects fails the WHOLE verb with
+  ## `invalid_settings` (docs/cloud-frames.md).
+  if value == nil:
+    return false
+  case key
+  of "name":
+    value.kind == JString and value.getStr("").len in 1 .. 256
+  of "rotate":
+    value.kind == JInt and value.getInt() in [0, 90, 180, 270]
+  of "interval":
+    numberInRange(value, 1, 24 * 60 * 60)
+  of "scaling_mode":
+    value.kind == JString and value.getStr("") in ["contain", "cover", "stretch", "center"]
+  of "timezone":
+    value.kind == JString and value.getStr("").len <= 64
+  of "debug":
+    value.kind == JBool
+  of "flip":
+    value.kind == JString and value.getStr("") in ["", "horizontal", "vertical", "both"]
+  of "error_behavior":
+    # The frontend/backend spelling; frontendErrorBehaviorToRuntime maps it
+    # onto errorBehavior in frame.json.
+    if not onlyKeys(value, ["mode", "retry_seconds", "silent_retry_seconds",
+                            "silent_retry_forever", "silent_window_minutes",
+                            "show_error_retry_seconds"]):
+      return false
+    for subKey in value.keys:
+      let ok = case subKey
+        of "mode":
+          value[subKey].kind == JString and
+            value[subKey].getStr("") in ["safe_mode", "show_error_retry", "silent_retry"]
+        of "silent_retry_forever":
+          value[subKey].kind == JBool
+        of "silent_window_minutes":
+          numberInRange(value[subKey], 1, CloudErrorWindowCeilingMinutes)
+        else:
+          numberInRange(value[subKey], 1, CloudErrorRetryCeilingSeconds)
+      if not ok:
+        return false
+    true
+  of "control_code":
+    # The runtime's controlCode shape (loadControlCode): a bool `enabled`,
+    # numbers, and #rrggbb colours — not the SPA form's string spellings.
+    if not onlyKeys(value, ["enabled", "position", "size", "padding",
+                            "offsetX", "offsetY", "qrCodeColor", "backgroundColor"]):
+      return false
+    for subKey in value.keys:
+      let ok = case subKey
+        of "enabled": value[subKey].kind == JBool
+        of "position":
+          value[subKey].kind == JString and value[subKey].getStr("") in
+            ["top-left", "top-right", "bottom-left", "bottom-right", "center"]
+        of "size": numberInRange(value[subKey], 1, 50)
+        of "padding": intInRange(value[subKey], 0, 50)
+        of "offsetX", "offsetY": intInRange(value[subKey], -4096, 4096)
+        else: isHtmlHexColor(value[subKey])
+      if not ok:
+        return false
+    true
+  of "metrics_interval":
+    # 0 disables the sampler (metrics.nim); anything else is a period.
+    numberInRange(value, 0, CloudMetricsIntervalCeilingSeconds)
+  of "max_http_response_bytes":
+    intInRange(value, CloudMaxHttpResponseBytesFloor, CloudMaxHttpResponseBytesCeiling)
+  of "save_assets":
+    # A single switch, or a per-app-keyword map of switches.
+    if value.kind == JBool:
+      return true
+    if value.kind != JObject or value.len > CloudSaveAssetsMaxEntries:
+      return false
+    for appKey in value.keys:
+      if appKey.len == 0 or appKey.len > 64 or value[appKey].kind != JBool:
+        return false
+    true
+  of "timezone_updater":
+    # enabled/hour only. The download URL is deliberately NOT accepted from a
+    # provider: the endpoint stays the FrameOS-owned default (or whatever the
+    # local admin set) — see handleSetSettings for how it is carried over.
+    if not onlyKeys(value, ["enabled", "hour"]):
+      return false
+    for subKey in value.keys:
+      let ok = case subKey
+        of "enabled": value[subKey].kind == JBool
+        else: intInRange(value[subKey], 0, 23)
+      if not ok:
+        return false
+    true
+  else:
+    false
+
 proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   let settings = msg{"settings"}
   if settings == nil or settings.kind != JObject:
@@ -750,14 +909,25 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
     return CloudVerbReply(ack: ackError(id, "invalid_settings"))
   # One unknown key refuses the whole verb: the allowlist is the contract, and
   # partial application would leave provider and frame disagreeing about what
-  # got set.
+  # got set. One bad VALUE refuses it too, for the same reason.
   for key in settings.keys:
     if key notin CLOUD_SETTINGS_ALLOWLIST:
       ctx.audit("set_settings", false, "setting_not_allowed: " & key)
       return CloudVerbReply(ack: ackError(id, "setting_not_allowed"))
+    if not validateCloudSetting(key, settings[key]):
+      ctx.audit("set_settings", false, "invalid_settings: " & key)
+      return CloudVerbReply(ack: ackError(id, "invalid_settings"))
   var payload = newJObject()
   for key in settings.keys:
     payload[key] = copy(settings[key])
+  if payload.hasKey("timezone_updater"):
+    # The persist path replaces the whole timeZoneUpdates object, and the
+    # provider only ever sends enabled/hour: carry the download URL the frame
+    # already uses across, so a push can never point the updater anywhere new
+    # — nor silently reset a URL the local admin chose.
+    let current = if ctx.frameConfig != nil: ctx.frameConfig.timeZoneUpdates else: nil
+    if current != nil and current.url.strip().len > 0:
+      payload["timezone_updater"]["url"] = %current.url
   if payload.len > 0:
     # Idempotency guard: every "push scenes & settings" click redelivers the
     # full settings object, and reloading the config re-inits the active scene
@@ -1481,7 +1651,11 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   var lastSceneImageGeneration = sceneImageGenerationValue()
   var logsGranted = "telemetry:logs" in link.scopes
   var metricsGranted = "telemetry:metrics" in link.scopes
-  let metricsInterval = max(frameConfig.metricsInterval, 5.0)
+  # Read live each pass, not once here: a `set_settings` push may change (or
+  # zero, i.e. disable) metrics_interval while this session is up.
+  proc metricsPushInterval(): float =
+    if frameConfig == nil or frameConfig.metricsInterval <= 0: 0.0
+    else: max(frameConfig.metricsInterval, 5.0)
   let idleTimeout = hubIdleTimeoutSeconds()
   let pingInterval = min(HubPingIntervalSeconds, idleTimeout / 3)
   result = sessionDisconnected
@@ -1633,7 +1807,8 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
         nextServiceSettingsPullAt = now +
           (if outcome.retryLater: HubServiceSettingsRetrySeconds
            else: HubServiceSettingsIntervalSeconds)
-      if metricsGranted and now - lastMetricsSentAt >= metricsInterval:
+      let metricsInterval = metricsPushInterval()
+      if metricsGranted and metricsInterval > 0 and now - lastMetricsSentAt >= metricsInterval:
         let sample = latestMetricsSample()
         if sample != nil:
           lastMetricsSentAt = now
