@@ -507,6 +507,7 @@ function AssetsSummaryHeader({
   stats,
   diskStats,
   showSyncAction,
+  syncDisabledReason,
   isReloading,
   onRefresh,
   onSync,
@@ -515,6 +516,7 @@ function AssetsSummaryHeader({
   stats: AssetStats
   diskStats: DiskStats | null
   showSyncAction: boolean
+  syncDisabledReason: string | null
   isReloading: boolean
   onRefresh: () => void
   onSync: () => void
@@ -556,7 +558,9 @@ function AssetsSummaryHeader({
               showSyncAction
                 ? {
                     label: 'Sync fonts',
-                    onClick: onSync,
+                    ...(syncDisabledReason
+                      ? { disabled: true, title: syncDisabledReason }
+                      : { onClick: onSync, title: 'Copy the backend’s fonts onto this frame' }),
                     icon: <DocumentArrowUpIcon className="w-5 h-5" />,
                   }
                 : null,
@@ -648,21 +652,28 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     useActions(assetsLogic(assetsLogicProps))
   const { toggleShowSystemFolders, toggleShowHiddenFiles } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
-  // Font sync pulls from the backend's own store; the on-device panel and the
-  // cloud have nothing to sync from. Everything else works on every control
-  // plane — the cloud speaks asset_put/asset_mkdir/asset_delete/asset_rename
-  // through /api/frames/{id}/assets/* since cloud-workspace-fixes.
+  // Font sync copies the BACKEND's font store — the faces bundled with the
+  // repo plus the project's uploaded ones — onto the frame. Only a self-hosted
+  // backend has such a store, so on the cloud and the on-device panel there is
+  // nothing to sync from.
   //
-  // Embedded hardware CAN take fonts, but only onto an SD card: the ESP32
-  // renderer loads a named face from {assets}/fonts (one at a time — see the
-  // frameosEmbedded branch of utils/font.nim), and a board with no card has no
-  // filesystem at all, which is what storageUnmounted reports. Virtual frames
-  // never can: they render in the browser out of the wasm bundle's own fonts.
+  // Hiding the action there was worse than useless: "where is Sync fonts" got
+  // no answer, and the thing that DOES work went unmentioned. Every control
+  // plane can write assets (the cloud speaks asset_put/asset_mkdir/…), and a
+  // font dropped into fonts/ lands exactly where sync would have put it —
+  // which is where the renderer looks (utils/font.nim: {assets}/fonts/<name>,
+  // one parsed face at a time on embedded).
+  //
+  // So the action is always offered, and says why when it cannot run.
   const readOnly = false
-  const showSyncAction =
-    workspaceMode() === 'backend' &&
-    !isVirtualFrame(frame) &&
-    (!isEmbeddedHardwareFrame(frame) || !storageUnmounted)
+  const syncDisabledReason = isVirtualFrame(frame)
+    ? 'Virtual frames render in your browser, with the fonts bundled into the renderer.'
+    : workspaceMode() !== 'backend'
+      ? 'Fonts sync from a self-hosted backend’s font store, which this control plane does not have. Upload a .ttf into the fonts/ folder here instead — the frame reads the same place.'
+      : isEmbeddedHardwareFrame(frame) && storageUnmounted
+        ? 'No SD card in this frame, so fonts have nowhere to go. Insert one and refresh.'
+        : null
+  const showSyncAction = true
 
   // syncAssets registers a long-running task toast, so no need to open logs
   const handleSyncAssets = () => {
@@ -718,6 +729,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             stats={assetStats}
             diskStats={diskStats}
             showSyncAction={showSyncAction}
+            syncDisabledReason={syncDisabledReason}
             isReloading={assetsLoading || assetsRefreshing}
             onRefresh={refreshAssets}
             onSync={handleSyncAssets}
