@@ -20,13 +20,14 @@ import {
   storePublishScope,
 } from "../../../../src/lib/store";
 import { publishStoreScene } from "../../../../src/lib/store-publish";
+import { storeRoute } from "../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
 
 // Publish a scene (template zip) to the store. Re-publishing a name the
 // account already owns appends an immutable version to that scene; a new
 // name creates a new scene with a globally unique slug. Private by default.
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:publish", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
@@ -86,3 +87,7 @@ export async function POST(request: NextRequest) {
     visibility: requestedVisibility,
   });
 }
+
+// Cache policy is per-response here (see storeRoute): anything this
+// handler did not decide is no-store.
+export const POST = storeRoute(handlePost);

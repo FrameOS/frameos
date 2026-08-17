@@ -14,6 +14,48 @@ async function contentSecurityPolicy(phase: string) {
   )?.value;
 }
 
+describe("API cache headers", () => {
+  it("stamps no-store on the API surface but leaves /api/store/ to its routes", async () => {
+    // A headers() rule overrides whatever a route handler set, so the
+    // blanket no-store used to make the store's deliberate edge caching (the
+    // immutable ?v= preview, scenes.json's five minutes) a no-op in
+    // production. The store subtree is exempt; storeRoute (store-cache.ts)
+    // then makes every route there — refusals included — state its own
+    // policy, so nothing under it is left without a Cache-Control.
+    const config = createNextConfig(PHASE_PRODUCTION_SERVER);
+    const rules = (await config.headers?.()) ?? [];
+    const apiRule = rules.find(
+      (rule) =>
+        rule.source.startsWith("/api/") &&
+        rule.headers.some((header) => header.key === "Cache-Control"),
+    );
+    expect(apiRule).toBeTruthy();
+    // Compile the source exactly as Next does and probe the paths that matter.
+    const { pathToRegexp } = await import("next/dist/compiled/path-to-regexp");
+    const matcher = pathToRegexp(apiRule!.source);
+    for (const covered of [
+      "/api/frames/1/settings",
+      "/api/account/scenes",
+      "/api/store", // no trailing slash: not a store read
+      "/api/storefront/anything",
+    ]) {
+      expect(matcher.test(covered), `${covered} should be no-store`).toBe(true);
+    }
+    for (const exempt of [
+      "/api/store/browse",
+      "/api/store/repository.json",
+      "/api/store/2026.8.0/repository.json",
+      "/api/store/scenes/abc/image",
+      "/api/store/scenes/abc/images/def",
+      "/api/store/scenes/abc/scenes.json",
+      "/api/store/scenes/abc/download",
+      "/api/store/account/repository.json",
+    ]) {
+      expect(matcher.test(exempt), `${exempt} decides its own caching`).toBe(false);
+    }
+  });
+});
+
 describe("Next.js security headers", () => {
   it("allows WebAssembly compilation without general eval in production", async () => {
     const policy = await contentSecurityPolicy(PHASE_PRODUCTION_SERVER);

@@ -198,8 +198,18 @@ function createNextConfig(phase: string): NextConfig {
           source: "/admin/:path*",
         },
         {
+          // Every API response is no-store — most routes are session-scoped
+          // and a static rule cannot tell them apart — EXCEPT the store's
+          // /api/store/ subtree, whose public reads are meant to sit at the
+          // edge (the immutable ?v= preview, scenes.json's five minutes, the
+          // CDN redirect). A headers() rule overrides whatever a handler set,
+          // so exempting the subtree is the only way to let those routes
+          // decide; in exchange every store route states its own policy,
+          // refusals included, via src/lib/store-cache.ts storeRoute
+          // (default no-store). Negative lookahead: path-to-regexp accepts a
+          // custom pattern for the segment.
           headers: [noStoreHeader],
-          source: "/api/:path*",
+          source: "/api/:path((?!store/).*)",
         },
       ];
     },

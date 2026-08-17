@@ -23,6 +23,7 @@ import {
   maxReportReasonLength,
   maxReportsPerDay,
 } from "../../../../../../src/lib/store";
+import { storeRoute } from "../../../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
 
@@ -32,7 +33,7 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // account (raises the cost of report-spam) and land in the superadmin queue
 // at /admin/reports. One open report per (scene, reporter) — enforced by a
 // partial unique index — so re-reporting is a no-op.
-export async function POST(request: NextRequest, context: RouteContext) {
+async function handlePost(request: NextRequest, context: RouteContext) {
   const csrf = csrfResponse(request);
   if (csrf) {
     return csrf;
@@ -141,3 +142,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   return NextResponse.json({ status: "reported" });
 }
+
+// Cache policy is per-response here (see storeRoute): anything this
+// handler did not decide is no-store.
+export const POST = storeRoute(handlePost);

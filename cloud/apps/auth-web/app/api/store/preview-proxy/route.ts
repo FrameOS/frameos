@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, readJsonObject } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { storeRoute } from "../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,7 @@ const maxTimeoutMs = 30_000;
 // are public), so it is tightly capped and SSRF-guarded.
 // Body: {method, url, headers, bodyBase64, timeoutMs}; the response mirrors
 // the upstream status and bytes.
-export async function POST(request: NextRequest) {
+async function handlePost(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:preview-proxy", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
@@ -182,3 +183,7 @@ async function readCapped(
   }
   return Buffer.concat(chunks);
 }
+
+// Cache policy is per-response here (see storeRoute): anything this
+// handler did not decide is no-store.
+export const POST = storeRoute(handlePost);
