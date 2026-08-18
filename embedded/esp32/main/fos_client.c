@@ -828,6 +828,15 @@ void fos_client_render_recovery_boot(void)
         s_render_recovery_restarts = 0;
         return;
     }
+    if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
+        /* No PSRAM, so no rescue ever fires (see render_failure_recover) and
+         * nothing to stay paused for. Also clears a streak left in RTC memory
+         * by a firmware that still counted on such boards: an OTA reboot is a
+         * software reset, so that frame would otherwise come up paused. */
+        s_render_recovery_magic = FOS_RENDER_RECOVERY_MAGIC;
+        s_render_recovery_restarts = 0;
+        return;
+    }
     if (s_render_recovery_magic != FOS_RENDER_RECOVERY_MAGIC) {
         /* First boot on this board, or RTC memory that was never stamped. */
         s_render_recovery_magic = FOS_RENDER_RECOVERY_MAGIC;
@@ -863,6 +872,16 @@ void fos_client_clear_render_pause(void)
 
 static void render_failure_recover(const char *scene_name)
 {
+    /* The rescue exists for boards where a failed render can leave PSRAM
+     * held forever. A board with no PSRAM at all (ESP32-C3 thin clients)
+     * cannot be in that state, yet its free-PSRAM reading is 0 — below any
+     * threshold — so without this check every ordinary render failure (a
+     * fetch that timed out, the server not ready yet) counted as a memory
+     * rescue: reboot, and after two in a row the frame paused rendering
+     * blaming "exhausted PSRAM". Seen in the field on a C3. */
+    if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) == 0) {
+        return;
+    }
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (free_psram >= FOS_RENDER_RECOVERY_MIN_PSRAM) {
         return; /* memory came back; nothing to recover from */

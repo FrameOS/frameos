@@ -38,6 +38,7 @@
 #include "fos_scenes.h"
 #include "fos_schedule.h"
 #include "fos_status_screen.h"
+#include "fos_mem.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -168,6 +169,7 @@ void app_main(void)
      * below) — a mount failure must never be a serial-only event, or "why are
      * my assets empty?" has no remote answer. */
     BOOTMEM("after-display");
+    FOS_MEM_LOG_MILESTONE(TAG, "after-display");
     if (fos_assets_sd_mount(config) != ESP_OK) {
         ESP_LOGW(TAG, "SD assets unavailable, continuing without %s: %s",
                  config->assets_path[0] ? config->assets_path : "/srv/assets",
@@ -234,10 +236,12 @@ void app_main(void)
     /* Before any render: decides whether the previous boot was a memory
      * rescue and whether rendering should stay paused this time. */
     BOOTMEM("after-wifi");
+    FOS_MEM_LOG_MILESTONE(TAG, "after-wifi");
     fos_client_render_recovery_boot();
     fos_client_start();
 
     BOOTMEM("after-client-start");
+    FOS_MEM_LOG_MILESTONE(TAG, "after-client-start");
     if (frameos_nim_available() && local_render_ok) {
         int width = fos_display_present() ? fos_display_width() : 800;
         int height = fos_display_present() ? fos_display_height() : 480;
@@ -319,6 +323,7 @@ void app_main(void)
         fos_http_start(false);
         fos_ota_start_periodic_task(24);
         BOOTMEM("after-http+ota");
+        FOS_MEM_LOG_MILESTONE(TAG, "after-http+ota");
     } else {
         frameos_nim_set_log_upload_enabled(false);
         if (!fos_config_wifi_ready()) {
