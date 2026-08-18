@@ -63,27 +63,18 @@ commands; everything else stays local to the device.
   remotely, redesign them as bounded toggles on fixed FrameOS-owned
   directories. Hardware identity reported by the frame stays authoritative.
 
-- **Sweep the private-scene copies the old save flow left behind.** Until
-  PR #367 every cloud settings save byte-compared the workspace's sanitized
-  scene with the raw store JSON, so every assigned scene looked edited: owned
-  scenes were republished per save and scenes the account did not own were
-  forked into a private copy per save ("Abstract Architecture 2" … "8"). The
-  flow now uses the workspace's own scene equality, drops the Templates
-  panel's `origin` stamp (never persisted, never stamped on cloud installs,
-  no cloud "update available" badge), keeps unreadable packs claimed and
-  serializes saves per frame — but the copies already made are still there
-  (33 in the founder account, 4 of them still assigned to a frame). Two
-  pieces left: a one-off cleanup (delete the unassigned copies, re-point the
-  assigned ones at their originals), and a server-side guard so two racing
-  `POST /api/account/scenes` with the same name cannot both win
-  (`availableSceneName` checks then inserts — "7" and "7" happened).
-
-- **Cloud AI chat: fork with lineage.** `save_scene` writes whatever scene the
-  chat is holding into the account as a new private scene. That covers forking
-  a store scene in practice, but records none of the lineage the dedicated fork
-  route does: source scene id in the audit event, carried-over preview image,
-  tags, description. Extract that route's body into a lib and have `save_scene`
-  call it with a `source_scene_id`. *Small, self-contained.*
+- **Sweep the private-scene copies the old save flow left behind.** The copies
+  are still there (33 in the founder account, 4 of them still assigned to a
+  frame); the flow that made them is fixed (PR #367) and the name race behind
+  the duplicate "7"s is closed (`withAccountSceneNameLock` serialises the
+  "pick a free name, then insert" against every other save for that account).
+  What is left is running the cleanup on production:
+  `pnpm scene:sweep-duplicate-copies -- --account=<id>` reports the copies it
+  judges to be litter (private, single-version, undescribed, untagged, part of
+  a "<name> N" run, created before the fix) and deletes them with `--apply`.
+  It never touches a copy a frame is running — those four want the frame
+  re-pointed at the original in the UI and deployed first, then the script
+  again. Run `scripts/object-store-sweep.sh` afterwards.
 
 - **Account hardening.** Passkeys/TOTP 2FA, re-authentication before sensitive
   actions (revoking frames, bulk assignment changes, scope grants), and a

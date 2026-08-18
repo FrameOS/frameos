@@ -81,6 +81,45 @@ export async function createAccountScene(
   if (!Array.isArray(input.scenes) || input.scenes.length === 0) {
     return jsonError("invalid_scenes", 400);
   }
+  return withAccountSceneNameLock(db, input.accountId, (locked) =>
+    createAccountSceneLocked(locked, input),
+  );
+}
+
+// "Pick a free name, then insert" is a check-then-act, and two saves racing
+// for the same account both saw "Sunrise 7" as free and both created it. A
+// transaction-scoped advisory lock keyed on the account serialises the pick
+// and the insert against every other name-picking save for that account
+// (across replicas — it lives in Postgres, not in this process) and releases
+// itself when the transaction ends, however it ends. Other accounts are
+// unaffected: the key is the account id.
+//
+// The callback runs inside the transaction and receives the transaction
+// handle in place of the database; drizzle's nested `transaction()` becomes a
+// savepoint, so callees that open their own transactions still work.
+export async function withAccountSceneNameLock<T>(
+  db: Database,
+  accountId: string,
+  run: (db: Database) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`account-scene-name:${accountId}`}))`,
+    );
+    return run(tx as unknown as Database);
+  });
+}
+
+async function createAccountSceneLocked(
+  db: Database,
+  input: {
+    accountId: string;
+    actor: PublishActor;
+    description?: string | undefined;
+    name: string;
+    scenes: unknown[];
+  },
+) {
   const finalName = await availableSceneName(db, input.accountId, input.name);
   if (!finalName) {
     return jsonError("scene_name_taken", 409, { name: input.name });

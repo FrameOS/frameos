@@ -11,6 +11,7 @@
     "build": "next build",
     "prestart": "node scripts/require-database-url.mjs production",
     "scene:scrub-transparent-previews": "node scripts/scrub-transparent-previews.mjs",
+    "scene:sweep-duplicate-copies": "node scripts/sweep-duplicate-scene-copies.mjs",
     "scene:set-preview": "node scripts/set-scene-preview.mjs",
     "scene:sync-preview": "node scripts/sync-scene-preview.mjs",
     "start": "next start",

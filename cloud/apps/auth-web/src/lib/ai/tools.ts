@@ -45,6 +45,7 @@ import {
   supersedePendingCommands,
 } from "../frames";
 import { createAccountScene } from "../account-scene-create";
+import { forkStoreScene, sceneIdPattern } from "../store-fork";
 import { readBlob } from "../blobs";
 import { extractScenesFromZip } from "../scene-title";
 
@@ -420,10 +421,12 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
     description:
       "Save a scene to the user's account as a NEW private store scene, so it survives closing the editor " +
       "and can be installed on a frame or forked later. With no arguments it saves whatever you just " +
-      "delivered with create_scenes/update_scene; pass `scenes` to save something else (for example a store " +
-      "scene from get_store_scene — that is how you fork one for them). It always creates a copy and never " +
-      "overwrites an existing saved scene, so say which name it landed under. Call it when the user asks to " +
-      "save, keep or fork — not on every build.",
+      "delivered with create_scenes/update_scene; pass `scenes` to save something else. When the scene " +
+      "started life as a store scene (you fetched it with get_store_scene, or the user opened it from the " +
+      "store), ALSO pass its id as `source_scene_id`: the copy is then a proper fork that keeps the " +
+      "original's preview image, tags and description and records where it came from. It always creates a " +
+      "copy and never overwrites an existing saved scene, so say which name it landed under. Call it when " +
+      "the user asks to save, keep or fork — not on every build.",
     name: "save_scene",
     parameters: {
       additionalProperties: false,
@@ -442,6 +445,12 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
             "Complete scene JSON to save. Omit to save the scene you just delivered.",
           items: { type: "object" },
           type: "array",
+        },
+        source_scene_id: {
+          description:
+            "Store scene id this is a copy of (from get_store_scene / search_store_scenes). Makes the save " +
+            "a fork with lineage: preview image, tags and description carry over. Omit for brand-new scenes.",
+          type: "string",
         },
       },
       type: "object",
@@ -606,17 +615,39 @@ async function saveSceneToAccount(
       : undefined) ??
     "Untitled scene";
   const description = asString(args.description);
-
-  const response = await createAccountScene(ctx.db, {
+  const sourceSceneId = asString(args.source_scene_id);
+  const actor = {
     accountId: ctx.accountId,
-    actor: {
-      accountId: ctx.accountId,
-      providerSubject: ctx.providerSubject ?? "",
-    },
-    ...(description ? { description } : {}),
-    name: requestedName,
-    scenes,
-  });
+    providerSubject: ctx.providerSubject ?? "",
+  };
+
+  if (sourceSceneId && !sceneIdPattern.test(sourceSceneId)) {
+    return JSON.stringify({
+      error: "source_scene_id must be a store scene uuid (or omit it for a brand-new scene)",
+      ok: false,
+    });
+  }
+  // A copy of a store scene is a FORK, and forks go through the same lib the
+  // workspace's fork button uses — so the audit event names the source, and
+  // the preview image, gallery, tags and description come along. Only the
+  // name is the model's to choose; the fork lib keeps it unique per account.
+  const response = sourceSceneId
+    ? await forkStoreScene(ctx.db, {
+        accountId: ctx.accountId,
+        actor,
+        ...(description ? { description } : {}),
+        ...(asString(args.name) ? { name: asString(args.name) } : {}),
+        scenes,
+        sourceSceneId,
+        via: "ai_chat",
+      })
+    : await createAccountScene(ctx.db, {
+        accountId: ctx.accountId,
+        actor,
+        ...(description ? { description } : {}),
+        name: requestedName,
+        scenes,
+      });
   const body = (await response.json().catch(() => ({}))) as {
     error?: string;
     scene?: { id?: string; name?: string; slug?: string };
@@ -631,8 +662,11 @@ async function saveSceneToAccount(
   }
   return JSON.stringify({
     note:
-      "Saved as a PRIVATE scene in the user's account. It is a copy — the editor still holds their unsaved " +
-      "version, and nothing was overwritten.",
+      (sourceSceneId
+        ? "Forked into a PRIVATE scene in the user's account, with the original's preview image, tags and " +
+          "description carried over. "
+        : "Saved as a PRIVATE scene in the user's account. ") +
+      "It is a copy — the editor still holds their unsaved version, and nothing was overwritten.",
     ok: true,
     scene: body.scene ?? null,
   });
