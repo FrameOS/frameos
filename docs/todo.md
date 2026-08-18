@@ -25,31 +25,19 @@ A cloud frame talks to `frame-hub` over one outbound WebSocket. The provider
 can push scenes, a short allowlist of declarative settings and a handful of
 commands; everything else stays local to the device.
 
-- **Widen cloud `set_settings`, in small validated batches.** The panel is
-  honest now — a cloud frame renders only the six declarative keys it can
-  actually save (and Power on an ESP32) — so what is left is making more of
-  the form saveable rather than hiding it.
+- **Widen cloud `set_settings`: the hardware-aware batch.** The Pi/Linux
+  batch shipped in 2026.8.30 (`flip`, `error_behavior`, `control_code`,
+  `metrics_interval` with a working `0`, `max_http_response_bytes` capped at
+  the runtime default, `save_assets`, `timezone_updater` enabled/hour only)
+  and is the shape every later batch copies: device allowlist + per-value
+  validators first (`validateCloudSetting`), then the auth-web validator and
+  a floor bump (`extendedFrameSettingsMinVersion`), then the SPA — which
+  renders the fields disabled-with-reason below the floor, never hidden.
+  The hazard has not gone away: the device refuses the WHOLE push on a key it
+  does not recognise, so nothing new goes out before the frames understand it.
 
-  **The hazard that shapes every batch:** the device refuses the WHOLE
-  `set_settings` push on a key it does not recognise. A key added to the cloud
-  before the frames understand it therefore breaks saving outright for every
-  frame still on older firmware — not just for the new key. So a batch needs a
-  version or capability gate before it needs anything else, and the ESP32
-  Power fields are the shape to copy (they carry a "needs firmware ≥ 2026.8.21"
-  footnote and the SPA only sends them to esp32 frames).
+  What is left, in the same shape:
 
-  Keep the shared SPA payload list, the auth-web validator/readback, the
-  Pi/Nim allowlist, the ESP32 handler where applicable, the docs and the drift
-  tests in lockstep:
-
-  - Straightforward Pi/Linux candidates: `flip`, `error_behavior` (mode and
-    retry timings), `control_code` (enable, placement, size/padding, offsets,
-    colors).
-  - With explicit bounds/policy: `metrics_interval` (with a working disabled
-    value), platform-capped `max_http_response_bytes`, `save_assets`
-    (boolean/per-app, respecting disk quotas). For `timezone_updater`, expose
-    only enabled/hour and keep the download endpoint fixed — never accept an
-    arbitrary update URL from the provider.
   - Hardware-aware: custom display `palette` colors, the strict
     partial-refresh subset of `device_config` (`partial`,
     `partialMaxAreaPercent`, `partialMaxRefreshesBeforeFull`), `gpio_buttons`
@@ -59,7 +47,8 @@ commands; everything else stays local to the device.
   - ESP32: `max_http_response_bytes`, debug logging and GPIO buttons are
     plausible (the NVS fields exist); add only what the firmware consumes and
     keep the whole-payload rejection contract. The cloud power controls stay
-    their own ESP32-only subset.
+    their own ESP32-only subset; the Pi batch above is refused for esp32
+    frames up front.
   - Automatic reboot: implement as a real cloud-safe scheduler capability
     (possibly via the schedule verb), not a persisted inert object. Brightness
     once the runtime and drivers grow a real setting.
@@ -68,20 +57,26 @@ commands; everything else stays local to the device.
   panel/driver/VCOM/dimensions, flash and GPIO wiring, SD-card wiring,
   Wi-Fi/hotspot credentials, private-network elevation, frame HTTP/admin/TLS
   access and keys, SSH/backend/agent configuration, mountpoints, HTTP-upload
-  URLs and headers, arbitrary update URLs, and service API secrets. Do not
-  expose raw `assets_path` or `log_to_file` paths; if they are wanted remotely,
-  redesign them as bounded toggles on fixed FrameOS-owned directories. Hardware
-  identity reported by the frame stays authoritative.
+  URLs and headers, arbitrary update URLs (the tz-updater URL included — the
+  device carries its own across a push), and service API secrets. Do not
+  expose raw `assets_path` or `log_to_file` paths; if they are wanted
+  remotely, redesign them as bounded toggles on fixed FrameOS-owned
+  directories. Hardware identity reported by the frame stays authoritative.
 
-- **A chunked cloud→device asset upload.** `asset_put` carries its bytes
-  base64-encoded in a single WebSocket frame, so the cloud cannot put anything
-  larger than ~2.5 MB on a frame (`maxAssetUploadBytes`, mirroring
-  `HubMaxAssetUploadBytes`). The font sync trips over this today: it copies 60
-  of the 61 bundled fonts and skips `NotoColorEmoji.ttf` at 10.7 MB, which is
-  exactly the font someone wants when their scene renders emoji as blanks. The
-  device→cloud direction already solved this once (the offset-based chunk
-  protocol the ESP32 asset upload uses); this is the same idea pointed the
-  other way, and it also unblocks pushing a photo or a video frame to a card.
+- **Sweep the private-scene copies the old save flow left behind.** Until
+  PR #367 every cloud settings save byte-compared the workspace's sanitized
+  scene with the raw store JSON, so every assigned scene looked edited: owned
+  scenes were republished per save and scenes the account did not own were
+  forked into a private copy per save ("Abstract Architecture 2" … "8"). The
+  flow now uses the workspace's own scene equality, drops the Templates
+  panel's `origin` stamp (never persisted, never stamped on cloud installs,
+  no cloud "update available" badge), keeps unreadable packs claimed and
+  serializes saves per frame — but the copies already made are still there
+  (33 in the founder account, 4 of them still assigned to a frame). Two
+  pieces left: a one-off cleanup (delete the unassigned copies, re-point the
+  assigned ones at their originals), and a server-side guard so two racing
+  `POST /api/account/scenes` with the same name cannot both win
+  (`availableSceneName` checks then inserts — "7" and "7" happened).
 
 - **Cloud AI chat: fork with lineage.** `save_scene` writes whatever scene the
   chat is holding into the account as a new private scene. That covers forking
@@ -127,30 +122,6 @@ enabled on images that have no backend to talk to.
   smooth: download and signature verification are already unprivileged, and
   only the final install crosses the line. Blocked on hardware time, not on a
   decision. The SPI/GPIO panel drivers are the part to measure first.
-
----
-
-## Store
-
-- **Public store reads cannot be edge-cached.** `next.config.ts` stamps
-  `Cache-Control: no-store` on all of `/api/:path*`, and a `headers()` rule
-  overrides whatever a route handler set — so the deliberate caching in the
-  store's read routes (the immutable `?v=` preview, `scenes.json`'s five
-  minutes, the CDN redirect) does nothing in production. The blanket rule is
-  right for an API surface where most routes are session-scoped, and a static
-  rule cannot tell a public scene from a private one because they share a URL
-  shape. Fixing it properly means either serving public bytes from a path
-  outside `/api/`, or exempting `/api/store/` and making every route there
-  state its own policy. Not urgent — the CDN redirect already moved the bytes
-  off the origin, which is the expensive part — but the comments in those
-  routes currently describe behaviour that is not happening.
-
----
-
-## Cloud service (auth-web)
-
-- **Operator-facing audit/event export** — only once there is an operator
-  surface to put it on.
 
 ---
 
@@ -223,6 +194,8 @@ case, so it is skipped until abuse is actually observed.
 
 Everything else parked:
 
+- **Operator-facing audit/event export** (auth-web) — only once there is an
+  operator surface to put it on.
 - **Deferred Pi models.** Pi 500 and CM5 Lite need `bcm2712-rpi-500` /
   `bcm2712-rpi-cm5l-*` DTBs that entered rpi-6.6.y after the kernel commit
   Buildroot 2025.02.13 pins; the next Buildroot (or kernel-pin) bump adds them

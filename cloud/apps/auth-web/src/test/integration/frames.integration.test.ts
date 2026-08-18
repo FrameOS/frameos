@@ -1511,11 +1511,13 @@ describe("frame management API", () => {
 
   it("accepts exactly the device's settings allowlist, in the device's spelling", async () => {
     // Authoritative lists: CLOUD_SETTINGS_ALLOWLIST in
-    // frameos/src/frameos/cloud/hub_client.nim (the base six) plus the power
-    // keys only ws_handle_set_settings in embedded/esp32/main/fos_cloud.c
-    // applies, mirrored in docs/cloud-frames.md. The hub forwards keys
-    // verbatim and each device refuses the whole verb on one unknown key, so
-    // this must match exactly (the SPA only sends power keys to esp32).
+    // frameos/src/frameos/cloud/hub_client.nim (the base six plus the
+    // 2026.8.30 Pi/Linux batch) plus the power keys only
+    // ws_handle_set_settings in embedded/esp32/main/fos_cloud.c applies,
+    // mirrored in docs/cloud-frames.md. The hub forwards keys verbatim and
+    // each device refuses the whole verb on one unknown key, so this must
+    // match exactly (the SPA only sends power keys to esp32, and the
+    // extended batch only to Pi frames whose firmware reports ≥ 2026.8.30).
     expect([...allowedFrameSettings.keys()].sort()).toEqual(
       [
         "debug",
@@ -1524,6 +1526,13 @@ describe("frame management API", () => {
         "rotate",
         "scaling_mode",
         "timezone",
+        "flip",
+        "error_behavior",
+        "control_code",
+        "metrics_interval",
+        "max_http_response_bytes",
+        "save_assets",
+        "timezone_updater",
         "deep_sleep",
         "deep_sleep_on_battery",
         "wake_check_seconds",
@@ -1579,6 +1588,51 @@ describe("frame management API", () => {
     // brightness is deferred until the runtime grows the setting.
     const brightness = await push({ brightness: 50 });
     expect(brightness.status).toBe(400);
+
+    // The extended batch is gated on the frame's reported firmware: this
+    // frame has never connected, so nothing is known about it and a push
+    // that older firmware would refuse whole is refused here first, with a
+    // code the SPA can turn into "update the frame".
+    const extendedTooEarly = await push({ interval: 300, flip: "horizontal" });
+    expect(extendedTooEarly.status).toBe(400);
+    expect(((await extendedTooEarly.json()) as { error: string }).error).toBe(
+      "settings_need_newer_firmware",
+    );
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.8.29" })
+      .where(eq(frames.id, frame_id));
+    const stillTooOld = await push({ flip: "horizontal" });
+    expect(stillTooOld.status).toBe(400);
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.8.30" })
+      .where(eq(frames.id, frame_id));
+    const extended = await push({
+      flip: "horizontal",
+      error_behavior: { mode: "silent_retry", silent_retry_forever: true },
+      control_code: { enabled: true, position: "top-left", qrCodeColor: "#000000" },
+      metrics_interval: 0,
+      max_http_response_bytes: 4 * 1024 * 1024,
+      save_assets: { unsplash: true },
+      timezone_updater: { enabled: false, hour: 4 },
+    });
+    expect(extended.status).toBe(200);
+    // Values are shape-checked, not just keyed: the URL is never a
+    // provider's to set, and one bad sub-key refuses the whole push.
+    const smuggledUrl = await push({
+      timezone_updater: { enabled: true, url: "https://evil.example/tz.json.gz" },
+    });
+    expect(smuggledUrl.status).toBe(400);
+    const badControlCode = await push({ control_code: { enabled: "true" } });
+    expect(badControlCode.status).toBe(400);
+    // …and round-trip through the frame summary in the device's spelling.
+    const [pushed] = await db.select().from(frames).where(eq(frames.id, frame_id));
+    expect(pushed?.settings).toMatchObject({
+      flip: "horizontal",
+      metrics_interval: 0,
+      timezone_updater: { enabled: false, hour: 4 },
+    });
   });
 
   // The frame's name is provider-side data (frames.name, what frameSummary

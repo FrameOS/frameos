@@ -9,6 +9,7 @@ import {
 } from "../../../../../../src/lib/store-auth";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { storeRoute } from "../../../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,7 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // The scenes.json extracted from a scene's latest template zip — what the
 // in-browser live preview (frameos-wasm) executes. Same access rules as the
 // zip download: public scenes are open, private ones owner-only, pulled 410.
-export async function GET(request: NextRequest, context: RouteContext) {
+async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:scenes-json", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
@@ -122,3 +123,7 @@ function extractScenesJson(content: Buffer): string | undefined {
     return undefined;
   }
 }
+
+// Cache policy is per-response here (see storeRoute): anything this
+// handler did not decide is no-store.
+export const GET = storeRoute(handleGet);

@@ -1,4 +1,4 @@
-import std/[base64, json, sequtils, strutils, unittest]
+import std/[base64, json, sequtils, strutils, tables, unittest]
 
 import ../hub_client
 import ../../types
@@ -14,6 +14,9 @@ type
     assetReads: seq[(string, bool)]
     assetData: string ## what readAssetFn serves for "photos/cat.jpg"
     assetWrites: seq[(string, string)]
+    ## asset_put_chunk parts, upload_id → bytes so far (an in-memory stand-in
+    ## for the device's part files, with the same offset semantics).
+    chunkParts: Table[string, string]
     assetMkdirs: seq[string]
     assetDeletes: seq[string]
     assetRenames: seq[(string, string)]
@@ -67,6 +70,23 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
         raise newException(ValueError, "Invalid asset path")
       recorded.assetWrites.add((path, data))
       %*{"path": path, "size": data.len, "mtime": 1700000003, "is_dir": false},
+    putAssetChunkFn: proc(uploadId: string, offset: BiggestInt, data: string,
+                          finalPath: string): JsonNode {.gcsafe.} =
+      if finalPath == "denied.bin":
+        raise newException(ValueError, "Invalid asset path")
+      var part = recorded.chunkParts.getOrDefault(uploadId, "")
+      if offset <= 0:
+        part = data
+      elif part.len < offset:
+        raise newException(ValueError, "chunk_gap")
+      else:
+        part = part[0 ..< offset.int] & data
+      if finalPath.len == 0:
+        recorded.chunkParts[uploadId] = part
+        return %*{"received": part.len}
+      recorded.chunkParts.del(uploadId)
+      recorded.assetWrites.add((finalPath, part))
+      %*{"path": finalPath, "size": part.len, "mtime": 1700000004, "is_dir": false},
     mkdirAssetFn: proc(path: string) {.gcsafe.} =
       recorded.assetMkdirs.add(path),
     deleteAssetFn: proc(path: string) {.gcsafe.} =
@@ -154,6 +174,94 @@ suite "cloud hub verb dispatcher":
     check recorded.persistedSettings[0]{"rotate"}.getInt(0) == 90
     check recorded.events.len == 1
     check recorded.events[0][0] == "reload"
+
+  test "set_settings applies the 2026.8.30 extended keys and shape-checks them":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    ctx.frameConfig.timeZoneUpdates = TimeZoneUpdatesConfig(
+      enabled: true, hour: 3, url: "https://tz.example.test/custom.json.gz")
+    let reply = handleCloudVerb(ctx, %*{
+      "id": "3x", "type": "set_settings",
+      "settings": {
+        "flip": "horizontal",
+        "error_behavior": {"mode": "silent_retry", "retry_seconds": 30,
+                           "silent_retry_forever": true, "silent_window_minutes": 15},
+        "control_code": {"enabled": true, "position": "bottom-left", "size": 3,
+                         "padding": 2, "offsetX": -4, "offsetY": 10,
+                         "qrCodeColor": "#112233", "backgroundColor": "#FFFFFF"},
+        "metrics_interval": 0,
+        "max_http_response_bytes": 8 * 1024 * 1024,
+        "save_assets": {"unsplash": true, "openai": false},
+        "timezone_updater": {"enabled": false, "hour": 5},
+      },
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.persistedSettings.len == 1
+    let persisted = recorded.persistedSettings[0]
+    check persisted{"flip"}.getStr("") == "horizontal"
+    check persisted{"control_code"}{"enabled"}.getBool(false) == true
+    check persisted{"metrics_interval"}.getFloat(-1) == 0
+    # The download URL is never the provider's to set: the frame's own URL
+    # rides along so the whole-object persist cannot reset it.
+    check persisted{"timezone_updater"}{"url"}.getStr("") == "https://tz.example.test/custom.json.gz"
+    check persisted{"timezone_updater"}{"enabled"}.getBool(true) == false
+    check recorded.events.len == 1
+    check recorded.events[0][0] == "reload"
+
+  test "set_settings refuses bad values for allowlisted keys with invalid_settings":
+    let bad = [
+      %*{"flip": "diagonal"},
+      %*{"flip": true},
+      %*{"error_behavior": {"mode": "explode"}},
+      %*{"error_behavior": {"retry_seconds": 0}},
+      %*{"error_behavior": {"mode": "safe_mode", "shell": "rm -rf /"}},
+      %*{"control_code": {"enabled": "true"}},
+      %*{"control_code": {"position": "middle"}},
+      %*{"control_code": {"qrCodeColor": "red"}},
+      %*{"control_code": {"size": 0}},
+      %*{"metrics_interval": -1},
+      %*{"metrics_interval": "60"},
+      %*{"max_http_response_bytes": 1},
+      %*{"max_http_response_bytes": CloudMaxHttpResponseBytesCeiling + 1},
+      %*{"save_assets": "yes"},
+      %*{"save_assets": {"unsplash": "true"}},
+      %*{"timezone_updater": {"url": "https://evil.example/tz.json.gz"}},
+      %*{"timezone_updater": {"hour": 24}},
+      %*{"timezone_updater": {"enabled": true, "url": "https://evil.example/tz.json.gz"}},
+      %*{"rotate": 45},
+      %*{"interval": 0},
+      %*{"name": ""},
+      %*{"debug": "true"},
+    ]
+    for settings in bad:
+      let recorded = Recorded()
+      var withValid = %*{"name": "Kitchen"}
+      for key in settings.keys:
+        withValid[key] = settings[key]
+      let reply = handleCloudVerb(makeContext(recorded), %*{
+        "id": "bad", "type": "set_settings", "settings": withValid})
+      check reply.ack{"ok"}.getBool(true) == false
+      check reply.ack{"error"}.getStr("") == "invalid_settings"
+      check recorded.persistedSettings.len == 0
+      check recorded.events.len == 0
+
+  test "every allowlisted key has a validator that accepts a sane value":
+    # A key with no rule falls through validateCloudSetting's `else` and
+    # refuses every value — which would make the key unsettable while still
+    # advertised. Pin one accepted value per key.
+    let samples = %*{
+      "name": "Kitchen", "rotate": 180, "interval": 300, "scaling_mode": "contain",
+      "timezone": "Europe/Tallinn", "debug": true, "flip": "",
+      "error_behavior": {"mode": "show_error_retry", "show_error_retry_seconds": 60},
+      "control_code": {"enabled": false},
+      "metrics_interval": 60, "max_http_response_bytes": 64 * 1024 * 1024,
+      "save_assets": true, "timezone_updater": {"enabled": true, "hour": 3},
+    }
+    for key in CLOUD_SETTINGS_ALLOWLIST:
+      check samples.hasKey(key)
+      check validateCloudSetting(key, samples[key])
+      check validateCloudSetting(key, newJNull()) == false
+    check validateCloudSetting("not_a_setting", %"x") == false
 
   test "set_settings that changes nothing is acked without persist or reload":
     # Every "push scenes & settings" click redelivers the full settings
@@ -609,6 +717,70 @@ suite "cloud hub verb dispatcher":
     check handleCloudVerb(ctx, %*{
       "type": "asset_put", "path": "denied.bin", "data": encode("x"),
     }).ack{"error"}.getStr("") == "invalid_path"
+    check recorded.assetWrites.len == 0
+
+  test "asset_put_chunk assembles a file across acked chunks, offsets make retries idempotent":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    let first = handleCloudVerb(ctx, %*{
+      "id": "c1", "type": "asset_put_chunk", "upload_id": "up_1",
+      "offset": 0, "data": encode("hello "),
+    })
+    check first.ack{"ok"}.getBool(false) == true
+    check first.ack{"received"}.getInt(0) == 6
+    check first.ack.hasKey("asset") == false
+    # At-least-once delivery: the same chunk again lands on the same bytes.
+    let again = handleCloudVerb(ctx, %*{
+      "id": "c1", "type": "asset_put_chunk", "upload_id": "up_1",
+      "offset": 0, "data": encode("hello "),
+    })
+    check again.ack{"received"}.getInt(0) == 6
+    let second = handleCloudVerb(ctx, %*{
+      "id": "c2", "type": "asset_put_chunk", "upload_id": "up_1",
+      "offset": 6, "data": encode("wor"),
+    })
+    check second.ack{"received"}.getInt(0) == 9
+    let last = handleCloudVerb(ctx, %*{
+      "id": "c3", "type": "asset_put_chunk", "upload_id": "up_1",
+      "offset": 9, "data": encode("ld"), "complete": true, "path": "fonts/big.ttf",
+    })
+    check last.ack{"ok"}.getBool(false) == true
+    check last.ack{"asset"}{"path"}.getStr("") == "fonts/big.ttf"
+    check last.ack{"asset"}{"size"}.getInt(0) == 11
+    check recorded.assetWrites == @[("fonts/big.ttf", "hello world")]
+    check "up_1" notin recorded.chunkParts
+
+  test "asset_put_chunk reports a hole as chunk_gap and refuses bad envelopes":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_put_chunk", "upload_id": "up_2", "offset": 0, "data": encode("abc"),
+    }).ack{"ok"}.getBool(false) == true
+    # Offset past the part's end: an earlier chunk was lost — restart, don't append.
+    check handleCloudVerb(ctx, %*{
+      "type": "asset_put_chunk", "upload_id": "up_2", "offset": 10, "data": encode("x"),
+    }).ack{"error"}.getStr("") == "chunk_gap"
+    for (message, error) in [
+      (%*{"type": "asset_put_chunk", "offset": 0, "data": encode("x")}, "invalid_upload_id"),
+      (%*{"type": "asset_put_chunk", "upload_id": "../evil", "offset": 0, "data": encode("x")}, "invalid_upload_id"),
+      (%*{"type": "asset_put_chunk", "upload_id": "a".repeat(65), "offset": 0, "data": encode("x")}, "invalid_upload_id"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "data": encode("x")}, "invalid_offset"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": -1, "data": encode("x")}, "invalid_offset"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": "0", "data": encode("x")}, "invalid_offset"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": 0, "data": ""}, "invalid_data"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": 0, "data": "!!!"}, "invalid_data"),
+      # The destination is checked on the final chunk, dot-directories included.
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": 0, "data": encode("x"),
+          "complete": true}, "invalid_path"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": 0, "data": encode("x"),
+          "complete": true, "path": ".thumbs/x.bin"}, "invalid_path"),
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": 0, "data": encode("x"),
+          "complete": true, "path": "denied.bin"}, "invalid_path"),
+      # Past the assembled-file ceiling.
+      (%*{"type": "asset_put_chunk", "upload_id": "up_3", "offset": HubMaxChunkedUploadBytes,
+          "data": encode("x")}, "too_large"),
+    ]:
+      check handleCloudVerb(ctx, message).ack{"error"}.getStr("") == error
     check recorded.assetWrites.len == 0
 
   test "asset write verbs never touch dot-directories":

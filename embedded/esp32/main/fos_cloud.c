@@ -1337,16 +1337,25 @@ typedef enum {
     ASSET_JOB_MKDIR = 4,
     ASSET_JOB_DELETE = 5,
     ASSET_JOB_RENAME = 6,
+    ASSET_JOB_PUT_CHUNK = 7,
 } asset_job_kind_t;
 
 typedef struct {
     uint8_t kind;
     char id[48]; /* command uuid, echoed on every reply frame */
     char path[FOS_CLOUD_ASSET_PATH_MAX];
-    char dst[FOS_CLOUD_ASSET_PATH_MAX]; /* rename destination */
-    uint8_t *data;                      /* asset_put payload, owned by the job */
+    char dst[FOS_CLOUD_ASSET_PATH_MAX]; /* rename destination; asset_put_chunk upload_id */
+    uint8_t *data;                      /* asset_put(_chunk) payload, owned by the job */
     size_t data_len;
+    long long offset;                   /* asset_put_chunk: where the bytes land */
+    bool complete;                      /* asset_put_chunk: last chunk, commit to `path` */
 } asset_job_t;
+
+/* asset_put_chunk: the assembled file's ceiling on the card. Chunks arrive
+ * one WS frame each (so each is bounded by FOS_CLOUD_WS_MAX_MSG anyway); the
+ * whole is a disk question. Mirrors HubMaxChunkedUploadBytes on the Linux
+ * runtime. */
+#define FOS_CLOUD_ASSET_CHUNKED_MAX_BYTES (64LL * 1024 * 1024)
 
 static QueueHandle_t s_asset_jobs = NULL;
 
@@ -1565,6 +1574,53 @@ static void asset_job_run_put(const asset_job_t *job)
     cJSON_Delete(msg);
 }
 
+/* asset_put_chunk: one offset-addressed write into `<root>/.uploads/<id>.part`
+ * (fos_assets_chunk_begin — offset 0 starts the part, a hole is `chunk_gap`,
+ * a resent chunk overwrites itself), committed to `path` on the final chunk.
+ * The very same part protocol the USB/HTTP chunked upload uses, so a
+ * provider-pushed font and a backend-pushed one land the same way. */
+static void asset_job_run_put_chunk(const asset_job_t *job)
+{
+    const char *err = NULL;
+    fos_assets_writer_t writer;
+    if (fos_assets_chunk_begin(job->dst, job->offset, &writer, &err) != ESP_OK) {
+        asset_job_ack(job->id, false, err ? err : "write_failed");
+        return;
+    }
+    if (fos_assets_write_chunk(&writer, job->data, job->data_len) != ESP_OK) {
+        fos_assets_chunk_close(&writer);
+        asset_job_ack(job->id, false, "write_failed");
+        return;
+    }
+    long long received = 0;
+    if (fos_assets_chunk_finish(&writer, job->complete ? job->path : NULL,
+                                &received, &err) != ESP_OK) {
+        asset_job_ack(job->id, false, err ? err : "write_failed");
+        return;
+    }
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return;
+    if (job->id[0]) cJSON_AddStringToObject(msg, "id", job->id);
+    cJSON_AddStringToObject(msg, "type", "ack");
+    cJSON_AddBoolToObject(msg, "ok", true);
+    if (job->complete) {
+        struct stat st;
+        cJSON *asset = cJSON_AddObjectToObject(msg, "asset");
+        if (asset) {
+            bool have_stat = fos_assets_stat(job->path, &st) == ESP_OK;
+            cJSON_AddStringToObject(asset, "path", job->path);
+            cJSON_AddNumberToObject(asset, "size",
+                                    have_stat ? (double)st.st_size : (double)received);
+            cJSON_AddNumberToObject(asset, "mtime", have_stat ? (double)st.st_mtime : 0);
+            cJSON_AddBoolToObject(asset, "is_dir", false);
+        }
+    } else {
+        cJSON_AddNumberToObject(msg, "received", (double)received);
+    }
+    ws_send_json(msg);
+    cJSON_Delete(msg);
+}
+
 /* Drain queued asset jobs. Called from the cloud task — file I/O over SPI
  * plus multi-frame sends must never run inside the WS event handler. */
 static bool ws_process_asset_jobs(void)
@@ -1581,6 +1637,9 @@ static bool ws_process_asset_jobs(void)
             case ASSET_JOB_GET: asset_job_run_get(&job); break;
             case ASSET_JOB_PUT:
                 asset_job_run_put(&job);
+                break;
+            case ASSET_JOB_PUT_CHUNK:
+                asset_job_run_put_chunk(&job);
                 break;
             case ASSET_JOB_MKDIR:
                 asset_job_ack(job.id, fos_assets_mkdir(job.path, &err) == ESP_OK, err);
@@ -1621,7 +1680,7 @@ static void ws_flush_asset_jobs(void)
 static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const cJSON *id)
 {
     asset_job_t job = { .kind = (uint8_t)kind, .id = "", .path = "", .dst = "",
-                        .data = NULL, .data_len = 0 };
+                        .data = NULL, .data_len = 0, .offset = 0, .complete = false };
     bool ack_now = true; /* read verbs: bare ack, then reply frames */
     if (cJSON_IsString(id) && id->valuestring &&
         strlen(id->valuestring) < sizeof(job.id)) {
@@ -1662,6 +1721,39 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
             return;
         }
         ack_now = false;
+    } else if (kind == ASSET_JOB_PUT_CHUNK) {
+        /* upload_id names the part on the card ([A-Za-z0-9_-], bounded);
+         * offset says where the bytes land; the destination path is only
+         * needed — and only checked — on the final (`complete`) chunk. */
+        const cJSON *upload_item = cJSON_GetObjectItem(root, "upload_id");
+        const char *upload_id = cJSON_IsString(upload_item) ? upload_item->valuestring : NULL;
+        if (!fos_assets_valid_upload_id(upload_id) || strlen(upload_id) >= sizeof(job.dst)) {
+            ws_ack(id, false, "invalid_upload_id");
+            return;
+        }
+        strlcpy(job.dst, upload_id, sizeof(job.dst));
+        const cJSON *offset_item = cJSON_GetObjectItem(root, "offset");
+        if (!cJSON_IsNumber(offset_item) || offset_item->valuedouble < 0 ||
+            offset_item->valuedouble != (double)(long long)offset_item->valuedouble) {
+            ws_ack(id, false, "invalid_offset");
+            return;
+        }
+        job.offset = (long long)offset_item->valuedouble;
+        const cJSON *complete_item = cJSON_GetObjectItem(root, "complete");
+        job.complete = cJSON_IsTrue(complete_item);
+        if (job.complete) {
+            const cJSON *path_item = cJSON_GetObjectItem(root, "path");
+            const char *raw = cJSON_IsString(path_item) ? path_item->valuestring : NULL;
+            if (!fos_assets_sanitize_write_path(raw, job.path, sizeof(job.path))) {
+                ws_ack(id, false, "invalid_path");
+                return;
+            }
+        }
+        if (!fos_assets_available()) {
+            ws_ack(id, false, "not_found");
+            return;
+        }
+        ack_now = false;
     } else if (kind == ASSET_JOB_RENAME) {
         const cJSON *src_item = cJSON_GetObjectItem(root, "src");
         const cJSON *dst_item = cJSON_GetObjectItem(root, "dst");
@@ -1674,12 +1766,17 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
         }
         ack_now = false;
     }
-    if (kind == ASSET_JOB_PUT) {
+    if (kind == ASSET_JOB_PUT || kind == ASSET_JOB_PUT_CHUNK) {
         const cJSON *data_item = cJSON_GetObjectItem(root, "data");
         const char *b64 = cJSON_IsString(data_item) ? data_item->valuestring : NULL;
         size_t b64_len = b64 ? strlen(b64) : 0;
         if (!b64 || b64_len == 0) {
             ws_ack(id, false, "invalid_data");
+            return;
+        }
+        if (kind == ASSET_JOB_PUT_CHUNK &&
+            job.offset + (long long)((b64_len / 4) * 3) > FOS_CLOUD_ASSET_CHUNKED_MAX_BYTES) {
+            ws_ack(id, false, "too_large");
             return;
         }
         size_t raw_cap = (b64_len / 4) * 3 + 4;
@@ -2179,6 +2276,8 @@ static void ws_handle_message(const char *data, size_t len)
         ws_handle_asset_verb(ASSET_JOB_GET, root, id);
     } else if (strcmp(type, "asset_put") == 0) {
         ws_handle_asset_verb(ASSET_JOB_PUT, root, id);
+    } else if (strcmp(type, "asset_put_chunk") == 0) {
+        ws_handle_asset_verb(ASSET_JOB_PUT_CHUNK, root, id);
     } else if (strcmp(type, "asset_mkdir") == 0) {
         ws_handle_asset_verb(ASSET_JOB_MKDIR, root, id);
     } else if (strcmp(type, "asset_delete") == 0) {

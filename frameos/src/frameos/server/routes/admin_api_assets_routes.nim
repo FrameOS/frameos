@@ -195,6 +195,88 @@ proc discardUploadChunk*(uploadId: string) =
   if fileExists(tempPath):
     removeFile(tempPath)
 
+# ---------------------------------------------------------------------------
+# Offset-addressed chunked uploads (the cloud's `asset_put_chunk` verb).
+#
+# appendUploadChunk above appends blindly, which is what the local admin's
+# per-request uploads want and exactly what a retried chunk must not do:
+# hub delivery is at-least-once, so a chunk can arrive twice. These parts
+# are addressed by offset instead — offset 0 starts the part, a later chunk
+# must land at or before the part's current end (a hole means an earlier
+# chunk was lost and the sender restarts: "chunk_gap"), and a resent chunk
+# overwrites itself. Same idea as the ESP32's fos_assets_chunk_begin.
+# ---------------------------------------------------------------------------
+
+const
+  # Parts left behind by an upload that never completed (the provider gave up,
+  # the link died mid-file) are swept on the next session start once older
+  # than this. Long enough for a slow link to finish a big file; short enough
+  # that a dead upload does not hold disk for a day.
+  CloudUploadPartMaxAgeSeconds* = 6 * 60 * 60
+
+proc cloudUploadPartPath(uploadId: string): string =
+  normalizedPath(uploadChunkTempRoot() / ("cloud-" & sanitizeUploadId(uploadId) & ".part"))
+
+proc writeAssetUploadChunk*(uploadId: string, offset: BiggestInt, data: string): BiggestInt =
+  ## Write `data` at `offset` into the upload's part file and return the
+  ## part's size afterwards. Raises ValueError("chunk_gap") when `offset` lies
+  ## past what has landed so far.
+  let partPath = cloudUploadPartPath(uploadId)
+  createDir(parentDir(partPath))
+  if offset <= 0:
+    # First (or restarted) chunk: whatever was there is a previous attempt.
+    writeFile(partPath, data)
+    return data.len.BiggestInt
+  if not fileExists(partPath) or getFileSize(partPath) < offset:
+    raise newException(ValueError, "chunk_gap")
+  var fileHandle = open(partPath, fmReadWriteExisting)
+  try:
+    fileHandle.setFilePos(offset)
+    fileHandle.write(data)
+  finally:
+    fileHandle.close()
+  getFileSize(partPath)
+
+proc finishAssetUploadChunks*(uploadId: string, path: string): JsonNode =
+  ## Move the finished part to `path` inside the assets directory, sanitizing
+  ## the filename exactly like a single-shot upload. Returns the stored entry
+  ## with an ABSOLUTE path (assetPayloadForPath); callers relativize.
+  let partPath = cloudUploadPartPath(uploadId)
+  if not fileExists(partPath):
+    raise newException(OSError, "Upload not found")
+  let (dir, name, ext) = splitFile(path)
+  let targetPath = resolveAssetUploadPath(dir, name & ext)
+  createDir(parentDir(targetPath))
+  if dirExists(targetPath):
+    raise newException(ValueError, "Invalid asset path")
+  if fileExists(targetPath):
+    removeFile(targetPath)
+  moveFile(partPath, targetPath)
+  assetPayloadForPath(targetPath)
+
+proc discardAssetUploadChunks*(uploadId: string) =
+  let partPath = cloudUploadPartPath(uploadId)
+  if fileExists(partPath):
+    removeFile(partPath)
+
+proc cleanupStaleAssetUploadChunks*(maxAgeSeconds = CloudUploadPartMaxAgeSeconds) =
+  ## Delete cloud upload parts nobody has touched for `maxAgeSeconds`.
+  let root = uploadChunkTempRoot()
+  if not dirExists(root):
+    return
+  let cutoff = getTime() - initDuration(seconds = maxAgeSeconds)
+  for kind, filePath in walkDir(root):
+    if kind != pcFile:
+      continue
+    let fileName = extractFilename(filePath)
+    if not (fileName.startsWith("cloud-") and fileName.endsWith(".part")):
+      continue
+    try:
+      if getFileInfo(filePath).lastWriteTime < cutoff:
+        removeFile(filePath)
+    except CatchableError:
+      discard
+
 proc finishChunkedAssetUpload*(uploadId: string, subdir: string, filename: string): JsonNode =
   let tempPath = uploadChunkTempPath(uploadId)
   if not fileExists(tempPath):

@@ -10,7 +10,7 @@ suite "config helper loaders":
       width: 0,
       height: 0,
       device: "",
-      metricsInterval: 0,
+      metricsInterval: -1,
       framePort: 0,
       frameHost: "",
       httpsProxy: nil,
@@ -34,6 +34,11 @@ suite "config helper loaders":
     check config.frameAccess == "private"
     check config.name == "localhost"
     check config.timeZone.len > 0
+
+  test "setConfigDefaults keeps metricsInterval 0 (the disabled value)":
+    var config = FrameConfig(metricsInterval: 0)
+    setConfigDefaults(config)
+    check config.metricsInterval == 0
 
   test "loadSchedule parses events and tolerates missing or invalid input":
     let eventNode = %*{

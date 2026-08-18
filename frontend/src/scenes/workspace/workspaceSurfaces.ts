@@ -200,14 +200,22 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
   // A cloud-managed frame renders only what the cloud can actually save: the
   // declarative `set_settings` keys, plus Power on an ESP32. Everything else
   // this panel knows how to draw — device, network, admin, mountpoints,
-  // palette, QR, assets, GPIO, logs, reboot — is owned by the device, and the
-  // cloud has neither a verb to push it nor a value to show.
+  // palette, assets path, GPIO, logs, reboot — is owned by the device, and
+  // the cloud has neither a verb to push it nor a value to show.
   //
-  // Only Power is listed: the settings block itself is the first thing the
-  // panel renders, so a nav link to it scrolls nowhere (the same reason
-  // esp32CloudFrameSettingsSections omits Info). With no ESP32 that leaves
-  // the nav empty, which is correct — there is nothing to jump to.
-  cloud: ['frame-settings-power'],
+  // The base settings block itself is the first thing the panel renders, so
+  // a nav link to it scrolls nowhere (the same reason
+  // esp32CloudFrameSettingsSections omits Info). What IS listed: the three
+  // headings of the extended batch a Pi/Linux frame renders below it
+  // (Defaults: flip, metrics, tz-updater, HTTP cap, asset saving; error
+  // handling; QR control code — disabled with a note on firmware older than
+  // 2026.8.30, but always present), and Power on an ESP32.
+  cloud: [
+    'frame-settings-defaults',
+    'frame-settings-error-behavior',
+    'frame-settings-qr',
+    'frame-settings-power',
+  ],
 }
 
 /**

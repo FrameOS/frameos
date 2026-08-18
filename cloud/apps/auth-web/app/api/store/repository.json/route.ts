@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireDatabase } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { buildStoreRepository } from "../../../../src/lib/store-repository";
+import { storeRoute } from "../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,7 @@ export const runtime = "nodejs";
 // remove scenes people already see. Every template carries its own
 // `frameosVersion`, so the install can warn locally. Installs that want a
 // filtered index use /api/store/{frameosVersion}/repository.json.
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:index", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
@@ -35,3 +36,7 @@ export async function GET(request: NextRequest) {
     headers: { "cache-control": "public, max-age=300" },
   });
 }
+
+// Cache policy is per-response here (see storeRoute): anything this
+// handler did not decide is no-store.
+export const GET = storeRoute(handleGet);

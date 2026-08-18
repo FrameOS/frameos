@@ -936,14 +936,24 @@ describe("store publish and distribution", () => {
     );
     expect(image.status).toBe(200);
 
-    // …a wrong or missing token stays a 404.
+    // …a wrong or missing token stays a 404 — and, now that /api/store/ is
+    // exempt from the blanket no-store header, that refusal states its own
+    // policy: a private scene's 404 must never sit at the edge for the next
+    // anonymous request (storeRoute's default).
     for (const suffix of ["", "?share=", "?share=not-the-token"]) {
       const denied = await downloadScene(
         request(`/api/store/scenes/${sceneId}/download${suffix}`, "GET"),
         ctx(sceneId),
       );
       expect(denied.status).toBe(404);
+      expect(denied.headers.get("cache-control")).toBe("no-store");
     }
+    const deniedImage = await getSceneImage(
+      request(`/api/store/scenes/${sceneId}/image?share=not-the-token`, "GET"),
+      ctx(sceneId),
+    );
+    expect(deniedImage.status).toBe(404);
+    expect(deniedImage.headers.get("cache-control")).toBe("no-store");
 
     // A pulled scene is dead even with the token (moderation kill switch).
     await db

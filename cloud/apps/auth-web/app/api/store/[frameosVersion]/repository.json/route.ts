@@ -3,6 +3,7 @@ import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { buildStoreRepository } from "../../../../../src/lib/store-repository";
 import { normalizeRequestedFrameosVersion } from "../../../../../src/lib/store-versions";
+import { storeRoute } from "../../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
 
@@ -21,7 +22,7 @@ export const runtime = "nodejs";
 // sibling /api/store/repository.json and /api/store/account/repository.json
 // routes keep winning over this [frameosVersion] segment — and "account" is
 // not a valid version anyway.
-export async function GET(
+async function handleGet(
   request: NextRequest,
   { params }: { params: Promise<{ frameosVersion: string }> },
 ) {
@@ -48,3 +49,7 @@ export async function GET(
     headers: { "cache-control": "public, max-age=300" },
   });
 }
+
+// Cache policy is per-response here (see storeRoute): anything this
+// handler did not decide is no-store.
+export const GET = storeRoute(handleGet);

@@ -11,7 +11,8 @@
 ## the code for those capabilities simply does not exist here, so no
 ## provider-side compromise or configuration flag can reach them. The only
 ## file access is the asset verb family (`assets_list`/`asset_get` plus the
-## write verbs `asset_put`/`asset_mkdir`/`asset_delete`/`asset_rename`):
+## write verbs `asset_put`/`asset_put_chunk`/`asset_mkdir`/`asset_delete`/
+## `asset_rename`):
 ## resolved and bounded on-device inside the assets directory
 ## (admin_api_assets_routes' resolveAssetPath — the same guard the local
 ## Assets panel uses), with writes additionally refused for dot-directories
@@ -113,10 +114,18 @@ const
   # folder. Over the cap the listing says `truncated: true` — never a silent
   # stop (a partial listing that looks complete is worse than none).
   HubMaxAssetListEntries* = 5000
-  # `asset_put` rides a single inbound frame (there is no cloud→device chunk
-  # stream), so the raw payload must survive base64 inflation plus envelope
-  # inside HubMaxInboundBytes. 2.5 MiB raw ≈ 3.4 MiB encoded.
+  # `asset_put` rides a single inbound frame, so the raw payload must survive
+  # base64 inflation plus envelope inside HubMaxInboundBytes. 2.5 MiB raw ≈
+  # 3.4 MiB encoded. Bigger files ride `asset_put_chunk` (below), one chunk of
+  # at most this size per frame.
   HubMaxAssetUploadBytes* = 2_621_440
+  # `asset_put_chunk` assembles a file across frames, so its ceiling is a disk
+  # question, not a frame-size one. 64 MiB covers the biggest bundled font
+  # (NotoColorEmoji, 10.7 MB) several times over and any photo a scene would
+  # want; a video that needs more belongs on the card, not on the socket.
+  HubMaxChunkedUploadBytes* = 64 * 1024 * 1024
+  # upload_id is a filename component on the device: [A-Za-z0-9_-], bounded.
+  HubMaxUploadIdLen* = 64
   # Service settings (docs/cloud-frames.md): the contract's own triggers are a
   # pull at every `ready` and a pull per `refresh_service_settings` nudge. This
   # slow timer is the "whenever the device decides its copy may be stale" leg —
@@ -149,10 +158,36 @@ const
 
 # Declarative settings a provider may push; every key maps onto an existing
 # frame.json field through the same persist path the local admin uses. Must
-# stay in sync with docs/cloud-frames.md (`set_settings`).
+# stay in sync with docs/cloud-frames.md (`set_settings`), allowedFrameSettings
+# in cloud/apps/auth-web/src/lib/frames.ts and the SPA's
+# frontend/src/utils/cloudFrameSettings.ts.
+#
+# Two tiers, one list. The first six shipped with the cloud link and every
+# managed frame understands them. The rest arrived in 2026.8.30 — a provider
+# gates them on the frame's reported `frameos_version`, because a frame on
+# older firmware refuses the WHOLE verb on a key it does not know (see
+# handleSetSettings): one new key in the push would take `name` and
+# `interval` down with it. Structured values are shape-checked below
+# (validateCloudSetting) before they reach the persist path — the allowlist
+# says which keys, the validators say which values, and the provider's own
+# validation is UX, not the boundary.
 const CLOUD_SETTINGS_ALLOWLIST* = [
   "name", "rotate", "interval", "scaling_mode", "timezone", "debug",
+  "flip", "error_behavior", "control_code", "metrics_interval",
+  "max_http_response_bytes", "save_assets", "timezone_updater",
 ]
+
+# Ceilings for the numeric extended settings. maxHttpResponseBytes is a
+# per-request memory bound on a Pi Zero as much as a policy knob, so the
+# provider cannot lift it past what the platform's default already allows.
+const
+  CloudMaxHttpResponseBytesFloor* = 64 * 1024
+  CloudMaxHttpResponseBytesCeiling* = DefaultMaxHttpResponseBytes
+  CloudMetricsIntervalCeilingSeconds* = 24 * 60 * 60.0
+  CloudErrorRetryCeilingSeconds* = 24 * 60 * 60.0
+  CloudErrorWindowCeilingMinutes* = 7 * 24 * 60.0
+  # A saveAssets object names apps by keyword; keep it small and simple.
+  CloudSaveAssetsMaxEntries* = 64
 
 # CLOUD_REFUSED_APP_KEYWORDS / refusedCloudAppKeyword moved to
 # cloud/scene_guard.nim (re-exported below): the scene registry now re-checks
@@ -204,6 +239,14 @@ type
     ## ValueError for a path the guard refuses and OSError for a filesystem
     ## failure — the handlers translate those into wire errors.
     writeAssetFn*: proc(path: string, data: string): JsonNode {.gcsafe.}
+    ## `asset_put_chunk`: write `data` at `offset` into the part named by
+    ## `uploadId`; with a non-empty `finalPath` also move the finished part
+    ## there and return the stored entry (like writeAssetFn), otherwise
+    ## return {"received": <part size>}. Raises ValueError("chunk_gap") when
+    ## `offset` is past what has landed, ValueError for a guard refusal and
+    ## OSError for filesystem trouble.
+    putAssetChunkFn*: proc(uploadId: string, offset: BiggestInt, data: string,
+                           finalPath: string): JsonNode {.gcsafe.}
     mkdirAssetFn*: proc(path: string) {.gcsafe.}
     deleteAssetFn*: proc(path: string) {.gcsafe.}
     renameAssetFn*: proc(src: string, dst: string) {.gcsafe.}
@@ -510,6 +553,19 @@ proc defaultWriteAsset(path: string, data: string): JsonNode {.gcsafe.} =
     payload["path"] = %relativeAssetPath(payload{"path"}.getStr(""))
     payload
 
+proc defaultPutAssetChunk(uploadId: string, offset: BiggestInt, data: string,
+                          finalPath: string): JsonNode {.gcsafe.} =
+  ## One `asset_put_chunk` write. The part lives outside the assets directory
+  ## (the admin upload temp root) until the final chunk moves it into place,
+  ## so a half-uploaded file is never listable or renderable.
+  {.gcsafe.}:
+    let received = writeAssetUploadChunk(uploadId, offset, data)
+    if finalPath.len == 0:
+      return %*{"received": received}
+    var payload = finishAssetUploadChunks(uploadId, finalPath)
+    payload["path"] = %relativeAssetPath(payload{"path"}.getStr(""))
+    payload
+
 var
   ## Set by the `refresh_service_settings` verb (and cleared by the session
   ## loop once the pull starts). The nudge is advisory, so accepting it is
@@ -563,6 +619,10 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
       writeAssetFn: proc(path: string, data: string): JsonNode {.gcsafe.} =
         {.gcsafe.}:
           defaultWriteAsset(path, data),
+      putAssetChunkFn: proc(uploadId: string, offset: BiggestInt, data: string,
+                            finalPath: string): JsonNode {.gcsafe.} =
+        {.gcsafe.}:
+          defaultPutAssetChunk(uploadId, offset, data, finalPath),
       mkdirAssetFn: proc(path: string) {.gcsafe.} =
         {.gcsafe.}:
           createAssetDirectory(path),
@@ -743,6 +803,139 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
     sceneAck["id"] = id
   CloudVerbReply(ack: ackOk(id), extra: @[sceneAck])
 
+# ---------------------------------------------------------------------------
+# set_settings value validation
+# ---------------------------------------------------------------------------
+
+proc isJsonNumber(node: JsonNode): bool =
+  node != nil and node.kind in {JInt, JFloat}
+
+proc numberInRange(node: JsonNode, low, high: float): bool =
+  isJsonNumber(node) and node.getFloat() >= low and node.getFloat() <= high
+
+proc intInRange(node: JsonNode, low, high: int): bool =
+  node != nil and node.kind == JInt and node.getInt() >= low and node.getInt() <= high
+
+proc isHtmlHexColor(node: JsonNode): bool =
+  ## "#rrggbb" only — the one spelling every producer of these values (the
+  ## SPA's ColorInput, the backend's frame.json writer) uses, and the one
+  ## loadControlCode's parseHtmlColor cannot choke on.
+  if node == nil or node.kind != JString:
+    return false
+  let value = node.getStr("")
+  if value.len != 7 or value[0] != '#':
+    return false
+  for ch in value[1 .. ^1]:
+    if ch notin {'0'..'9', 'a'..'f', 'A'..'F'}:
+      return false
+  true
+
+proc onlyKeys(node: JsonNode, allowed: openArray[string]): bool =
+  ## Object shape guard: every key present must be one of `allowed`. An
+  ## unknown sub-key is refused for the same reason an unknown top-level key
+  ## is — the provider does not get to invent fields the runtime never
+  ## validated, even inside an object it is allowed to set.
+  if node == nil or node.kind != JObject:
+    return false
+  for key in node.keys:
+    if key notin allowed:
+      return false
+  true
+
+proc validateCloudSetting*(key: string, value: JsonNode): bool =
+  ## Is `value` an acceptable value for allowlisted setting `key`? The device
+  ## is the security boundary, so every key on CLOUD_SETTINGS_ALLOWLIST has a
+  ## rule here — including the original six, whose provider-side validators
+  ## these mirror. Anything this rejects fails the WHOLE verb with
+  ## `invalid_settings` (docs/cloud-frames.md).
+  if value == nil:
+    return false
+  case key
+  of "name":
+    value.kind == JString and value.getStr("").len in 1 .. 256
+  of "rotate":
+    value.kind == JInt and value.getInt() in [0, 90, 180, 270]
+  of "interval":
+    numberInRange(value, 1, 24 * 60 * 60)
+  of "scaling_mode":
+    value.kind == JString and value.getStr("") in ["contain", "cover", "stretch", "center"]
+  of "timezone":
+    value.kind == JString and value.getStr("").len <= 64
+  of "debug":
+    value.kind == JBool
+  of "flip":
+    value.kind == JString and value.getStr("") in ["", "horizontal", "vertical", "both"]
+  of "error_behavior":
+    # The frontend/backend spelling; frontendErrorBehaviorToRuntime maps it
+    # onto errorBehavior in frame.json.
+    if not onlyKeys(value, ["mode", "retry_seconds", "silent_retry_seconds",
+                            "silent_retry_forever", "silent_window_minutes",
+                            "show_error_retry_seconds"]):
+      return false
+    for subKey in value.keys:
+      let ok = case subKey
+        of "mode":
+          value[subKey].kind == JString and
+            value[subKey].getStr("") in ["safe_mode", "show_error_retry", "silent_retry"]
+        of "silent_retry_forever":
+          value[subKey].kind == JBool
+        of "silent_window_minutes":
+          numberInRange(value[subKey], 1, CloudErrorWindowCeilingMinutes)
+        else:
+          numberInRange(value[subKey], 1, CloudErrorRetryCeilingSeconds)
+      if not ok:
+        return false
+    true
+  of "control_code":
+    # The runtime's controlCode shape (loadControlCode): a bool `enabled`,
+    # numbers, and #rrggbb colours — not the SPA form's string spellings.
+    if not onlyKeys(value, ["enabled", "position", "size", "padding",
+                            "offsetX", "offsetY", "qrCodeColor", "backgroundColor"]):
+      return false
+    for subKey in value.keys:
+      let ok = case subKey
+        of "enabled": value[subKey].kind == JBool
+        of "position":
+          value[subKey].kind == JString and value[subKey].getStr("") in
+            ["top-left", "top-right", "bottom-left", "bottom-right", "center"]
+        of "size": numberInRange(value[subKey], 1, 50)
+        of "padding": intInRange(value[subKey], 0, 50)
+        of "offsetX", "offsetY": intInRange(value[subKey], -4096, 4096)
+        else: isHtmlHexColor(value[subKey])
+      if not ok:
+        return false
+    true
+  of "metrics_interval":
+    # 0 disables the sampler (metrics.nim); anything else is a period.
+    numberInRange(value, 0, CloudMetricsIntervalCeilingSeconds)
+  of "max_http_response_bytes":
+    intInRange(value, CloudMaxHttpResponseBytesFloor, CloudMaxHttpResponseBytesCeiling)
+  of "save_assets":
+    # A single switch, or a per-app-keyword map of switches.
+    if value.kind == JBool:
+      return true
+    if value.kind != JObject or value.len > CloudSaveAssetsMaxEntries:
+      return false
+    for appKey in value.keys:
+      if appKey.len == 0 or appKey.len > 64 or value[appKey].kind != JBool:
+        return false
+    true
+  of "timezone_updater":
+    # enabled/hour only. The download URL is deliberately NOT accepted from a
+    # provider: the endpoint stays the FrameOS-owned default (or whatever the
+    # local admin set) — see handleSetSettings for how it is carried over.
+    if not onlyKeys(value, ["enabled", "hour"]):
+      return false
+    for subKey in value.keys:
+      let ok = case subKey
+        of "enabled": value[subKey].kind == JBool
+        else: intInRange(value[subKey], 0, 23)
+      if not ok:
+        return false
+    true
+  else:
+    false
+
 proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   let settings = msg{"settings"}
   if settings == nil or settings.kind != JObject:
@@ -750,14 +943,25 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
     return CloudVerbReply(ack: ackError(id, "invalid_settings"))
   # One unknown key refuses the whole verb: the allowlist is the contract, and
   # partial application would leave provider and frame disagreeing about what
-  # got set.
+  # got set. One bad VALUE refuses it too, for the same reason.
   for key in settings.keys:
     if key notin CLOUD_SETTINGS_ALLOWLIST:
       ctx.audit("set_settings", false, "setting_not_allowed: " & key)
       return CloudVerbReply(ack: ackError(id, "setting_not_allowed"))
+    if not validateCloudSetting(key, settings[key]):
+      ctx.audit("set_settings", false, "invalid_settings: " & key)
+      return CloudVerbReply(ack: ackError(id, "invalid_settings"))
   var payload = newJObject()
   for key in settings.keys:
     payload[key] = copy(settings[key])
+  if payload.hasKey("timezone_updater"):
+    # The persist path replaces the whole timeZoneUpdates object, and the
+    # provider only ever sends enabled/hour: carry the download URL the frame
+    # already uses across, so a push can never point the updater anywhere new
+    # — nor silently reset a URL the local admin chose.
+    let current = if ctx.frameConfig != nil: ctx.frameConfig.timeZoneUpdates else: nil
+    if current != nil and current.url.strip().len > 0:
+      payload["timezone_updater"]["url"] = %current.url
   if payload.len > 0:
     # Idempotency guard: every "push scenes & settings" click redelivers the
     # full settings object, and reloading the config re-inits the active scene
@@ -964,6 +1168,72 @@ proc handleAssetPut(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVe
     ctx.audit("asset_put", false, wireError)
     CloudVerbReply(ack: ackError(id, wireError))
 
+proc validCloudUploadId*(uploadId: string): bool =
+  ## [A-Za-z0-9_-]{1,64}: it becomes a filename component on the device.
+  if uploadId.len == 0 or uploadId.len > HubMaxUploadIdLen:
+    return false
+  for ch in uploadId:
+    if not (ch.isAlphaNumeric() or ch in {'-', '_'}):
+      return false
+  true
+
+proc handleAssetPutChunk(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  ## The cloud→device half of the chunk protocol (docs/cloud-frames.md
+  ## `asset_put_chunk`): the provider streams a file as offset-addressed
+  ## chunks under one `upload_id`, waiting for each ack, and marks the last
+  ## one `complete` with the destination `path`. Offsets make redelivery
+  ## idempotent — hub delivery is at-least-once, and a chunk that arrives
+  ## twice overwrites itself instead of appending. Nothing is visible in the
+  ## assets directory until the final chunk lands.
+  if ctx.putAssetChunkFn.isNil:
+    ctx.audit("asset_put_chunk", false, "unsupported_verb")
+    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+  let uploadId = msg{"upload_id"}.getStr("")
+  if not validCloudUploadId(uploadId):
+    ctx.audit("asset_put_chunk", false, "invalid_upload_id")
+    return CloudVerbReply(ack: ackError(id, "invalid_upload_id"))
+  let offsetNode = msg{"offset"}
+  if offsetNode == nil or offsetNode.kind != JInt or offsetNode.getBiggestInt() < 0:
+    ctx.audit("asset_put_chunk", false, "invalid_offset")
+    return CloudVerbReply(ack: ackError(id, "invalid_offset"))
+  let offset = offsetNode.getBiggestInt()
+  let complete = msg{"complete"}.getBool(false)
+  let path = msg{"path"}.getStr("")
+  # The destination is only needed (and only checked) on the final chunk;
+  # the part itself never lives in the assets directory.
+  if complete and (path.len == 0 or refusedWritePath(path)):
+    ctx.audit("asset_put_chunk", false, "invalid_path")
+    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+  var data: string
+  try:
+    data = decode(msg{"data"}.getStr(""))
+  except CatchableError:
+    ctx.audit("asset_put_chunk", false, "invalid_data")
+    return CloudVerbReply(ack: ackError(id, "invalid_data"))
+  if data.len == 0 or data.len > HubMaxAssetUploadBytes:
+    ctx.audit("asset_put_chunk", false,
+              if data.len == 0: "invalid_data" else: "too_large")
+    return CloudVerbReply(ack: ackError(id, if data.len == 0: "invalid_data" else: "too_large"))
+  if offset + data.len > HubMaxChunkedUploadBytes:
+    ctx.audit("asset_put_chunk", false, "too_large")
+    return CloudVerbReply(ack: ackError(id, "too_large"))
+  try:
+    let stored = ctx.putAssetChunkFn(uploadId, offset, data, if complete: path else: "")
+    ctx.audit("asset_put_chunk", true)
+    var ack = ackOk(id)
+    if complete:
+      ack["asset"] = stored
+    else:
+      ack["received"] = stored{"received"}
+    CloudVerbReply(ack: ack)
+  except CatchableError as error:
+    # A hole in the part is the sender's cue to restart from offset 0 — say
+    # so distinctly, it is the one write error that is not the device's.
+    let wireError = if error of ValueError and error.msg == "chunk_gap": "chunk_gap"
+                    else: assetWriteError(error)
+    ctx.audit("asset_put_chunk", false, wireError)
+    CloudVerbReply(ack: ackError(id, wireError))
+
 proc handleAssetMkdir(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if ctx.mkdirAssetFn.isNil:
     ctx.audit("asset_mkdir", false, "unsupported_verb")
@@ -1083,6 +1353,8 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = handleAssetGet(ctx, id, msg)
   of "asset_put":
     result = handleAssetPut(ctx, id, msg)
+  of "asset_put_chunk":
+    result = handleAssetPutChunk(ctx, id, msg)
   of "asset_mkdir":
     result = handleAssetMkdir(ctx, id, msg)
   of "asset_delete":
@@ -1481,13 +1753,24 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   var lastSceneImageGeneration = sceneImageGenerationValue()
   var logsGranted = "telemetry:logs" in link.scopes
   var metricsGranted = "telemetry:metrics" in link.scopes
-  let metricsInterval = max(frameConfig.metricsInterval, 5.0)
+  # Read live each pass, not once here: a `set_settings` push may change (or
+  # zero, i.e. disable) metrics_interval while this session is up.
+  proc metricsPushInterval(): float =
+    if frameConfig == nil or frameConfig.metricsInterval <= 0: 0.0
+    else: max(frameConfig.metricsInterval, 5.0)
   let idleTimeout = hubIdleTimeoutSeconds()
   let pingInterval = min(HubPingIntervalSeconds, idleTimeout / 3)
   result = sessionDisconnected
   try:
     let ready = await runHandshake(socket, ctx)
     log(%*{"event": "cloud:hub:connected", "provider": link.providerUrl})
+    # Parts of chunked uploads that never completed (the provider gave up,
+    # or the previous session died mid-file) are only ever finished by the
+    # session that started them; sweep the stale ones on every fresh start.
+    try:
+      cleanupStaleAssetUploadChunks()
+    except CatchableError:
+      discard
     # The hub announces the link's granted scopes in `ready`. Merge anything
     # new into the local link state — this is how frames whose enroll response
     # under-reported the grant (older providers said only frame:managed)
@@ -1633,7 +1916,8 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
         nextServiceSettingsPullAt = now +
           (if outcome.retryLater: HubServiceSettingsRetrySeconds
            else: HubServiceSettingsIntervalSeconds)
-      if metricsGranted and now - lastMetricsSentAt >= metricsInterval:
+      let metricsInterval = metricsPushInterval()
+      if metricsGranted and metricsInterval > 0 and now - lastMetricsSentAt >= metricsInterval:
         let sample = latestMetricsSample()
         if sample != nil:
           lastMetricsSentAt = now

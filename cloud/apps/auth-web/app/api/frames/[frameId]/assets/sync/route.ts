@@ -9,9 +9,10 @@ import {
 import {
   assetWriteRequestContext,
   invalidateCachedAssetSubtree,
-  maxAssetUploadBytes,
+  maxChunkedAssetUploadBytes,
   queueAssetsListRefresh,
   runAssetWriteCommand,
+  uploadAssetBytes,
 } from "../../../../../../src/lib/frame-asset-write";
 
 export const runtime = "nodejs";
@@ -31,7 +32,10 @@ export const runtime = "nodejs";
 // One font at a time, deliberately. Queueing all 61 at once would put ~53 MB
 // of base64 into frame_commands in one go and hand the device a backlog it
 // answers for minutes; waiting for each ack keeps exactly one payload in
-// flight and lets a frame that goes away stop the run early.
+// flight and lets a frame that goes away stop the run early. Fonts past the
+// single-frame cap (NotoColorEmoji, 10.7 MB — the one people want when emoji
+// render as blanks) ride asset_put_chunk through uploadAssetBytes, still one
+// chunk in flight at a time.
 
 /** Where fonts live on the device, relative to its assets directory. */
 const fontsDirectory = "fonts";
@@ -163,23 +167,21 @@ export async function POST(
           skip(font, index, "already on the frame");
           continue;
         }
-        if (font.size > maxAssetUploadBytes) {
-          // NotoColorEmoji is 10.7 MB. asset_put rides a single WS frame and
-          // there is no cloud→device chunked upload, so this one cannot be
-          // pushed at all — say which font and why rather than reporting a
-          // generic failure the user cannot act on.
+        if (font.size > maxChunkedAssetUploadBytes) {
+          // Nothing bundled is anywhere near this today; say which font and
+          // why rather than reporting a generic failure nobody can act on.
           skip(
             font,
             index,
             `too large to push (${(font.size / 1_000_000).toFixed(1)} MB, limit ` +
-              `${(maxAssetUploadBytes / 1_000_000).toFixed(1)} MB) — upload it by hand if you need it`,
+              `${(maxChunkedAssetUploadBytes / 1_000_000).toFixed(0)} MB)`,
           );
           continue;
         }
 
-        let data: string;
+        let data: Uint8Array;
         try {
-          data = (await readCatalogueFont(font)).toString("base64");
+          data = new Uint8Array(await readCatalogueFont(font));
         } catch (error) {
           failed += 1;
           consecutiveFailures += 1;
@@ -198,12 +200,12 @@ export async function POST(
           continue;
         }
 
-        const result = await runAssetWriteCommand(
+        const result = await uploadAssetBytes(
           db,
           accountId,
-          frame.id,
-          "asset_put",
-          { data, path: `${fontsDirectory}/${font.file}` },
+          frame,
+          `${fontsDirectory}/${font.file}`,
+          data,
         );
         if (result.ok) {
           uploaded += 1;
@@ -226,7 +228,10 @@ export async function POST(
           index,
           total: catalogueFonts.length,
           status: "failed",
-          reason: result.error,
+          reason:
+            result.error === "chunked_upload_unsupported"
+              ? "needs a newer FrameOS on the frame (files over 2.5 MB ride asset_put_chunk) — update the frame, then sync again"
+              : result.error,
         });
         if (consecutiveFailures >= consecutiveFailureLimit) {
           stopped =

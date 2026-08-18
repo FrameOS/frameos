@@ -292,18 +292,30 @@ proc logMetricsSample(self: MetricsLoggerThread) =
 proc logMetricsNow*(frameConfig: FrameConfig) {.gcsafe.} =
   MetricsLoggerThread(frameConfig: frameConfig).logMetricsSample()
 
+# How long a disabled sampler dozes between looks at its interval. The
+# interval is re-read every pass (not once at start) so a settings save —
+# local admin or cloud `set_settings` — that turns metrics on, off, or slower
+# takes effect without a runtime restart. `metricsInterval == 0` is the
+# documented "disabled" value; setConfigDefaults leaves it alone on purpose.
+const MetricsDisabledPollMs = 60_000
+
 proc runMetricsLoop(self: MetricsLoggerThread, maxIterations = -1) {.gcsafe.} =
-  let ms = (self.frameConfig.metricsInterval * 1000).int
-  if ms == 0:
-    log(%*{"event": "metrics", "state": "disabled"})
-  else:
-    var iterations = 0
-    while true:
-      if maxIterations >= 0 and iterations >= maxIterations:
-        break
-      inc iterations
-      self.logMetricsSample()
-      metricsSleepHook(ms)
+  var iterations = 0
+  var announcedDisabled = false
+  while true:
+    if maxIterations >= 0 and iterations >= maxIterations:
+      break
+    inc iterations
+    let ms = (self.frameConfig.metricsInterval * 1000).int
+    if ms <= 0:
+      if not announcedDisabled:
+        log(%*{"event": "metrics", "state": "disabled"})
+        announcedDisabled = true
+      metricsSleepHook(MetricsDisabledPollMs)
+      continue
+    announcedDisabled = false
+    self.logMetricsSample()
+    metricsSleepHook(ms)
 
 proc start(self: MetricsLoggerThread) {.gcsafe.} =
   self.runMetricsLoop()

@@ -18,17 +18,22 @@ import { BindLogic } from "../../../../../../frontend/node_modules/kea";
 import { frameLogic } from "../../../../../../frontend/src/scenes/frame/frameLogic";
 import { framesModel } from "../../../../../../frontend/src/models/framesModel";
 import { FrameSettings } from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/FrameSettings";
-import { cloudFrameSettingKeys } from "../../../../../../frontend/src/utils/cloudFrameSettings";
+import {
+  cloudFrameSettingKeys,
+  extendedCloudFrameSettingKeys,
+  extendedCloudFrameSettingsMinVersion,
+} from "../../../../../../frontend/src/utils/cloudFrameSettings";
 import type { FrameType } from "../../../../../../frontend/src/types";
 
 const fetchMock = vi.fn<typeof fetch>();
 
-function cloudFrame(platform: string): FrameType {
+function cloudFrame(platform: string, frameosVersion: string | null = extendedCloudFrameSettingsMinVersion): FrameType {
   return {
     id: 1 as unknown as FrameType["id"],
     project_id: 1,
     name: `Frame on ${platform}`,
     managed_by: "cloud",
+    frameos_version: frameosVersion,
     hardware: { platform, width: 800, height: 480 },
     frame_host: "",
     frame_port: 8787,
@@ -98,12 +103,59 @@ function renderedFieldNames(): string[] {
     .filter((name) => name.length > 0 && name !== "_noop");
 }
 
+/**
+ * The form-control names the extended batch's shared field blocks render.
+ * Structured keys (control_code, error_behavior, timezone_updater) render
+ * their sub-fields, so the name on the wire is not the name on the control —
+ * this maps each rendered name back to the top-level setting it feeds.
+ */
+const extendedFieldNames: Record<string, (typeof extendedCloudFrameSettingKeys)[number]> = {
+  flip: "flip",
+  metrics_interval: "metrics_interval",
+  max_http_response_bytes: "max_http_response_bytes",
+  save_assets: "save_assets",
+  "error_behavior.mode": "error_behavior",
+  "error_behavior.retry_seconds": "error_behavior",
+  "error_behavior.silent_retry_seconds": "error_behavior",
+  "error_behavior.silent_retry_forever": "error_behavior",
+  "error_behavior.silent_window_minutes": "error_behavior",
+  "error_behavior.show_error_retry_seconds": "error_behavior",
+  // <Group name="control_code">: enabled, position, size, padding, offsetX,
+  // offsetY, qrCodeColor, backgroundColor — all but `enabled` render only
+  // once the code is enabled.
+  enabled: "control_code",
+  position: "control_code",
+  size: "control_code",
+  padding: "control_code",
+  offsetX: "control_code",
+  offsetY: "control_code",
+  qrCodeColor: "control_code",
+  backgroundColor: "control_code",
+};
+
+/**
+ * timezone_updater's controls carry no form name (a render-prop Switch and a
+ * hand-wired hour input), so its presence is read off its label.
+ */
+function extendedSettingsCovered(): Set<string> {
+  const covered = new Set<string>(
+    renderedFieldNames().map((name) => extendedFieldNames[name]).filter(Boolean),
+  );
+  if (screen.queryByText("Update timezone data")) {
+    covered.add("timezone_updater");
+  }
+  return covered;
+}
+
 describe("the Settings panel on a cloud-managed Linux frame", () => {
   it("renders an editable field only for settings the cloud can save", () => {
     renderPanel(cloudFrame("raspberry-pi-64"));
 
     const rendered = new Set(renderedFieldNames());
-    const saveable = new Set<string>(cloudFrameSettingKeys);
+    const saveable = new Set<string>([
+      ...cloudFrameSettingKeys,
+      ...Object.keys(extendedFieldNames),
+    ]);
     const unsaveable = [...rendered].filter((name) => !saveable.has(name));
 
     expect(
@@ -121,6 +173,44 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
         true,
       );
     }
+  });
+
+  it("offers every extended setting on firmware that knows the batch", () => {
+    renderPanel(cloudFrame("raspberry-pi-64", "2026.9.1"));
+
+    const covered = extendedSettingsCovered();
+    for (const key of extendedCloudFrameSettingKeys) {
+      expect(covered.has(key), `${key} is saveable but the panel omits it`).toBe(true);
+    }
+    // Enabled, not just present.
+    const flip = document.querySelector<HTMLSelectElement>('select[name="flip"]');
+    expect(flip?.matches(":disabled")).toBe(false);
+  });
+
+  it("disables (never hides) the extended settings on older firmware, and says why", () => {
+    renderPanel(cloudFrame("raspberry-pi-64", "2026.8.21"));
+
+    // Older firmware refuses the WHOLE push on the first key it does not
+    // know, so the fields must not be editable — but they stay on the page
+    // with the reason, the same disabled-with-explanation rule the esp32
+    // profile follows for missing capabilities.
+    const flip = document.querySelector<HTMLSelectElement>('select[name="flip"]');
+    expect(flip, "the field is hidden rather than disabled").toBeTruthy();
+    expect(flip?.matches(":disabled")).toBe(true);
+    expect(
+      screen.getByText(new RegExp(`need FrameOS ${extendedCloudFrameSettingsMinVersion.replaceAll(".", "\\.")} or newer`)),
+    ).toBeTruthy();
+    // The base six stay editable regardless.
+    const name = document.querySelector<HTMLInputElement>('input[name="name"]');
+    expect(name?.matches(":disabled")).toBe(false);
+  });
+
+  it("treats a frame that never reported a version as not yet supporting the batch", () => {
+    renderPanel(cloudFrame("raspberry-pi-64", null));
+
+    const flip = document.querySelector<HTMLSelectElement>('select[name="flip"]');
+    expect(flip?.matches(":disabled")).toBe(true);
+    expect(screen.getByText(/once the frame connects and reports its version/i)).toBeTruthy();
   });
 
   it("says who owns everything it is not showing", () => {
@@ -141,7 +231,6 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
       "Network",
       "Mountpoints",
       "Palette",
-      "QR Control Code",
       "Assets",
       "Logs",
       "Reboot",
@@ -179,5 +268,13 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     // them here would be the same lie in a smaller font.
     expect(rendered.has("timezone")).toBe(false);
     expect(rendered.has("debug")).toBe(false);
+    // The extended batch is Pi/Linux only: the firmware has no consumer for
+    // any of it, and the route refuses it for esp32 frames.
+    for (const name of Object.keys(extendedFieldNames)) {
+      expect(rendered.has(name), `${name} has no consumer in the esp32 firmware`).toBe(false);
+    }
+    expect(extendedSettingsCovered().size).toBe(0);
+    expect(screen.queryByText("QR Control Code")).toBeNull();
+    expect(screen.queryByText("Global errors")).toBeNull();
   });
 });

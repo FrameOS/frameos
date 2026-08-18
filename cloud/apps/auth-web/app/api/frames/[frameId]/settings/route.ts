@@ -12,7 +12,10 @@ import {
   enqueueFrameCommand,
   esp32OnlySettableKeys,
   esp32SettableKeys,
+  extendedFrameSettingKeys,
+  extendedFrameSettingsMinVersion,
   frameForAccount,
+  frameSupportsExtendedSettings,
   mergeFrameSettings,
   supersedePendingCommands,
   validateFrameSettings,
@@ -88,6 +91,21 @@ export async function POST(
     Object.keys(settings).some((key) => esp32OnlySettableKeys.has(key))
   ) {
     return jsonError("settings_not_supported_by_device", 400);
+  }
+  // The extended batch needs firmware that knows the keys. The frame reports
+  // its version on every hello; a Pi frame still on older firmware refuses
+  // the WHOLE push on the first key it does not recognise, taking `name`
+  // and `interval` down with it — so refuse here, with a code the SPA turns
+  // into "update the frame first". A frame that never reported a version
+  // (never connected) is refused too: see frameSupportsExtendedSettings.
+  if (
+    !isEsp32 &&
+    !frameSupportsExtendedSettings(frame.frameosVersion) &&
+    Object.keys(settings).some((key) => extendedFrameSettingKeys.has(key))
+  ) {
+    return jsonError("settings_need_newer_firmware", 400, {
+      min_frameos_version: extendedFrameSettingsMinVersion,
+    });
   }
 
   // Mirror what was pushed so the Settings panel hydrates on the next load

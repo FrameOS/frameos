@@ -4,6 +4,7 @@
 // under app/api/frames/[frameId]/assets/* mirror the self-hosted backend's
 // client contract so the shared SPA needs no cloud branch.
 
+import { randomUUID } from "node:crypto";
 import { and, eq, like, or } from "drizzle-orm";
 import { frameAssetFiles, frameCommands } from "@frameos-cloud/db";
 import type { NextRequest } from "next/server";
@@ -21,9 +22,37 @@ import { readSession } from "./session";
 type CommandDatabase = Parameters<typeof enqueueFrameCommand>[0];
 
 // Mirror of HubMaxAssetUploadBytes (frameos/src/frameos/cloud/hub_client.nim):
-// an upload rides a single base64-encoded WS frame under the device's 4 MiB
-// inbound cap. Bigger files need a chunked verb that does not exist yet.
+// a single-shot `asset_put` rides one base64-encoded WS frame under the
+// device's 4 MiB inbound cap. Bigger files ride `asset_put_chunk` — see
+// uploadAssetBytes — up to maxChunkedAssetUploadBytes.
 export const maxAssetUploadBytes = 2_621_440;
+// Mirror of HubMaxChunkedUploadBytes / FOS_CLOUD_ASSET_CHUNKED_MAX_BYTES: the
+// assembled file's ceiling on the device.
+export const maxChunkedAssetUploadBytes = 64 * 1024 * 1024;
+// Raw bytes per asset_put_chunk. The ESP32 caps an inbound WS text frame at
+// 512 KiB (FOS_CLOUD_WS_MAX_MSG), so 256 KiB raw (~342 KiB base64 plus
+// envelope) is the most it can take; the Linux runtime takes 4 MiB frames,
+// so 1 MiB raw keeps a 10 MB font at ten round-trips instead of forty.
+export const esp32AssetUploadChunkBytes = 256 * 1024;
+export const linuxAssetUploadChunkBytes = 1024 * 1024;
+
+export function isEsp32Frame(frame: { hardware: unknown }): boolean {
+  const platform = (frame.hardware as { platform?: unknown } | null)?.platform;
+  return typeof platform === "string" && platform.toLowerCase().startsWith("esp32");
+}
+
+/** The biggest raw chunk this frame's firmware can take in one WS frame. */
+export function assetUploadChunkBytes(frame: { hardware: unknown }): number {
+  return isEsp32Frame(frame) ? esp32AssetUploadChunkBytes : linuxAssetUploadChunkBytes;
+}
+
+// upload_id becomes a filename component on the device: the same
+// [A-Za-z0-9_-] alphabet secureToken()/randomUUID produce, bounded.
+const uploadIdPattern = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function isValidUploadId(value: unknown): value is string {
+  return typeof value === "string" && uploadIdPattern.test(value);
+}
 
 const commandTtlMs = 2 * 60 * 1000;
 // Mutations are user-blocking (a dialog waits on them), so wait about as
@@ -77,7 +106,7 @@ export async function runAssetWriteCommand(
   db: CommandDatabase,
   accountId: string,
   frameId: string,
-  type: "asset_put" | "asset_mkdir" | "asset_delete" | "asset_rename",
+  type: "asset_put" | "asset_put_chunk" | "asset_mkdir" | "asset_delete" | "asset_rename",
   payload: Record<string, unknown>,
 ): Promise<AssetCommandResult> {
   const command = await enqueueFrameCommand(db, {
@@ -109,6 +138,86 @@ export async function runAssetWriteCommand(
     }
   }
   return { ok: false, error: "frame_unreachable", timedOut: true };
+}
+
+/**
+ * One `asset_put_chunk` toward the device: `bytes` land at `offset` in the
+ * part named `uploadId`; with `finalPath` set the device commits the part
+ * to that asset path. Wire contract in docs/cloud-frames.md. The device's
+ * `chunk_gap` (an earlier chunk never landed — restart from offset 0) and a
+ * firmware that predates the verb (`unknown_verb` / `unsupported_verb`, which
+ * this maps to `chunked_upload_unsupported`) come back as ordinary errors for
+ * the caller to act on.
+ */
+export async function putAssetChunk(
+  db: CommandDatabase,
+  accountId: string,
+  frameId: string,
+  chunk: { uploadId: string; offset: number; bytes: Uint8Array; finalPath?: string },
+): Promise<AssetCommandResult> {
+  const result = await runAssetWriteCommand(db, accountId, frameId, "asset_put_chunk", {
+    upload_id: chunk.uploadId,
+    offset: chunk.offset,
+    data: Buffer.from(chunk.bytes).toString("base64"),
+    ...(chunk.finalPath !== undefined ? { complete: true, path: chunk.finalPath } : {}),
+  });
+  if (!result.ok && (result.error === "unknown_verb" || result.error === "unsupported_verb")) {
+    return { ok: false, error: "chunked_upload_unsupported" };
+  }
+  return result;
+}
+
+/**
+ * Put a whole file on the device, whichever way its size allows: one
+ * `asset_put` when it fits a single WS frame (older firmware included),
+ * otherwise `asset_put_chunk` after `asset_put_chunk`, each acked before the
+ * next goes out — one payload in flight, and a frame that goes away stops
+ * the run early. A `chunk_gap` restarts the file once under a fresh id.
+ * `onChunk` reports bytes acked so far, for callers streaming progress.
+ */
+export async function uploadAssetBytes(
+  db: CommandDatabase,
+  accountId: string,
+  frame: { id: string; hardware: unknown },
+  path: string,
+  bytes: Uint8Array,
+  options: { onChunk?: (ackedBytes: number) => void } = {},
+): Promise<AssetCommandResult> {
+  if (bytes.length > maxChunkedAssetUploadBytes) {
+    return { ok: false, error: "too_large" };
+  }
+  if (bytes.length <= maxAssetUploadBytes) {
+    return runAssetWriteCommand(db, accountId, frame.id, "asset_put", {
+      data: Buffer.from(bytes).toString("base64"),
+      path,
+    });
+  }
+  const chunkBytes = assetUploadChunkBytes(frame);
+  let restartsLeft = 1;
+  let uploadId = randomUUID().replace(/-/g, "");
+  let offset = 0;
+  while (offset < bytes.length) {
+    const end = Math.min(bytes.length, offset + chunkBytes);
+    const result = await putAssetChunk(db, accountId, frame.id, {
+      uploadId,
+      offset,
+      bytes: bytes.subarray(offset, end),
+      ...(end >= bytes.length ? { finalPath: path } : {}),
+    });
+    if (result.ok) {
+      offset = end;
+      options.onChunk?.(offset);
+      continue;
+    }
+    if (result.error === "chunk_gap" && restartsLeft > 0) {
+      restartsLeft -= 1;
+      uploadId = randomUUID().replace(/-/g, "");
+      offset = 0;
+      continue;
+    }
+    return result;
+  }
+  return { ok: true };
 }
 
 /**
@@ -195,7 +304,9 @@ export function assetWriteErrorResponse(
       ? 404
       : result.error === "too_large"
         ? 413
-        : 400;
+        : result.error === "chunk_gap"
+          ? 409
+          : 400;
   return jsonError(result.error, status);
 }
 

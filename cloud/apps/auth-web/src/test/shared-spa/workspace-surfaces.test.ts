@@ -118,10 +118,7 @@ describe("cloud mode hides everything the protocol cannot do", () => {
       "frame-settings-network",
       "frame-settings-admin",
       "frame-settings-mountpoints",
-      "frame-settings-defaults",
-      "frame-settings-error-behavior",
       "frame-settings-palette",
-      "frame-settings-qr",
       "frame-settings-assets",
       "frame-settings-gpio",
       "frame-settings-logs",
@@ -130,6 +127,22 @@ describe("cloud mode hides everything the protocol cannot do", () => {
       "frame-http-proxy-section",
     ]) {
       expect(frameSettingsSectionIsAllowed("cloud", section)).toBe(false);
+    }
+  });
+
+  it("offers the extended-batch headings on a cloud Linux frame, not on an esp32", () => {
+    // Error handling and the QR control code became cloud-saveable with the
+    // 2026.8.30 batch (extendedCloudFrameSettingKeys); the panel renders them
+    // under their own headings on the Pi profile — disabled with a note on
+    // older firmware, but always present, so the anchor always exists.
+    const esp32 = { hardware: { platform: "esp32-s3" } };
+    for (const section of [
+      "frame-settings-defaults",
+      "frame-settings-error-behavior",
+      "frame-settings-qr",
+    ]) {
+      expect(frameSettingsSectionIsAllowed("cloud", section)).toBe(true);
+      expect(frameSettingsSectionIsAllowed("cloud", section, esp32)).toBe(false);
     }
   });
 

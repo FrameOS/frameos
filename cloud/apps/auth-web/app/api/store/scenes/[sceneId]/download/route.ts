@@ -8,6 +8,7 @@ import {
 } from "../../../../../../src/lib/store-auth";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { storeRoute } from "../../../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,7 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // what repository.json points frameos installs at). Private scenes are
 // downloadable only by their owner's web session. Pulled scenes answer 410
 // everywhere — the moderation kill switch.
-export async function GET(request: NextRequest, context: RouteContext) {
+async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:download", {
     limit: 600,
     windowMs: 15 * 60 * 1000,
@@ -128,3 +129,7 @@ function versionParam(request: NextRequest): number | undefined | null {
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
+
+// Cache policy is per-response here (see storeRoute): anything this
+// handler did not decide is no-store.
+export const GET = storeRoute(handleGet);

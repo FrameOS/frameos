@@ -12,6 +12,7 @@ import {
   requireDatabase,
 } from "../../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../../src/lib/rate-limit";
+import { storeRoute } from "../../../../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
 
@@ -19,7 +20,7 @@ type RouteContext = { params: Promise<{ sceneId: string; imageId: string }> };
 
 // An owner-uploaded gallery image; same visibility rules and fixed content
 // type as the primary preview image route.
-export async function GET(request: NextRequest, context: RouteContext) {
+async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:image", {
     limit: 1200,
     windowMs: 15 * 60 * 1000,
@@ -109,3 +110,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     },
   });
 }
+
+// Cache policy is per-response here (see storeRoute): anything this
+// handler did not decide is no-store.
+export const GET = storeRoute(handleGet);

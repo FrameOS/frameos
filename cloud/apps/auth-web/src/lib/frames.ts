@@ -30,6 +30,7 @@ import {
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
+import { frameosVersionSatisfies } from "./store-versions";
 import { logWarn, reportError } from "./log";
 // usage.ts only type-imports from this module, so no runtime cycle.
 import {
@@ -163,7 +164,181 @@ export const allowedFrameSettings = new Map<
     "battery_divider",
     (v) => typeof v === "number" && v >= 0.5 && v <= 20,
   ],
+  // The 2026.8.30 batch (Pi/Linux runtime only). Gated per frame on its
+  // reported frameos_version — see extendedFrameSettingKeys — because a frame
+  // on older firmware refuses the WHOLE push on any of them. Value rules
+  // mirror validateCloudSetting in hub_client.nim; the device re-checks.
+  ["flip", (v) => v === "" || v === "horizontal" || v === "vertical" || v === "both"],
+  ["error_behavior", isValidErrorBehavior],
+  ["control_code", isValidControlCode],
+  [
+    "metrics_interval",
+    // 0 disables the sampler; anything else is a period in seconds.
+    (v) => typeof v === "number" && v >= 0 && v <= 24 * 60 * 60,
+  ],
+  [
+    "max_http_response_bytes",
+    (v) =>
+      typeof v === "number" &&
+      Number.isInteger(v) &&
+      v >= minMaxHttpResponseBytes &&
+      v <= maxMaxHttpResponseBytes,
+  ],
+  ["save_assets", isValidSaveAssets],
+  ["timezone_updater", isValidTimezoneUpdater],
 ]);
+
+// Bounds shared with the device (CloudMaxHttpResponseBytes* in
+// hub_client.nim): the ceiling is the runtime's own default (64 MiB), so a
+// push can lower a Pi Zero's per-request memory bound but never raise it.
+export const minMaxHttpResponseBytes = 64 * 1024;
+export const maxMaxHttpResponseBytes = 64 * 1024 * 1024;
+
+// A key that only exists in the 2026.8.30+ Pi/Linux runtime. Every one of
+// them here must ALSO be in allowedFrameSettings; the settings route refuses
+// them for frames whose reported firmware predates the batch (and for
+// esp32 frames, whose firmware has no consumer for any of them).
+export const extendedFrameSettingsMinVersion = "2026.8.30";
+export const extendedFrameSettingKeys = new Set([
+  "flip",
+  "error_behavior",
+  "control_code",
+  "metrics_interval",
+  "max_http_response_bytes",
+  "save_assets",
+  "timezone_updater",
+]);
+
+/**
+ * Does a frame reporting `frameosVersion` understand the extended settings
+ * batch? Three answers, mirrored by the SPA's cloudFrameSupportsExtendedSettings
+ * (frontend/src/utils/cloudFrameSettings.ts) — the two must agree or the SPA
+ * offers fields the route refuses:
+ *  - a parseable version compares against extendedFrameSettingsMinVersion;
+ *  - a non-empty but unparseable one ("unknown", a dev build) is trusted —
+ *    dev builds carry the newest code, and refusing them would make the
+ *    batch untestable against a locally built frame;
+ *  - null/empty (the frame never reported one, i.e. never connected) is NOT:
+ *    nothing is known about the firmware, and a push that sits queued until
+ *    a first connect that then refuses it helps nobody.
+ */
+export function frameSupportsExtendedSettings(
+  frameosVersion: string | null | undefined,
+): boolean {
+  if (typeof frameosVersion !== "string" || frameosVersion.trim().length === 0) {
+    return false;
+  }
+  return frameosVersionSatisfies(extendedFrameSettingsMinVersion, frameosVersion);
+}
+
+const positiveNumber = (v: unknown, max: number) =>
+  typeof v === "number" && v > 0 && v <= max;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// The frontend/backend spelling of the error handling block; the device's
+// frontendErrorBehaviorToRuntime maps it onto errorBehavior in frame.json.
+// Unknown sub-keys refuse the value, exactly as unknown top-level keys do.
+function isValidErrorBehavior(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  const daySeconds = 24 * 60 * 60;
+  const weekMinutes = 7 * 24 * 60;
+  for (const [key, v] of Object.entries(value)) {
+    switch (key) {
+      case "mode":
+        if (v !== "safe_mode" && v !== "show_error_retry" && v !== "silent_retry") return false;
+        break;
+      case "silent_retry_forever":
+        if (typeof v !== "boolean") return false;
+        break;
+      case "silent_window_minutes":
+        if (!positiveNumber(v, weekMinutes)) return false;
+        break;
+      case "retry_seconds":
+      case "silent_retry_seconds":
+      case "show_error_retry_seconds":
+        if (!positiveNumber(v, daySeconds)) return false;
+        break;
+      default:
+        return false;
+    }
+  }
+  return true;
+}
+
+const htmlHexColor = /^#[0-9a-fA-F]{6}$/;
+const controlCodePositions = new Set([
+  "top-left",
+  "top-right",
+  "bottom-left",
+  "bottom-right",
+  "center",
+]);
+
+// The runtime's controlCode shape (config.nim loadControlCode): a boolean
+// `enabled`, numbers, #rrggbb colours — NOT the SPA form's string spellings,
+// which cloudFrameSettingsPayload converts before sending.
+function isValidControlCode(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  for (const [key, v] of Object.entries(value)) {
+    switch (key) {
+      case "enabled":
+        if (typeof v !== "boolean") return false;
+        break;
+      case "position":
+        if (typeof v !== "string" || !controlCodePositions.has(v)) return false;
+        break;
+      case "size":
+        if (typeof v !== "number" || v < 1 || v > 50) return false;
+        break;
+      case "padding":
+        if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 50) return false;
+        break;
+      case "offsetX":
+      case "offsetY":
+        if (typeof v !== "number" || !Number.isInteger(v) || v < -4096 || v > 4096) return false;
+        break;
+      case "qrCodeColor":
+      case "backgroundColor":
+        if (typeof v !== "string" || !htmlHexColor.test(v)) return false;
+        break;
+      default:
+        return false;
+    }
+  }
+  return true;
+}
+
+// One switch, or a per-app-keyword map of switches (what frame.json's
+// saveAssets already holds).
+function isValidSaveAssets(value: unknown): boolean {
+  if (typeof value === "boolean") return true;
+  if (!isPlainRecord(value)) return false;
+  const entries = Object.entries(value);
+  if (entries.length > 64) return false;
+  return entries.every(
+    ([key, v]) => key.length > 0 && key.length <= 64 && typeof v === "boolean",
+  );
+}
+
+// enabled/hour only. The download URL is deliberately not a thing a provider
+// can set: the endpoint stays FrameOS-owned (or whatever the local admin
+// chose) — the device carries its own URL across the write.
+function isValidTimezoneUpdater(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  for (const [key, v] of Object.entries(value)) {
+    if (key === "enabled") {
+      if (typeof v !== "boolean") return false;
+    } else if (key === "hour") {
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 23) return false;
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
 
 export const allowedFrameCommandTypes = new Set([
   "get_metrics",

@@ -10,6 +10,7 @@ import {
   parseStorePage,
   storePageSize,
 } from "../../../../src/lib/store-filters";
+import { storeRoute } from "../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,7 @@ export const runtime = "nodejs";
 // (src/components/StoreSceneFeed). Same filters and same ordering as the
 // server-rendered first page, so scrolling continues the list instead of
 // re-shuffling it.
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:browse", {
     limit: 600,
     windowMs: 15 * 60 * 1000,
@@ -53,3 +54,7 @@ export async function GET(request: NextRequest) {
     { headers: { "cache-control": "public, max-age=60" } },
   );
 }
+
+// Cache policy is per-response here (see storeRoute): anything this
+// handler did not decide is no-store.
+export const GET = storeRoute(handleGet);

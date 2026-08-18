@@ -20,6 +20,12 @@ import { GET as getFrameAssets } from "../../../app/api/frames/[frameId]/assets/
 import { GET as getFrameAsset } from "../../../app/api/frames/[frameId]/asset/route";
 import { DELETE as deleteFrame } from "../../../app/api/frames/[frameId]/route";
 import { POST as postFrameEvent } from "../../../app/api/frames/[frameId]/event/[eventName]/route";
+import { POST as uploadFrameAsset } from "../../../app/api/frames/[frameId]/assets/upload/route";
+import {
+  esp32AssetUploadChunkBytes,
+  linuxAssetUploadChunkBytes,
+  maxAssetUploadBytes,
+} from "../../lib/frame-asset-write";
 import {
   maxAssetCacheBytesPerFrame,
   maxAssetFileBytes,
@@ -422,6 +428,264 @@ describe("POST /api/frames/{id}/event/{event}", () => {
       eventParams(pendingFrame.id, "render"),
     );
     expect(refused.status).toBe(409);
+  });
+});
+
+// A stand-in for the device behind the hub: acks every command of the given
+// types as they appear, recording each, until stopped. Lets a route that
+// long-polls its own enqueued command run to completion in-process.
+function fakeDevice(
+  frameId: string,
+  answer: (command: typeof frameCommands.$inferSelect) => { ok: boolean; error?: string },
+) {
+  const seen: (typeof frameCommands.$inferSelect)[] = [];
+  let stopped = false;
+  const state = { maxPendingSeen: 0 };
+  const loop = (async () => {
+    while (!stopped) {
+      const pending = await db
+        .select()
+        .from(frameCommands)
+        .where(and(eq(frameCommands.frameId, frameId), eq(frameCommands.status, "pending")))
+        .orderBy(frameCommands.createdAt);
+      state.maxPendingSeen = Math.max(state.maxPendingSeen, pending.length);
+      for (const command of pending) {
+        seen.push(command);
+        const reply = answer(command);
+        await db
+          .update(frameCommands)
+          .set({
+            ackedAt: new Date(),
+            error: reply.ok ? null : (reply.error ?? "error"),
+            status: reply.ok ? "acked" : "failed",
+          })
+          .where(eq(frameCommands.id, command.id));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  })();
+  return {
+    seen,
+    get maxPendingSeen() {
+      return state.maxPendingSeen;
+    },
+    stop: async () => {
+      stopped = true;
+      await loop;
+    },
+  };
+}
+
+function multipartUpload(frameId: string, filename: string, bytes: Uint8Array<ArrayBuffer>, path = "") {
+  const form = new FormData();
+  form.append("file", new File([bytes], filename));
+  form.append("path", path);
+  return new NextRequest(new URL(`/api/frames/${frameId}/assets/upload`, baseUrl), {
+    body: form,
+    headers: { origin: baseUrl },
+    method: "POST",
+  });
+}
+
+function chunkUpload(
+  frameId: string,
+  query: Record<string, string>,
+  bytes: Uint8Array<ArrayBuffer>,
+) {
+  const url = new URL(`/api/frames/${frameId}/assets/upload`, baseUrl);
+  for (const [key, value] of Object.entries(query)) {
+    url.searchParams.set(key, value);
+  }
+  return new NextRequest(url, {
+    body: new Blob([bytes]),
+    headers: { "content-type": "application/octet-stream", origin: baseUrl },
+    method: "POST",
+  });
+}
+
+describe("POST /api/frames/{id}/assets/upload", () => {
+  it("puts a small file in one asset_put and a big one in acked asset_put_chunk pieces", async () => {
+    const { frame } = await activeFrame();
+    const device = fakeDevice(frame.id, () => ({ ok: true }));
+    try {
+      const small = new Uint8Array(1024).fill(7);
+      const smallResponse = await uploadFrameAsset(
+        multipartUpload(frame.id, "small.bin", small, "photos"),
+        assetsParams(frame.id),
+      );
+      expect(smallResponse.status).toBe(200);
+      expect(await smallResponse.json()).toMatchObject({ is_dir: false, path: "photos/small.bin", size: 1024 });
+
+      // Just over the single-frame cap: three 1 MiB chunks, the last one
+      // committing to the path, each waited for before the next goes out.
+      const big = new Uint8Array(maxAssetUploadBytes + 1);
+      for (let index = 0; index < big.length; index += 4096) big[index] = (index / 4096) & 0xff;
+      const bigResponse = await uploadFrameAsset(
+        multipartUpload(frame.id, "Big Font.ttf", big, "fonts"),
+        assetsParams(frame.id),
+      );
+      expect(bigResponse.status).toBe(200);
+      expect(await bigResponse.json()).toMatchObject({ path: "fonts/Big_Font.ttf", size: big.length });
+    } finally {
+      await device.stop();
+    }
+    const puts = device.seen.filter((c) => c.type === "asset_put");
+    expect(puts).toHaveLength(1);
+    expect((puts[0]!.payload as { path: string }).path).toBe("photos/small.bin");
+    const chunks = device.seen.filter((c) => c.type === "asset_put_chunk");
+    expect(chunks.map((c) => (c.payload as { offset: number }).offset)).toEqual([
+      0,
+      linuxAssetUploadChunkBytes,
+      2 * linuxAssetUploadChunkBytes,
+    ]);
+    const uploadIds = new Set(chunks.map((c) => (c.payload as { upload_id: string }).upload_id));
+    expect(uploadIds.size).toBe(1);
+    expect(chunks.slice(0, -1).every((c) => !(c.payload as { complete?: boolean }).complete)).toBe(true);
+    expect(chunks.at(-1)!.payload).toMatchObject({ complete: true, path: "fonts/Big_Font.ttf" });
+    // The bytes survive the round trip.
+    const reassembled = Buffer.concat(
+      chunks.map((c) => Buffer.from((c.payload as { data: string }).data, "base64")),
+    );
+    expect(reassembled.length).toBe(maxAssetUploadBytes + 1);
+    expect(reassembled[4096]).toBe(1);
+    expect(reassembled[8192]).toBe(2);
+    expect(reassembled[linuxAssetUploadChunkBytes + 4096]).toBe((linuxAssetUploadChunkBytes / 4096 + 1) & 0xff);
+    // One chunk in flight at a time: the fake device only ever saw one
+    // pending asset_put_chunk per poll.
+    expect(device.maxPendingSeen).toBe(1);
+  });
+
+  it("restarts once on chunk_gap and reports firmware that lacks the verb", async () => {
+    const { frame } = await activeFrame();
+    let gapReported = false;
+    const device = fakeDevice(frame.id, (command) => {
+      if (command.type !== "asset_put_chunk") return { ok: true };
+      const offset = (command.payload as { offset: number }).offset;
+      if (offset > 0 && !gapReported) {
+        gapReported = true;
+        return { ok: false, error: "chunk_gap" };
+      }
+      return { ok: true };
+    });
+    try {
+      const big = new Uint8Array(maxAssetUploadBytes + 1);
+      const response = await uploadFrameAsset(
+        multipartUpload(frame.id, "big.bin", big),
+        assetsParams(frame.id),
+      );
+      expect(response.status).toBe(200);
+    } finally {
+      await device.stop();
+    }
+    const chunks = device.seen.filter((c) => c.type === "asset_put_chunk");
+    const uploadIds = [...new Set(chunks.map((c) => (c.payload as { upload_id: string }).upload_id))];
+    // First attempt: offsets 0, 1 MiB (gap). Second attempt under a fresh id: 0, 1 MiB, 2 MiB.
+    expect(uploadIds).toHaveLength(2);
+    expect(chunks.map((c) => (c.payload as { offset: number }).offset)).toEqual([
+      0,
+      linuxAssetUploadChunkBytes,
+      0,
+      linuxAssetUploadChunkBytes,
+      2 * linuxAssetUploadChunkBytes,
+    ]);
+
+    const older = await activeFrame();
+    const olderDevice = fakeDevice(older.frame.id, (command) =>
+      command.type === "asset_put_chunk" ? { ok: false, error: "unknown_verb" } : { ok: true },
+    );
+    try {
+      const response = await uploadFrameAsset(
+        multipartUpload(older.frame.id, "big.bin", new Uint8Array(maxAssetUploadBytes + 1)),
+        assetsParams(older.frame.id),
+      );
+      expect(response.status).toBe(400);
+      expect(((await response.json()) as { error: string }).error).toBe("chunked_upload_unsupported");
+    } finally {
+      await olderDevice.stop();
+    }
+  });
+
+  it("speaks the SPA's per-request chunk protocol, one asset_put_chunk per request", async () => {
+    const { frame } = await activeFrame();
+    const device = fakeDevice(frame.id, () => ({ ok: true }));
+    try {
+      const first = await uploadFrameAsset(
+        chunkUpload(
+          frame.id,
+          { upload_id: "abc_DEF-123", filename: "clip.mp4", path: "videos", offset: "0", complete: "0" },
+          new Uint8Array(3000),
+        ),
+        assetsParams(frame.id),
+      );
+      expect(first.status).toBe(200);
+      expect(await first.json()).toEqual({ pending: true, received: 3000 });
+      const last = await uploadFrameAsset(
+        chunkUpload(
+          frame.id,
+          { upload_id: "abc_DEF-123", filename: "clip.mp4", path: "videos", offset: "3000", complete: "1" },
+          new Uint8Array(500),
+        ),
+        assetsParams(frame.id),
+      );
+      expect(last.status).toBe(200);
+      expect(await last.json()).toMatchObject({ path: "videos/clip.mp4", size: 3500, is_dir: false });
+    } finally {
+      await device.stop();
+    }
+    const chunks = device.seen.filter((c) => c.type === "asset_put_chunk");
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]!.payload).toMatchObject({ upload_id: "abc_DEF-123", offset: 0 });
+    expect((chunks[0]!.payload as { complete?: boolean }).complete).toBeUndefined();
+    expect(chunks[1]!.payload).toMatchObject({
+      upload_id: "abc_DEF-123",
+      offset: 3000,
+      complete: true,
+      path: "videos/clip.mp4",
+    });
+
+    // Bad envelopes never reach the device.
+    for (const [query, error, status] of [
+      [{ upload_id: "../x", filename: "a", offset: "0" }, "invalid_upload_id", 400],
+      [{ upload_id: "ok", filename: "a", offset: "-1" }, "invalid_offset", 400],
+      [{ upload_id: "ok", filename: "a", offset: "0", path: ".thumbs" }, "invalid_path", 400],
+    ] as const) {
+      const response = await uploadFrameAsset(
+        chunkUpload(frame.id, query as Record<string, string>, new Uint8Array(10)),
+        assetsParams(frame.id),
+      );
+      expect(response.status).toBe(status);
+      expect(((await response.json()) as { error: string }).error).toBe(error);
+    }
+    // A chunk bigger than one device frame is refused with the cap.
+    const oversized = await uploadFrameAsset(
+      chunkUpload(frame.id, { upload_id: "ok", filename: "a", offset: "0" }, new Uint8Array(linuxAssetUploadChunkBytes + 1)),
+      assetsParams(frame.id),
+    );
+    expect(oversized.status).toBe(413);
+    expect(await oversized.json()).toMatchObject({ error: "chunk_too_large", max_bytes: linuxAssetUploadChunkBytes });
+    expect(device.seen.filter((c) => c.type === "asset_put_chunk")).toHaveLength(2);
+  });
+
+  it("caps an esp32 frame's chunks at what one of its WS frames can carry", async () => {
+    const { frame } = await activeFrame();
+    await db.update(frames).set({ hardware: { platform: "esp32-s3" } }).where(eq(frames.id, frame.id));
+    const response = await uploadFrameAsset(
+      chunkUpload(frame.id, { upload_id: "ok", filename: "a", offset: "0" }, new Uint8Array(esp32AssetUploadChunkBytes + 1)),
+      assetsParams(frame.id),
+    );
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ max_bytes: esp32AssetUploadChunkBytes });
+    // 409 on chunk_gap is what tells the SPA to restart the file.
+    const device = fakeDevice(frame.id, () => ({ ok: false, error: "chunk_gap" }));
+    try {
+      const gap = await uploadFrameAsset(
+        chunkUpload(frame.id, { upload_id: "ok", filename: "a", offset: "4096" }, new Uint8Array(10)),
+        assetsParams(frame.id),
+      );
+      expect(gap.status).toBe(409);
+    } finally {
+      await device.stop();
+    }
   });
 });
 

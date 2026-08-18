@@ -9,7 +9,7 @@ import { frameLogic } from '../../frameLogic'
 import { metricsLogic } from '../Metrics/metricsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
-import { isVirtualFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
+import { isEsp32CloudFrame, isVirtualFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
@@ -640,12 +640,22 @@ export const assetsLogic = kea<assetsLogicType>([
               detail,
             })
           }
-          // Embedded frames always upload in chunks: the backend forwards each
-          // chunk to the device synchronously, so one slow request never has to
-          // carry the whole file and the progress bar tracks what the device
-          // actually received. Retried chunks overwrite themselves (offset
-          // semantics) — safe on the backend + ESP32, not on the Nim admin API.
-          const chunkedUpload = isInFrameAdminMode() || values.frame.mode === 'embedded'
+          // Embedded and cloud frames always upload in chunks: the control
+          // plane forwards each chunk to the device synchronously (the cloud
+          // as one asset_put_chunk per request), so one slow request never
+          // has to carry the whole file and the progress bar tracks what the
+          // device actually received. Retried chunks overwrite themselves
+          // (offset semantics) — safe on the backend, cloud and ESP32, not on
+          // the Nim admin API. Chunk sizes match what one device WS frame can
+          // take: 256 KiB on an ESP32, 1 MiB on a Linux cloud frame
+          // (assetUploadChunkBytes in the cloud's frame-asset-write.ts).
+          const cloudUpload = workspaceMode() === 'cloud'
+          const chunkedUpload = isInFrameAdminMode() || values.frame.mode === 'embedded' || cloudUpload
+          const chunkSize = isInFrameAdminMode()
+            ? undefined
+            : cloudUpload && !isEsp32CloudFrame(values.frame)
+              ? 1024 * 1024
+              : 256 * 1024
           try {
             const asset = chunkedUpload
               ? await uploadFileInChunks({
@@ -654,7 +664,7 @@ export const assetsLogic = kea<assetsLogicType>([
                   file,
                   path: filePath,
                   filename: file.name,
-                  chunkSize: isInFrameAdminMode() ? undefined : 256 * 1024,
+                  chunkSize,
                   retries: isInFrameAdminMode() ? 0 : 2,
                   onProgress: (size) => updateProgress(size),
                 })

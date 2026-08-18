@@ -13,6 +13,7 @@ import { getScenesBaseUrl } from "../../../../../src/lib/env";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 import { storePublishScope } from "../../../../../src/lib/store";
+import { storeRoute } from "../../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
 
@@ -28,7 +29,7 @@ export const runtime = "nodejs";
 // URLs are absolute because the backend attaches the link token when
 // requesting them from the provider host; for the workspace they are
 // same-deployment URLs the browser can fetch with its session cookie.
-export async function GET(request: NextRequest) {
+async function handleGet(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:drive", {
     limit: 240,
     windowMs: 15 * 60 * 1000,
@@ -123,3 +124,7 @@ export async function GET(request: NextRequest) {
     { headers: { "cache-control": "no-store" } },
   );
 }
+
+// Cache policy is per-response here (see storeRoute): anything this
+// handler did not decide is no-store.
+export const GET = storeRoute(handleGet);
