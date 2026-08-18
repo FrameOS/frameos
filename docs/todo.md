@@ -63,18 +63,17 @@ commands; everything else stays local to the device.
   remotely, redesign them as bounded toggles on fixed FrameOS-owned
   directories. Hardware identity reported by the frame stays authoritative.
 
-- **Sweep the private-scene copies the old save flow left behind.** The copies
-  are still there (33 in the founder account, 4 of them still assigned to a
-  frame); the flow that made them is fixed (PR #367) and the name race behind
-  the duplicate "7"s is closed (`withAccountSceneNameLock` serialises the
-  "pick a free name, then insert" against every other save for that account).
-  What is left is running the cleanup on production:
-  `pnpm scene:sweep-duplicate-copies -- --account=<id>` reports the copies it
-  judges to be litter (private, single-version, undescribed, untagged, part of
-  a "<name> N" run, created before the fix) and deletes them with `--apply`.
-  It never touches a copy a frame is running — those four want the frame
-  re-pointed at the original in the UI and deployed first, then the script
-  again. Run `scripts/object-store-sweep.sh` afterwards.
+- **Four assigned scene copies still to re-point.** The duplicate-copy sweep
+  ran on production 2026-08-18: 33 of the 37 leftover copies are gone
+  (`pnpm scene:sweep-duplicate-copies`, dump at `/root/pre-sweep-*.sql.gz`).
+  The four it deliberately left alone are the ones a frame is running —
+  "GitHub stars 2", "SD card image 3" and "Wikimedia Commons 3" on Wood7.3,
+  "SD card image 4" on SuurESP — because un-assigning a scene changes what a
+  wall displays and wants a deploy. Re-point each frame at the original scene
+  in the UI, deploy, then re-run the script to remove the freed copies, and
+  `scripts/object-store-sweep.sh --apply` (7-day min age) to free their bytes.
+  The flow that made them is fixed (PR #367) and the name race behind the
+  duplicate "7"s is closed (`withAccountSceneNameLock`).
 
 - **Account hardening.** Passkeys/TOTP 2FA, re-authentication before sensitive
   actions (revoking frames, bulk assignment changes, scope grants), and a
