@@ -2316,6 +2316,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
             s_metrics_granted = false;
             s_ws_backoff_advanced = false; /* a new attempt got this far */
             ESP_LOGI(TAG, "ws: connected, sending hello");
+            FOS_MEM_LOG_MILESTONE(TAG, "cloud-connected");
             ws_send_hello();
             break;
         case WEBSOCKET_EVENT_ERROR:
