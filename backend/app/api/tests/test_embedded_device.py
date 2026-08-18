@@ -6,7 +6,13 @@ from app.models.frame import Frame
 from app.models.settings import Settings
 from app.tasks.embedded_firmware import (
     EMBEDDED_FIRMWARE_VERSION,
+    FOS_PIXEL_1BPP,
+    FOS_PIXEL_2BPP_BWYR,
+    FOS_PIXEL_2BPP_GRAY,
+    FOS_PIXEL_4BPP_7COLOR,
+    FOS_PIXEL_4BPP_GRAY,
     FOS_PIXEL_4BPP_SPECTRA6,
+    FOS_PIXEL_DUAL_1BPP_RED,
     embedded_firmware_config_hash,
     embedded_panel_for_frame,
     ensure_embedded_frame_defaults,
@@ -498,3 +504,76 @@ async def test_generated_config_uses_frame_network_wifi(async_client, db):
     assert '#define FRAMEOS_DEFAULT_WIFI_PASS "hunter2"' in header
     assert f'#define FRAMEOS_DEFAULT_FRAME_ID {frame.id}' in header
     assert '#define FRAMEOS_DEFAULT_PANEL "EPD_7in5_V2"' in header
+
+
+def _unpack_levels(packed: bytes, width: int, height: int, bits: int) -> list[int]:
+    """Every pixel's packed index, for the sub-byte formats."""
+    per_byte = 8 // bits
+    row = (width + per_byte - 1) // per_byte
+    mask = (1 << bits) - 1
+    return [
+        (packed[y * row + (x // per_byte)] >> (8 - bits - (x % per_byte) * bits)) & mask
+        for y in range(height) for x in range(width)
+    ]
+
+
+@pytest.mark.parametrize('pixel_format,bits,fill', [
+    (FOS_PIXEL_1BPP, 1, (128, 128, 128)),
+    # Between the 85 and 170 levels: nearest-colour picks one flat level.
+    (FOS_PIXEL_2BPP_GRAY, 2, (128, 128, 128)),
+    (FOS_PIXEL_4BPP_GRAY, 4, (128, 128, 128)),
+    # Halfway between the palette's white and yellow.
+    (FOS_PIXEL_2BPP_BWYR, 2, (232, 222, 163)),
+    (FOS_PIXEL_4BPP_7COLOR, 4, (232, 222, 163)),
+    (FOS_PIXEL_4BPP_SPECTRA6, 4, (188, 190, 96)),
+])
+def test_packers_dither_a_flat_field(pixel_format, bits, fill):
+    """A flat off-palette field must come out as a mix, not one flat level.
+
+    The thin-client packers used to quantize to the nearest colour, which
+    turned gradients and photos into hard bands on the panel — the on-device
+    renderers Floyd-Steinberg dither before packing, and these must match.
+    """
+    from PIL import Image
+
+    from app.api.embedded_device import pack_image_for_panel
+
+    width, height = 64, 16
+    packed = pack_image_for_panel(Image.new('RGB', (width, height), fill), pixel_format)
+    levels = _unpack_levels(packed, width, height, bits)
+    assert len(set(levels)) > 1, 'flat field quantized to a single level — dithering is gone'
+
+
+def test_dual_1bpp_dithers_a_flat_field():
+    from PIL import Image
+
+    from app.api.embedded_device import pack_image_for_panel
+
+    width, height = 64, 16
+    # Halfway between black and red: must mix the two planes, not pick one.
+    packed = pack_image_for_panel(
+        Image.new('RGB', (width, height), (128, 0, 0)), FOS_PIXEL_DUAL_1BPP_RED)
+    plane = len(packed) // 2
+    black_bits = sum(bin(byte).count('1') for byte in packed[:plane])
+    red_bits = sum(bin(byte).count('1') for byte in packed[plane:])
+    total = plane * 8
+    assert 0 < black_bits < total
+    assert 0 < red_bits < total
+
+
+def test_spectra6_packer_skips_the_missing_palette_index():
+    """Index 4 is a hole in the Spectra 6 wire palette — never emit it."""
+    from PIL import Image
+
+    from app.api.embedded_device import SPECTRA6_PALETTE, pack_image_for_panel
+
+    width, height = 60, 4
+    image = Image.new('RGB', (width, height))
+    colors = [rgb for rgb in SPECTRA6_PALETTE if max(rgb) <= 255]
+    for x in range(width):
+        for y in range(height):
+            image.putpixel((x, y), colors[(x * len(colors)) // width])
+    levels = _unpack_levels(
+        pack_image_for_panel(image, FOS_PIXEL_4BPP_SPECTRA6), width, height, 4)
+    assert 4 not in levels
+    assert set(levels) == {0, 1, 2, 3, 5, 6}

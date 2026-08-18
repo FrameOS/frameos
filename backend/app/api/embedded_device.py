@@ -111,66 +111,99 @@ def embedded_render_dimensions(frame: Frame) -> tuple[int, int]:
     return DEFAULT_WIDTH, DEFAULT_HEIGHT
 
 
-def _nearest_palette_index(rgb: tuple[int, int, int], palette: list[tuple[int, int, int]]) -> int:
-    r, g, b = rgb
-    return min(
-        range(len(palette)),
-        key=lambda i: abs(r - palette[i][0]) + abs(g - palette[i][1]) + abs(b - palette[i][2]),
-    )
+def _dithered_indices(image, palette: list[tuple[int, int, int]]) -> bytes:
+    """One palette index per pixel, Floyd-Steinberg dithered.
+
+    The on-device renderers dither before packing (``ditherPaletteIndexed`` in
+    frameos/src/frameos/utils/dither.nim), so thin clients must too: picking
+    the nearest colour per pixel turns every gradient and photo into flat
+    bands. Pillow diffuses the error in C — a Python loop over 800x480 would
+    dominate the render. Palette entries map 1:1 onto the returned indices.
+    """
+    from PIL import Image
+
+    flat: list[int] = []
+    for entry in palette:
+        flat.extend(entry)
+    reference = Image.new("P", (1, 1))
+    reference.putpalette(flat)
+    return image.convert("RGB").quantize(
+        palette=reference, dither=Image.Dither.FLOYDSTEINBERG).tobytes()
+
+
+def _dithered_gray_levels(image, levels: int) -> bytes:
+    """One gray level (0..levels-1) per pixel, Floyd-Steinberg dithered.
+
+    Luma uses the same weights as the Nim renderer's ``toGrayscaleFloat`` so a
+    scene looks the same whether it rendered on-device or here.
+    """
+    luma = image.convert("RGB").convert("L", (0.21, 0.72, 0.07, 0))
+    return _dithered_indices(luma, [(round(i * 255 / (levels - 1)),) * 3 for i in range(levels)])
 
 
 def _pack_1bpp(image) -> bytes:
-    return image.convert("1").tobytes()
+    row = (image.width + 7) // 8
+    out = bytearray(row * image.height)
+    levels = _dithered_gray_levels(image, 2)
+    for y in range(image.height):
+        base = y * image.width
+        for x in range(image.width):
+            if levels[base + x]:
+                out[y * row + (x >> 3)] |= 0x80 >> (x & 7)
+    return bytes(out)
 
 
 def _pack_dual_1bpp(image, accent: tuple[int, int, int]) -> bytes:
-    palette = [(0, 0, 0), accent, (255, 255, 255)]
     row = (image.width + 7) // 8
     black = bytearray([0xFF] * (row * image.height))
     color = bytearray([0xFF] * (row * image.height))
-    rgb = image.convert("RGB")
+    indices = _dithered_indices(image, [(0, 0, 0), accent, (255, 255, 255)])
     for y in range(image.height):
+        base = y * image.width
         for x in range(image.width):
-            index = _nearest_palette_index(rgb.getpixel((x, y)), palette)
-            bit = 0x80 >> (x & 7)
-            offset = y * row + (x >> 3)
-            if index == 0:
-                black[offset] &= ~bit
-            elif index == 1:
-                color[offset] &= ~bit
+            index = indices[base + x]
+            if index > 1:
+                continue
+            plane = black if index == 0 else color
+            plane[y * row + (x >> 3)] &= ~(0x80 >> (x & 7))
     return bytes(black + color)
 
 
 def _pack_2bpp_gray(image) -> bytes:
     row = (image.width + 3) // 4
     out = bytearray(row * image.height)
-    gray = image.convert("L")
+    levels = _dithered_gray_levels(image, 4)
     for y in range(image.height):
+        base = y * image.width
         for x in range(image.width):
-            value = round(gray.getpixel((x, y)) * 3 / 255)
-            out[y * row + (x >> 2)] |= (value & 0x03) << (6 - ((x & 3) * 2))
+            out[y * row + (x >> 2)] |= (levels[base + x] & 0x03) << (6 - ((x & 3) * 2))
     return bytes(out)
 
 
 def _pack_4bpp_gray(image) -> bytes:
     row = (image.width + 1) // 2
     out = bytearray(row * image.height)
-    gray = image.convert("L")
+    levels = _dithered_gray_levels(image, 16)
     for y in range(image.height):
+        base = y * image.width
         for x in range(image.width):
-            value = round(gray.getpixel((x, y)) * 15 / 255)
-            out[y * row + (x >> 1)] |= (value & 0x0F) << (4 if (x & 1) == 0 else 0)
+            out[y * row + (x >> 1)] |= (levels[base + x] & 0x0F) << (4 if (x & 1) == 0 else 0)
     return bytes(out)
 
 
 def _pack_palette(image, palette: list[tuple[int, int, int]], bits: int) -> bytes:
+    # Spectra 6 leaves a hole at index 4: dither against the real colours only,
+    # then map back to the wire indices the panel expects.
+    entries = [(index, rgb) for index, rgb in enumerate(palette) if max(rgb) <= 255]
+    wire = bytes(index for index, _ in entries)
+    indices = _dithered_indices(image, [rgb for _, rgb in entries])
     divider = 4 if bits == 2 else 2
     row = (image.width + divider - 1) // divider
     out = bytearray(row * image.height)
-    rgb = image.convert("RGB")
     for y in range(image.height):
+        base = y * image.width
         for x in range(image.width):
-            index = _nearest_palette_index(rgb.getpixel((x, y)), palette)
+            index = wire[indices[base + x]]
             if bits == 2:
                 out[y * row + (x >> 2)] |= (index & 0x03) << (6 - ((x & 3) * 2))
             else:
