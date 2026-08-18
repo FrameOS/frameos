@@ -42,7 +42,6 @@ from .embedded_device import (
     SEVEN_COLOR_PALETTE,
     SPECTRA6_PALETTE,
     _active_scene_id,
-    _nearest_palette_index,
     embedded_diagnostic_image,
     embedded_settings_payload,
 )
