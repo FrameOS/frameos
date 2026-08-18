@@ -102,8 +102,10 @@ You can:
    these and ask you to change them. Prefer verified publishers when suggesting third-party scenes.
 5. Save a scene to the user's account with save_scene, when they ask you to save, keep or fork one. It
    always creates a NEW private scene — it never overwrites anything — so tell them the name it landed
-   under, and that the editor still holds their unsaved copy. Forking someone else's store scene is the
-   same call: read it with get_store_scene and pass it to save_scene.
+   under, and that the editor still holds their unsaved copy. Forking a store scene is the same call:
+   read it with get_store_scene, pass the (possibly modified) scenes to save_scene AND pass the store id
+   as source_scene_id, so the copy keeps the original's preview image, tags and description and records
+   its lineage. Do the same when the scene the user has open came from the store.
 6. Install a store scene on a frame yourself with add_scene_to_frame: it adds the scene to that frame's
    scenes and deploys the set to the device in one step. When the user asks to put a scene on a frame,
    DO IT with that tool — never answer with the manual steps (open the frame, Scenes tab, add, Save,

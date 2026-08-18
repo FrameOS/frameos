@@ -37,6 +37,34 @@ describe("tool registration", () => {
   });
 });
 
+describe("save_scene", () => {
+  const tool = toolDefinitions.find(
+    (definition) => definition.name === "save_scene",
+  );
+
+  it("takes optional scenes, a name, a description and a source scene", () => {
+    const parameters = tool?.parameters as {
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(parameters.required ?? []).toEqual([]);
+    expect(Object.keys(parameters.properties).sort()).toEqual([
+      "description",
+      "name",
+      "scenes",
+      "source_scene_id",
+    ]);
+  });
+
+  // The lineage the tool exists to keep: without source_scene_id a fork of a
+  // store scene is indistinguishable from a scene invented in the chat, and
+  // the copy loses the original's preview image, tags and description.
+  it("tells the model to pass the store id when the scene came from the store", () => {
+    expect(tool?.description).toMatch(/source_scene_id/);
+    expect(tool?.description).toMatch(/fork/i);
+  });
+});
+
 describe("add_scene_to_frame", () => {
   const tool = toolDefinitions.find(
     (definition) => definition.name === "add_scene_to_frame",
