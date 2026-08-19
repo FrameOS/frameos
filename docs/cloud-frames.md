@@ -835,6 +835,7 @@ GET  {provider}/api/frames/{id}/metrics/recent # the same, from ?since=
 POST {provider}/api/frames/{id}/confirm        # pending → active
 POST {provider}/api/frames/{id}/revoke         # revoke link; device demotes itself on next 401
 GET  {provider}/api/frames/{id}/logs           # retained logs (telemetry:logs)
+GET  {provider}/api/frames/{id}/activity       # the frame's audit trail, newest first; ?limit= (≤200), ?before=&before_id= cursor from next_cursor
 GET  {provider}/api/frames/{id}/scenes         # assigned scenes
 POST {provider}/api/frames/{id}/scenes         # assign scene versions → enqueues set_scenes
 POST {provider}/api/frames/{id}/settings       # declarative settings → persists them, enqueues set_settings
@@ -844,7 +845,7 @@ GET  {provider}/api/frames/{id}/commands       # what is still QUEUED for this f
 DELETE {provider}/api/frames/{id}/commands/{command_id}  # cancel one, while it is still undelivered
 GET  {provider}/api/frames/{id}/service-settings          # DEVICE-authed, not session: see "Service settings"
 POST {provider}/api/frames/{id}/service-settings/enabled  # {"enabled": bool} → grants/revokes settings:services, nudges on enable
-WS   {provider}/api/frames/{id}/updates        # browser socket: update_frame / new_log / new_metrics events
+WS   {provider}/api/frames/{id}/updates        # browser socket: update_frame / new_log / new_metrics / frame_activity events
 WS   {provider}/api/frames/updates             # browser socket, all the account's frames (fleet view)
 ```
 

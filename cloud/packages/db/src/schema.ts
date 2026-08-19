@@ -296,6 +296,74 @@ export const sessions = pgTable(
   }),
 );
 
+// Optional second factors (migration 0034). Two-factor is ON for an account
+// exactly when it has a confirmed TOTP secret or at least one passkey — the
+// credentials are the flag, so nothing can drift out of sync with them.
+export const accountTotp = pgTable("account_totp", {
+  accountId: uuid("account_id")
+    .primaryKey()
+    .references(() => accounts.id, { onDelete: "cascade" }),
+  // Null until the user proves they scanned the secret with one valid code.
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  // AES-256-GCM under FRAMEOS_CLOUD_ENCRYPTION_KEY (lib/secrets encryptSecret).
+  encryptedSecret: text("encrypted_secret").notNull(),
+  // The 30-second step of the last accepted code: replay protection.
+  lastUsedStep: bigint("last_used_step", { mode: "number" }),
+  ...timestamps,
+});
+
+export const accountPasskeys = pgTable(
+  "account_passkeys",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    aaguid: text("aaguid"),
+    backedUp: boolean("backed_up").default(false).notNull(),
+    counter: bigint("counter", { mode: "number" }).default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // base64url, as WebAuthn hands it to us; globally unique by design.
+    credentialId: text("credential_id").notNull(),
+    deviceType: text("device_type"),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    name: text("name").notNull(),
+    publicKey: bytea("public_key").notNull(),
+    transports: text("transports").array(),
+  },
+  (table) => ({
+    accountIdx: index("account_passkeys_account_idx").on(table.accountId),
+    credentialIdUnique: uniqueIndex("account_passkeys_credential_id_unique").on(
+      table.credentialId,
+    ),
+  }),
+);
+
+// Single-use recovery codes, shown once at generation and stored hashed.
+export const accountRecoveryCodes = pgTable(
+  "account_recovery_codes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    codeHash: text("code_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+  },
+  (table) => ({
+    accountIdx: index("account_recovery_codes_account_idx").on(table.accountId),
+    hashUnique: uniqueIndex("account_recovery_codes_hash_unique").on(
+      table.accountId,
+      table.codeHash,
+    ),
+  }),
+);
+
 // Single-use password reset tokens. The emailed link carries the raw token;
 // only its hash is stored, and redemption marks the row used so a leaked link
 // cannot be replayed.

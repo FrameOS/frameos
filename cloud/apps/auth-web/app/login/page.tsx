@@ -99,6 +99,10 @@ function errorMessage(error: string) {
     return "Google sign-in was canceled. Try again when you are ready.";
   }
 
+  if (error === "second_factor_expired") {
+    return "The two-factor step timed out. Sign in again to get a fresh one.";
+  }
+
   if (error === "google_email_unverified") {
     return "Google could not confirm that email address, so it cannot be linked. Sign in with your password instead.";
   }

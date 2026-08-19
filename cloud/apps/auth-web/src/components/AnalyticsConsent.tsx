@@ -54,12 +54,11 @@ export function AnalyticsConsentBanner({
       <div className="consent-banner__copy">
         <strong>Help us fix what breaks?</strong>{" "}
         <span className="copy">
-          Two things go to PostHog in the EU if you say yes: the errors you
+          We use PostHog in the EU to track the errors you
           run into, so we can fix them without waiting for a bug report, and
-          which pages get used, so the next thing we build is one you asked
-          for. That is the entire list — no ad networks, no profile sold on,
-          nothing leaving the EU. Every feature works exactly the same either
-          way. Details in our <a href="/legal/privacy">Privacy Policy</a>.
+          which pages get used, to focus development on features that matter.
+          That is the entire list — no ad networks, no profile sold on. 
+          Details in our <a href="/legal/privacy">Privacy Policy</a>.
         </span>
       </div>
       <div className="consent-banner__actions">

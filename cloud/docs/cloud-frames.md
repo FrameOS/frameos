@@ -370,11 +370,28 @@ on-device verifies them, so a signature there would be decoration.
 
 An account that controls physical devices needs more than email + password:
 
-- Passkeys and TOTP 2FA.
+- Passkeys and TOTP 2FA — **shipped** (optional, `/account/security`; design
+  and routes in `cloud/docs/auth.md`, "Two-Factor Authentication"). Both
+  session-minting routes gate on it; a passkey with user verification also
+  signs in passwordlessly.
 - Re-authentication for sensitive actions (revoking frames, changing scene
-  assignments in bulk, scope grants).
-- Per-frame audit trail surfaced in the UI (the `audit_events` table already
-  exists).
+  assignments in bulk, scope grants) — still open. Today only the
+  account-weakening routes (removing a second factor, deleting the account)
+  re-ask for the password or a current code.
+- Per-frame audit trail surfaced in the UI — **shipped.** Every
+  `audit_events` row that concerns a frame carries `target.frameId`
+  (indexed, migration 0035); `GET /api/frames/{id}/activity` serves the
+  frame's slice newest-first with a keyset cursor, and the workspace's
+  **Activity** panel (`?tool=activity`) renders it. Account-side writes
+  (pushes, commands, asset writes, rename old→new, scene assignment) are
+  recorded by auth-web; the frame hub records the device side itself —
+  `frame.connected` / `frame.disconnected` (debounced to one pair per
+  minute per frame), `frame.firmware_version_changed`,
+  `frame.scenes_applied` (the ack of the assigned checksum) and
+  `frame.session_kicked` — and broadcasts `frame_activity` to the frame's
+  browser sockets so an open panel updates live. The panel is cloud-only:
+  backend-managed (self-hosted) frames have no audit table, so the shared
+  SPA hides it outside cloud mode (`workspaceSurfaces.ts`).
 
 ## "Add frame" flows
 

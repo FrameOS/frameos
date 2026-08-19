@@ -225,6 +225,18 @@ describe("cloud mode keeps what the protocol does implement", () => {
       expect(frameToolPanelIsAllowed("cloud", panel)).toBe(true);
     }
   });
+
+  it("offers the Activity panel — and only the cloud does", () => {
+    // The per-frame audit trail reads the cloud's audit_events table
+    // (GET /api/frames/{id}/activity). The self-hosted backend and the
+    // on-device admin panel keep no such ledger, so the panel would be a
+    // guaranteed 404 there.
+    expect(frameToolPanelIsAllowed("cloud", "activity")).toBe(true);
+    expect(allowedFrameToolPanels.cloud).toContain("activity");
+    expect(frameToolPanelIsAllowed("backend", "activity")).toBe(false);
+    expect(frameToolPanelIsAllowed("frameAdmin", "activity")).toBe(false);
+    expect(allowedSceneToolPanels.cloud).not.toContain("activity");
+  });
 });
 
 // The mode allow-lists say what a control plane implements; the device
@@ -525,16 +537,22 @@ describe("allow-list hygiene", () => {
   // The whole point: a surface is invisible until someone lists it. Guard
   // against a mode's list silently becoming a superset of the backend's.
   it("never grants a restricted mode more than the backend has", () => {
+    // The one deliberate exception: the Activity panel reads the cloud's
+    // audit ledger, which the self-hosted backend does not keep. Anything
+    // else cloud-only must be argued for here, not slipped in.
+    const cloudOnlyFrameTools = ["activity"];
     const lists = [
-      [allowedFrameToolPanels, "frame tools"],
-      [allowedSceneToolPanels, "scene tools"],
-      [allowedSceneUtilityPanels, "scene utilities"],
-      [allowedFrameSettingsSections, "settings sections"],
+      [allowedFrameToolPanels, "frame tools", cloudOnlyFrameTools],
+      [allowedSceneToolPanels, "scene tools", []],
+      [allowedSceneUtilityPanels, "scene utilities", []],
+      [allowedFrameSettingsSections, "settings sections", []],
     ] as const;
-    for (const [list, label] of lists) {
+    for (const [list, label, cloudOnly] of lists) {
       for (const mode of ["cloud", "frameAdmin"] as const) {
         const extra = (list[mode] as readonly string[]).filter(
-          (entry) => !(list.backend as readonly string[]).includes(entry),
+          (entry) =>
+            !(list.backend as readonly string[]).includes(entry) &&
+            !(mode === "cloud" && (cloudOnly as readonly string[]).includes(entry)),
         );
         expect(extra, `${label} allowed in ${mode} but not backend`).toEqual(
           [],

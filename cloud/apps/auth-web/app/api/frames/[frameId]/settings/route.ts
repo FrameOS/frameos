@@ -189,6 +189,21 @@ export async function POST(
     metadata: { keys: Object.keys(settings) },
     target: { commandId: command?.id, frameId: frame.id },
   });
+  // A rename rides the settings push, but "settings updated: name" does not
+  // tell you what the frame used to be called. Record it on its own, with
+  // both names, so the frame's activity feed shows old → new.
+  if (typeof settings.name === "string" && settings.name !== frame.name) {
+    await recordAuditEvent(db, {
+      accountId: session.accountId,
+      actor: {
+        accountId: session.accountId,
+        providerSubject: session.providerSubject,
+      },
+      eventType: "frame.renamed",
+      metadata: { from: frame.name, to: settings.name },
+      target: { commandId: command?.id, frameId: frame.id },
+    });
+  }
 
   return NextResponse.json({
     command_id: command?.id ?? null,

@@ -24,6 +24,7 @@ export type WorkspaceUtilityPanel =
   | 'preview'
   | 'ping'
   | 'debug'
+  | 'activity'
 
 // One SPA, three control planes. Which surfaces exist is a property of the
 // control plane, not of the component that happens to render them:
@@ -67,7 +68,10 @@ export const allowedFrameToolPanels: Record<WorkspaceMode, readonly WorkspaceUti
   // The cloud protocol has no shell or diagnostic verbs. Assets speak the
   // full assets_list/asset_get/asset_put/asset_mkdir/asset_delete/
   // asset_rename verb set (docs/cloud-frames.md); only font sync is absent.
-  cloud: ['overview', 'settings', 'preview', 'schedule', 'logs', 'metrics', 'assets'],
+  // Activity is cloud-only: the per-frame audit trail reads the cloud's
+  // audit_events table (docs/cloud-frames.md, "Account hardening"); the
+  // self-hosted backend keeps no such ledger.
+  cloud: ['overview', 'settings', 'preview', 'schedule', 'logs', 'metrics', 'assets', 'activity'],
 }
 
 /** The scene-tool shortcut row on the frame dashboard. Same verbs, same rules. */

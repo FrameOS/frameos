@@ -30,6 +30,7 @@ const frameToolPanels = [
   'ping',
   'debug',
   'settings',
+  'activity',
 ] as const satisfies readonly WorkspaceUtilityPanel[]
 
 function isFrameToolPanel(panel: unknown): panel is (typeof frameToolPanels)[number] {

@@ -4,7 +4,6 @@ import {
   normalizeEmail,
   passwordProviderIssuer,
 } from "@frameos-cloud/db";
-import { recordAuditEvent } from "../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { safeAuthReturnPath } from "../../../../src/lib/auth-cookies";
 import { csrfResponse } from "../../../../src/lib/csrf";
@@ -17,10 +16,14 @@ import {
   rateLimitResponse,
 } from "../../../../src/lib/rate-limit";
 import {
-  createSession,
   sessionCookieName,
   sessionCookieOptions,
 } from "../../../../src/lib/session";
+import { completeFirstFactor } from "../../../../src/lib/sign-in";
+import {
+  pendingSignInCookieName,
+  pendingSignInCookieOptions,
+} from "../../../../src/lib/two-factor";
 
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
@@ -81,31 +84,46 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "email_unverified" }, { status: 403 });
   }
 
-  await recordAuditEvent(db, {
-    accountId: account.id,
-    actor: { accountId: account.id, providerSubject: email },
-    eventType: "account.signed_in",
-    metadata: { method: "password" },
-    target: { providerIssuer: passwordProviderIssuer },
-  });
-
-  const sessionToken = await createSession(db, {
-    accountId: account.id,
-    email: account.primaryEmail ?? email,
-    emailVerified: account.emailVerified,
-    name: account.displayName ?? undefined,
-    providerIssuer: passwordProviderIssuer,
-    providerSubject: email,
-  });
-
   const returnTo =
     typeof body?.return_to === "string"
       ? safeAuthReturnPath(body.return_to)
       : undefined;
+
+  const outcome = await completeFirstFactor(db, {
+    method: "password",
+    profile: {
+      accountId: account.id,
+      email: account.primaryEmail ?? email,
+      emailVerified: account.emailVerified,
+      name: account.displayName ?? undefined,
+      providerIssuer: passwordProviderIssuer,
+      providerSubject: email,
+    },
+    returnTo,
+  });
+
+  // Password correct but a second factor is enrolled: no session yet. The
+  // pending token rides an httpOnly cookie to /login/verify, which finishes
+  // the sign-in once a passkey, authenticator code or recovery code checks
+  // out.
+  if (outcome.kind === "second_factor") {
+    const response = NextResponse.json({
+      ok: true,
+      redirect: "/login/verify",
+      second_factor_required: true,
+    });
+    response.cookies.set(
+      pendingSignInCookieName,
+      outcome.pendingToken,
+      pendingSignInCookieOptions(),
+    );
+    return response;
+  }
+
   const response = NextResponse.json({
     ok: true,
     redirect: returnTo ?? "/account",
   });
-  response.cookies.set(sessionCookieName, sessionToken, sessionCookieOptions());
+  response.cookies.set(sessionCookieName, outcome.token, sessionCookieOptions());
   return response;
 }

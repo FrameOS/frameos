@@ -20,6 +20,7 @@ vi.mock("../../../../../../src/lib/frame-asset-write", async (importOriginal) =>
   assetWriteRequestContext: vi.fn(),
   invalidateCachedAssetSubtree: vi.fn(() => Promise.resolve()),
   queueAssetsListRefresh: vi.fn(() => Promise.resolve()),
+  recordAssetWriteAudit: vi.fn(() => Promise.resolve()),
   runAssetWriteCommand: vi.fn(() => Promise.resolve({ ok: true as const })),
   uploadAssetBytes: vi.fn(() => Promise.resolve({ ok: true as const })),
 }));
@@ -48,6 +49,7 @@ function fakeDb(listing: ListingEntry[] | null) {
 function grantAccess(listing: ListingEntry[] | null = null) {
   contextMock.mockResolvedValue({
     accountId,
+    actor: { accountId },
     db: fakeDb(listing) as never,
     frame: { id: frameId, status: "active" } as never,
   });

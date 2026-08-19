@@ -8,6 +8,7 @@ import {
   CalendarDaysIcon,
   ChartBarIcon,
   CircleStackIcon,
+  ClockIcon,
   CommandLineIcon,
   DocumentTextIcon,
   EyeIcon,
@@ -47,6 +48,7 @@ import { FrameSettings } from '../frame/panels/FrameSettings/FrameSettings'
 import { Image } from '../frame/panels/Image/Image'
 import { Logs } from '../frame/panels/Logs/Logs'
 import { Metrics } from '../frame/panels/Metrics/Metrics'
+import { Activity } from '../frame/panels/Activity/Activity'
 import { Ping } from '../frame/panels/Ping/Ping'
 import { Schedule } from '../frame/panels/Schedule/Schedule'
 import { Terminal } from '../frame/panels/Terminal/Terminal'
@@ -260,6 +262,7 @@ const frameToolDefinitions: FrameToolDefinition[] = [
   { panel: 'terminal', label: 'Terminal', description: 'Shell access', icon: <CommandLineIcon className="h-5 w-5" /> },
   { panel: 'ping', label: 'Ping', description: 'Connectivity', icon: <SignalIcon className="h-5 w-5" /> },
   { panel: 'debug', label: 'Debug', description: 'Diagnostics', icon: <BoltIcon className="h-5 w-5" /> },
+  { panel: 'activity', label: 'Activity', description: 'Audit trail', icon: <ClockIcon className="h-5 w-5" /> },
 ]
 
 // Allow-list, not deny-list: see workspaceSurfaces.ts. A panel added above is
@@ -1324,6 +1327,7 @@ function FrameToolSurface({
   if (activeTool === 'schedule') return <Schedule scrollContainer={!pageScroll} />
   if (activeTool === 'ping') return <Ping scrollContainer={!pageScroll} />
   if (activeTool === 'debug') return <Debug scrollContainer={!pageScroll} />
+  if (activeTool === 'activity') return <Activity scrollContainer={!pageScroll} />
   return <Image className="h-full min-h-[26rem] w-full" objectFit="contain" />
 }
 

@@ -1,0 +1,186 @@
+import { actions, afterMount, beforeUnmount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { loaders } from 'kea-loaders'
+
+import type { FrameId } from '../../../../types'
+import { apiFetch } from '../../../../utils/apiFetch'
+import { formatFrameRelativeTime } from '../../../../decorators/frame'
+import { socketLogic } from '../../../socketLogic'
+import { workspaceMode } from '../../../workspace/workspaceSurfaces'
+
+import type { activityLogicType } from './activityLogicType'
+
+/**
+ * One row of a cloud-managed frame's audit trail, as served by
+ * `GET /api/frames/{id}/activity` (docs/cloud-frames.md). Label and detail
+ * are rendered server-side so the event vocabulary lives in one place.
+ */
+export interface FrameActivityEvent {
+  id: string
+  created_at: string
+  event_type: string
+  label: string
+  detail: string | null
+  actor: { kind: 'account' | 'device' | 'system'; ip?: string; email?: string }
+  metadata: Record<string, unknown> | null
+}
+
+export interface FrameActivityPage {
+  events: FrameActivityEvent[]
+  has_more: boolean
+  next_cursor: { before: string; before_id: string } | null
+}
+
+export interface ActivityLogicProps {
+  frameId: FrameId
+}
+
+const PAGE_SIZE = 50
+// Device-side rows arrive live over the socket (frame_activity); the poll is
+// the catch-up for account-side rows and for a dropped socket.
+const POLL_INTERVAL_MS = 30 * 1000
+
+/** "account@example.com", "device" or "—", plus the IP when there is one. */
+export function activityActorLabel(event: FrameActivityEvent): string {
+  const who =
+    event.actor.kind === 'device' ? 'device' : event.actor.email ?? (event.actor.kind === 'account' ? 'account' : '—')
+  return event.actor.ip ? `${who} · ${event.actor.ip}` : who
+}
+
+export function activityRelativeTime(event: FrameActivityEvent): string {
+  return formatFrameRelativeTime(event.created_at) ?? event.created_at
+}
+
+export const activityLogic = kea<activityLogicType>([
+  path(['src', 'scenes', 'frame', 'panels', 'Activity', 'activityLogic']),
+  props({} as ActivityLogicProps),
+  key((props) => props.frameId),
+  connect(() => ({ logic: [socketLogic] })),
+  actions({
+    loadOlder: true,
+    // The newest page replaces what is shown; older pages append. Both go
+    // through the one loader so loading/error state is shared.
+    appendOlder: (page: FrameActivityPage) => ({ page }),
+    setActivityError: (error: string | null) => ({ error }),
+  }),
+  loaders(({ props, values, actions }) => ({
+    activityPage: [
+      null as FrameActivityPage | null,
+      {
+        loadActivity: async () => {
+          if (workspaceMode() !== 'cloud') {
+            // The self-hosted backend and the on-device panel keep no audit
+            // ledger; the panel is hidden there (workspaceSurfaces), this is
+            // the belt.
+            return { events: [], has_more: false, next_cursor: null }
+          }
+          const response = await apiFetch(`/api/frames/${props.frameId}/activity?limit=${PAGE_SIZE}`)
+          if (!response.ok) {
+            actions.setActivityError(
+              response.status === 404 ? 'This frame has no activity feed.' : 'Could not load the activity feed.'
+            )
+            return values.activityPage
+          }
+          actions.setActivityError(null)
+          return (await response.json()) as FrameActivityPage
+        },
+      },
+    ],
+  })),
+  reducers({
+    // Older pages, in the order they were loaded (each newest-first).
+    olderEvents: [
+      [] as FrameActivityEvent[],
+      {
+        loadActivitySuccess: () => [],
+        appendOlder: (state, { page }) => [...state, ...page.events],
+      },
+    ],
+    // The cursor for the next "load older": the latest page's, or the first
+    // page's when nothing older has been fetched yet.
+    olderCursor: [
+      null as FrameActivityPage['next_cursor'],
+      {
+        loadActivitySuccess: (_, { activityPage }) => activityPage?.next_cursor ?? null,
+        appendOlder: (_, { page }) => page.next_cursor,
+      },
+    ],
+    hasOlder: [
+      false,
+      {
+        loadActivitySuccess: (_, { activityPage }) => activityPage?.has_more ?? false,
+        appendOlder: (_, { page }) => page.has_more,
+      },
+    ],
+    loadingOlder: [
+      false,
+      {
+        loadOlder: () => true,
+        appendOlder: () => false,
+        setActivityError: () => false,
+      },
+    ],
+    activityError: [
+      null as string | null,
+      {
+        setActivityError: (_, { error }) => error,
+      },
+    ],
+  }),
+  selectors({
+    events: [
+      (s) => [s.activityPage, s.olderEvents],
+      (page, older): FrameActivityEvent[] => {
+        // A live-refreshed first page can overlap the older pages (a row
+        // that was on page two moved to page one); dedupe on id, keeping
+        // the first (newest) occurrence.
+        const seen = new Set<string>()
+        const merged: FrameActivityEvent[] = []
+        for (const event of [...(page?.events ?? []), ...older]) {
+          if (!seen.has(event.id)) {
+            seen.add(event.id)
+            merged.push(event)
+          }
+        }
+        return merged
+      },
+    ],
+    hasLoaded: [(s) => [s.activityPage], (page): boolean => page !== null],
+  }),
+  listeners(({ actions, props, values }) => ({
+    loadOlder: async () => {
+      const cursor = values.olderCursor
+      if (!cursor) {
+        actions.setActivityError(null)
+        return
+      }
+      const params = new URLSearchParams({
+        before: cursor.before,
+        before_id: cursor.before_id,
+        limit: String(PAGE_SIZE),
+      })
+      const response = await apiFetch(`/api/frames/${props.frameId}/activity?${params.toString()}`)
+      if (!response.ok) {
+        actions.setActivityError('Could not load older activity.')
+        return
+      }
+      actions.appendOlder((await response.json()) as FrameActivityPage)
+    },
+    [socketLogic.actionTypes.frameActivity]: ({ activity }) => {
+      if (String(activity.frame_id) === String(props.frameId)) {
+        actions.loadActivity()
+      }
+    },
+    [socketLogic.actionTypes.socketReconnected]: () => {
+      actions.loadActivity()
+    },
+  })),
+  afterMount(({ actions, cache }) => {
+    actions.loadActivity()
+    cache.pollInterval = window.setInterval(() => actions.loadActivity(), POLL_INTERVAL_MS)
+  }),
+  beforeUnmount(({ cache }) => {
+    if (cache.pollInterval) {
+      window.clearInterval(cache.pollInterval)
+    }
+  }),
+])

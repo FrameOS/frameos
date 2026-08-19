@@ -11,6 +11,7 @@ import {
   invalidateCachedAssetSubtree,
   maxChunkedAssetUploadBytes,
   queueAssetsListRefresh,
+  recordAssetWriteAudit,
   runAssetWriteCommand,
   uploadAssetBytes,
 } from "../../../../../../src/lib/frame-asset-write";
@@ -245,6 +246,16 @@ export async function POST(
       if (uploaded > 0) {
         await invalidateCachedAssetSubtree(db, frame.id, fontsDirectory);
         await queueAssetsListRefresh(db, accountId, frame.id);
+      }
+      // One row per sync, not per font: counts plus the directory are what
+      // the activity feed needs; the per-font stream above is ephemeral.
+      if (uploaded > 0 || failed > 0) {
+        await recordAssetWriteAudit(db, context, "frame.assets_synced", {
+          failed,
+          path: fontsDirectory,
+          skipped,
+          uploaded,
+        });
       }
       emit({
         type: "done",

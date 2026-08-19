@@ -7,6 +7,7 @@ import {
   hiddenWritePath,
   invalidateCachedAssetSubtree,
   queueAssetsListRefresh,
+  recordAssetWriteAudit,
   runAssetWriteCommand,
 } from "../../../../../../src/lib/frame-asset-write";
 
@@ -52,5 +53,6 @@ export async function POST(
   await invalidateCachedAssetSubtree(db, frame.id, src);
   await invalidateCachedAssetSubtree(db, frame.id, dst);
   await queueAssetsListRefresh(db, accountId, frame.id);
+  await recordAssetWriteAudit(db, context, "frame.asset_renamed", { dst, src });
   return NextResponse.json({ message: "Renamed" });
 }

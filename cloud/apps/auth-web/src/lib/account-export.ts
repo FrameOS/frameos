@@ -15,6 +15,7 @@ import {
   storeSceneVersions,
   storeScenes,
 } from "@frameos-cloud/db";
+import { secondFactorStatus } from "./two-factor";
 
 // GDPR art. 20 (portability) and art. 15 (access) in one file the user can
 // download themselves, without asking us and without waiting a month.
@@ -312,6 +313,19 @@ export async function buildAccountExport(
           version: version.version,
           yankedAt: version.yankedAt,
         })),
+    })),
+    // Second factors: names and timestamps only. The TOTP secret, passkey
+    // public keys and recovery-code hashes are credentials, not personal
+    // data, and stay out of the export.
+    secondFactors: await secondFactorStatus(db, accountId).then((status) => ({
+      enabled: status.enabled,
+      passkeys: status.passkeys.map((passkey) => ({
+        createdAt: passkey.createdAt,
+        lastUsedAt: passkey.lastUsedAt,
+        name: passkey.name,
+      })),
+      recoveryCodesRemaining: status.recoveryCodesRemaining,
+      totpEnabled: status.totpEnabled,
     })),
     sessions: accountSessions,
     settings,

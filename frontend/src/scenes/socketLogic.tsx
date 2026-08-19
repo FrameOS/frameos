@@ -37,6 +37,10 @@ export const socketLogic = kea<socketLogicType>([
     deleteFrame: ({ id }: { id: number }) => ({ id }),
     updateSettings: (settings: Record<string, any>) => ({ settings }),
     newMetrics: (metrics: Record<string, any>) => ({ metrics }),
+    // Cloud only: the frame hub recorded a device-side audit row (connected,
+    // disconnected, scenes applied...). Payload: { frame_id, event_type,
+    // metadata, timestamp }; the Activity panel refetches on it.
+    frameActivity: (activity: { frame_id: string; event_type: string }) => ({ activity }),
     frameRendered: (frameId: FrameId) => ({ frameId }),
     // Fired when the socket reopens after a drop. All frame state is
     // event-sourced over this socket, so listeners must refetch anything
@@ -100,6 +104,9 @@ export const socketLogic = kea<socketLogicType>([
               break
             case 'new_metrics':
               actions.newMetrics(data.data)
+              break
+            case 'frame_activity':
+              actions.frameActivity(data.data)
               break
             case 'pong':
               break
