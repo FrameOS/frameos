@@ -19,19 +19,6 @@ Two rules that shape most entries:
 
 ---
 
-## Cloud-managed frames
-
-A cloud frame talks to `frame-hub` over one outbound WebSocket. The provider
-can push scenes, a short allowlist of declarative settings and a handful of
-commands; everything else stays local to the device.
-
-- **Panel-displayed link code.** Show the enrollment code/QR on the e-ink panel
-  itself, as proof of possession, rather than only on the portal and admin
-  pages. The private-network elevation already does exactly this ceremony
-  (`frameos/local_access.nim`) and is the model to copy.
-
----
-
 ## Frame privileges and FrameOS Remote
 
 Audited 2026-08-16; findings and the full reasoning in

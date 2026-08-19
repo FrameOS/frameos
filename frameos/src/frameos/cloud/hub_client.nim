@@ -63,6 +63,7 @@ import frameos/server/state
 import frameos/types
 import frameos/upgrade
 import frameos/utils/http_client
+import ./device_flow
 import ./enrollment
 import ./identity
 import ./link_state
@@ -2095,6 +2096,14 @@ proc cloudHubThreadMain(frameConfig: FrameConfig) {.thread.} =
         # have succeeded, so start over.
         nextEnrollAttemptAt = 0.0
         enrollBackoff = HubEnrollBackoffMinSeconds
+      # ---- device-flow ("link code") handoff -----------------------------
+      # Polls a pending flow so a link started from the admin page (or queued
+      # by the setup portal for the panel) completes without a browser tab
+      # driving it; starts a queued panel link once the network is up. When
+      # managed enrollment succeeds this thread IS the hub client, so the
+      # next pass picks the new link state up by itself.
+      if deviceFlowTick(frameConfig):
+        log(%*{"event": "cloud:enroll:linkCode", "ok": true})
       if epochTime() >= nextEnrollAttemptAt and fileExists(pendingEnrollmentPath()):
         # Announced BEFORE the attempt, because the attempt is what changes
         # state: a successful or permanently-rejected enrollment deletes the

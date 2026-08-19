@@ -199,6 +199,26 @@ the ownership proof, so a frame enrolled this way is born `active`, not
 `{"public_key": …, "hardware": …}` and the device-flow Bearer token instead
 of a claim token, to register its key and fetch `frame_id`/`ws_path`.
 
+**The code shows on the panel.** While a flow is pending, the runner draws
+the user code plus a QR of `verification_uri_complete` over whatever the
+frame is showing (`frameos/cloud/device_flow.nim` `activeLinkCode()`, drawn
+in `runner.nim` beside the local-presence overlay), so the person in front
+of the frame can claim it without ever opening the local admin page — the
+same possession ceremony as the LAN-access code, in the other direction.
+The hub thread polls the flow in the background (`deviceFlowTick`), so a
+link started from the admin page completes even after the browser tab
+closes, and the code comes down the moment the flow resolves or its window
+lapses.
+
+**Starting one without a browser.** The setup portal's cloud option no
+longer requires a claim code: saved without one, it queues
+`state/cloud_link_code_pending.json`, and once the frame is online the hub
+thread starts the device flow and the panel shows the code. An unclaimed
+window restarts a fresh code (each start is a provider round trip; after 12
+unclaimed starts the frame gives up until the next boot or admin-page
+retry). Picking another control mode in the portal, or `POST
+/api/cloud/disconnect`, retires the queue.
+
 ### Scopes
 
 `frame:managed` is the base scope: connect the WS, receive scene/settings

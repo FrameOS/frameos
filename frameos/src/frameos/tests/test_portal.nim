@@ -1,6 +1,7 @@
 import std/[json, os, strutils, tables, unittest]
 
 import ../channels
+import ../cloud/device_flow
 import ../network/backend
 import ../portal
 import ../types
@@ -598,14 +599,17 @@ suite "portal setup control mode":
     createDir(setupDir)
     putEnv("FRAMEOS_CONFIG", setupDir / "frame.json")
     putEnv("FRAMEOS_CLOUD_ENROLL_PENDING_PATH", setupDir / "pending.json")
+    putEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH", setupDir / "link_code_pending.json")
 
   teardown:
     resetPortalHooksForTest()
     resetHookState()
     removeFile(setupDir / "frame.json")
     removeFile(setupDir / "pending.json")
+    removeFile(setupDir / "link_code_pending.json")
     delEnv("FRAMEOS_CONFIG")
     delEnv("FRAMEOS_CLOUD_ENROLL_PENDING_PATH")
+    delEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH")
 
   test "the localhost placeholder no longer preselects a self-hosted backend":
     let frame = makeFrameOS()
@@ -673,6 +677,40 @@ suite "portal setup control mode":
     let pending = parseFile(setupDir / "pending.json")
     check pending{"claim_token"}.getStr() == "FRCT-pending"
     check frame.frameConfig.serverHost == ""
+
+  test "cloud mode with no claim code queues a panel link code":
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = "localhost"
+    let params = {
+      "ssid": "home-wifi",
+      "hostname": "kitchen",
+      "controlMode": "cloud",
+      "cloudUrl": "https://cloud.example.com",
+    }.toTable
+    let options = parseSetupOptions(params, frame.frameConfig)
+    check persistPortalSetup(frame, options)
+    # No claim-token enrollment was queued...
+    check not fileExists(setupDir / "pending.json")
+    # ...a panel link code was: the hub thread starts the device flow once
+    # online, and the display shows the code to claim the frame.
+    let queued = parseFile(setupDir / "link_code_pending.json")
+    check queued{"provider_url"}.getStr() == "https://cloud.example.com"
+    check frame.frameConfig.serverHost == ""
+    # A queued link code preselects the cloud on a portal revisit.
+    check defaultControlMode(frame.frameConfig) == "cloud"
+
+  test "leaving cloud mode retires a queued panel link code":
+    check writePendingLinkCode("https://cloud.example.com")
+    let frame = makeFrameOS()
+    let params = {
+      "ssid": "home-wifi",
+      "hostname": "office",
+      "controlMode": "backend",
+      "serverHost": "backend.example.com",
+    }.toTable
+    let options = parseSetupOptions(params, frame.frameConfig)
+    check persistPortalSetup(frame, options)
+    check not fileExists(setupDir / "link_code_pending.json")
 
   test "backend mode still persists the server connection":
     let frame = makeFrameOS()

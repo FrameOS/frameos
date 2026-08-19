@@ -488,6 +488,13 @@ type
     controlCodeRender*: AppRoot
     controlCodeData*: AppRoot
     localAccessRender*: AppRoot
+    linkCodeRender*: AppRoot
+    linkCodeQrRender*: AppRoot
+    linkCodeQrData*: AppRoot
+    # data/qr regenerates on every get(); cache the rendered image keyed on
+    # the payload so a pending link code costs one QR render, not one per frame.
+    linkCodeQrImage*: Image
+    linkCodeQrKey*: string
 
   RunnerControl* = ref object
     start*: proc(firstSceneId: Option[SceneId])
