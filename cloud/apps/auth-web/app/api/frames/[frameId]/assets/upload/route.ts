@@ -11,6 +11,7 @@ import {
   maxChunkedAssetUploadBytes,
   putAssetChunk,
   queueAssetsListRefresh,
+  recordAssetWriteAudit,
   sanitizedUploadFilename,
   uploadAssetBytes,
 } from "../../../../../../src/lib/frame-asset-write";
@@ -45,7 +46,7 @@ export async function POST(
   const { db, accountId, frame } = context;
 
   if (request.nextUrl.searchParams.has("upload_id")) {
-    return uploadChunk(request, { db, accountId, frame });
+    return uploadChunk(request, context);
   }
 
   let form: FormData;
@@ -81,6 +82,10 @@ export async function POST(
   }
   await invalidateCachedAssetSubtree(db, frame.id, target);
   await queueAssetsListRefresh(db, accountId, frame.id);
+  await recordAssetWriteAudit(db, context, "frame.asset_uploaded", {
+    bytes: file.size,
+    path: target,
+  });
   return NextResponse.json(storedEntry(target, file.size));
 }
 
@@ -89,10 +94,8 @@ type UploadContext = Exclude<
   { response: Response }
 >;
 
-async function uploadChunk(
-  request: NextRequest,
-  { db, accountId, frame }: UploadContext,
-) {
+async function uploadChunk(request: NextRequest, context: UploadContext) {
+  const { db, accountId, frame } = context;
   const query = request.nextUrl.searchParams;
   const uploadId = query.get("upload_id");
   if (!isValidUploadId(uploadId)) {
@@ -136,6 +139,11 @@ async function uploadChunk(
   }
   await invalidateCachedAssetSubtree(db, frame.id, target);
   await queueAssetsListRefresh(db, accountId, frame.id);
+  await recordAssetWriteAudit(db, context, "frame.asset_uploaded", {
+    bytes: offset + bytes.length,
+    chunked: true,
+    path: target,
+  });
   return NextResponse.json(storedEntry(target, offset + bytes.length));
 }
 

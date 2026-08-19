@@ -3,6 +3,11 @@ import { Download } from "lucide-react";
 import { accounts, createDb } from "@frameos-cloud/db";
 import { ChangePasswordForm } from "../../../src/components/ChangePasswordForm";
 import { DeleteAccountForm } from "../../../src/components/DeleteAccountForm";
+import {
+  TwoFactorSettings,
+  type TwoFactorStatusPayload,
+} from "../../../src/components/TwoFactorSettings";
+import { twoFactorStatusPayload } from "../../../src/lib/account-security";
 import { readSession } from "../../../src/lib/session";
 
 export const metadata = { title: "Security" };
@@ -14,6 +19,7 @@ export default async function AccountSecurityPage() {
   let hasPassword = false;
   let isSuperadmin = false;
   let primaryEmail: string | undefined;
+  let twoFactor: TwoFactorStatusPayload | undefined;
   if (accountId) {
     const [account] = await createDb()
       .select({
@@ -27,6 +33,7 @@ export default async function AccountSecurityPage() {
     hasPassword = Boolean(account?.passwordHash);
     isSuperadmin = Boolean(account?.isSuperadmin);
     primaryEmail = account?.primaryEmail ?? undefined;
+    twoFactor = await twoFactorStatusPayload(createDb(), accountId, hasPassword);
   }
 
   return (
@@ -50,6 +57,22 @@ export default async function AccountSecurityPage() {
               emailed link proves you control the address.
             </p>
           )}
+        </section>
+      </section>
+
+      <section className="section-block">
+        <div className="content-header compact-header">
+          <div>
+            <h2>Two-factor authentication</h2>
+            <p className="copy">
+              Optional, and recommended for an account that controls physical
+              frames: add an authenticator app or a passkey and sign-in asks
+              for it after your password or Google.
+            </p>
+          </div>
+        </div>
+        <section className="card">
+          {twoFactor ? <TwoFactorSettings initial={twoFactor} /> : null}
         </section>
       </section>
 

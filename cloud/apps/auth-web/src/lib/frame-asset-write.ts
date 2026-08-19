@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, like, or } from "drizzle-orm";
 import { frameAssetFiles, frameCommands } from "@frameos-cloud/db";
 import type { NextRequest } from "next/server";
+import { recordAuditEvent } from "./audit";
 import { csrfResponse } from "./csrf";
 import { jsonError, requireDatabase } from "./device-flow";
 import {
@@ -260,6 +261,7 @@ export async function assetWriteRequestContext(
       response?: undefined;
       db: CommandDatabase;
       accountId: string;
+      actor: { accountId: string; providerSubject?: string };
       frame: NonNullable<Awaited<ReturnType<typeof frameForAccount>>>;
     }
 > {
@@ -289,7 +291,46 @@ export async function assetWriteRequestContext(
   if (frame.status !== "active") {
     return { response: jsonError("frame_not_active", 409) };
   }
-  return { db, accountId: session.accountId, frame };
+  return {
+    db,
+    accountId: session.accountId,
+    actor: {
+      accountId: session.accountId,
+      providerSubject: session.providerSubject,
+    },
+    frame,
+  };
+}
+
+export type AssetAuditEventType =
+  | "frame.asset_uploaded"
+  | "frame.asset_deleted"
+  | "frame.asset_mkdir"
+  | "frame.asset_renamed"
+  | "frame.assets_synced";
+
+/**
+ * Audit a write the device acked. Paths and counts only — never bytes or
+ * file names beyond the path the owner typed — so the activity feed can say
+ * *what* changed on the frame without becoming a copy of the asset.
+ */
+export async function recordAssetWriteAudit(
+  db: CommandDatabase,
+  context: {
+    accountId: string;
+    actor: { accountId: string; providerSubject?: string };
+    frame: { id: string };
+  },
+  eventType: AssetAuditEventType,
+  metadata: Record<string, unknown>,
+) {
+  await recordAuditEvent(db, {
+    accountId: context.accountId,
+    actor: context.actor,
+    eventType,
+    metadata,
+    target: { frameId: context.frame.id },
+  });
 }
 
 /** Map a device refusal / queue outcome onto an HTTP error response. */

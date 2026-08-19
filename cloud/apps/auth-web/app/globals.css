@@ -576,6 +576,21 @@ html.theme-dark .button-primary {
   background: color-mix(in srgb, var(--danger), transparent 92%);
 }
 
+.totp-qr {
+  width: 200px;
+  max-width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.totp-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .code-input {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     monospace;

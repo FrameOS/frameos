@@ -26,6 +26,7 @@ import {
   frameLogs,
   frames,
   linkedClients,
+  recordAuditEvent,
 } from "@frameos-cloud/db";
 // Shared helpers imported directly from auth-web source; those files are
 // deliberately free of Next imports so the hub can consume them (see the
@@ -109,9 +110,33 @@ const closeAuthTimeout = 4408;
 const closeSuperseded = 4409;
 const closeSlowConsumer = 1013;
 
+// What the audit row says about a device close, from the WS close code the
+// hub saw. 1000/1001 are the device's own goodbye (reboot, shutdown); 1006
+// is no close frame at all (power loss, Wi-Fi drop, a ping that went
+// unanswered — see the heartbeat sweep); the hub's own codes name themselves.
+function deviceCloseReason(code: number): string | undefined {
+  switch (code) {
+    case 1000:
+    case 1001:
+      return "closed_by_device";
+    case 1006:
+      return "connection_lost";
+    case closeSuperseded:
+      return "superseded";
+    case closeSlowConsumer:
+      return "slow_consumer";
+    default:
+      return undefined;
+  }
+}
+
 const defaultAuthTimeoutMs = 15_000;
 const defaultHeartbeatIntervalMs = 30_000;
 const defaultSweepIntervalMs = 30_000;
+// Connect/disconnect audit debounce: a frame on flaky Wi-Fi can bounce every
+// few seconds, and each bounce is two audit rows nobody wants to scroll
+// past. See recordLifecycleAudit.
+const lifecycleAuditDebounceMs = 60_000;
 
 // Largest inbound WebSocket frame the hub will buffer and JSON.parse. Every
 // device is untrusted (cloud/docs/cloud-frames.md, threat model) and a browser
@@ -219,6 +244,7 @@ export interface FrameHubOptions {
   commandRedeliverAfterMs?: number;
   heartbeatIntervalMs?: number;
   sweepIntervalMs?: number;
+  lifecycleAuditDebounceMs?: number;
 }
 
 export interface FrameHub {
@@ -243,6 +269,8 @@ export async function startFrameHub(
   const sweepIntervalMs = options.sweepIntervalMs ?? defaultSweepIntervalMs;
   const redeliverAfterMs =
     options.commandRedeliverAfterMs ?? commandRedeliverAfterMs;
+  const lifecycleDebounceMs =
+    options.lifecycleAuditDebounceMs ?? lifecycleAuditDebounceMs;
 
   const deviceSessions = new Map<string, DeviceSession>();
   // Browser subscriptions: per-frame sockets keyed by frame id, fleet-view
@@ -251,6 +279,10 @@ export async function startFrameHub(
   // are covered automatically (no subscription list to refresh, no race).
   const frameBrowserSockets = new Map<string, Set<BrowserConnection>>();
   const accountBrowserSockets = new Map<string, Set<BrowserConnection>>();
+  // frame id → when the last connected/disconnected audit row was written.
+  // In-memory on purpose: the hub is single-instance (see the boot sweep
+  // below), and losing the map on restart only costs one extra pair of rows.
+  const lastLifecycleAuditAt = new Map<string, number>();
 
   // Single-host constraint (cloud/docs/cloud-frames.md): the hub runs as one
   // instance, so a restarted hub owns every frame — clear all stale liveness
@@ -298,6 +330,60 @@ export async function startFrameHub(
     const message = browserEvent(event, data);
     sendToConnections(frameBrowserSockets.get(frame.id), message);
     sendToConnections(accountBrowserSockets.get(frame.accountId), message);
+  }
+
+  // Device-side audit trail: the hub is the only party that sees a frame
+  // connect, drop, apply an assignment or get kicked, so it writes those
+  // rows itself — account-scoped like every other audit event, actor = the
+  // device. The frame's Activity panel reads them back through auth-web's
+  // /api/frames/{id}/activity; the frame_activity broadcast lets an open
+  // panel show the row without waiting for its next poll. Audit failures
+  // are logged, never raised: a full disk must not cost a frame its session.
+  async function recordFrameAudit(
+    frame: { accountId: string; id: string },
+    eventType: string,
+    metadata?: Record<string, unknown>,
+  ) {
+    try {
+      await recordAuditEvent(db, {
+        accountId: frame.accountId,
+        actor: { frameId: frame.id, kind: "device" },
+        eventType,
+        metadata,
+        target: { frameId: frame.id },
+      });
+      broadcastToBrowsers(frame, "frame_activity", {
+        event_type: eventType,
+        frame_id: frame.id,
+        metadata: metadata ?? null,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      logError("device.audit_failed", {
+        error: errorField(error),
+        eventType,
+        frameId: frame.id,
+      });
+    }
+  }
+
+  // connected / disconnected, debounced: when the previous lifecycle row for
+  // this frame is under lifecycleAuditDebounceMs old, the row is skipped
+  // (and the clock is NOT reset, so a frame that flaps non-stop still leaves
+  // one row per minute rather than none — enough for the feed to show the
+  // flapping without drowning in it). Other event types never debounce.
+  async function recordLifecycleAudit(
+    frame: { accountId: string; id: string },
+    eventType: "frame.connected" | "frame.disconnected",
+    metadata?: Record<string, unknown>,
+  ) {
+    const now = Date.now();
+    const last = lastLifecycleAuditAt.get(frame.id);
+    if (last !== undefined && now - last < lifecycleDebounceMs) {
+      return;
+    }
+    lastLifecycleAuditAt.set(frame.id, now);
+    await recordFrameAudit(frame, eventType, metadata);
   }
 
   async function broadcastFrameUpdate(frameId: string) {
@@ -484,9 +570,14 @@ export async function startFrameHub(
   async function kickRevokedSession(session: DeviceSession) {
     logInfo("device.kicked_revoked", { frameId: session.frame.id });
     // Mark disconnected (connected=false + update_frame broadcast) before
-    // closing, so the state flip does not wait on the close handshake.
-    await markDeviceDisconnected(session);
+    // closing, so the state flip does not wait on the close handshake. The
+    // kick is its own audit row (not a plain "disconnected"): the cloud
+    // closed this session because the link was revoked or re-keyed.
+    await markDeviceDisconnected(session, { audit: false });
     session.ws.close(closeAuthFailed, "frame_revoked");
+    await recordFrameAudit(session.frame, "frame.session_kicked", {
+      reason: "frame_revoked",
+    });
   }
 
   // Command wake-up entry point shared by LISTEN/NOTIFY and the sweep.
@@ -597,6 +688,30 @@ export async function startFrameHub(
     }
     logInfo("device.connected", { frameId, pendingCommands: pendingCount });
     await broadcastFrameUpdate(frameId);
+    const reportedVersion =
+      typeof hello.frameos_version === "string"
+        ? hello.frameos_version.slice(0, 64)
+        : undefined;
+    await recordLifecycleAudit(session.frame, "frame.connected", {
+      ...(reportedVersion ? { frameosVersion: reportedVersion } : {}),
+      ...(typeof hello.scenes_checksum === "string"
+        ? { scenesChecksum: hello.scenes_checksum.slice(0, 128) }
+        : {}),
+    });
+    // session.frame is the row as read at authentication, i.e. the version
+    // the frame reported LAST time; a difference means the firmware changed
+    // (OTA, reflash) between sessions. Not debounced — it is rare and it is
+    // exactly what a "what happened to my frame" reader wants to see.
+    if (
+      reportedVersion &&
+      session.frame.frameosVersion &&
+      reportedVersion !== session.frame.frameosVersion
+    ) {
+      await recordFrameAudit(session.frame, "frame.firmware_version_changed", {
+        from: session.frame.frameosVersion,
+        to: reportedVersion,
+      });
+    }
     await drainCommands(session);
 
     // The socket closed while the writes above were in flight: run the
@@ -606,7 +721,10 @@ export async function startFrameHub(
     }
   }
 
-  async function markDeviceDisconnected(session: DeviceSession) {
+  async function markDeviceDisconnected(
+    session: DeviceSession,
+    options: { audit?: boolean; reason?: string | undefined } = {},
+  ) {
     // Idempotent: the revocation kick runs this before closing the socket,
     // and the close handler would otherwise run it a second time.
     if (session.disconnectHandled) {
@@ -630,6 +748,13 @@ export async function startFrameHub(
       .returning({ id: frames.id });
     if (updated.length > 0) {
       await broadcastFrameUpdate(session.frame.id);
+      // Only the live session's close is a disconnect worth recording; a
+      // superseded socket's late close changed nothing (the guard above).
+      if (options.audit !== false) {
+        await recordLifecycleAudit(session.frame, "frame.disconnected", {
+          ...(options.reason ? { reason: options.reason } : {}),
+        });
+      }
     }
   }
 
@@ -732,7 +857,7 @@ export async function startFrameHub(
         ? msg.active_scene.slice(0, maxSceneIdChars)
         : undefined;
     const now = new Date();
-    await db
+    const updated = await db
       .update(frames)
       .set({
         lastSeenAt: now,
@@ -749,8 +874,20 @@ export async function startFrameHub(
             }
           : {}),
       })
-      .where(eq(frames.id, session.frame.id));
+      .where(eq(frames.id, session.frame.id))
+      .returning({ assignedChecksum: frames.assignedChecksum });
     await broadcastFrameUpdate(session.frame.id);
+    // The device confirming the ASSIGNED set (not a preview push, not a
+    // stale set) is the cloud's deploy-succeeded moment — the counterpart of
+    // frame.scenes_assigned, which records the push.
+    if (
+      checksum !== undefined &&
+      updated[0]?.assignedChecksum === checksum
+    ) {
+      await recordFrameAudit(session.frame, "frame.scenes_applied", {
+        checksum,
+      });
+    }
   }
 
   async function handleState(
@@ -1231,7 +1368,7 @@ export async function startFrameHub(
         frameId: frame.id,
       });
     });
-    ws.on("close", () => {
+    ws.on("close", (code) => {
       session.closed = true;
       if (session.authTimeout) {
         clearTimeout(session.authTimeout);
@@ -1240,8 +1377,10 @@ export async function startFrameHub(
       if (!session.ready) {
         return;
       }
-      logInfo("device.disconnected", { frameId: frame.id });
-      markDeviceDisconnected(session).catch((error: unknown) =>
+      logInfo("device.disconnected", { code, frameId: frame.id });
+      markDeviceDisconnected(session, {
+        reason: deviceCloseReason(code),
+      }).catch((error: unknown) =>
         logError("device.disconnect_failed", {
           error: errorField(error),
           frameId: frame.id,

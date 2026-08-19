@@ -6,6 +6,7 @@ import {
   assetWriteRequestContext,
   hiddenWritePath,
   queueAssetsListRefresh,
+  recordAssetWriteAudit,
   runAssetWriteCommand,
 } from "../../../../../../src/lib/frame-asset-write";
 
@@ -46,5 +47,6 @@ export async function POST(
     return assetWriteErrorResponse(result);
   }
   await queueAssetsListRefresh(db, accountId, frame.id);
+  await recordAssetWriteAudit(db, context, "frame.asset_mkdir", { path });
   return NextResponse.json({ message: "Created" });
 }

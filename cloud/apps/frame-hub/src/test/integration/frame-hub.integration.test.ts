@@ -14,6 +14,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import {
   accounts,
+  auditEvents,
   createDb,
   frameCommands,
   frameLogs,
@@ -790,6 +791,127 @@ describe("command redelivery", () => {
       "second delivery after the sweep",
     );
     device.ws.close();
+  });
+});
+
+// The hub writes the device side of the per-frame audit trail itself
+// (cloud/docs/cloud-frames.md "Account hardening"): account-scoped rows with
+// actor.kind = "device" and target.frameId, which auth-web's
+// /api/frames/{id}/activity serves and the workspace's Activity panel shows.
+describe("device audit trail", () => {
+  async function frameAuditRows(frameId: string) {
+    const rows = await db
+      .select()
+      .from(auditEvents)
+      .where(sql`${auditEvents.target}->>'frameId' = ${frameId}`)
+      .orderBy(auditEvents.createdAt, auditEvents.id);
+    return rows;
+  }
+
+  async function waitForAuditRow(frameId: string, eventType: string) {
+    return waitFor(async () => {
+      const rows = await frameAuditRows(frameId);
+      return rows.find((row) => row.eventType === eventType);
+    }, `audit row ${eventType}`);
+  }
+
+  it("records connected (with the version), scenes applied, and a disconnect with its reason", async () => {
+    // Debounce off: this test wants every lifecycle row.
+    const audited = await startExtraHub({ lifecycleAuditDebounceMs: 0 });
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    // The frame reported 2026.8.1 last time; this session says 2026.8.31.
+    await db
+      .update(frames)
+      .set({ assignedChecksum: "sum-assigned", frameosVersion: "2026.8.1" })
+      .where(eq(frames.id, frame.id));
+    const sessionToken = await createBrowserSession(account.id);
+    const browser = await openBrowser(frame.id, sessionToken, audited.port);
+
+    const device = await openDevice(token, audited.port);
+    await handshake(device, privateKey, { frameos_version: "2026.8.31" });
+
+    const connected = await waitForAuditRow(frame.id, "frame.connected");
+    expect(connected.accountId).toBe(account.id);
+    expect(connected.actor).toEqual({ frameId: frame.id, kind: "device" });
+    expect(connected.metadata).toMatchObject({ frameosVersion: "2026.8.31" });
+    const versionChanged = await waitForAuditRow(
+      frame.id,
+      "frame.firmware_version_changed",
+    );
+    expect(versionChanged.metadata).toEqual({ from: "2026.8.1", to: "2026.8.31" });
+
+    // The panel learns about the row without polling.
+    const live = await browser.next(
+      (msg) =>
+        msg.event === "frame_activity" &&
+        (msg.data as Record<string, unknown>).event_type === "frame.connected",
+      "frame_activity broadcast",
+    );
+    expect((live.data as Record<string, unknown>).frame_id).toBe(frame.id);
+
+    // A preview ack is not a deploy; the assigned checksum's ack is.
+    device.send({ checksum: "sum-preview", id: randomUUID(), type: "scene_ack" });
+    device.send({ checksum: "sum-assigned", id: randomUUID(), type: "scene_ack" });
+    const applied = await waitForAuditRow(frame.id, "frame.scenes_applied");
+    expect(applied.metadata).toEqual({ checksum: "sum-assigned" });
+    expect(
+      (await frameAuditRows(frame.id)).filter(
+        (row) => row.eventType === "frame.scenes_applied",
+      ),
+    ).toHaveLength(1);
+
+    // The device says goodbye (1000 = closed_by_device).
+    device.ws.close(1000);
+    const disconnected = await waitForAuditRow(frame.id, "frame.disconnected");
+    expect(disconnected.metadata).toEqual({ reason: "closed_by_device" });
+    browser.ws.close();
+  });
+
+  it("debounces a connect/disconnect flap and never double-records a superseded socket", async () => {
+    // Default hub: 60 s debounce. One connect, one drop, one reconnect —
+    // all within a second — leaves exactly one lifecycle row.
+    const { frame, privateKey, token } = await createFrameFixture();
+    const first = await openDevice(token);
+    await handshake(first, privateKey);
+    await waitForAuditRow(frame.id, "frame.connected");
+    first.ws.close();
+    await waitFor(async () => {
+      const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return row?.connected === false ? row : undefined;
+    }, "frame marked offline");
+    const second = await openDevice(token);
+    await handshake(second, privateKey);
+    await waitFor(async () => {
+      const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return row?.connected === true ? row : undefined;
+    }, "frame back online");
+    const lifecycle = (await frameAuditRows(frame.id)).filter(
+      (row) =>
+        row.eventType === "frame.connected" ||
+        row.eventType === "frame.disconnected",
+    );
+    expect(lifecycle.map((row) => row.eventType)).toEqual(["frame.connected"]);
+    second.ws.close();
+  });
+
+  it("records a kicked session when the frame is revoked, instead of a plain disconnect", async () => {
+    const audited = await startExtraHub({ lifecycleAuditDebounceMs: 0 });
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token, audited.port);
+    await handshake(device, privateKey);
+    await waitForAuditRow(frame.id, "frame.connected");
+
+    await revokeFrame(db, { id: frame.id, linkedClientId: frame.linkedClientId });
+    expect(await device.closed).toBe(4401);
+
+    const kicked = await waitForAuditRow(frame.id, "frame.session_kicked");
+    expect(kicked.metadata).toEqual({ reason: "frame_revoked" });
+    expect(kicked.actor).toEqual({ frameId: frame.id, kind: "device" });
+    expect(
+      (await frameAuditRows(frame.id)).filter(
+        (row) => row.eventType === "frame.disconnected",
+      ),
+    ).toHaveLength(0);
   });
 });
 

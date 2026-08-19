@@ -25,9 +25,11 @@ A cloud frame talks to `frame-hub` over one outbound WebSocket. The provider
 can push scenes, a short allowlist of declarative settings and a handful of
 commands; everything else stays local to the device.
 
-- **Account hardening.** Passkeys/TOTP 2FA, re-authentication before sensitive
-  actions (revoking frames, bulk assignment changes, scope grants), and a
-  per-frame audit trail surfaced in the UI.
+- **Account hardening.** Passkeys/TOTP 2FA (optional, shipped 2026-08) and the
+  per-frame audit trail (workspace "Activity" panel, shipped 2026-08) are done;
+  left: re-authentication before sensitive actions (revoking frames, bulk
+  assignment changes, scope grants) — a "recently authenticated" session claim
+  plus a `requireRecentAuth()` helper in front of those routes.
 
 - **Panel-displayed link code.** Show the enrollment code/QR on the e-ink panel
   itself, as proof of possession, rather than only on the portal and admin

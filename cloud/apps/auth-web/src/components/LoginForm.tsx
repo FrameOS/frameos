@@ -1,6 +1,7 @@
 "use client";
 
-import { LogIn } from "lucide-react";
+import { startAuthentication } from "@simplewebauthn/browser";
+import { KeyRound, LogIn } from "lucide-react";
 import posthog from "posthog-js";
 import { useState } from "react";
 
@@ -19,6 +20,63 @@ export function LoginForm({
   const googleHref = `/api/auth/google/start${
     returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ""
   }`;
+
+  // Passwordless: a discoverable passkey with user verification is the whole
+  // sign-in. The browser lists the matching passkeys; the server learns the
+  // account from the credential that answers.
+  async function signInWithPasskey() {
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      const optionsResponse = await fetch("/api/auth/passkey/options", {
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      const optionsPayload = (await optionsResponse
+        .json()
+        .catch(() => undefined)) as
+        | { options?: Parameters<typeof startAuthentication>[0]["optionsJSON"] }
+        | undefined;
+      if (!optionsResponse.ok || !optionsPayload?.options) {
+        setError(
+          optionsResponse.status === 429
+            ? "Too many attempts. Wait a few minutes and try again."
+            : "Passkey sign-in is unavailable right now. Use your password.",
+        );
+        setSubmitting(false);
+        return;
+      }
+      const assertion = await startAuthentication({
+        optionsJSON: optionsPayload.options,
+      });
+      const response = await fetch("/api/auth/passkey/verify", {
+        body: JSON.stringify({
+          response: assertion,
+          ...(returnTo ? { return_to: returnTo } : {}),
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      if (response.ok) {
+        const payload = (await response.json()) as { redirect?: string };
+        posthog.capture("user_logged_in", { method: "passkey" });
+        window.location.assign(payload.redirect ?? "/account");
+        return;
+      }
+      setError(
+        response.status === 429
+          ? "Too many attempts. Wait a few minutes and try again."
+          : "That passkey is not registered with a FrameOS Cloud account, or could not be verified.",
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error && caught.name === "NotAllowedError"
+          ? "Passkey prompt was cancelled."
+          : "Passkeys are not available on this device or browser.",
+      );
+    }
+    setSubmitting(false);
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -102,6 +160,15 @@ export function LoginForm({
         >
           <LogIn aria-hidden size={18} />
           {submitting ? "Signing in…" : "Sign in"}
+        </button>
+        <button
+          className="button"
+          disabled={submitting}
+          onClick={() => void signInWithPasskey()}
+          type="button"
+        >
+          <KeyRound aria-hidden size={18} />
+          Sign in with a passkey
         </button>
         {googleEnabled ? (
           <a

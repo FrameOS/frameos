@@ -7,6 +7,7 @@ import {
   hiddenWritePath,
   invalidateCachedAssetSubtree,
   queueAssetsListRefresh,
+  recordAssetWriteAudit,
   runAssetWriteCommand,
 } from "../../../../../../src/lib/frame-asset-write";
 
@@ -48,5 +49,6 @@ export async function POST(
   }
   await invalidateCachedAssetSubtree(db, frame.id, path);
   await queueAssetsListRefresh(db, accountId, frame.id);
+  await recordAssetWriteAudit(db, context, "frame.asset_deleted", { path });
   return NextResponse.json({ message: "Deleted" });
 }

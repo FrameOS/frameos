@@ -4,7 +4,6 @@ import {
   verifyOidcIdToken,
 } from "@frameos-cloud/auth-client";
 import { createDb } from "@frameos-cloud/db";
-import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import {
   authCookieNames,
@@ -18,10 +17,14 @@ import {
   getGoogleOAuthConfig,
 } from "../../../../../src/lib/env";
 import {
-  createSession,
   sessionCookieName,
   sessionCookieOptions,
 } from "../../../../../src/lib/session";
+import { completeFirstFactor } from "../../../../../src/lib/sign-in";
+import {
+  pendingSignInCookieName,
+  pendingSignInCookieOptions,
+} from "../../../../../src/lib/two-factor";
 import { notifyNewCloudUser } from "../../../../../src/lib/signup-notifications";
 import { logWarn, reportError } from "../../../../../src/lib/log";
 
@@ -137,26 +140,42 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  await recordAuditEvent(db, {
-    accountId,
-    actor: { accountId, providerSubject: claims.sub },
-    eventType: "account.signed_in",
-    metadata: {
+  const outcome = await completeFirstFactor(db, {
+    auditMetadata: {
       email: claims.email,
       emailVerified: claims.email_verified,
-      method: "google",
     },
-    target: { providerIssuer: discovery.issuer },
+    method: "google",
+    profile: {
+      accountId,
+      email: claims.email,
+      emailVerified: claims.email_verified,
+      name: claims.name,
+      providerIssuer: discovery.issuer,
+      providerSubject: claims.sub,
+    },
+    returnTo,
   });
 
-  const sessionToken = await createSession(db, {
-    accountId,
-    email: claims.email,
-    emailVerified: claims.email_verified,
-    name: claims.name,
-    providerIssuer: discovery.issuer,
-    providerSubject: claims.sub,
-  });
+  // Second factor enrolled: park the sign-in in the pending cookie and let
+  // /login/verify finish it. Same cleanup of the OAuth cookies as below.
+  if (outcome.kind === "second_factor") {
+    const response = NextResponse.redirect(
+      new URL("/login/verify", getBaseUrl()),
+    );
+    response.cookies.set(
+      pendingSignInCookieName,
+      outcome.pendingToken,
+      pendingSignInCookieOptions(),
+    );
+    response.cookies.delete(authCookieNames.state);
+    response.cookies.delete(authCookieNames.nonce);
+    response.cookies.delete(authCookieNames.verifier);
+    response.cookies.delete(authCookieNames.returnTo);
+    response.cookies.delete(authCookieNames.mergeEmail);
+    return response;
+  }
+  const sessionToken = outcome.token;
 
   const response = NextResponse.redirect(
     new URL(returnTo ?? "/account", getBaseUrl()),

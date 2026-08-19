@@ -89,6 +89,55 @@ React Server Components where `cookies().set()` throws. The row remains the
 single enforcement point, so logout, a password change, and the admin "revoke
 sessions" button all still take effect on the very next request.
 
+## Two-Factor Authentication (optional)
+
+An account that controls physical frames can add a second step to sign-in. It
+is opt-in, managed on `/account/security`, and ON exactly when the account has
+a confirmed authenticator-app secret or at least one passkey — the credentials
+are the flag (`account_totp`, `account_passkeys`, migration 0034), so nothing
+can drift out of sync with them.
+
+- **Authenticator app (TOTP, RFC 6238)** — `POST /api/account/two-factor/totp`
+  mints a 160-bit base32 secret (stored AES-256-GCM under
+  `FRAMEOS_CLOUD_ENCRYPTION_KEY`) plus an `otpauth://` URI and a server-rendered
+  QR SVG; `POST …/totp/confirm` with one valid code flips it on. Codes are six
+  digits, 30 s steps, ±1 step of drift, and the accepted step is persisted so a
+  captured code cannot be replayed inside its window.
+- **Passkeys (WebAuthn)** — `@simplewebauthn/server`; relying-party id is the
+  cloud origin's hostname (override with `FRAMEOS_WEBAUTHN_RP_ID` when the
+  login and account surfaces sit on different subdomains — set it to the common
+  parent domain), expected origins are the configured app origins. Challenges
+  are stateless: a signed JWT in an httpOnly cookie, 5 minutes. Registration
+  asks for a discoverable, `userVerification: preferred` credential, so the
+  same passkey also works as a **passwordless** sign-in ("Sign in with a
+  passkey" on `/login`, `POST /api/auth/passkey/{options,verify}`): there user
+  verification is *required* and one assertion is the whole sign-in.
+- **Recovery codes** — ten single-use `xxxxx-xxxxx` codes, minted when the
+  first second factor is confirmed and shown exactly once, stored as keyed
+  HMAC hashes (like device user codes); regenerating replaces the set, and they
+  are deleted when the last second factor goes.
+
+**Sign-in gate.** Both session-minting routes (`/api/auth/login` and the Google
+callback) end in `completeFirstFactor()` (`src/lib/sign-in.ts`). With a second
+factor enrolled it mints no session: it sets a 10-minute signed
+`frameos_signin_pending` cookie and sends the browser to `/login/verify`, which
+offers a passkey (`/api/auth/second-factor/passkey/{options,verify}`) or an
+authenticator/recovery code (`/api/auth/second-factor/code`). Only those
+routes turn the pending cookie into a real session; the pending token grants
+nothing by itself. Everything downstream of a session (device approval,
+FrameOS-backend SSO, the frames SPA) is therefore covered without changes.
+Code checks are rate-limited per IP and per account (10 / 15 min), and every
+failure is audited (`account.second_factor_failed`).
+
+**Weakening the account** (removing the authenticator or a passkey,
+regenerating recovery codes, turning 2FA off) re-asks for the password when
+the account has one, otherwise for a current authenticator/recovery code
+(`requireWeakeningProof`, `src/lib/account-security.ts`). Every change is an
+audit event (`account.totp_enabled/disabled`, `account.passkey_added/
+removed/renamed`, `account.recovery_codes_regenerated`,
+`account.two_factor_disabled`), and `account.signed_in` carries
+`second_factor: totp|passkey|recovery_code`.
+
 ## Google OAuth Client
 
 Create an OAuth 2.0 Client ID (type "Web application") in the Google Cloud

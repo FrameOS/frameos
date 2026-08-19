@@ -131,7 +131,17 @@ export default async function AccountFramesPage() {
                   {frame.lastSeenAt ? formatDateTime(frame.lastSeenAt) : "never"}
                 </td>
                 <td>
-                  <FrameRowActions frameId={frame.id} status={frame.status} />
+                  <span className="inline-actions">
+                    {/* The per-frame audit trail lives in the workspace's
+                        Activity panel (?tool=activity). */}
+                    <Link
+                      className="button button--small"
+                      href={cloudFrameUrl(frame.id, "activity")}
+                    >
+                      Activity
+                    </Link>
+                    <FrameRowActions frameId={frame.id} status={frame.status} />
+                  </span>
                 </td>
               </tr>
             ))}
