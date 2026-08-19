@@ -4,12 +4,8 @@ import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
-import {
-  assignScenesToFrame,
-  currentSceneAssignments,
-} from "../../../../../src/lib/frame-scenes";
+import { applyProvisioningScenes } from "../../../../../src/lib/frame-provisioning";
 import { frameForAccount, frameSummary } from "../../../../../src/lib/frames";
-import { reportError } from "../../../../../src/lib/log";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 
@@ -64,76 +60,17 @@ export async function POST(
       eventType: "frame.confirmed",
       target: { frameId: frame.id },
     });
-    await applyProvisioningScenes(
-      db,
-      { accountId: session.accountId, providerSubject: session.providerSubject },
-      { ...frame, status: "active" },
-    );
-  }
-  return NextResponse.json({
-    frame: { ...frameSummary(frame), status: "active" },
-    status: "active",
-  });
-}
-
-/**
- * "Start this frame with the scenes from <that frame>", chosen while building
- * the SD image or flashing the board and carried here on the frame row.
- *
- * Deliberately AT confirmation, not at enrollment: enrollment is
- * unauthenticated (anything holding the claim code can run it), so it must
- * never be the step that decides whose scenes reach a device. By the time
- * this runs the owner has clicked Confirm, the frame is active, and the copy
- * goes through the same assignScenesToFrame gates a workspace deploy does —
- * accessibility, pinned version, shell-risk refusal.
- *
- * Best effort, and the intent is cleared either way: the confirmation itself
- * has already committed, the frame is usable without its scenes, and a copy
- * that retried on every subsequent call would fight the owner's own edits.
- * Failures are reported, never raised.
- */
-async function applyProvisioningScenes(
-  db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
-  session: { accountId: string; providerSubject?: string },
-  frame: typeof frames.$inferSelect,
-) {
-  const sourceFrameId = frame.sceneSourceFrameId;
-  if (!sourceFrameId) {
-    return;
-  }
-  try {
-    await db
-      .update(frames)
-      .set({ sceneSourceFrameId: null })
-      .where(eq(frames.id, frame.id));
-    // Re-check ownership at use time, not just at mint time: the source frame
-    // may have been deleted, or the account may have changed hands, in the
-    // days between building the card and booting it.
-    const source = await frameForAccount(db, session.accountId, sourceFrameId);
-    if (!source || source.id === frame.id) {
-      return;
-    }
-    const requested = await currentSceneAssignments(db, source.id);
-    if (requested.length === 0) {
-      return;
-    }
-    const outcome = await assignScenesToFrame(db, {
+    await applyProvisioningScenes(db, {
       accountId: session.accountId,
       actor: {
         accountId: session.accountId,
         providerSubject: session.providerSubject,
       },
-      frame,
-      requested,
-      via: "provisioning",
+      frame: { ...frame, status: "active" },
     });
-    if (!outcome.ok) {
-      reportError(
-        "frames.provisioning_scene_copy_refused",
-        new Error(outcome.failure.code),
-      );
-    }
-  } catch (error) {
-    reportError("frames.provisioning_scene_copy_failed", error);
   }
+  return NextResponse.json({
+    frame: { ...frameSummary(frame), status: "active" },
+    status: "active",
+  });
 }

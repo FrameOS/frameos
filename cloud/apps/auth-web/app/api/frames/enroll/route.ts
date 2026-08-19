@@ -1,6 +1,7 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { frameEnrollmentTokens, frames, linkedClients } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../src/lib/audit";
+import { applyProvisioningScenes } from "../../../../src/lib/frame-provisioning";
 import { NextRequest, NextResponse } from "next/server";
 import {
   authenticateLinkedClient,
@@ -105,9 +106,17 @@ function parseHardware(value: unknown): Record<string, unknown> | null {
 
 // Device enrollment (wire contract: docs/cloud-frames.md "Enrollment").
 //
-// Flow A — unauthenticated, with a single-use claim token from "Add frame".
-//   The frame is born `pending`; the owner confirms it in the account UI
-//   before any scene push is accepted.
+// Flow A — unauthenticated, with a claim token from "Add frame".
+//   The FIRST enrollment of a token is born `active`: minting the token was
+//   the owner's deliberate, authenticated act, and the overwhelmingly common
+//   first redeemer is the owner's own board booting minutes later (SD images
+//   mint multi-use tokens so a card can be reflashed, so "single-use only"
+//   would miss exactly that case). If a stolen token or leaked image beats
+//   the owner to it, the owner's own card lands `pending` behind a foreign
+//   active frame — loud, auditable, and revocable. Every LATER enrollment of
+//   a multi-use token is born `pending` and needs the owner's confirmation
+//   click: any card holding a fleet image can enroll, so each additional
+//   board brings its own proof.
 // Flow B — Bearer token from the RFC 8628 device flow (client_kind "frame").
 //   The consent screen was the ownership proof, so the frame is born
 //   `active`; this call registers the device public key.
@@ -282,7 +291,9 @@ async function enrollWithClaimToken(
           // card enrolls many frames, and the token's own frame_id records
           // only the last one, so the intent has to ride the frame row.
           sceneSourceFrameId: token.sceneSourceFrameId,
-          status: "pending",
+          // redeemClaimToken returned the post-spend row, so use_count 1 is
+          // the token's first enrollment.
+          status: token.useCount === 1 ? "active" : "pending",
         })
         .returning();
       if (!insertedFrame) {
@@ -315,12 +326,28 @@ async function enrollWithClaimToken(
     accountId: result.frame.accountId,
     actor: { claimTokenId: result.tokenId, kind: "frame_enrollment" },
     eventType: "frame.enrolled",
-    metadata: { via: "claim_token" },
+    metadata: {
+      via: "claim_token",
+      ...(result.frame.status === "active" ? { auto_confirmed: true } : {}),
+    },
     target: {
       frameId: result.frame.id,
       linkedClientId: result.frame.linkedClientId,
     },
   });
+
+  // A single-use enrollment is born active, so the provisioning scene copy
+  // ("start with the scenes from <that frame>") runs here instead of at the
+  // Confirm click. The source rides the token the owner minted — the
+  // unauthenticated caller chooses nothing — and the ownership re-check plus
+  // the deploy gates live inside applyProvisioningScenes.
+  if (result.frame.status === "active") {
+    await applyProvisioningScenes(db, {
+      accountId: result.frame.accountId,
+      actor: { claimTokenId: result.tokenId, kind: "frame_enrollment" },
+      frame: result.frame,
+    });
+  }
 
   return NextResponse.json({
     access_token: result.accessTokenValue,
@@ -333,10 +360,18 @@ async function enrollWithClaimToken(
   });
 }
 
-// Has this exact device already enrolled with this exact claim token? Only a
-// still-pending frame on a live linked client counts; the claim token itself
-// is the secret that authorizes the lookup, so this grants nothing a fresh
-// enrollment would not have granted.
+// A retry may arrive minutes after the response was lost, so a frame that is
+// no longer pending must still be replayable for a while.
+const replayActiveWindowSeconds = 15 * 60;
+
+// Has this exact device already enrolled with this exact claim token? The
+// claim token itself is the secret that authorizes the lookup, so this grants
+// nothing a fresh enrollment would not have granted. A still-pending frame on
+// a live linked client always counts; an ACTIVE frame counts only briefly
+// after its enrollment (a token's first enrollment is born active, so its
+// lost-response retry would otherwise find nothing) — never beyond that
+// window, or a claim token captured after the fact could mint fresh
+// credentials for a frame that has long been in service.
 async function replayEnrollment(
   db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
   wsUrl: string | undefined,
@@ -352,6 +387,16 @@ async function replayEnrollment(
     return undefined;
   }
 
+  const replayableStatus = or(
+    eq(frames.status, "pending"),
+    and(
+      eq(frames.status, "active"),
+      gt(
+        frames.createdAt,
+        new Date(Date.now() - replayActiveWindowSeconds * 1000),
+      ),
+    ),
+  );
   const [existing] = await db
     .select({ frame: frames })
     .from(frames)
@@ -360,7 +405,7 @@ async function replayEnrollment(
       and(
         eq(frames.accountId, token.accountId),
         eq(frames.publicKey, input.publicKey),
-        eq(frames.status, "pending"),
+        replayableStatus,
         isNull(linkedClients.revokedAt),
       ),
     )

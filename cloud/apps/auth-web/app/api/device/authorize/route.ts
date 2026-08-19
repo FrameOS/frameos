@@ -19,7 +19,10 @@ import {
   identityRateLimitResponse,
   rateLimitResponse,
 } from "../../../../src/lib/rate-limit";
-import { requireRecentAuth } from "../../../../src/lib/recent-auth";
+import {
+  recentApprovalMaxAgeSeconds,
+  requireRecentAuth,
+} from "../../../../src/lib/recent-auth";
 import { createEncryptedSecretToken, hashUserCode } from "../../../../src/lib/secrets";
 import { readSession } from "../../../../src/lib/session";
 import { reportError } from "../../../../src/lib/log";
@@ -61,9 +64,11 @@ export async function POST(request: NextRequest) {
     return response;
   }
   // Granting a device (or widening its scopes) is sensitive: the session must
-  // have proved its credentials recently. /device sends the user through
-  // /login/reauth before showing the approve button; this is the backstop.
-  const stale = await requireRecentAuth(db, accountId);
+  // have proved its credentials recently — within the wider approval window,
+  // sized for an afternoon of setting up frames. /device sends the user
+  // through /login/reauth before showing the approve button; this is the
+  // backstop.
+  const stale = await requireRecentAuth(db, accountId, recentApprovalMaxAgeSeconds);
   if (stale) {
     return stale;
   }

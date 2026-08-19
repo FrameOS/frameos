@@ -26,6 +26,7 @@ import { resetRateLimitForTests } from "../../lib/rate-limit";
 import {
   markSessionReauthenticated,
   reauthMethods,
+  recentApprovalMaxAgeSeconds,
   recentAuthMaxAgeSeconds,
 } from "../../lib/recent-auth";
 import { hashSecret } from "../../lib/secrets";
@@ -234,7 +235,8 @@ describe("sensitive routes require a recent credential check", () => {
 
   it("a stale session gets 403 reauth_required with the proofs on offer", async () => {
     const user = await passwordUser();
-    await ageSession(user.token);
+    // Older than BOTH windows, so revoke and approve alike refuse.
+    await ageSession(user.token, recentApprovalMaxAgeSeconds + 60);
     const { frameId, linkedClientId } = await seedFrame(user.accountId);
 
     const frameResponse = await revokeFrame(
@@ -265,7 +267,30 @@ describe("sensitive routes require a recent credential check", () => {
       request("/api/device/authorize", { body: { user_code: userCode } }),
     );
     expect(authorizeResponse.status).toBe(403);
-    expect(await authorizeResponse.json()).toMatchObject({ error: "reauth_required" });
+    expect(await authorizeResponse.json()).toMatchObject({
+      error: "reauth_required",
+      reauth: { max_age_seconds: recentApprovalMaxAgeSeconds },
+    });
+  });
+
+  it("approving rides the wider window; revoking does not", async () => {
+    // Signed in twenty minutes ago: stale for a revoke (15 min window),
+    // fresh enough to approve a device link (2 h window) — an afternoon of
+    // setting up frames must not re-prompt on every board.
+    const user = await passwordUser();
+    await ageSession(user.token, 20 * 60);
+    const { frameId } = await seedFrame(user.accountId);
+
+    const revoke = await revokeFrame(request(`/api/frames/${frameId}/revoke`, { body: {} }), {
+      params: Promise.resolve({ frameId }),
+    });
+    expect(revoke.status).toBe(403);
+
+    const { user_code: userCode } = await startDeviceRequest();
+    const approve = await authorizeDevice(
+      request("/api/device/authorize", { body: { user_code: userCode } }),
+    );
+    expect(approve.status).toBe(200);
   });
 
   it("the password re-proves the session and the action goes through", async () => {

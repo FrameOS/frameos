@@ -106,9 +106,24 @@ a usable access token, so a response lost in flight does not strand the
 device. The same token presented with a *different* device key is refused —
 `409 public_key_mismatch` — since that is a different device, not a retry.
 
-The frame stores its access token in a `0600` state file and appears as
-**pending** in the owner's account; the owner confirms it there (a deliberate
-click, showing hardware details) before any scene push is accepted.
+The frame stores its access token in a `0600` state file. Whether it needs a
+confirmation click depends on whether it is the token's first enrollment:
+
+- **The first enrollment of a token is born active.** Minting the token was
+  the owner's deliberate, authenticated act, and the overwhelmingly common
+  first redeemer is the owner's own board booting minutes later — asking the
+  owner to confirm their own two-minute-old token again is ceremony without
+  proof. (SD images mint multi-use tokens so a card can be reflashed, which
+  is why the rule keys on first use, not on a single-use budget.) If a
+  stolen token or leaked image beats the owner's board to it, the owner's
+  own card lands pending behind a foreign active frame — loud, auditable,
+  revocable. Provisioning scene intent (`scene_source_frame_id`) is applied
+  right at enrollment.
+- **Every later enrollment of a multi-use token appears as pending** and the
+  owner confirms it (a deliberate click, showing hardware details) before
+  any scene push is accepted — any card holding a fleet image can enroll, so
+  each additional board brings its own proof.
+
 Re-enrolling a revoked frame needs a fresh claim token.
 
 ### A2. Re-enrollment (a claim token bound to an existing frame)
@@ -742,7 +757,8 @@ curl -fsSL {provider}/install.sh | \
 The script installs the prebuilt release binaries and services as usual,
 then writes the same `state/cloud_enroll_pending.json` handoff (mode `0600`,
 dir `0700`) the SD-image flow uses, so the frame enrolls via flow A on first
-start and appears as pending. Setting a claim token forces the backend
+start (the token's first enrollment is active right away; later enrollments
+of a multi-use image token stay pending behind a confirmation). Setting a claim token forces the backend
 connection off and refuses an explicit `FRAMEOS_BACKEND_ENABLED=true` — one
 control plane at a time. Display questions stay interactive (the script
 keeps its prompts); every prompt can be pre-answered with the script's
