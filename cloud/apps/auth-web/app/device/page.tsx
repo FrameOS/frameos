@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
+import { createDb } from "@frameos-cloud/db";
 import { AppShell } from "../../src/components/AppShell";
 import { DeviceApprovalPanel } from "../../src/components/DeviceApprovalPanel";
+import { hasDatabaseUrl } from "../../src/lib/env";
+import { hasRecentAuth, reauthPath } from "../../src/lib/recent-auth";
 import { readSession } from "../../src/lib/session";
 
 export const metadata = { title: "Connect this FrameOS backend" };
@@ -17,18 +20,23 @@ export default async function DevicePage({ searchParams }: DevicePageProps) {
   const initialReturnTo = Array.isArray(returnTo) ? returnTo[0] : returnTo;
 
   // Connecting a device always needs a signed-in account; go through login
-  // first and come straight back to this code.
+  // first and come straight back to this code. Approving is a sensitive
+  // action, so a session that has not proved its credentials recently goes
+  // through /login/reauth the same way (the authorize route enforces it too).
+  const query = new URLSearchParams();
+  if (initialUserCode) {
+    query.set("user_code", initialUserCode);
+  }
+  if (initialReturnTo) {
+    query.set("return_to", initialReturnTo);
+  }
+  const target = `/device${query.size > 0 ? `?${query.toString()}` : ""}`;
   const session = await readSession();
   if (!session?.accountId) {
-    const query = new URLSearchParams();
-    if (initialUserCode) {
-      query.set("user_code", initialUserCode);
-    }
-    if (initialReturnTo) {
-      query.set("return_to", initialReturnTo);
-    }
-    const target = `/device${query.size > 0 ? `?${query.toString()}` : ""}`;
     redirect(`/login?return_to=${encodeURIComponent(target)}`);
+  }
+  if (hasDatabaseUrl() && !(await hasRecentAuth(createDb()))) {
+    redirect(`${reauthPath}?return_to=${encodeURIComponent(target)}`);
   }
 
   return (

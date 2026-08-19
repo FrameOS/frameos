@@ -52,9 +52,16 @@ export async function GET(request: NextRequest) {
     request.nextUrl.searchParams.get("return_to"),
   );
 
+  // /login/reauth sends accounts that have nothing local to check (no
+  // password, no second factor) back through Google. A silent Google SSO
+  // round-trip would prove nothing, so ask Google to re-prompt for
+  // credentials; the callback then mints a fresh session as usual.
+  const reauth = request.nextUrl.searchParams.get("reauth") === "1";
+
   const authorizationUrl = buildAuthorizationUrl(discovery, {
     clientId: config.clientId,
     codeChallenge: pkce.challenge,
+    ...(reauth ? { extraParams: { prompt: "login" } } : {}),
     nonce,
     redirectUri: getGoogleCallbackUrl(),
     scopes: [...frameosCloudAuthScopes],

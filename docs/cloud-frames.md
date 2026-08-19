@@ -833,7 +833,7 @@ GET  {provider}/api/frames/{id}                # one frame, state + sync status
 GET  {provider}/api/frames/{id}/metrics        # retained metrics + `reboots` markers (telemetry:metrics)
 GET  {provider}/api/frames/{id}/metrics/recent # the same, from ?since=
 POST {provider}/api/frames/{id}/confirm        # pending → active
-POST {provider}/api/frames/{id}/revoke         # revoke link; device demotes itself on next 401
+POST {provider}/api/frames/{id}/revoke         # revoke link; device demotes itself on next 401; 403 reauth_required unless the session proved its credentials within 15 min (cloud/docs/auth.md)
 GET  {provider}/api/frames/{id}/logs           # retained logs (telemetry:logs)
 GET  {provider}/api/frames/{id}/activity       # the frame's audit trail, newest first; ?limit= (≤200), ?before=&before_id= cursor from next_cursor
 GET  {provider}/api/frames/{id}/scenes         # assigned scenes

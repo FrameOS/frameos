@@ -25,19 +25,10 @@ A cloud frame talks to `frame-hub` over one outbound WebSocket. The provider
 can push scenes, a short allowlist of declarative settings and a handful of
 commands; everything else stays local to the device.
 
-- **Account hardening.** Passkeys/TOTP 2FA (optional, shipped 2026-08) and the
-  per-frame audit trail (workspace "Activity" panel, shipped 2026-08) are done;
-  left: re-authentication before sensitive actions (revoking frames, bulk
-  assignment changes, scope grants) — a "recently authenticated" session claim
-  plus a `requireRecentAuth()` helper in front of those routes.
-
 - **Panel-displayed link code.** Show the enrollment code/QR on the e-ink panel
   itself, as proof of possession, rather than only on the portal and admin
   pages. The private-network elevation already does exactly this ceremony
   (`frameos/local_access.nim`) and is the model to copy.
-
-- **Backend↔cloud promotion/demotion ceremony.** An explicit local action that
-  moves a frame between control planes without a factory reset. UX is open.
 
 ---
 
@@ -71,8 +62,6 @@ enabled on images that have no backend to talk to.
 
 Matrix in `docs/api-triality.md`.
 
-- ESP32: full web admin shell parity. The device API is close to complete —
-  what is left is the admin UI the Pi serves and the ESP32 does not.
 - Frame import/adoption: standalone export/source payloads, and a backend
   adoption flow for standalone frames.
 
@@ -124,6 +113,13 @@ case, so it is skipped until abuse is actually observed.
 
 Everything else parked:
 
+- **Backend↔cloud promotion/demotion ceremony.** An explicit local action
+  that moves a frame between control planes without a factory reset. UX is
+  open; a half-built attempt was dropped in 2026-08. Today the answer is
+  re-enrolling from the other side.
+- **ESP32: full web admin shell parity.** The device API is close to
+  complete — what is left is the admin UI the Pi serves and the ESP32 does
+  not. Parked until someone actually misses it on a board.
 - **Operator-facing audit/event export** (auth-web) — only once there is an
   operator surface to put it on.
 - **Deferred Pi models.** Pi 500 and CM5 Lite need `bcm2712-rpi-500` /

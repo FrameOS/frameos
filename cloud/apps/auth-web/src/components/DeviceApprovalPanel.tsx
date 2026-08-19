@@ -17,6 +17,7 @@ import {
   deviceScopeDescriptions,
   deviceScopeLabels,
 } from "../lib/device-scopes";
+import { redirectToReauthIfRequired } from "../lib/reauth-client";
 
 type DeviceRequest = {
   client_kind?: "backend" | "frame";
@@ -116,6 +117,11 @@ export function DeviceApprovalPanel({
       status?: string;
     };
     if (!response.ok) {
+      // The page already routed a stale session through /login/reauth; this
+      // catches the window expiring while the panel was open.
+      if (redirectToReauthIfRequired(response, payload)) {
+        return;
+      }
       setState({
         kind: "error",
         message: payload.error ?? "Request failed",

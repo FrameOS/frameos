@@ -63,7 +63,7 @@ export function webauthnChallengeCookieOptions() {
   };
 }
 
-type ChallengePurpose = "authenticate" | "register" | "second_factor";
+type ChallengePurpose = "authenticate" | "reauth" | "register" | "second_factor";
 
 type ChallengeClaims = {
   accountId?: string | undefined;

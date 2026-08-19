@@ -2,6 +2,7 @@
 
 import { Unplug } from "lucide-react";
 import { useState } from "react";
+import { redirectToReauthIfRequired } from "../lib/reauth-client";
 
 export function RevokeLinkedClientButton({ linkedClientId }: { linkedClientId: string }) {
   const [status, setStatus] = useState<"idle" | "revoking" | "revoked" | "error">("idle");
@@ -14,6 +15,14 @@ export function RevokeLinkedClientButton({ linkedClientId }: { linkedClientId: s
       method: "POST",
     });
 
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => undefined)) as
+        | { error?: string }
+        | undefined;
+      if (redirectToReauthIfRequired(response, payload)) {
+        return;
+      }
+    }
     setStatus(response.ok ? "revoked" : "error");
   }
 

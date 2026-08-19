@@ -278,6 +278,11 @@ export const sessions = pgTable(
     absoluteExpiresAt: timestamp("absolute_expires_at", {
       withTimezone: true,
     }).notNull(),
+    // When the session last proved the account's credentials (sign-in, or a
+    // later /api/auth/reauth). Sensitive routes require it to be recent.
+    authenticatedAt: timestamp("authenticated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true })
       .defaultNow()

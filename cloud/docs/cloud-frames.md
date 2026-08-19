@@ -374,10 +374,13 @@ An account that controls physical devices needs more than email + password:
   and routes in `cloud/docs/auth.md`, "Two-Factor Authentication"). Both
   session-minting routes gate on it; a passkey with user verification also
   signs in passwordlessly.
-- Re-authentication for sensitive actions (revoking frames, changing scene
-  assignments in bulk, scope grants) — still open. Today only the
-  account-weakening routes (removing a second factor, deleting the account)
-  re-ask for the password or a current code.
+- Re-authentication for sensitive actions — **shipped.** Revoking a frame
+  or a linked backend and approving a device link / scope change need a
+  session that proved its credentials within the last 15 minutes
+  (`403 reauth_required` → `/login/reauth`; design in `auth.md`,
+  "Re-authentication"). Scene assignment is deliberately not gated: it is
+  the workspace's save path. The account-weakening routes (removing a
+  second factor, deleting the account) keep their own in-body proof.
 - Per-frame audit trail surfaced in the UI — **shipped.** Every
   `audit_events` row that concerns a frame carries `target.frameId`
   (indexed, migration 0035); `GET /api/frames/{id}/activity` serves the

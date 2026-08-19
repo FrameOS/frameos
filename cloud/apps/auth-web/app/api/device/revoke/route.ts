@@ -9,6 +9,7 @@ import {
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { requireRecentAuth } from "../../../../src/lib/recent-auth";
 import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -35,6 +36,12 @@ export async function POST(request: NextRequest) {
   const { db, response } = requireDatabase();
   if (!db) {
     return response;
+  }
+  // Revoking a link is sensitive: the session must have proved its
+  // credentials recently (403 reauth_required otherwise).
+  const stale = await requireRecentAuth(db, session.accountId);
+  if (stale) {
+    return stale;
   }
 
   const body = await readJsonObject(request);
