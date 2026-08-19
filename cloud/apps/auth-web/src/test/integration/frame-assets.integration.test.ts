@@ -440,7 +440,15 @@ function fakeDevice(
 ) {
   const seen: (typeof frameCommands.$inferSelect)[] = [];
   let stopped = false;
-  const state = { maxPendingSeen: 0 };
+  // Per TYPE, not overall: the asset routes queue an assets_list refresh
+  // after every write, so "pending commands for this frame" briefly includes
+  // one that has nothing to do with the upload under test. Counting all of
+  // them made "one chunk in flight" fail on a loaded runner whenever that
+  // refresh was still unacked as the next chunk went out.
+  const state = {
+    maxPendingByType: new Map<string, number>(),
+    overlaps: new Set<string>(),
+  };
   const loop = (async () => {
     while (!stopped) {
       const pending = await db
@@ -448,7 +456,22 @@ function fakeDevice(
         .from(frameCommands)
         .where(and(eq(frameCommands.frameId, frameId), eq(frameCommands.status, "pending")))
         .orderBy(frameCommands.createdAt);
-      state.maxPendingSeen = Math.max(state.maxPendingSeen, pending.length);
+      if (pending.length > 1) {
+        // Kept for the next time this trips on CI and not locally: the
+        // failure message then names WHICH commands were in flight together,
+        // instead of leaving "expected 2 to be 1" to be re-derived.
+        state.overlaps.add(pending.map((command) => command.type).sort().join(" + "));
+      }
+      const byType = new Map<string, number>();
+      for (const command of pending) {
+        byType.set(command.type, (byType.get(command.type) ?? 0) + 1);
+      }
+      for (const [type, count] of byType) {
+        state.maxPendingByType.set(
+          type,
+          Math.max(state.maxPendingByType.get(type) ?? 0, count),
+        );
+      }
       for (const command of pending) {
         seen.push(command);
         const reply = answer(command);
@@ -466,8 +489,13 @@ function fakeDevice(
   })();
   return {
     seen,
-    get maxPendingSeen() {
-      return state.maxPendingSeen;
+    /** Every combination of types seen pending together in one poll. */
+    get overlaps() {
+      return [...state.overlaps];
+    },
+    /** Most commands of this type seen pending in a single poll. */
+    maxPendingOfType(type: string) {
+      return state.maxPendingByType.get(type) ?? 0;
     },
     stop: async () => {
       stopped = true;
@@ -551,8 +579,13 @@ describe("POST /api/frames/{id}/assets/upload", () => {
     expect(reassembled[8192]).toBe(2);
     expect(reassembled[linuxAssetUploadChunkBytes + 4096]).toBe((linuxAssetUploadChunkBytes / 4096 + 1) & 0xff);
     // One chunk in flight at a time: the fake device only ever saw one
-    // pending asset_put_chunk per poll.
-    expect(device.maxPendingSeen).toBe(1);
+    // pending asset_put_chunk per poll. Counted per TYPE on purpose — every
+    // asset write also queues an assets_list refresh, so the frame legitimately
+    // has two unrelated commands in flight now and then.
+    expect(
+      device.maxPendingOfType("asset_put_chunk"),
+      `chunks were pipelined; commands seen together: ${device.overlaps.join(", ") || "none"}`,
+    ).toBe(1);
   });
 
   it("restarts once on chunk_gap and reports firmware that lacks the verb", async () => {

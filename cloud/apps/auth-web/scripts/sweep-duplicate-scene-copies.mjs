@@ -11,8 +11,12 @@
 // What counts as a leftover copy here — all of these, together:
 //   - owned by the account, private, active,
 //   - never republished (latest_version = 1, exactly one version row),
-//   - never given a life of its own: no description, no tags, no gallery
-//     image beyond what the fork carried, not published anywhere,
+//   - never given a life of its own: no description, never published,
+//     nothing but the one version the copy was born with.
+//     NOT "no tags": publishing auto-classifies a new scene and assigns
+//     suggested tags, so every copy carries 4-5 inherited ones while the
+//     originals it was copied from all have descriptions. The absent
+//     description is the discriminator; the tags are noise.
 //   - named "<base> <n>" with n >= 2, where the account also has "<base>"
 //     or another copy of the same run,
 //   - created before --before (default: the #367 deploy).
@@ -173,13 +177,9 @@ try {
     if (!partOfARun) {
       continue;
     }
-    // A copy someone went on to describe, tag or re-publish is work, not
-    // litter. One version only: a second means it was saved over deliberately.
-    if (
-      scene.description ||
-      (scene.tags ?? []).length > 0 ||
-      scene.version_count !== 1
-    ) {
+    // A copy someone went on to describe or re-publish is work, not litter.
+    // One version only: a second means it was saved over deliberately.
+    if (scene.description || scene.version_count !== 1) {
       continue;
     }
 

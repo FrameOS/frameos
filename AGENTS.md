@@ -8,6 +8,42 @@
 - There are TWO control planes for frames: the self-hosted backend (`backend/` + `frontend/`) and FrameOS Cloud (`cloud/` + `cloud-frontend/`). **Any frame-facing feature or fix must land on both, or explicitly note why it's one-sided** — unless the task says otherwise. When you touch frame panels, frame APIs, device verbs, or provisioning/flashing, check the other control plane before calling the work done. The current push is porting all ESP32 backend capabilities to the cloud (see `docs/todo.md`, "ESP32 backend→cloud parity").
 - The frame workspace UI is SHARED code (`frontend/src`), wrapped for cloud by `cloud-frontend/`. A fix that "doesn't show on cloud" is usually NOT a fork — check the `workspaceSurfaces` gating (`frontend/src/scenes/workspace/`) and remember the cloud serves a PREBUILT bundle: auth-web's predev rebuilds it via turbo (`scripts/build-frames-app.mjs`), but a long-running `pnpm dev` session keeps serving the bundle from its start.
 
+## Cloud tests before you push (`verify` is the gate)
+
+- The cloud CI job named **`verify`** (`.github/workflows/cloud-ci.yml`) runs
+  `turbo run lint typecheck test build --filter='@frameos-cloud/*'` and then
+  TWO integration suites against a real Postgres: `@frameos-cloud/auth-web`
+  and `@frameos-cloud/frame-hub`. Run the same three locally from `cloud/`
+  before pushing — a green `pnpm test` alone proves little, because the
+  integration suites are where the interesting failures live:
+
+  ```
+  pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*'
+  pnpm --filter @frameos-cloud/auth-web test:integration
+  pnpm --filter @frameos-cloud/frame-hub test:integration
+  ```
+
+- **Never run two copies of one integration suite at once.** All of a suite's
+  files share ONE database and truncate between files (`fileParallelism: false`
+  exists for exactly this), so a background loop plus a foreground run will
+  produce unrelated "failures" in both. The two suites use different databases
+  and may run side by side. If tests you did not touch fail, check what else
+  was running before you believe the result.
+- **A `verify` failure is often not a type error.** Read the log before
+  concluding: the frame/device suites drive fake devices over the real command
+  queue with `setTimeout` poll loops, so they are timing-sensitive, and a
+  loaded CI runner surfaces races that a developer laptop never does — the
+  chunked-upload assertion in `frame-assets.integration.test.ts` failed on CI
+  and passed 15/15 locally.
+- **When one of those races bites, fix what the assertion measures — do not
+  add a retry, a sleep, or a widened tolerance.** The pattern that has already
+  caught us: asserting on *all* pending commands for a frame when the claim was
+  about one verb. Every asset write also queues an `assets_list` refresh, so a
+  frame legitimately has unrelated commands in flight; count per type
+  (`fakeDevice().maxPendingOfType(...)`) and record which commands were in
+  flight together, so the next failure explains itself instead of printing
+  `expected 2 to be 1`.
+
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】
