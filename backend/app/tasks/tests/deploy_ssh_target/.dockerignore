@@ -1,0 +1,7 @@
+# Kept in step with _is_context_input in context_tag.py: neither the tag
+# helper nor Python bytecode is part of the image.
+context_tag.py
+__pycache__/
+*.pyc
+*.pyo
+.dockerignore

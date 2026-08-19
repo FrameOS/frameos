@@ -22,14 +22,39 @@ from pathlib import Path
 IMAGE_NAME = "frameos-deploy-e2e-ssh-target"
 
 
+# Files that live in the context directory but never reach the image, so they
+# must not move the tag. `.dockerignore` keeps them out of Docker's build
+# context; this list keeps them out of the digest — the two say the same thing.
+_NOT_PART_OF_THE_IMAGE = {".dockerignore", Path(__file__).name}
+_NOT_PART_OF_THE_IMAGE_DIRS = {"__pycache__"}
+_NOT_PART_OF_THE_IMAGE_SUFFIXES = {".pyc", ".pyo"}
+
+
+def _is_context_input(path: Path, root: Path) -> bool:
+    if path.name in _NOT_PART_OF_THE_IMAGE:
+        return False
+    if path.suffix in _NOT_PART_OF_THE_IMAGE_SUFFIXES:
+        return False
+    return not any(
+        part in _NOT_PART_OF_THE_IMAGE_DIRS for part in path.relative_to(root).parts
+    )
+
+
 def context_digest(context_dir: Path | None = None) -> str:
-    """Short digest over every file in the build context, path names included."""
+    """Short digest over every file in the build context, path names included.
+
+    "Every file" once meant literally every file, and that cost the CI job the
+    whole point of pre-building: the workflow computed the tag by RUNNING this
+    file, then the test computed it again by IMPORTING it — and importing
+    writes ``__pycache__/context_tag.cpython-*.pyc`` into this very directory,
+    so the second digest disagreed with the first, the pre-built image was
+    never found, and the test rebuilt it from scratch on every run (~48 s on
+    top of the ~68 s pre-build). Only what Docker actually sends counts.
+    """
     root = context_dir or Path(__file__).parent
     digest = hashlib.sha256()
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
-        # This helper is part of the context but not part of the image, so
-        # changing the tag logic must not invalidate the image it names.
-        if path.name == Path(__file__).name:
+        if not _is_context_input(path, root):
             continue
         digest.update(path.relative_to(root).as_posix().encode())
         digest.update(b"\0")

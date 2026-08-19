@@ -477,7 +477,14 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
     nim_path = find_nim_v2()
     _say(f"using Nim compiler at {nim_path}")
     monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
-    monkeypatch.setenv("FRAMEOS_CROSS_MAKE_JOBS", os.environ.get("FRAMEOS_CROSS_MAKE_JOBS", "2"))
+    # Production cross-compiles use every core (`nproc` inside the toolchain
+    # container); this used to pin the test to 2 and left half of a 4-core
+    # runner idle for the ~50 s C compile. The env override stays for anyone
+    # who needs to throttle it on a shared machine.
+    monkeypatch.setenv(
+        "FRAMEOS_CROSS_MAKE_JOBS",
+        os.environ.get("FRAMEOS_CROSS_MAKE_JOBS") or str(os.cpu_count() or 2),
+    )
     monkeypatch.setenv("FRAMEOS_PRECOMPILED_CACHE_DIR", str(tmp_path / "precompiled-cache"))
 
     with _phase("full deploy with compile on device"):
