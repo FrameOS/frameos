@@ -17,6 +17,7 @@ import {
 import { frameHost, frameIsHealthy, frameIsStale, logUpdatesFrameActivity } from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
 import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent, FrameId } from '../../types'
+import { scheduledEventTitle } from '../../utils/scheduleEvents'
 import { frameIdsEqual, parseRouteFrameId } from '../../utils/frameId'
 import { framesModel } from '../../models/framesModel'
 import { FrameosShell } from './FrameosShell'
@@ -1168,7 +1169,7 @@ function OverviewScheduleCard({ frame, scenes }: { frame: FrameType; scenes: Fra
               <div className="shrink-0 font-bold text-[color:var(--tool-strong)]">{scheduleTimeLabel(event)}</div>
               <div className="min-w-0 flex-1">
                 <div className="truncate font-semibold text-[color:var(--tool-strong)]">
-                  {sceneNameById.get(event.payload.sceneId) ?? 'Unknown scene'}
+                  {scheduledEventTitle(event, (sceneId) => sceneNameById.get(sceneId))}
                 </div>
                 <div className="frame-tool-muted truncate text-xs">{scheduleWeekdayLabel(event.weekday)}</div>
               </div>

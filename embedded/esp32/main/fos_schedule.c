@@ -7,9 +7,11 @@
 #include <unistd.h>
 
 #include "esp_log.h"
+#include "esp_system.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "nvs.h"
 
@@ -278,6 +280,14 @@ static void fire_event(const schedule_event_t *event)
         cJSON_Delete(payload);
     } else if (strcmp(event->event, "render") == 0) {
         fos_client_render_now();
+    } else if (strcmp(event->event, "restart") == 0 || strcmp(event->event, "reboot") == 0) {
+        /* The cloud-safe "automatic reboot": a schedule entry, not a cron
+         * line. One process here, so restarting the runtime and rebooting
+         * the board are the same thing. The log line above is what the owner
+         * sees; flush it and let the upload go out before the reset. */
+        frameos_nim_flush_logs();
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        esp_restart();
     } else if (frameos_nim_available()) {
         frameos_nim_send_event(event->event, event->payload);
         if (frameos_nim_render_requested()) fos_client_render_now();

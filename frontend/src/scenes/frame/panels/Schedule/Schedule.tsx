@@ -8,9 +8,19 @@ import { TextInput } from '../../../../components/TextInput'
 import { FrameImage } from '../../../../components/FrameImage'
 import { useActions, useValues } from 'kea'
 import { scheduleLogic } from './scheduleLogic'
-import { CalendarDaysIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, CalendarDaysIcon, PowerIcon } from '@heroicons/react/24/outline'
 import { StateFieldEdit } from '../Scenes/StateFieldEdit'
 import { FrameScene, ScheduledEvent, StateField, FrameId } from '../../../../types'
+import {
+  isScheduledSystemEvent,
+  ScheduledSystemEventName,
+  scheduledEventOptions,
+  scheduledSystemEvents,
+  scheduledSystemEventLabel,
+  scheduledSystemEventsMinVersion,
+} from '../../../../utils/scheduleEvents'
+import { cloudFrameSupportsSettingsFrom } from '../../../../utils/cloudFrameSettings'
+import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { Switch } from '../../../../components/Switch'
 import clsx from 'clsx'
@@ -58,6 +68,14 @@ function timeLabel(event: ScheduledEvent): string {
 
 function sceneName(scene: FrameScene | null | undefined, fallback = 'Unspecified scene'): string {
   return scene?.name || scene?.id || fallback
+}
+
+function entryTitle(event: ScheduledEvent, scene: FrameScene | null | undefined): string {
+  return isScheduledSystemEvent(event.event) ? scheduledSystemEventLabel(event.event) : sceneName(scene)
+}
+
+function SystemEventIcon({ event, className }: { event: ScheduledSystemEventName; className?: string }): JSX.Element {
+  return event === 'reboot' ? <PowerIcon className={className} /> : <ArrowPathIcon className={className} />
 }
 
 function entryCountLabel(count: number): string {
@@ -282,7 +300,11 @@ function ScheduleEntryCard({ frameId, event, scene, className }: ScheduleEntryCa
       )}
     >
       <div className="h-16 w-20 shrink-0 overflow-hidden rounded-xl bg-slate-200/60">
-        {scene ? (
+        {isScheduledSystemEvent(event.event) ? (
+          <div className="flex h-full w-full items-center justify-center">
+            <SystemEventIcon event={event.event} className="h-7 w-7 text-slate-500" />
+          </div>
+        ) : scene ? (
           <FrameImage
             frameId={frameId}
             sceneId={scene.id}
@@ -299,7 +321,7 @@ function ScheduleEntryCard({ frameId, event, scene, className }: ScheduleEntryCa
       </div>
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="truncate text-sm font-semibold">{sceneName(scene)}</div>
+          <div className="truncate text-sm font-semibold">{entryTitle(event, scene)}</div>
           {event.disabled ? (
             <span className="shrink-0 rounded-full bg-slate-500/12 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-500">
               Disabled
@@ -319,8 +341,11 @@ interface EditRowProps {
   event: ScheduledEvent
   scene: FrameScene | null
   eventFields: StateField[]
+  /** null = system actions are not available for this frame (reason in systemEventsUnavailableReason). */
+  systemEventsUnavailableReason: string | null
   closeEvent: (id: string) => void
   deleteEvent: (id: string) => void
+  setEventType: (id: string, eventType: ScheduledEvent['event']) => void
 }
 
 function CompactScheduleField({
@@ -340,7 +365,24 @@ function CompactScheduleField({
   )
 }
 
-function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }: EditRowProps) {
+function EditRow({
+  frameId,
+  event,
+  scene,
+  eventFields,
+  systemEventsUnavailableReason,
+  closeEvent,
+  deleteEvent,
+  setEventType,
+}: EditRowProps) {
+  const systemEvent = isScheduledSystemEvent(event.event)
+  // An entry that already IS a system action stays editable even below the
+  // firmware floor — hiding it would hide what the schedule will do.
+  const actionOptions = scheduledEventOptions.map((option) => ({
+    ...option,
+    disabled:
+      option.value !== event.event && isScheduledSystemEvent(option.value) && systemEventsUnavailableReason !== null,
+  }))
   return (
     <div className="space-y-4">
       <button
@@ -356,6 +398,21 @@ function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }
         />
       </button>
       <div className="grid grid-cols-2 gap-3 @md:grid-cols-[minmax(8rem,1fr)_minmax(4.5rem,5rem)_minmax(4.5rem,5rem)]">
+        <CompactScheduleField label="Action" className="col-span-2 @md:col-span-3">
+          <div title={systemEventsUnavailableReason ?? undefined}>
+            <Select
+              options={actionOptions}
+              value={event.event}
+              onChange={(value_) => setEventType(event.id, value_ as ScheduledEvent['event'])}
+              className="h-9 min-w-0"
+            />
+            {systemEvent ? (
+              <div className="frame-tool-muted mt-1 text-xs">
+                {scheduledSystemEvents.find((option) => option.value === event.event)?.description}
+              </div>
+            ) : null}
+          </div>
+        </CompactScheduleField>
         <CompactScheduleField label="Repeats" className="col-span-2 @md:col-span-1">
           <Field name="weekday" className="@md:!block">
             {({ value, onChange }) => (
@@ -394,7 +451,7 @@ function EditRow({ frameId, event, scene, eventFields, closeEvent, deleteEvent }
         </CompactScheduleField>
       </div>
       <Group name="payload">
-        {event.payload.sceneId ? (
+        {!systemEvent && event.payload?.sceneId ? (
           <Group name="state">
             <div className="mt-3 space-y-3">
               {visiblePublicStateFields(eventFields, event.payload?.state ?? {}).map((field) => (
@@ -470,6 +527,8 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
   const {
     editEvent,
     addEventForScene,
+    addSystemEvent,
+    setEventType,
     closeEvent,
     deleteEvent,
     hideDropZone,
@@ -477,6 +536,18 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
     setSceneSearch,
     showDropZone,
   } = useActions(scheduleLogic({ frameId }))
+  const { frame } = useValues(frameLogic)
+  // Cloud-managed frames: older firmware fires restart/reboot entries onto
+  // the scene as a no-op, so below the floor the buttons are disabled with a
+  // reason, never hidden (the settings panel's convention). Backend frames get
+  // the runtime they were deployed with, so no gate there.
+  const systemEventsUnavailableReason =
+    workspaceMode() === 'cloud' &&
+    !cloudFrameSupportsSettingsFrom(scheduledSystemEventsMinVersion, frame.frameos_version)
+      ? frame.frameos_version
+        ? `Scheduled restarts and reboots need FrameOS ${scheduledSystemEventsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to schedule them here.`
+        : `Scheduled restarts and reboots need FrameOS ${scheduledSystemEventsMinVersion} or newer on the frame. It has not reported a version yet.`
+      : null
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const scenesById = Object.fromEntries(sortedScenes.map((scene) => [scene.id, scene]))
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(sortedScenes)
@@ -600,6 +671,36 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
     </div>
   )
 
+  const maintenancePicker = (
+    <div className="frame-tool-card overflow-hidden rounded-[22px]">
+      <div className="p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold">Maintenance</div>
+          <div className="frame-tool-muted text-xs">No scene, just an action</div>
+        </div>
+        <div className="flex flex-wrap gap-2" title={systemEventsUnavailableReason ?? undefined}>
+          {scheduledSystemEvents.map((option) => (
+            <Button
+              key={option.value}
+              color="secondary"
+              size="small"
+              disabled={systemEventsUnavailableReason !== null}
+              onClick={() => addSystemEvent(option.value)}
+              title={systemEventsUnavailableReason ?? option.description}
+              className="flex items-center gap-1.5"
+            >
+              <SystemEventIcon event={option.value} className="h-4 w-4" />
+              {option.label}
+            </Button>
+          ))}
+        </div>
+        {systemEventsUnavailableReason ? (
+          <div className="frame-tool-muted mt-2 text-xs">{systemEventsUnavailableReason}</div>
+        ) : null}
+      </div>
+    </div>
+  )
+
   const scheduleEntries = (
     <div className="space-y-2">
       {dropZoneVisible ? (
@@ -614,7 +715,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
       ) : null}
       {sortedEvents.length === 0 ? (
         <div className="frame-tool-card rounded-[22px] border-dashed p-5 text-center">
-          <div className="text-sm font-semibold">No scheduled scenes. Drag one here.</div>
+          <div className="text-sm font-semibold">Nothing scheduled. Drag a scene here, or add a maintenance entry.</div>
         </div>
       ) : null}
       {sortedEvents.map((event, sortedIndex) => {
@@ -622,7 +723,8 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
         if (eventIndex === -1) {
           return null
         }
-        const scene = scenesById[event.payload.sceneId] ?? null
+        const sceneId = isScheduledSystemEvent(event.event) ? '' : event.payload?.sceneId ?? ''
+        const scene = (sceneId ? scenesById[sceneId] : null) ?? null
         const inactive = event.disabled || disabled
 
         return (
@@ -646,9 +748,11 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
                       frameId={frameId}
                       event={event}
                       scene={scene}
-                      eventFields={fieldsForScene[event.payload.sceneId] ?? []}
+                      eventFields={(sceneId ? fieldsForScene[sceneId] : undefined) ?? []}
+                      systemEventsUnavailableReason={systemEventsUnavailableReason}
                       closeEvent={closeEvent}
                       deleteEvent={deleteEvent}
+                      setEventType={setEventType}
                     />
                   </Group>
                 </div>
@@ -663,10 +767,10 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
               >
                 <button
                   type="button"
-                  draggable={Boolean(event.payload.sceneId)}
+                  draggable={Boolean(sceneId)}
                   onDragStart={(dragEvent) => {
-                    if (event.payload.sceneId) {
-                      setFrameosSceneDragData(dragEvent.dataTransfer, event.payload.sceneId)
+                    if (sceneId) {
+                      setFrameosSceneDragData(dragEvent.dataTransfer, sceneId)
                       showDropZone()
                     }
                   }}
@@ -739,7 +843,10 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
               : 'grid gap-5 @5xl:grid-cols-[minmax(17rem,0.8fr)_minmax(24rem,1.2fr)] @5xl:items-start'
           )}
         >
-          {scenePicker}
+          <div className="space-y-4">
+            {scenePicker}
+            {maintenancePicker}
+          </div>
           {scheduleColumn}
         </div>
       </Form>

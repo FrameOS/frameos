@@ -25,6 +25,7 @@ import { frameHost, frameIsHealthy, frameStatus } from '../../decorators/frame'
 import { framesModel } from '../../models/framesModel'
 import { urls } from '../../urls'
 import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
+import { scheduledEventTitle } from '../../utils/scheduleEvents'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
@@ -227,7 +228,9 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
       : sceneControlSelection.sceneId === livePreviewSceneId) &&
     sceneControlSelection.source === 'preview'
   const nextSchedule = nextScheduledEvent(frame.schedule)
-  const scheduledScene = nextSchedule ? scenes.find((scene) => scene.id === nextSchedule.event.payload.sceneId) : null
+  const nextScheduleTitle = nextSchedule
+    ? scheduledEventTitle(nextSchedule.event, (sceneId) => scenes.find((scene) => scene.id === sceneId)?.name)
+    : null
   const openLivePreview = (): void => {
     openLiveSceneControl(frame.id, liveSceneControlId)
   }
@@ -271,10 +274,9 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
           </div>
           {nextSchedule ? (
             <div className="frameos-muted mt-1 truncate text-xs text-slate-500">
-              {`${scheduleDatePrefix(nextSchedule.date)} ${scheduleTimeLabel(nextSchedule.event)}: ${sceneDisplayName(
-                scheduledScene,
-                'Unknown scene'
-              )}`}
+              {`${scheduleDatePrefix(nextSchedule.date)} ${scheduleTimeLabel(
+                nextSchedule.event
+              )}: ${nextScheduleTitle}`}
             </div>
           ) : null}
         </div>

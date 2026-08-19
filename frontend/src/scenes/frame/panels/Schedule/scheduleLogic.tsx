@@ -2,8 +2,9 @@ import { actions, connect, kea, key, listeners, path, props, reducers, selectors
 import { v4 as uuidv4 } from 'uuid'
 
 import type { scheduleLogicType } from './scheduleLogicType'
-import { ScheduledEvent, StateField, FrameId } from '../../../../types'
+import { ScheduledEvent, ScheduledEventName, StateField, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
+import { isScheduledSystemEvent, ScheduledSystemEventName } from '../../../../utils/scheduleEvents'
 
 export interface ScheduleLogicProps {
   frameId: FrameId
@@ -28,6 +29,12 @@ export const scheduleLogic = kea<scheduleLogicType>([
       event: newScheduledEvent(sceneId),
       insertIndex,
     }),
+    /** A restart / reboot entry: no scene, no state — see utils/scheduleEvents.ts. */
+    addSystemEvent: (systemEvent: ScheduledSystemEventName) => ({
+      event: newSystemScheduledEvent(systemEvent),
+    }),
+    /** Switch an existing entry between showing a scene and a system action. */
+    setEventType: (id: string, eventType: ScheduledEventName) => ({ id, eventType }),
     editEvent: (id: string) => ({ id }),
     closeEvent: (id: string) => ({ id }),
     deleteEvent: (id: string) => ({ id }),
@@ -43,6 +50,7 @@ export const scheduleLogic = kea<scheduleLogicType>([
         setDropIndex: (_, { dropIndex }) => dropIndex,
         hideDropZone: () => null,
         addEventForScene: () => null,
+        addSystemEvent: () => null,
       },
     ],
     dropZoneVisible: [
@@ -51,6 +59,7 @@ export const scheduleLogic = kea<scheduleLogicType>([
         showDropZone: () => true,
         hideDropZone: () => false,
         addEventForScene: () => false,
+        addSystemEvent: () => false,
       },
     ],
     sceneSearch: [
@@ -64,6 +73,7 @@ export const scheduleLogic = kea<scheduleLogicType>([
       {
         addEventForScene: (state, { event, insertIndex }) =>
           insertIndex === undefined || insertIndex === null ? { ...state, [event.id]: true } : state,
+        addSystemEvent: (state, { event }) => ({ ...state, [event.id]: true }),
         editEvent: (state, { id }) => ({ ...state, [id]: true }),
         closeEvent: (state, { id }) => {
           const { [id]: _, ...rest } = state
@@ -113,8 +123,9 @@ export const scheduleLogic = kea<scheduleLogicType>([
       (s) => [s.events],
       (events): Record<string, number> =>
         events.reduce((acc, event) => {
-          if (event.payload.sceneId) {
-            acc[event.payload.sceneId] = (acc[event.payload.sceneId] ?? 0) + 1
+          const sceneId = isScheduledSystemEvent(event.event) ? null : event.payload?.sceneId
+          if (sceneId) {
+            acc[sceneId] = (acc[sceneId] ?? 0) + 1
           }
           return acc
         }, {} as Record<string, number>),
@@ -134,6 +145,24 @@ export const scheduleLogic = kea<scheduleLogicType>([
         schedule: {
           ...values.schedule,
           events: insertEvent(values.events, values.sortedEvents, nextEvent, effectiveInsertIndex),
+        },
+      })
+    },
+    addSystemEvent: ({ event }) => {
+      // Keeps its own 04:00 default rather than slotting in next to the last
+      // scene change: a maintenance entry is about the hour, not the order,
+      // and the row opens for editing so the time is the first thing seen.
+      actions.setFrameFormValues({
+        ...values.frameForm,
+        schedule: { ...values.schedule, events: [...values.events, event] },
+      })
+    },
+    setEventType: ({ id, eventType }) => {
+      actions.setFrameFormValues({
+        ...values.frameForm,
+        schedule: {
+          ...values.schedule,
+          events: values.events.map((event) => (event.id === id ? withEventType(event, eventType) : event)),
         },
       })
     },
@@ -243,5 +272,33 @@ function newScheduledEvent(sceneId = ''): ScheduledEvent {
     weekday: 0,
     event: 'setCurrentScene',
     payload: { sceneId, state: {} },
+  }
+}
+
+function newSystemScheduledEvent(systemEvent: ScheduledSystemEventName): ScheduledEvent {
+  // 04:00 — the hour a nightly restart is least likely to be noticed; the
+  // cron the self-hosted backend installs for the same job defaults there too.
+  return {
+    id: uuidv4(),
+    hour: 4,
+    minute: 0,
+    weekday: 0,
+    event: systemEvent,
+    payload: {},
+  }
+}
+
+/** Keep id/time/enabled, swap what the entry does. A system action carries no payload. */
+export function withEventType(event: ScheduledEvent, eventType: ScheduledEventName): ScheduledEvent {
+  if (event.event === eventType) {
+    return event
+  }
+  if (isScheduledSystemEvent(eventType)) {
+    return { ...event, event: eventType, payload: {} }
+  }
+  return {
+    ...event,
+    event: eventType,
+    payload: { sceneId: event.payload?.sceneId ?? '', state: event.payload?.state ?? {} },
   }
 }

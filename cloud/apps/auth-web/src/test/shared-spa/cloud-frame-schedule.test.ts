@@ -54,6 +54,30 @@ describe("validateFrameSchedule", () => {
     expect(schedule?.events[0]?.disabled).toBe(true);
   });
 
+  it("accepts the panel's maintenance entries — restart and reboot with an empty payload", () => {
+    // The SPA's scheduled "Restart FrameOS" / "Reboot device" entries
+    // (frontend/src/utils/scheduleEvents.ts). The device runs them itself
+    // (runner.nim `restart`/`reboot`, fos_schedule.c) — there is no scene
+    // to name, so the payload is {} and must survive as such.
+    const { error, schedule } = validateFrameSchedule({
+      events: [
+        event({ event: "restart", payload: {} }),
+        event({ event: "reboot", hour: 4, id: "reboot-1", minute: 0 }),
+      ],
+    });
+    expect(error).toBeUndefined();
+    expect(
+      schedule?.events.map((entry) => [entry.event, entry.payload]),
+    ).toEqual([
+      ["restart", {}],
+      ["reboot", { sceneId: "scene-1", state: {} }],
+    ]);
+    const { schedule: cleared } = validateFrameSchedule({
+      events: [event({ event: "reboot", payload: undefined })],
+    });
+    expect(cleared?.events[0]).toMatchObject({ event: "reboot", payload: {} });
+  });
+
   it("accepts an empty events list (a cleared schedule)", () => {
     expect(validateFrameSchedule({ events: [] })).toEqual({
       schedule: { events: [] },

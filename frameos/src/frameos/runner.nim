@@ -8,6 +8,7 @@ import apps/data/qr/app as data_qrApp
 import frameos/apps
 import frameos/channels
 import frameos/config
+import frameos/device_setup
 import frameos/driver_render_hint
 import frameos/local_access
 import frameos/logger
@@ -589,6 +590,14 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
           of "restart":
             self.logger.log(%*{"event": "restart", "message": "Restarting FrameOS runtime"})
             quit(QuitSuccess)
+          of "reboot":
+            # A scheduled `{event: "reboot"}` entry (the cloud-safe "automatic
+            # reboot") lands here; the cloud `reboot` verb runs the same
+            # detached command from hub_client. The runtime keeps going until
+            # init takes it down, so the log line gets out first.
+            self.logger.log(%*{"event": "reboot", "message": "Rebooting the device"})
+            rebootSystemDetached()
+            continue # don't dispatch this event to the scene
           of "uploadScenes":
             let (mainSceneId, sceneIds) = updateUploadedScenesFromPayload(payload)
             if mainSceneId.isNone:

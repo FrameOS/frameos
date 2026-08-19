@@ -72,12 +72,24 @@ proc privilegedCommand*(command: string): string =
 proc privilegedAptCommand(command: string): string =
   sudoPrefix() & "env DEBIAN_FRONTEND=noninteractive " & command
 
+proc systemRebootCommand*(delaySeconds = 2): string =
+  ## The one shell line every reboot path on the device runs: detached, so the
+  ## caller's process can finish what it was doing, and `reboot` as the
+  ## fallback for an init without systemd.
+  privilegedShell("(sleep " & $delaySeconds & "; systemctl reboot || reboot) >/dev/null 2>&1 &")
+
 proc scheduleSystemReboot*(delaySeconds = 2) =
   ## Reboot the device shortly after the caller returns. The delay exists so the
   ## caller can finish writing its status file (and, over HTTP, flush a
-  ## response) before init tears the process down.
-  let command = "(sleep " & $delaySeconds & "; systemctl reboot || reboot) >/dev/null 2>&1 &"
-  discard runSetupCommand(privilegedShell(command), raiseOnError = false)
+  ## response) before init tears the process down. Logs through the setup log.
+  discard runSetupCommand(systemRebootCommand(delaySeconds), raiseOnError = false)
+
+proc rebootSystemDetached*(delaySeconds = 2) =
+  ## `scheduleSystemReboot` for the running frame — the cloud `reboot` verb
+  ## and a scheduled `reboot` event — where the caller does its own logging.
+  ## Goes through `commandRunner` so tests can intercept it instead of
+  ## rebooting the developer's machine.
+  discard commandRunner(systemRebootCommand(delaySeconds))
 
 # --- writing to a read-only root filesystem --------------------------------
 #
