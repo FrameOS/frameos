@@ -1,7 +1,8 @@
-import std/[json, options, tables, sequtils, asyncdispatch, unittest, os]
+import std/[json, options, tables, sequtils, asyncdispatch, unittest, os, strutils]
 import pixie
 import ../boot_guard
 import ../config
+import ../device_setup
 import ../driver_render_hint
 import ../runner
 import ../scenes
@@ -443,6 +444,45 @@ suite "runner loop safety":
         it{"error"}.getStr("") == "Scene not found")
     finally:
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "a reboot event runs the detached system reboot and is not handed to the scene":
+    clearEventChannel()
+
+    # The scheduler fires `{event: "reboot"}` entries (the cloud-safe automatic
+    # reboot) onto the same channel as everything else. The runner must run
+    # the privileged reboot command itself rather than dispatch the event to
+    # the scene, where it would be a silent no-op.
+    var rebootCommands: seq[string] = @[]
+    setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+      rebootCommands.add(command)
+      (output: "", exitCode: 0))
+    try:
+      var config = loadConfig()
+      let store = LogStore(entries: @[])
+      var runnerThread = RunnerThread(
+        frameConfig: config,
+        scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: getFirstSceneId(),
+        lastRenderAt: 0.0,
+        sleepFuture: none(Future[void]),
+        isRendering: false,
+        triggerRenderNext: false,
+        logger: testLogger(config, store)
+      )
+
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 2)
+      sendEvent("reboot", %*{})
+
+      let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
+      check finished
+      if finished:
+        waitFor messageLoop
+      check rebootCommands.len == 1
+      if rebootCommands.len == 1:
+        check rebootCommands[0].contains("systemctl reboot")
+      check store.hasEvent("reboot")
+    finally:
+      resetSetupCommandRunnerForTest()
 
   test "scene changes are logged while render logging is paused":
     let sceneId = "tests/runner/paused-scene-change".SceneId

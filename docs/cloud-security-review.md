@@ -138,7 +138,7 @@ cloud-service items below. What remains open is listed last, with why.
 
 ## Still open
 
-These are also tracked in `docs/todo.md`.
+Tracked here, not in `docs/todo.md`: each is either accepted, a design decision, or too small to schedule.
 
 - ~~**The frame stores its link token in plaintext**~~ — **accepted, closed
   2026-08-17.** The file-handling weaknesses around it were fixed long ago (the
@@ -159,7 +159,11 @@ These are also tracked in `docs/todo.md`.
   standalone. What stays open is the narrower thing that is actually fixable:
   if the state file ever travels (support bundles, backups), the token must be
   redacted on the way out. Nothing exports it today; the rule is on any code
-  that starts to.
+  that starts to, and the tool for it exists: `redactedCloudLinkState` in
+  `frameos/src/frameos/cloud/link_state.nim` returns a copy with every
+  secret-bearing key (`CLOUD_LINK_SECRET_KEYS` — the bearer token, a pending
+  device code, the token reference, pending login handoffs) replaced by
+  `"[redacted]"`. An exporter serialises that, never the raw file.
 - ~~Cloud rate limiting is in-memory per process~~ — resolved since this
   review: limits are Postgres-backed (`rate_limit_buckets`, atomic upsert),
   so they hold across replicas and restarts; in-memory buckets remain only

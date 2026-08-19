@@ -1,10 +1,12 @@
 import { Edge, Node } from 'reactflow'
 import type { FrameCompilationModeOptionValue } from './utils/frameBuildOptions'
 import type { FrameId } from './utils/frameId'
+import type { ScheduledEventName } from './utils/scheduleEvents'
 
 // Defined in utils/frameId.ts (which has no imports) and re-exported here so
 // the SPA's usual `from '../types'` import keeps working.
 export type { FrameId }
+export type { ScheduledEventName }
 
 export type FrameErrorBehaviorMode = 'safe_mode' | 'show_error_retry' | 'silent_retry'
 export type FrameVirtualColorMode = 'rgb' | 'bw' | 'gray4' | 'bwyr' | 'sevencolor' | 'spectra6'
@@ -454,8 +456,9 @@ export interface ScheduledEvent {
   minute: number
   hour: number
   weekday: number // undefined/null/''/0 for every day, 1-7 mon-sun, 8 for every weekday, 9 for every weekend
-  event: 'setCurrentScene'
-  payload: { sceneId: string; state: Record<string, any> }
+  /** setCurrentScene shows a scene; restart / reboot (utils/scheduleEvents.ts) carry an empty payload. */
+  event: ScheduledEventName
+  payload: { sceneId?: string; state?: Record<string, any> }
   disabled?: boolean
 }
 

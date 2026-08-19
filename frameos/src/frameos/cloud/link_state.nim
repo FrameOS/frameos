@@ -192,6 +192,39 @@ proc unionScopeString*(existing, added: string): string =
       scopes.add(scope)
   scopes.join(" ")
 
+# Keys in cloud_link.json that are secrets or secret-bearing. The file itself
+# is accepted in plaintext (0600; possession of the SD card is possession of
+# the link — docs/cloud-security-review.md), but the moment link state travels
+# — a support bundle, a device backup, a debug dump — it must go through
+# `redactedCloudLinkState` so none of these leave the device.
+const CLOUD_LINK_SECRET_KEYS* = [
+  "access_token",   # the link bearer token
+  "device_code",    # a pending device-flow poll can be hijacked with it
+  "token_reference",
+  "login_states",   # pending cloud-login handoffs (one-time nonces)
+]
+
+proc redactedCloudLinkState*(state: JsonNode): JsonNode {.gcsafe.} =
+  ## A copy of `state` safe to export: secret-bearing keys are replaced by
+  ## `"[redacted]"` when they hold anything, so a reader still sees that the
+  ## frame HAS a token without learning it. Non-object input yields `{}`.
+  if state == nil or state.kind != JObject:
+    return newJObject()
+  result = copy(state)
+  for key in CLOUD_LINK_SECRET_KEYS:
+    if not result.hasKey(key):
+      continue
+    let value = result[key]
+    let empty = case value.kind
+      of JNull: true
+      of JString: value.getStr("").len == 0
+      of JObject, JArray: value.len == 0
+      else: false
+    if empty:
+      result.delete(key)
+    else:
+      result[key] = %"[redacted]"
+
 proc isManagedLink*(state: JsonNode): bool =
   ## True when this frame is cloud-managed and the link is live.
   state{"mode"}.getStr("") == "managed" and

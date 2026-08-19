@@ -25,59 +25,6 @@ A cloud frame talks to `frame-hub` over one outbound WebSocket. The provider
 can push scenes, a short allowlist of declarative settings and a handful of
 commands; everything else stays local to the device.
 
-- **Cloud `set_settings`: what is still not pushable.** Three batches have
-  shipped, each in the same shape (device allowlist + per-value validators in
-  `validateCloudSetting`, then the auth-web validator and a version floor,
-  then the SPA rendering the fields disabled-with-reason below the floor,
-  never hidden): the base six; the 2026.8.30 Pi batch (`flip`,
-  `error_behavior`, `control_code`, `metrics_interval`,
-  `max_http_response_bytes`, `save_assets`, `timezone_updater`); and the
-  2026.8.31 hardware batch (`palette`, the partial-refresh subset of
-  `device_config`, `gpio_buttons` — the driver reads them at init, so the
-  device restarts its runtime; the SPA shows only the fields the reported
-  panel can use) plus the ESP32 firmware's own 2026.8.31 tail (`debug`,
-  `max_http_response_bytes`, `gpio_buttons`). The hazard has not gone away:
-  the device refuses the WHOLE push on a key it does not recognise, so
-  nothing new goes out before the frames understand it.
-
-  What is left:
-
-  - Automatic reboot: implement as a real cloud-safe scheduler capability,
-    not a persisted inert object. The device half is nearly there — the
-    runner already exits on a scheduled `restart` event (systemd brings it
-    back), so a schedule entry `{event: "restart"}` restarts the runtime
-    nightly today; a `reboot` event would need a runner handler that reuses
-    the hub's privileged reboot. What is missing is the Schedule panel: it
-    only builds `setCurrentScene` entries, so there is no way to add one.
-    Brightness once the runtime and drivers grow a real setting.
-  - Route-side panel checks: the auth-web validator is shape-only for the
-    hardware batch (the SPA gates on `hardware.device`, the device ignores an
-    inapplicable palette). If a route ever needs the device→capability
-    tables (`withCustomPalette`, `partialRefreshDevices`), they live in
-    `frontend/src/devices.ts` and are import-light.
-
-  What must stay local, whatever else moves: deployment mode,
-  panel/driver/VCOM/dimensions, flash and GPIO wiring, SD-card wiring,
-  Wi-Fi/hotspot credentials, private-network elevation, frame HTTP/admin/TLS
-  access and keys, SSH/backend/agent configuration, mountpoints, HTTP-upload
-  URLs and headers, arbitrary update URLs (the tz-updater URL included — the
-  device carries its own across a push), and service API secrets. Do not
-  expose raw `assets_path` or `log_to_file` paths; if they are wanted
-  remotely, redesign them as bounded toggles on fixed FrameOS-owned
-  directories. Hardware identity reported by the frame stays authoritative.
-
-- **Four assigned scene copies still to re-point.** The duplicate-copy sweep
-  ran on production 2026-08-18: 33 of the 37 leftover copies are gone
-  (`pnpm scene:sweep-duplicate-copies`, dump at `/root/pre-sweep-*.sql.gz`).
-  The four it deliberately left alone are the ones a frame is running —
-  "GitHub stars 2", "SD card image 3" and "Wikimedia Commons 3" on Wood7.3,
-  "SD card image 4" on SuurESP — because un-assigning a scene changes what a
-  wall displays and wants a deploy. Re-point each frame at the original scene
-  in the UI, deploy, then re-run the script to remove the freed copies, and
-  `scripts/object-store-sweep.sh --apply` (7-day min age) to free their bytes.
-  The flow that made them is fixed (PR #367) and the name race behind the
-  duplicate "7"s is closed (`withAccountSceneNameLock`).
-
 - **Account hardening.** Passkeys/TOTP 2FA, re-authentication before sensitive
   actions (revoking frames, bulk assignment changes, scope grants), and a
   per-frame audit trail surfaced in the UI.
@@ -115,18 +62,6 @@ enabled on images that have no backend to talk to.
   smooth: download and signature verification are already unprivileged, and
   only the final install crosses the line. Blocked on hardware time, not on a
   decision. The SPI/GPIO panel drivers are the part to measure first.
-
----
-
-## Security
-
-Open items from `docs/cloud-security-review.md`.
-
-- **Redact the link token in the first thing that exports frame state.**
-  `state/cloud_link.json` holds it in plaintext (0600), which is accepted —
-  possession of the SD card is possession of the link, and a Pi has no secure
-  element to change that. Nothing exports the file today; a support bundle or
-  a device backup would, and must redact it.
 
 ---
 

@@ -4,11 +4,13 @@ import clsx from 'clsx'
 export interface Option {
   value: string
   label: string
+  disabled?: boolean
 }
 
 export interface NumericOption {
   value: number
   label: string
+  disabled?: boolean
 }
 
 export type SelectOption = Option | NumericOption
@@ -32,7 +34,7 @@ function isOptionGroup(option: SelectOptionEntry): option is OptionGroup {
 
 function renderOption(option: SelectOption): JSX.Element {
   return (
-    <option key={String(option.value)} value={option.value}>
+    <option key={String(option.value)} value={option.value} disabled={option.disabled}>
       {option.label}
     </option>
   )

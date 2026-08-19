@@ -54,7 +54,6 @@ import ws
 
 import frameos/channels
 import frameos/device_setup
-import frameos/hal/processes
 import frameos/interpreter
 import frameos/js_runtime/app_runtime
 import frameos/scenes
@@ -458,8 +457,7 @@ proc helloStatePayload*(frameConfig: FrameConfig, scenesChecksum: string): JsonN
 
 proc defaultReboot() {.gcsafe.} =
   {.gcsafe.}:
-    let command = "(sleep 2; systemctl reboot || reboot) >/dev/null 2>&1 &"
-    discard runShellCapture(privilegedCommand("sh -c " & shellQuote(command)), timeoutMs = 10_000)
+    rebootSystemDetached()
 
 proc logUpgradeStatus(): string {.gcsafe.} =
   ## Forward the detached upgrade's own status file into the frame log — the
