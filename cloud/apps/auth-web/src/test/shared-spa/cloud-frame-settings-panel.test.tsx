@@ -22,19 +22,24 @@ import {
   cloudFrameSettingKeys,
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
+  hardwareCloudFrameSettingsMinVersion,
 } from "../../../../../../frontend/src/utils/cloudFrameSettings";
 import type { FrameType } from "../../../../../../frontend/src/types";
 
 const fetchMock = vi.fn<typeof fetch>();
 
-function cloudFrame(platform: string, frameosVersion: string | null = extendedCloudFrameSettingsMinVersion): FrameType {
+function cloudFrame(
+  platform: string,
+  frameosVersion: string | null = extendedCloudFrameSettingsMinVersion,
+  device?: string,
+): FrameType {
   return {
     id: 1 as unknown as FrameType["id"],
     project_id: 1,
     name: `Frame on ${platform}`,
     managed_by: "cloud",
     frameos_version: frameosVersion,
-    hardware: { platform, width: 800, height: 480 },
+    hardware: { platform, width: 800, height: 480, ...(device ? { device } : {}) },
     frame_host: "",
     frame_port: 8787,
     frame_access_key: "",
@@ -164,6 +169,38 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
     ).toEqual([]);
   });
 
+  it("offers the hardware batch the reported panel can use, on firmware that knows it", () => {
+    // A Spectra-6 Inky: a palette to edit and a fixed button map to show;
+    // no partial refresh (that panel cannot do one).
+    renderPanel(cloudFrame("raspberry-pi-64", "2026.8.31", "pimoroni.inky_impression_13"));
+    const paletteSelect = document.querySelector<HTMLSelectElement>('select[name="palette"]');
+    expect(paletteSelect, "the palette editor is missing").toBeTruthy();
+    expect(paletteSelect?.matches(":disabled")).toBe(false);
+    expect(screen.getByText("Configured")).toBeTruthy();
+    expect(screen.queryByText("Partial refresh")).toBeNull();
+    expect(screen.getByText(/restarts FrameOS on the frame/i)).toBeTruthy();
+    cleanup();
+
+    // A 7.5" V2: partial refresh, editable buttons, no palette.
+    renderPanel(cloudFrame("raspberry-pi-64", "2026.8.31", "waveshare.EPD_7in5_V2"));
+    expect(screen.getByText("Partial refresh")).toBeTruthy();
+    expect(document.querySelector('select[name="palette"]')).toBeNull();
+    expect(screen.getByText("Add button")).toBeTruthy();
+  });
+
+  it("disables (never hides) the hardware batch below its own floor", () => {
+    renderPanel(cloudFrame("raspberry-pi-64", "2026.8.30", "pimoroni.inky_impression_13"));
+    const paletteSelect = document.querySelector<HTMLSelectElement>('select[name="palette"]');
+    expect(paletteSelect, "the field is hidden rather than disabled").toBeTruthy();
+    expect(paletteSelect?.matches(":disabled")).toBe(true);
+    expect(
+      screen.getByText(new RegExp(`need FrameOS ${hardwareCloudFrameSettingsMinVersion.replaceAll(".", "\\.")} or newer`)),
+    ).toBeTruthy();
+    // The 2026.8.30 batch right next to it stays editable.
+    const flip = document.querySelector<HTMLSelectElement>('select[name="flip"]');
+    expect(flip?.matches(":disabled")).toBe(false);
+  });
+
   it("still offers all six settings the device does accept", () => {
     renderPanel(cloudFrame("raspberry-pi-64"));
 
@@ -210,7 +247,8 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
 
     const flip = document.querySelector<HTMLSelectElement>('select[name="flip"]');
     expect(flip?.matches(":disabled")).toBe(true);
-    expect(screen.getByText(/once the frame connects and reports its version/i)).toBeTruthy();
+    // Both gated batches say so — the extended one and the hardware one.
+    expect(screen.getAllByText(/once the frame connects and reports its version/i).length).toBe(2);
   });
 
   it("says who owns everything it is not showing", () => {
@@ -255,7 +293,7 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(screen.queryByText("Power")).toBeTruthy();
   });
 
-  it("keeps its narrower set: no timezone or debug the firmware ignores", () => {
+  it("keeps its narrower set: no timezone the firmware ignores, no Pi-only batch", () => {
     renderPanel(cloudFrame("esp32-s3"));
 
     const rendered = new Set(renderedFieldNames());
@@ -264,17 +302,37 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(rendered.has("interval")).toBe(true);
     expect(rendered.has("rotate")).toBe(true);
     expect(rendered.has("scaling_mode")).toBe(true);
-    // Accepted by the control plane, ignored by the firmware — so offering
-    // them here would be the same lie in a smaller font.
+    // Accepted by the control plane, unimplementable on the firmware — so
+    // offering it here would be the same lie in a smaller font.
     expect(rendered.has("timezone")).toBe(false);
-    expect(rendered.has("debug")).toBe(false);
-    // The extended batch is Pi/Linux only: the firmware has no consumer for
-    // any of it, and the route refuses it for esp32 frames.
+    // The Pi/Linux extended batch: the firmware has no consumer for any of
+    // it except the HTTP ceiling it learned in 2026.8.31 (its own gated
+    // section below), and the route refuses the rest for esp32 frames.
     for (const name of Object.keys(extendedFieldNames)) {
+      if (name === "max_http_response_bytes") continue;
       expect(rendered.has(name), `${name} has no consumer in the esp32 firmware`).toBe(false);
     }
-    expect(extendedSettingsCovered().size).toBe(0);
     expect(screen.queryByText("QR Control Code")).toBeNull();
     expect(screen.queryByText("Global errors")).toBeNull();
+    expect(screen.queryByText("Panel")).toBeNull();
+  });
+
+  it("offers debug, the HTTP ceiling and GPIO buttons on firmware from 2026.8.31, disabled below it", () => {
+    renderPanel(cloudFrame("esp32-s3", "2026.8.31"));
+    const debug = document.querySelector<HTMLButtonElement>('button[name="debug"]');
+    expect(debug, "the debug switch is missing").toBeTruthy();
+    expect(debug?.matches(":disabled")).toBe(false);
+    expect(document.querySelector('input[name="max_http_response_bytes"]')?.matches(":disabled")).toBe(false);
+    expect(screen.getByText("Add button")).toBeTruthy();
+    expect(screen.getByText(/reboots the frame/i)).toBeTruthy();
+    cleanup();
+
+    renderPanel(cloudFrame("esp32-s3", "2026.8.21"));
+    const oldDebug = document.querySelector<HTMLButtonElement>('button[name="debug"]');
+    expect(oldDebug, "the field is hidden rather than disabled").toBeTruthy();
+    expect(oldDebug?.matches(":disabled")).toBe(true);
+    expect(screen.getByText(/need FrameOS 2026\.8\.31 or newer/)).toBeTruthy();
+    // The ungated set stays editable.
+    expect(document.querySelector<HTMLInputElement>('input[name="interval"]')?.matches(":disabled")).toBe(false);
   });
 });

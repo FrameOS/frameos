@@ -208,8 +208,60 @@ suite "cloud hub verb dispatcher":
     check recorded.events.len == 1
     check recorded.events[0][0] == "reload"
 
+  test "set_settings applies the hardware batch and restarts the runtime for it":
+    # palette / device_config / gpio_buttons are copied into the driver
+    # context at init: a reload would persist them and change nothing on the
+    # panel, so the push restarts the runtime instead.
+    let recorded = Recorded()
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "id": "hw", "type": "set_settings",
+      "settings": {
+        "name": "Kitchen",
+        "palette": {"name": "Spectra", "colors": ["#000000", "#FFFFFF", "#ff0000", "#00ff00", "#0000ff", "#ffff00"],
+                    "colorNames": ["black", "white", "red", "green", "blue", "yellow"]},
+        "device_config": {"partial": true, "partialMaxAreaPercent": 25.5, "partialMaxRefreshesBeforeFull": 10},
+        "gpio_buttons": [{"pin": 5, "label": "A"}, {"pin": 6, "label": "B"}],
+      },
+    })
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.persistedSettings.len == 1
+    let persisted = recorded.persistedSettings[0]
+    check persisted{"palette"}{"colors"}.len == 6
+    check persisted{"device_config"}{"partial"}.getBool(false) == true
+    check persisted{"device_config"}.len == 3 # nothing else rides along
+    check persisted{"gpio_buttons"}.len == 2
+    check recorded.events.len == 1
+    check recorded.events[0][0] == "restart"
+
+    # Each of the three alone restarts too; the 2026.8.30 keys still reload.
+    for settings in [%*{"palette": {"colors": []}}, %*{"device_config": {"partial": false}},
+                     %*{"gpio_buttons": []}]:
+      let one = Recorded()
+      discard handleCloudVerb(makeContext(one), %*{"id": "h1", "type": "set_settings", "settings": settings})
+      check one.events.len == 1 and one.events[0][0] == "restart"
+    let soft = Recorded()
+    discard handleCloudVerb(makeContext(soft), %*{"id": "h2", "type": "set_settings", "settings": {"flip": "both"}})
+    check soft.events.len == 1 and soft.events[0][0] == "reload"
+
   test "set_settings refuses bad values for allowlisted keys with invalid_settings":
     let bad = [
+      %*{"palette": {"colors": ["red"]}},
+      %*{"palette": {"colors": "#ffffff"}},
+      %*{"palette": {"colors": ["#ffffff"], "colorNames": ["a", "b"]}},
+      %*{"palette": {"colors": ["#ffffff"], "lut": [1, 2, 3]}},
+      %*{"palette": []},
+      %*{"device_config": {}},
+      %*{"device_config": {"partial": "true"}},
+      %*{"device_config": {"partial": true, "vcom": -1.5}},
+      %*{"device_config": {"partial": true, "pins": {"rst": 17}}},
+      %*{"device_config": {"partialMaxAreaPercent": 101}},
+      %*{"device_config": {"partialMaxRefreshesBeforeFull": -1}},
+      %*{"gpio_buttons": {"pin": 5, "label": "A"}},
+      %*{"gpio_buttons": [{"pin": 5}]},
+      %*{"gpio_buttons": [{"pin": 5, "label": ""}]},
+      %*{"gpio_buttons": [{"pin": 99, "label": "A"}]},
+      %*{"gpio_buttons": [{"pin": 5, "label": "A", "action": "reboot"}]},
+      %*{"gpio_buttons": [{"pin": 5, "label": "A"}, {"pin": 5, "label": "B"}]},
       %*{"flip": "diagonal"},
       %*{"flip": true},
       %*{"error_behavior": {"mode": "explode"}},
@@ -256,6 +308,9 @@ suite "cloud hub verb dispatcher":
       "control_code": {"enabled": false},
       "metrics_interval": 60, "max_http_response_bytes": 64 * 1024 * 1024,
       "save_assets": true, "timezone_updater": {"enabled": true, "hour": 3},
+      "palette": {"colors": ["#ffffff", "#000000"]},
+      "device_config": {"partial": true},
+      "gpio_buttons": [{"pin": 5, "label": "A"}],
     }
     for key in CLOUD_SETTINGS_ALLOWLIST:
       check samples.hasKey(key)

@@ -25,33 +25,36 @@ A cloud frame talks to `frame-hub` over one outbound WebSocket. The provider
 can push scenes, a short allowlist of declarative settings and a handful of
 commands; everything else stays local to the device.
 
-- **Widen cloud `set_settings`: the hardware-aware batch.** The Pi/Linux
-  batch shipped in 2026.8.30 (`flip`, `error_behavior`, `control_code`,
-  `metrics_interval` with a working `0`, `max_http_response_bytes` capped at
-  the runtime default, `save_assets`, `timezone_updater` enabled/hour only)
-  and is the shape every later batch copies: device allowlist + per-value
-  validators first (`validateCloudSetting`), then the auth-web validator and
-  a floor bump (`extendedFrameSettingsMinVersion`), then the SPA — which
-  renders the fields disabled-with-reason below the floor, never hidden.
-  The hazard has not gone away: the device refuses the WHOLE push on a key it
-  does not recognise, so nothing new goes out before the frames understand it.
+- **Cloud `set_settings`: what is still not pushable.** Three batches have
+  shipped, each in the same shape (device allowlist + per-value validators in
+  `validateCloudSetting`, then the auth-web validator and a version floor,
+  then the SPA rendering the fields disabled-with-reason below the floor,
+  never hidden): the base six; the 2026.8.30 Pi batch (`flip`,
+  `error_behavior`, `control_code`, `metrics_interval`,
+  `max_http_response_bytes`, `save_assets`, `timezone_updater`); and the
+  2026.8.31 hardware batch (`palette`, the partial-refresh subset of
+  `device_config`, `gpio_buttons` — the driver reads them at init, so the
+  device restarts its runtime; the SPA shows only the fields the reported
+  panel can use) plus the ESP32 firmware's own 2026.8.31 tail (`debug`,
+  `max_http_response_bytes`, `gpio_buttons`). The hazard has not gone away:
+  the device refuses the WHOLE push on a key it does not recognise, so
+  nothing new goes out before the frames understand it.
 
-  What is left, in the same shape:
+  What is left:
 
-  - Hardware-aware: custom display `palette` colors, the strict
-    partial-refresh subset of `device_config` (`partial`,
-    `partialMaxAreaPercent`, `partialMaxRefreshesBeforeFull`), `gpio_buttons`
-    (pin + label). Validate against the reported panel/platform, advertise
-    capability/version requirements, restart the runtime when the driver only
-    reads them at init. Never allow the whole `device_config` object.
-  - ESP32: `max_http_response_bytes`, debug logging and GPIO buttons are
-    plausible (the NVS fields exist); add only what the firmware consumes and
-    keep the whole-payload rejection contract. The cloud power controls stay
-    their own ESP32-only subset; the Pi batch above is refused for esp32
-    frames up front.
-  - Automatic reboot: implement as a real cloud-safe scheduler capability
-    (possibly via the schedule verb), not a persisted inert object. Brightness
-    once the runtime and drivers grow a real setting.
+  - Automatic reboot: implement as a real cloud-safe scheduler capability,
+    not a persisted inert object. The device half is nearly there — the
+    runner already exits on a scheduled `restart` event (systemd brings it
+    back), so a schedule entry `{event: "restart"}` restarts the runtime
+    nightly today; a `reboot` event would need a runner handler that reuses
+    the hub's privileged reboot. What is missing is the Schedule panel: it
+    only builds `setCurrentScene` entries, so there is no way to add one.
+    Brightness once the runtime and drivers grow a real setting.
+  - Route-side panel checks: the auth-web validator is shape-only for the
+    hardware batch (the SPA gates on `hardware.device`, the device ignores an
+    inapplicable palette). If a route ever needs the device→capability
+    tables (`withCustomPalette`, `partialRefreshDevices`), they live in
+    `frontend/src/devices.ts` and are import-light.
 
   What must stay local, whatever else moves: deployment mode,
   panel/driver/VCOM/dimensions, flash and GPIO wiring, SD-card wiring,

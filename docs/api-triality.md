@@ -148,8 +148,26 @@ Pi maps this into runtime config:
 - `https_proxy.certs.server_key` -> `httpsProxy.serverKey`
 - `error_behavior.retry_seconds` -> `errorBehavior.retrySeconds`
 - `timezone_updater` -> `timeZoneUpdates`
+- `device_config` -> `deviceConfig`, PATCHED (present sub-keys win, `null`
+  deletes, absent ones keep what the device had) — a form that knows only
+  the partial-refresh keys, or a cloud push carrying only them, cannot drop
+  the panel's pin overrides or render mode
 - `scenes` -> active `scenes.json` or `scenes.json.gz`
 - Original API fields -> `frameApi` in `frame.json` for sync/adoption fidelity
+
+The other direction (GET `/api/frames/{id}`) reads the live config back through
+the same key table (`frameApiKeyMap` in `frameos/src/frameos/server/api.nim`),
+with `device_config` and `palette` served verbatim from `frame.json` — the SPA
+writes more into both (ESP32 power keys, SD-card wiring, colour names) than
+the runtime types, and its next save would otherwise lose it. Unprivileged
+readers get secrets blanked: access/API keys, TLS material, admin credentials,
+mount passwords, the hotspot password and the agent secret.
+
+`frame.json` itself is parsed straight into the typed config with jsony
+(`frameos/src/frameos/config.nim`): field names are the JSON keys, defaults
+live in `newHook`s, and scalars are read leniently (a quoted number, a
+float for an int, `"true"` for a bool all parse; anything unreadable leaves
+the default rather than refusing to boot the frame).
 
 Scene/state:
 

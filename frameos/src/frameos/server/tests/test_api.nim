@@ -10,6 +10,7 @@ import locks
 import ../api
 import ../state
 import ../../types
+import ../../config
 
 proc baseConfig(assetsPath = ""): FrameConfig =
   FrameConfig(
@@ -92,7 +93,8 @@ suite "Server API helpers":
 
     let payload = frameApiPayload(state)
     check payload{"interval"}.getFloat() == 42
-    check payload{"max_http_response_bytes"}.getInt() == globalFrameConfig.maxHttpResponseBytes
+    # A hand-built config reads back with defaults applied, like a loaded one.
+    check payload{"max_http_response_bytes"}.getInt() == DefaultMaxHttpResponseBytes
     check payload{"background_color"}.getStr() == "#123456"
     check payload{"active_connections"}.getInt() == 2
     check payload{"scenes"}.kind == JArray
@@ -209,3 +211,80 @@ suite "no-op settings pushes are detectable":
     persistFrameApiUpdate(changed)
     check runtimeVisible(configPath){"rotate"}.getInt(0) == 270
     check not frameApiUpdateChangesConfig(changed)
+
+suite "the frame payload round-trips what the device stores":
+  test "device_config is patched, never replaced, and read back verbatim":
+    let tempRoot = getTempDir() / "frameos-api-device-config"
+    createDir(tempRoot)
+    let configPath = tempRoot / "frame.json"
+    writeFile(configPath, """{
+      "deviceConfig": {"vcom": -1.5, "pins": {"rst": 17, "cs2": 2}, "renderMode": "local", "uploadUrl": "http://up"},
+      "palette": {"name": "Spectra", "colors": ["#ffffff", "#000000"], "colorNames": ["white", "black"]}
+    }""")
+    putEnv("FRAMEOS_CONFIG", configPath)
+    globalFrameConfig = baseConfig(tempRoot)
+    let state = initConnectionsState()
+
+    # A form that only knows the partial-refresh keys must not wipe the wiring.
+    let merged = frontendFramePayloadToRuntimeConfig(
+      %*{"device_config": {"partial": true, "partialMaxAreaPercent": 20, "uploadUrl": nil}},
+      parseJson(readFile(configPath)))
+    check merged["deviceConfig"]{"partial"}.getBool() == true
+    check merged["deviceConfig"]{"partialMaxAreaPercent"}.getInt() == 20
+    check merged["deviceConfig"]{"pins"}{"rst"}.getInt() == 17
+    check merged["deviceConfig"]{"pins"}{"cs2"}.getInt() == 2
+    check merged["deviceConfig"]{"renderMode"}.getStr() == "local"
+    check merged["deviceConfig"]{"vcom"}.getFloat() == -1.5
+    check not merged["deviceConfig"].hasKey("uploadUrl") # null deletes
+
+    let payload = frameApiPayload(state, exposeSecrets = true)
+    check payload{"device_config"}{"pins"}{"cs2"}.getInt() == 2
+    check payload{"device_config"}{"renderMode"}.getStr() == "local"
+    check payload{"palette"}{"colors"}[0].getStr() == "#ffffff"
+    check payload{"palette"}{"colorNames"}[1].getStr() == "black"
+    check not payload.hasKey("settings")
+
+  test "the typed fallback hides driver-default pins and speaks the API's upload keys":
+    let tempRoot = getTempDir() / "frameos-api-typed-device-config"
+    createDir(tempRoot)
+    let configPath = tempRoot / "frame.json"
+    writeFile(configPath, "{}")
+    putEnv("FRAMEOS_CONFIG", configPath)
+    var config = baseConfig(tempRoot)
+    setConfigDefaults(config)
+    config.deviceConfig.pins.rst = 5
+    config.deviceConfig.httpUploadUrl = "http://upload.local"
+    config.palette = PaletteConfig(colors: @[(255, 0, 0)])
+    config.controlCode.enabled = true
+    globalFrameConfig = config
+    let payload = frameApiPayload(initConnectionsState(), exposeSecrets = true)
+    check payload{"device_config"}{"pins"} == %*{"rst": 5}
+    check payload{"device_config"}{"uploadUrl"}.getStr() == "http://upload.local"
+    check not payload{"device_config"}.hasKey("httpUploadUrl")
+    check payload{"palette"}{"colors"}[0].getStr() == "#FF0000"
+    check payload{"control_code"}{"enabled"}.getBool() == true
+    check payload{"control_code"}{"qrCodeColor"}.getStr() == "#000000"
+    check payload{"timezone_updater"}{"url"}.getStr() == "https://example.test/tz.json.gz"
+    check payload{"schedule"}{"events"}.kind == JArray
+    check payload{"gpio_buttons"}.kind == JArray
+
+  test "hotspot and agent secrets stay off the unprivileged payload":
+    let tempRoot = getTempDir() / "frameos-api-secrets"
+    createDir(tempRoot)
+    writeFile(tempRoot / "frame.json", "{}")
+    putEnv("FRAMEOS_CONFIG", tempRoot / "frame.json")
+    var config = baseConfig(tempRoot)
+    setConfigDefaults(config)
+    config.network.wifiHotspotSsid = "FrameOS-Setup"
+    config.network.wifiHotspotPassword = "hotspot-secret"
+    config.agent = AgentConfig(agentEnabled: true, agentSharedSecret: "agent-secret")
+    globalFrameConfig = config
+    let state = initConnectionsState()
+    let public = frameApiPayload(state)
+    check public{"network"}{"wifiHotspotPassword"}.getStr() == ""
+    check public{"network"}{"wifiHotspotSsid"}.getStr() == "FrameOS-Setup"
+    check public{"agent"}{"agentSharedSecret"}.getStr() == ""
+    check public{"agent"}{"agentEnabled"}.getBool() == true
+    let privileged = frameApiPayload(state, exposeSecrets = true)
+    check privileged{"network"}{"wifiHotspotPassword"}.getStr() == "hotspot-secret"
+    check privileged{"agent"}{"agentSharedSecret"}.getStr() == "agent-secret"

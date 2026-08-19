@@ -111,13 +111,13 @@ block test_load_config:
         doAssert config.mountpoints.items[0].username == "frame"
 
 block test_error_behavior_defaults:
-    let config = loadErrorBehavior(%*{
+    let config = parseFrameConfig($(%*{"errorBehavior": {
         "mode": "not-a-mode",
         "retrySeconds": 0,
         "silentRetrySeconds": -1,
         "silentWindowMinutes": 0,
         "showErrorRetrySeconds": -5
-    })
+    }})).errorBehavior
 
     doAssert config.mode == "show_error_retry"
     doAssert config.retrySeconds == 60
@@ -127,10 +127,10 @@ block test_error_behavior_defaults:
     doAssert config.showErrorRetrySeconds == 60
 
 block test_error_behavior_legacy_silent_retry_minutes:
-    let config = loadErrorBehavior(%*{
+    let config = parseFrameConfig($(%*{"errorBehavior": {
         "mode": "silent_retry",
         "silentRetryMinutes": 7
-    })
+    }})).errorBehavior
 
     doAssert config.mode == "silent_retry"
     doAssert config.silentWindowMinutes == 7

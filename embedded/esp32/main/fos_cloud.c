@@ -1995,6 +1995,8 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         "interval", "name", "rotate", "scaling_mode",
         "deep_sleep", "deep_sleep_on_battery", "wake_check_seconds",
         "battery_pin", "battery_divider",
+        /* 2026.8.31: what the local admin API and the console already set. */
+        "debug", "max_http_response_bytes", "gpio_buttons",
     };
     const cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, settings) {
@@ -2115,11 +2117,84 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         battery_changed = battery_changed || config->battery_divider != divider;
         config->battery_divider = divider;
     }
+    /* Debug logging: the render loop pushes config->debug_logging into the
+     * Nim runtime every pass (fos_client.c), so this applies live. */
+    const cJSON *debug = cJSON_GetObjectItem(settings, "debug");
+    if (debug != NULL) {
+        if (!cJSON_IsBool(debug)) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        config->debug_logging = cJSON_IsTrue(debug);
+    }
+    /* Per-request HTTP body ceiling: handed to frameos_nim_init once at boot
+     * (main.c), so a change takes the same deferred reboot as rotate. Same
+     * floor as the local admin API; the ceiling is the Pi runtime's default
+     * (a provider can lower a device's bound, never raise it past that). */
+    bool restart_for_init = false;
+    const cJSON *max_http = cJSON_GetObjectItem(settings, "max_http_response_bytes");
+    if (max_http != NULL) {
+        if (!cJSON_IsNumber(max_http) || max_http->valuedouble < 1024 ||
+            max_http->valuedouble > 64.0 * 1024 * 1024) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        uint32_t bytes = (uint32_t)max_http->valuedouble;
+        restart_for_init = restart_for_init || config->max_http_response_bytes != bytes;
+        config->max_http_response_bytes = bytes;
+    }
+    /* GPIO buttons: [{pin, label}], the whole list replaced — the same
+     * shape the Pi runtime takes, parsed through the console's spec parser
+     * so the limits (FOS_GPIO_BUTTONS_MAX, label length, pin range) live in
+     * one place. fos_buttons_init runs once at boot, hence the reboot. */
+    const cJSON *buttons = cJSON_GetObjectItem(settings, "gpio_buttons");
+    if (buttons != NULL) {
+        if (!cJSON_IsArray(buttons) || cJSON_GetArraySize(buttons) > FOS_GPIO_BUTTONS_MAX) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        char spec[FOS_GPIO_BUTTONS_SPEC_LEN] = "";
+        size_t used = 0;
+        const cJSON *button = NULL;
+        cJSON_ArrayForEach(button, buttons) {
+            const cJSON *pin = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "pin") : NULL;
+            const cJSON *label = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "label") : NULL;
+            if (!cJSON_IsNumber(pin) || pin->valuedouble < 0 || pin->valuedouble > 48 ||
+                pin->valuedouble != (double)(int)pin->valuedouble ||
+                !cJSON_IsString(label) || !label->valuestring[0] ||
+                strlen(label->valuestring) >= FOS_GPIO_BUTTON_LABEL_LEN ||
+                strchr(label->valuestring, '\n') != NULL || strchr(label->valuestring, ':') != NULL) {
+                ws_ack(id, false, "invalid_settings");
+                return;
+            }
+            int written = snprintf(spec + used, sizeof(spec) - used, "%s%d:%s",
+                                   used ? "\n" : "", (int)pin->valuedouble, label->valuestring);
+            if (written < 0 || (size_t)written >= sizeof(spec) - used) {
+                ws_ack(id, false, "invalid_settings");
+                return;
+            }
+            used += (size_t)written;
+        }
+        char before[FOS_GPIO_BUTTONS_SPEC_LEN];
+        fos_config_format_gpio_buttons(config, before, sizeof(before));
+        if (fos_config_parse_gpio_buttons(spec, config) != ESP_OK) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        char after[FOS_GPIO_BUTTONS_SPEC_LEN];
+        fos_config_format_gpio_buttons(config, after, sizeof(after));
+        restart_for_init = restart_for_init || strcmp(before, after) != 0;
+    }
     if (fos_config_save() != ESP_OK) {
         ws_ack(id, false, "persist_failed");
         return;
     }
     ws_ack(id, true, NULL);
+    if (restart_for_init && !battery_changed && !rotate_changed) {
+        ESP_LOGW(TAG, "ws: boot-time setting changed (http ceiling %lu, %u buttons); restarting",
+                 (unsigned long)config->max_http_response_bytes, (unsigned)config->gpio_button_count);
+        ws_schedule_reboot();
+    }
     if (battery_changed && !rotate_changed) {
         ESP_LOGW(TAG, "ws: battery sensing changed (pin %d, divider %.2f); restarting to re-init the ADC",
                  (int)config->battery_pin, (double)config->battery_divider);

@@ -1,4 +1,5 @@
 import json
+import jsony
 import pixie
 import chroma
 import times
@@ -251,55 +252,80 @@ proc frontendErrorBehaviorToRuntime(value: JsonNode, existing: JsonNode): JsonNo
   putJsonIfPresent(result, value, "silent_window_minutes", "silentWindowMinutes")
   putJsonIfPresent(result, value, "show_error_retry_seconds", "showErrorRetrySeconds")
 
+# The admin API's snake_case key ↔ frame.json's camelCase key, for every
+# top-level field the SPA's frame form can carry. One table, both directions:
+# frontendFramePayloadToRuntimeConfig writes through it and frameApiPayload
+# reads back through it, so a key cannot exist in one and not the other.
+# Keys the runtime does not consume (interval, reboot, buildroot, …) still
+# round-trip through frame.json — the on-device admin page is the backend's
+# frame form pointed at one frame, and it needs them back.
+const frameApiKeyMap* = [
+  ("name", "name"),
+  ("mode", "mode"),
+  ("frame_host", "frameHost"),
+  ("frame_port", "framePort"),
+  ("frame_access_key", "frameAccessKey"),
+  ("frame_access", "frameAccess"),
+  ("server_host", "serverHost"),
+  ("server_port", "serverPort"),
+  ("server_api_key", "serverApiKey"),
+  ("server_send_logs", "serverSendLogs"),
+  ("width", "width"),
+  ("height", "height"),
+  ("device", "device"),
+  ("device_config", "deviceConfig"),
+  ("metrics_interval", "metricsInterval"),
+  ("max_http_response_bytes", "maxHttpResponseBytes"),
+  ("rotate", "rotate"),
+  ("flip", "flip"),
+  ("scaling_mode", "scalingMode"),
+  ("settings", "settings"),
+  ("assets_path", "assetsPath"),
+  ("save_assets", "saveAssets"),
+  ("upload_fonts", "uploadFonts"),
+  ("log_to_file", "logToFile"),
+  ("debug", "debug"),
+  ("timezone", "timeZone"),
+  ("timezone_updater", "timeZoneUpdates"),
+  ("schedule", "schedule"),
+  ("gpio_buttons", "gpioButtons"),
+  ("control_code", "controlCode"),
+  ("network", "network"),
+  ("agent", "agent"),
+  ("mountpoints", "mountpoints"),
+  ("palette", "palette"),
+  ("interval", "interval"),
+  ("background_color", "backgroundColor"),
+  ("color", "color"),
+  ("reboot", "reboot"),
+  ("buildroot", "buildroot"),
+  ("embedded", "embedded"),
+  ("rpios", "rpios"),
+]
+
+proc mergeDeviceConfig(existing: JsonNode, patch: JsonNode): JsonNode =
+  ## deviceConfig is PATCHED, never replaced: the SPA form only knows the keys
+  ## it renders, and the cloud's set_settings sends the partial-refresh subset
+  ## alone — a wholesale replace from either would drop the panel's pin
+  ## overrides, render mode or SD-card wiring. Present keys win, `null`
+  ## deletes, absent keys keep what the device already had.
+  result = objectNodeOrEmpty(existing)
+  if patch == nil or patch.kind != JObject:
+    return
+  for key in patch.keys:
+    putJsonIfPresent(result, patch, key, key)
+
 proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode): JsonNode =
   result = if existing != nil and existing.kind == JObject: copy(existing) else: %*{}
   if payload == nil or payload.kind != JObject:
     return
 
-  for pair in [
-    ("name", "name"),
-    ("mode", "mode"),
-    ("frame_host", "frameHost"),
-    ("frame_port", "framePort"),
-    ("frame_access_key", "frameAccessKey"),
-    ("frame_access", "frameAccess"),
-    ("server_host", "serverHost"),
-    ("server_port", "serverPort"),
-    ("server_api_key", "serverApiKey"),
-    ("server_send_logs", "serverSendLogs"),
-    ("width", "width"),
-    ("height", "height"),
-    ("device", "device"),
-    ("device_config", "deviceConfig"),
-    ("metrics_interval", "metricsInterval"),
-    ("max_http_response_bytes", "maxHttpResponseBytes"),
-    ("rotate", "rotate"),
-    ("flip", "flip"),
-    ("scaling_mode", "scalingMode"),
-    ("settings", "settings"),
-    ("assets_path", "assetsPath"),
-    ("save_assets", "saveAssets"),
-    ("upload_fonts", "uploadFonts"),
-    ("log_to_file", "logToFile"),
-    ("debug", "debug"),
-    ("timezone", "timeZone"),
-    ("timezone_updater", "timeZoneUpdates"),
-    ("schedule", "schedule"),
-    ("gpio_buttons", "gpioButtons"),
-    ("control_code", "controlCode"),
-    ("network", "network"),
-    ("agent", "agent"),
-    ("mountpoints", "mountpoints"),
-    ("palette", "palette"),
-    ("interval", "interval"),
-    ("background_color", "backgroundColor"),
-    ("color", "color"),
-    ("reboot", "reboot"),
-    ("buildroot", "buildroot"),
-    ("embedded", "embedded"),
-    ("rpios", "rpios"),
-  ]:
-    putJsonIfPresent(result, payload, pair[0], pair[1])
+  for (apiKey, configKey) in frameApiKeyMap:
+    if apiKey == "device_config":
+      if payload.hasKey(apiKey):
+        result[configKey] = mergeDeviceConfig(result{configKey}, payload[apiKey])
+      continue
+    putJsonIfPresent(result, payload, apiKey, configKey)
 
   # The private-network elevation never rides along with a bulk config save.
   # The cloud is already blocked from it by CLOUD_SETTINGS_ALLOWLIST, but the
@@ -515,155 +541,6 @@ proc setLocalNetworkAccess*(enabled: bool): JsonNode =
     globalFrameOS.frameConfig.network.allowLocalNetworkAccess = enabled
   localNetworkAccessPayload()
 
-proc frameControlCodeJson(controlCode: ControlCode): JsonNode =
-  if controlCode == nil:
-    return %*{}
-  result = %*{
-    "enabled": controlCode.enabled,
-    "position": controlCode.position,
-    "size": controlCode.size,
-    "padding": controlCode.padding,
-    "offsetX": controlCode.offsetX,
-    "offsetY": controlCode.offsetY,
-    "qrCodeColor": controlCode.qrCodeColor.toHtmlHex(),
-    "backgroundColor": controlCode.backgroundColor.toHtmlHex(),
-  }
-
-proc frameScheduleJson(schedule: FrameSchedule): JsonNode =
-  if schedule == nil:
-    return %*{"events": %*[]}
-  var events: seq[JsonNode] = @[]
-  for event in schedule.events:
-    events.add(%*{
-      "id": event.id,
-      "minute": event.minute,
-      "hour": event.hour,
-      "weekday": event.weekday,
-      "event": event.event,
-      "payload": event.payload,
-    })
-  result = %*{"events": events}
-
-proc frameGpioButtonsJson(buttons: seq[GPIOButton]): JsonNode =
-  var entries: seq[JsonNode] = @[]
-  for button in buttons:
-    entries.add(%*{"pin": button.pin, "label": button.label})
-  result = %*entries
-
-proc frameNetworkJson(network: NetworkConfig): JsonNode =
-  if network == nil:
-    return %*{}
-  result = %*{
-    "networkCheck": network.networkCheck,
-    "networkCheckTimeoutSeconds": network.networkCheckTimeoutSeconds,
-    "networkCheckUrl": network.networkCheckUrl,
-    "wifiHotspot": network.wifiHotspot,
-    "wifiHotspotSsid": network.wifiHotspotSsid,
-    "wifiHotspotPassword": network.wifiHotspotPassword,
-    "wifiHotspotTimeoutSeconds": network.wifiHotspotTimeoutSeconds,
-    "allowLocalNetworkAccess": network.allowLocalNetworkAccess,
-  }
-
-proc frameAgentJson(agent: AgentConfig): JsonNode =
-  if agent == nil:
-    return %*{}
-  result = %*{
-    "agentEnabled": agent.agentEnabled,
-    "agentRunCommands": agent.agentRunCommands,
-    "agentSharedSecret": agent.agentSharedSecret,
-  }
-
-proc frameMountpointsJson(mountpoints: MountpointsConfig, exposeSecrets: bool): JsonNode =
-  if mountpoints == nil:
-    return %*{"enabled": false, "items": %*[]}
-  var items: seq[JsonNode] = @[]
-  for mountpoint in mountpoints.items:
-    if mountpoint == nil:
-      continue
-    items.add(%*{
-      "enabled": mountpoint.enabled,
-      "source": mountpoint.source,
-      "target": mountpoint.target,
-      "username": mountpoint.username,
-      "password": if exposeSecrets: mountpoint.password else: "",
-      "domain": mountpoint.domain,
-      "options": mountpoint.options,
-    })
-  result = %*{
-    "enabled": mountpoints.enabled,
-    "items": items,
-  }
-
-proc framePaletteJson(palette: PaletteConfig): JsonNode =
-  if palette == nil:
-    return %*{}
-  var colors: seq[JsonNode] = @[]
-  for color in palette.colors:
-    colors.add(%*[color[0], color[1], color[2]])
-  result = %*{"colors": colors}
-
-proc frameDeviceConfigJson(deviceConfig: DeviceConfig): JsonNode =
-  if deviceConfig == nil:
-    return %*{}
-  var headers: seq[JsonNode] = @[]
-  for header in deviceConfig.httpUploadHeaders:
-    headers.add(%*{"name": header.name, "value": header.value})
-  result = %*{
-    "vcom": deviceConfig.vcom,
-    "partial": deviceConfig.partial,
-    "partialMaxAreaPercent": deviceConfig.partialMaxAreaPercent,
-    "partialMaxRefreshesBeforeFull": deviceConfig.partialMaxRefreshesBeforeFull,
-    "uploadUrl": deviceConfig.httpUploadUrl,
-    "uploadHeaders": headers,
-  }
-
-proc frameHttpsProxyJson(httpsProxy: HttpsProxyConfig, exposeSecrets: bool): JsonNode =
-  let port = if httpsProxy != nil and httpsProxy.port > 0: httpsProxy.port else: 8443
-  result = %*{
-    "enable": if httpsProxy != nil: httpsProxy.enable else: false,
-    "port": port,
-    "expose_only_port": if httpsProxy != nil: httpsProxy.exposeOnlyPort else: true,
-    "certs": {
-      "server": if exposeSecrets and httpsProxy != nil: httpsProxy.serverCert else: "",
-      "server_key": if exposeSecrets and httpsProxy != nil: httpsProxy.serverKey else: "",
-      "client_ca": "",
-    },
-    "server_cert_not_valid_after": newJNull(),
-    "client_ca_cert_not_valid_after": newJNull(),
-  }
-
-proc frameErrorBehaviorJson(errorBehavior: ErrorBehaviorConfig): JsonNode =
-  if errorBehavior == nil:
-    return %*{
-      "mode": "show_error_retry",
-      "retry_seconds": 60,
-      "silent_retry_seconds": 60,
-      "silent_retry_forever": false,
-      "silent_window_minutes": 10,
-      "show_error_retry_seconds": 60,
-    }
-  %*{
-    "mode": errorBehavior.mode,
-    "retry_seconds": errorBehavior.retrySeconds,
-    "silent_retry_seconds": errorBehavior.silentRetrySeconds,
-    "silent_retry_forever": errorBehavior.silentRetryForever,
-    "silent_window_minutes": errorBehavior.silentWindowMinutes,
-    "show_error_retry_seconds": errorBehavior.showErrorRetrySeconds,
-  }
-
-proc frameTimeZoneUpdatesJson(timeZoneUpdates: TimeZoneUpdatesConfig): JsonNode =
-  if timeZoneUpdates == nil:
-    return %*{
-      "enabled": true,
-      "hour": 3,
-      "url": "https://tz.frameos.net/tzdata.json.gz",
-    }
-  %*{
-    "enabled": timeZoneUpdates.enabled,
-    "hour": timeZoneUpdates.hour,
-    "url": timeZoneUpdates.url,
-  }
-
 proc storedFrameApiPayload(configJson: JsonNode): JsonNode =
   if configJson.kind == JObject and configJson{"frameApi"} != nil and configJson{"frameApi"}.kind == JObject:
     return copy(configJson["frameApi"])
@@ -714,96 +591,158 @@ proc storedFrameAdminAuthValue(configJson: JsonNode, storedFrameApi: JsonNode, e
     result["user"] = %source{"user"}.getStr("")
     result["pass"] = %source{"pass"}.getStr("")
 
+# --- typed config → admin API ------------------------------------------------
+
+proc dumpHook*(s: var string, v: Color) =
+  s.add('"' & v.toHtmlHex() & '"')
+
+proc dumpHook*(s: var string, v: PaletteConfig) =
+  ## The SPA's Palette shape: colours as "#rrggbb" strings.
+  s.add("{\"colors\":[")
+  if v != nil:
+    for index, (r, g, b) in v.colors:
+      if index > 0: s.add(',')
+      s.add('"' & rgb(r.uint8, g.uint8, b.uint8).color.toHtmlHex() & '"')
+  s.add("]}")
+
+proc frameConfigJson(config: FrameConfig): JsonNode =
+  ## The live config in frame.json's own spelling (camelCase, defaults
+  ## applied), via jsony — no per-section hand serializers. Defaults are
+  ## applied on a copy so a hand-built config (tests, embedded builds) reads
+  ## back exactly like a loaded one; loadConfig already did this for the
+  ## runtime's own.
+  if config == nil:
+    return %*{}
+  var complete = FrameConfig()
+  complete[] = config[]
+  setConfigDefaults(complete)
+  parseJson(complete.toJson())
+
+proc apiHttpsProxy(node: JsonNode, exposeSecrets: bool): JsonNode =
+  let proxy = objectNodeOrEmpty(node)
+  let port = proxy{"port"}.getInt(0)
+  %*{
+    "enable": proxy{"enable"}.getBool(false),
+    "port": if port > 0: port else: 8443,
+    "expose_only_port": proxy{"exposeOnlyPort"}.getBool(true),
+    "certs": {
+      "server": if exposeSecrets: proxy{"serverCert"}.getStr("") else: "",
+      "server_key": if exposeSecrets: proxy{"serverKey"}.getStr("") else: "",
+      "client_ca": "",
+    },
+    "server_cert_not_valid_after": newJNull(),
+    "client_ca_cert_not_valid_after": newJNull(),
+  }
+
+proc apiErrorBehavior(node: JsonNode): JsonNode =
+  let behavior = objectNodeOrEmpty(node)
+  %*{
+    "mode": behavior{"mode"}.getStr("show_error_retry"),
+    "retry_seconds": behavior{"retrySeconds"}.getFloat(60),
+    "silent_retry_seconds": behavior{"silentRetrySeconds"}.getFloat(60),
+    "silent_retry_forever": behavior{"silentRetryForever"}.getBool(false),
+    "silent_window_minutes": behavior{"silentWindowMinutes"}.getFloat(10),
+    "show_error_retry_seconds": behavior{"showErrorRetrySeconds"}.getFloat(60),
+  }
+
+proc apiDeviceConfig(stored: JsonNode, typed: JsonNode): JsonNode =
+  ## What frame.json holds, verbatim — the SPA writes far more into
+  ## deviceConfig (renderMode, sdCardAssets, ESP32 power keys, pin overrides)
+  ## than the runtime types, and the form must read all of it back or its
+  ## next save loses it. The typed view only stands in when the file has none.
+  if stored != nil and stored.kind == JObject:
+    return copy(stored)
+  result = objectNodeOrEmpty(typed)
+  if result.hasKey("httpUploadUrl"):
+    result["uploadUrl"] = result["httpUploadUrl"]
+    result.delete("httpUploadUrl")
+  if result.hasKey("httpUploadHeaders"):
+    result["uploadHeaders"] = result["httpUploadHeaders"]
+    result.delete("httpUploadHeaders")
+  # -1 is "driver default", not a pin anyone chose; the form shows blanks.
+  if result{"pins"} != nil and result["pins"].kind == JObject:
+    var pins = %*{}
+    for key, value in result["pins"].pairs:
+      if value.kind == JInt and value.getInt() >= 0:
+        pins[key] = value
+    if pins.len > 0: result["pins"] = pins else: result.delete("pins")
+
+proc maskedCopy(node: JsonNode, keys: openArray[string]): JsonNode =
+  result = objectNodeOrEmpty(node)
+  for key in keys:
+    if result.hasKey(key):
+      result[key] = %""
+
 proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false): JsonNode =
   let configPath = getConfigFilename()
   let configJson = loadConfigJson()
   let storedFrameApi = storedFrameApiPayload(configJson)
-  let interval = if configJson.kind == JObject: configJson{"interval"}.getFloat(300) else: 300
-  let backgroundColor =
-    if configJson.kind == JObject: configJson{"backgroundColor"}.getStr("#000000") else: "#000000"
-  let colorValue =
-    if configJson.kind == JObject and configJson.hasKey("color"): configJson["color"] else: newJNull()
-  let scenesPayload = loadScenePayload()
-  let frameAccessKey = if exposeSecrets: globalFrameConfig.frameAccessKey else: ""
-  let frameAdminAuth = storedFrameAdminAuthValue(configJson, storedFrameApi, exposeSecrets)
-  let serverApiKey = if exposeSecrets: globalFrameConfig.serverApiKey else: ""
+  let live = frameConfigJson(globalFrameConfig)
   let scenesSource = activeScenesJsonPath()
   var activeConnections = 0
   withLock connectionsState.lock:
     activeConnections = connectionsState.items.len
 
-  result = %*{
-    "id": frameApiId(),
-    "project_id": 0,
-    "name": globalFrameConfig.name,
-    "mode": globalFrameConfig.mode,
-    "frame_host": globalFrameConfig.frameHost,
-    "frame_port": globalFrameConfig.framePort,
-    "frame_access_key": frameAccessKey,
-    "frame_access": globalFrameConfig.frameAccess,
-    "frame_admin_auth": frameAdminAuth,
-    "https_proxy": frameHttpsProxyJson(globalFrameConfig.httpsProxy, exposeSecrets),
-    "ssh_user": "",
-    "ssh_pass": "",
-    "ssh_port": 22,
-    "ssh_keys": %*[],
-    "server_host": globalFrameConfig.serverHost,
-    "server_port": globalFrameConfig.serverPort,
-    "server_api_key": serverApiKey,
-    "server_send_logs": globalFrameConfig.serverSendLogs,
-    "status": "ready",
-    "archived": false,
-    "version": compiledFrameOSVersion(),
-    "width": globalFrameConfig.width,
-    "height": globalFrameConfig.height,
-    "device": globalFrameConfig.device,
-    "device_config": frameDeviceConfigJson(globalFrameConfig.deviceConfig),
-    "color": colorValue,
-    "timezone": globalFrameConfig.timeZone,
-    "timezone_updater": frameTimeZoneUpdatesJson(globalFrameConfig.timeZoneUpdates),
-    "interval": interval,
-    "metrics_interval": globalFrameConfig.metricsInterval,
-    "max_http_response_bytes": globalFrameConfig.maxHttpResponseBytes,
-    "scaling_mode": globalFrameConfig.scalingMode,
-    "rotate": globalFrameConfig.rotate,
-    "flip": globalFrameConfig.flip,
-    "background_color": backgroundColor,
-    "scenes": scenesPayload,
-    "debug": globalFrameConfig.debug,
-    "last_log_at": newJNull(),
-    "log_to_file": globalFrameConfig.logToFile,
-    "assets_path": globalFrameConfig.assetsPath,
-    "save_assets": globalFrameConfig.saveAssets,
-    "upload_fonts": storedApiOrConfigValue(configJson, storedFrameApi, "upload_fonts", "uploadFonts", %""),
-    "reboot": storedApiOrConfigValue(configJson, storedFrameApi, "reboot", "reboot", newJNull()),
-    "control_code": frameControlCodeJson(globalFrameConfig.controlCode),
-    "schedule": frameScheduleJson(globalFrameConfig.schedule),
-    "gpio_buttons": frameGpioButtonsJson(globalFrameConfig.gpioButtons),
-    "network": frameNetworkJson(globalFrameConfig.network),
-    "agent": frameAgentJson(globalFrameConfig.agent),
-    "mountpoints": frameMountpointsJson(globalFrameConfig.mountpoints, exposeSecrets),
-    "error_behavior": frameErrorBehaviorJson(globalFrameConfig.errorBehavior),
-    "palette": framePaletteJson(globalFrameConfig.palette),
-    "buildroot": storedApiOrConfigValue(configJson, storedFrameApi, "buildroot", "buildroot", newJNull()),
-    "embedded": storedApiOrConfigValue(configJson, storedFrameApi, "embedded", "embedded", newJNull()),
-    "rpios": storedApiOrConfigValue(configJson, storedFrameApi, "rpios", "rpios", newJNull()),
-    "terminal_history": storedApiOrConfigValue(
-      configJson, storedFrameApi, "terminal_history", "terminalHistory", %*[]
-    ),
-    "last_successful_deploy": storedApiOrConfigValue(
-      configJson, storedFrameApi, "last_successful_deploy", "lastSuccessfulDeploy", newJNull()
-    ),
-    "last_successful_deploy_at": storedApiOrConfigValue(
-      configJson, storedFrameApi, "last_successful_deploy_at", "lastSuccessfulDeployAt", newJNull()
-    ),
-    "frame_sync": {
-      "current_revision": storedFrameApi{frameSyncCurrentRevisionKey}.getStr(""),
-      "deployed_revision": storedFrameApi{frameSyncDeployedRevisionKey}.getStr(""),
-      "frame_config_modified_at": fileModifiedIso(configPath),
-      "scenes_modified_at": fileModifiedIso(scenesSource.path),
-    },
-    "active_connections": activeConnections,
+  # Everything the runtime types, straight from the live config; everything
+  # it does not (interval, reboot, buildroot, …) from frame.json / the last
+  # saved payload; then the handful whose API shape differs, below.
+  result = %*{}
+  for (apiKey, configKey) in frameApiKeyMap:
+    if live.hasKey(configKey):
+      result[apiKey] = live[configKey]
+    else:
+      result[apiKey] = storedApiOrConfigValue(configJson, storedFrameApi, apiKey, configKey, newJNull())
+  result["interval"] = storedConfigValue(configJson, "interval", %300)
+  result["background_color"] = storedConfigValue(configJson, "backgroundColor", %"#000000")
+  result["upload_fonts"] = storedApiOrConfigValue(configJson, storedFrameApi, "upload_fonts", "uploadFonts", %"")
+  result.delete("settings") # app secrets never ride the frame payload; see /api/settings
+  result["https_proxy"] = apiHttpsProxy(live{"httpsProxy"}, exposeSecrets)
+  result["error_behavior"] = apiErrorBehavior(live{"errorBehavior"})
+  result["device_config"] = apiDeviceConfig(configJson{"deviceConfig"}, live{"deviceConfig"})
+  # The stored palette carries the SPA's name/colorNames next to the colours.
+  if configJson{"palette"} != nil and configJson["palette"].kind == JObject:
+    result["palette"] = copy(configJson["palette"])
+  result["frame_admin_auth"] = storedFrameAdminAuthValue(configJson, storedFrameApi, exposeSecrets)
+  if not exposeSecrets:
+    result["frame_access_key"] = %""
+    result["server_api_key"] = %""
+    result["network"] = maskedCopy(result{"network"}, ["wifiHotspotPassword"])
+    result["agent"] = maskedCopy(result{"agent"}, ["agentSharedSecret"])
+    if result{"mountpoints"}{"items"} != nil and result["mountpoints"]["items"].kind == JArray:
+      var items: seq[JsonNode] = @[]
+      for item in result["mountpoints"]["items"].items:
+        items.add(maskedCopy(item, ["password"]))
+      result["mountpoints"]["items"] = %items
+  if result{"network"} != nil and result["network"].kind == JObject:
+    # Provisioning detail, not a setting the form edits.
+    result["network"].delete("networkBackend")
+
+  result["id"] = %frameApiId()
+  result["project_id"] = %0
+  result["ssh_user"] = %""
+  result["ssh_pass"] = %""
+  result["ssh_port"] = %22
+  result["ssh_keys"] = %*[]
+  result["status"] = %"ready"
+  result["archived"] = %false
+  result["version"] = %compiledFrameOSVersion()
+  result["scenes"] = loadScenePayload()
+  result["last_log_at"] = newJNull()
+  result["terminal_history"] = storedApiOrConfigValue(
+    configJson, storedFrameApi, "terminal_history", "terminalHistory", %*[])
+  result["last_successful_deploy"] = storedApiOrConfigValue(
+    configJson, storedFrameApi, "last_successful_deploy", "lastSuccessfulDeploy", newJNull())
+  result["last_successful_deploy_at"] = storedApiOrConfigValue(
+    configJson, storedFrameApi, "last_successful_deploy_at", "lastSuccessfulDeployAt", newJNull())
+  result["frame_sync"] = %*{
+    "current_revision": storedFrameApi{frameSyncCurrentRevisionKey}.getStr(""),
+    "deployed_revision": storedFrameApi{frameSyncDeployedRevisionKey}.getStr(""),
+    "frame_config_modified_at": fileModifiedIso(configPath),
+    "scenes_modified_at": fileModifiedIso(scenesSource.path),
   }
+  result["active_connections"] = %activeConnections
+  # The last payload the admin saved wins for admins: what they typed is what
+  # they read back, richer form state (colorNames, ESP32 fields) included.
   for key in storedFrameApi.keys:
     if exposeSecrets or not result.hasKey(key):
       result[key] = copy(storedFrameApi[key])

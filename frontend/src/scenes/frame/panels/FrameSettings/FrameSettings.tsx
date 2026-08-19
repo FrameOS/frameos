@@ -42,8 +42,12 @@ import {
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import {
+  cloudFrameSupportsEsp32ExtendedSettings,
   cloudFrameSupportsExtendedSettings,
+  cloudFrameSupportsHardwareSettings,
+  esp32ExtendedCloudFrameSettingsMinVersion,
   extendedCloudFrameSettingsMinVersion,
+  hardwareCloudFrameSettingsMinVersion,
   setCloudFrameServiceSettingsEnabled,
 } from '../../../../utils/cloudFrameApi'
 import { appsLogic } from '../Apps/appsLogic'
@@ -1174,6 +1178,16 @@ export function FrameSettings({
   // that knows the keys; see cloudFrameSupportsExtendedSettings for what an
   // unknown or missing version means.
   const cloudExtendedSettingsSupported = cloudProfile && cloudFrameSupportsExtendedSettings(frame.frameos_version)
+  // The 2026.8.31 hardware batch (palette, partial refresh, GPIO buttons)
+  // has its own floor, and which of its fields apply depends on the panel
+  // the device reported at enrollment — a cloud frame's `device` is the one
+  // in frame.hardware, never a form value.
+  const cloudHardwareSettingsSupported = cloudProfile && cloudFrameSupportsHardwareSettings(frame.frameos_version)
+  // The ESP32 firmware's own 2026.8.31 additions: debug logging, the HTTP
+  // ceiling and GPIO buttons (esp32ExtendedCloudFrameSettingKeys).
+  const cloudEsp32ExtendedSettingsSupported =
+    esp32CloudProfile && cloudFrameSupportsEsp32ExtendedSettings(frame.frameos_version)
+  const cloudDevice = cloudProfile ? frame.hardware?.device ?? '' : ''
   const showBackendSection = frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-backend')
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
     frameForm.embedded?.hardwarePreset ?? frameForm.device_config?.hardwarePreset
@@ -1229,7 +1243,8 @@ export function FrameSettings({
     setFrameFormValues(nextValues)
   }
 
-  const palette = withCustomPalette[frame.device || '']
+  const paletteDevice = cloudProfile ? cloudDevice : frame.device || ''
+  const palette = withCustomPalette[paletteDevice]
   const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
   const normalizeKeyIds = (keys: string[]) => Array.from(new Set(keys)).sort()
   const deployedSshKeyIds = normalizeKeyIds(
@@ -1322,10 +1337,12 @@ export function FrameSettings({
     !isVirtualPlatform &&
     !(frameForm.embedded?.platform ?? frame.embedded?.platform ?? '').startsWith('pico') &&
     frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-power', frame)
-  const configuredGpioButtons = !isEmbeddedMode ? configuredGpioButtonsForDevice(frameForm.device) : null
+  const configuredGpioButtons = !isEmbeddedMode
+    ? configuredGpioButtonsForDevice(cloudProfile ? cloudDevice : frameForm.device)
+    : null
   const showWifiCredentials = isBuildrootMode || isEmbeddedMode
   const maxHttpResponsePlaceholder = String(
-    isEmbeddedMode ? EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES : DEFAULT_MAX_HTTP_RESPONSE_BYTES
+    isEmbeddedMode || esp32CloudProfile ? EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES : DEFAULT_MAX_HTTP_RESPONSE_BYTES
   )
   const selectedTimezone = frameForm.timezone ?? frame.timezone ?? ''
   const timezoneUpdater = frameForm.timezone_updater ?? {}
@@ -1556,6 +1573,136 @@ export function FrameSettings({
           : []),
       ]}
     />
+  )
+
+  // Palette and GPIO buttons: the full surface renders them for every backend
+  // frame; the cloud profile renders them for Pi/Linux frames whose firmware
+  // knows the 2026.8.31 hardware batch, and only when the panel the device
+  // reported has a palette / a button map to configure. One definition.
+  const paletteField = (
+    <Field name="palette" label="Color palette">
+      {({ value, onChange }: { value: Palette; onChange: (v: Palette) => void }) => (
+        <div className="space-y-2 w-full">
+          <div className="flex items-center gap-2">
+            <span>Set&nbsp;to</span>
+            <Select
+              name="palette"
+              value={''}
+              onChange={(v) => {
+                const selectedPalette = spectraPalettes.find((p) => p.name === v)
+                if (selectedPalette) {
+                  onChange(selectedPalette)
+                }
+              }}
+              options={[
+                { value: '', label: '' },
+                ...spectraPalettes.map((palette) => ({
+                  value: palette.name || '',
+                  label: palette.name || 'Custom',
+                })),
+              ]}
+            />
+          </div>
+          {palette?.colors.map((color, index) => (
+            <div className="flex items-center gap-2" key={index}>
+              <ColorInput
+                className="!w-24"
+                name={`colors.${index}`}
+                value={value?.colors?.[index] ?? color}
+                onChange={(_value) => {
+                  const newColors = palette.colors.map((c, i) =>
+                    i === index ? _value : value?.colors?.[i] ?? c ?? '#000000'
+                  )
+                  onChange({ colors: newColors })
+                }}
+              />
+              <TextInput
+                type="text"
+                className="!w-24"
+                name={`colors.${index}`}
+                value={value?.colors?.[index] ?? color}
+                onChange={(_value) => {
+                  const newColors = palette.colors.map((c, i) =>
+                    i === index ? _value : value?.colors?.[i] ?? c ?? '#000000'
+                  )
+                  onChange({ colors: newColors })
+                }}
+              />
+              <span>{palette?.colorNames?.[index]}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Field>
+  )
+  const gpioButtonsSection = (
+    <>
+      <H6 id="frame-settings-gpio" className="flex items-center gap-2">
+        GPIO buttons
+        {configuredGpioButtons ? (
+          <Tag color="gray">Configured</Tag>
+        ) : (
+          <Button
+            size="small"
+            color="secondary"
+            onClick={() => setFrameFormValues({ gpio_buttons: [...(frameForm.gpio_buttons || []), {}] })}
+            className="flex items-center gap-1"
+          >
+            <PlusIcon className="w-4 h-4" />
+            Add button
+          </Button>
+        )}
+      </H6>
+      <div className="pl-2 @md:pl-8 space-y-2">
+        {configuredGpioButtons ? (
+          <div className="space-y-2">
+            {configuredGpioButtons.map((button) => (
+              <div key={`${button.pin}-${button.label}`} className="grid grid-cols-1 gap-2 @md:grid-cols-2">
+                <div className="space-y-1 @md:flex @md:gap-2">
+                  <Label className="@md:w-1/3">Pin</Label>
+                  <TextInput value={String(button.pin)} readOnly className="cursor-default opacity-70" />
+                </div>
+                <div className="space-y-1 @md:flex @md:gap-2">
+                  <Label className="@md:w-1/3">Label</Label>
+                  <TextInput value={button.label} readOnly className="cursor-default opacity-70" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          frameForm.gpio_buttons?.map((_, index) => (
+            <Group key={index} name={`gpio_buttons.${index}`}>
+              <div>
+                <Field
+                  name="pin"
+                  label="Pin"
+                  labelRight={
+                    <Button
+                      color="secondary"
+                      size="small"
+                      className="flex items-center gap-1"
+                      onClick={() =>
+                        setFrameFormValues({
+                          gpio_buttons: frameForm.gpio_buttons?.filter((_, i) => i !== index),
+                        })
+                      }
+                    >
+                      <TrashIcon className="w-4 h-4" />
+                      Remove
+                    </Button>
+                  }
+                >
+                  <TextInput name="pin" placeholder="5" />
+                </Field>
+                <Field name="label" label="Label">
+                  <TextInput name="label" placeholder="A" />
+                </Field>
+              </div>
+            </Group>
+          ))
+        )}
+      </div>
+    </>
   )
 
   // Shared between the full settings surface and the cloud profile block
@@ -1993,6 +2140,47 @@ export function FrameSettings({
                 <div className="pl-2 @md:pl-8 space-y-2">{controlCodeFields}</div>
               </fieldset>
             ) : null}
+            {/* Pi/Linux only, firmware ≥ 2026.8.31: the hardware batch
+                (hardwareCloudFrameSettingKeys). The display driver reads
+                these at init, so a save that carries one restarts the
+                runtime on the frame. Only the fields the reported panel can
+                use are rendered; below the floor they render disabled with
+                the reason, never hidden. */}
+            {!esp32CloudProfile ? (
+              <fieldset disabled={!cloudHardwareSettingsSupported} className="min-w-0 space-y-4">
+                <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
+                  <H6 id="frame-settings-hardware">Panel</H6>
+                </div>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  {!cloudHardwareSettingsSupported ? (
+                    <p className="frameos-muted text-sm">
+                      {frame.frameos_version
+                        ? `Palette, partial refresh and GPIO button settings need FrameOS ${hardwareCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to edit them here.`
+                        : `Palette, partial refresh and GPIO button settings need FrameOS ${hardwareCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`}
+                    </p>
+                  ) : (
+                    <p className="frameos-muted text-sm">
+                      The panel driver reads these when it starts, so saving a change here restarts FrameOS on the frame
+                      (a few seconds of blank panel).
+                    </p>
+                  )}
+                  {palette ? paletteField : null}
+                  {partialRefreshDevices.has(cloudDevice) ? (
+                    <Field name="device_config">
+                      {({ value, onChange }) => (
+                        <PartialRefreshSettingsFields
+                          value={value as FrameType['device_config']}
+                          onChange={onChange}
+                          variant="settings"
+                          panelDefaults={partialRefreshDefaultsByDevice[cloudDevice]}
+                        />
+                      )}
+                    </Field>
+                  ) : null}
+                </div>
+                {gpioButtonsSection}
+              </fieldset>
+            ) : null}
             {/* ESP32 only. The Pi runtime's CLOUD_SETTINGS_ALLOWLIST does not
                 know the power keys, so pushing them at a Linux frame refuses
                 the whole verb — every other setting in the same save included. */}
@@ -2008,6 +2196,37 @@ export function FrameSettings({
                     footnote="Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings push. Update the frame first if saving fails."
                   />
                 </div>
+                {/* Firmware ≥ 2026.8.31 only (esp32ExtendedCloudFrameSettingKeys):
+                    older firmware refuses the whole push on any of these, so
+                    below the floor they render disabled with the reason. */}
+                <fieldset disabled={!cloudEsp32ExtendedSettingsSupported} className="min-w-0 space-y-4">
+                  <div className="frame-settings-heading-row mt-4 flex items-center justify-between gap-3">
+                    <H6 id="frame-settings-esp32-extended">Device</H6>
+                  </div>
+                  <div className="pl-2 @md:pl-8 space-y-2">
+                    {!cloudEsp32ExtendedSettingsSupported ? (
+                      <p className="frameos-muted text-sm">
+                        {frame.frameos_version
+                          ? `Debug logging, the HTTP response limit and GPIO buttons need FrameOS ${esp32ExtendedCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to edit them here.`
+                          : `Debug logging, the HTTP response limit and GPIO buttons need FrameOS ${esp32ExtendedCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`}
+                      </p>
+                    ) : (
+                      <p className="frameos-muted text-sm">
+                        Debug logging applies on the next render. The HTTP response limit and GPIO buttons are read at
+                        boot, so saving a change to them reboots the frame.
+                      </p>
+                    )}
+                    <Field
+                      name="debug"
+                      label="Debug logging"
+                      tooltip="Verbose per-render logging on the device. Useful while a scene misbehaves; noisy otherwise."
+                    >
+                      <Switch name="debug" fullWidth />
+                    </Field>
+                    {maxHttpResponseBytesField}
+                  </div>
+                  {gpioButtonsSection}
+                </fieldset>
               </>
             ) : null}
           </>
@@ -3512,63 +3731,8 @@ export function FrameSettings({
         </div>
 
         <H6 id="frame-settings-palette">Palette</H6>
-        {frame.device && withCustomPalette[frame.device] ? (
-          <div className="pl-2 @md:pl-8 space-y-2">
-            <Field name="palette" label="Color palette">
-              {({ value, onChange }: { value: Palette; onChange: (v: Palette) => void }) => (
-                <div className="space-y-2 w-full">
-                  <div className="flex items-center gap-2">
-                    <span>Set&nbsp;to</span>
-                    <Select
-                      name="palette"
-                      value={''}
-                      onChange={(v) => {
-                        const selectedPalette = spectraPalettes.find((p) => p.name === v)
-                        if (selectedPalette) {
-                          onChange(selectedPalette)
-                        }
-                      }}
-                      options={[
-                        { value: '', label: '' },
-                        ...spectraPalettes.map((palette) => ({
-                          value: palette.name || '',
-                          label: palette.name || 'Custom',
-                        })),
-                      ]}
-                    />
-                  </div>
-                  {palette?.colors.map((color, index) => (
-                    <div className="flex items-center gap-2" key={index}>
-                      <ColorInput
-                        className="!w-24"
-                        name={`colors.${index}`}
-                        value={value?.colors?.[index] ?? color}
-                        onChange={(_value) => {
-                          const newColors = palette.colors.map((c, i) =>
-                            i === index ? _value : value?.colors?.[i] ?? c ?? '#000000'
-                          )
-                          onChange({ colors: newColors })
-                        }}
-                      />
-                      <TextInput
-                        type="text"
-                        className="!w-24"
-                        name={`colors.${index}`}
-                        value={value?.colors?.[index] ?? color}
-                        onChange={(_value) => {
-                          const newColors = palette.colors.map((c, i) =>
-                            i === index ? _value : value?.colors?.[i] ?? c ?? '#000000'
-                          )
-                          onChange({ colors: newColors })
-                        }}
-                      />
-                      <span>{palette?.colorNames?.[index]}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Field>
-          </div>
+        {palette ? (
+          <div className="pl-2 @md:pl-8 space-y-2">{paletteField}</div>
         ) : (
           <div>This frame does not support changing the palette</div>
         )}
@@ -3696,71 +3860,7 @@ export function FrameSettings({
             </div>
           </>
         ) : null}
-        <H6 id="frame-settings-gpio" className="flex items-center gap-2">
-          GPIO buttons
-          {configuredGpioButtons ? (
-            <Tag color="gray">Configured</Tag>
-          ) : (
-            <Button
-              size="small"
-              color="secondary"
-              onClick={() => setFrameFormValues({ gpio_buttons: [...(frameForm.gpio_buttons || []), {}] })}
-              className="flex items-center gap-1"
-            >
-              <PlusIcon className="w-4 h-4" />
-              Add button
-            </Button>
-          )}
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          {configuredGpioButtons ? (
-            <div className="space-y-2">
-              {configuredGpioButtons.map((button) => (
-                <div key={`${button.pin}-${button.label}`} className="grid grid-cols-1 gap-2 @md:grid-cols-2">
-                  <div className="space-y-1 @md:flex @md:gap-2">
-                    <Label className="@md:w-1/3">Pin</Label>
-                    <TextInput value={String(button.pin)} readOnly className="cursor-default opacity-70" />
-                  </div>
-                  <div className="space-y-1 @md:flex @md:gap-2">
-                    <Label className="@md:w-1/3">Label</Label>
-                    <TextInput value={button.label} readOnly className="cursor-default opacity-70" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            frameForm.gpio_buttons?.map((_, index) => (
-              <Group key={index} name={`gpio_buttons.${index}`}>
-                <div>
-                  <Field
-                    name="pin"
-                    label="Pin"
-                    labelRight={
-                      <Button
-                        color="secondary"
-                        size="small"
-                        className="flex items-center gap-1"
-                        onClick={() =>
-                          setFrameFormValues({
-                            gpio_buttons: frameForm.gpio_buttons?.filter((_, i) => i !== index),
-                          })
-                        }
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                        Remove
-                      </Button>
-                    }
-                  >
-                    <TextInput name="pin" placeholder="5" />
-                  </Field>
-                  <Field name="label" label="Label">
-                    <TextInput name="label" placeholder="A" />
-                  </Field>
-                </div>
-              </Group>
-            ))
-          )}
-        </div>
+        {gpioButtonsSection}
           </>
         ) : null}
       </Form>
