@@ -86,6 +86,7 @@ from app.schemas.frames import (
     FrameSSHKeysUpdateRequest,
     FrameSetNextSceneRequest,
     FrameSyncApplyRequest,
+    FrameAdoptRequest,
 )
 from app.api.auth import get_current_user_from_request
 from app.config import config
@@ -107,6 +108,7 @@ from app.utils.frame_http import (
 )
 from app.utils import embedded_assets, virtual_assets
 from app.api.frame_sync import (
+    adopt_standalone_frame,
     apply_frame_sync,
     get_frame_sync_status,
     read_frame_sync_hint_headers,
@@ -3892,6 +3894,21 @@ async def api_frame_update_ssh_keys(
     await update_frame(db, redis, frame)
 
     return {"message": "SSH keys updated successfully"}
+
+
+@api_project.post("/frames/adopt", response_model=FrameResponse)
+async def api_frame_adopt(
+    data: FrameAdoptRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Adopt a running standalone frame: log into its local admin API, import
+    its config and scenes, and write this backend's server credentials back so
+    the device becomes backend-managed (docs/api-triality.md)."""
+    frame = await adopt_standalone_frame(
+        db, redis, data, _fetch_frame_http_bytes, project_id=current_project_id()
+    )
+    return {"frame": frame.to_dict()}
 
 
 @api_project.post("/frames/import", response_model=FrameResponse)

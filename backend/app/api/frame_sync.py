@@ -15,13 +15,15 @@ from sqlalchemy.orm import Session
 from app.models.frame import (
     Frame,
     compact_timezone_updater,
+    delete_frame,
+    new_frame,
     normalize_frame_admin_auth,
     normalize_error_behavior,
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
     update_frame,
 )
-from app.schemas.frames import FrameSyncApplyRequest, FrameUpdateRequest
+from app.schemas.frames import FrameAdoptRequest, FrameSyncApplyRequest, FrameUpdateRequest
 from app.tasks.buildroot_image import (
     buildroot_sd_image_config_fingerprint,
     clear_buildroot_sd_image,
@@ -1171,6 +1173,140 @@ async def _push_frame_sync_metadata(
         fetch_frame_http_bytes,
         reload_runtime=False,
     )
+
+
+# Keys _sync_frame_json_payload would import from the device but adoption must
+# not: the backend just minted the server credentials it is about to write TO
+# the device, and the device's own view of them (empty, or a previous
+# backend's) must not clobber that.
+ADOPT_SKIPPED_SYNC_KEYS = ("server_host", "server_port", "server_send_logs")
+
+
+async def adopt_standalone_frame(
+    db: Session,
+    redis: Redis,
+    data: FrameAdoptRequest,
+    fetch_frame_http_bytes: FrameFetch,
+    project_id: int | None = None,
+) -> Frame:
+    """Adopt a running standalone frame into this backend.
+
+    docs/api-triality.md: "backend should discover/read local GET /api/frames
+    and GET /api/frames/:id, import scenes/config, then write backend server
+    credentials back to the local frame through POST /api/frames/:id".
+
+    The read goes through the same admin-session + canonical-payload helpers
+    frame sync uses, against a transient Frame carrying only the caller's
+    host/port/credentials — so a wrong password or unreachable host fails
+    before anything is created. Only after the payload is in hand does a row
+    exist, and a failed credential write-back deletes it again: adoption
+    either completes or leaves nothing behind.
+    """
+    admin_auth = {
+        "enabled": True,
+        "user": data.admin_username.strip(),
+        "pass": data.admin_password,
+    }
+    if not admin_auth["user"] or not admin_auth["pass"]:
+        _bad_request("The frame's admin username and password are required to adopt it")
+
+    host = data.frame_host.strip()
+    if not host:
+        _bad_request("A frame host is required")
+    server_host = data.server_host.strip()
+    if not server_host:
+        _bad_request("A server host is required (the address the frame will reach this backend on)")
+
+    # Probe first, create later: _fetch_frame_http_bytes only needs host,
+    # port, access mode and the admin credentials, so a transient (never
+    # persisted) Frame is enough to log in and read the canonical payload.
+    probe = Frame(
+        frame_host=host,
+        frame_port=data.frame_port,
+        frame_access="private",
+        frame_access_key="",
+        frame_admin_auth=admin_auth,
+        mode="rpios",
+    )
+    remote_frame = await _load_live_frame_api_payload(probe, redis, fetch_frame_http_bytes)
+
+    frame_host = host if data.frame_port in (0, 8787) else f"{host}:{data.frame_port}"
+    frame = await new_frame(
+        db,
+        redis,
+        data.name or remote_frame.get("name") or host,
+        frame_host,
+        f"{server_host}:{data.server_port}",
+        device=remote_frame.get("device"),
+        interval=remote_frame.get("interval"),
+        project_id=project_id,
+    )
+
+    try:
+        frame_import = _sync_frame_json_payload(remote_frame)
+        for key in ADOPT_SKIPPED_SYNC_KEYS:
+            frame_import.pop(key, None)
+        # The caller's choice of name wins over the device's.
+        if data.name:
+            frame_import.pop("name", None)
+        try:
+            _apply_sync_frame_update(frame, frame_import)
+        except ValueError as exc:
+            _bad_request(str(exc))
+
+        # Beyond the sync pull list, adoption takes over the device's web
+        # access key (an admin session reads it unredacted, so the backend
+        # keeps working against links already in the wild) and its scenes.
+        if isinstance(remote_frame.get("frame_access"), str) and remote_frame["frame_access"]:
+            frame.frame_access = remote_frame["frame_access"]
+        if isinstance(remote_frame.get("frame_access_key"), str) and remote_frame["frame_access_key"]:
+            frame.frame_access_key = remote_frame["frame_access_key"]
+        remote_scenes = remote_frame.get("scenes")
+        if isinstance(remote_scenes, list) and remote_scenes:
+            # Scenes pulled from a device may predate the removal of the
+            # legacy/* apps.
+            migrate_legacy_apps_in_scenes(remote_scenes)
+            frame.scenes = remote_scenes
+        frame.frame_admin_auth = admin_auth
+        # The frame is demonstrably running FrameOS — it just answered.
+        frame.status = "ready"
+        await update_frame(db, redis, frame)
+        db.refresh(frame)
+
+        # The write-back is what makes this an adoption: a non-empty
+        # serverHost marks the device backend-managed (and blocks cloud
+        # enrollment). The device reloads its config; logs start flowing on
+        # its next restart or deploy (the log shipper binds its target at
+        # process start).
+        await _push_frame_sync_payload(
+            frame,
+            redis,
+            {
+                "server_host": frame.server_host,
+                "server_port": frame.server_port,
+                "server_api_key": frame.server_api_key,
+                "server_send_logs": True,
+            },
+            fetch_frame_http_bytes,
+            reload_runtime=True,
+        )
+    except HTTPException:
+        # Adoption failed after the row was created: leave nothing behind, so
+        # a retry does not pile up half-adopted frames.
+        await delete_frame(db, redis, frame.id, frame.project_id)
+        raise
+
+    # The device now matches the backend by construction; record the baseline
+    # so the sync panel opens clean. The metadata echo to the device is best
+    # effort — the adoption itself is already complete.
+    _mark_frame_sync_baseline(frame)
+    await update_frame(db, redis, frame)
+    db.refresh(frame)
+    try:
+        await _push_frame_sync_metadata(frame, redis, fetch_frame_http_bytes)
+    except HTTPException:
+        pass
+    return frame
 
 
 async def get_frame_sync_status(

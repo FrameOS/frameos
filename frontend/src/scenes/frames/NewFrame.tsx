@@ -47,6 +47,9 @@ import { PartialRefreshSettingsFields } from '../../components/PartialRefreshSet
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
 import { urls } from '../../urls'
 import { defaultNewFrameServerHost } from '../../utils/backendAddress'
+import { apiFetch } from '../../utils/apiFetch'
+import { framesModel } from '../../models/framesModel'
+import { useState } from 'react'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -655,7 +658,7 @@ function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[]
 // 'virtual' is not its own install_method: it is the embedded install flow on
 // the "virtual" platform, surfaced as a separate card because there is no
 // hardware to flash and none of the ESP32 steps apply.
-type AddFrameMode = FrameInstallMethod | 'import' | 'virtual'
+type AddFrameMode = FrameInstallMethod | 'import' | 'virtual' | 'adopt'
 type UploadHeader = { name: string; value: string }
 
 function installMethodTitle(installMethod: AddFrameMode): string {
@@ -673,6 +676,9 @@ function installMethodTitle(installMethod: AddFrameMode): string {
   }
   if (installMethod === 'import') {
     return 'Import frame'
+  }
+  if (installMethod === 'adopt') {
+    return 'Adopt frame'
   }
   return 'Install over SSH'
 }
@@ -807,7 +813,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
   const installMethod = newFrame.install_method
   const isVirtualPlatform = installMethod === 'embedded' && newFrame.platform === EMBEDDED_VIRTUAL
   const addFrameMode: AddFrameMode | undefined =
-    newFrame.mode === 'import' ? 'import' : isVirtualPlatform ? 'virtual' : installMethod
+    newFrame.mode === 'import'
+      ? 'import'
+      : newFrame.mode === 'adopt'
+      ? 'adopt'
+      : isVirtualPlatform
+      ? 'virtual'
+      : installMethod
   const timezone = normalizedTimezone(newFrame.timezone, savedSettings.defaults?.timezone)
   const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
   const selectedSshKeys = new Set(newFrame.ssh_keys ?? defaultInstallSshKeyIds(savedSettings))
@@ -976,6 +988,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               description="Load a previously exported frame JSON file."
             >
               <ArrowUpTrayIcon className="h-4 w-4" />
+            </ModeButton>
+            <ModeButton
+              onClick={() => setNewFrameValues({ mode: 'adopt', install_method: undefined })}
+              title="Adopt frame"
+              description="Take over a standalone frame already running FrameOS: import its config and scenes, then manage it from here."
+            >
+              <ServerStackIcon className="h-4 w-4" />
             </ModeButton>
           </div>
         </div>
@@ -1477,7 +1496,138 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </button>
           </div>
         </div>
+      ) : addFrameMode === 'adopt' ? (
+        <AdoptFramePane cancel={cancel} />
       ) : null}
+    </div>
+  )
+}
+
+// Adopt a running standalone frame: the backend logs into the frame's local
+// admin API, imports its config and scenes, and writes its own server
+// credentials back (POST /api/frames/adopt). Local state on purpose — the
+// pane is self-contained and the shared form machinery gains nothing here.
+function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
+  const { frameCreated, hideForm } = useActions(newFrameForm)
+  const [host, setHost] = useState('')
+  const [port, setPort] = useState('8787')
+  const [adminUser, setAdminUser] = useState('')
+  const [adminPass, setAdminPass] = useState('')
+  const [serverHost, setServerHost] = useState(defaultNewFrameServerHost() ?? '')
+  const [name, setName] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function adopt(): Promise<void> {
+    setSubmitting(true)
+    setError(null)
+    try {
+      const response = await apiFetch('/api/frames/adopt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          frame_host: host.trim(),
+          frame_port: parseInt(port, 10) || 8787,
+          admin_username: adminUser.trim(),
+          admin_password: adminPass,
+          server_host: serverHost.trim(),
+          ...(name.trim() ? { name: name.trim() } : {}),
+        }),
+      })
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => ({}))) as { detail?: string }
+        setError(detail.detail ?? `Adoption failed (HTTP ${response.status})`)
+        return
+      }
+      const result = (await response.json()) as { frame?: { id: number } }
+      if (result.frame?.id) {
+        framesModel.actions.addFrame(result.frame as any)
+        hideForm()
+        frameCreated(result.frame.id)
+      }
+    } catch {
+      setError('Adoption failed: could not reach the backend')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const inputClass =
+    'frameos-input h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+  const labelClass = 'frameos-strong mb-1 block text-xs font-semibold text-slate-700'
+  const canSubmit = host.trim() !== '' && adminUser.trim() !== '' && adminPass !== '' && serverHost.trim() !== ''
+
+  return (
+    <div className="space-y-4">
+      <p className="frameos-muted text-xs text-slate-500">
+        The frame keeps everything it is showing: its config and scenes are imported here, and the backend's address is
+        written back so the frame reports in. It needs the admin login you set on the frame's local admin page.
+      </p>
+      {error ? (
+        <p className="flex items-start gap-1.5 text-xs font-medium text-red-600" role="alert">
+          <ExclamationCircleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          {error}
+        </p>
+      ) : null}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="sm:col-span-1">
+          <label className={labelClass}>Frame host</label>
+          <input
+            className={inputClass}
+            placeholder="frame.local or 10.0.0.42"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+          />
+        </div>
+        <div className="sm:col-span-1">
+          <label className={labelClass}>Frame port</label>
+          <input className={inputClass} inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value)} />
+        </div>
+        <div className="sm:col-span-1">
+          <label className={labelClass}>Frame admin username</label>
+          <input
+            className={inputClass}
+            autoComplete="off"
+            value={adminUser}
+            onChange={(e) => setAdminUser(e.target.value)}
+          />
+        </div>
+        <div className="sm:col-span-1">
+          <label className={labelClass}>Frame admin password</label>
+          <input
+            className={inputClass}
+            type="password"
+            autoComplete="off"
+            value={adminPass}
+            onChange={(e) => setAdminPass(e.target.value)}
+          />
+        </div>
+        <div className="sm:col-span-1">
+          <label className={labelClass}>This backend's address, as seen from the frame</label>
+          <input className={inputClass} value={serverHost} onChange={(e) => setServerHost(e.target.value)} />
+        </div>
+        <div className="sm:col-span-1">
+          <label className={labelClass}>Name (optional, defaults to the frame's own)</label>
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => void adopt()}
+          disabled={!canSubmit || submitting}
+          className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {submitting ? <Spinner color="white" /> : 'Adopt'}
+        </button>
+        <button
+          type="button"
+          onClick={cancel}
+          className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   )
 }

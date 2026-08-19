@@ -282,6 +282,20 @@ class FrameSetNextSceneRequest(BaseModel):
     fastDeploy: Optional[bool] = True
 
 
+class FrameAdoptRequest(BaseModel):
+    """Adopt a running standalone frame: read its canonical local API, import
+    its config and scenes, and write this backend's server credentials back."""
+    frame_host: str
+    frame_port: int = 8787
+    admin_username: str
+    admin_password: str
+    # The address the FRAME will use to reach this backend (logs, deploys) —
+    # the browser knows it, the backend behind a proxy may not.
+    server_host: str
+    server_port: int = 8989
+    name: Optional[str] = None
+
+
 class FrameSyncApplyRequest(BaseModel):
     frame_json: Optional[Literal["backend", "frame", "ignore"]] = "ignore"
     scenes_json: Optional[Literal["backend", "frame", "ignore"]] = "ignore"

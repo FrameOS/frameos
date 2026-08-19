@@ -47,10 +47,9 @@ enabled on images that have no backend to talk to.
 
 ## Canonical API gaps
 
-Matrix in `docs/api-triality.md`.
-
-- Frame import/adoption: standalone export/source payloads, and a backend
-  adoption flow for standalone frames.
+Matrix in `docs/api-triality.md`; nothing scheduled — the remaining deltas
+(ESP32 field coverage, canonical Pi asset-mutation aliases) live in that
+file's "Current gaps".
 
 ---
 

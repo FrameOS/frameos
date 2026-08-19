@@ -3193,3 +3193,178 @@ async def test_api_frame_generate_tls_material_includes_validity_dates(async_cli
     assert data['client_ca_cert_not_valid_after'] is not None
     assert data['server_cert_not_valid_after'].endswith('+00:00')
     assert data['client_ca_cert_not_valid_after'].endswith('+00:00')
+
+
+# ---------------------------------------------------------------------------
+# Adoption: POST /api/frames/adopt takes over a running standalone frame.
+# ---------------------------------------------------------------------------
+
+def _adopt_request_body(**overrides):
+    return {
+        'frame_host': '10.0.0.42',
+        'frame_port': 8787,
+        'admin_username': 'admin',
+        'admin_password': 'secret',
+        'server_host': 'backend.local',
+        'server_port': 8989,
+        **overrides,
+    }
+
+
+def _standalone_device_payload():
+    """What a standalone Pi's GET /api/frames/1 answers an admin session."""
+    return {
+        'id': 1,
+        'project_id': 0,
+        'name': 'Kitchen frame',
+        'mode': 'rpios',
+        'frame_host': '10.0.0.42',
+        'frame_port': 8787,
+        'frame_access': 'private',
+        'frame_access_key': 'device-web-key',
+        'server_host': '',
+        'server_port': 8989,
+        'server_api_key': '',
+        'server_send_logs': True,
+        'width': 800,
+        'height': 480,
+        'device': 'pimoroni.inky_impression_13',
+        'device_config': {'color': 'multi'},
+        'interval': 300.0,
+        'metrics_interval': 60.0,
+        'rotate': 90,
+        'scaling_mode': 'cover',
+        'status': 'ready',
+        'version': '2026.8.31',
+        'scenes': [{'id': 'scene-1', 'name': 'Device scene', 'nodes': [], 'edges': []}],
+    }
+
+
+def _adopt_mock_fetch(device_payload, posted_payloads, login_calls=None):
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            if login_calls is not None:
+                login_calls.append(json.loads(body))
+            return _sync_admin_login_response()
+        assert headers and 'Cookie' in headers
+        assert path.startswith('/api/frames/1')
+        if method == 'POST':
+            posted_payloads.append(json.loads(body))
+            return 200, b'{"message":"ok"}', {'content-type': 'application/json'}
+        return 200, json.dumps({'frame': device_payload}).encode(), {'content-type': 'application/json'}
+    return mock_fetch
+
+
+@pytest.mark.asyncio
+async def test_api_frame_adopt_imports_config_scenes_and_writes_back_credentials(async_client, db, redis):
+    posted_payloads = []
+    login_calls = []
+    mock_fetch = _adopt_mock_fetch(_standalone_device_payload(), posted_payloads, login_calls)
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+
+    assert response.status_code == 200, response.text
+    frame_id = response.json()['frame']['id']
+    db.expire_all()
+    frame = db.get(Frame, frame_id)
+
+    # Imported from the device.
+    assert frame.name == 'Kitchen frame'
+    assert frame.frame_host == '10.0.0.42'
+    assert frame.device == 'pimoroni.inky_impression_13'
+    assert frame.width == 800 and frame.height == 480
+    assert frame.rotate == 90
+    assert frame.interval == 300.0
+    assert frame.scenes == _standalone_device_payload()['scenes']
+    # The device's web access key is taken over, so existing ?k= links keep working.
+    assert frame.frame_access_key == 'device-web-key'
+    assert frame.frame_access == 'private'
+    # The admin credentials the caller supplied are stored for future syncs.
+    assert frame.frame_admin_auth == {'enabled': True, 'user': 'admin', 'pass': 'secret'}
+    assert login_calls[0] == {'username': 'admin', 'password': 'secret'}
+    # Backend-side identity was minted, not copied from the (empty) device fields.
+    assert frame.server_host == 'backend.local'
+    assert frame.server_port == 8989
+    assert frame.server_api_key
+    assert frame.status == 'ready'
+
+    # The write-back marks the device backend-managed with the minted key.
+    credentials_push = posted_payloads[0]
+    assert credentials_push['server_host'] == 'backend.local'
+    assert credentials_push['server_port'] == 8989
+    assert credentials_push['server_api_key'] == frame.server_api_key
+    assert credentials_push['server_send_logs'] is True
+    assert 'skip_runtime_reload' not in credentials_push
+
+    # The sync baseline is recorded so the sync panel opens clean.
+    assert frame.last_successful_deploy_at is not None
+    assert frame.last_successful_deploy['name'] == 'Kitchen frame'
+    assert posted_payloads[-1]['frame_sync_mark_deployed'] is True
+
+
+@pytest.mark.asyncio
+async def test_api_frame_adopt_reports_login_failure_and_creates_nothing(async_client, db, redis):
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return 401, b'{"detail":"Unauthorized"}', {'content-type': 'application/json'}
+        raise AssertionError(f'unexpected path {path}')
+
+    frames_before = db.query(Frame).count()
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+
+    assert response.status_code == 502
+    assert 'admin login failed' in response.json()['detail']
+    assert db.query(Frame).count() == frames_before
+
+
+@pytest.mark.asyncio
+async def test_api_frame_adopt_rolls_back_when_the_write_back_fails(async_client, db, redis):
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET", body=None, headers=None):
+        if path == '/api/admin/login':
+            return _sync_admin_login_response()
+        if method == 'POST':
+            return 500, b'{"detail":"disk full"}', {'content-type': 'application/json'}
+        return 200, json.dumps({'frame': _standalone_device_payload()}).encode(), {'content-type': 'application/json'}
+
+    frames_before = db.query(Frame).count()
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+
+    assert response.status_code == 502
+    assert db.query(Frame).count() == frames_before
+
+
+@pytest.mark.asyncio
+async def test_api_frame_adopt_validates_input(async_client, db, redis):
+    response = await async_client.post(
+        '/api/frames/adopt', json=_adopt_request_body(admin_username='  ')
+    )
+    assert response.status_code == 400
+
+    response = await async_client.post(
+        '/api/frames/adopt', json=_adopt_request_body(server_host=' ')
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_api_frame_adopt_keeps_minted_key_when_device_hides_secrets(async_client, db, redis):
+    device_payload = _standalone_device_payload()
+    device_payload['frame_access_key'] = ''
+    posted_payloads = []
+    mock_fetch = _adopt_mock_fetch(device_payload, posted_payloads)
+
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=mock_fetch)):
+        response = await async_client.post(
+            '/api/frames/adopt', json=_adopt_request_body(name='My adopted frame')
+        )
+
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    frame = db.get(Frame, response.json()['frame']['id'])
+    # The caller's name wins over the device's, and an empty device key does
+    # not blank the minted one.
+    assert frame.name == 'My adopted frame'
+    assert frame.frame_access_key
