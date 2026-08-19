@@ -162,20 +162,29 @@ const
 # in cloud/apps/auth-web/src/lib/frames.ts and the SPA's
 # frontend/src/utils/cloudFrameSettings.ts.
 #
-# Two tiers, one list. The first six shipped with the cloud link and every
-# managed frame understands them. The rest arrived in 2026.8.30 — a provider
-# gates them on the frame's reported `frameos_version`, because a frame on
-# older firmware refuses the WHOLE verb on a key it does not know (see
-# handleSetSettings): one new key in the push would take `name` and
-# `interval` down with it. Structured values are shape-checked below
-# (validateCloudSetting) before they reach the persist path — the allowlist
-# says which keys, the validators say which values, and the provider's own
-# validation is UX, not the boundary.
+# Three tiers, one list. The first six shipped with the cloud link and every
+# managed frame understands them. The next seven arrived in 2026.8.30 and the
+# hardware batch (palette, the partial-refresh subset of deviceConfig, GPIO
+# buttons) in 2026.8.31 — a provider gates each tier on the frame's reported
+# `frameos_version`, because a frame on older firmware refuses the WHOLE verb
+# on a key it does not know (see handleSetSettings): one new key in the push
+# would take `name` and `interval` down with it. Structured values are
+# shape-checked below (validateCloudSetting) before they reach the persist
+# path — the allowlist says which keys, the validators say which values, and
+# the provider's own validation is UX, not the boundary.
 const CLOUD_SETTINGS_ALLOWLIST* = [
   "name", "rotate", "interval", "scaling_mode", "timezone", "debug",
   "flip", "error_behavior", "control_code", "metrics_interval",
   "max_http_response_bytes", "save_assets", "timezone_updater",
+  "palette", "device_config", "gpio_buttons",
 ]
+
+# The display drivers copy these three into their own context at init
+# (drivers/drivers.nim): a palette, a partial-refresh policy or a button map
+# only takes effect on the next start. A push carrying one of them restarts
+# the runtime after persisting instead of reloading it — the process comes
+# straight back (systemd), the panel re-inits with the new values.
+const CLOUD_SETTINGS_RESTART_KEYS* = ["palette", "device_config", "gpio_buttons"]
 
 # Ceilings for the numeric extended settings. maxHttpResponseBytes is a
 # per-request memory bound on a Pi Zero as much as a policy knob, so the
@@ -188,6 +197,14 @@ const
   CloudErrorWindowCeilingMinutes* = 7 * 24 * 60.0
   # A saveAssets object names apps by keyword; keep it small and simple.
   CloudSaveAssetsMaxEntries* = 64
+  # Palettes are the panel's ink count (6 for Spectra, 7 for ACeP); 16 leaves
+  # room without letting a provider ship a lookup table.
+  CloudPaletteMaxColors* = 16
+  # BCM 0..27 on a Pi header, up to 48 on the ESP32 boards; the driver
+  # refuses (and logs) a line it cannot open, it never crashes on one.
+  CloudGpioButtonMaxPin* = 48
+  CloudGpioButtonsMax* = 16
+  CloudPartialRefreshMaxRefreshes* = 1000
 
 # CLOUD_REFUSED_APP_KEYWORDS / refusedCloudAppKeyword moved to
 # cloud/scene_guard.nim (re-exported below): the scene registry now re-checks
@@ -933,6 +950,64 @@ proc validateCloudSetting*(key: string, value: JsonNode): bool =
       if not ok:
         return false
     true
+  of "palette":
+    # The SPA's Palette shape (frame.json `palette`): "#rrggbb" colours plus
+    # the optional display name and per-colour names. An empty colour list is
+    # a valid value — it hands the panel back its built-in palette.
+    if not onlyKeys(value, ["name", "colors", "colorNames"]):
+      return false
+    let colors = value{"colors"}
+    if colors == nil or colors.kind != JArray or colors.len > CloudPaletteMaxColors:
+      return false
+    for color in colors.items:
+      if not isHtmlHexColor(color):
+        return false
+    if value.hasKey("name") and not (value["name"].kind == JString and value["name"].getStr("").len <= 64):
+      return false
+    if value.hasKey("colorNames"):
+      let names = value["colorNames"]
+      if names.kind != JArray or names.len != colors.len:
+        return false
+      for name in names.items:
+        if name.kind != JString or name.getStr("").len > 32:
+          return false
+    true
+  of "device_config":
+    # STRICTLY the partial-refresh policy. Everything else in deviceConfig is
+    # hardware wiring (VCOM, pins, upload URL and headers, SD card, render
+    # mode) and stays the device's own — the persist path patches, so what
+    # is not sent is not touched.
+    if not onlyKeys(value, ["partial", "partialMaxAreaPercent", "partialMaxRefreshesBeforeFull"]):
+      return false
+    if value.len == 0:
+      return false
+    for subKey in value.keys:
+      let ok = case subKey
+        of "partial": value[subKey].kind == JBool
+        of "partialMaxAreaPercent": numberInRange(value[subKey], 0, 100)
+        else: intInRange(value[subKey], 0, CloudPartialRefreshMaxRefreshes)
+      if not ok:
+        return false
+    true
+  of "gpio_buttons":
+    # [{pin, label}] — the whole list, replaced. An empty list unbinds every
+    # button; a pin appearing twice is refused (the driver would register
+    # the line twice).
+    if value.kind != JArray or value.len > CloudGpioButtonsMax:
+      return false
+    var seenPins: seq[int] = @[]
+    for button in value.items:
+      if not onlyKeys(button, ["pin", "label"]):
+        return false
+      if not intInRange(button{"pin"}, 0, CloudGpioButtonMaxPin):
+        return false
+      let label = button{"label"}
+      if label == nil or label.kind != JString or label.getStr("").strip().len notin 1 .. 32:
+        return false
+      if button["pin"].getInt() in seenPins:
+        return false
+      seenPins.add(button["pin"].getInt())
+    true
   else:
     false
 
@@ -975,7 +1050,15 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
       except CatchableError as error:
         ctx.audit("set_settings", false, "persist_failed: " & error.msg)
         return CloudVerbReply(ack: ackError(id, "persist_failed"))
-      discard ctx.sendEventFn("reload", %*{})
+      # A driver-init key (see CLOUD_SETTINGS_RESTART_KEYS) needs the process
+      # to come back up; everything else is picked up by a config reload.
+      var needsRestart = false
+      for key in CLOUD_SETTINGS_RESTART_KEYS:
+        if payload.hasKey(key):
+          needsRestart = true
+      # Same order as restart_runtime: the event queues here, the ack goes
+      # out on return, the runner exits when it drains the queue.
+      discard ctx.sendEventFn(if needsRestart: "restart" else: "reload", %*{})
   ctx.audit("set_settings", true)
   CloudVerbReply(ack: ackOk(id))
 

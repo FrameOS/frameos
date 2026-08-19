@@ -36,6 +36,21 @@ export const extendedCloudFrameSettingKeys = [
 export const extendedCloudFrameSettingsMinVersion = '2026.8.30'
 
 /**
+ * The 2026.8.31 hardware batch, Pi/Linux runtime only: the display palette,
+ * the partial-refresh subset of device_config, and the GPIO button map. The
+ * device's display driver reads all three at init, so a push carrying one
+ * restarts the runtime (a few seconds of blank panel on e-ink). Which of them
+ * apply to a given frame depends on the panel it reported
+ * (`frame.hardware.device`) — the panel renders only the applicable fields —
+ * and callers gate on cloudFrameSupportsHardwareSettings(frame.frameos_version)
+ * before including hardwareCloudFrameSettingKeys.
+ */
+export const hardwareCloudFrameSettingKeys = ['palette', 'device_config', 'gpio_buttons'] as const
+
+/** Firmware from here on knows the hardware keys. */
+export const hardwareCloudFrameSettingsMinVersion = '2026.8.31'
+
+/**
  * Power-management keys only the ESP32 firmware consumes. The Nim runtime's
  * CLOUD_SETTINGS_ALLOWLIST does not know them, so pushing them at a Pi frame
  * drops the whole verb — callers must include them only for esp32 frames
@@ -49,12 +64,52 @@ export const esp32PowerSettingKeys = [
   'battery_divider',
 ] as const
 
-export const esp32CloudFrameSettingKeys = [...cloudFrameSettingKeys, ...esp32PowerSettingKeys] as const
+/**
+ * What every ESP32 firmware with the cloud link applies: four of the base
+ * six (no timezone — the chip carries no tz database — and no debug before
+ * 2026.8.31) plus the power keys. Mirrors esp32SettableKeys on the control
+ * plane minus its version-gated tail.
+ */
+export const esp32CloudFrameSettingKeys = [
+  'interval',
+  'name',
+  'rotate',
+  'scaling_mode',
+  ...esp32PowerSettingKeys,
+] as const
+
+/**
+ * What the ESP32 firmware learned in 2026.8.31: debug logging (live), the
+ * per-request HTTP ceiling and the GPIO button map (both read at boot, so
+ * the firmware reboots after persisting them). Older firmware refuses the
+ * whole push on them — callers gate on cloudFrameSupportsEsp32ExtendedSettings.
+ * `debug` and `max_http_response_bytes` are the same wire keys the Pi runtime
+ * takes; the SPA's esp32 profile simply did not send them before.
+ */
+export const esp32ExtendedCloudFrameSettingKeys = ['debug', 'max_http_response_bytes', 'gpio_buttons'] as const
+export const esp32ExtendedCloudFrameSettingsMinVersion = '2026.8.31'
+export const esp32MaxCloudGpioButtons = 8
+
+export function cloudFrameSupportsEsp32ExtendedSettings(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32ExtendedCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/** The keys an ESP32 cloud frame reporting `frameosVersion` can be sent. */
+export function esp32CloudFrameSettingKeysForVersion(
+  frameosVersion: string | null | undefined
+): CloudFrameSettingKey[] {
+  const keys: CloudFrameSettingKey[] = [...esp32CloudFrameSettingKeys]
+  if (cloudFrameSupportsEsp32ExtendedSettings(frameosVersion)) {
+    keys.push(...esp32ExtendedCloudFrameSettingKeys)
+  }
+  return keys
+}
 
 /** Every key any cloud frame can be sent — the superset the drift test pins. */
 export const allCloudFrameSettingKeys = [
   ...cloudFrameSettingKeys,
   ...extendedCloudFrameSettingKeys,
+  ...hardwareCloudFrameSettingKeys,
   ...esp32PowerSettingKeys,
 ] as const
 
@@ -62,12 +117,17 @@ export type CloudFrameSettingKey = (typeof allCloudFrameSettingKeys)[number]
 
 /**
  * The keys a Pi/Linux cloud frame reporting `frameosVersion` can be sent:
- * the base six, plus the extended batch once the firmware knows it.
+ * the base six, plus each later batch once the firmware knows it.
  */
 export function cloudFrameSettingKeysForVersion(frameosVersion: string | null | undefined): CloudFrameSettingKey[] {
-  return cloudFrameSupportsExtendedSettings(frameosVersion)
-    ? [...cloudFrameSettingKeys, ...extendedCloudFrameSettingKeys]
-    : [...cloudFrameSettingKeys]
+  const keys: CloudFrameSettingKey[] = [...cloudFrameSettingKeys]
+  if (cloudFrameSupportsExtendedSettings(frameosVersion)) {
+    keys.push(...extendedCloudFrameSettingKeys)
+  }
+  if (cloudFrameSupportsHardwareSettings(frameosVersion)) {
+    keys.push(...hardwareCloudFrameSettingKeys)
+  }
+  return keys
 }
 
 /**
@@ -80,6 +140,15 @@ export function cloudFrameSettingKeysForVersion(frameosVersion: string | null | 
  *  - null/empty (never reported = never connected) is not.
  */
 export function cloudFrameSupportsExtendedSettings(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(extendedCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/** Same three answers, against the hardware batch's floor. */
+export function cloudFrameSupportsHardwareSettings(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(hardwareCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+export function cloudFrameSupportsSettingsFrom(minVersion: string, frameosVersion: string | null | undefined): boolean {
   if (typeof frameosVersion !== 'string' || frameosVersion.trim().length === 0) {
     return false
   }
@@ -87,7 +156,7 @@ export function cloudFrameSupportsExtendedSettings(frameosVersion: string | null
   if (!target) {
     return true
   }
-  const minimum = frameosVersionKey(extendedCloudFrameSettingsMinVersion) ?? []
+  const minimum = frameosVersionKey(minVersion) ?? []
   for (let index = 0; index < 4; index += 1) {
     const diff = (target[index] ?? 0) - (minimum[index] ?? 0)
     if (diff !== 0) {
@@ -242,6 +311,102 @@ export function cloudSaveAssetsPayload(value: unknown): boolean | Record<string,
 }
 
 /**
+ * palette: the SPA's Palette ({name?, colors, colorNames?}) with every colour
+ * a "#rrggbb". One unparseable colour drops the whole palette from the push
+ * (a partial palette would shift every colour after it on the panel).
+ * Undefined when there is nothing to send.
+ */
+export function cloudPalettePayload(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined
+  }
+  const form = value as { name?: unknown; colors?: unknown; colorNames?: unknown }
+  if (!Array.isArray(form.colors)) {
+    return undefined
+  }
+  const colors: string[] = []
+  for (const color of form.colors) {
+    if (typeof color !== 'string' || !htmlHexColor.test(color)) {
+      return undefined
+    }
+    colors.push(color)
+  }
+  const out: Record<string, unknown> = { colors }
+  if (typeof form.name === 'string' && form.name.length > 0 && form.name.length <= 64) {
+    out.name = form.name
+  }
+  if (
+    Array.isArray(form.colorNames) &&
+    form.colorNames.length === colors.length &&
+    form.colorNames.every((n) => typeof n === 'string' && n.length <= 32)
+  ) {
+    out.colorNames = form.colorNames
+  }
+  return out
+}
+
+/**
+ * device_config: ONLY the partial-refresh policy — partial, partialMaxAreaPercent,
+ * partialMaxRefreshesBeforeFull — coerced from the form's strings. Everything
+ * else in the form's device_config (VCOM, pins, upload URL, SD card, …) is the
+ * device's own and never rides a cloud push. Undefined when none is set.
+ */
+export function cloudPartialRefreshPayload(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined
+  }
+  const form = value as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  if (form.partial !== undefined && form.partial !== null && form.partial !== '') {
+    out.partial = form.partial === true || form.partial === 'true'
+  }
+  const area = toNumber(form.partialMaxAreaPercent)
+  if (area !== undefined && area >= 0 && area <= 100) {
+    out.partialMaxAreaPercent = area
+  }
+  const refreshes = toInteger(form.partialMaxRefreshesBeforeFull)
+  if (refreshes !== undefined && refreshes >= 0) {
+    out.partialMaxRefreshesBeforeFull = refreshes
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/**
+ * gpio_buttons: [{pin, label}] with pins as integers and labels trimmed.
+ * Rows the form left blank (no pin) are skipped; a row with a pin but an
+ * unusable label or a duplicate pin drops the whole list from the push,
+ * since the device refuses it and would take every other setting down.
+ * An empty list IS sent — it unbinds every button.
+ */
+export function cloudGpioButtonsPayload(value: unknown): Record<string, unknown>[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+  const out: Record<string, unknown>[] = []
+  const pins = new Set<number>()
+  for (const row of value) {
+    if (!row || typeof row !== 'object') {
+      continue
+    }
+    const { pin, label } = row as { pin?: unknown; label?: unknown }
+    if (pin === undefined || pin === null || pin === '') {
+      continue
+    }
+    const parsedPin = toInteger(pin)
+    const trimmedLabel = typeof label === 'string' ? label.trim() : ''
+    if (parsedPin === undefined || parsedPin < 0 || trimmedLabel.length === 0 || trimmedLabel.length > 32) {
+      return undefined
+    }
+    if (pins.has(parsedPin)) {
+      return undefined
+    }
+    pins.add(parsedPin)
+    out.push({ pin: parsedPin, label: trimmedLabel })
+  }
+  return out
+}
+
+/**
  * Pick just the keys the cloud accepts, dropping unset ones — the control
  * plane's validator rejects null/empty values, and a rejected key takes the
  * whole push down with it.
@@ -272,6 +437,15 @@ export function cloudFrameSettingsPayload(
         break
       case 'save_assets':
         converted = cloudSaveAssetsPayload(value)
+        break
+      case 'palette':
+        converted = cloudPalettePayload(value)
+        break
+      case 'device_config':
+        converted = cloudPartialRefreshPayload(value)
+        break
+      case 'gpio_buttons':
+        converted = cloudGpioButtonsPayload(value)
         break
       default:
         // The form keeps numbers as strings; the control plane type-checks them.

@@ -7,9 +7,14 @@ import {
   cloudFrameSettingKeysForVersion,
   cloudFrameSettingsPayload,
   cloudFrameSupportsExtendedSettings,
-  esp32CloudFrameSettingKeys,
+  cloudFrameSupportsHardwareSettings,
+  cloudFrameSupportsEsp32ExtendedSettings,
+  esp32CloudFrameSettingKeysForVersion,
+  esp32ExtendedCloudFrameSettingsMinVersion,
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
+  hardwareCloudFrameSettingKeys,
+  hardwareCloudFrameSettingsMinVersion,
   type CloudFrameSettingKey,
 } from './cloudFrameSettings'
 import { isEsp32CloudFrame } from '../scenes/workspace/workspaceSurfaces'
@@ -40,8 +45,13 @@ export {
   cloudFrameSettingKeysForVersion,
   cloudFrameSettingsPayload,
   cloudFrameSupportsExtendedSettings,
+  cloudFrameSupportsHardwareSettings,
+  cloudFrameSupportsEsp32ExtendedSettings,
+  esp32ExtendedCloudFrameSettingsMinVersion,
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
+  hardwareCloudFrameSettingKeys,
+  hardwareCloudFrameSettingsMinVersion,
 }
 export type { CloudFrameSettingKey }
 export type { CloudFrameSceneRow }
@@ -84,7 +94,7 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
   // that knows it (cloudFrameSupportsExtendedSettings) — older firmware
   // refuses the whole push on the first unknown key.
   const keys = isEsp32CloudFrame(frame)
-    ? esp32CloudFrameSettingKeys
+    ? esp32CloudFrameSettingKeysForVersion(frame.frameos_version)
     : cloudFrameSettingKeysForVersion(frame.frameos_version)
   const settings = cloudFrameSettingsPayload(frame, keys)
   if (Object.keys(settings).length === 0) {
@@ -99,7 +109,9 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
     const detail = (await response.json().catch(() => ({}))) as { error?: string; min_frameos_version?: string }
     if (detail.error === 'settings_need_newer_firmware') {
       throw new Error(
-        `Some of these settings need FrameOS ${detail.min_frameos_version ?? extendedCloudFrameSettingsMinVersion} or newer on the frame — update it first`
+        `Some of these settings need FrameOS ${
+          detail.min_frameos_version ?? extendedCloudFrameSettingsMinVersion
+        } or newer on the frame — update it first`
       )
     }
     throw new Error(
@@ -116,10 +128,7 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
  * settings"). Turning it off REMOVES the scope, so the device's next pull is a
  * 403 and it drops every cloud-owned key it holds.
  */
-export async function setCloudFrameServiceSettingsEnabled(
-  frameId: FrameId,
-  enabled: boolean
-): Promise<void> {
+export async function setCloudFrameServiceSettingsEnabled(frameId: FrameId, enabled: boolean): Promise<void> {
   const response = await apiFetch(`/api/frames/${frameId}/service-settings/enabled`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

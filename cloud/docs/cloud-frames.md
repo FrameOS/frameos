@@ -141,9 +141,11 @@ Cloud-profile verb set (complete):
   via the existing uploaded-scenes path.
 - `set_schedule`, `set_settings` — declarative allowlist only (rotation,
   flip, interval, timezone, error handling, control code, metrics interval,
-  asset saving, tz-updater on/off, scene schedule; brightness once the runtime
-  has it). Never SSH config, admin credentials, network config, update URLs,
-  or agent/profile state. The full key list and its firmware gating live in
+  asset saving, tz-updater on/off, scene schedule; from 2026.8.31 the panel
+  palette, the partial-refresh policy and the GPIO button map — all three
+  driver-init settings that restart the runtime; brightness once the runtime
+  has it). Never SSH config, admin credentials, network config, panel wiring
+  (VCOM, pins, upload URLs), update URLs, or agent/profile state. The full key list and its firmware gating live in
   `docs/cloud-frames.md` (`set_settings`).
 - `get_state`, `get_logs`, `get_metrics` — gated by the `telemetry:*` scopes
   the owner granted.

@@ -1533,6 +1533,9 @@ describe("frame management API", () => {
         "max_http_response_bytes",
         "save_assets",
         "timezone_updater",
+        "palette",
+        "device_config",
+        "gpio_buttons",
         "deep_sleep",
         "deep_sleep_on_battery",
         "wake_check_seconds",
@@ -1552,6 +1555,9 @@ describe("frame management API", () => {
         "wake_check_seconds",
         "battery_pin",
         "battery_divider",
+        "debug",
+        "max_http_response_bytes",
+        "gpio_buttons",
       ].sort(),
     );
     for (const key of esp32SettableKeys) {
@@ -1626,6 +1632,32 @@ describe("frame management API", () => {
     expect(smuggledUrl.status).toBe(400);
     const badControlCode = await push({ control_code: { enabled: "true" } });
     expect(badControlCode.status).toBe(400);
+    // The hardware batch has its own floor, one release later.
+    const hardwareTooEarly = await push({ palette: { colors: ["#000000"] } });
+    expect(hardwareTooEarly.status).toBe(400);
+    expect((await hardwareTooEarly.json()) as { error: string; min_frameos_version?: string }).toMatchObject({
+      error: "settings_need_newer_firmware",
+      min_frameos_version: "2026.8.31",
+    });
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.8.31" })
+      .where(eq(frames.id, frame_id));
+    const hardware = await push({
+      palette: { name: "Desaturated", colors: ["#000000", "#ffffff"], colorNames: ["Black", "White"] },
+      device_config: { partial: true, partialMaxAreaPercent: 15, partialMaxRefreshesBeforeFull: 30 },
+      gpio_buttons: [{ pin: 5, label: "A" }],
+    });
+    expect(hardware.status).toBe(200);
+    // Only the partial-refresh subset of device_config: wiring never rides a push.
+    const wiring = await push({ device_config: { partial: true, pins: { rst: 17 } } });
+    expect(wiring.status).toBe(400);
+    const vcom = await push({ device_config: { vcom: -1.5 } });
+    expect(vcom.status).toBe(400);
+    const badPalette = await push({ palette: { colors: ["red"] } });
+    expect(badPalette.status).toBe(400);
+    const duplicatePin = await push({ gpio_buttons: [{ pin: 5, label: "A" }, { pin: 5, label: "B" }] });
+    expect(duplicatePin.status).toBe(400);
     // …and round-trip through the frame summary in the device's spelling.
     const [pushed] = await db.select().from(frames).where(eq(frames.id, frame_id));
     expect(pushed?.settings).toMatchObject({
@@ -1766,12 +1798,12 @@ describe("frame management API", () => {
   });
 
   it("refuses the settings an esp32 has no consumer for", async () => {
-    // debug is not a field of fos_config_t, and timezone is unimplementable
-    // on a device with no tz database (its only timezone concept is the
-    // utcOffsetMinutes riding with set_schedule). The firmware refuses the
-    // whole verb on either; the route says so first, so nothing is
-    // half-applied. (scaling_mode joined the settable set when the firmware
-    // grew a consumer for it.)
+    // timezone is unimplementable on a device with no tz database (its only
+    // timezone concept is the utcOffsetMinutes riding with set_schedule), and
+    // the Pi/Linux hardware batch has no firmware consumer at all. The
+    // firmware refuses the whole verb on any of them; the route says so
+    // first, so nothing is half-applied. (scaling_mode joined the settable
+    // set when the firmware grew a consumer for it, debug in 2026.8.31.)
     const keys = deviceKeypair();
     await signIn();
     const claimToken = await mintToken("Desk esp32");
@@ -1785,8 +1817,10 @@ describe("frame management API", () => {
     );
 
     for (const settings of [
-      { debug: true },
       { timezone: "Europe/Tallinn" },
+      { palette: { colors: ["#000000"] } },
+      { device_config: { partial: true } },
+      { flip: "horizontal" },
     ]) {
       const refused = await pushFrameSettings(
         postJson(
@@ -1835,7 +1869,7 @@ describe("frame management API", () => {
     const refused = await pushFrameSettings(
       postJson(
         `/api/frames/${frame_id}/settings`,
-        { settings: { name: "Half-applied", debug: true } },
+        { settings: { name: "Half-applied", timezone: "Europe/Tallinn" } },
         { origin: baseUrl },
       ),
       routeParams(frame_id),
@@ -1856,6 +1890,47 @@ describe("frame management API", () => {
       .from(frameCommands)
       .where(eq(frameCommands.frameId, frame_id));
     expect(commands).toHaveLength(0);
+  });
+
+  it("gates the esp32 firmware's 2026.8.31 keys on the reported version and its button table", async () => {
+    const keys = deviceKeypair();
+    await signIn();
+    const claimToken = await mintToken("Desk esp32");
+    const enrolled = await enroll(claimToken, keys.publicKeyBase64, {
+      hardware: { height: 480, platform: "ESP32-S3", width: 800 },
+    });
+    const { frame_id } = (await enrolled.json()) as { frame_id: string };
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const push = (settings: Record<string, unknown>) =>
+      pushFrameSettings(
+        postJson(`/api/frames/${frame_id}/settings`, { settings }, { origin: baseUrl }),
+        routeParams(frame_id),
+      );
+    // Never connected: nothing known about the firmware, so refused.
+    const tooEarly = await push({ debug: true });
+    expect(tooEarly.status).toBe(400);
+    expect((await tooEarly.json()) as { error: string; min_frameos_version?: string }).toMatchObject({
+      error: "settings_need_newer_firmware",
+      min_frameos_version: "2026.8.31",
+    });
+    await db.update(frames).set({ frameosVersion: "2026.8.30" }).where(eq(frames.id, frame_id));
+    expect((await push({ max_http_response_bytes: 2 * 1024 * 1024 })).status).toBe(400);
+    await db.update(frames).set({ frameosVersion: "2026.8.31" }).where(eq(frames.id, frame_id));
+    const accepted = await push({
+      debug: true,
+      max_http_response_bytes: 2 * 1024 * 1024,
+      gpio_buttons: [{ pin: 0, label: "BOOT" }],
+    });
+    expect(accepted.status).toBe(200);
+    // FOS_GPIO_BUTTONS_MAX is 8 on the chip; the Pi takes 16.
+    const tooMany = await push({
+      gpio_buttons: Array.from({ length: 9 }, (_, index) => ({ pin: index, label: `B${index}` })),
+    });
+    expect(tooMany.status).toBe(400);
+    expect(((await tooMany.json()) as { error: string }).error).toBe("invalid_settings");
   });
 
   it("renames a non-esp32 frame in the DB AND pushes set_settings to the device", async () => {

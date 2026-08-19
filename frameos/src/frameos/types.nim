@@ -513,7 +513,6 @@ type
   Scheduler* = ref object
     frameConfig*: FrameConfig
     logger*: Logger
-    schedule*: FrameSchedule
 
   NetworkStatus* = enum
     idle, connecting, connected, timeout, error

@@ -10,12 +10,19 @@ import {
 } from "../../../../../src/lib/device-flow";
 import {
   enqueueFrameCommand,
+  esp32ExtendedFrameSettingKeys,
+  esp32ExtendedFrameSettingsMinVersion,
+  esp32MaxGpioButtons,
   esp32OnlySettableKeys,
   esp32SettableKeys,
   extendedFrameSettingKeys,
   extendedFrameSettingsMinVersion,
   frameForAccount,
   frameSupportsExtendedSettings,
+  frameSupportsHardwareSettings,
+  frameSupportsSettingsFrom,
+  hardwareFrameSettingKeys,
+  hardwareFrameSettingsMinVersion,
   mergeFrameSettings,
   supersedePendingCommands,
   validateFrameSettings,
@@ -83,6 +90,25 @@ export async function POST(
   ) {
     return jsonError("settings_not_supported_by_device", 400);
   }
+  // ESP32 firmware before 2026.8.31 refuses the whole verb on debug /
+  // max_http_response_bytes / gpio_buttons; and its button table holds
+  // fewer entries than the Pi's.
+  if (
+    isEsp32 &&
+    !frameSupportsSettingsFrom(esp32ExtendedFrameSettingsMinVersion, frame.frameosVersion) &&
+    Object.keys(settings).some((key) => esp32ExtendedFrameSettingKeys.has(key))
+  ) {
+    return jsonError("settings_need_newer_firmware", 400, {
+      min_frameos_version: esp32ExtendedFrameSettingsMinVersion,
+    });
+  }
+  if (
+    isEsp32 &&
+    Array.isArray(settings.gpio_buttons) &&
+    settings.gpio_buttons.length > esp32MaxGpioButtons
+  ) {
+    return jsonError("invalid_settings", 400);
+  }
   // The inverse holds too: the power keys exist only in the ESP32 firmware's
   // profile — the Pi runtime's CLOUD_SETTINGS_ALLOWLIST refuses the whole
   // verb on any of them, so refuse up front instead of half-applying.
@@ -105,6 +131,18 @@ export async function POST(
   ) {
     return jsonError("settings_need_newer_firmware", 400, {
       min_frameos_version: extendedFrameSettingsMinVersion,
+    });
+  }
+  // The hardware batch (palette, partial refresh, GPIO buttons) has its own,
+  // later floor. Same failure mode below it: the whole push refused on the
+  // device, so refuse it here with the version the SPA should ask for.
+  if (
+    !isEsp32 &&
+    !frameSupportsHardwareSettings(frame.frameosVersion) &&
+    Object.keys(settings).some((key) => hardwareFrameSettingKeys.has(key))
+  ) {
+    return jsonError("settings_need_newer_firmware", 400, {
+      min_frameos_version: hardwareFrameSettingsMinVersion,
     });
   }
 

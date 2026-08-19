@@ -5,18 +5,33 @@ import {
   cloudFrameSettingKeysForVersion,
   cloudFrameSettingsPayload,
   cloudFrameSupportsExtendedSettings,
+  cloudFrameSupportsHardwareSettings,
+  cloudGpioButtonsPayload,
+  cloudPalettePayload,
+  cloudPartialRefreshPayload,
+  cloudFrameSupportsEsp32ExtendedSettings,
   esp32CloudFrameSettingKeys,
+  esp32CloudFrameSettingKeysForVersion,
+  esp32ExtendedCloudFrameSettingKeys,
+  esp32ExtendedCloudFrameSettingsMinVersion,
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
+  hardwareCloudFrameSettingKeys,
+  hardwareCloudFrameSettingsMinVersion,
 } from "../../../../../../frontend/src/utils/cloudFrameSettings";
 import {
   allowedFrameCommandTypes,
   allowedFrameSettings,
+  esp32ExtendedFrameSettingKeys,
+  esp32ExtendedFrameSettingsMinVersion,
   esp32OnlySettableKeys,
   esp32SettableKeys,
   extendedFrameSettingKeys,
   extendedFrameSettingsMinVersion,
   frameSupportsExtendedSettings,
+  frameSupportsHardwareSettings,
+  hardwareFrameSettingKeys,
+  hardwareFrameSettingsMinVersion,
 } from "../../lib/frames";
 
 // Save and Render in the shared SPA used to POST /api/frames/{id} and
@@ -52,12 +67,40 @@ describe("cloud settings push", () => {
   it("agrees with the control plane on which keys are the extended batch, and its floor", () => {
     expect(new Set(extendedCloudFrameSettingKeys)).toEqual(extendedFrameSettingKeys);
     expect(extendedCloudFrameSettingsMinVersion).toBe(extendedFrameSettingsMinVersion);
-    // Extended keys are Pi/Linux only: the route refuses them for esp32
-    // frames, so the SPA's esp32 list must not carry them.
+    // Extended keys are Pi/Linux first: the route refuses them for esp32
+    // frames unless the esp32 firmware later learned the same wire key
+    // (max_http_response_bytes, 2026.8.31) — and then only behind its own
+    // gate. The SPA's ungated esp32 list must not carry any of them.
     for (const key of extendedCloudFrameSettingKeys) {
-      expect(esp32SettableKeys.has(key)).toBe(false);
+      expect(esp32SettableKeys.has(key)).toBe(esp32ExtendedFrameSettingKeys.has(key));
       expect(esp32OnlySettableKeys.has(key)).toBe(false);
       expect((esp32CloudFrameSettingKeys as readonly string[]).includes(key)).toBe(false);
+    }
+  });
+
+  it("agrees with the control plane on what the esp32 firmware applies, and its gated tail", () => {
+    // Ungated: exactly the control plane's esp32 subset minus the tail.
+    const ungated = [...esp32SettableKeys].filter((key) => !esp32ExtendedFrameSettingKeys.has(key));
+    expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
+    expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
+    expect(esp32ExtendedCloudFrameSettingsMinVersion).toBe(esp32ExtendedFrameSettingsMinVersion);
+    for (const key of esp32ExtendedCloudFrameSettingKeys) {
+      expect(esp32SettableKeys.has(key)).toBe(true);
+      expect(allowedFrameSettings.has(key)).toBe(true);
+    }
+    expect(cloudFrameSupportsEsp32ExtendedSettings("2026.8.30")).toBe(false);
+    expect(cloudFrameSupportsEsp32ExtendedSettings("2026.8.31")).toBe(true);
+    expect(esp32CloudFrameSettingKeysForVersion("2026.8.30")).toEqual([...esp32CloudFrameSettingKeys]);
+    expect(esp32CloudFrameSettingKeysForVersion("2026.8.31")).toEqual([
+      ...esp32CloudFrameSettingKeys,
+      ...esp32ExtendedCloudFrameSettingKeys,
+    ]);
+    // Never a Pi-only key toward the chip: the route (and the firmware)
+    // refuse the whole push on them.
+    for (const key of [...esp32CloudFrameSettingKeys, ...esp32ExtendedCloudFrameSettingKeys]) {
+      expect(key).not.toBe("timezone");
+      expect(key).not.toBe("palette");
+      expect(key).not.toBe("device_config");
     }
   });
 
@@ -92,6 +135,86 @@ describe("cloud settings push", () => {
     // A dev build is trusted; a frame that never reported is not.
     expect(cloudFrameSupportsExtendedSettings("unknown")).toBe(true);
     expect(cloudFrameSupportsExtendedSettings(null)).toBe(false);
+  });
+
+  it("agrees with the control plane on the hardware batch, and its floor", () => {
+    expect(new Set(hardwareCloudFrameSettingKeys)).toEqual(hardwareFrameSettingKeys);
+    expect(hardwareCloudFrameSettingsMinVersion).toBe(hardwareFrameSettingsMinVersion);
+    for (const key of hardwareCloudFrameSettingKeys) {
+      expect(allowedFrameSettings.has(key)).toBe(true);
+      // gpio_buttons is the one wire key both firmwares learned in 2026.8.31,
+      // each behind its own gate; palette / device_config never go to a chip.
+      expect(esp32SettableKeys.has(key)).toBe(esp32ExtendedFrameSettingKeys.has(key));
+      expect((esp32CloudFrameSettingKeys as readonly string[]).includes(key)).toBe(false);
+    }
+    for (const version of ["2026.8.30", "2026.8.31", "2026.9.0", "unknown", null, ""]) {
+      expect(cloudFrameSupportsHardwareSettings(version), `${version}`).toBe(
+        frameSupportsHardwareSettings(version),
+      );
+    }
+    expect(cloudFrameSupportsHardwareSettings("2026.8.30")).toBe(false);
+    expect(cloudFrameSupportsHardwareSettings("2026.8.31")).toBe(true);
+    // Firmware between the two floors gets the extended batch and not this one.
+    expect(cloudFrameSettingKeysForVersion("2026.8.30")).toEqual([
+      ...cloudFrameSettingKeys,
+      ...extendedCloudFrameSettingKeys,
+    ]);
+    expect(cloudFrameSettingKeysForVersion("2026.8.31")).toEqual([
+      ...cloudFrameSettingKeys,
+      ...extendedCloudFrameSettingKeys,
+      ...hardwareCloudFrameSettingKeys,
+    ]);
+  });
+
+  it("converts the hardware batch into the wire shapes the validators want", () => {
+    const palette = cloudPalettePayload({
+      name: "Desaturated",
+      colors: ["#000000", "#ffffff"],
+      colorNames: ["Black", "White"],
+    });
+    expect(palette).toEqual({ name: "Desaturated", colors: ["#000000", "#ffffff"], colorNames: ["Black", "White"] });
+    expect(allowedFrameSettings.get("palette")?.(palette)).toBe(true);
+    // One unparseable colour drops the palette rather than shifting the rest.
+    expect(cloudPalettePayload({ colors: ["#000000", "white"] })).toBeUndefined();
+    expect(cloudPalettePayload({ colors: ["#000000"], colorNames: ["a", "b"] })).toEqual({ colors: ["#000000"] });
+
+    const partial = cloudPartialRefreshPayload({
+      partial: "true",
+      partialMaxAreaPercent: "15",
+      partialMaxRefreshesBeforeFull: "30",
+      vcom: "-1.5",
+      pins: { rst: 17 },
+      renderMode: "local",
+    });
+    expect(partial).toEqual({ partial: true, partialMaxAreaPercent: 15, partialMaxRefreshesBeforeFull: 30 });
+    expect(allowedFrameSettings.get("device_config")?.(partial)).toBe(true);
+    expect(cloudPartialRefreshPayload({ vcom: "-1.5" })).toBeUndefined();
+
+    const buttons = cloudGpioButtonsPayload([{ pin: "5", label: " A " }, {}, { pin: 6, label: "B" }]);
+    expect(buttons).toEqual([{ pin: 5, label: "A" }, { pin: 6, label: "B" }]);
+    expect(allowedFrameSettings.get("gpio_buttons")?.(buttons)).toBe(true);
+    expect(cloudGpioButtonsPayload([])).toEqual([]);
+    expect(cloudGpioButtonsPayload([{ pin: 5, label: "" }])).toBeUndefined();
+    expect(cloudGpioButtonsPayload([{ pin: 5, label: "A" }, { pin: 5, label: "B" }])).toBeUndefined();
+
+    const settings = cloudFrameSettingsPayload(
+      {
+        name: "Kitchen",
+        palette: { colors: ["#000000"] },
+        device_config: { partial: true, vcom: "-1.2" },
+        gpio_buttons: [{ pin: 5, label: "A" }],
+      },
+      cloudFrameSettingKeysForVersion("2026.8.31"),
+    );
+    expect(settings).toEqual({
+      name: "Kitchen",
+      palette: { colors: ["#000000"] },
+      device_config: { partial: true },
+      gpio_buttons: [{ pin: 5, label: "A" }],
+    });
+    for (const [key, value] of Object.entries(settings)) {
+      expect(allowedFrameSettings.get(key)?.(value), key).toBe(true);
+    }
   });
 
   it("only includes the extended batch for firmware that knows it", () => {

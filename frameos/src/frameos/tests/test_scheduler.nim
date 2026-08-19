@@ -41,7 +41,6 @@ suite "Scheduler Tests (Various Time Configurations)":
     var scheduler = Scheduler(
       frameConfig: config,
       logger: logger,
-      schedule: config.schedule
     )
 
     # We'll test multiple days: Sunday (weekday=7) -> Monday (1) -> Wednesday (3)
@@ -70,7 +69,6 @@ suite "Scheduler Tests (Various Time Configurations)":
     var scheduler = Scheduler(
       frameConfig: config,
       logger: logger,
-      schedule: config.schedule
     )
 
     clearEventChannel()
@@ -105,7 +103,6 @@ suite "Scheduler Tests (Various Time Configurations)":
     var scheduler = Scheduler(
       frameConfig: config,
       logger: logger,
-      schedule: config.schedule
     )
 
     # Sunday test
@@ -138,7 +135,6 @@ suite "Scheduler Tests (Various Time Configurations)":
     var scheduler = Scheduler(
       frameConfig: config,
       logger: logger,
-      schedule: config.schedule
     )
 
     # Monday 8:15 => triggers
@@ -169,7 +165,6 @@ suite "Scheduler Tests (Various Time Configurations)":
     var scheduler = Scheduler(
       frameConfig: config,
       logger: logger,
-      schedule: config.schedule
     )
 
     # Saturday 20:00 => triggers
@@ -206,7 +201,6 @@ suite "Scheduler Tests (Various Time Configurations)":
     var scheduler = Scheduler(
       frameConfig: config,
       logger: logger,
-      schedule: config.schedule
     )
 
     clearEventChannel()
@@ -230,7 +224,6 @@ suite "Scheduler Tests (Various Time Configurations)":
     var scheduler = Scheduler(
       frameConfig: config,
       logger: logger,
-      schedule: config.schedule
     )
 
     clearEventChannel()
@@ -263,7 +256,6 @@ suite "Scheduler Tests (Various Time Configurations)":
     var scheduler = Scheduler(
       frameConfig: config,
       logger: logger,
-      schedule: config.schedule
     )
 
     clearEventChannel()
@@ -291,7 +283,6 @@ suite "Scheduler Tests (Various Time Configurations)":
     var scheduler = Scheduler(
       frameConfig: config,
       logger: logger,
-      schedule: config.schedule
     )
 
     clearEventChannel()

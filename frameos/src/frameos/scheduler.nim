@@ -36,7 +36,13 @@ proc weekdayMatches(eventWeekday: int, dt: DateTime): bool =
 
 proc handleSchedule*(self: Scheduler, dt: DateTime) =
   # do everything except sleeping or looping
-  let matched = self.schedule.events.filter(proc(ev: ScheduledEvent): bool =
+  # Read through the config every minute: a reload swaps the schedule object
+  # under us (config.nim updateFrameConfigFrom), and a stale copy would keep
+  # firing yesterday's events.
+  let schedule = self.frameConfig.schedule
+  if schedule == nil:
+    return
+  let matched = schedule.events.filter(proc(ev: ScheduledEvent): bool =
     ev.minute == dt.minute and ev.hour == dt.hour and weekdayMatches(ev.weekday, dt)
   )
 
@@ -79,7 +85,6 @@ proc createThreadRunner(frameOS: FrameOS) {.thread.} =
   var scheduler = Scheduler(
     frameConfig: frameOS.frameConfig,
     logger: frameOS.logger,
-    schedule: frameOS.frameConfig.schedule
   )
   scheduler.start()
 

@@ -186,6 +186,12 @@ export const allowedFrameSettings = new Map<
   ],
   ["save_assets", isValidSaveAssets],
   ["timezone_updater", isValidTimezoneUpdater],
+  // The hardware batch (Pi/Linux runtime from 2026.8.31, see
+  // hardwareFrameSettingKeys). All three are read by the display driver at
+  // init, so the device restarts its runtime after persisting them.
+  ["palette", isValidPalette],
+  ["device_config", isValidPartialRefreshDeviceConfig],
+  ["gpio_buttons", isValidGpioButtons],
 ]);
 
 // Bounds shared with the device (CloudMaxHttpResponseBytes* in
@@ -225,10 +231,34 @@ export const extendedFrameSettingKeys = new Set([
 export function frameSupportsExtendedSettings(
   frameosVersion: string | null | undefined,
 ): boolean {
+  return frameSupportsSettingsFrom(extendedFrameSettingsMinVersion, frameosVersion);
+}
+
+// The 2026.8.31 hardware batch: keys the display driver reads at init.
+// Same gating as the extended batch, one floor later; every key here must
+// ALSO be in allowedFrameSettings, and none of them exists on esp32.
+export const hardwareFrameSettingsMinVersion = "2026.8.31";
+export const hardwareFrameSettingKeys = new Set([
+  "palette",
+  "device_config",
+  "gpio_buttons",
+]);
+
+export function frameSupportsHardwareSettings(
+  frameosVersion: string | null | undefined,
+): boolean {
+  return frameSupportsSettingsFrom(hardwareFrameSettingsMinVersion, frameosVersion);
+}
+
+/** The three-way answer above, for any floor. */
+export function frameSupportsSettingsFrom(
+  minVersion: string,
+  frameosVersion: string | null | undefined,
+): boolean {
   if (typeof frameosVersion !== "string" || frameosVersion.trim().length === 0) {
     return false;
   }
-  return frameosVersionSatisfies(extendedFrameSettingsMinVersion, frameosVersion);
+  return frameosVersionSatisfies(minVersion, frameosVersion);
 }
 
 const positiveNumber = (v: unknown, max: number) =>
@@ -340,6 +370,76 @@ function isValidTimezoneUpdater(value: unknown): boolean {
   return true;
 }
 
+// The SPA's Palette shape (what frame.json stores under `palette`): "#rrggbb"
+// colours with an optional name and per-colour names. Empty `colors` is a
+// value — it hands the panel back its built-in palette. Mirrors the device's
+// validateCloudSetting("palette").
+export const maxPaletteColors = 16;
+function isValidPalette(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  for (const key of Object.keys(value)) {
+    if (key !== "name" && key !== "colors" && key !== "colorNames") return false;
+  }
+  const colors = value.colors;
+  if (!Array.isArray(colors) || colors.length > maxPaletteColors) return false;
+  if (!colors.every((c) => typeof c === "string" && htmlHexColor.test(c))) return false;
+  if ("name" in value && !(typeof value.name === "string" && value.name.length <= 64)) return false;
+  if ("colorNames" in value) {
+    const names = value.colorNames;
+    if (!Array.isArray(names) || names.length !== colors.length) return false;
+    if (!names.every((n) => typeof n === "string" && n.length <= 32)) return false;
+  }
+  return true;
+}
+
+// STRICTLY the partial-refresh policy of device_config. VCOM, pins, upload
+// URL/headers, SD-card wiring and render mode stay the device's own; the
+// device patches deviceConfig with what is sent and refuses anything else.
+export const maxPartialRefreshesBeforeFull = 1000;
+function isValidPartialRefreshDeviceConfig(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  const entries = Object.entries(value);
+  if (entries.length === 0) return false;
+  for (const [key, v] of entries) {
+    switch (key) {
+      case "partial":
+        if (typeof v !== "boolean") return false;
+        break;
+      case "partialMaxAreaPercent":
+        if (typeof v !== "number" || v < 0 || v > 100) return false;
+        break;
+      case "partialMaxRefreshesBeforeFull":
+        if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > maxPartialRefreshesBeforeFull) return false;
+        break;
+      default:
+        return false;
+    }
+  }
+  return true;
+}
+
+// [{pin, label}] — the whole list, replaced. BCM 0..27 on a Pi header, up
+// to 48 on the ESP32 boards; a duplicate pin is refused (the driver would
+// register the line twice).
+export const maxGpioButtons = 16;
+export const maxGpioButtonPin = 48;
+function isValidGpioButtons(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > maxGpioButtons) return false;
+  const pins = new Set<number>();
+  for (const button of value) {
+    if (!isPlainRecord(button)) return false;
+    for (const key of Object.keys(button)) {
+      if (key !== "pin" && key !== "label") return false;
+    }
+    const { pin, label } = button;
+    if (typeof pin !== "number" || !Number.isInteger(pin) || pin < 0 || pin > maxGpioButtonPin) return false;
+    if (typeof label !== "string" || label.trim().length === 0 || label.trim().length > 32) return false;
+    if (pins.has(pin)) return false;
+    pins.add(pin);
+  }
+  return true;
+}
+
 export const allowedFrameCommandTypes = new Set([
   "get_metrics",
   // Advisory only: the device fetches the manifest and verifies the image
@@ -381,12 +481,14 @@ export function validateFrameSettings(
 // (embedded/esp32/main/fos_cloud.c ws_handle_set_settings): `interval`
 // (interval_sec), `name` (the DHCP hostname), `rotate` (validated with the
 // same 0/90/180/270 normalization the backend settings poll uses, then
-// deferred-rebooted so the renderer re-inits) and `scaling_mode`
+// deferred-rebooted so the renderer re-inits), `scaling_mode`
 // (contain/cover/stretch/center, applied live — a per-decode fallback, no
-// reboot). Everything else has no on-device consumer — `debug` is not a
-// field of fos_config_t and `timezone` is unimplementable without a tz
-// database — so the firmware refuses the WHOLE verb on them and the route
-// refuses them up front instead of half-applying a push.
+// reboot), the power keys, and from 2026.8.31 `debug` (debug_logging, live),
+// `max_http_response_bytes` and `gpio_buttons` (both read at boot → deferred
+// reboot). Everything else has no on-device consumer — `timezone` is
+// unimplementable without a tz database — so the firmware refuses the WHOLE
+// verb on them and the route refuses them up front instead of half-applying
+// a push.
 // Keys only the ESP32 firmware knows: the Pi runtime's
 // CLOUD_SETTINGS_ALLOWLIST refuses the whole verb on any of them, so the
 // settings route refuses them up front for non-esp32 frames.
@@ -411,7 +513,23 @@ export const esp32SettableKeys = new Set([
   "wake_check_seconds",
   "battery_pin",
   "battery_divider",
+  // 2026.8.31 (esp32ExtendedFrameSettingKeys): debug applies live, the
+  // other two are read once at boot and cost a deferred reboot.
+  "debug",
+  "max_http_response_bytes",
+  "gpio_buttons",
 ]);
+
+// The ESP32 firmware learned these in 2026.8.31; older firmware refuses the
+// whole verb on them, so the route gates them on the reported version like
+// the Pi batches. Its button table is smaller than the Pi's (FOS_GPIO_BUTTONS_MAX).
+export const esp32ExtendedFrameSettingsMinVersion = "2026.8.31";
+export const esp32ExtendedFrameSettingKeys = new Set([
+  "debug",
+  "max_http_response_bytes",
+  "gpio_buttons",
+]);
+export const esp32MaxGpioButtons = 8;
 
 // The settings frames.settings mirrors, in the device's spelling. `name` is
 // excluded on purpose: frames.name is the authoritative display name, and a
