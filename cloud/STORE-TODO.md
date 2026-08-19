@@ -127,9 +127,9 @@ front and repository.json, owner management and superadmin moderation,
 
 ## Remaining work
 
-Tracked in `docs/todo.md` at the repo root (sweeping objects nothing
-references; backing the bucket up; apps in the store pending a signing/review
-story; the open questions on pre-review, unpublish policy, and usernames).
+Tracked in `docs/todo.md` at the repo root: apps in the store (pending a
+signing/review story) and the open questions on pre-review, unpublish policy
+and usernames. Object sweeping and the bucket backup shipped in 2026-08.
 
 ## Protocol summary (details in docs/cloud-link.md at the repo root)
 

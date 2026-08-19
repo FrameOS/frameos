@@ -98,7 +98,10 @@ contract: `docs/cloud-frames.md`), and covered by tests:
 
 - **Linking** (device authorization flow, backends + frames, encrypted
   tokens, grants/inventory sync), **cloud login** (handoff, identity
-  linking, first-run setup, lockout-proof local fallback), **scene store**
+  linking, first-run setup, lockout-proof local fallback), **account
+  security** (optional passkey/TOTP 2FA, re-authentication before revoking
+  or granting device access, per-account and per-frame audit trail —
+  `cloud/docs/auth.md`), **scene store**
   (publish, public repository, "Private cloud scenes", risk badges —
   decisions in `cloud/STORE-TODO.md`), **config backups**
   (`backup:scenes`/`backup:frames`, sealed-envelope encryption, tarball
@@ -114,9 +117,9 @@ contract: `docs/cloud-frames.md`), and covered by tests:
 
 ## Remaining work
 
-Tracked in `docs/todo.md` (one consolidated list: signed OTA, JS-runtime
-capability audit, account hardening, gallery/asset-backup/remote-access
-services, observability, store apps, open questions, parking lot).
+Tracked in `docs/todo.md` — the one consolidated list for the whole repo,
+including the open product questions and the parking lot. Nothing is tracked
+here.
 
 ## Protocol summary (details in docs/cloud-link.md)
 
@@ -126,13 +129,10 @@ POST {provider}/api/device/poll         → authorization_pending | access_token
 POST {provider}/api/backends/inventory  (Bearer) → report version/capabilities/health
 GET  {provider}/api/backends/grants     (Bearer) → owning account, granted scopes
 POST {provider}/api/backends/rotate-token (Bearer) → new token (atomic swap)
-POST {provider}/api/device/revoke       (Bearer) → unlink
+POST {provider}/api/backends/unlink     (Bearer) → unlink (the account-page counterpart is /api/device/revoke, session + recent re-auth)
 POST {provider}/api/frameos/login/start (Bearer) → login handoff
 ```
 
 The provider URL is user-editable (default `https://cloud.frameos.net`), so any
 server implementing this contract works. Env override: `FRAMEOS_CLOUD_URL`
 (`disabled` hides the feature entirely).
-
-Open product questions (billing, publish review policy, backup-key UX,
-per-org links) live with the rest of the tracker in `docs/todo.md`.

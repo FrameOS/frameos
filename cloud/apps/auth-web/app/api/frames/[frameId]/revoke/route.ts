@@ -4,6 +4,7 @@ import { csrfResponse } from "../../../../../src/lib/csrf";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { frameForAccount, revokeFrame } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import { requireRecentAuth } from "../../../../../src/lib/recent-auth";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -11,7 +12,8 @@ export const runtime = "nodejs";
 // Revoke a frame: the linked client is revoked, so the device's next request
 // or WS (re)connect gets 401 invalid_link_token and it demotes itself to
 // standalone (it keeps rendering the last pushed scenes; see the wire
-// contract). Re-enrolling needs a fresh claim token.
+// contract). Re-enrolling needs a fresh claim token. Sensitive: the session
+// must have proved its credentials recently (403 reauth_required otherwise).
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
@@ -34,6 +36,10 @@ export async function POST(
   const { db, response } = requireDatabase();
   if (!db) {
     return response;
+  }
+  const stale = await requireRecentAuth(db, session.accountId);
+  if (stale) {
+    return stale;
   }
 
   const { frameId } = await params;

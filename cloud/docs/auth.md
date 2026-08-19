@@ -138,6 +138,46 @@ removed/renamed`, `account.recovery_codes_regenerated`,
 `account.two_factor_disabled`), and `account.signed_in` carries
 `second_factor: totp|passkey|recovery_code`.
 
+## Re-authentication for sensitive actions ("sudo mode")
+
+A session cookie is a laptop left open. Actions that change who controls a
+device therefore re-check the credentials even with a valid session: every
+`sessions` row remembers when it last proved them (`authenticated_at`,
+migration 0036 — set at sign-in, pushed forward by a successful re-check),
+and the routes below refuse with `403 {"error": "reauth_required", "reauth":
+{"methods": …, "path": "/login/reauth", "max_age_seconds": 900}}` when that
+is older than **15 minutes** (`recentAuthMaxAgeSeconds`,
+`src/lib/recent-auth.ts`). Gated today:
+
+- `POST /api/frames/{id}/revoke` — revoking a cloud-managed frame;
+- `POST /api/device/revoke` — revoking a linked backend or frame;
+- `POST /api/device/authorize` — approving a device link or a scope change
+  (the `/device` page sends a stale session through `/login/reauth` *before*
+  showing the approve button; the route check is the backstop).
+
+Routes call `requireRecentAuth(db, accountId)` right after `readSession()`;
+pages call `hasRecentAuth(db)`. The client components behind those buttons
+(`src/lib/reauth-client.ts`) react to the 403 by navigating to
+`/login/reauth?return_to=<current page>`, which asks for whichever proof the
+account has — the password, an authenticator or recovery code, or a passkey —
+and returns. The proof routes (`POST /api/auth/reauth` with `{password}` or
+`{code}`, `POST /api/auth/reauth/passkey/{options,verify}`) stamp the current
+session row in place: the token and cookie never change, so in-flight
+requests and the frame hub's browser sockets are unaffected. An account with
+nothing local to check (Google sign-in, no password, no second factor) is
+sent back through Google with `prompt=login`
+(`/api/auth/google/start?reauth=1`); the callback mints a fresh session, which
+counts as recent. Checks are rate-limited per IP (30 / 15 min) and per
+account (10 / 15 min); every attempt is audited
+(`account.reauthenticated` with `method: password|totp|recovery_code|passkey`,
+`account.reauthentication_failed`).
+
+Deliberately **not** gated: scene assignment (`POST /api/frames/{id}/scenes`)
+and settings pushes — those are the workspace's save path, and a prompt on
+every save would train users to click through it. Revoke and grant are the
+actions that change *who* controls a frame; the rest changes *what* it shows
+and is undone by the next save.
+
 ## Google OAuth Client
 
 Create an OAuth 2.0 Client ID (type "Web application") in the Google Cloud

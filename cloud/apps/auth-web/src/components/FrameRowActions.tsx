@@ -3,6 +3,7 @@
 import { CheckCircle2, Unplug } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { redirectToReauthIfRequired } from "../lib/reauth-client";
 
 // Confirm (pending → active) or revoke a cloud-managed frame. Revoking cuts
 // the link: the device sees 401 on its next connect and demotes itself to
@@ -33,6 +34,11 @@ export function FrameRowActions({
         const data = (await response.json().catch(() => ({}))) as {
           error?: string;
         };
+        // Revoking needs a recent credential check; /login/reauth brings
+        // the user straight back here.
+        if (redirectToReauthIfRequired(response, data)) {
+          return;
+        }
         setError(data.error ?? `error_${response.status}`);
         return;
       }

@@ -63,6 +63,9 @@ export async function createSession(
   await db.insert(sessions).values({
     absoluteExpiresAt: new Date(now + sessionAbsoluteMaxAgeSeconds * 1000),
     accountId: profile.accountId,
+    // A fresh sign-in is the strongest proof there is; sensitive routes
+    // accept it for recentAuthMaxAgeSeconds before asking again (recent-auth.ts).
+    authenticatedAt: new Date(now),
     expiresAt: new Date(now + sessionIdleMaxAgeSeconds * 1000),
     lastUsedAt: new Date(now),
     tokenHash: hashSecret(token),
@@ -84,6 +87,17 @@ export async function revokeSessionByToken(
         isNull(sessions.revokedAt),
       ),
     );
+}
+
+// The raw session token from the request's cookies, for callers that need to
+// address the session row itself (recent-auth.ts) rather than the profile.
+export async function readSessionToken() {
+  try {
+    const cookieStore = await cookies();
+    return cookieStore.get(sessionCookieName)?.value;
+  } catch {
+    return undefined;
+  }
 }
 
 // Read-only on purpose: this runs inside React Server Components, where

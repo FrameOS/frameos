@@ -3,6 +3,7 @@
 import { MoreHorizontal, Unplug } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { redirectToReauthIfRequired } from "../lib/reauth-client";
 
 // Per-row "..." menu on the installs table; destructive actions live here
 // instead of as always-visible buttons.
@@ -48,6 +49,14 @@ export function InstallRowMenu({
       headers: { "content-type": "application/json" },
       method: "POST",
     });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => undefined)) as
+        | { error?: string }
+        | undefined;
+      if (redirectToReauthIfRequired(response, payload)) {
+        return;
+      }
+    }
     setBusy(false);
     setOpen(false);
     if (response.ok) {
