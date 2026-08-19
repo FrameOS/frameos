@@ -211,9 +211,12 @@ def test_embedded_firmware_layout_tracks_flash_and_ram():
     assert layout['ram']['width'] == 1200
     assert layout['ram']['height'] == 1600
     assert layout['ram']['pixelFormat'] == FOS_PIXEL_4BPP_SPECTRA6
-    assert layout['ram']['rgbaBufferBytes'] == 1200 * 1600 * 4
+    # The canvas is 16-bit RGB (2 B/px); the old key name stays for the UI.
+    assert layout['ram']['canvasBytesPerPixel'] == 2
+    assert layout['ram']['canvasBufferBytes'] == 1200 * 1600 * 2
+    assert layout['ram']['rgbaBufferBytes'] == layout['ram']['canvasBufferBytes']
     assert layout['ram']['packedBufferBytes'] == 960_000
-    assert layout['ram']['renderWorkingBytes'] > layout['ram']['rgbaBufferBytes']
+    assert layout['ram']['renderWorkingBytes'] > layout['ram']['canvasBufferBytes']
 
 
 def test_embedded_firmware_layout_keeps_large_16mb_state_partition():
@@ -555,9 +558,13 @@ def test_embedded_panel_formats_and_buffer_sizes():
 
 
 def test_embedded_render_psram_estimate():
-    # 800x480 RGBA (1.5MB) + default packed 1bpp + ~1.5MB reserve is ~3MB.
+    # 800x480 at 2 B/px (768KB) + default packed 1bpp + ~1.5MB reserve is ~2.4MB.
     need = embedded_render_psram_bytes(800, 480)
-    assert 2_900_000 < need < 3_200_000
+    assert 2_300_000 < need < 2_500_000
+    # 1200x1600 Spectra 6: 3.84MB canvas + 960KB packed + 1.5MB reserve, under 8MB.
+    need = embedded_render_psram_bytes(1200, 1600, FOS_PIXEL_4BPP_SPECTRA6)
+    assert 6_300_000 < need < 6_400_000
+    assert need < 8 * 1024 * 1024
 
 
 def test_panel_fits_default_8mb_module():
@@ -575,14 +582,22 @@ def test_panel_too_large_for_small_psram_is_rejected():
     assert "PSRAM" in str(exc.value)
 
 
-def test_large_spectra_panel_requires_16mb_for_local_rendering():
+def test_large_spectra_panel_renders_locally_on_8mb_module():
+    # 1200x1600 used to need the 16MB module (7.3MB RGBA canvas); with the
+    # 16-bit canvas it fits the stock 8MB one — the reTerminal E1004 case.
     frame = Frame(device="waveshare.EPD_13in3e")
-    with pytest.raises(ValueError) as exc:
-        check_embedded_panel_fits_memory(frame)
-    assert "13in3e" in str(exc.value)
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    check_embedded_panel_fits_memory(frame)  # must not raise
 
     frame.device_config = {"psramMB": 16, "pins": {"cs2": 8}}
     check_embedded_panel_fits_memory(frame)
+
+    # A module that really is too small is still refused with a clear reason.
+    frame.device_config = {"psramMB": 4}
+    with pytest.raises(ValueError) as exc:
+        check_embedded_panel_fits_memory(frame)
+    assert "13in3e" in str(exc.value)
+    assert "PSRAM" in str(exc.value)
 
 
 def test_embedded_defaults_choose_response_limit_and_pin_layout():
@@ -871,6 +886,37 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
             {"pin": 5, "label": "RIGHT"},
         ]
         assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
+
+
+def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
+    frame = Frame(id=9, embedded={"hardwarePreset": "seeed_reterminal_e1004"})
+
+    ensure_embedded_frame_defaults(frame)
+
+    assert embedded_panel_for_frame(frame) == "EPD_13in3e"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "32MB"
+    # 8MB PSRAM and a 1200x1600 panel: renders on-device thanks to the
+    # 16-bit canvas; this is the whole reason that canvas exists.
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 38, "dc": 11, "cs": 10, "cs2": 2,
+        "busy": 13, "sck": 7, "mosi": 9, "pwr": 12,
+    }
+    assert not frame.gpio_buttons  # none published for this board yet
+    assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
+    plan = embedded_provisioning_plan(frame)
+    settings = _provisioned(plan)
+    assert plan["settings"][0]["key"] == "hardware"
+    assert settings["hardware"] == "seeed_reterminal_e1004"
+    assert settings["panel"] == "EPD_13in3e"
+    assert settings["pins"] == "rst=38,dc=11,cs=10,cs2=2,busy=13,sck=7,mosi=9,pwr=12"
+    assert settings["render_mode"] == "local"
+    assert embedded_sdkconfig_defaults_for_frame(frame) == (
+        "sdkconfig.defaults;sdkconfig.defaults.32mb-ota"
+    )
 
 
 def test_embedded_hardware_preset_for_elecrow_crowpanel_5in79():

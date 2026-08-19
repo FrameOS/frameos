@@ -21,6 +21,7 @@ export type FrameEmbeddedHardwarePreset =
   | 'seeed_reterminal_sticky'
   | 'seeed_reterminal_e1001'
   | 'seeed_reterminal_e1002'
+  | 'seeed_reterminal_e1004'
   | 'elecrow_crowpanel_5in79'
   | 'pimoroni_inky_frame_4'
   | 'pimoroni_inky_frame_5_7'
@@ -1307,6 +1308,8 @@ export interface FrameEmbeddedConfig {
         pixelFormatName?: string
         renderMode?: 'local' | 'remote'
         rgbaBufferBytes?: number
+        canvasBufferBytes?: number
+        canvasBytesPerPixel?: number
         packedBufferBytes?: number
         renderReserveBytes?: number
         renderWorkingBytes?: number

@@ -463,6 +463,73 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
   renderRequested = true
   log("image fusion " & (if wanted: "enabled" else: "disabled") & "; scene will re-plan")
 
+# ------------------------------------------------------------- the canvas
+#
+# One scene canvas for the device's uptime, not one per render.
+#
+# Two decisions live here. The format: a 16-bit RGB 5/6/5 pixie image, half
+# the bytes of RGBA. Every panel the ESP32 firmware drives is a dithered
+# e-paper, and the dither (`forEachPaletteDithered`, `forEachGrayDithered`)
+# keeps its error state in its own rows at full precision, so the 5/6-bit
+# colour the canvas holds is a precision the output cannot show: a 6-colour
+# Floyd–Steinberg field has per-pixel error dozens of times the 565 step. It
+# is what makes 1200x1600 fit an 8 MB module — RGBA is 7.3 MiB and does not,
+# 565 is 3.7 MiB and does. `-d:frameosCanvasRgbx` keeps the old RGBA canvas
+# for A/B measurement; the Pi runtime and the wasm preview are untouched
+# either way and keep full RGBA.
+#
+# The lifetime: the memory comes from one PSRAM block the firmware claims at
+# boot (`frameos_nim_reserve_canvas`, before Wi-Fi and TLS have carved the
+# heap up) and hands back through `frameos_nim_canvas_buffer`. A multi-MB
+# contiguous run is the one allocation fragmentation can deny a long-running
+# device; claiming it once and never freeing it is how that cannot happen —
+# and it also removes the per-render allocate/GC churn of the old scheme.
+# Nothing aliases the canvas across renders (docs/value-pipeline.md: the
+# cache never stores the live canvas), so reusing it is safe.
+
+proc canvasBuffer(len: csize_t): pointer {.importc: "frameos_nim_canvas_buffer", cdecl.}
+
+var sceneCanvas: Image
+
+proc sceneCanvasFormat*(): PixelFormat =
+  when defined(frameosCanvasRgbx): pfRgbx
+  else: pfRgb565
+
+proc sceneCanvasWidth*(): int =
+  if frameConfig.isNil: 0
+  elif frameConfig.rotate in [90, 270]: frameConfig.height
+  else: frameConfig.width
+
+proc sceneCanvasHeight*(): int =
+  if frameConfig.isNil: 0
+  elif frameConfig.rotate in [90, 270]: frameConfig.width
+  else: frameConfig.height
+
+proc renderCanvas*(): Image =
+  ## The canvas the next render draws into, at the scene's (rotated)
+  ## dimensions. Made on first use, reused for every render after.
+  let
+    width = sceneCanvasWidth()
+    height = sceneCanvasHeight()
+    format = sceneCanvasFormat()
+  if not sceneCanvas.isNil and sceneCanvas.width == width and
+      sceneCanvas.height == height and sceneCanvas.format == format:
+    return sceneCanvas
+  let bytesPerPixel = if format == pfRgb565: 2 else: 4
+  let buffer = canvasBuffer(csize_t(width * height * bytesPerPixel))
+  if buffer != nil:
+    sceneCanvas =
+      if format == pfRgb565: newImage565Over(width, height, buffer)
+      else: newImageOver(width, height, buffer)
+  else:
+    # No firmware block (a host build, or the reservation failed): the Nim
+    # heap is PSRAM too, so this is the same memory without the guarantee.
+    log(&"canvas: no reserved block for {width}x{height}, allocating from the heap")
+    sceneCanvas =
+      if format == pfRgb565: newImage565(width, height)
+      else: newImage(width, height)
+  sceneCanvas
+
 proc sceneRefreshSeconds*(): float =
   if not currentScene.isNil and currentScene.refreshInterval > 0:
     return currentScene.refreshInterval
@@ -484,11 +551,14 @@ proc renderCurrentScene*(): Option[Image] =
   lastNextSleep = -1
   if not ensureScene():
     return none(Image)
+  # The persistent canvas goes in with the event; the interpreter's "render"
+  # handler fills it with the scene background and draws into it.
   let context = ExecutionContext(
     scene: currentScene,
     event: "render",
     payload: %*{},
-    hasImage: false,
+    image: renderCanvas(),
+    hasImage: true,
     loopIndex: 0,
     loopKey: ".",
     nextSleep: -1

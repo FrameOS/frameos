@@ -222,7 +222,7 @@ function FirmwareFootprintVisualization({ frame }: { frame: FrameType }): JSX.El
   const appBinaryBytes = flash?.appBinaryBytes ?? firmware?.appSize ?? firmware?.otaSize ?? null
   const mergedBinaryBytes = flash?.mergedBinaryBytes ?? firmware?.size ?? null
   const ramSegments = [
-    { label: 'RGBA render', bytes: ram?.rgbaBufferBytes ?? 0, color: '#2563eb' },
+    { label: 'Render canvas', bytes: ram?.canvasBufferBytes ?? ram?.rgbaBufferBytes ?? 0, color: '#2563eb' },
     { label: 'Packed panel', bytes: ram?.packedBufferBytes ?? 0, color: '#16a34a' },
     { label: 'Reserve', bytes: ram?.renderReserveBytes ?? 0, color: '#b45309' },
     { label: 'Spare', bytes: renderSpareBytes, color: '#e2e8f0' },

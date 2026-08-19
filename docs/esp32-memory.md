@@ -25,6 +25,30 @@ Measured 2026-08-14 on v2026.8.19 with `-d:memProbe`:
 The first render after a boot — the one that also pays the scene parse and
 the app transpiles — no longer touches the emergency reserve.
 
+## The canvas is 2 bytes per pixel (2026.8.31)
+
+The scene canvas became a 16-bit RGB 5/6/5 pixie image (`embedded/esp32/README.md`,
+"The render canvas is 16-bit"). The budget arithmetic that moved with it, in
+its four mirrors — `FOS_RENDER_CANVAS_BYTES_PER_PIXEL` in
+`components/frameos_display/include/frameos_display.h`,
+`EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL` in `backend/app/tasks/embedded_firmware.py`,
+the `byteSize` the interpreter's cache limits use, and the 1.5 MiB reserve
+shared with `frameos/src/frameos/utils/memory.nim`:
+
+| panel | canvas (was RGBA) | packed | reserve | total (was) |
+|---|---|---|---|---|
+| 800×480 4bpp | 0.73 MiB (1.46) | 0.18 | 1.50 | 2.42 MiB (3.15) |
+| 792×272 2bpp | 0.41 MiB (0.82) | 0.05 | 1.50 | 1.96 MiB (2.37) |
+| 1200×1600 4bpp | 3.66 MiB (7.32) | 0.92 | 1.50 | **6.08 MiB** (9.74) |
+
+The 13.3" row is the one that changed category: it fits the 8 MB module now.
+The measured ~1.3 MB non-canvas render peak above was taken at 800×480; the
+pieces of it that scale with canvas width (pixie's per-row scratch, SVG
+bands) are small, but a 1200×1600 measurement on an 8 MB board is still the
+number to take before trusting the margin. The canvas block is claimed at
+boot (`frameos_nim_reserve_canvas`) and never freed, so "largest free block"
+no longer has to hold it at render time.
+
 ## The 1 MB emergency reserve stays
 
 `FOS_NIM_EMERGENCY_RESERVE_BYTES` (frameos_nim_glue.c) was sized when a

@@ -347,6 +347,18 @@ const SEEED_RETERMINAL_E10XX_PINS: NonNullable<NonNullable<NewFrameFormType['dev
   mosi: 9,
   pwr: -1,
 }
+// reTerminal E1004: the E-series SPI bus with the 13.3" panel's second chip
+// select on GPIO2, reset on 38 and panel power on 12.
+const SEEED_RETERMINAL_E1004_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 38,
+  dc: 11,
+  cs: 10,
+  cs2: 2,
+  busy: 13,
+  sck: 7,
+  mosi: 9,
+  pwr: 12,
+}
 const ELECROW_CROWPANEL_5IN79_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 47,
   dc: 46,
@@ -495,6 +507,15 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 4, label: 'LEFT' },
       { pin: 5, label: 'RIGHT' },
     ],
+  },
+  seeed_reterminal_e1004: {
+    label: 'Seeed reTerminal E1004 (13.3" color ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_13in3e',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: SEEED_RETERMINAL_E1004_PINS,
+    gpioButtons: [],
   },
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',

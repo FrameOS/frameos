@@ -18,6 +18,16 @@ extern "C" {
 
 /* True when the Nim runtime is compiled in. */
 bool frameos_nim_available(void);
+/* The scene canvas: one PSRAM block of `len` bytes claimed once and kept for
+ * the device's uptime (fos_display_canvas_bytes() for the selected panel).
+ * Call at boot, before Wi-Fi, so the multi-MB contiguous run exists before
+ * the heap fragments; the Nim renderer draws every frame into it. Returns
+ * false (and keeps any earlier reservation) when PSRAM cannot supply it;
+ * the renderer then falls back to its heap. */
+bool frameos_nim_reserve_canvas(size_t len);
+/* The reserved block, claiming (or growing) it on demand. NULL on failure. */
+void *frameos_nim_canvas_buffer(size_t len);
+size_t frameos_nim_canvas_reserved(void);
 /* One-time init: panel dimensions + the backend credentials the runtime's own
  * uploads use. Safe to call when unavailable (returns false). Allocates the
  * Nim heap (PSRAM via malloc). */

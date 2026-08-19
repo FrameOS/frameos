@@ -111,7 +111,7 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
 EMBEDDED_PLATFORM_ALIASES = EMBEDDED_PLATFORMS[SUPPORTED_EMBEDDED_PLATFORM]["aliases"]
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 47  # boot-time framebuffer reservation (C3 thin-client OOM), honest board.target
+EMBEDDED_FIRMWARE_VERSION = 48  # 16-bit render canvas reserved at boot, streamed packers, E1004 (T133A01) preset
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -257,6 +257,24 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS = [
     {"pin": 4, "label": "LEFT"},
     {"pin": 5, "label": "RIGHT"},
 ]
+# Seeed reTerminal E1004 (ESP32-S3, 32MB flash, 8MB PSRAM): 13.3" 1200x1600
+# Spectra 6 (T133A01) on the E-series SPI bus — SCK7/MOSI9, CS10, DC11,
+# BUSY13 as the E1001/E1002 — but with the panel's second chip-select on
+# GPIO2, reset on GPIO38 and a panel power enable on GPIO12 (the pins
+# ESPHome's integrated-board definition for this model bakes in). Buttons
+# and the microSD slot are not published; they stay unset until read off
+# the schematic. The panel is driven as EPD_13in3e with the T133A01 tuning
+# the firmware selects from this preset (components/frameos_display).
+EMBEDDED_SEEED_RETERMINAL_E1004_PINS = {
+    "rst": 38,
+    "dc": 11,
+    "cs": 10,
+    "cs2": 2,
+    "busy": 13,
+    "sck": 7,
+    "mosi": 9,
+    "pwr": 12,
+}
 # Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8): dual-SSD1683 792x272 panel
 # on SCK12/MOSI11, CS45, DC46, RST47, BUSY48 (vendor demo code spi.h).
 # Buttons: HOME=2, EXIT=1, rotary NEXT=4, OK=5, PREV=6.
@@ -392,6 +410,14 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+    },
+    "seeed_reterminal_e1004": {
+        # 1200x1600 on an 8MB module: the 16-bit render canvas is what makes
+        # this render on-device (3.7MB instead of 7.3MB RGBA).
+        "device": "waveshare.EPD_13in3e",
+        "flashSize": "32MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_RETERMINAL_E1004_PINS,
     },
     "elecrow_crowpanel_5in79": {
         "device": "waveshare.EPD_5in79",
@@ -545,10 +571,14 @@ EMBEDDED_RELEASE_FIRMWARE: dict[str, dict[str, str]] = {
     "esp32-s3": {"asset": "esp32-s3-generic", "flashSize": "8MB"},
     "esp32-c3": {"asset": "esp32-c3-generic", "flashSize": "4MB"},
 }
-# Memory guardrail (M4): the on-device renderer composites into an RGBA pixie
-# buffer (4 B/px), packs it to the selected panel format, and needs headroom
-# for the Nim heap + QuickJS. Keep the reserve in sync with
-# FOS_RENDER_PSRAM_RESERVE in components/frameos_display/frameos_display.c.
+# Memory guardrail (M4): the on-device renderer composites into a pixie canvas
+# (16-bit RGB 5/6/5, 2 B/px — frameos/src/embedded/embedded_runtime.nim
+# `renderCanvas`), packs it to the selected panel format, and needs headroom
+# for the Nim heap + QuickJS. Keep both constants in sync with
+# FOS_RENDER_CANVAS_BYTES_PER_PIXEL / FOS_RENDER_PSRAM_RESERVE in
+# components/frameos_display (the firmware's boot-time fit check) and
+# EmbeddedReserveBytes in frameos/src/frameos/utils/memory.nim.
+EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL = 2
 EMBEDDED_RENDER_PSRAM_RESERVE_BYTES = 1536 * 1024
 EMBEDDED_QUICKJS_HEAP_LIMIT_BYTES = 4 * 1024 * 1024
 EMBEDDED_PREVIEW_SNAPSHOT_RESERVE_BYTES = 1024 * 1024
@@ -1169,9 +1199,9 @@ def embedded_buffer_size(width: int, height: int, pixel_format: int) -> int:
 
 def embedded_render_psram_bytes(width: int, height: int, pixel_format: int = FOS_PIXEL_1BPP) -> int:
     """PSRAM the on-device renderer needs for a width×height panel."""
-    rgba = width * height * 4
+    canvas = width * height * EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL
     packed = embedded_buffer_size(width, height, pixel_format)
-    return rgba + packed + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
+    return canvas + packed + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
 
 
 def _parse_embedded_size(value: str) -> int:
@@ -1287,11 +1317,13 @@ def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | 
     dims = device_dimensions(frame.device) or (0, 0)
     width, height = dims
     pixel_format = embedded_pixel_format_for_panel(panel)
-    rgba_bytes = width * height * 4 if width > 0 and height > 0 else 0
+    canvas_bytes = (
+        width * height * EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL if width > 0 and height > 0 else 0
+    )
     packed_bytes = embedded_buffer_size(width, height, pixel_format) if width > 0 and height > 0 else 0
     render_mode = embedded_render_mode_for_frame(frame)
     render_working_bytes = (
-        rgba_bytes + packed_bytes + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
+        canvas_bytes + packed_bytes + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
         if render_mode == EMBEDDED_RENDER_LOCAL and panel != "none"
         else 0
     )
@@ -1317,7 +1349,10 @@ def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | 
             "pixelFormat": pixel_format,
             "pixelFormatName": _pixel_format_name(pixel_format),
             "renderMode": "local" if render_mode == EMBEDDED_RENDER_LOCAL else "remote",
-            "rgbaBufferBytes": rgba_bytes,
+            # Historical key name: the canvas is 16-bit RGB now, not RGBA.
+            "rgbaBufferBytes": canvas_bytes,
+            "canvasBufferBytes": canvas_bytes,
+            "canvasBytesPerPixel": EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL,
             "packedBufferBytes": packed_bytes,
             "renderReserveBytes": EMBEDDED_RENDER_PSRAM_RESERVE_BYTES,
             "renderWorkingBytes": render_working_bytes,

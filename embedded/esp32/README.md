@@ -169,6 +169,7 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" | reTerminal Sticky, 32MB flash |
 | `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash |
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash |
+| `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
 
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet
@@ -385,6 +386,32 @@ all. The id ↔ slot mapping lives in the index. Every failure path (an
 unsplittable payload, more than 32 scenes, a full partition) falls back to
 loading the combined file whole, so a frame cannot lose its scenes to a
 failed optimization.
+
+## The render canvas is 16-bit (2026.8.31)
+
+The scene canvas the Nim renderer composites into is a pixie `pfRgb565`
+image — packed RGB 5/6/5, 2 bytes per pixel — not RGBA. Every panel this
+firmware drives is a dithered e-paper, and the dither keeps its own
+full-precision error rows beside the canvas (`forEachPaletteDithered` /
+`forEachGrayDithered` in `frameos/src/frameos/utils/dither.nim`), so the
+5/6-bit colour the canvas holds is a precision the output cannot show: a
+6-colour Floyd–Steinberg field has per-pixel error dozens of times the 565
+step. What it buys is the **13.3" 1200×1600 panel on an 8 MB module** — the
+RGBA canvas was 7.3 MiB and did not fit, the 565 one is 3.7 MiB and does
+(`fos_display_render_psram_bytes`: canvas + packed + 1.5 MiB reserve =
+6.1 MiB). Every other board gains 0.4–0.7 MiB of headroom, and half the
+PSRAM traffic per render.
+
+The canvas is also **one block for the device's uptime**: `main.c` calls
+`frameos_nim_reserve_canvas(fos_display_canvas_bytes())` right after the
+fit check and before `fos_wifi_init`, so the multi-MB contiguous run exists
+before Wi-Fi and TLS fragment the heap, and `embedded_runtime.nim`'s
+`renderCanvas()` wraps it with `newImage565Over` and reuses it every render.
+Nothing aliases the canvas across renders (the value pipeline never caches
+the live canvas), so reuse is safe, and the per-render allocate/collect
+churn is gone. `-d:frameosCanvasRgbx` in `FRAMEOS_EXTRA_NIM_FLAGS` keeps the
+old RGBA canvas for A/B measurement. The Pi runtime and the wasm preview are
+untouched and keep full RGBA.
 
 Two allocation facts worth knowing before profiling anything here:
 
