@@ -145,15 +145,20 @@ device therefore re-check the credentials even with a valid session: every
 `sessions` row remembers when it last proved them (`authenticated_at`,
 migration 0036 — set at sign-in, pushed forward by a successful re-check),
 and the routes below refuse with `403 {"error": "reauth_required", "reauth":
-{"methods": …, "path": "/login/reauth", "max_age_seconds": 900}}` when that
-is older than **15 minutes** (`recentAuthMaxAgeSeconds`,
-`src/lib/recent-auth.ts`). Gated today:
+{"methods": …, "path": "/login/reauth", "max_age_seconds": …}}` when that is
+older than the route's window (`src/lib/recent-auth.ts`). Two windows,
+matched to what the action can do:
 
-- `POST /api/frames/{id}/revoke` — revoking a cloud-managed frame;
-- `POST /api/device/revoke` — revoking a linked backend or frame;
-- `POST /api/device/authorize` — approving a device link or a scope change
-  (the `/device` page sends a stale session through `/login/reauth` *before*
-  showing the approve button; the route check is the backstop).
+- **15 minutes** (`recentAuthMaxAgeSeconds`) for the destructive pair:
+  `POST /api/frames/{id}/revoke` (revoking a cloud-managed frame) and
+  `POST /api/device/revoke` (revoking a linked backend or frame).
+- **2 hours** (`recentApprovalMaxAgeSeconds`) for
+  `POST /api/device/authorize` — approving a device link or a scope change.
+  Approvals are additive and come in batches ("setting up frames this
+  afternoon"); the gate still matters because an approval converts a stolen
+  cookie into a durable token, but a login fresh that afternoon is proof
+  enough. The `/device` page sends a stale session through `/login/reauth`
+  *before* showing the approve button; the route check is the backstop.
 
 Routes call `requireRecentAuth(db, accountId)` right after `readSession()`;
 pages call `hasRecentAuth(db)`. The client components behind those buttons

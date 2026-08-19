@@ -220,9 +220,10 @@ The response is `{ "status": "unlinked" }`. The link token stops
 authenticating immediately; a repeat call (or any other API call) with the
 same token returns `401 invalid_link_token`. The user-facing counterpart that
 revokes a link from the cloud account page is `POST /api/device/revoke`
-(session cookie, not the link token; like approving a link, it answers
-`403 reauth_required` unless the session proved its credentials within the
-last 15 minutes — see `auth.md`, "Re-authentication").
+(session cookie, not the link token; it answers `403 reauth_required`
+unless the session proved its credentials within the last 15 minutes —
+approving a link rides a wider 2-hour window; see `auth.md`,
+"Re-authentication").
 
 ## Backend Login Handoff
 

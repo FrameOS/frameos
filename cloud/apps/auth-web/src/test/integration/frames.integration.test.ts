@@ -182,6 +182,32 @@ async function enrolledFrame() {
   return { accountId, keys, ...payload };
 }
 
+// A frame that is still PENDING: a token's first enrollment is born active,
+// so pending only exists from the second enrollment of a multi-use token on.
+async function enrolledPendingFrame() {
+  const accountId = await signIn();
+  const keys = deviceKeypair();
+  const minted = await mintClaimToken(
+    postJson("/api/frames/claim-tokens", { multi_use: true }, { origin: baseUrl }),
+  );
+  expect(minted.status).toBe(200);
+  const { claim_token: claimToken } = (await minted.json()) as {
+    claim_token: string;
+  };
+  // The first card auto-confirms; the frame under test is the second.
+  const first = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+  expect(first.status).toBe(200);
+  const response = await enroll(claimToken, keys.publicKeyBase64);
+  expect(response.status).toBe(200);
+  const payload = (await response.json()) as {
+    access_token: string;
+    frame_id: string;
+    status: string;
+  };
+  expect(payload.status).toBe("pending");
+  return { accountId, keys, ...payload };
+}
+
 // Fill an account up to `count` frames without going through enrollment, so
 // quota tests do not need `count` round trips through the route.
 async function seedFrames(accountId: string, count: number) {
@@ -302,7 +328,7 @@ async function publishSceneVersion(
 }
 
 describe("cloud-managed frame enrollment", () => {
-  it("enrolls with a claim token, single-use, pending until confirmed", async () => {
+  it("enrolls with a single-use claim token, born active (auto-confirmed)", async () => {
     const accountId = await signIn();
     const keys = deviceKeypair();
     const claimToken = await mintToken("Kitchen frame");
@@ -315,7 +341,9 @@ describe("cloud-managed frame enrollment", () => {
     });
     expect(response.status).toBe(200);
     const payload = (await response.json()) as Record<string, unknown>;
-    expect(payload.status).toBe("pending");
+    // Minting the single-use token was the owner's deliberate act; no extra
+    // Confirm click.
+    expect(payload.status).toBe("active");
     expect(payload.token_type).toBe("Bearer");
     // The FULL grant, not just frame:managed — the device stores this string
     // as its local scope list and gates its telemetry push loops (and its
@@ -462,7 +490,11 @@ describe("cloud-managed frame enrollment", () => {
       .from(frames)
       .where(eq(frames.accountId, accountId));
     expect(rows).toHaveLength(2);
-    expect(rows.every((row) => row.status === "pending")).toBe(true);
+    // The first card off the image auto-confirms (the mint was the owner's
+    // deliberate act); every later card needs the owner's click.
+    const byFrameId = new Map(rows.map((row) => [row.id, row.status]));
+    expect(byFrameId.get(firstPayload.frame_id)).toBe("active");
+    expect(byFrameId.get(secondPayload.frame_id)).toBe("pending");
     expect(rows[0]?.publicKey).not.toBe(rows[1]?.publicKey);
 
     // The budget is spent: the third card gets invalid_claim_token.
@@ -750,7 +782,9 @@ describe("cloud-managed frame enrollment", () => {
       status: string;
     };
     expect(retryPayload.frame_id).toBe(firstPayload.frame_id);
-    expect(retryPayload.status).toBe("pending");
+    // Single-use enrollments are born active; the replay window still hands
+    // the same frame back for a lost response.
+    expect(retryPayload.status).toBe("active");
     // No orphan frame, no orphan linked client, no extra use spent.
     expect(
       await db.select().from(frames).where(eq(frames.accountId, accountId)),
@@ -1273,7 +1307,7 @@ describe("frame management API", () => {
   });
 
   it("refuses scene pushes while the frame is pending", async () => {
-    const { accountId, frame_id } = await enrolledFrame();
+    const { accountId, frame_id } = await enrolledPendingFrame();
     const scene = await createStoreScene(accountId, { name: "Early" });
     const refused = await assignFrameScenes(
       postJson(
@@ -1372,15 +1406,29 @@ describe("frame management API", () => {
       claim_token: string;
     };
 
+    // The image's first card auto-confirms and takes its scenes right away.
+    const firstCard = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    expect(firstCard.status).toBe(200);
+    const { frame_id: firstFrameId, status: firstStatus } =
+      (await firstCard.json()) as { frame_id: string; status: string };
+    expect(firstStatus).toBe("active");
+    expect(
+      (
+        await db
+          .select()
+          .from(frameSceneAssignments)
+          .where(eq(frameSceneAssignments.frameId, firstFrameId))
+      ).map((row) => row.sceneId),
+    ).toEqual([scene.id]);
+
     const enrolled = await enroll(claimToken, deviceKeypair().publicKeyBase64);
     expect(enrolled.status).toBe(200);
     const { frame_id: newFrameId } = (await enrolled.json()) as {
       frame_id: string;
     };
 
-    // Nothing yet: a board nobody confirmed has been sent nothing, which is
-    // the whole reason the intent waits on the frame row rather than being
-    // applied at enrollment.
+    // A LATER card is pending, and a board nobody confirmed has been sent
+    // nothing — the intent waits on the frame row until the owner's click.
     expect(
       await db
         .select()
@@ -1407,6 +1455,48 @@ describe("frame management API", () => {
     expect(queued.map((row) => row.type)).toContain("set_scenes");
     // Consumed exactly once — a re-confirm must not fight the owner's own
     // later edits.
+    expect((await frameRow(newFrameId)).sceneSourceFrameId).toBeNull();
+  });
+
+  it("copies the chosen scenes at enrollment for a single-use token (no confirm)", async () => {
+    const source = await enrolledFrame();
+    const scene = await createStoreScene(source.accountId, { name: "Hall clock" });
+    const assigned = await assignFrameScenes(
+      postJson(
+        `/api/frames/${source.frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(source.frame_id),
+    );
+    expect(assigned.status).toBe(200);
+
+    const minted = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { scene_source_frame_id: source.frame_id },
+        { origin: baseUrl },
+      ),
+    );
+    expect(minted.status).toBe(200);
+    const { claim_token: claimToken } = (await minted.json()) as {
+      claim_token: string;
+    };
+
+    const enrolled = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    expect(enrolled.status).toBe(200);
+    const { frame_id: newFrameId, status } = (await enrolled.json()) as {
+      frame_id: string;
+      status: string;
+    };
+    // Born active, scenes copied right away — no Confirm click in between.
+    expect(status).toBe("active");
+    const copied = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, newFrameId));
+    expect(copied.map((row) => row.sceneId)).toEqual([scene.id]);
+    // Consumed exactly once.
     expect((await frameRow(newFrameId)).sceneSourceFrameId).toBeNull();
   });
 
@@ -2189,7 +2279,7 @@ describe("frame management API", () => {
   });
 
   it("refuses schedule pushes while the frame is pending, and without an app origin", async () => {
-    const { frame_id } = await enrolledFrame();
+    const { frame_id } = await enrolledPendingFrame();
 
     const pending = await pushFrameSchedule(
       postJson(

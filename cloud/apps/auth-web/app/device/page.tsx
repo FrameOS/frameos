@@ -3,7 +3,11 @@ import { createDb } from "@frameos-cloud/db";
 import { AppShell } from "../../src/components/AppShell";
 import { DeviceApprovalPanel } from "../../src/components/DeviceApprovalPanel";
 import { hasDatabaseUrl } from "../../src/lib/env";
-import { hasRecentAuth, reauthPath } from "../../src/lib/recent-auth";
+import {
+  hasRecentAuth,
+  reauthPath,
+  recentApprovalMaxAgeSeconds,
+} from "../../src/lib/recent-auth";
 import { readSession } from "../../src/lib/session";
 
 export const metadata = { title: "Connect this FrameOS backend" };
@@ -35,7 +39,10 @@ export default async function DevicePage({ searchParams }: DevicePageProps) {
   if (!session?.accountId) {
     redirect(`/login?return_to=${encodeURIComponent(target)}`);
   }
-  if (hasDatabaseUrl() && !(await hasRecentAuth(createDb()))) {
+  if (
+    hasDatabaseUrl() &&
+    !(await hasRecentAuth(createDb(), recentApprovalMaxAgeSeconds))
+  ) {
     redirect(`${reauthPath}?return_to=${encodeURIComponent(target)}`);
   }
 

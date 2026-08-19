@@ -375,10 +375,10 @@ An account that controls physical devices needs more than email + password:
   session-minting routes gate on it; a passkey with user verification also
   signs in passwordlessly.
 - Re-authentication for sensitive actions — **shipped.** Revoking a frame
-  or a linked backend and approving a device link / scope change need a
-  session that proved its credentials within the last 15 minutes
-  (`403 reauth_required` → `/login/reauth`; design in `auth.md`,
-  "Re-authentication"). Scene assignment is deliberately not gated: it is
+  or a linked backend needs a session that proved its credentials within
+  the last 15 minutes; approving a device link / scope change rides a wider
+  2-hour window (`403 reauth_required` → `/login/reauth`; design in
+  `auth.md`, "Re-authentication"). Scene assignment is deliberately not gated: it is
   the workspace's save path. The account-weakening routes (removing a
   second factor, deleting the account) keep their own in-body proof.
 - Per-frame audit trail surfaced in the UI — **shipped.** Every
@@ -413,8 +413,10 @@ One button, three tiles, one shared enrollment endpoint.
   the image contains network credentials. Default flow leaves WiFi out and
   relies on the existing captive portal (`FrameOS-Setup` hotspot).
 - Boot sequence: flash → boot → portal if no network → dial cloud with
-  claim token → keypair enrollment → frame appears as **pending** in the
-  account → owner confirms.
+  claim token → keypair enrollment → the token's first enrollment activates
+  the frame right away (the mint was the owner's deliberate act); each later
+  enrollment of the image's multi-use token stays **pending** until the
+  owner confirms it.
 - Initial hardware support is whatever buildroot supports (today: Raspberry
   Pi Zero 2 W); `rpios` users can enroll via flow 2 instead.
 

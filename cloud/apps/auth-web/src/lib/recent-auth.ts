@@ -20,10 +20,16 @@ import { readSessionToken } from "./session";
 import { hashSecret } from "./secrets";
 import { secondFactorStatus } from "./two-factor";
 
-// Fifteen minutes: long enough to revoke a handful of frames or approve a
-// scope change without re-proving between each, short enough that a cookie
-// picked up from an unattended session cannot do it hours later.
+// Two windows, matched to what the action can do. Revoking is destructive
+// and rare — fifteen minutes: long enough to revoke a handful of frames
+// without re-proving between each, short enough that a cookie picked up from
+// an unattended session cannot do it hours later. Approving a device link is
+// additive and happens in batches ("I'm setting up frames this afternoon") —
+// two hours, the same order GitHub's sudo mode uses; the gate still matters
+// because an approval converts a transient stolen cookie into a durable
+// token, but a fresh-that-afternoon login is proof enough for it.
 export const recentAuthMaxAgeSeconds = 15 * 60;
+export const recentApprovalMaxAgeSeconds = 2 * 60 * 60;
 
 export const reauthPath = "/login/reauth";
 
@@ -74,18 +80,28 @@ export async function sessionAuthenticatedAt(
   return row?.authenticatedAt;
 }
 
-export function isRecent(authenticatedAt: Date | undefined, now = new Date()) {
+export function isRecent(
+  authenticatedAt: Date | undefined,
+  maxAgeSeconds: number = recentAuthMaxAgeSeconds,
+  now = new Date(),
+) {
   return (
     authenticatedAt !== undefined &&
-    now.getTime() - authenticatedAt.getTime() <= recentAuthMaxAgeSeconds * 1000
+    now.getTime() - authenticatedAt.getTime() <= maxAgeSeconds * 1000
   );
 }
 
 // True when the request's session proved its credentials recently enough for
 // a sensitive action. Pages use it to send the user through /login/reauth
 // before showing an approve button they could not press.
-export async function hasRecentAuth(db: ReturnType<typeof createDb>) {
-  return isRecent(await sessionAuthenticatedAt(db, await readSessionToken()));
+export async function hasRecentAuth(
+  db: ReturnType<typeof createDb>,
+  maxAgeSeconds: number = recentAuthMaxAgeSeconds,
+) {
+  return isRecent(
+    await sessionAuthenticatedAt(db, await readSessionToken()),
+    maxAgeSeconds,
+  );
 }
 
 // The response a sensitive route sends instead of acting, or undefined when
@@ -94,15 +110,16 @@ export async function hasRecentAuth(db: ReturnType<typeof createDb>) {
 export async function requireRecentAuth(
   db: ReturnType<typeof createDb>,
   accountId: string,
+  maxAgeSeconds: number = recentAuthMaxAgeSeconds,
 ): Promise<NextResponse | undefined> {
-  if (await hasRecentAuth(db)) {
+  if (await hasRecentAuth(db, maxAgeSeconds)) {
     return undefined;
   }
   return NextResponse.json(
     {
       error: "reauth_required",
       reauth: {
-        max_age_seconds: recentAuthMaxAgeSeconds,
+        max_age_seconds: maxAgeSeconds,
         methods: await reauthMethods(db, accountId),
         path: reauthPath,
       },
