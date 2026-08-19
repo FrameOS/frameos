@@ -14,7 +14,7 @@ on:
           - raspberry-pi-64
           - raspberry-pi-5
       runner_label:
-        description: "Runner label override; empty uses the platform default (32-core Depot runners — x86_64 for 32-bit ARM targets so prebuilt Bootlin toolchains apply)"
+        description: "Runner label override; empty uses the platform default (the self-hosted 32-core EPYC slot, label epyc-32)"
         required: false
         default: ""
         type: string
@@ -117,17 +117,22 @@ jobs:
             if [ -n "${RUNNER_OVERRIDE}" ]; then
               runner="${RUNNER_OVERRIDE}"
             else
-              # 32-core Depot runners: a Buildroot build is compile-bound and
-              # scales nearly linearly, and Depot serves actions/cache from
-              # its own storage (faster restores, no 10GB repo quota
-              # squeezing the ccache). Keep the arch split in sync with
-              # default_runner_label in backend/app/tasks/buildroot_platforms.py:
-              # 32-bit ARM targets build on x86_64 so the prebuilt Bootlin
-              # toolchains apply.
-              case "${platform}" in
-                raspberry-pi-32) runner="depot-ubuntu-24.04-32" ;;
-                *) runner="depot-ubuntu-24.04-arm-32" ;;
-              esac
+              # Self-hosted 32-core EPYC slot (ephemeral Incus VMs on the
+              # monster host; /srv/gha-runners/README.md there). A Buildroot
+              # build is compile-bound and scales nearly linearly, and the
+              # host-side /mnt/cache mount keeps dl + ccache warm with no
+              # quota and no save/restore step. There is ONE epyc-32 slot,
+              # so an "all" publish builds its three platforms serially —
+              # same total wall-clock as one 32-core build each, just
+              # queued. Every platform now builds on an x86_64 host: the
+              # aarch64 targets cross-compile exactly like the 32-bit ones
+              # (Buildroot never executes target binaries), and prebuilt
+              # Bootlin toolchains only exist for x86_64 hosts anyway —
+              # buildroot_platforms.py documents that olddefconfig drops
+              # host-incompatible toolchain lines, with a guard that fails
+              # the build if a package silently disappears. The first run
+              # per platform is a cold ccache (host arch changed).
+              runner="epyc-32"
             fi
             entries+=("{\"platform\":\"${platform}\",\"runner\":\"${runner}\"}")
           done
@@ -153,7 +158,8 @@ jobs:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       FRAMEOS_BUILDROOT_JLEVEL: ${{ inputs.buildroot_jlevel }}
-      FRAMEOS_BUILDROOT_CACHE_DIR: ${{ github.workspace }}/build/buildroot-images/cache
+      # FRAMEOS_BUILDROOT_CACHE_DIR is set by the "Pick the persistent cache
+      # dir" step below (the shared /mnt/cache mount on self-hosted runners).
       # Pinned by resolve-matrix, not recomputed here — see the comment there.
       FRAMEOS_NEXT_VERSION: ${{ needs.resolve-matrix.outputs.version }}
     steps:
@@ -167,32 +173,26 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The cache dir holds Buildroot downloads AND the ccache (BR2_CCACHE_DIR
-      # points into it). The key ends in the run id ON PURPOSE: actions/cache
-      # only saves when the exact key is new, so a content-hash key meant the
-      # ccache warmed by a run was thrown away and every future run restored
-      # the same increasingly stale snapshot. With a per-run key each run
-      # restores the newest cache via restore-keys and saves its own warmer
-      # one.
-      #
-      # The wiring is verified: buildroot_images.py bind-mounts this dir at
-      # /cache and the generated config sets BR2_DL_DIR=/cache/dl and
-      # BR2_CCACHE_DIR=/cache/ccache, so post-job saves are ~1.5-1.8GB.
-      # Historical "restored 0 bytes" runs were NOT a path bug: saves on
-      # GitHub-hosted runners went to the repo's 10GB GitHub cache where
-      # turbo/buildx caches evicted them within hours, and Depot runners use
-      # Depot's own cache store, which started cold. Cache continuity
-      # therefore requires staying on Depot runners: a runner_label override
-      # onto a GitHub-hosted runner reads/writes the other, quota-squeezed
-      # store.
-      - name: Restore Buildroot download + compiler cache
-        uses: actions/cache@v4
-        with:
-          path: build/buildroot-images/cache
-          key: buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ matrix.platform }}-${{ github.run_id }}
-          restore-keys: |
-            buildroot-dl-${{ runner.os }}-${{ runner.arch }}-${{ matrix.platform }}-
-            buildroot-dl-${{ runner.os }}-${{ runner.arch }}-
+      # The cache dir holds Buildroot downloads AND the ccache: buildroot_
+      # images.py bind-mounts it at /cache and the generated config sets
+      # BR2_DL_DIR=/cache/dl and BR2_CCACHE_DIR=/cache/ccache. On the
+      # self-hosted runners it is a plain host directory shared into every
+      # runner VM at /mnt/cache — it survives every job with no
+      # save/restore step and no quota, which is what actions/cache never
+      # managed here (GitHub's 10GB repo store evicted it within hours, and
+      # Depot's store went away with Depot). A runner_label override onto a
+      # GitHub-hosted runner simply builds cold in the workspace.
+      - name: Pick the persistent cache dir
+        run: |
+          set -euo pipefail
+          if [ -d /mnt/cache ]; then
+            cache_dir="/mnt/cache/buildroot/${PLATFORM}"
+          else
+            cache_dir="${GITHUB_WORKSPACE}/build/buildroot-images/cache"
+          fi
+          mkdir -p "${cache_dir}"
+          echo "Using cache dir: ${cache_dir}"
+          echo "FRAMEOS_BUILDROOT_CACHE_DIR=${cache_dir}" >> "$GITHUB_ENV"
 
       - name: Install Python dependencies
         run: |

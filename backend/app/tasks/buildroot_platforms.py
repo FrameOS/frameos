@@ -72,11 +72,13 @@ class BuildrootPlatform:
     # which breaks multi-model images: a Pi 4 must load start4.elf, and the
     # GPU bootloader only auto-selects per model when the keys are absent.
     remove_boot_config_keys: tuple[str, ...] = ()
-    # Default GitHub Actions runner label for base-image builds: 32-core
-    # Depot runners (Buildroot is compile-bound and scales with cores, and
-    # Depot serves actions/cache from its own storage). x86_64 runners can
-    # use prebuilt Bootlin toolchains for 32-bit ARM targets.
-    default_runner_label: str = "depot-ubuntu-24.04-arm-32"
+    # Default GitHub Actions runner label for base-image builds: the
+    # self-hosted 32-core EPYC slot (Buildroot is compile-bound and scales
+    # with cores; the host's /mnt/cache mount keeps dl + ccache warm). All
+    # platforms build on x86_64 hosts, where the prebuilt Bootlin
+    # toolchains apply; hosts of other arches fall back per the
+    # extra_config_lines note above.
+    default_runner_label: str = "epyc-32"
 
     def build_target_copy(self) -> TargetMetadata:
         # TargetMetadata is a mutable dataclass; hand out copies so callers
@@ -160,7 +162,7 @@ RASPBERRY_PI_32 = BuildrootPlatform(
     wifi_firmware_models=("raspberrypi,model-zero-w",),
     needs_zero_2_w_wifi_firmware=False,
     # x86_64 so the Bootlin ARMv6 rootfs toolchain applies.
-    default_runner_label="depot-ubuntu-24.04-32",
+    default_runner_label="epyc-32",
 )
 
 RASPBERRY_PI_64 = BuildrootPlatform(
@@ -250,7 +252,7 @@ RASPBERRY_PI_64 = BuildrootPlatform(
         "raspberrypi,model-zero-2-2",
     ),
     needs_zero_2_w_wifi_firmware=True,
-    default_runner_label="depot-ubuntu-24.04-arm-32",
+    default_runner_label="epyc-32",
 )
 
 RASPBERRY_PI_5 = BuildrootPlatform(
@@ -318,7 +320,7 @@ RASPBERRY_PI_5 = BuildrootPlatform(
     # BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI already.
     wifi_firmware_models=(),
     needs_zero_2_w_wifi_firmware=False,
-    default_runner_label="depot-ubuntu-24.04-arm-32",
+    default_runner_label="epyc-32",
 )
 
 # TODO(luckfox-pico): Rockchip RV1103/RV1106 boards (Luckfox Pico family).
@@ -336,7 +338,7 @@ LUCKFOX_PICO = BuildrootPlatform(
     docker_platform="linux/arm/v7",
     release_target="debian-bookworm-armhf",
     enabled=False,
-    default_runner_label="depot-ubuntu-24.04-32",
+    default_runner_label="epyc-32",
 )
 
 # TODO(t113): Allwinner T113-S3/S4 boards (MangoPi, Lctech, etc.). Needs a
@@ -353,7 +355,7 @@ ALLWINNER_T113 = BuildrootPlatform(
     docker_platform="linux/arm/v7",
     release_target="debian-bookworm-armhf",
     enabled=False,
-    default_runner_label="depot-ubuntu-24.04-32",
+    default_runner_label="epyc-32",
 )
 
 BUILDROOT_PLATFORMS: dict[str, BuildrootPlatform] = {
