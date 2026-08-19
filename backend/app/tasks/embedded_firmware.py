@@ -2264,28 +2264,78 @@ async def _iter_process_lines(stream: asyncio.StreamReader):
         yield buffer
 
 
+# How long the group gets to finish on SIGTERM before SIGKILL, once the shell
+# itself is gone. Nothing waits on this in the common case: the loop below
+# stops as soon as the group is empty, which is normally within milliseconds.
+EMBEDDED_GROUP_KILL_GRACE_SECONDS = 3.0
+
+
+def _process_group_is_empty(group: int) -> bool:
+    """Whether *group* has no members left to signal."""
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 async def _terminate_process_group(process: asyncio.subprocess.Process) -> None:
     """Kill the build and everything it spawned. The task runs ``bash -c``, so
     signalling the child alone would leave ninja and its compilers running:
     they would keep burning the machine's CPU and, worse, collide with the
-    next attempt inside the same build directory."""
+    next attempt inside the same build directory.
+
+    Escalating on "did the shell exit?" is not enough, and that is the bug this
+    shape exists to avoid: ``bash`` dies on SIGTERM at once, so waiting for it
+    and returning happy leaves behind anything in the group that blocks SIGTERM
+    or was forked in the instant before the signal landed. The shell's death is
+    the START of the question, so after it we watch the GROUP and SIGKILL
+    whatever is still there."""
     if process.returncode is not None:
         return
     try:
         group = os.getpgid(process.pid)
     except (ProcessLookupError, OSError):
         group = None
-    for sig in (signal.SIGTERM, signal.SIGKILL):
+
+    def signal_all(sig: int) -> bool:
+        """Signal the whole group (or just the child); False if it is gone."""
         try:
             if group is not None:
                 os.killpg(group, sig)
             else:
                 process.send_signal(sig)
         except (ProcessLookupError, OSError):
-            return
+            return False
+        return True
+
+    if not signal_all(signal.SIGTERM):
+        return
+    with contextlib.suppress(asyncio.TimeoutError):
+        await asyncio.wait_for(process.wait(), timeout=10)
+
+    if group is None:
+        # No group to sweep: the child is all there is to kill.
+        if process.returncode is None and signal_all(signal.SIGKILL):
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=10)
+        return
+
+    deadline = asyncio.get_running_loop().time() + EMBEDDED_GROUP_KILL_GRACE_SECONDS
+    while not _process_group_is_empty(group):
+        if asyncio.get_running_loop().time() >= deadline:
+            # Whatever is left has had its chance to exit cleanly. SIGKILL is
+            # a no-op against the zombies an unreaping PID 1 leaves behind, so
+            # this is safe to fire blind rather than parsing /proc for states.
+            signal_all(signal.SIGKILL)
+            break
+        await asyncio.sleep(0.05)
+
+    if process.returncode is None:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(process.wait(), timeout=10)
-            return
 
 
 async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: str | None) -> None:

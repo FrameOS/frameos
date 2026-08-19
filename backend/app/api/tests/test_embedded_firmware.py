@@ -1,5 +1,7 @@
 import asyncio
 import os
+import shlex
+import sys
 
 import pytest
 from unittest.mock import AsyncMock, patch
@@ -1749,6 +1751,63 @@ async def test_terminating_a_build_kills_the_processes_it_spawned():
             break
         await asyncio.sleep(0.1)
     assert not _process_is_running(child_pid)
+
+
+@pytest.mark.asyncio
+async def test_terminating_a_build_kills_children_that_ignore_sigterm(tmp_path):
+    """The escalation to SIGKILL must not hinge on the shell outliving SIGTERM.
+
+    ``bash -c`` dies on SIGTERM at once, so a cancel that waits for the shell
+    and then declares victory leaves behind exactly the process worth worrying
+    about: a compiler that traps SIGTERM. Only a SIGKILL aimed at the GROUP
+    ends that one, and the group is what a build cancel promises to clear.
+
+    Three details make this able to tell a fixed cancel from a broken one, each
+    of which silently made an earlier version of this test pass either way:
+      * `read` and not `wait` — bash defers SIGTERM until a job it is `wait`ing
+        on finishes, keeping the shell alive long enough for ANY implementation
+        to escalate on its own timeout;
+      * the grandchild's output goes to /dev/null instead of inheriting the
+        shell's stdout — asyncio's `wait()` also waits for the pipes to close,
+        and a process refusing to die holds them open, hiding the difference
+        behind that same timeout;
+      * the readiness handshake — a python that has not yet reached
+        `signal()` dies of the default SIGTERM like anything else, so without
+        waiting for it the test proves nothing.
+    """
+    ready = tmp_path / "ready"
+    ignores_sigterm = (
+        "import pathlib, signal, sys, time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "pathlib.Path(sys.argv[1]).write_text('ready'); "
+        "time.sleep(120)"
+    )
+    process = await asyncio.create_subprocess_exec(
+        "bash",
+        "-c",
+        f"{shlex.quote(sys.executable)} -c {shlex.quote(ignores_sigterm)} "
+        f"{shlex.quote(str(ready))} >/dev/null 2>&1 & echo $!; read _",
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        start_new_session=True,
+    )
+    stubborn_pid = int((await process.stdout.readline()).strip())
+    for _ in range(100):
+        if ready.exists():
+            break
+        await asyncio.sleep(0.05)
+    assert ready.exists(), "grandchild never armed its SIGTERM handler"
+    assert _process_is_running(stubborn_pid)
+
+    await embedded_firmware_module._terminate_process_group(process)
+
+    assert process.returncode is not None
+    for _ in range(50):
+        if not _process_is_running(stubborn_pid):
+            break
+        await asyncio.sleep(0.1)
+    assert not _process_is_running(stubborn_pid)
 
 
 def test_build_root_is_redirectable_to_a_persistent_volume(monkeypatch, tmp_path):
