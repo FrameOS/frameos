@@ -11,6 +11,7 @@ import frameos/config
 import frameos/device_setup
 import frameos/driver_render_hint
 import frameos/local_access
+import frameos/cloud/device_flow
 import frameos/logger
 import frameos/metrics
 import frameos/types
@@ -95,6 +96,51 @@ proc configureLocalAccessOverlay(self: RunnerThread) =
     overflow: "fit-bounds",
   ))
 
+proc configureLinkCodeOverlay(self: RunnerThread) =
+  ## Always built, like the presence-code overlay: a device-flow link can be
+  ## started at any moment (admin page, setup portal queue) and the code has
+  ## to be on the panel for the possession ceremony to mean anything.
+  self.linkCodeRender = render_textApp.App(nodeName: "render/text", nodeId: -3.NodeId,
+    frameConfig: self.frameConfig, appConfig: render_textApp.AppConfig(
+    text: "",
+    richText: "disabled",
+    inputImage: none(Image),
+    position: "center",
+    vAlign: "top",
+    offsetX: 0.0,
+    offsetY: 0.0,
+    padding: 16.0,
+    fontColor: parseHtmlColor("#ffffff"),
+    fontSize: 32.0,
+    borderColor: parseHtmlColor("#000000"),
+    borderWidth: 3,
+    overflow: "fit-bounds",
+  ))
+  self.linkCodeQrRender = render_imageApp.App(nodeName: "render/image", nodeId: -4.NodeId,
+    frameConfig: self.frameConfig, appConfig: render_imageApp.AppConfig(
+    placement: "center",
+    offsetX: 0,
+    offsetY: 40,
+    blendMode: "normal",
+  ))
+  self.linkCodeQrData = data_qrApp.App(nodeName: "data/qr", nodeId: -4.NodeId,
+    frameConfig: self.frameConfig, appConfig: data_qrApp.AppConfig(
+    codeType: "Custom",
+    code: "",
+    # A third of the shorter panel edge: readable from in front of the frame
+    # on the small panels, without covering the whole scene on the large ones.
+    size: 33.0,
+    sizeUnit: "percent",
+    alRad: 30.0,
+    moRad: 0.0,
+    moSep: 0.0,
+    padding: 1,
+    qrCodeColor: parseHtmlColor("#000000"),
+    backgroundColor: parseHtmlColor("#ffffff"),
+  ))
+  self.linkCodeQrImage = nil
+  self.linkCodeQrKey = ""
+
 proc configureControlCode(self: RunnerThread) =
   if self.frameConfig.controlCode.enabled:
     let controlCode = self.frameConfig.controlCode
@@ -156,6 +202,27 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       render_textApp.App(self.localAccessRender).appConfig.text =
         "Local network access\n" & presenceCode
       render_textApp.App(self.localAccessRender).run(context)
+    # A pending FrameOS Cloud link code (cloud/device_flow.nim): the user code
+    # plus a QR of the claim URL, drawn over the scene for the same reason as
+    # the presence code — reading it off the panel is the ownership proof.
+    let linkCode = activeLinkCode()
+    if linkCode.active:
+      let qrPayload = if linkCode.verificationUriComplete.len > 0:
+          linkCode.verificationUriComplete
+        else:
+          linkCode.verificationUri
+      if qrPayload.len > 0:
+        if self.linkCodeQrImage == nil or self.linkCodeQrKey != qrPayload:
+          data_qrApp.App(self.linkCodeQrData).appConfig.code = qrPayload
+          self.linkCodeQrImage = data_qrApp.App(self.linkCodeQrData).get(context)
+          self.linkCodeQrKey = qrPayload
+        render_imageApp.App(self.linkCodeQrRender).appConfig.image = self.linkCodeQrImage
+        render_imageApp.App(self.linkCodeQrRender).run(context)
+      var linkText = "Connect to FrameOS Cloud\n" & linkCode.userCode
+      if linkCode.verificationUri.len > 0:
+        linkText.add("\n" & linkCode.verificationUri)
+      render_textApp.App(self.linkCodeRender).appConfig.text = linkText
+      render_textApp.App(self.linkCodeRender).run(context)
     let image = context.image
 
     var outImage: Image
@@ -584,6 +651,7 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
             self.currentSceneId = getFirstSceneId()
             self.configureControlCode()
             self.configureLocalAccessOverlay()
+            self.configureLinkCodeOverlay()
             self.forceSceneReload = true
             self.triggerRenderNext = true
             continue # don't dispatch this event to the scene
@@ -645,6 +713,7 @@ proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =
     )
     runnerThread.configureControlCode()
     runnerThread.configureLocalAccessOverlay()
+    runnerThread.configureLinkCodeOverlay()
 
     waitFor runnerThread.startRenderLoop() and runnerThread.startMessageLoop()
 

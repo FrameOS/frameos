@@ -8,6 +8,7 @@ import frameos/setup_proxy
 import frameos/utils/process
 import frameos/network/backend as netbackend
 import frameos/network/supplicant as wpa
+import frameos/cloud/device_flow
 import frameos/cloud/enrollment
 import frameos/cloud/link_state
 import drivers/drivers as frameDrivers
@@ -778,7 +779,7 @@ proc defaultControlMode*(frameConfig: FrameConfig): string {.gcsafe.} =
   ## enrollment wins, then a configured self-hosted backend; a frame with
   ## neither — including the release-image "localhost" placeholder — runs
   ## standalone until the user picks something.
-  if pendingCloudEnrollment() != nil or cloudLinkIsManaged():
+  if pendingCloudEnrollment() != nil or cloudLinkIsManaged() or pendingLinkCodeQueued():
     return "cloud"
   if otherControlPlaneActive(frameConfig):
     return "backend"
@@ -953,14 +954,27 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     writeFile(filename, pretty(data, indent = 4) & "\n")
     writeHostnameBestEffort(hostnameBase)
 
-    if options.controlMode == "cloud" and options.claimToken.len > 0:
-      # A fresh claim code replaces whatever enrollment was queued; blank
-      # keeps the boot-provisioned one. The hub thread redeems it once the
-      # network is up (connectToWifi nudges it).
-      if not writePendingEnrollment(options.claimToken, options.cloudUrl, hostnameBase):
-        rememberError("Failed to save the cloud claim code.")
-        pLog("portal:setup:cloudEnrollError", %*{"providerUrl": options.cloudUrl})
-        return false
+    if options.controlMode == "cloud":
+      if options.claimToken.len > 0:
+        # A fresh claim code replaces whatever enrollment was queued; blank
+        # keeps the boot-provisioned one. The hub thread redeems it once the
+        # network is up (connectToWifi nudges it).
+        if not writePendingEnrollment(options.claimToken, options.cloudUrl, hostnameBase):
+          rememberError("Failed to save the cloud claim code.")
+          pLog("portal:setup:cloudEnrollError", %*{"providerUrl": options.cloudUrl})
+          return false
+      elif pendingCloudEnrollment() == nil and not cloudLinkIsManaged():
+        # No claim code at all: queue a panel-displayed link code instead
+        # (docs/cloud-frames.md, flow B). Once online, the hub thread starts
+        # a device flow and the display shows the code + QR to claim this
+        # frame — reading it off the panel is the ownership proof.
+        if not writePendingLinkCode(options.cloudUrl):
+          rememberError("Failed to queue the cloud link code.")
+          pLog("portal:setup:linkCodeError", %*{"providerUrl": options.cloudUrl})
+          return false
+    else:
+      # Picking a backend or standalone retires a queued panel link code.
+      clearPendingLinkCode()
 
     pLog("portal:setup:persisted", %*{
       "controlMode": options.controlMode,
@@ -1667,7 +1681,9 @@ proc setupHtml*(frameOS: FrameOS): string =
                data-pending="{claimPending}"
                placeholder="{htmlEscape(claimPlaceholder)}">
       </label>
-      <p class="muted">Claim codes come from "Add frame" in your cloud account.</p>
+      <p class="muted">Claim codes come from "Add frame" in your cloud account.
+        Leave this empty to show a link code on the display instead: claim the
+        frame by scanning it once the frame is online.</p>
     </div>
     <div id="backend-fields"{backendFieldsClass}>
       <label>Server Host
@@ -1714,7 +1730,9 @@ function updateControlUi() {
   cloudFields.classList.toggle('hidden', mode !== 'cloud');
   backendFields.classList.toggle('hidden', mode !== 'backend');
   serverHostInput.required = mode === 'backend';
-  claimTokenInput.required = mode === 'cloud' && claimTokenInput.dataset.pending !== '1';
+  // Optional either way: with no claim code, saving queues a link code that
+  // the frame shows on its own display once online.
+  claimTokenInput.required = false;
 }
 
 function currentDeviceMeta() {

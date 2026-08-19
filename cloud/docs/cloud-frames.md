@@ -588,7 +588,10 @@ different subtrees):
 4. Signed release verification in `upgrade.nim`.
 5. Boot-partition personalization file support in the buildroot image +
    portal claim-token handoff.
-6. Panel-displayed link code for flow 2.
+6. Panel-displayed link code for flow 2 — **done**: pending device flows
+   render the user code + QR on the panel, the hub thread polls them, and
+   the setup portal can queue one without a claim code
+   (`frameos/cloud/device_flow.nim`).
 7. Local ceremony to switch a frame between backend-managed and
    cloud-managed (exactly one control plane at a time).
 
