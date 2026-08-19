@@ -31,7 +31,12 @@ import {
 } from "../../../app/api/frames/[frameId]/scenes/route";
 import { POST as pushFrameSchedule } from "../../../app/api/frames/[frameId]/schedule/route";
 import { POST as pushFrameSettings } from "../../../app/api/frames/[frameId]/settings/route";
-import { GET as getFrameDetail } from "../../../app/api/frames/[frameId]/route";
+import {
+  GET as getFrameDetail,
+  POST as renameFrameRoute,
+} from "../../../app/api/frames/[frameId]/route";
+import { POST as restartFrameRoute } from "../../../app/api/frames/[frameId]/restart/route";
+import { POST as rebootFrameRoute } from "../../../app/api/frames/[frameId]/reboot/route";
 import {
   allowedFrameSettings,
   esp32SettableKeys,
@@ -1372,6 +1377,164 @@ describe("frame management API", () => {
     expect(((await shell.json()) as { error: string }).error).toBe(
       "invalid_command",
     );
+  });
+
+  // The canonical verb routes the shared SPA calls with no cloud branch
+  // (docs/api-triality.md): /restart and /reboot alias the queue verbs,
+  // POST /api/frames/{id} renames.
+  it("serves the canonical restart and reboot routes as queue verbs", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const restarted = await restartFrameRoute(
+      postJson(`/api/frames/${frame_id}/restart`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(restarted.status).toBe(200);
+    expect(((await restarted.json()) as { status: string }).status).toBe(
+      "queued",
+    );
+
+    const rebooted = await rebootFrameRoute(
+      postJson(`/api/frames/${frame_id}/reboot`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(rebooted.status).toBe(200);
+
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands.map((command) => command.type).sort()).toEqual([
+      "reboot",
+      "restart_runtime",
+    ]);
+    // "Now"-commands expire like the /command route's — a reboot queued on
+    // Monday must not fire on Friday.
+    for (const command of commands) {
+      expect(command.expiresAt).not.toBeNull();
+    }
+
+    // Another account's frame is invisible, not forbidden.
+    await enrolledFrame();
+    const refused = await restartFrameRoute(
+      postJson(`/api/frames/${frame_id}/restart`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(refused.status).toBe(404);
+  });
+
+  it("renames a frame through the canonical POST /api/frames/{id}", async () => {
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const renamed = await renameFrameRoute(
+      postJson(`/api/frames/${frame_id}`, { name: "Hallway" }, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(renamed.status).toBe(200);
+    expect(((await renamed.json()) as { status: string }).status).toBe(
+      "queued",
+    );
+    expect((await frameRow(frame_id)).name).toBe("Hallway");
+
+    // Pi frames get the set_settings push so local config stays in sync.
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.type).toBe("set_settings");
+    expect(commands[0]?.payload).toEqual({ settings: { name: "Hallway" } });
+
+    // Saving the same name again is a no-op, not another push.
+    const unchanged = await renameFrameRoute(
+      postJson(`/api/frames/${frame_id}`, { name: "Hallway" }, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(unchanged.status).toBe(200);
+    expect(((await unchanged.json()) as { status: string }).status).toBe(
+      "applied",
+    );
+
+    // Only `name` is accepted: a caller sending other backend fields here
+    // must hear "no" rather than have them silently dropped.
+    const extraKey = await renameFrameRoute(
+      postJson(
+        `/api/frames/${frame_id}`,
+        { interval: 300, name: "Kitchen" },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(extraKey.status).toBe(400);
+    expect(((await extraKey.json()) as { error: string }).error).toBe(
+      "unsupported_field",
+    );
+
+    const emptyName = await renameFrameRoute(
+      postJson(`/api/frames/${frame_id}`, { name: "" }, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(emptyName.status).toBe(400);
+    expect(((await emptyName.json()) as { error: string }).error).toBe(
+      "invalid_name",
+    );
+  });
+
+  it("skips the device push when renaming an esp32 frame", async () => {
+    await signIn();
+    const keys = deviceKeypair();
+    const claimToken = await mintToken("Desk board");
+    const enrolled = await enroll(claimToken, keys.publicKeyBase64, {
+      hardware: { height: 480, platform: "esp32", width: 800 },
+    });
+    expect(enrolled.status).toBe(200);
+    const { frame_id } = (await enrolled.json()) as { frame_id: string };
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+
+    const renamed = await renameFrameRoute(
+      postJson(`/api/frames/${frame_id}`, { name: "Desk" }, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(renamed.status).toBe(200);
+    const payload = (await renamed.json()) as {
+      command_id: string | null;
+      status: string;
+    };
+    // The display name is provider data; older esp32 firmware without
+    // set_settings would refuse a name-only push for nothing.
+    expect(payload.status).toBe("applied");
+    expect(payload.command_id).toBeNull();
+    expect((await frameRow(frame_id)).name).toBe("Desk");
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands).toHaveLength(0);
+  });
+
+  it("refuses power commands and renames for a pending frame", async () => {
+    const { frame_id } = await enrolledPendingFrame();
+    const restarted = await restartFrameRoute(
+      postJson(`/api/frames/${frame_id}/restart`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(restarted.status).toBe(409);
+    const renamed = await renameFrameRoute(
+      postJson(`/api/frames/${frame_id}`, { name: "Nope" }, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    expect(renamed.status).toBe(409);
   });
 
   it("copies the chosen frame's scenes onto a new frame when the owner confirms it", async () => {
