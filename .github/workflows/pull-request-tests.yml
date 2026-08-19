@@ -23,7 +23,14 @@ permissions:
 jobs:
   nim:
     name: FrameOS Nim Tests (shard ${{ matrix.shard }})
-    runs-on: ubuntu-latest
+    # Self-hosted 4-core slots (ephemeral Incus VMs on the monster host; see
+    # /srv/gha-runners/README.md there): same 4-vcpu shape as ubuntu-latest,
+    # faster cores, and the eight shards skip the account-wide GitHub-hosted
+    # queue. Pure compute — no browser rendering. The visual-regression jobs
+    # stay on GitHub-hosted runners on purpose: their auto-committed
+    # Playwright/snapshot baselines must keep rendering on the image that
+    # produced them.
+    runs-on: epyc-4
     strategy:
       fail-fast: false
       matrix:
@@ -582,7 +589,9 @@ jobs:
 
   deploy-e2e:
     name: Deploy E2E SSH
-    runs-on: ubuntu-latest
+    # Self-hosted 8-core slot: docker + SSH loopback deploy, no rendering.
+    # The redis service container runs via the VM's own docker daemon.
+    runs-on: epyc-8
     # Redis for the runtime E2E test. A service container comes up during job
     # setup instead of costing an `apt-get update && apt-get install` step
     # (~30 s) inside it; the tests reach it through REDIS_URL, and the runtime
