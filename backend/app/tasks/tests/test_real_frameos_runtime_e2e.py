@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import shutil
 import socket
 import subprocess
 import threading
@@ -226,9 +225,30 @@ def _runtime_logs(db, frame: Frame) -> list[str]:
     ]
 
 
+def _redis_reachable() -> bool:
+    """Whether something answers on the Redis the backend is configured for.
+
+    Asks the question that matters — is there a Redis to talk to — instead of
+    "is a redis-server binary on PATH", which said no to a perfectly good
+    Redis in a CI service container and skipped the test.
+    """
+    from urllib.parse import urlparse
+
+    from app.config import config
+
+    parsed = urlparse(config.REDIS_URL)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 6379
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
 def test_real_frameos_runtime_posts_render_done_to_backend(db, tmp_path: Path) -> None:
-    if not shutil.which("redis-server") and os.environ.get("REDIS_URL", "").startswith("redis://localhost"):
-        pytest.skip("redis-server is required for the runtime HTTP backend test")
+    if not _redis_reachable():
+        pytest.skip("a reachable Redis (REDIS_URL) is required for the runtime HTTP backend test")
 
     server_port = _free_port()
     frame_port = _free_port()

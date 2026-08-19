@@ -583,6 +583,20 @@ jobs:
   deploy-e2e:
     name: Deploy E2E SSH
     runs-on: ubuntu-latest
+    # Redis for the runtime E2E test. A service container comes up during job
+    # setup instead of costing an `apt-get update && apt-get install` step
+    # (~30 s) inside it; the tests reach it through REDIS_URL, and the runtime
+    # test's skip guard probes that port rather than looking for a binary.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -640,12 +654,6 @@ jobs:
         if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
         run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
 
-      - name: Install redis
-        run: |
-          sudo apt-get -y update
-          sudo apt-get install -y redis-server
-          redis-server --daemonize yes
-
       - name: Verify Docker
         run: docker version
 
@@ -693,19 +701,44 @@ jobs:
           nimble build
 
       # The test builds a Debian image with a toolchain in it (~54 s). Its tag
-      # is a hash of the build context, so building it here with a layer cache
-      # means the test finds it already present and skips the build; an edit to
-      # the context changes the tag and both this and the test rebuild.
-      - name: Pre-build SSH target image
+      # is a hash of the build context, so an image by that name can only have
+      # come from exactly these files: the test finds it in the daemon and
+      # skips the build, and an edit to the context changes the tag so both
+      # this and the test rebuild.
+      #
+      # The whole image is cached as one tarball rather than as buildx layers.
+      # With a layer cache every run still paid buildx's export-then-import
+      # round trip into the daemon (~68 s for a 175 MB image, more than the
+      # build it was saving); `docker load` of a cached tar is ~10 s.
+      - name: Compute SSH target image tag
+        id: ssh_target_tag
+        run: echo "tag=$(python3 backend/app/tasks/tests/deploy_ssh_target/context_tag.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache SSH target image
+        id: cache_ssh_target
+        uses: actions/cache@v4
+        with:
+          path: .tmp/ssh-target-image.tar
+          key: ${{ runner.os }}-ssh-target-image-${{ steps.ssh_target_tag.outputs.tag }}
+
+      - name: Load cached SSH target image
+        if: steps.cache_ssh_target.outputs.cache-hit == 'true'
+        run: docker load -i .tmp/ssh-target-image.tar
+
+      - name: Build SSH target image
+        if: steps.cache_ssh_target.outputs.cache-hit != 'true'
         run: |
-          TAG="$(python3 backend/app/tasks/tests/deploy_ssh_target/context_tag.py)"
+          TAG="${{ steps.ssh_target_tag.outputs.tag }}"
           echo "SSH target image: $TAG"
-          docker buildx build \
-            --load \
-            --cache-from type=gha,scope=deploy-e2e-ssh-target \
-            --cache-to type=gha,mode=max,scope=deploy-e2e-ssh-target \
-            -t "$TAG" \
-            backend/app/tasks/tests/deploy_ssh_target
+          docker build -t "$TAG" backend/app/tasks/tests/deploy_ssh_target
+          mkdir -p .tmp
+          docker save -o .tmp/ssh-target-image.tar "$TAG"
+
+      - name: Verify SSH target image is present under the tag the test computes
+        run: |
+          TAG="${{ steps.ssh_target_tag.outputs.tag }}"
+          docker image inspect "$TAG" > /dev/null
+          echo "SSH target image present: $TAG"
 
       - name: Run SSH deploy E2E test
         run: |
