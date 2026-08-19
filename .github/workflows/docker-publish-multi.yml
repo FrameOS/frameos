@@ -13,14 +13,21 @@ permissions:
   contents: write
 
 jobs:
-  # Runner sizing: every job runs on Depot. The bookkeeping jobs (version
-  # bump, npm dispatch, release notes, matrix, addon repo, GitHub release) are
-  # I/O bound and take the default Depot size; only the two jobs that actually
-  # compute (Buildroot images, ESP32 firmware) take 16 cores. The one
-  # exception is the armhf leg of build-prebuilt-cross, which stays on
-  # GitHub's ARM runners — see backend/bin/cross for the measurements.
+  # Runner sizing (post-Depot-runners, 2026-08): the bookkeeping jobs
+  # (version bump, npm dispatch, release notes, matrix, addon repo, GitHub
+  # release, the push-multiarch orchestrator) are I/O bound and run on free
+  # GitHub-hosted runners. The compute-heavy jobs run on the self-hosted
+  # EPYC pool ("epyc-32" / "epyc-8" = ephemeral Incus VMs on the monster
+  # host, see /srv/gha-runners/README.md there): Buildroot release image on
+  # the 32-core slot, ESP32 firmware on an 8-core slot. Cross builds split
+  # per-arch — amd64/armv6 on epyc-8, arm64+armhf on GitHub's free ARM
+  # runners — see backend/bin/cross for the mapping and measurements. Depot
+  # is still used, deliberately, for the container image builds themselves
+  # (depot/build-push-action: the esp32-ci layer cache shared with
+  # e2e-docker.yml, and push-multiarch's remote amd64+arm64 builders) — only
+  # the billed runner minutes moved off Depot.
   update-versions:
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       release_sha: ${{ steps.release-ref.outputs.release_sha }}
       docker_version: ${{ steps.release-ref.outputs.docker_version }}
@@ -77,7 +84,7 @@ jobs:
   publish-npm:
     name: Publish FrameOS npm packages
     needs: update-versions
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       # npm auth uses trusted publishing (OIDC), which matches on the
       # top-level workflow file — so publishing lives in npm-publish.yml and
@@ -96,7 +103,7 @@ jobs:
   release-notes:
     name: Generate Release Notes
     needs: update-versions
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout release commit
         uses: actions/checkout@v4
@@ -126,7 +133,7 @@ jobs:
 
   determine-release-targets:
     needs: update-versions
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       targets: ${{ steps.set-matrix.outputs.targets }}
     steps:
@@ -235,7 +242,10 @@ jobs:
   build-buildroot-release-image:
     name: Build Buildroot Release Image
     needs: [update-versions, build-prebuilt-cross]
-    runs-on: depot-ubuntu-24.04-16
+    # The one 32-core slot on the self-hosted pool; assembles the release
+    # image from the prebuilt R2 base image, so it queues behind nothing
+    # else in this workflow (the ESP32 job uses an epyc-8 slot).
+    runs-on: epyc-32
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -357,7 +367,9 @@ jobs:
   build-esp32-generic-firmware:
     name: Build ESP32 firmware (generic, all panels)
     needs: [update-versions]
-    runs-on: depot-ubuntu-24.04-16
+    # Self-hosted 8-core slot; the esp32-ci image itself still comes from
+    # Depot's builders below (warm layer cache), only idf.py runs here.
+    runs-on: epyc-8
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -561,9 +573,9 @@ jobs:
   # image build and pushes the multi-arch manifest directly.
   push-multiarch:
     needs: [update-versions, build-prebuilt-cross, build-buildroot-release-image]
-    # The image itself is built on Depot's remote builders, so this runner only
-    # orchestrates: the default size is plenty.
-    runs-on: depot-ubuntu-24.04
+    # The image itself is built on Depot's remote builders, so this runner
+    # only orchestrates: a free GitHub-hosted runner is plenty.
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -617,7 +629,7 @@ jobs:
   update-addon-repo:
     name: Update Home Assistant Addon
     needs: [update-versions, push-multiarch, release-notes]
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout frameos
         uses: actions/checkout@v4
@@ -696,7 +708,7 @@ jobs:
   github-release:
     name: Create GitHub Release
     needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-pico-firmware, update-addon-repo, release-notes]
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       # Shallow: this job only needs a working directory for `gh` and the
       # downloaded artifacts. Release notes come from an artifact and the tag
