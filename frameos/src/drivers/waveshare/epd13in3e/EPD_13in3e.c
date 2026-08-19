@@ -96,6 +96,40 @@ const UBYTE TFT_VCOM_POWER_V[1] = {
 	0x02
 };
 
+/* T133A01 (Seeed reTerminal E1004) tuning, from the vendor's Arduino driver
+ * (T133A01_Defines.h, EPD_INIT) as mirrored by ESPHome's epaper_spi T133A01
+ * model. Same register map and dual-CS routing as above; only these values
+ * and the two structural differences in EPD_13IN3E_Init change. */
+const UBYTE AN_TM_V_T133A01[9] = {
+	0x00, 0x0C, 0x0C, 0xD9, 0xDD, 0xDD, 0x15, 0x15, 0x55
+};
+const UBYTE CDI_V_T133A01[1] = {
+	0x37
+};
+const UBYTE BTST_P_V_T133A01[2] = {
+	0xE0, 0x20
+};
+const UBYTE BTST_N_V_T133A01[2] = {
+	0xE0, 0x20
+};
+#define DCDC_T133A01 0xA5
+const UBYTE DCDC_V_T133A01[3] = {
+	0x44, 0x54, 0x00
+};
+
+static int s_variant = EPD_13IN3E_VARIANT_WAVESHARE;
+
+void EPD_13IN3E_SetVariant(int variant)
+{
+    s_variant = (variant == EPD_13IN3E_VARIANT_T133A01) ? EPD_13IN3E_VARIANT_T133A01
+                                                         : EPD_13IN3E_VARIANT_WAVESHARE;
+}
+
+int EPD_13IN3E_GetVariant(void)
+{
+    return s_variant;
+}
+
 
 static void EPD_13IN3E_CS_ALL(UBYTE Value)
 {
@@ -221,8 +255,14 @@ void EPD_13IN3E_Init(void)
         return;
     }
 
+    const int t133a01 = (s_variant == EPD_13IN3E_VARIANT_T133A01);
+
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
-	EPD_13IN3E_SPI_Sand(AN_TM, AN_TM_V, sizeof(AN_TM_V));
+    if (t133a01) {
+        EPD_13IN3E_SPI_Sand(AN_TM, AN_TM_V_T133A01, sizeof(AN_TM_V_T133A01));
+    } else {
+        EPD_13IN3E_SPI_Sand(AN_TM, AN_TM_V, sizeof(AN_TM_V));
+    }
     EPD_13IN3E_CS_ALL(1);
 
     EPD_13IN3E_CS_ALL(0);
@@ -233,8 +273,19 @@ void EPD_13IN3E_Init(void)
 	EPD_13IN3E_SPI_Sand(PSR, PSR_V, sizeof(PSR_V));
     EPD_13IN3E_CS_ALL(1);
 
+    if (t133a01) {
+        /* DC/DC setting, master only — the T133A01 sequence's one extra step. */
+        DEV_Digital_Write(EPD_CS_M_PIN, 0);
+        EPD_13IN3E_SPI_Sand(DCDC_T133A01, DCDC_V_T133A01, sizeof(DCDC_V_T133A01));
+        EPD_13IN3E_CS_ALL(1);
+    }
+
     EPD_13IN3E_CS_ALL(0);
-	EPD_13IN3E_SPI_Sand(CDI, CDI_V, sizeof(CDI_V));
+    if (t133a01) {
+        EPD_13IN3E_SPI_Sand(CDI, CDI_V_T133A01, sizeof(CDI_V_T133A01));
+    } else {
+        EPD_13IN3E_SPI_Sand(CDI, CDI_V, sizeof(CDI_V));
+    }
     EPD_13IN3E_CS_ALL(1);
 
     EPD_13IN3E_CS_ALL(0);
@@ -249,9 +300,12 @@ void EPD_13IN3E_Init(void)
 	EPD_13IN3E_SPI_Sand(PWS, PWS_V, sizeof(PWS_V));
     EPD_13IN3E_CS_ALL(1);
 
-    EPD_13IN3E_CS_ALL(0);
-	EPD_13IN3E_SPI_Sand(CCSET, CCSET_V, sizeof(CCSET_V));
-    EPD_13IN3E_CS_ALL(1);
+    if (!t133a01) {
+        /* The T133A01 vendor sequence does not program CCSET. */
+        EPD_13IN3E_CS_ALL(0);
+        EPD_13IN3E_SPI_Sand(CCSET, CCSET_V, sizeof(CCSET_V));
+        EPD_13IN3E_CS_ALL(1);
+    }
 
     EPD_13IN3E_CS_ALL(0);
 	EPD_13IN3E_SPI_Sand(TRES, TRES_V, sizeof(TRES_V));
@@ -266,7 +320,11 @@ void EPD_13IN3E_Init(void)
     EPD_13IN3E_CS_ALL(1);
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
-	EPD_13IN3E_SPI_Sand(BTST_P, BTST_P_V, sizeof(BTST_P_V));
+    if (t133a01) {
+        EPD_13IN3E_SPI_Sand(BTST_P, BTST_P_V_T133A01, sizeof(BTST_P_V_T133A01));
+    } else {
+        EPD_13IN3E_SPI_Sand(BTST_P, BTST_P_V, sizeof(BTST_P_V));
+    }
     EPD_13IN3E_CS_ALL(1);
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
@@ -274,7 +332,11 @@ void EPD_13IN3E_Init(void)
     EPD_13IN3E_CS_ALL(1);
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
-	EPD_13IN3E_SPI_Sand(BTST_N, BTST_N_V, sizeof(BTST_N_V));
+    if (t133a01) {
+        EPD_13IN3E_SPI_Sand(BTST_N, BTST_N_V_T133A01, sizeof(BTST_N_V_T133A01));
+    } else {
+        EPD_13IN3E_SPI_Sand(BTST_N, BTST_N_V, sizeof(BTST_N_V));
+    }
     EPD_13IN3E_CS_ALL(1);
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);

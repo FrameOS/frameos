@@ -3,6 +3,9 @@
 #include "frameos_nim.h"
 
 bool frameos_nim_available(void) { return false; }
+bool frameos_nim_reserve_canvas(size_t len) { (void)len; return false; }
+void *frameos_nim_canvas_buffer(size_t len) { (void)len; return NULL; }
+size_t frameos_nim_canvas_reserved(void) { return 0; }
 bool frameos_nim_init(int width, int height, const char *frame_name,
                       uint32_t max_http_response_bytes, const char *backend_url,
                       const char *api_key, bool server_send_logs, int rotate)

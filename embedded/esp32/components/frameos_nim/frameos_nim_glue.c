@@ -105,6 +105,48 @@ static void nim_lock_give(void)
     if (s_nim_lock != NULL) xSemaphoreGive(s_nim_lock);
 }
 
+/* ------------------------------------------------------- the scene canvas
+ *
+ * One PSRAM block for the Nim renderer's scene canvas, claimed at boot and
+ * never freed. A 1200x1600 canvas is a 3.7 MB contiguous run; after hours of
+ * Wi-Fi, TLS and heap churn the allocator may not have one, and "largest free
+ * block" is exactly the number the render budget keys on. Claiming it before
+ * fos_wifi_init (main.c) is what guarantees it exists, the same way the
+ * thin-client framebuffer is reserved. The Nim side wraps it with pixie's
+ * newImage565Over and reuses it every render (embedded_runtime.nim). */
+static void *s_canvas = NULL;
+static size_t s_canvas_len = 0;
+
+bool frameos_nim_reserve_canvas(size_t len)
+{
+    if (len == 0) return false;
+    if (s_canvas != NULL && s_canvas_len >= len) return true;
+    void *next = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (next == NULL) {
+        ESP_LOGW("fos_nim", "canvas: could not reserve %u KB of PSRAM (largest free block %u KB)",
+                 (unsigned)(len / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
+        return false;
+    }
+    if (s_canvas != NULL) heap_caps_free(s_canvas);
+    s_canvas = next;
+    s_canvas_len = len;
+    ESP_LOGI("fos_nim", "canvas: reserved %u KB of PSRAM", (unsigned)(len / 1024));
+    return true;
+}
+
+void *frameos_nim_canvas_buffer(size_t len)
+{
+    /* Late or larger than reserved (a panel change at runtime): claim now. */
+    if (!frameos_nim_reserve_canvas(len)) return NULL;
+    return s_canvas;
+}
+
+size_t frameos_nim_canvas_reserved(void)
+{
+    return s_canvas_len;
+}
+
 /* The packed buffer allocated during fos_nim_render_alloc_impl is invisible
  * to the OOM longjmp handler, so remember the newest one here (all Nim
  * calls are serialized by s_nim_lock) and free it if the render aborts. */

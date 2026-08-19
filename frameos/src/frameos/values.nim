@@ -122,7 +122,7 @@ proc approxByteSize*(v: Value): int =
     if v.sp.isFileBacked(): DefaultWindowBytes else: v.sp.len
   of fkJson: approxByteSize(v.j)
   of fkImage:
-    if v.img.isNil: 0 else: v.img.width * v.img.height * 4
+    if v.img.isNil: 0 else: v.img.byteSize
   of fkImageSpool:
     # Pixels on disk cost nothing to hold; that is the tier's whole point.
     0

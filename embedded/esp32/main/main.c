@@ -203,6 +203,13 @@ void app_main(void)
         }
     }
 
+    /* The renderer's scene canvas, claimed now for the same reason the thin-
+     * client framebuffer was above: it is the one multi-MB contiguous PSRAM
+     * run the device needs, and before Wi-Fi/TLS there is always one. */
+    if (local_render_ok && frameos_nim_available() && fos_display_present()) {
+        frameos_nim_reserve_canvas(fos_display_canvas_bytes());
+    }
+
     BOOTMEM("after-sd");
     ESP_ERROR_CHECK(fos_wifi_init());
     fos_http_set_actions(action_render_now, action_ota_now);

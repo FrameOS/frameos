@@ -434,6 +434,14 @@ static int cmd_set(int argc, char **argv)
               "rst=12,dc=11,cs=10,cs2=-1,busy=13,sck=7,mosi=9,pwr=-1",
               "3:REFRESH\n4:LEFT\n5:RIGHT",
               "", -1, 2.0f },
+            /* Seeed reTerminal E1004: 13.3" 1200x1600 Spectra 6 (T133A01) on
+             * the E-series bus, second CS on GPIO2, reset 38, panel power 12.
+             * The display component selects the T133A01 init tuning from this
+             * preset name. Buttons/SD not published yet. */
+            { "seeed_reterminal_e1004", "EPD_13in3e",
+              "rst=38,dc=11,cs=10,cs2=2,busy=13,sck=7,mosi=9,pwr=12",
+              "",
+              "", -1, 2.0f },
             /* Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8). */
             { "elecrow_crowpanel_5in79", "EPD_5in79",
               "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=-1",

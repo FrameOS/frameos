@@ -12,6 +12,9 @@
 static const char *TAG = "fos_display";
 
 void EPD_7IN3E_SetPhotoPainterMode(int enabled) __attribute__((weak));
+void EPD_13IN3E_SetVariant(int variant) __attribute__((weak));
+#define FOS_EPD_13IN3E_VARIANT_WAVESHARE 0
+#define FOS_EPD_13IN3E_VARIANT_T133A01 1
 
 static const fos_panel_entry_t *s_panel = NULL;
 static bool s_module_ready = false;
@@ -20,6 +23,17 @@ static bool is_photo_painter_hardware(const fos_display_config_t *config)
 {
     return config && config->hardware_preset &&
            strcmp(config->hardware_preset, "waveshare_esp32_s3_photopainter") == 0;
+}
+
+/* Seeed reTerminal E1004: the same 1200x1600 Spectra 6 panel class as the
+ * Waveshare 13.3" E6 and driven by the same EPD_13in3e code, but its T133A01
+ * panel wants the vendor's own analogue tuning in the init sequence. Like the
+ * PhotoPainter PMIC, that is a fact about the board, so the preset selects
+ * it; the panel key stays EPD_13in3e everywhere else. */
+static bool is_reterminal_e1004_hardware(const fos_display_config_t *config)
+{
+    return config && config->hardware_preset &&
+           strcmp(config->hardware_preset, "seeed_reterminal_e1004") == 0;
 }
 
 static size_t panel_buffer_size(int width, int height, fos_pixel_format_t format)
@@ -73,6 +87,11 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
     bool photo_painter = is_photo_painter_hardware(config);
     if (EPD_7IN3E_SetPhotoPainterMode) {
         EPD_7IN3E_SetPhotoPainterMode(photo_painter ? 1 : 0);
+    }
+    if (EPD_13IN3E_SetVariant) {
+        EPD_13IN3E_SetVariant(is_reterminal_e1004_hardware(config)
+                                  ? FOS_EPD_13IN3E_VARIANT_T133A01
+                                  : FOS_EPD_13IN3E_VARIANT_WAVESHARE);
     }
 
     if (photo_painter) {
@@ -136,14 +155,23 @@ fos_pixel_format_t fos_display_panel_format(size_t index)
 /* Headroom beyond the two framebuffers for the Nim heap, QuickJS (capped at
  * 4MB but typically far less), pixie temporaries (fonts, gradients) and
  * allocator fragmentation. Empirically ~1.5MB is comfortable for the 800x480
- * scenes have been verified on an 8MB module. */
+ * scenes have been verified on an 8MB module; the 2026-08-14 probe on that
+ * module measured ~1.3 MB of non-canvas render peak. Keep in sync with
+ * EMBEDDED_RENDER_PSRAM_RESERVE_BYTES (backend) and EmbeddedReserveBytes
+ * (frameos/src/frameos/utils/memory.nim). */
 #define FOS_RENDER_PSRAM_RESERVE (1536u * 1024u)
+
+size_t fos_display_canvas_bytes(void)
+{
+    if (!s_panel) return 0;
+    return (size_t)fos_display_width() * (size_t)fos_display_height() *
+           (size_t)FOS_RENDER_CANVAS_BYTES_PER_PIXEL;
+}
 
 size_t fos_display_render_psram_bytes(void)
 {
     if (!s_panel) return 0;
-    size_t rgba = (size_t)fos_display_width() * (size_t)fos_display_height() * 4u;
-    return rgba + fos_display_buffer_size() + FOS_RENDER_PSRAM_RESERVE;
+    return fos_display_canvas_bytes() + fos_display_buffer_size() + FOS_RENDER_PSRAM_RESERVE;
 }
 
 static esp_err_t ensure_module(void)

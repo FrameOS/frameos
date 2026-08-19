@@ -62,9 +62,10 @@ proc toGrayscaleFloat*(image: Image, grayscale: var seq[float], multiple: float 
     height = image.height
   for y in 0..<height:
     for x in 0..<width:
-      let index = y * width + x
-      grayscale[index] = multiple * (image.data[index].r.float * 0.21 + image.data[index].g.float * 0.72 + image.data[
-          index].b.float * 0.07) / 255.0
+      let
+        index = y * width + x
+        p = image.unsafe[x, y]
+      grayscale[index] = multiple * (p.r.float * 0.21 + p.g.float * 0.72 + p.b.float * 0.07) / 255.0
 
 proc floydSteinberg*(pixels: var seq[float], width, height: int) =
   let
@@ -94,54 +95,151 @@ proc closestPalette*(palette: seq[(int, int, int)], r, g, b: int): (int, int, in
       index = i
   return (index, palette[index][0], palette[index][1], palette[index][2])
 
+# ---------------------------------------------------------------------------
+# Row-streamed dithering.
+#
+# Floyd–Steinberg only ever reaches one row ahead, so the error state is two
+# rows, not a canvas. The templates below walk an image top to bottom with
+# exactly that — a few KB for any panel width — and hand each quantised pixel
+# to the caller's body. They read the image through pixie's accessors, so
+# they work on a view and on a 16-bit canvas as well as on RGBX, and they
+# never write to the image: a 565 canvas keeps its 5/6-bit colour and the
+# error accumulates at full precision beside it.
+#
+# The palette walk keeps the arithmetic of the in-place version it replaces
+# — integer error split with `div 16`, distributed in the order right,
+# down-left, down, down-right, and *clipped into the neighbouring pixel value
+# at every step* — so the packed bytes are the same as before on every
+# existing panel. The grey walk keeps `toGrayscaleFloat` + `floydSteinberg`
+# float64 arithmetic the same way.
+
+template forEachPaletteDithered*(
+  image: Image, palette: seq[(int, int, int)],
+  x, y, index: untyped, body: untyped
+) =
+  ## Runs `body` for every pixel in scan order with `x`, `y` and the
+  ## palette `index` the dither chose for it.
+  block:
+    let
+      ditherWidth = image.width
+      ditherHeight = image.height
+    if ditherWidth > 0 and ditherHeight > 0:
+      # Adjusted RGB of the current row and the next: the pixel values after
+      # the error already pushed into them, which is what the in-place
+      # version stored back into the image.
+      var
+        curRow = newSeq[uint8](ditherWidth * 3)
+        nextRow = newSeq[uint8](ditherWidth * 3)
+      template loadRow(row: var seq[uint8], ry: int) =
+        for rx in 0 ..< ditherWidth:
+          let p = image.unsafe[rx, ry]
+          row[rx * 3 + 0] = p.r
+          row[rx * 3 + 1] = p.g
+          row[rx * 3 + 2] = p.b
+      template push(row: var seq[uint8], rx: int, er, eg, eb: int, weight: int) =
+        row[rx * 3 + 0] = clip8(row[rx * 3 + 0].int + (er * weight div 16))
+        row[rx * 3 + 1] = clip8(row[rx * 3 + 1].int + (eg * weight div 16))
+        row[rx * 3 + 2] = clip8(row[rx * 3 + 2].int + (eb * weight div 16))
+      loadRow(curRow, 0)
+      for yy in 0 ..< ditherHeight:
+        let hasNext = yy + 1 < ditherHeight
+        if hasNext:
+          loadRow(nextRow, yy + 1)
+        for xx in 0 ..< ditherWidth:
+          let
+            imageR = curRow[xx * 3 + 0].int
+            imageG = curRow[xx * 3 + 1].int
+            imageB = curRow[xx * 3 + 2].int
+            (palIndex, palR, palG, palB) = closestPalette(palette, imageR, imageG, imageB)
+            errorR = imageR - palR
+            errorG = imageG - palG
+            errorB = imageB - palB
+          block:
+            let
+              x {.inject.} = xx
+              y {.inject.} = yy
+              index {.inject.} = palIndex
+            body
+          if xx + 1 < ditherWidth:
+            push(curRow, xx + 1, errorR, errorG, errorB, 7)
+          if hasNext:
+            if xx - 1 >= 0:
+              push(nextRow, xx - 1, errorR, errorG, errorB, 3)
+            push(nextRow, xx, errorR, errorG, errorB, 5)
+            if xx + 1 < ditherWidth:
+              push(nextRow, xx + 1, errorR, errorG, errorB, 1)
+        swap(curRow, nextRow)
+
+template forEachGrayDithered*(
+  image: Image, maxLevel: int,
+  x, y, level: untyped, body: untyped
+) =
+  ## Runs `body` for every pixel in scan order with the dithered grey
+  ## `level` in 0 .. maxLevel. Same numbers as `toGrayscaleFloat(maxLevel)`
+  ## followed by `floydSteinberg`, without the float-per-pixel canvas.
+  block:
+    let
+      ditherWidth = image.width
+      ditherHeight = image.height
+      multiple = maxLevel.float
+    if ditherWidth > 0 and ditherHeight > 0:
+      var
+        curRow = newSeq[float](ditherWidth)
+        nextRow = newSeq[float](ditherWidth)
+      template loadRow(row: var seq[float], ry: int) =
+        for rx in 0 ..< ditherWidth:
+          let p = image.unsafe[rx, ry]
+          row[rx] = multiple * (p.r.float * 0.21 + p.g.float * 0.72 + p.b.float * 0.07) / 255.0
+      loadRow(curRow, 0)
+      for yy in 0 ..< ditherHeight:
+        let hasNext = yy + 1 < ditherHeight
+        if hasNext:
+          loadRow(nextRow, yy + 1)
+        for xx in 0 ..< ditherWidth:
+          let
+            value = round(curRow[xx])
+            error = curRow[xx] - value
+          block:
+            let
+              x {.inject.} = xx
+              y {.inject.} = yy
+              level {.inject.} = max(0, min(maxLevel, value.int))
+            body
+          if xx + 1 < ditherWidth:
+            curRow[xx + 1] += error * (7.0 / 16.0)
+          if hasNext:
+            if xx - 1 >= 0:
+              nextRow[xx - 1] += error * (3.0 / 16.0)
+            nextRow[xx] += error * (5.0 / 16.0)
+            if xx + 1 < ditherWidth:
+              nextRow[xx + 1] += error * (1.0 / 16.0)
+        swap(curRow, nextRow)
 
 proc ditherPaletteIndexed*(image: Image, palette: seq[(int, int, int)]): seq[uint8] =
+  ## Dithers to the palette and packs indices MSB-first at 1/2/4/8 bits per
+  ## pixel, rows padded to whole bytes. Streams; the image is not modified.
   let
-    img = image.copy
-    width = img.width
-    height = img.height
-    distribution = [7, 3, 5, 1]
-    dy = [0, 1, 1, 1]
-    dx = [1, -1, 0, 1]
+    width = image.width
+    height = image.height
     bits = if palette.len <= 2: 1 elif palette.len <= 4: 2 elif palette.len <= 16: 4 else: 8
     divider = if palette.len <= 2: 8 elif palette.len <= 4: 4 elif palette.len <= 16: 2 else: 1
 
   let rowWidth = ceil(width.float / divider.float).int
   var output = newSeq[uint8](height * rowWidth)
 
-  for y in 0..<height:
-    for x in 0..<width:
-      let dataIndex = y * width + x
-      let outputIndex = y * rowWidth + x div divider
-
-      let imageR = img.data[dataIndex].r.int
-      let imageG = img.data[dataIndex].g.int
-      let imageB = img.data[dataIndex].b.int
-
-      let (index, palR, palG, palB) = closestPalette(palette, imageR, imageG, imageB)
-
-      let errorR = imageR - palR
-      let errorG = imageG - palG
-      let errorB = imageB - palB
-
-      case bits:
-        of 8: output[outputIndex] = index.uint8
-        of 4:
-          let bitPosition = (1 - (x mod 2)) * 4
-          output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
-        of 2:
-          let bitPosition = (3 - (x mod 4)) * 2
-          output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
-        of 1:
-          let bitPosition = (7 - x) mod 8
-          output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
-        else: discard
-
-      for i in 0..<4:
-        if (x + dx[i] >= 0) and (x + dx[i] < width) and (y + dy[i] < height):
-          let errorIndex = (y + dy[i]) * width + (x + dx[i])
-          img.data[errorIndex].r = clip8(img.data[errorIndex].r.int + (errorR * distribution[i] div 16))
-          img.data[errorIndex].g = clip8(img.data[errorIndex].g.int + (errorG * distribution[i] div 16))
-          img.data[errorIndex].b = clip8(img.data[errorIndex].b.int + (errorB * distribution[i] div 16))
+  image.forEachPaletteDithered(palette, x, y, index):
+    let outputIndex = y * rowWidth + x div divider
+    case bits:
+      of 8: output[outputIndex] = index.uint8
+      of 4:
+        let bitPosition = (1 - (x mod 2)) * 4
+        output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
+      of 2:
+        let bitPosition = (3 - (x mod 4)) * 2
+        output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
+      of 1:
+        let bitPosition = (7 - x) mod 8
+        output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
+      else: discard
 
   return output

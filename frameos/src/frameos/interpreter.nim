@@ -98,14 +98,16 @@ proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
   if imageSpillDisabled:
     return refuse("spill disabled after an earlier storage failure")
   if context != nil and context.hasImage and not context.image.isNil and
-      image.data == context.image.data:
+      image.bufferPointer == context.image.bufferPointer:
     return refuse("value aliases the live canvas")
   # The disk tier exists for canvas-shaped values. A native-resolution decode
   # that some unfused shape materialized (tens of MB) would cost a huge write
   # on every miss and could never be read back under the render budget anyway.
-  let bytes = image.width * image.height * 4
+  let bytes = image.byteSize
   var cap = 4 * cachedImageMemoryLimit()
   if context != nil and context.hasImage and not context.image.isNil:
+    # The disk tier stores RGBX rows whatever the canvas format, so the cap
+    # is the canvas's pixel count at 4 bytes, not its own byte size.
     cap = max(cap, context.image.width * context.image.height * 4)
   if bytes > cap:
     return refuse($(bytes div 1024) & "K is over the " &
@@ -308,7 +310,7 @@ proc withCache(scene: InterpretedFrameScene,
   var toStore = fresh
   let memoryLimit = cachedImageMemoryLimit()
   if memoryLimit > 0 and fresh.kind == fkImage and not fresh.img.isNil and
-      fresh.img.width * fresh.img.height * 4 > memoryLimit:
+      fresh.img.byteSize > memoryLimit:
     # Never retain a frame-sized image in memory on embedded: pinning a
     # canvas-sized RGBA buffer (7.7MB at 1200x1600) across renders means the
     # next render needs a second canvas and OOMs the module — and when the

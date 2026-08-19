@@ -68,6 +68,15 @@
 
 
 
+/* Panel tuning variants. The same controller family drives the Waveshare
+ * 13.3" E6 HAT and the panel in Seeed's reTerminal E1004 (T133A01), but the
+ * vendors' init sequences differ in the analogue tuning registers (0x74,
+ * 0x50, 0x05/0x06, and an extra 0xA5 on the T133A01). Select before Init;
+ * the default is the Waveshare tuning this driver always had. */
+#define EPD_13IN3E_VARIANT_WAVESHARE 0
+#define EPD_13IN3E_VARIANT_T133A01   1
+void EPD_13IN3E_SetVariant(int variant);
+int EPD_13IN3E_GetVariant(void);
 void EPD_13IN3E_Init(void);
 void EPD_13IN3E_Clear(UBYTE color);
 void EPD_13IN3E_Display(const UBYTE *Image);

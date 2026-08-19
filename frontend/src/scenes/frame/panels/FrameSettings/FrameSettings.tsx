@@ -699,6 +699,17 @@ const ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT: Esp32PinLayout = {
   pwr: -1,
 }
 
+const ESP32_SEEED_RETERMINAL_E1004_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 38,
+  dc: 11,
+  cs: 10,
+  cs2: 2,
+  busy: 13,
+  sck: 7,
+  mosi: 9,
+  pwr: 12,
+}
+
 const ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT: Esp32PinLayout = {
   rst: 47,
   dc: 46,
@@ -858,6 +869,14 @@ const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePreset,
     flashSize: '32MB',
     psramMB: 8,
     pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  seeed_reterminal_e1004: {
+    label: 'Seeed reTerminal E1004 (13.3" color ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_13in3e',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_RETERMINAL_E1004_PIN_LAYOUT,
   },
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
@@ -1076,6 +1095,11 @@ const ESP32_PIN_LAYOUT_PRESETS: { value: string; label: string; pins: Esp32PinLa
     value: 'seeed-reterminal-e10xx',
     label: 'Seeed reTerminal E1001/E1002',
     pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  {
+    value: 'seeed-reterminal-e1004',
+    label: 'Seeed reTerminal E1004 (13.3")',
+    pins: ESP32_SEEED_RETERMINAL_E1004_PIN_LAYOUT,
   },
   {
     value: 'elecrow-crowpanel-5in79',

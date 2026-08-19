@@ -34,8 +34,13 @@ proc newFont(size: float32; color: Color): Font =
   result.paint = newPaint(SolidPaint)
   result.paint.color = color
 
-proc render*(width, height: int; frameName: string; renderCount: int): Image =
-  result = newImage(width, height)
+proc renderDemoInto*(canvas: Image; frameName: string; renderCount: int): Image =
+  ## Draws the baked demo scene into `canvas` (the persistent canvas) and
+  ## returns it.
+  result = canvas
+  let
+    width = result.width
+    height = result.height
   result.fill(try: parseHtmlColor(frameosSceneBackground) except CatchableError: color(1, 1, 1, 1))
 
   let

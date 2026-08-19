@@ -592,6 +592,7 @@ describe("Esp32CloudFlasher", () => {
         "hw:seeed_reterminal_sticky",
         "hw:seeed_reterminal_e1001",
         "hw:seeed_reterminal_e1002",
+        "hw:seeed_reterminal_e1004",
         "hw:elecrow_crowpanel_5in79",
       ]),
     );

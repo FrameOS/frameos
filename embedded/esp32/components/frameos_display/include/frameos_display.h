@@ -47,7 +47,17 @@ const char *fos_display_panel_name(size_t index);
 int fos_display_panel_width(size_t index);
 int fos_display_panel_height(size_t index);
 fos_pixel_format_t fos_display_panel_format(size_t index);
-/* PSRAM the on-device renderer needs for this panel: the RGBA scene buffer
+/* Bytes per pixel of the scene canvas the Nim renderer composites into.
+ * 2: pixie's 16-bit RGB 5/6/5 surface (frameos/src/embedded/embedded_runtime.nim,
+ * `renderCanvas`). Every panel here is a dithered e-paper and the dither keeps
+ * its own full-precision error rows, so the canvas's 5/6-bit colour is
+ * below what the output can show — and it is what fits a 1200x1600 canvas
+ * in an 8 MB module (3.7 MiB instead of 7.3 MiB). Mirrored by
+ * EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL in backend embedded_firmware.py. */
+#define FOS_RENDER_CANVAS_BYTES_PER_PIXEL 2u
+/* Bytes of the scene canvas for the selected panel (0 when headless). */
+size_t fos_display_canvas_bytes(void);
+/* PSRAM the on-device renderer needs for this panel: the scene canvas
  * pixie composites into, the selected packed panel output, plus headroom for
  * the Nim heap and QuickJS interpreter. 0 when headless. Used to refuse panels
  * that won't fit the module's PSRAM (they'd OOM mid-render). */

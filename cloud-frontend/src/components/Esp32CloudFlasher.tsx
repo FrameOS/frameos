@@ -78,6 +78,11 @@ const boardChoices = [
     platform: genericPlatform,
   },
   {
+    label: 'Seeed reTerminal E1004 (13.3" color ESP32-S3)',
+    value: 'hw:seeed_reterminal_e1004',
+    platform: genericPlatform,
+  },
+  {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
     value: 'hw:elecrow_crowpanel_5in79',
     platform: genericPlatform,

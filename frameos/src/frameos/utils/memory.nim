@@ -16,8 +16,11 @@ when defined(frameosEmbedded):
 
   const
     # Keep headroom for the packed framebuffer, preview snapshot and the
-    # C-side HTTP/TLS buffers that also live in PSRAM.
-    EmbeddedReserveBytes = 1_536_000
+    # C-side HTTP/TLS buffers that also live in PSRAM. The same 1.5 MiB as
+    # FOS_RENDER_PSRAM_RESERVE (frameos_display.c) and
+    # EMBEDDED_RENDER_PSRAM_RESERVE_BYTES (backend): it was 1_536_000 here,
+    # a decimal-MB slip 36 KB short of the other two.
+    EmbeddedReserveBytes = 1536 * 1024
 elif defined(linux) and not defined(frameosWasm):
   import std/[strutils, os]
 

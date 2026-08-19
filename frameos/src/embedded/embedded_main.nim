@@ -96,7 +96,7 @@ proc packImage1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): b
   # image); each output bit lands at its rotated panel position.
   for y in 0 ..< height:
     for x in 0 ..< width:
-      let pixel = image.data[image.dataIndex(x, y)]
+      let pixel = image.unsafe[x, y]
       let gray = (pixel.r.float32 * 0.299f + pixel.g.float32 * 0.587f +
                   pixel.b.float32 * 0.114f) / 255.0f + currentError[x + 1]
       let white = gray >= 0.5f
@@ -123,20 +123,13 @@ proc copyPacked(pixels: seq[uint8]; buf: ptr UncheckedArray[uint8]; bufLen: int)
     buf[i] = pixels[i]
   true
 
-proc grayLevel(value: float32; maxValue: uint8): uint8 {.inline.} =
-  let rounded = round(value).int
-  if rounded < 0:
-    return 0
-  if rounded > maxValue.int:
-    return maxValue
-  rounded.uint8
-
-proc clip8(value: int): uint8 {.inline.} =
-  if value < 0:
-    return 0
-  if value > 255:
-    return 255
-  value.uint8
+# The packers below all stream: two rows of dither state beside the canvas
+# (`forEachPaletteDithered` / `forEachGrayDithered` in utils/dither), the
+# canvas read through pixie's accessors and never written. That is what lets
+# the canvas be a 16-bit image — the colour it holds stays 5/6-bit while the
+# diffused error keeps full precision — and it is also what removed the
+# per-render full-frame scratch the old versions needed (an 8-byte float per
+# pixel for grey, a full RGBA copy for the two-plane panels).
 
 proc packImageGray(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int; maxValue: uint8): bool =
   let
@@ -149,24 +142,16 @@ proc packImageGray(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int; ma
     log(&"pack gray: buffer mismatch, want {rowBytes * frameHeight} bytes, got {bufLen}")
     return false
 
-  var
-    gray = newSeq[float](width * height)
-  image.toGrayscaleFloat(gray, maxValue.float)
-  gray.floydSteinberg(width, height)
-
   for i in 0 ..< bufLen:
     buf[i] = 0
-  for y in 0 ..< height:
-    for x in 0 ..< width:
-      let
-        inputIndex = y * width + x
-        (px, py) = panelCoords(x, y, width, height)
-        outIndex = py * rowBytes + px div pixelsPerByte
-        level = grayLevel(gray[inputIndex].float32, maxValue)
-      if bits == 2:
-        buf[outIndex] = buf[outIndex] or ((level and 0b11'u8) shl (6 - (px mod 4) * 2))
-      else:
-        buf[outIndex] = buf[outIndex] or ((level and 0x0F'u8) shl (if (px mod 2) == 0: 4 else: 0))
+  image.forEachGrayDithered(maxValue.int, x, y, level):
+    let
+      (px, py) = panelCoords(x, y, width, height)
+      outIndex = py * rowBytes + px div pixelsPerByte
+    if bits == 2:
+      buf[outIndex] = buf[outIndex] or ((level.uint8 and 0b11'u8) shl (6 - (px mod 4) * 2))
+    else:
+      buf[outIndex] = buf[outIndex] or ((level.uint8 and 0x0F'u8) shl (if (px mod 2) == 0: 4 else: 0))
   true
 
 proc packImageDual1bpp(
@@ -178,29 +163,24 @@ proc packImageDual1bpp(
   let
     width = image.width
     height = image.height
-    inputRowBytes = (width + 3) div 4
     packedRowBytes = (frameWidth + 7) div 8
     planeBytes = packedRowBytes * frameHeight
   if planeBytes * 2 != bufLen:
     log(&"pack dual: buffer mismatch, want {planeBytes * 2} bytes, got {bufLen}")
     return false
 
-  let pixels = ditherPaletteIndexed(image, @[(0, 0, 0), (255, if accentIsRed: 0 else: 255, 0), (255, 255, 255)])
+  let palette = @[(0, 0, 0), (255, if accentIsRed: 0 else: 255, 0), (255, 255, 255)]
   for i in 0 ..< bufLen:
     buf[i] = 0
-
-  for y in 0 ..< height:
-    for x in 0 ..< width:
-      let
-        pixelByte = pixels[y * inputRowBytes + x div 4]
-        pixelValue = (pixelByte shr ((3 - x mod 4) * 2)) and 0b11
-        black: uint8 = if pixelValue == 0: 0'u8 else: 1'u8
-        accent: uint8 = if pixelValue == 1: 0'u8 else: 1'u8
-        (px, py) = panelCoords(x, y, width, height)
-        outputIndex = py * packedRowBytes + px div 8
-        shift = 7 - (px mod 8)
-      buf[outputIndex] = buf[outputIndex] or (black shl shift)
-      buf[planeBytes + outputIndex] = buf[planeBytes + outputIndex] or (accent shl shift)
+  image.forEachPaletteDithered(palette, x, y, index):
+    let
+      black: uint8 = if index == 0: 0'u8 else: 1'u8
+      accent: uint8 = if index == 1: 0'u8 else: 1'u8
+      (px, py) = panelCoords(x, y, width, height)
+      outputIndex = py * packedRowBytes + px div 8
+      shift = 7 - (px mod 8)
+    buf[outputIndex] = buf[outputIndex] or (black shl shift)
+    buf[planeBytes + outputIndex] = buf[planeBytes + outputIndex] or (accent shl shift)
   true
 
 proc packImagePalette(
@@ -215,9 +195,6 @@ proc packImagePalette(
     bits = if palette.len <= 2: 1 elif palette.len <= 4: 2 elif palette.len <= 16: 4 else: 8
     pixelsPerByte = if palette.len <= 2: 8 elif palette.len <= 4: 4 elif palette.len <= 16: 2 else: 1
     rowBytes = (frameWidth + pixelsPerByte - 1) div pixelsPerByte
-    distribution = [7, 3, 5, 1]
-    dy = [0, 1, 1, 1]
-    dx = [1, -1, 0, 1]
 
   if rowBytes * frameHeight != bufLen:
     log(&"pack palette: buffer mismatch, want {rowBytes * frameHeight} bytes, got {bufLen}")
@@ -226,47 +203,24 @@ proc packImagePalette(
   for i in 0 ..< bufLen:
     buf[i] = 0
 
-  # Mutate the rendered image in-place while packing. The image is discarded
-  # immediately after this step, and avoiding an extra pixie image copy plus a
-  # packed output seq keeps ESP32 renders inside PSRAM headroom.
-  for y in 0 ..< height:
-    for x in 0 ..< width:
-      let
-        dataIndex = y * width + x
-        (px, py) = panelCoords(x, y, width, height)
-        outputIndex = py * rowBytes + px div pixelsPerByte
-        imageR = image.data[dataIndex].r.int
-        imageG = image.data[dataIndex].g.int
-        imageB = image.data[dataIndex].b.int
-        (index, palR, palG, palB) = closestPalette(palette, imageR, imageG, imageB)
-        errorR = imageR - palR
-        errorG = imageG - palG
-        errorB = imageB - palB
-
-      case bits:
-      of 8:
-        buf[outputIndex] = index.uint8
-      of 4:
-        let bitPosition = (1 - (px mod 2)) * 4
-        buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
-      of 2:
-        let bitPosition = (3 - (px mod 4)) * 2
-        buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
-      of 1:
-        let bitPosition = (7 - px) mod 8
-        buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
-      else:
-        discard
-
-      for i in 0 ..< 4:
-        let
-          nextX = x + dx[i]
-          nextY = y + dy[i]
-        if nextX >= 0 and nextX < width and nextY < height:
-          let errorIndex = nextY * width + nextX
-          image.data[errorIndex].r = clip8(image.data[errorIndex].r.int + (errorR * distribution[i] div 16))
-          image.data[errorIndex].g = clip8(image.data[errorIndex].g.int + (errorG * distribution[i] div 16))
-          image.data[errorIndex].b = clip8(image.data[errorIndex].b.int + (errorB * distribution[i] div 16))
+  image.forEachPaletteDithered(palette, x, y, index):
+    let
+      (px, py) = panelCoords(x, y, width, height)
+      outputIndex = py * rowBytes + px div pixelsPerByte
+    case bits:
+    of 8:
+      buf[outputIndex] = index.uint8
+    of 4:
+      let bitPosition = (1 - (px mod 2)) * 4
+      buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
+    of 2:
+      let bitPosition = (3 - (px mod 4)) * 2
+      buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
+    of 1:
+      let bitPosition = (7 - px) mod 8
+      buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
+    else:
+      discard
 
   true
 
@@ -274,7 +228,7 @@ proc renderFrameImage(): tuple[image: Image, source: string] =
   let interpreted = renderCurrentScene()
   if interpreted.isSome:
     return (interpreted.get(), "interpreted scene \"" & currentSceneName() & "\"")
-  (render(sceneWidth(), sceneHeight(), frameName, renderCount + 1), "demo scene")
+  (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "demo scene")
 
 proc packImageForFormat(
     image: Image;
@@ -427,7 +381,10 @@ proc renderErrorFallback(
   ## the previous panel contents) when it does not.
   try:
     GC_fullCollect()
-    let image = renderError(sceneWidth(), sceneHeight(), message)
+    # Into the persistent canvas: a fresh full-frame image here is exactly
+    # the allocation an OOM-aborted render could not afford.
+    let image = renderCanvas()
+    image.renderErrorInto(image.width, image.height, message)
     if not packImageForFormat(image, buf, bufLen, pixelFormat):
       return 1
     GC_fullCollect()
@@ -457,6 +414,9 @@ proc fos_nim_render_impl(
     let renderedAt = getMonoTime()
     if not packImageForFormat(image, buf, bufLen.int, pixelFormat.int):
       return 1
+    # The image is the persistent canvas (or, for a scene that produced its
+    # own, a one-off); dropping our reference and collecting frees the latter
+    # and costs the former nothing.
     image = nil
     GC_fullCollect()
     let packed = getMonoTime()
@@ -494,7 +454,8 @@ proc renderErrorFallbackAlloc(
     let raw = renderBufferAlloc(packedLen.csize_t)
     if raw == nil:
       return 1
-    let image = renderError(sceneWidth(), sceneHeight(), message)
+    let image = renderCanvas()
+    image.renderErrorInto(image.width, image.height, message)
     if not packImageForFormat(image, cast[ptr UncheckedArray[uint8]](raw), packedLen, pixelFormat):
       renderBufferFree(raw)
       return 1

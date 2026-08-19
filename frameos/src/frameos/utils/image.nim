@@ -1122,23 +1122,23 @@ proc getExifMetadataFromData*(data: string): Option[JsonNode] =
 proc rotateDegrees*(image: Image, degrees: int): Image {.raises: [PixieError].} =
   case (degrees + 1080) mod 360: # TODO: yuck
   of 90:
-    result = newImage(image.height, image.width)
+    result = image.newImageLike(image.height, image.width)
     for y in 0 ..< result.height:
       for x in 0 ..< result.width:
-        result.data[result.dataIndex(x, y)] =
-          image.data[image.dataIndex(y, image.height - x - 1)]
+        result.setPixel(result.dataIndex(x, y),
+          image.getPixel(image.dataIndex(y, image.height - x - 1)))
   of 180:
-    result = newImage(image.width, image.height)
+    result = image.newImageLike(image.width, image.height)
     for y in 0 ..< result.height:
       for x in 0 ..< result.width:
-        result.data[result.dataIndex(x, y)] =
-          image.data[image.dataIndex(image.width - x - 1, image.height - y - 1)]
+        result.setPixel(result.dataIndex(x, y),
+          image.getPixel(image.dataIndex(image.width - x - 1, image.height - y - 1)))
   of 270:
-    result = newImage(image.height, image.width)
+    result = image.newImageLike(image.height, image.width)
     for y in 0 ..< result.height:
       for x in 0 ..< result.width:
-        result.data[result.dataIndex(x, y)] =
-          image.data[image.dataIndex(image.width - y - 1, x)]
+        result.setPixel(result.dataIndex(x, y),
+          image.getPixel(image.dataIndex(image.width - y - 1, x)))
   else:
     result = image
 
@@ -1212,7 +1212,7 @@ when defined(frameosEmbedded):
       return
     for py in y0 ..< y1:
       for px in x0 ..< x1:
-        image.data[image.dataIndex(px, py)] = color
+        image.setPixel(image.dataIndex(px, py), color)
 
   proc writeEmbeddedErrorMarker(image: Image, width, height: int) =
     let black = rgbx(0, 0, 0, 255)
@@ -1298,10 +1298,23 @@ proc spillImageToSpool*(image: Image, name: string, preferredDir = ""): ImageSpo
     return nil
   var ok = true
   try:
-    image.forEachSpan:
-      if ok:
-        let bytes = spanLen * 4
-        if file.writeBuffer(addr image.data[spanStart], bytes) != bytes:
+    if image.format == pfRgbx:
+      image.forEachSpan:
+        if ok:
+          let bytes = spanLen * 4
+          if file.writeBuffer(addr image.data[spanStart], bytes) != bytes:
+            ok = false
+    else:
+      # The file format is RGBX rows whatever the image is; a 565 image is
+      # expanded a row at a time on the way out.
+      var row = newSeq[ColorRGBX](image.width)
+      let bytes = image.width * 4
+      for y in 0 ..< image.height:
+        if not ok:
+          break
+        for x in 0 ..< image.width:
+          row[x] = image.unsafe[x, y]
+        if file.writeBuffer(addr row[0], bytes) != bytes:
           ok = false
   except CatchableError:
     ok = false
@@ -1398,8 +1411,8 @@ when defined(frameosEmbedded):
           continue
         let srcX = min(srcImage.width - 1, srcXFloat.int)
         let targetIndex = targetImage.dataIndex(x, y)
-        targetImage.data[targetIndex] = blend(targetImage.data[targetIndex],
-          srcImage.data[srcImage.dataIndex(srcX, srcY)])
+        targetImage.setPixel(targetIndex, blend(targetImage.getPixel(targetIndex),
+          srcImage.getPixel(srcImage.dataIndex(srcX, srcY))))
     true
 
 proc scaleAndDrawImage*(targetImage: Image, srcImage: Image, scalingMode: string, offsetX: int = 0,
