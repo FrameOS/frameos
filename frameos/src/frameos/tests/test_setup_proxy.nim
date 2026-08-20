@@ -18,7 +18,11 @@ proc makeFakeCaddyBin(dirPath: string) =
   writeFile(scriptPath, "#!/bin/sh\nif [ -n \"$FRAMEOS_FAKE_CADDY_PIDS\" ]; then\n  echo \"$$\" >> \"$FRAMEOS_FAKE_CADDY_PIDS\"\nfi\ntrap 'exit 0' TERM INT\nwhile :; do\n  sleep 1\ndone\n")
   discard execCmdEx("chmod +x " & quoteShell(scriptPath))
 
-proc waitFor(condition: proc(): bool {.closure.}, timeoutMs = 1200, pollMs = 20): bool =
+# Spawning the fake caddy is a fork+exec of /bin/sh; on a CI runner that is
+# compiling three other test files at the same time that has been seen to
+# take well over a second. The poll returns the moment the condition holds,
+# so a long ceiling only costs time when something is actually wrong.
+proc waitFor(condition: proc(): bool {.closure.}, timeoutMs = 15000, pollMs = 20): bool =
   let deadline = epochTime() + (float(timeoutMs) / 1000.0)
   while epochTime() < deadline:
     if condition():
@@ -74,10 +78,11 @@ suite "setup proxy lifecycle":
       check waitFor(proc(): bool = readFile(pidsPath).splitLines().filterIt(it.len > 0).len >= 2)
 
       let lines = readFile(pidsPath).splitLines().filterIt(it.len > 0)
-      let firstPid = parseInt(lines[0])
-      let secondPid = parseInt(lines[1])
-
-      check firstPid != secondPid
+      check lines.len >= 2
+      if lines.len >= 2:
+        let firstPid = parseInt(lines[0])
+        let secondPid = parseInt(lines[1])
+        check firstPid != secondPid
       check setupProxyPort() >= 8000
     else:
       check setupProxyPort() == 0

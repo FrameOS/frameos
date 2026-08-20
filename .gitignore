@@ -34,7 +34,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-*Type.ts
 
 # Nim
 frameos/tmp/
