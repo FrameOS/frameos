@@ -10,7 +10,6 @@ import { apiFetch } from '../utils/apiFetch'
 import { isCloudMode } from '../utils/cloudMode'
 import {
   sendCloudFrameCommand,
-  pushCloudFrameSettings,
   listCloudFrameScenes,
   deployCloudFrameScenes,
   cloudDeployActiveSceneId,
@@ -904,15 +903,12 @@ export const framesModel = kea<framesModelType>([
           }
         }
         if (!usbSucceeded) {
-          if (isCloudMode()) {
-            // The cloud has no /event/* routes; `render` is one of its four
-            // command verbs (cloud/apps/auth-web/src/lib/frames.ts).
-            await sendCloudFrameCommand(id, 'render')
-          } else {
-            const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
-            if (!response.ok) {
-              throw new Error('Failed to send render event')
-            }
+          // One canonical route on every control plane: the backend forwards
+          // the event to the frame; the cloud's event shim maps it onto the
+          // queued `render` verb.
+          const response = await apiFetch(`/api/frames/${id}/event/render`, { method: 'POST' })
+          if (!response.ok) {
+            throw new Error('Failed to send render event')
           }
         }
       } catch (error) {
@@ -1015,10 +1011,8 @@ export const framesModel = kea<framesModelType>([
     },
     restartFrame: async ({ id }) => {
       try {
-        if (isCloudMode()) {
-          await sendCloudFrameCommand(id, 'restart_runtime')
-          return
-        }
+        // Canonical on both control planes; the cloud maps it onto the
+        // queued `restart_runtime` verb.
         const response = await apiFetch(`/api/frames/${id}/restart`, { method: 'POST' })
         if (!response.ok) {
           throw new Error('Failed to restart frame')
@@ -1034,10 +1028,8 @@ export const framesModel = kea<framesModelType>([
     },
     rebootFrame: async ({ id }) => {
       try {
-        if (isCloudMode()) {
-          await sendCloudFrameCommand(id, 'reboot')
-          return
-        }
+        // Canonical on both control planes; the cloud maps it onto the
+        // queued `reboot` verb.
         const response = await apiFetch(`/api/frames/${id}/reboot`, { method: 'POST' })
         if (!response.ok) {
           throw new Error('Failed to reboot frame')
@@ -1444,12 +1436,9 @@ export const framesModel = kea<framesModelType>([
     },
     renameFrame: async ({ id, name }) => {
       try {
-        if (isCloudMode()) {
-          // `name` is on the cloud's settings allowlist; there is no
-          // POST /api/frames/{id} to rename through.
-          await pushCloudFrameSettings(id, { name })
-          return
-        }
+        // Canonical on both control planes: the backend updates the row; the
+        // cloud updates frames.name and pushes set_settings {name} to
+        // devices that accept it.
         const response = await apiFetch(`/api/frames/${id}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

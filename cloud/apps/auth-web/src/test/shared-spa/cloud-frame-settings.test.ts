@@ -35,8 +35,11 @@ import {
 } from "../../lib/frames";
 
 // Save and Render in the shared SPA used to POST /api/frames/{id} and
-// /api/frames/{id}/event/render — neither exists on the cloud, so both always
-// errored. They now go through /settings and /command. The settings allowlist
+// /api/frames/{id}/event/render — neither existed on the cloud at first, so
+// both always errored. Full saves go through /settings; render, restart,
+// reboot and rename now ride the canonical backend paths, which the cloud
+// serves as queue aliases (event shim, /restart, /reboot, POST
+// /api/frames/{id}). The settings allowlist
 // is triple-declared (SPA, this app's src/lib/frames.ts, and the device's
 // CLOUD_SETTINGS_ALLOWLIST) and the device refuses the WHOLE push on an
 // unknown key, so one extra key silently drops every setting. Pin the

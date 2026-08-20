@@ -51,6 +51,15 @@ stable. Consolidated tracker: `docs/todo.md` at the repo root.
 9. **Metrics** — `frame_metrics` retention, `/metrics` +
    `/metrics/recent` in the panel's shape, live samples merged from
    `new_metrics`.
+10. **Canonical verb routes** — render, restart, reboot and rename ride
+    the same paths on both control planes, so `framesModel` carries no
+    cloud branches for them: `/event/render` (the item-4 shim),
+    `POST /api/frames/{id}/restart` and `/reboot` (aliases onto the
+    queue's `restart_runtime` / `reboot`, 5-minute TTL), and
+    `POST /api/frames/{id}` `{name}` (rename — updates `frames.name`,
+    audits `frame.renamed`, pushes `set_settings {name}` to devices that
+    accept it, skipping the push for esp32). The generic `/command` route
+    stays for the queue dialect (`notify_update_available`).
 
 Beyond the original list: **wasm fleet previews** (2026-08-13) — when a
 fleet tile's device snapshot and store cover both fail, the assigned scene

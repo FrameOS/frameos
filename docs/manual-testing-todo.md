@@ -14,11 +14,12 @@ flow (changes first-boot behavior for every new user).
 
 ## 1. Browser only — cloud auth (no hardware, ~30 min)
 
-- [ ] **2FA end-to-end (#377):** on `/account/security` enroll TOTP **and** a
-  passkey → sign out → sign in lands on `/login/verify` and both factors
-  work; also try "Sign in with a passkey" directly on `/login`. Then open a
-  cloud frame and confirm the new Activity (audit trail) panel populates.
-  Passkeys need a secure context: `localhost` or HTTPS.
+- [x] **2FA end-to-end (#377):** passed 2026-08-20 — enrolled TOTP + passkeys,
+  signed out; direct passkey sign-in on `/login` worked; Google sign-in
+  correctly demanded a second factor (passkey or TOTP).
+- [x] **Activity panel (#377):** passed 2026-08-20 — account activity feed
+  populates with sign-ins (google, passkey), passkey added, TOTP enabled
+  (with IPs) and frame `connection_lost` events.
 - [ ] **Re-auth click-through (#378):** with a session older than 15 min,
   revoke device access / grant a scope → `/login/reauth` appears; verify at
   least the password proof and one of TOTP/passkey/recovery-code proofs

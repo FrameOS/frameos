@@ -21,10 +21,14 @@ import { isEsp32CloudFrame } from '../scenes/workspace/workspaceSurfaces'
 import type { FrameId } from './frameId'
 
 // FrameOS Cloud speaks a much narrower dialect than the FrameOS backend: an
-// enqueued command with one of four verbs, or a declarative settings push.
-// There is no POST /api/frames/{id}, no /event/*, no deploy, no shell. The
-// shared SPA used to call the backend paths in cloud mode too, so Save and
-// Render always errored — everything cloud-bound goes through here instead.
+// enqueued command from a short verb list, or a declarative settings push.
+// There is no deploy and no shell. The canonical frame routes the SPA shares
+// with the backend — POST /api/frames/{id} (rename), /restart, /reboot and
+// the /event/{render,setCurrentScene,uploadScenes} shim — exist on the cloud
+// as aliases onto that queue, so feature code calls them with no cloud
+// branch. This module holds what has no canonical twin: the settings
+// allowlist push, schedule, scene assignment, account scenes, and the
+// update-notify nudge.
 //
 // Wire contract: cloud/apps/auth-web/app/api/frames/[frameId]/{command,settings}
 // and cloud/docs/cloud-frames.md.
