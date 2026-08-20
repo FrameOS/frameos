@@ -153,7 +153,10 @@ jobs:
 
   visual-regression:
     name: Visual Regression Tests (${{ matrix.shard }}/2)
-    runs-on: ubuntu-latest
+    # Pixie renders these snapshots in software from fonts in the repo — no
+    # browser, no system fonts — so the host image does not shape the pixels
+    # and the job can use the self-hosted pool like the Nim shards.
+    runs-on: epyc-4
     permissions:
       contents: read
     strategy:
@@ -336,7 +339,15 @@ jobs:
 
   frontend-visual-regression:
     name: Frontend E2E + Visual Regression Tests (${{ matrix.shard }}/4)
-    runs-on: ubuntu-latest
+    # Chromium screenshots depend on the fonts and libraries of the machine
+    # that rendered them, which used to pin this job to GitHub's ubuntu-latest
+    # image. The official Playwright container (tag = the @playwright/test
+    # version in pnpm-lock.yaml; bump both together) fixes that environment
+    # wherever it runs, so the job can move to the self-hosted pool. Browsers
+    # ship in the image, hence no `playwright install` step.
+    runs-on: epyc-4
+    container:
+      image: mcr.microsoft.com/playwright:v1.60.0-noble
     permissions:
       contents: read
     strategy:
@@ -355,10 +366,13 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Steps run as root inside the container: no sudo. git is for the
+      # snapshot diff steps below; checkout itself falls back to the REST API
+      # without it, but `git diff` does not.
       - name: Install redis
         run: |
-          sudo apt-get -y update
-          sudo apt-get install -y redis-server
+          apt-get -y update
+          apt-get install -y --no-install-recommends redis-server git
           redis-server --daemonize yes
 
       - name: Cache pip packages
@@ -390,9 +404,6 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
 
       - name: Build frontend
         run: pnpm --dir frontend run build
