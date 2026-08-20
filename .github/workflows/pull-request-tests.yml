@@ -123,6 +123,9 @@ jobs:
           nimble setup
           FRAMEOS_ROOT_DIR="." python3 tools/makeapploaders.py
 
+      # The shard runner compiles+runs one test file per core (FRAMEOS_TEST_JOBS,
+      # defaults to nproc on CI): each testament call is a single-threaded Nim
+      # compile, so sequential runs idled three of the four cores.
       - name: FrameOS nim tests
         run: |
           cd frameos
