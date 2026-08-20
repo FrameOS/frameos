@@ -25,8 +25,10 @@ describe("cloud workspace loading gate", () => {
   it("framesLoaded still means 'has at least one frame'", () => {
     // If this ever stops being true, the comment on the gate below is wrong
     // and this whole test should be revisited rather than patched.
-    expect(framesModel).toContain(
-      "framesLoaded: [(s) => [s.frames], (frames) => Object.keys(frames).length > 0]",
+    // kea-typegen annotates the combiner parameter (`frames: framesModelValues['frames']`),
+    // so match the shape rather than the exact text.
+    expect(framesModel).toMatch(
+      /framesLoaded: \[\(s\) => \[s\.frames\], \(frames(?:: [^)]+)?\) => Object\.keys\(frames\)\.length > 0\]/,
     );
   });
 
