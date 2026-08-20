@@ -3,7 +3,13 @@
 // The SD image builder inside the workspace's "Add frame" panel. It lives in
 // cloud-frontend/, which has no test runner, so it is tested from auth-web's
 // vitest across the package boundary (see the other shared-spa tests).
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -208,7 +214,12 @@ afterEach(() => {
 describe("SdImageBuilder", () => {
   it("lists boards from the latest release and disables missing ones", async () => {
     mockReleaseAndImage();
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_x")} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_x")}
+      />,
+    );
 
     const available = await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
@@ -229,16 +240,25 @@ describe("SdImageBuilder", () => {
   // so it is the one field the builder never guesses.
   it("selects no board on its own, leaving the download disabled", async () => {
     mockReleaseAndImage();
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_x")} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_x")}
+      />,
+    );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
-    expect((screen.getByLabelText("Board") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("Board") as HTMLSelectElement).value).toBe(
+      "",
+    );
     expect(
-      (screen.getByRole("button", {
-        name: /download sd image/i,
-      }) as HTMLButtonElement).disabled,
+      (
+        screen.getByRole("button", {
+          name: /download sd image/i,
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(true);
   });
 
@@ -299,14 +319,19 @@ describe("SdImageBuilder", () => {
       name: "Raspberry Pi Zero / Zero W / 1 (32-bit) — image not published yet",
     });
 
-    expect((screen.getByLabelText("Board") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("Board") as HTMLSelectElement).value).toBe(
+      "",
+    );
   });
 
   it("reports a failed release lookup instead of silently offering nothing", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response("{}", { status: 500 }),
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 500 }));
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_x")}
+      />,
     );
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_x")} />);
 
     await screen.findByText(/Could not look up the latest FrameOS release/);
   });
@@ -314,19 +339,21 @@ describe("SdImageBuilder", () => {
   it("refuses WiFi values with double quotes before downloading anything", async () => {
     mockReleaseAndImage();
     const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={mint}
+      />,
+    );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
-    fireEvent.change(
-      screen.getByPlaceholderText(/WiFi network \(optional/),
-      { target: { value: 'my "network"' } },
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.change(screen.getByPlaceholderText(/WiFi network \(optional/), {
+      target: { value: 'my "network"' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
 
     await screen.findByText(/must not contain double quotes or backslashes/);
     expect(mint).not.toHaveBeenCalled();
@@ -342,7 +369,12 @@ describe("SdImageBuilder", () => {
     mockReleaseAndImage();
     stubSaveFilePicker();
     const mint = vi.fn(() => Promise.resolve("FRCT_multi_use_token"));
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={mint}
+      />,
+    );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
@@ -357,34 +389,37 @@ describe("SdImageBuilder", () => {
     fireEvent.change(screen.getByLabelText("Claim code validity"), {
       target: { value: "7" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
 
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
-    expect(mint).toHaveBeenCalledExactlyOnceWith({ multiUse: true, ttlDays: 7 });
+    expect(mint).toHaveBeenCalledExactlyOnceWith({
+      multiUse: true,
+      ttlDays: 7,
+    });
   });
 
   it("builds a personalized image: mints a multi-use token, patches the placeholder, streams to disk", async () => {
     mockReleaseAndImage();
     const saved = stubSaveFilePicker();
     const mint = vi.fn(() => Promise.resolve("FRCT_multi_use_token"));
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={mint}
+      />,
+    );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
-    fireEvent.change(
-      screen.getByPlaceholderText(/WiFi network \(optional/),
-      { target: { value: "MyNet" } },
-    );
+    fireEvent.change(screen.getByPlaceholderText(/WiFi network \(optional/), {
+      target: { value: "MyNet" },
+    });
     fireEvent.change(screen.getByPlaceholderText("WiFi password"), {
       target: { value: "hunter2" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
 
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
@@ -428,7 +463,12 @@ describe("SdImageBuilder", () => {
   it("requires a root password or an explicit passwordless-root opt-in", async () => {
     mockReleaseAndImage();
     const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={mint}
+      />,
+    );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
@@ -439,9 +479,7 @@ describe("SdImageBuilder", () => {
     fireEvent.change(screen.getByPlaceholderText("Frame name"), {
       target: { value: "Kitchen Frame" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
 
     await screen.findByText(/Set a root password for the device, or tick/);
     expect(mint).not.toHaveBeenCalled();
@@ -475,12 +513,13 @@ describe("SdImageBuilder", () => {
     // A typed password makes the passwordless opt-in irrelevant (and
     // disabled, so nameFrame-style ticking is impossible).
     expect(
-      (screen.getByLabelText(/Enable passwordless root login/) as HTMLInputElement)
-        .disabled,
+      (
+        screen.getByLabelText(
+          /Enable passwordless root login/,
+        ) as HTMLInputElement
+      ).disabled,
     ).toBe(true);
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
     const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
@@ -501,9 +540,7 @@ describe("SdImageBuilder", () => {
     });
 
     nameFrame();
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
     const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
@@ -527,9 +564,7 @@ describe("SdImageBuilder", () => {
     });
 
     nameFrame();
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
     expect(mint).not.toHaveBeenCalled();
@@ -537,9 +572,9 @@ describe("SdImageBuilder", () => {
     expect(regionText).toContain("claim_token=FRCT_existing\n");
     // Success panel explains the expiry semantics: it gates NEW enrollments
     // only, and a fresh image is the re-claim path.
-    expect(
-      screen.getByTestId("sd-image-done").textContent,
-    ).toContain("accepts new frames until");
+    expect(screen.getByTestId("sd-image-done").textContent).toContain(
+      "accepts new frames until",
+    );
   });
 
   it("writes the chosen display driver and its config into the image", async () => {
@@ -561,15 +596,19 @@ describe("SdImageBuilder", () => {
     });
     // Native panel dimensions are prefilled and editable.
     // Portrait-native, straight from the backend device registry.
-    expect((screen.getByLabelText("Display width") as HTMLInputElement).value).toBe("1200");
-    expect((screen.getByLabelText("Display height") as HTMLInputElement).value).toBe("1600");
-    fireEvent.change(screen.getByLabelText("Rotation"), { target: { value: "90" } });
+    expect(
+      (screen.getByLabelText("Display width") as HTMLInputElement).value,
+    ).toBe("1200");
+    expect(
+      (screen.getByLabelText("Display height") as HTMLInputElement).value,
+    ).toBe("1600");
+    fireEvent.change(screen.getByLabelText("Rotation"), {
+      target: { value: "90" },
+    });
     // vcom is an IT8951 knob — no curated panel needs it, so it must not
     // clutter a Waveshare pick.
     expect(screen.queryByLabelText("VCOM (optional)")).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
     const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
@@ -603,9 +642,7 @@ describe("SdImageBuilder", () => {
     fireEvent.change(screen.getByLabelText("VCOM (optional)"), {
       target: { value: "-1.48" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
     const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
@@ -616,7 +653,12 @@ describe("SdImageBuilder", () => {
   it("requires the upload URL for http.upload before opening the save dialog", async () => {
     mockReleaseAndImage();
     const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={mint}
+      />,
+    );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
@@ -625,12 +667,48 @@ describe("SdImageBuilder", () => {
     fireEvent.change(screen.getByLabelText("Display"), {
       target: { value: "http.upload" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    // No native size for this driver: the form says so and gates the build.
+    screen.getByText(/Width and height are required/);
+    expect(
+      (screen.getByLabelText("Display width") as HTMLInputElement).required,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
+    await screen.findByText(/Display width is required/);
+
+    fireEvent.change(screen.getByLabelText("Display width"), {
+      target: { value: "800" },
+    });
+    fireEvent.change(screen.getByLabelText("Display height"), {
+      target: { value: "480" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
 
     await screen.findByText(/HTTP upload needs the URL/);
     expect(mint).not.toHaveBeenCalled();
+  });
+
+  it("marks the size optional for HDMI, where the framebuffer autodetects it", async () => {
+    mockReleaseAndImage();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_multi")}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+    });
+
+    fireEvent.change(screen.getByLabelText("Display"), {
+      target: { value: "framebuffer" },
+    });
+    screen.getByText(/optional for HDMI/);
+    expect(
+      (screen.getByLabelText("Display width") as HTMLInputElement).required,
+    ).toBe(false);
+    expect(
+      (screen.getByLabelText("Display height") as HTMLInputElement).required,
+    ).toBe(false);
   });
 
   it("remembers WiFi credentials in localStorage only when asked to", async () => {
@@ -647,26 +725,19 @@ describe("SdImageBuilder", () => {
     });
 
     nameFrame();
-    fireEvent.change(
-      screen.getByPlaceholderText(/WiFi network \(optional/),
-      { target: { value: "MyNet" } },
-    );
+    fireEvent.change(screen.getByPlaceholderText(/WiFi network \(optional/), {
+      target: { value: "MyNet" },
+    });
     fireEvent.change(screen.getByPlaceholderText("WiFi password"), {
       target: { value: "hunter2" },
     });
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
     // Unchecked by default: nothing is stored.
     expect(localStorage.getItem("frameos-sd-image-wifi")).toBeNull();
 
-    fireEvent.click(
-      screen.getByLabelText(/Remember WiFi credentials/),
-    );
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByLabelText(/Remember WiFi credentials/));
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
     expect(localStorage.getItem("frameos-sd-image-wifi")).toBe(
       JSON.stringify({ password: "hunter2", ssid: "MyNet" }),
@@ -692,7 +763,12 @@ describe("SdImageBuilder", () => {
         clicked.push(this);
       });
 
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_m")} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_m")}
+      />,
+    );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
@@ -700,9 +776,7 @@ describe("SdImageBuilder", () => {
     expect(screen.getByText(/assembled in memory/)).toBeDefined();
 
     nameFrame();
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
 
     expect(clicked).toHaveLength(1);
@@ -737,7 +811,12 @@ describe("SdImageBuilder", () => {
       return Promise.resolve(new Response(large.slice()));
     });
     stubFailingSaveFilePicker("The target volume is full.");
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_m")} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_m")}
+      />,
+    );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
@@ -758,15 +837,18 @@ describe("SdImageBuilder", () => {
   it("reports a config that does not fit the placeholder on its own terms", async () => {
     mockReleaseAndImage();
     stubSaveFilePicker();
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_m")} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_m")}
+      />,
+    );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame("x".repeat(5000));
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
 
     await screen.findByText(/does not fit in the 4096-byte placeholder/);
     // Not the "your release is too old" story — nothing is wrong with the
@@ -788,38 +870,40 @@ describe("SdImageBuilder", () => {
     });
     stubSaveFilePicker();
     render(
-      <SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={() => Promise.resolve("FRCT_multi")} />,
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_multi")}
+      />,
     );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     nameFrame();
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
 
-    await screen.findByText(
-      /predates in-browser personalization/,
-      undefined,
-      { timeout: 5000 },
-    );
+    await screen.findByText(/predates in-browser personalization/, undefined, {
+      timeout: 5000,
+    });
   });
 
   it("requires a frame name before opening the save dialog", async () => {
     mockReleaseAndImage();
     stubSaveFilePicker();
     const mint = vi.fn(() => Promise.resolve("FRCT_multi"));
-    render(<SdImageBuilder cloudOrigin={window.location.origin} mintClaimToken={mint} />);
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={mint}
+      />,
+    );
     await screen.findByRole("option", {
       name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
     });
 
     // A board but no name: the name check is the one that must speak up.
     pickBoard();
-    fireEvent.click(
-      screen.getByRole("button", { name: /download sd image/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
 
     await screen.findByText(/Name the frame first/);
     expect(mint).not.toHaveBeenCalled();
@@ -907,9 +991,7 @@ describe("SdImageBuilder", () => {
       });
 
       pickBoard();
-      fireEvent.click(
-        screen.getByLabelText(/Enable passwordless root login/),
-      );
+      fireEvent.click(screen.getByLabelText(/Enable passwordless root login/));
       fireEvent.click(
         screen.getByRole("button", { name: /download sd image/i }),
       );
@@ -966,7 +1048,11 @@ describe("SdImageBuilder", () => {
         <SdImageBuilder
           cloudOrigin={window.location.origin}
           mintClaimToken={() => Promise.resolve("FRCT_bound")}
-          reenrollFrame={{ ...reenrollFrame, device: "not.a.real.driver", width: 800 }}
+          reenrollFrame={{
+            ...reenrollFrame,
+            device: "not.a.real.driver",
+            width: 800,
+          }}
         />,
       );
       await screen.findByRole("option", {
@@ -975,7 +1061,9 @@ describe("SdImageBuilder", () => {
 
       // An unknown value must not silently bake itself into the image while
       // the select renders the "pick later" option.
-      expect((screen.getByLabelText("Display") as HTMLSelectElement).value).toBe("");
+      expect(
+        (screen.getByLabelText("Display") as HTMLSelectElement).value,
+      ).toBe("");
       expect(screen.queryByLabelText("Display width")).toBeNull();
     });
 
@@ -997,9 +1085,7 @@ describe("SdImageBuilder", () => {
       });
 
       pickBoard();
-      fireEvent.click(
-        screen.getByLabelText(/Enable passwordless root login/),
-      );
+      fireEvent.click(screen.getByLabelText(/Enable passwordless root login/));
       fireEvent.click(
         screen.getByRole("button", { name: /download sd image/i }),
       );
