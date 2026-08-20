@@ -2,8 +2,12 @@
 
 import { CheckCircle2, Unplug } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { redirectToReauthIfRequired } from "../lib/reauth-client";
+import { useEffect, useState } from "react";
+import {
+  isReauthRequired,
+  redirectToReauthIfRequired,
+  takePendingReauthAction,
+} from "../lib/reauth-client";
 
 // Confirm (pending → active) or revoke a cloud-managed frame. Revoking cuts
 // the link: the device sees 401 on its next connect and demotes itself to
@@ -19,8 +23,22 @@ export function FrameRowActions({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
-  async function post(path: string, confirmText?: string) {
-    if (confirmText && !window.confirm(confirmText)) {
+  const revokePath = `/api/frames/${frameId}/revoke`;
+
+  // Back from /login/reauth: the user already confirmed the revoke before
+  // being sent away, so finish it without asking again.
+  useEffect(() => {
+    if (takePendingReauthAction(revokePath)) {
+      void post(revokePath, undefined, { resumed: true });
+    }
+  }, [revokePath]);
+
+  async function post(
+    path: string,
+    confirmText?: string,
+    { resumed = false } = {},
+  ) {
+    if (!resumed && confirmText && !window.confirm(confirmText)) {
       return;
     }
     setBusy(true);
@@ -35,8 +53,13 @@ export function FrameRowActions({
           error?: string;
         };
         // Revoking needs a recent credential check; /login/reauth brings
-        // the user straight back here.
-        if (redirectToReauthIfRequired(response, data)) {
+        // the user straight back here and the effect above resumes. A
+        // resumed call that is still refused (Cancel on the reauth page)
+        // stops quietly instead of bouncing back to the reauth page.
+        if (resumed && isReauthRequired(response, data)) {
+          return;
+        }
+        if (redirectToReauthIfRequired(response, data, path)) {
           return;
         }
         setError(data.error ?? `error_${response.status}`);

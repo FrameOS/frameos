@@ -3,7 +3,11 @@
 import { MoreHorizontal, Unplug } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { redirectToReauthIfRequired } from "../lib/reauth-client";
+import {
+  isReauthRequired,
+  redirectToReauthIfRequired,
+  takePendingReauthAction,
+} from "../lib/reauth-client";
 
 // Per-row "..." menu on the installs table; destructive actions live here
 // instead of as always-visible buttons.
@@ -35,8 +39,19 @@ export function InstallRowMenu({
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
 
-  async function revoke() {
+  const resumeAction = `revoke-install:${linkedClientId}`;
+
+  // Back from /login/reauth: the revoke was confirmed before the detour, so
+  // finish it without reopening the menu or asking again.
+  useEffect(() => {
+    if (takePendingReauthAction(resumeAction)) {
+      void revoke({ resumed: true });
+    }
+  }, [resumeAction]);
+
+  async function revoke({ resumed = false } = {}) {
     if (
+      !resumed &&
       !window.confirm(
         `Revoke the cloud link for "${name}"? The device loses access until it is linked again.`,
       )
@@ -53,7 +68,12 @@ export function InstallRowMenu({
       const payload = (await response.json().catch(() => undefined)) as
         | { error?: string }
         | undefined;
-      if (redirectToReauthIfRequired(response, payload)) {
+      // A resumed call that is still refused (Cancel on the reauth page)
+      // stops here instead of bouncing back to /login/reauth.
+      if (
+        !(resumed && isReauthRequired(response, payload)) &&
+        redirectToReauthIfRequired(response, payload, resumeAction)
+      ) {
         return;
       }
     }

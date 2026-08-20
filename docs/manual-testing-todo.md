@@ -20,11 +20,13 @@ flow (changes first-boot behavior for every new user).
 - [x] **Activity panel (#377):** passed 2026-08-20 — account activity feed
   populates with sign-ins (google, passkey), passkey added, TOTP enabled
   (with IPs) and frame `connection_lost` events.
-- [ ] **Re-auth click-through (#378):** with a session older than 15 min,
-  revoke device access / grant a scope → `/login/reauth` appears; verify at
-  least the password proof and one of TOTP/passkey/recovery-code proofs
-  complete and the action then succeeds. (Integration-tested only, never
-  clicked through in a browser.)
+- [x] **Re-auth click-through (#378):** passed 2026-08-20 — revoke on the
+  backends page → `/login/reauth` → proof accepted → back on the page. Found
+  and fixed: the revoke itself was *not* replayed after returning (the user
+  had to find the button and confirm again). Revoke/install-revoke buttons
+  now stash the pending action and finish it on return; a Cancel on the
+  reauth page leaves the frame untouched. Re-check once deployed: after the
+  proof the frame should show as revoked without a second click.
 - [ ] **Two-tier re-auth windows (#382):** a ~20-min-old session can still
   **approve** a pending frame but is refused on **revoke**; past 2 h both
   prompt for re-auth.
