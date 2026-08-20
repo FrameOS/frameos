@@ -453,6 +453,15 @@ __WPA_SUPPLICANT_FROM_CLOUD__
     cloud_frame_json="$SRV_DIR"/frameos/current/frame.json
     if [ ! -f "$cloud_frame_json" ]; then
       echo "Warning: $cloud_frame_json missing; cannot apply display device '$cloud_device'"
+    elif [ -x "$SRV_DIR"/frameos/current/frameos ] && \\
+      "$SRV_DIR"/frameos/current/frameos set-display \\
+        --frame-json="$cloud_frame_json" --device="$cloud_device" \\
+        --width="$cloud_width" --height="$cloud_height" --rotate="$cloud_rotate" \\
+        --vcom="$cloud_vcom" --upload-url="$cloud_upload_url"; then
+      # The binary patches its own frame.json (Buildroot images ship neither
+      # python3 nor jq, so the python fallback below never ran there).
+      echo "Applied display device '$cloud_device' to $cloud_frame_json"
+      cloud_display_applied=1
     elif command -v python3 >/dev/null 2>&1 && \\
       FRAMEOS_FRAME_JSON="$cloud_frame_json" FRAMEOS_CLOUD_DEVICE="$cloud_device" \\
       FRAMEOS_CLOUD_WIDTH="$cloud_width" FRAMEOS_CLOUD_HEIGHT="$cloud_height" \\
@@ -495,7 +504,7 @@ os.replace(tmp, path)'; then
       echo "Applied display device '$cloud_device' to $cloud_frame_json"
       cloud_display_applied=1
     else
-      # Covers both "no python3" (busybox-only image) and invalid values.
+      # Both the binary and python3 refused (or are missing): invalid values.
       echo "Warning: could not apply display device '$cloud_device'; pick the display in the setup portal instead"
     fi
   fi

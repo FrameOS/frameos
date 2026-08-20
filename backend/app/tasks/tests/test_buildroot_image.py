@@ -2163,6 +2163,10 @@ def test_buildroot_stage_overlay_leaves_service_install_to_firstboot(tmp_path, m
     assert scenes_payload == [frame.scenes[0]]
     assert all_scenes_payload == frame.scenes
     assert (overlay_dir / "boot" / "frameos-hostname").read_text(encoding="utf-8") == "frame-one\n"
+    # Consumer routers that strip RRSIGs must not take DNS down for the boot
+    # network check; DNSSEC is off on frames.
+    resolved_dropin = overlay_dir / "etc" / "systemd" / "resolved.conf.d" / "10-frameos.conf"
+    assert "[Resolve]\nDNSSEC=no\n" in resolved_dropin.read_text(encoding="utf-8")
     remote_release_dir = overlay_dir / "srv" / "frameos" / "remote" / "releases" / "release_build123"
     assert (remote_release_dir / "frame.json").read_text(encoding="utf-8") == (
         release_dir / "frame.json"

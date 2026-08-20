@@ -10,6 +10,7 @@ from ./frameos/frameos import startFrameOS, describeFatalStartupError, fatalStar
 from ./frameos/setup import setupFrameOS, setupFrameOSDrivers, scheduleSetupRebootIfRequired,
   startFrameOSSystemdServices, writeSetupReleasePayload
 from ./frameos/upgrade import runFrameOSUpgrade, parseFrameOSUpgradeOptions
+from ./frameos/display_patch import runSetDisplay
 from ./frameos/version import compiledFrameOSVersion
 
 proc printHelp() =
@@ -24,6 +25,10 @@ proc printHelp() =
   echo "  driver-setup"
   echo "          Run display driver setup for the current frame.json"
   echo "          --reboot-if-required to let setup reboot after changes that require it"
+  echo "  set-display"
+  echo "          Patch the display device (and optional size/rotation/vcom/upload URL) into frame.json"
+  echo "          --device=<key> [--frame-json=PATH] [--width=N] [--height=N] [--rotate=0|90|180|270]"
+  echo "          [--vcom=F] [--upload-url=URL]; run driver-setup afterwards"
   echo "  upgrade Upgrade this installed frame to the latest GitHub release"
   echo "          --dry-run to validate and print the upgrade plan without changing files"
   echo "          --no-reboot to stop after staging when the new release needs a reboot"
@@ -83,6 +88,8 @@ when isMainModule:
           quit(0)
         quit(2)
       quit(0)
+    elif args.len > 0 and args[0] == "set-display":
+      quit(runSetDisplay(if args.len > 1: args[1 .. ^1] else: @[]))
     elif args.len > 0 and args[0] == "upgrade":
       let upgradeArgs = if args.len > 1: args[1 .. ^1] else: @[]
       quit(runFrameOSUpgrade(parseFrameOSUpgradeOptions(upgradeArgs)))
