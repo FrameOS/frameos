@@ -81,6 +81,25 @@ if [[ -z "$test_timeout_seconds" && "${CI:-}" == "true" ]]; then
   test_timeout_seconds=300
 fi
 
+# How many test files to compile+run at once. Each testament invocation is
+# one single-threaded Nim compile of most of the tree, so a shard that runs
+# them one after another leaves three of a four-core runner idle for five
+# minutes. Testament already gives every test its own nimcache dir, and each
+# worker below gets a private TMPDIR, so the files cannot trample each other.
+# Defaults to the core count on CI and to 1 locally (interleaved output is
+# not what you want while debugging one failing test).
+test_jobs="${FRAMEOS_TEST_JOBS:-}"
+if [[ -z "$test_jobs" ]]; then
+  if [[ "${CI:-}" == "true" ]]; then
+    test_jobs="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)"
+  else
+    test_jobs=1
+  fi
+fi
+if ! [[ "$test_jobs" =~ ^[0-9]+$ ]] || (( test_jobs < 1 )); then
+  test_jobs=1
+fi
+
 run_testament() {
   local test_file="$1"
 
@@ -97,7 +116,8 @@ diagnose_timeout() {
   # phases split and capped, so the CI log answers that on the machine where
   # it actually happens.
   local test_file="$1"
-  local bin="/tmp/frameos-test-timeout-diagnosis"
+  local bin
+  bin="$(mktemp "${TMPDIR:-/tmp}/frameos-test-timeout-diagnosis.XXXXXX")"
   echo "--- timeout diagnosis: compiling ${test_file} separately (cap ${test_timeout_seconds}s)"
   if ! timeout "${test_timeout_seconds}s" \
       nim c --hints:off -d:testing -o:"$bin" "./${test_file}"; then
@@ -114,19 +134,91 @@ diagnose_timeout() {
   fi
 }
 
-for test_file in "${tests[@]}"; do
+# Runs one test file to completion (plus the timeout diagnosis when needed)
+# and returns its status. Output goes to whatever stdout is at the time: the
+# terminal when sequential, a per-test log file when parallel.
+run_one() {
+  local test_file="$1"
   echo "==> ${test_file}"
-  set +e
-  run_testament "$test_file"
-  status=$?
-  set -e
-  if (( status != 0 )); then
-    if (( status == 124 )); then
-      echo "Timed out after ${test_timeout_seconds}s: ${test_file}" >&2
-      set +e
-      diagnose_timeout "$test_file"
-      set -e
-    fi
-    exit "$status"
+  local status=0
+  run_testament "$test_file" || status=$?
+  if (( status == 124 )); then
+    echo "Timed out after ${test_timeout_seconds}s: ${test_file}" >&2
+    diagnose_timeout "$test_file" || true
   fi
+  return "$status"
+}
+
+if (( test_jobs == 1 || ${#tests[@]} == 1 )); then
+  for test_file in "${tests[@]}"; do
+    run_one "$test_file" || exit $?
+  done
+  exit 0
+fi
+
+echo "Running up to ${test_jobs} test files at a time"
+
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/frameos-test-shard.XXXXXX")"
+trap 'rm -rf "$work_dir"' EXIT
+
+# One worker per test file, capped at $test_jobs in flight. Each worker logs
+# to its own file and its own TMPDIR (getTempDir() honours it, and several
+# tests use fixed names under it); the log is replayed in submission order as
+# soon as that test is done, so the CI output reads exactly like the
+# sequential run — just with a few tests "already finished" when you get to
+# them. The first failure stops the queue from starting anything new, but
+# in-flight tests run to completion so their output is not lost.
+declare -a pids=() logs=() files=()
+running=0
+next_to_print=0
+overall_status=0
+
+print_ready() {
+  # Flush finished tests in order, stopping at the first one still running.
+  while (( next_to_print < ${#pids[@]} )); do
+    local pid="${pids[$next_to_print]}"
+    if kill -0 "$pid" 2>/dev/null; then
+      return
+    fi
+    local status=0
+    wait "$pid" || status=$?
+    cat "${logs[$next_to_print]}"
+    if (( status != 0 && overall_status == 0 )); then
+      overall_status="$status"
+      echo "FAILED (${status}): ${files[$next_to_print]}" >&2
+    fi
+    next_to_print=$((next_to_print + 1))
+    running=$((running - 1))
+  done
+}
+
+for test_file in "${tests[@]}"; do
+  if (( overall_status != 0 )); then
+    break
+  fi
+  while (( running >= test_jobs )); do
+    sleep 0.2
+    print_ready
+  done
+  idx=${#pids[@]}
+  log="${work_dir}/${idx}.log"
+  tmp="${work_dir}/tmp-${idx}"
+  mkdir -p "$tmp"
+  (
+    export TMPDIR="$tmp"
+    run_one "$test_file"
+  ) >"$log" 2>&1 &
+  pids+=("$!")
+  logs+=("$log")
+  files+=("$test_file")
+  running=$((running + 1))
+  print_ready
 done
+
+# Drain whatever is still in flight, in order.
+while (( next_to_print < ${#pids[@]} )); do
+  sleep 0.2
+  print_ready
+done
+
+exit "$overall_status"
