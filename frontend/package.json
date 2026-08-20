@@ -92,7 +92,7 @@
     "express": "^4.19.2",
     "fs-extra": "^11.2.0",
     "kea-test-utils": "^0.2.2",
-    "kea-typegen": "3.8.3",
+    "kea-typegen": "3.8.4",
     "postcss": "^8.5.26",
     "postcss-preset-env": "^9.5.13",
     "prettier": "^2.7.1",
