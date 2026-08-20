@@ -815,6 +815,12 @@ export function frameSummary(
           service_settings_enabled: linkedClientScopes(linkedClient).includes(
             frameServiceSettingsScope,
           ),
+          // Same contract: the owner's per-frame telemetry switch
+          // (telemetry/enabled route). Pre-2026-08-03 enrollments report
+          // false here — that is the empty-Logs-panel case, now named.
+          telemetry_enabled: linkedClientScopes(linkedClient).includes(
+            frameTelemetryLogsScope,
+          ),
         }
       : {}),
     status: frame.status,

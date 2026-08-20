@@ -697,6 +697,29 @@ def stage_buildroot_network_manager_state(root: Path) -> None:
         os.chmod(connections_dir, 0o700)
 
 
+BUILDROOT_RESOLVED_DROPIN_PATH = "/etc/systemd/resolved.conf.d/10-frameos.conf"
+BUILDROOT_RESOLVED_DROPIN = """# FrameOS: no DNSSEC validation on frames.
+#
+# Buildroot builds resolved with default-dnssec=allow-downgrade, but the
+# downgrade heuristic is unreliable against the many consumer routers that
+# answer DO-flagged queries without RRSIGs: every lookup fails with
+# "DNSSEC validation failed ... no-signature" for tens of seconds after the
+# WiFi comes up. A first boot spent its whole 30 s network check that way,
+# then fell back to the setup hotspot and never enrolled with the cloud
+# (2026-08-20, Pi 5). A frame also boots with a clock years off until NTP
+# answers, which would fail signature validity checks anyway.
+[Resolve]
+DNSSEC=no
+"""
+
+
+def stage_buildroot_resolved_dropin(root: Path) -> None:
+    path = root / BUILDROOT_RESOLVED_DROPIN_PATH.lstrip("/")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(BUILDROOT_RESOLVED_DROPIN, encoding="utf-8")
+    os.chmod(path, 0o644)
+
+
 def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[str, bool]:
     lines = content.splitlines()
     changed = False
@@ -847,7 +870,13 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
 
     network = dict(frame.network or {})
     network.setdefault("networkCheck", True)
-    network.setdefault("networkCheckTimeoutSeconds", 30)
+    # 90 s, not 30: the window only matters when WiFi credentials exist (with
+    # none the check bails after one attempt and the hotspot starts at once),
+    # and a Pi spends 5-10 s of it associating + DHCP before the first lookup
+    # can even succeed. A first boot on a Pi 5 burned all 30 s on a slow
+    # resolver, fell back to the setup hotspot and never reached the cloud.
+    # Wrong credentials now cost 90 s before the hotspot appears — acceptable.
+    network.setdefault("networkCheckTimeoutSeconds", 90)
     network.setdefault("networkCheckUrl", "https://networkcheck.frameos.net/")
     network["wifiHotspot"] = "bootOnly"
     network.setdefault("wifiHotspotSsid", "FrameOS-Setup")
@@ -1668,6 +1697,7 @@ class BuildrootImageBuilder:
         ):
             directory.mkdir(parents=True, exist_ok=True)
         stage_buildroot_network_manager_state(overlay_dir)
+        stage_buildroot_resolved_dropin(overlay_dir)
         stage_postboot_log(overlay_dir)
 
         if not frameos_build.binary_path:

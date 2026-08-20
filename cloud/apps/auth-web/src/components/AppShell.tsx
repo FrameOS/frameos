@@ -9,9 +9,11 @@ import {
   getScenesBaseUrl,
 } from "../lib/env";
 
-// `title` is the page's heading, shown in the top row next to the logo.
+// `title` is the page's heading, shown in the top row after the wordmark.
 // The header is the /frames fleet workspace's (cloud-frontend
-// AccountHeader.tsx + cloud-chrome.css): same chrome on every surface.
+// AccountHeader.tsx + cloud-chrome.css): same chrome on every surface. The
+// wordmark links to /frames — the workspace is the cloud's home — and the
+// nav starts there too: Frames, Scenes, Account, (Admin), Sign out.
 export function AppShell({
   children,
   isSuperadmin = false,
@@ -40,13 +42,13 @@ export function AppShell({
   return (
     <div className="shell">
       <header className="frameos-account-header">
-        <HeaderBrand href={accountUrl} title={title} />
+        <HeaderBrand href={framesUrl} title={title} />
         <nav aria-label="Primary" className="frameos-account-header__nav">
-          <Link className="frameos-account-header__link" href={scenesUrl}>
-            Scenes
-          </Link>
           <Link className="frameos-account-header__link" href={framesUrl}>
             Frames
+          </Link>
+          <Link className="frameos-account-header__link" href={scenesUrl}>
+            Scenes
           </Link>
           <Link className="frameos-account-header__link" href={accountUrl}>
             Account

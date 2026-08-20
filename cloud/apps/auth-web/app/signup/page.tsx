@@ -18,11 +18,7 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
   const returnTo = safeAuthReturnPath(rawReturnTo);
 
   return (
-    <AuthCard
-      copy="Create a FrameOS Cloud account to link and manage your FrameOS backends."
-      eyebrow="Sign up"
-      title="Create your account"
-    >
+    <AuthCard eyebrow="Sign up" title="Create your account">
       <SignupForm
         googleEnabled={hasGoogleOAuth()}
         returnTo={returnTo}

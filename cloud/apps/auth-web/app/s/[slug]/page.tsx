@@ -293,7 +293,6 @@ export default async function ScenePage({
       // holds the link, and none of that should reach analytics.
       noCapture={isPrivate}
       signedIn={Boolean(session)}
-      title="FrameOS Scenes"
     >
       <SceneViewTracker sceneId={scene.id} visibility={scene.visibility} />
       {/* React hoists these into <head>. The frameos backend resolves a

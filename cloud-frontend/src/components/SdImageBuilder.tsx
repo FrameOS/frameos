@@ -300,6 +300,12 @@ export function SdImageBuilder({
   const showVcom = device === 'waveshare.EPD_10in3'
   const showUploadUrl = device === 'http.upload'
   const showDisplayDetails = displayChoice !== ''
+  // The framebuffer driver reads the panel size from the kernel, so the
+  // fields are optional overrides there. A driver with no native size in the
+  // catalog (http.upload, web_only) has nothing to fall back on and needs
+  // both numbers. Catalog panels arrive prefilled.
+  const dimensionsRequired = showDisplayDetails && device !== 'framebuffer' && !findDeviceOption(device)?.width
+  const dimensionsOptional = device === 'framebuffer'
 
   function pickDisplay(value: string): void {
     setDisplayChoice(value)
@@ -323,6 +329,9 @@ export function SdImageBuilder({
     ] as const) {
       if (value && !/^[1-9][0-9]{0,4}$/.test(value)) {
         return `${label} must be a whole number of pixels.`
+      }
+      if (dimensionsRequired && !value.trim()) {
+        return `${label} is required for this display — it has no default size.`
       }
     }
     if (vcom && !/^-?[0-9]+(\.[0-9]+)?$/.test(vcom)) {
@@ -681,6 +690,7 @@ export function SdImageBuilder({
                 maxLength={5}
                 onChange={(event) => setWidth(event.target.value)}
                 placeholder="Width"
+                required={dimensionsRequired}
                 value={width}
               />
               <input
@@ -691,6 +701,7 @@ export function SdImageBuilder({
                 maxLength={5}
                 onChange={(event) => setHeight(event.target.value)}
                 placeholder="Height"
+                required={dimensionsRequired}
                 value={height}
               />
               <select
@@ -707,6 +718,13 @@ export function SdImageBuilder({
                 ))}
               </select>
             </div>
+          ) : null}
+          {dimensionsOptional ? (
+            <p className="frameos-muted text-xs">
+              Width and height are optional for HDMI — the panel size is autodetected.
+            </p>
+          ) : dimensionsRequired ? (
+            <p className="frameos-muted text-xs">Width and height are required — this display has no default size.</p>
           ) : null}
           {showDisplayDetails && showVcom ? (
             <input
@@ -821,8 +839,8 @@ export function SdImageBuilder({
                 </label>
               ) : (
                 <p className="frameos-muted text-xs">
-                  The card keeps working for as long as you keep it. Every frame it adds still waits for your
-                  confirmation here, and your frame limit caps how many it can ever add.
+                  You can flash and boot this image as many times as you like, forever. Each new frame shows up in your
+                  account within your frame limit.
                 </p>
               )}
             </div>

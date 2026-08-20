@@ -1,20 +1,25 @@
 import Link from "next/link";
 
 // The lead slot of the shared cloud header (cloud-chrome.css): the cloud
-// logo — light and dark renditions, CSS picks one — plus either the wordmark
-// or, when a page brings a `title`, that title in the wordmark's place. The
-// /frames SPA renders the same markup in cloud-frontend AccountHeader.tsx.
+// logo — light and dark renditions, CSS picks one — and the wordmark, both
+// inside one link. A page may add a `title` after the wordmark; it never
+// replaces it, so the wordmark sits at the same offset on every surface
+// (the store header and the workspace header used to differ by the gap
+// between the brand link and a detached title). The /frames SPA renders
+// the same markup in cloud-frontend AccountHeader.tsx.
 export function HeaderBrand({
   href,
+  name = "FrameOS Cloud",
   title,
 }: {
   href: string;
+  name?: string;
   title?: React.ReactNode;
 }) {
   return (
     <div className="frameos-account-header__lead">
       <Link
-        aria-label="FrameOS Cloud"
+        aria-label={name}
         className="frameos-account-header__brand"
         href={href}
       >
@@ -32,9 +37,7 @@ export function HeaderBrand({
           src="/logo-dark.svg"
           width={36}
         />
-        {title ? null : (
-          <span className="frameos-account-header__name">FrameOS Cloud</span>
-        )}
+        <span className="frameos-account-header__name">{name}</span>
       </Link>
       {title ? (
         <span className="frameos-account-header__title">{title}</span>

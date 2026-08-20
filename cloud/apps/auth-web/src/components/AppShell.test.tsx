@@ -7,7 +7,8 @@ import { PublicShell } from "./PublicShell";
 // The shells build absolute nav URLs from the deployment's origins.
 vi.mock("../lib/env", () => ({
   getAccountBaseUrl: () => "https://cloud.example.net",
-  getAccountUrl: (path?: string) => `https://cloud.example.net${path ?? "/account"}`,
+  getAccountUrl: (path?: string) =>
+    `https://cloud.example.net${path ?? "/account"}`,
   getCloudBaseUrl: () => "https://cloud.example.net",
   getScenesBaseUrl: () => "https://scenes.example.net",
   // The shells render LegalFooter, which needs the cookie domain for the
@@ -58,5 +59,71 @@ describe("PublicShell", () => {
     expect(container.querySelector("main")?.className).not.toContain(
       "ph-no-capture",
     );
+  });
+});
+
+// The two shells draw one header: the wordmark sits inside the brand link
+// on both (so it does not shift between scenes.* and cloud.*), the brand
+// links to the workspace for anyone signed in, and Frames leads the nav.
+function navLabels(container: HTMLElement) {
+  return Array.from(
+    container.querySelectorAll(
+      "nav[aria-label='Primary'] a, nav[aria-label='Primary'] button",
+    ),
+  ).map((node) => node.textContent?.trim());
+}
+
+function brand(container: HTMLElement) {
+  const link = container.querySelector<HTMLAnchorElement>(
+    ".frameos-account-header__brand",
+  );
+  return {
+    href: link?.getAttribute("href"),
+    name: link?.querySelector(".frameos-account-header__name")?.textContent,
+  };
+}
+
+describe("the shared header", () => {
+  it("reads FrameOS Cloud and leads to the workspace on the account pages", () => {
+    const { container } = render(<AppShell title="Users">body</AppShell>);
+    expect(brand(container)).toEqual({
+      href: "https://cloud.example.net/frames",
+      name: "FrameOS Cloud",
+    });
+    // A page title follows the wordmark instead of replacing it.
+    expect(
+      container.querySelector(".frameos-account-header__title")?.textContent,
+    ).toBe("Users");
+    expect(navLabels(container)).toEqual([
+      "Frames",
+      "Scenes",
+      "Account",
+      "Sign out",
+    ]);
+  });
+
+  it("reads FrameOS Scenes with only Sign in for a signed-out store visitor", () => {
+    const { container } = render(
+      <PublicShell signedIn={false}>body</PublicShell>,
+    );
+    expect(brand(container)).toEqual({
+      href: "https://scenes.example.net/",
+      name: "FrameOS Scenes",
+    });
+    expect(navLabels(container)).toEqual(["Sign in"]);
+  });
+
+  it("shows the cloud header to a signed-in store visitor", () => {
+    const { container } = render(<PublicShell signedIn>body</PublicShell>);
+    expect(brand(container)).toEqual({
+      href: "https://cloud.example.net/frames",
+      name: "FrameOS Cloud",
+    });
+    expect(navLabels(container)).toEqual([
+      "Frames",
+      "Scenes",
+      "Account",
+      "Sign out",
+    ]);
   });
 });

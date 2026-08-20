@@ -142,6 +142,21 @@ export async function setCloudFrameServiceSettingsEnabled(frameId: FrameId, enab
 }
 
 /**
+ * The owner's per-frame switch for telemetry: whether this frame's link holds
+ * `telemetry:logs` + `telemetry:metrics`, i.e. whether the device ships its
+ * logs and metrics to the cloud. Scopes are pinned per connection, so the
+ * cloud restarts the frame's runtime to apply the change either way.
+ */
+export async function setCloudFrameTelemetryEnabled(frameId: FrameId, enabled: boolean): Promise<void> {
+  const response = await apiFetch(`/api/frames/${frameId}/telemetry/enabled`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  })
+  await assertOk(response, `Failed to ${enabled ? 'enable' : 'disable'} log shipping for this frame`)
+}
+
+/**
  * Push the Schedule panel's edits. Schedule is its own verb (`set_schedule`),
  * not a settings key: POST /api/frames/{id}/schedule persists the full
  * schedule server-side (disabled events included, so the panel round-trips)

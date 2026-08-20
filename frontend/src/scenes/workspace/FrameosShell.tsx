@@ -505,35 +505,38 @@ export function FrameosShell({
             secondarySidebarOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
           )}
         >
-          <a
-            href={homeHref}
-            title={inFrameAdminMode ? 'Frame' : 'Frames home'}
-            onPointerEnter={preloadHome}
-            onFocus={preloadHome}
-            onMouseDown={preloadHome}
-            onClick={(event: MouseEvent<HTMLAnchorElement>) => {
-              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-                return
-              }
-              event.preventDefault()
-              if (inFrameAdminMode) {
+          {/* The cloud header already shows the FrameOS Cloud logo; the rail one would duplicate it. */}
+          {!isCloudMode() ? (
+            <a
+              href={homeHref}
+              title={inFrameAdminMode ? 'Frame' : 'Frames home'}
+              onPointerEnter={preloadHome}
+              onFocus={preloadHome}
+              onMouseDown={preloadHome}
+              onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                  return
+                }
+                event.preventDefault()
+                if (inFrameAdminMode) {
+                  prepareFirstLevelNavigation()
+                  router.actions.push(homeHref)
+                  return
+                }
+                requestNextFramesHomeScrollTop()
                 prepareFirstLevelNavigation()
-                router.actions.push(homeHref)
-                return
-              }
-              requestNextFramesHomeScrollTop()
-              prepareFirstLevelNavigation()
-              if (mode === 'frames') {
-                scrollFramesHomeToTop('smooth', false)
-              } else {
-                router.actions.push(homeHref)
-                scrollFramesHomeToTop()
-              }
-            }}
-            className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-auto" />
-          </a>
+                if (mode === 'frames') {
+                  scrollFramesHomeToTop('smooth', false)
+                } else {
+                  router.actions.push(homeHref)
+                  scrollFramesHomeToTop()
+                }
+              }}
+              className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-auto" />
+            </a>
+          ) : null}
           <nav className="flex flex-1 flex-col items-center gap-4">
             {!inFrameAdminMode ? (
               <NavButton

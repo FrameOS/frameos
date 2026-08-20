@@ -4,7 +4,8 @@ import { accountNavUrls } from '../cloudConfig'
 
 // The FrameOS Cloud chrome, rendered from the same stylesheet as
 // cloud/apps/auth-web's shells (cloud-chrome.css, imported via src/index.css):
-// the cloud logo, the wordmark, then Scenes / Frames / Account / Sign out. It
+// the cloud logo, the wordmark (linking to /frames, the cloud's home), then
+// Frames / Scenes / Account / Sign out. It
 // sits ABOVE the workspace shell and never re-renders per route — App.tsx
 // renders it once, outside the scene Suspense boundary, and the shell below it
 // gets the rest of the viewport (see the .frameos-cloud-app rules in
@@ -30,7 +31,7 @@ export function AccountHeader(): ReactElement {
   return (
     <header className="frameos-account-header">
       <div className="frameos-account-header__lead">
-        <a aria-label="FrameOS Cloud" className="frameos-account-header__brand" href={accountUrl}>
+        <a aria-label="FrameOS Cloud" className="frameos-account-header__brand" href={framesUrl}>
           <img
             alt=""
             className="frameos-account-header__logo frameos-account-header__logo--light"
@@ -49,11 +50,11 @@ export function AccountHeader(): ReactElement {
         </a>
       </div>
       <nav aria-label="Primary" className="frameos-account-header__nav">
-        <a className="frameos-account-header__link" href={scenesUrl}>
-          Scenes
-        </a>
         <a className="frameos-account-header__link" href={framesUrl}>
           Frames
+        </a>
+        <a className="frameos-account-header__link" href={scenesUrl}>
+          Scenes
         </a>
         <a className="frameos-account-header__link" href={accountUrl}>
           Account

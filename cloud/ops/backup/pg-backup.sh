@@ -36,12 +36,18 @@ set -euo pipefail
 #   RETENTION_DAYS    prune remote files older than this (default 30)
 #   HEALTHCHECKS_URL  optional hc-ping.com check URL; start/success/fail pings
 #   LOCAL_DIR         staging dir (default /var/backups/frameos-cloud)
+#   PGBACKREST_STANZA          stanza whose health gates this run (default
+#                              frameos); PGBACKREST_MAX_AGE_HOURS how old the
+#                              newest base backup may be (default 36; 0 skips
+#                              the pgBackRest check entirely)
 
 database_url="${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
 rclone_remote="${RCLONE_REMOTE:-storagebox:frameos-cloud-backups}"
 retention_days="${RETENTION_DAYS:-30}"
 healthchecks_url="${HEALTHCHECKS_URL:-}"
 local_dir="${LOCAL_DIR:-/var/backups/frameos-cloud}"
+pgbackrest_stanza="${PGBACKREST_STANZA:-frameos}"
+pgbackrest_max_age_hours="${PGBACKREST_MAX_AGE_HOURS:-36}"
 keep_local=2
 
 ping() {
@@ -175,6 +181,70 @@ if [ -n "$about_json" ]; then
   fi
 fi
 
-summary="ok db=$(du -h "$db_file" | cut -f1) host=$(du -h "$host_file" | cut -f1) remote=$rclone_remote retention=${retention_days}d${box_summary}"
+# The pgBackRest layer (continuous WAL archiving + daily base backups, the
+# one that actually gives point-in-time recovery) has its own timers and,
+# until this check, no alarm: a broken archive-push or a stuck base backup
+# only showed up to someone running `pgbackrest info` by hand. Fold its
+# health into this run so the single healthchecks.io check covers both
+# layers — a stale or errored stanza fails the run, which pages. Checked
+# LAST so the dump and the host tarball are already shipped when it fires.
+# Skipped, loudly, where pgBackRest is not set up (a rehearsal VM, a dev box)
+# or with PGBACKREST_MAX_AGE_HOURS=0.
+pitr_summary=""
+if ! [[ "$pgbackrest_max_age_hours" =~ ^[0-9]+$ ]]; then
+  echo "PGBACKREST_MAX_AGE_HOURS must be a non-negative integer, got: ${pgbackrest_max_age_hours}" >&2
+  exit 1
+fi
+if [ "$pgbackrest_max_age_hours" -eq 0 ]; then
+  echo "pgBackRest check disabled (PGBACKREST_MAX_AGE_HOURS=0)"
+elif ! command -v pgbackrest >/dev/null 2>&1 || [ ! -e /etc/pgbackrest/pgbackrest.conf ]; then
+  echo "pgBackRest check skipped: not installed/configured on this host"
+  pitr_summary=" pitr=unconfigured"
+else
+  # Runs as postgres: that user owns the repo key and the stanza lock, and
+  # root would leave root-owned files in the spool/lock directories.
+  if ! info_json="$(runuser -u postgres -- pgbackrest --stanza="$pgbackrest_stanza" --output=json info 2>&1)"; then
+    echo "pgbackrest info failed:" >&2
+    echo "$info_json" >&2
+    exit 1
+  fi
+  pitr_summary="$(PGBACKREST_INFO_JSON="$info_json" python3 -c '
+import json, os, sys, time
+stanza_name = sys.argv[1]
+max_age_hours = int(sys.argv[2])
+try:
+    stanzas = json.loads(os.environ["PGBACKREST_INFO_JSON"])
+except ValueError as exc:
+    sys.exit("pgbackrest info did not return JSON: %s" % exc)
+stanza = next((s for s in stanzas if s.get("name") == stanza_name), None)
+if stanza is None:
+    sys.exit("stanza %r missing from pgbackrest info" % stanza_name)
+status = stanza.get("status") or {}
+if status.get("code") != 0:
+    sys.exit("stanza %s status: %s (code %s)" % (stanza_name, status.get("message"), status.get("code")))
+backups = stanza.get("backup") or []
+if not backups:
+    sys.exit("stanza %s has no base backups" % stanza_name)
+latest = max(backups, key=lambda b: (b.get("timestamp") or {}).get("stop") or 0)
+stop = (latest.get("timestamp") or {}).get("stop") or 0
+age_hours = (time.time() - stop) / 3600
+if age_hours > max_age_hours:
+    sys.exit("newest base backup (%s, %s) is %.1f h old, limit %d h — a pgbackrest timer is stuck"
+             % (latest.get("label"), latest.get("type"), age_hours, max_age_hours))
+if latest.get("error"):
+    sys.exit("newest base backup %s is flagged with an error" % latest.get("label"))
+archives = stanza.get("archive") or []
+wal_max = next((a.get("max") for a in reversed(archives) if a.get("max")), None)
+if not wal_max:
+    sys.exit("stanza %s has no archived WAL — archive_command is not reaching the repo" % stanza_name)
+print(" pitr_latest=%s@%.1fh wal_max=%s" % (latest.get("type"), age_hours, wal_max), end="")
+' "$pgbackrest_stanza" "$pgbackrest_max_age_hours")" || {
+    echo "pgBackRest health check failed (reason above) — the dump and host tarball were still shipped." >&2
+    exit 1
+  }
+  echo "pgBackRest ok:${pitr_summary}"
+fi
+
+summary="ok db=$(du -h "$db_file" | cut -f1) host=$(du -h "$host_file" | cut -f1) remote=$rclone_remote retention=${retention_days}d${box_summary}${pitr_summary}"
 echo "Backup complete: $summary"
 ping "" "$summary"

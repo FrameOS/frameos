@@ -13,7 +13,8 @@ import { BrushChart } from './BrushChart'
 import { Select } from '../../../../components/Select'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { metricChartThemes, themeMetricSeries } from './chartTheme'
-import { BoltIcon } from '@heroicons/react/24/outline'
+import { BoltIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
+import { Tooltip } from '../../../../components/Tooltip'
 
 const metricLabels: Record<string, string> = {
   load: 'Load',
@@ -27,6 +28,26 @@ const metricLabels: Record<string, string> = {
   cpuCount: 'CPU count',
   'runtime.sequence': 'Render sequence index (keeps incrementing)',
   'runtime.lastCompletedAgoMs': 'Seconds since last render',
+  wifiRssi: 'WiFi signal (RSSI)',
+}
+
+// Shown behind an (i) next to the card title; the number alone reads as
+// "negative, therefore bad" to anyone who has not met dBm before.
+const metricHelp: Record<string, JSX.Element> = {
+  wifiRssi: (
+    <div className="space-y-1">
+      <div>
+        WiFi signal strength (RSSI) in dBm, as measured by the frame. The values are negative: closer to 0 is stronger.
+      </div>
+      <ul className="list-disc pl-4">
+        <li>−30 to −50: excellent</li>
+        <li>−50 to −67: good, fine for anything a frame does</li>
+        <li>−67 to −75: fair, occasional slow pushes</li>
+        <li>−75 to −85: weak, expect drops and reconnects</li>
+        <li>below −85: unusable — move the frame or the router</li>
+      </ul>
+    </div>
+  ),
 }
 
 const latestDatapointFormatter = new Intl.DateTimeFormat(undefined, {
@@ -83,7 +104,7 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
   return (
     <div
       className={clsx(
-        'frame-tool-panel relative select-none',
+        'frame-tool-panel relative',
         scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible'
       )}
     >
@@ -141,6 +162,15 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
             <div key={key} className="frame-tool-card mb-3 overflow-hidden rounded-[22px]">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
                 <strong className="frame-tool-heading">{metricLabels[key] ?? key}</strong>
+                {metricHelp[key] ? (
+                  <Tooltip
+                    title={metricHelp[key]}
+                    className="frame-tool-muted"
+                    titleClassName="w-72 text-xs leading-snug"
+                  >
+                    <InformationCircleIcon className="h-4 w-4" aria-label={`About ${metricLabels[key] ?? key}`} />
+                  </Tooltip>
+                ) : null}
                 {latestMetricSummariesByCategory[key] ? (
                   <span className="frame-tool-muted">{latestMetricSummariesByCategory[key]}</span>
                 ) : null}
@@ -168,7 +198,9 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
               </div>
               <div
                 className={clsx(
-                  'h-[200px] p-0',
+                  // select-none here only: dragging the brush must not select
+                  // text, but the card titles above stay copyable.
+                  'h-[200px] select-none p-0',
                   theme === 'dark' ? 'bg-[#18181b] text-white' : 'bg-white/70 text-slate-900'
                 )}
               >

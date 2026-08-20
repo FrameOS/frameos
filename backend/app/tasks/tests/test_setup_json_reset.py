@@ -56,13 +56,19 @@ class Sandbox:
         path.write_text(content, encoding="utf-8")
         path.chmod(0o755)
 
-    def add_fake_frameos(self, exit_status: int = 0) -> Path:
+    def add_fake_frameos(self, exit_status: int = 0, set_display_exit_status: int = 1) -> Path:
+        # `set-display` exits 1 by default, like a release binary that predates
+        # the subcommand (unknown command → ValueError), so the python3
+        # fallback path stays covered; pass 0 to exercise the binary path.
         current = self.srv / "frameos" / "current"
         current.mkdir(parents=True, exist_ok=True)
         argv_log = self.root / "frameos-argv.log"
         frameos = current / "frameos"
         frameos.write_text(
-            f'#!/bin/sh\nprintf \'%s\\n\' "$@" > {argv_log}\nexit {exit_status}\n',
+            "#!/bin/sh\n"
+            f'printf \'%s\\n\' "$@" >> {argv_log}\n'
+            f'[ "$1" = set-display ] && exit {set_display_exit_status}\n'
+            f"exit {exit_status}\n",
             encoding="utf-8",
         )
         frameos.chmod(0o755)
@@ -264,6 +270,38 @@ def test_cloud_config_display_keys_patch_frame_json_and_run_driver_setup(tmp_pat
     # Enrollment still happened and the secrets are gone from /boot.
     assert sandbox.pending_file.exists()
     assert not (sandbox.boot / "frameos-cloud.txt").exists()
+
+
+def test_cloud_config_display_prefers_the_frameos_binary_over_python3(tmp_path):
+    # Buildroot images have no python3: the binary's own `set-display` patches
+    # frame.json. The fake only records argv, so assert the wiring, not the
+    # JSON (covered by frameos/src/frameos/tests/test_display_patch.nim).
+    sandbox = Sandbox(tmp_path)
+    argv_log = sandbox.add_fake_frameos(set_display_exit_status=0)
+    frame_json = sandbox.srv / "frameos" / "current" / "frame.json"
+    frame_json.write_text(json.dumps({"device": "framebuffer"}), encoding="utf-8")
+    sandbox.write_cloud_file(
+        "claim_token=FRCT-abc\n"
+        "device=http.upload\n"
+        "width=800\n"
+        "height=480\n"
+        "upload_url=https://frames.example.com/upload\n"
+    )
+
+    result = sandbox.run(disable_python3=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    argv = argv_log.read_text(encoding="utf-8")
+    assert "set-display" in argv
+    assert f"--frame-json={frame_json}" in argv
+    assert "--device=http.upload" in argv
+    assert "--width=800" in argv
+    assert "--height=480" in argv
+    assert "--upload-url=https://frames.example.com/upload" in argv
+    assert "driver-setup" in argv
+    log = (sandbox.boot / "frameos-setup-reset.log").read_text(encoding="utf-8")
+    assert "Applied display device 'http.upload'" in log
+    assert "could not apply display device" not in log
 
 
 def test_cloud_config_display_invalid_value_leaves_frame_json_untouched(tmp_path):

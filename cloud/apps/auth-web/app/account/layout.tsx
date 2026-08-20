@@ -105,7 +105,7 @@ export default async function AccountLayout({
     // noCapture: every /account page is the signed-in user's own data — their
     // name and email in the header here, and frame names, scene names and
     // images, install hostnames, backup names and activity in the subpages.
-    <AppShell isSuperadmin={isSuperadmin} noCapture title="FrameOS Account">
+    <AppShell isSuperadmin={isSuperadmin} noCapture>
       {session.accountId ? (
         <UserIdentifier
           email={session.email}

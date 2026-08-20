@@ -35,6 +35,7 @@ const frameEventTypes = [
   "frame.service_settings_scope_changed",
   "frame.session_kicked",
   "frame.settings_pushed",
+  "frame.telemetry_scope_changed",
 ];
 
 describe("auditEventLabel", () => {

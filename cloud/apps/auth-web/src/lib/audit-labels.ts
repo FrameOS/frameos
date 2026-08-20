@@ -51,9 +51,11 @@ const eventLabels: Record<string, string> = {
   "frame.scenes_applied": "Assigned scenes applied by the frame",
   "frame.scenes_assigned": "Scenes assigned to a frame",
   "frame.schedule_pushed": "Frame schedule updated",
-  "frame.service_settings_scope_changed": "Frame access to service API keys changed",
+  "frame.service_settings_scope_changed":
+    "Frame access to service API keys changed",
   "frame.session_kicked": "Frame session closed by the cloud",
   "frame.settings_pushed": "Frame settings updated",
+  "frame.telemetry_scope_changed": "Frame log and metric shipping changed",
   "linked_client.revoked": "Linked device revoked",
   "linked_client.scopes_reduced": "Enabled features reduced",
   "linked_client.scopes_updated": "Enabled features updated",
@@ -124,7 +126,9 @@ export function auditEventDetail(metadata: unknown): string | undefined {
       record.sceneNames.filter((s) => typeof s === "string").join(", "),
     );
   } else if (typeof record.sceneCount === "number") {
-    parts.push(`${record.sceneCount} scene${record.sceneCount === 1 ? "" : "s"}`);
+    parts.push(
+      `${record.sceneCount} scene${record.sceneCount === 1 ? "" : "s"}`,
+    );
   }
   if (typeof record.events === "number") {
     parts.push(
@@ -138,7 +142,9 @@ export function auditEventDetail(metadata: unknown): string | undefined {
   if (typeof record.uploaded === "number") {
     parts.push(
       `${record.uploaded} uploaded` +
-        (typeof record.skipped === "number" ? `, ${record.skipped} skipped` : "") +
+        (typeof record.skipped === "number"
+          ? `, ${record.skipped} skipped`
+          : "") +
         (typeof record.failed === "number" && record.failed > 0
           ? `, ${record.failed} failed`
           : ""),
@@ -195,10 +201,31 @@ export function summarizeAuditActor(actor: unknown): AuditActorSummary {
   const record = actor as Record<string, unknown>;
   const ip = typeof record.ip === "string" ? record.ip : undefined;
   if (typeof record.accountId === "string") {
-    return { kind: "account", accountId: record.accountId, ...(ip ? { ip } : {}) };
+    return {
+      kind: "account",
+      accountId: record.accountId,
+      ...(ip ? { ip } : {}),
+    };
   }
   if (record.kind === "device" || record.kind === "frame_enrollment") {
     return { kind: "device", ...(ip ? { ip } : {}) };
   }
   return { kind: "system", ...(ip ? { ip } : {}) };
+}
+
+// The frame / scene a row is about, read from the target the writer stamped
+// (frame-hub lifecycle rows and every frame route use `target.frameId`; the
+// scene routes use `target.sceneId`). The activity feed resolves these to
+// names so "Frame disconnected" says which frame.
+export type AuditTargetRef = { frameId?: string; sceneId?: string };
+
+export function auditEventTarget(target: unknown): AuditTargetRef {
+  if (!target || typeof target !== "object" || Array.isArray(target)) {
+    return {};
+  }
+  const record = target as Record<string, unknown>;
+  return {
+    ...(typeof record.frameId === "string" ? { frameId: record.frameId } : {}),
+    ...(typeof record.sceneId === "string" ? { sceneId: record.sceneId } : {}),
+  };
 }

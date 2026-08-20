@@ -34,8 +34,9 @@
   backdrop-filter: blur(16px);
 }
 
-/* Brand plus an optional page title (the Next pages show the current page's
-   heading in the name slot; the SPA always shows the wordmark). */
+/* Brand plus an optional page title. The wordmark always sits inside the
+   brand link, so it lands at the same offset on every surface; a page title
+   follows it as quieter text. */
 .frameos-account-header__lead {
   display: flex;
   align-items: center;
@@ -62,6 +63,14 @@
 .frameos-account-header__title {
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.frameos-account-header__title::before {
+  content: '/';
+  margin-right: 0.75rem;
+  opacity: 0.5;
 }
 
 .frameos-account-header__logo {

@@ -43,6 +43,17 @@ flow (changes first-boot behavior for every new user).
   it, watch the frame appear **active with no Confirm step** in the cloud
   workspace (single-use card born active; a multi-use card's first boot is
   active, later cards pending).
+- [ ] **First-boot cloud enrollment on a router that strips DNSSEC (PR #384):**
+  2026-08-20 a Pi 5 card booted, joined WiFi, then every lookup failed with
+  `systemd-resolved: DNSSEC validation failed ... no-signature`; the 30 s
+  network check expired, the setup hotspot took over and the frame never
+  enrolled. Fixes: `DNSSEC=no` drop-in on the image, 90 s check window, and
+  the cloud-chosen display is now applied by `frameos set-display` (the
+  python3 patcher never ran — Buildroot ships no python3; the log said
+  `could not apply display device 'http.upload'`). Re-flash from `main`,
+  boot behind the GL-BE3600, confirm: enrolled within ~1 min, no hotspot,
+  `frame.json` carries the chosen device, postboot log shows
+  `Applied display device`.
 - [ ] **Panel link code (#379):** boot an unclaimed frame in cloud mode with
   no claim code → the panel renders the link code + QR → complete the claim
   from an account, and confirm the code retires once connected.

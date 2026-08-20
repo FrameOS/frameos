@@ -107,7 +107,6 @@ export default async function PublisherPage({
     <PublicShell
       isSuperadmin={await accountIsSuperadmin(session?.accountId)}
       signedIn={Boolean(session)}
-      title="FrameOS Scenes"
     >
       <div className="content-header">
         <div>

@@ -187,11 +187,7 @@ export default async function HomePage({
   const totalPages = Math.max(1, Math.ceil(total / storePageSize));
 
   return (
-    <PublicShell
-      isSuperadmin={isSuperadmin}
-      signedIn={Boolean(session)}
-      title="FrameOS Scenes"
-    >
+    <PublicShell isSuperadmin={isSuperadmin} signedIn={Boolean(session)}>
       <div className="content-header">
         <div>
           <p className="copy">

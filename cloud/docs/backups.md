@@ -101,7 +101,13 @@ ssh <host> rclone lsl storagebox:frameos-cloud-backups
 ```
 
 `pgbackrest info` is the health check that matters for the live layer: the
-newest backup's WAL "max" keeps advancing as segments archive.
+newest backup's WAL "max" keeps advancing as segments archive. The nightly
+job runs that check for you (status `ok`, newest base backup under
+`PGBACKREST_MAX_AGE_HOURS`, default 36 h, at least one archived WAL segment)
+after shipping its own artifacts, and fails the run — so the same
+healthchecks.io check pages — when the live layer is stuck. Each success ping
+carries `pitr_latest=<type>@<age>h wal_max=<segment>` alongside the box
+capacity.
 
 Storage Box capacity: `rclone about storagebox:` (1 TiB box). The nightly
 job also appends `box_used`/`box_free` to every success ping — the
