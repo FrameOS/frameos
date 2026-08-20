@@ -42,17 +42,27 @@ jobs:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v2
+      # The runner image ships python3 (+ `python`), which is all the nim
+      # setup scripts need. Node is only needed when the compiled-assets cache
+      # misses and prepare_assets.py has to rebuild the frame frontend, so its
+      # ~35 s of setup (mostly the pnpm store restore) is skipped on a hit.
+      - name: Cache compiled assets
+        id: cache_assets
+        uses: actions/cache@v4
         with:
-          python-version: '3.12'
+          path: |
+            frameos/assets/compiled
+            frameos/src/assets
+          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'repo/**', 'pnpm-lock.yaml', 'versions.json') }}
 
       - uses: pnpm/action-setup@v4
+        if: steps.cache_assets.outputs.cache-hit != 'true'
         with:
           version: 10.27.0
           run_install: false
 
       - name: Set up Node
+        if: steps.cache_assets.outputs.cache-hit != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -106,14 +116,6 @@ jobs:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
 
-      - name: Cache compiled assets
-        uses: actions/cache@v4
-        with:
-          path: |
-            frameos/assets/compiled
-            frameos/src/assets
-          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'repo/**', 'pnpm-lock.yaml', 'versions.json') }}
-
       - name: FrameOS nim setup
         run: |
           cd frameos
@@ -123,6 +125,27 @@ jobs:
           nimble setup
           FRAMEOS_ROOT_DIR="." python3 tools/makeapploaders.py
 
+      # Every test file is a full compile of most of the tree, and Nim only
+      # re-runs gcc for C files whose content hash changed — so a warm nimcache
+      # roughly halves a test's compile (10 s -> 4 s measured). Testament keys
+      # each test's cache dir by file path + options (stable across commits),
+      # and the shard assignment is a stable hash of the path too, so one
+      # cache dir per shard on the host-side /mnt/cache mount (shared into
+      # every runner VM, no GitHub cache quota) stays warm across runs. Plain
+      # copies: two runs of the same shard overlapping at worst interleave
+      # files from two consistent states, and Nim validates each object by
+      # hash anyway.
+      - name: Restore nimcache
+        run: |
+          src="/mnt/cache/nimcache/frameos-tests/shard-${{ matrix.shard }}"
+          if [ -d "$src" ]; then
+            mkdir -p frameos/nimcache
+            cp -a "$src/." frameos/nimcache/
+            echo "restored $(du -sh frameos/nimcache | cut -f1) from $src"
+          else
+            echo "no nimcache at $src yet"
+          fi
+
       # The shard runner compiles+runs one test file per core (FRAMEOS_TEST_JOBS,
       # defaults to nproc on CI): each testament call is a single-threaded Nim
       # compile, so sequential runs idled three of the four cores.
@@ -130,6 +153,18 @@ jobs:
         run: |
           cd frameos
           bash ./tools/run_test_shard.sh ${{ matrix.shard }}
+
+      - name: Save nimcache
+        if: always()
+        run: |
+          dest="/mnt/cache/nimcache/frameos-tests/shard-${{ matrix.shard }}"
+          if [ -d /mnt/cache ] && [ -d frameos/nimcache ]; then
+            mkdir -p "$dest"
+            # drop per-test dirs untouched for two weeks (renamed/removed tests)
+            find "$dest" -type d -name "*.nim_*" -mtime +14 -prune -exec rm -rf {} + 2>/dev/null || true
+            cp -a frameos/nimcache/. "$dest/"
+            echo "saved $(du -sh "$dest" | cut -f1) to $dest"
+          fi
 
       - name: FrameOS ESP32 Nim compile
         if: ${{ matrix.shard == 1 }}
