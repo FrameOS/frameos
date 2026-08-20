@@ -28,10 +28,23 @@ const darkChromeQuery = "(prefers-color-scheme: dark)";
 // tab strip, so the only thing it has to contrast with is the browser chrome.
 // Toggling the account pages to light while Chrome stays dark used to swap in
 // the black glyph, which then vanished against the dark strip.
+//
+// Creates the <link> when app/layout.tsx's inline script has not (it is the
+// only place the element comes from — rendering it from JSX let React hoist
+// a stale duplicate on hydration), and updates the one element otherwise.
 function applyFavicon() {
   const darkChrome = window.matchMedia?.(darkChromeQuery).matches;
-  const icon = document.querySelector("link[data-frameos-favicon]");
-  icon?.setAttribute(
+  let icon = document.querySelector<HTMLLinkElement>(
+    "link[data-frameos-favicon]",
+  );
+  if (!icon) {
+    icon = document.createElement("link");
+    icon.rel = "icon";
+    icon.type = "image/svg+xml";
+    icon.dataset.frameosFavicon = "";
+    document.head.appendChild(icon);
+  }
+  icon.setAttribute(
     "href",
     `/logo-${darkChrome ? "dark" : "light"}${isLocalHost() ? "-mono" : ""}.svg`,
   );

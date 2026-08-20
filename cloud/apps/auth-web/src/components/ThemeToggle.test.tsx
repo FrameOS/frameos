@@ -14,6 +14,7 @@ beforeEach(() => {
   window.localStorage.clear();
   document.cookie = "frameos_theme=; Path=/; Max-Age=0";
   document.documentElement.classList.remove("theme-dark");
+  document.head.innerHTML = "";
 });
 
 afterEach(() => {
@@ -90,5 +91,36 @@ describe("ThemeToggle", () => {
     expect(document.documentElement.classList.contains("theme-dark")).toBe(
       true,
     );
+  });
+
+  // The icon follows the browser chrome, not the page theme, and is owned by
+  // exactly one <link> that ThemeToggle creates when the pre-paint script has
+  // not — never a JSX placeholder, which React re-hoisted as a stale duplicate.
+  // (jsdom runs on localhost, hence the -mono variants.)
+  it("creates one favicon link and keeps it matched to the browser scheme", () => {
+    stubMatchMedia(true);
+    window.localStorage.setItem("frameos-cloud-theme", "light");
+
+    render(<ThemeToggle />);
+
+    const links = document.head.querySelectorAll("link[rel=icon]");
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute("href")).toBe("/logo-dark-mono.svg");
+
+    fireEvent.click(screen.getByRole("button", { name: "Use dark theme" }));
+    expect(document.head.querySelectorAll("link[rel=icon]")).toHaveLength(1);
+    expect(links[0]?.getAttribute("href")).toBe("/logo-dark-mono.svg");
+  });
+
+  it("updates an existing favicon link instead of adding a second one", () => {
+    stubMatchMedia(false);
+    document.head.innerHTML =
+      '<link data-frameos-favicon="" href="/logo-dark.svg" rel="icon" type="image/svg+xml">';
+
+    render(<ThemeToggle />);
+
+    const links = document.head.querySelectorAll("link[rel=icon]");
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute("href")).toBe("/logo-light-mono.svg");
   });
 });

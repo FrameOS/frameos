@@ -38,6 +38,15 @@ const themeStorageKey = "frameos-cloud-theme";
 // to contrast with is the browser chrome — and a dark Chrome showing a
 // light-themed account page was drawing the black glyph onto a dark strip,
 // where it all but disappeared. ThemeToggle keeps it in step afterwards.
+//
+// The <link> is CREATED here rather than rendered from JSX. React 19 treats
+// <link rel="icon"> in <head> as a hoistable element and hydrates it by
+// finding an existing node whose attributes match the props; once this
+// script had rewritten the href, nothing matched, React appended a second
+// <link rel="icon" href="/logo-light.svg">, the browser honoured the last
+// one, and every page except the static /frames shell showed the black
+// outline on a dark tab strip. An element React never rendered is an
+// element React never hydrates.
 const themeScript = `(function(){try{
 var c=document.cookie.split(";").map(function(p){return p.trim()}).filter(function(p){return p.indexOf("${themeCookieName}=")===0})[0];
 var v=c?c.slice(${themeCookieName.length + 1}):null;
@@ -49,7 +58,8 @@ var h=window.location.hostname.toLowerCase();
 var local=h==="localhost"||h.slice(-10)===".localhost"||h==="127.0.0.1"||h==="0.0.0.0"||h==="::1"||h==="[::1]";
 var darkChrome=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;
 var icon=document.querySelector("link[data-frameos-favicon]");
-if(icon){icon.setAttribute("href","/logo-"+(darkChrome?"dark":"light")+(local?"-mono":"")+".svg")}
+if(!icon){icon=document.createElement("link");icon.rel="icon";icon.type="image/svg+xml";icon.setAttribute("data-frameos-favicon","");document.head.appendChild(icon)}
+icon.setAttribute("href","/logo-"+(darkChrome?"dark":"light")+(local?"-mono":"")+".svg");
 }catch(e){}})()`;
 
 export default async function RootLayout({
@@ -67,19 +77,11 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        {/* A fixed placeholder, not a guess. The two things that pick the
-            icon — the browser's colour scheme and the hostname the browser
-            used — are both invisible to the server, and the theme cookie is
-            NOT a stand-in for the first (that substitution is what put a
-            black glyph on a dark tab strip). themeScript, right below, has
-            both and corrects this before the first paint; a `media` pair
-            here instead would give JS two elements to fight over. */}
-        <link
-          data-frameos-favicon=""
-          href="/logo-light.svg"
-          rel="icon"
-          type="image/svg+xml"
-        />
+        {/* No <link rel="icon"> here on purpose: themeScript creates it.
+            The two things that pick the icon — the browser's colour scheme
+            and the hostname the browser used — are both invisible to the
+            server, and a JSX placeholder would be re-hoisted by React on
+            hydration once the script changed its href (see themeScript). */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body>
