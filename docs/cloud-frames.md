@@ -249,6 +249,15 @@ pushes, report state. Telemetry is opt-in per scope, exactly as reserved in
 
 Scope changes use the existing `/api/backends/scopes` mechanism (additions
 need owner approval on the provider's device screen; removals are immediate).
+A claim-token enrollment grants all four up front (since 2026-08-03); links
+made before that carry `frame:managed` only and are **never backfilled** —
+adding a scope the owner did not approve is the silent escalation the flow
+refuses. The owner instead flips two per-frame switches in the frame's
+Settings panel (`service-settings/enabled`, `telemetry/enabled` below), which
+grant or remove the scope on the link itself. Scopes are read once per
+WebSocket session, so the telemetry switch also queues a `restart_runtime`
+for an active frame; until the device reconnects, a frame without
+`telemetry:logs` shows an empty Logs panel that names the switch.
 
 ## The management WebSocket
 
@@ -881,6 +890,7 @@ GET  {provider}/api/frames/{id}/commands       # what is still QUEUED for this f
 DELETE {provider}/api/frames/{id}/commands/{command_id}  # cancel one, while it is still undelivered
 GET  {provider}/api/frames/{id}/service-settings          # DEVICE-authed, not session: see "Service settings"
 POST {provider}/api/frames/{id}/service-settings/enabled  # {"enabled": bool} → grants/revokes settings:services, nudges on enable
+POST {provider}/api/frames/{id}/telemetry/enabled         # {"enabled": bool} → grants/revokes telemetry:logs + telemetry:metrics, restart_runtime on change
 WS   {provider}/api/frames/{id}/updates        # browser socket: update_frame / new_log / new_metrics / frame_activity events
 WS   {provider}/api/frames/updates             # browser socket, all the account's frames (fleet view)
 ```

@@ -55,6 +55,7 @@ const eventLabels: Record<string, string> = {
     "Frame access to service API keys changed",
   "frame.session_kicked": "Frame session closed by the cloud",
   "frame.settings_pushed": "Frame settings updated",
+  "frame.telemetry_scope_changed": "Frame log and metric shipping changed",
   "linked_client.revoked": "Linked device revoked",
   "linked_client.scopes_reduced": "Enabled features reduced",
   "linked_client.scopes_updated": "Enabled features updated",

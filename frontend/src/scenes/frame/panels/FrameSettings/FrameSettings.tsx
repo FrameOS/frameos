@@ -49,6 +49,7 @@ import {
   extendedCloudFrameSettingsMinVersion,
   hardwareCloudFrameSettingsMinVersion,
   setCloudFrameServiceSettingsEnabled,
+  setCloudFrameTelemetryEnabled,
 } from '../../../../utils/cloudFrameApi'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -419,6 +420,62 @@ function CloudServiceSettingsSection(): JSX.Element {
                 })}
               </div>
             )}
+          </div>
+        </Field>
+      </div>
+    </>
+  )
+}
+
+/**
+ * Cloud-managed frames only: whether the device ships its logs and metrics to
+ * the cloud at all. The owner's per-frame grant of `telemetry:logs` +
+ * `telemetry:metrics`; frames enrolled before 2026-08-03 never received it
+ * and sit with an empty Logs panel that nothing explains — this is the
+ * switch that explains it. Scopes are pinned per connection, so the cloud
+ * restarts the runtime on every change; the panel says so.
+ */
+function CloudTelemetrySection(): JSX.Element | null {
+  const { frameId, frame } = useValues(frameLogic)
+  const { loadFrame } = useActions(framesModel)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Absent = the row we hold came from a broadcast without the link; do not
+  // draw a switch in an unknown position.
+  if (typeof frame?.telemetry_enabled !== 'boolean') {
+    return null
+  }
+  const enabled = frame.telemetry_enabled
+
+  const toggle = async (next: boolean): Promise<void> => {
+    setSaving(true)
+    setError(null)
+    try {
+      await setCloudFrameTelemetryEnabled(frameId, next)
+      loadFrame(frameId)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <H6 id="frame-settings-telemetry" className="mt-2">
+        Logs and metrics
+      </H6>
+      <div className="pl-2 @md:pl-8 space-y-3">
+        <Field name="_noop" label="Ship logs and metrics to the cloud">
+          <div className="w-full space-y-1">
+            <Switch value={enabled} onChange={toggle} disabled={saving} label={enabled ? 'Enabled' : 'Disabled'} />
+            <div className="frameos-muted text-xs">
+              {enabled
+                ? 'The Logs and Metrics panels fill from the device. Changing this restarts FrameOS on the frame.'
+                : 'The Logs and Metrics panels stay empty. Frames set up before August 2026 start out here; enabling restarts FrameOS on the frame.'}
+            </div>
+            {error ? <div className="text-red-300 text-xs">{error}</div> : null}
           </div>
         </Field>
       </div>
@@ -2259,6 +2316,7 @@ export function FrameSettings({
             asking for an API key" is answered here, not in the account-wide
             secrets page. */}
         {hideForCloud ? <CloudServiceSettingsSection /> : null}
+        {hideForCloud ? <CloudTelemetrySection /> : null}
         {!cloudProfile && showFrameInfo ? (
           <>
             <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">

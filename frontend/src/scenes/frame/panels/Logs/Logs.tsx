@@ -813,7 +813,19 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
                 renderTheme === 'dark' ? 'text-gray-400' : 'text-slate-500'
               )}
             >
-              {searchActive ? 'No matching logs' : 'No logs yet'}
+              {searchActive ? (
+                'No matching logs'
+              ) : frame?.telemetry_enabled === false ? (
+                // A cloud frame whose link was never granted telemetry (every
+                // enrollment before 2026-08-03) ships nothing, silently. Name
+                // the cause and point at the switch instead of "No logs yet".
+                <span className="text-center px-4">
+                  Log shipping is off for this frame — turn on “Ship logs and metrics to the cloud” under Settings →
+                  Logs and metrics.
+                </span>
+              ) : (
+                'No logs yet'
+              )}
             </div>
           ),
         }}

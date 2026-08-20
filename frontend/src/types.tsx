@@ -72,6 +72,12 @@ export interface FrameType {
    * owner toggles it per frame; absent means "not reported" (hub broadcasts
    * that do not carry the link), never "off". */
   service_settings_enabled?: boolean
+  /** Cloud-managed frames: whether the frame's link holds `telemetry:logs`
+   * (and `telemetry:metrics`), i.e. whether the device ships logs and metrics
+   * to the cloud at all. Frames enrolled before 2026-08-03 were never granted
+   * it; the owner toggles it per frame. Absent means "not reported", never
+   * "off". */
+  telemetry_enabled?: boolean
   /** The hardware object the device reported at cloud enrollment and on every
    * hub hello (frames.hardware jsonb on the cloud; absent on backend-managed
    * frames). `platform` drives the device-profile capability gating in
