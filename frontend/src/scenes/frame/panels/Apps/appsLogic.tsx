@@ -6,8 +6,8 @@ import { AppConfig, AppNodeData, SceneApp, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { isJavaScriptCatalogApp, normalizeSceneApps, sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
-import type { FrameType } from '../../../../types'
 import type { FrameScene } from '../../../../types'
+import type { FrameType } from '../../../../types'
 
 export const INLINE_CODE_NODE_KEYWORD = '__frameos_inline_code_node__'
 

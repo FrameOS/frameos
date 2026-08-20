@@ -33,8 +33,8 @@ import {
   sceneAppToAppConfig,
 } from '../../../../utils/sceneApps'
 import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
-import type { AppConfig, FrameType } from '../../../../types'
 import type { FrameScene } from '../../../../types'
+import type { AppConfig, FrameType } from '../../../../types'
 import type { SceneApp } from '../../../../types'
 
 export interface ModelMarker extends editor.IMarkerData {}

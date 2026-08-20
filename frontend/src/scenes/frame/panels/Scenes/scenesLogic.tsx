@@ -23,6 +23,7 @@ import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../mode
 import { embeddedUsbUploadTimeoutMs, scheduleEmbeddedUsbFrameImageRefresh } from '../../../../models/framesModel'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 import type { AppConfig, FrameType } from '../../../../types'
+import type { TemplateType } from '../../../../types'
 
 export interface ScenesLogicProps {
   frameId: FrameId
@@ -205,13 +206,13 @@ export interface scenesLogicActions {
     sceneId: string
   } // frameEditorsLogic
   applyTemplate: (
-    template: Partial<import('/Users/marius/Projects/FrameOS/frameos/frontend/src/types').TemplateType>,
+    template: Partial<TemplateType>,
     openDrawer?: boolean | undefined,
     preserveSceneIds?: boolean | undefined
   ) => {
     openDrawer: boolean
     preserveSceneIds: boolean
-    template: Partial<import('/Users/marius/Projects/FrameOS/frameos/frontend/src/types').TemplateType>
+    template: Partial<TemplateType>
   } // frameLogic
   sendEvent: (
     event: string,
