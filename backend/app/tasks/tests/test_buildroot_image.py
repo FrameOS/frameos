@@ -614,11 +614,10 @@ def test_buildroot_serial_package_build_by_default(tmp_path):
     assert "make -C /build/buildroot O=/build/output \n" in script_path.read_text(encoding="utf-8")
 
 
-def test_buildroot_top_level_parallel_build_caps_per_package_jlevel(tmp_path, monkeypatch):
-    # Top-level -j8 on a 32-core host: per-package JLEVEL drops to 8 so the
-    # product stays at ~2x the core count instead of 8 x 33.
-    monkeypatch.setattr("app.tasks.buildroot_image.BUILDROOT_TOP_LEVEL_JOBS", 8)
-    monkeypatch.setattr("app.tasks.buildroot_image.os.cpu_count", lambda: 32)
+def test_buildroot_top_level_parallel_build_keeps_full_per_package_jlevel(tmp_path, monkeypatch):
+    # Top-level -j4; BR2_JLEVEL is left to Buildroot (nproc+1) so the kernel
+    # and ffmpeg long poles still get every core.
+    monkeypatch.setattr("app.tasks.buildroot_image.BUILDROOT_TOP_LEVEL_JOBS", 4)
     config_path = tmp_path / "frameos-buildroot.config"
     script_path = tmp_path / "buildroot-build.sh"
 
@@ -628,15 +627,10 @@ def test_buildroot_top_level_parallel_build_caps_per_package_jlevel(tmp_path, mo
     script = script_path.read_text(encoding="utf-8")
 
     assert "BR2_PER_PACKAGE_DIRECTORIES=y" in config
-    assert "BR2_JLEVEL=8" in config
-    assert "make -C /build/buildroot O=/build/output -j8\n" in script
+    assert "BR2_JLEVEL=0" in config
+    assert "make -C /build/buildroot O=/build/output -j4\n" in script
     # Config steps stay serial; only the build itself fans out.
     assert "O=/build/output olddefconfig\n" in script
-
-    # An explicit JLEVEL wins over the derived cap.
-    monkeypatch.setattr("app.tasks.buildroot_image.BUILDROOT_JLEVEL", 4)
-    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_32)
-    assert "BR2_JLEVEL=4" in config_path.read_text(encoding="utf-8")
 
 
 def test_buildroot_build_script_verifies_config_after_olddefconfig(tmp_path):

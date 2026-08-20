@@ -112,22 +112,14 @@ BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
 # Number = top-level job count; 0/unset = off. Opt-in because switching it on
 # an existing /build/output (per-package host/staging layout changes) forces a
 # full rebuild; CI always starts from a fresh output directory.
+#
+# BR2_JLEVEL is deliberately NOT reduced to compensate: the wall clock is set
+# by a few long poles (linux, ffmpeg, host-python3) that must get every core,
+# and those run while the rest of the DAG is already drained. A first attempt
+# that capped JLEVEL to cores/jobs left the kernel on 8 of 32 cores for 23 min.
+# Oversubscription during the early burst of small packages costs nothing but
+# memory, which the 96 GB slot has; keep the top-level count small (4).
 BUILDROOT_TOP_LEVEL_JOBS = int(os.environ.get("FRAMEOS_BUILDROOT_TOP_LEVEL_JOBS", "0"))
-
-
-def _effective_jlevel() -> int:
-    """BR2_JLEVEL to write into the config.
-
-    With top-level parallelism the effective fan-out is top_level_jobs ×
-    BR2_JLEVEL, and Buildroot's default of "0 = nproc+1" per package would
-    oversubscribe a 32-core box 8×. Cap per-package parallelism so the product
-    lands around 2× the core count — compile phases still saturate the box,
-    configure-heavy phases overlap across packages.
-    """
-    if BUILDROOT_JLEVEL or BUILDROOT_TOP_LEVEL_JOBS <= 0:
-        return BUILDROOT_JLEVEL
-    cores = os.cpu_count() or 4
-    return max(2, (cores * 2) // BUILDROOT_TOP_LEVEL_JOBS)
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "6"
 # 20: the Pi 5 gained dtoverlay=vc4-kms-v3d, which _frame_boot_config_lines
 # merges into /boot/config.txt during customization — cards cached from before
@@ -1941,7 +1933,7 @@ class BuildrootImageBuilder:
                     "BR2_TARGET_GENERIC_HOSTNAME=\"frameos\"",
                     "BR2_TARGET_GENERIC_ISSUE=\"Welcome to FrameOS\"",
                     "BR2_TARGET_ROOTFS_EXT2_SIZE=\"768M\"",
-                    f"BR2_JLEVEL={_effective_jlevel()}",
+                    f"BR2_JLEVEL={BUILDROOT_JLEVEL}",
                     *(["BR2_PER_PACKAGE_DIRECTORIES=y"] if BUILDROOT_TOP_LEVEL_JOBS > 0 else []),
                     'BR2_DL_DIR="/cache/dl"',
                     'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"',
