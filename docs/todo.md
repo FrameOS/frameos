@@ -19,6 +19,14 @@ Two rules that shape most entries:
 
 ---
 
+## Pre-release manual test sweep
+
+`docs/manual-testing-todo.md` collects every unticked manual checkbox and
+"needs hardware" note from PRs #362–#382, grouped by test bench. Work it
+before the next release; delete it when empty.
+
+---
+
 ## Frame privileges and FrameOS Remote
 
 Audited 2026-08-16; findings and the full reasoning in

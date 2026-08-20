@@ -18,6 +18,7 @@ import {
   extendedFrameSettingKeys,
   extendedFrameSettingsMinVersion,
   frameForAccount,
+  frameHardwareIsEsp32,
   frameSupportsExtendedSettings,
   frameSupportsHardwareSettings,
   frameSupportsSettingsFrom,
@@ -80,10 +81,7 @@ export async function POST(
   // declarative subset; anything else it refuses whole-verb with
   // setting_not_allowed), so a payload carrying other keys is refused up
   // front and nothing is half-applied.
-  const platform = (frame.hardware as { platform?: unknown } | null)?.platform;
-  const isEsp32 =
-    typeof platform === "string" &&
-    platform.toLowerCase().startsWith("esp32");
+  const isEsp32 = frameHardwareIsEsp32(frame);
   if (
     isEsp32 &&
     Object.keys(settings).some((key) => !esp32SettableKeys.has(key))

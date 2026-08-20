@@ -250,6 +250,22 @@ export function frameSupportsHardwareSettings(
   return frameSupportsSettingsFrom(hardwareFrameSettingsMinVersion, frameosVersion);
 }
 
+/**
+ * Whether the frame's enrollment hardware report says esp32 (any variant —
+ * "esp32-s3" etc). The chip's firmware speaks a narrower set_settings
+ * profile than the Pi runtime, so both the settings route and the rename
+ * route branch on this.
+ */
+export function frameHardwareIsEsp32(frame: {
+  hardware: unknown;
+}): boolean {
+  const platform = (frame.hardware as { platform?: unknown } | null)
+    ?.platform;
+  return (
+    typeof platform === "string" && platform.toLowerCase().startsWith("esp32")
+  );
+}
+
 /** The three-way answer above, for any floor. */
 export function frameSupportsSettingsFrom(
   minVersion: string,
