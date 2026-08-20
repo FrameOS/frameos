@@ -7,7 +7,7 @@ import {
   getAccountBaseUrl,
   getAccountUrl,
   getCloudBaseUrl,
-  getScenesBaseUrl,
+  getStoreUrl,
   getSessionCookieDomain,
 } from "../../../src/lib/env";
 import { claimTokenTtlMs } from "../../../src/lib/frames";
@@ -131,7 +131,7 @@ async function appConfigLines(): Promise<string[]> {
     // The fleet SPA is served from the account origin (this route).
     `cloud_frames_url: ${JSON.stringify(new URL("/frames", getAccountBaseUrl()).toString())},`,
     `cloud_logout_url: ${JSON.stringify(new URL("/api/auth/logout", getCloudBaseUrl()).toString())},`,
-    `cloud_scenes_url: ${JSON.stringify(new URL("/", getScenesBaseUrl()).toString())},`,
+    `cloud_scenes_url: ${JSON.stringify(getStoreUrl())},`,
     `cloud_origin: ${JSON.stringify(await enrollmentOrigin(accountOrigin))},`,
     `cloud_claim_token_ttl_hours: ${Math.round(claimTokenTtlMs / (60 * 60 * 1000))},`,
     // The workspace and the account pages are two different apps sharing one

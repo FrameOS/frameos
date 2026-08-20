@@ -73,7 +73,9 @@ export function getPublicOrigin(request: {
   url: string;
 }): string {
   const header =
-    request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "";
+    request.headers.get("x-forwarded-host") ??
+    request.headers.get("host") ??
+    "";
   // A proxy chain can leave a list; the first entry is the client's.
   const host = header.split(",")[0]?.trim().toLowerCase() ?? "";
   const ownOrigin = safeOrigin(request.url);
@@ -101,10 +103,6 @@ function safeOrigin(url: string): string | undefined {
   }
 }
 
-function pathMatchesAccountFrames(path: string) {
-  return path === "/account/frames" || path.startsWith("/account/frames/");
-}
-
 export function getAccountPath(path: string) {
   // Only local development runs every surface on one origin; there the
   // /account/* app routes are the real URLs and nothing shortens. In
@@ -117,12 +115,6 @@ export function getAccountPath(path: string) {
   if (path === "/account" || path === "/account/installs") {
     return "/backends";
   }
-  // "/frames" on the account host is the fleet SPA (app/frames/[[...path]]),
-  // so the "My frames" account page cannot shorten into it — it would serve
-  // the workspace instead of the frame list. It keeps its full path.
-  if (pathMatchesAccountFrames(path)) {
-    return path;
-  }
   if (path.startsWith("/account/")) {
     return path.slice("/account".length);
   }
@@ -131,6 +123,36 @@ export function getAccountPath(path: string) {
 
 export function getAccountUrl(path = "/account") {
   return new URL(getAccountPath(path), getAccountBaseUrl()).toString();
+}
+
+// The fleet workspace SPA (app/frames/[[...path]]) — the one and only frames
+// page; the old /account/frames table redirects here.
+export function getFramesUrl() {
+  return new URL("/frames", getAccountBaseUrl()).toString();
+}
+
+// The public store front. On its own host (production: scenes.frameos.net)
+// it is the root; when the store shares an origin with the cloud app (local
+// development) the root belongs to the signed-in workspace redirect, so the
+// store front answers at /store instead (app/store/page.tsx serves both).
+export function getStorePath() {
+  return new URL(getScenesBaseUrl()).origin ===
+    new URL(getCloudBaseUrl()).origin
+    ? "/store"
+    : "/";
+}
+
+export function getStoreUrl() {
+  return new URL(getStorePath(), getScenesBaseUrl()).toString();
+}
+
+// "My private scenes": the second tab of the scene store, on the scenes host
+// next to the public store front. It replaced /account/scenes (and its clean
+// alias /scenes on the cloud host), which now redirect here.
+export const myScenesPath = "/my-scenes";
+
+export function getMyScenesUrl() {
+  return new URL(myScenesPath, getScenesBaseUrl()).toString();
 }
 
 export function getSessionCookieDomain() {

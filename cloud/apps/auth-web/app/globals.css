@@ -1118,6 +1118,17 @@ a.tag-pill--active:hover {
   padding-bottom: 10px;
 }
 
+/* The scene store's tabs (StoreTabs.tsx) sit right under the header: pull
+   them up into the content padding, and let the section that follows start
+   at the tabs' own bottom margin. */
+.subnav--store {
+  margin-top: -14px;
+}
+
+.subnav--store + .section-block {
+  margin-top: 0;
+}
+
 .subnav__link {
   border-radius: 999px;
   padding: 6px 14px;

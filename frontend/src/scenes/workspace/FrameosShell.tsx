@@ -670,11 +670,14 @@ export function FrameosShell({
         ) : (
           <div
             className={clsx(
-              'mb-8 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center',
+              // One row at every width: the search shrinks, the buttons keep
+              // their size. Stacking it on narrow viewports left a tall empty
+              // band at the top of the mobile frames page.
+              'mb-8 flex flex-row items-center justify-between gap-3',
               topBarClassName
             )}
           >
-            <div className="relative w-full max-w-sm">
+            <div className="relative min-w-0 flex-1 @md:max-w-sm">
               <MagnifyingGlassIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <input
                 value={search}
@@ -683,7 +686,7 @@ export function FrameosShell({
                 className="frameos-input h-12 w-full rounded-2xl border border-white/90 bg-white/90 pl-12 pr-4 text-base text-slate-900 shadow-lg shadow-slate-300/35 outline-none transition placeholder:text-slate-400 focus:ring-2 focus:ring-blue-400"
               />
             </div>
-            <div className="flex items-center justify-end gap-3">
+            <div className="flex shrink-0 items-center justify-end gap-3">
               {toolbar}
               {aiButton}
               {onPrimaryAction ? (

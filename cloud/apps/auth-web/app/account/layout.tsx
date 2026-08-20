@@ -7,7 +7,6 @@ import {
   createDb,
   frames,
   linkedClients,
-  storeScenes,
 } from "@frameos-cloud/db";
 import { AccountNav } from "../../src/components/AccountNav";
 import { AppShell } from "../../src/components/AppShell";
@@ -39,9 +38,7 @@ export default async function AccountLayout({
 
   let isSuperadmin = false;
   let installCount = 0;
-  let sceneCount = 0;
   let backupCount = 0;
-  let frameCount = 0;
   let usage: AccountUsage | null = null;
 
   if (session.accountId) {
@@ -49,7 +46,7 @@ export default async function AccountLayout({
     const db = createDb();
     // Byte sums come from the same accountUsage() helper the quota
     // enforcement and /api/backends/grants use — one definition of "used".
-    const [[row], installs, scenes, backups, frameRows, usageSnapshot] =
+    const [[row], installs, backups, usageSnapshot] =
       await Promise.all([
         db
           .select({ isSuperadmin: accounts.isSuperadmin })
@@ -76,28 +73,13 @@ export default async function AccountLayout({
           ),
         db
           .select({ count: sql<number>`count(*)::int` })
-          .from(storeScenes)
-          .where(eq(storeScenes.accountId, accountId)),
-        db
-          .select({ count: sql<number>`count(*)::int` })
           .from(clientBackups)
           .where(eq(clientBackups.accountId, accountId)),
-        db
-          .select({ count: sql<number>`count(*)::int` })
-          .from(frames)
-          .where(
-            and(
-              eq(frames.accountId, accountId),
-              sql`${frames.status} <> 'revoked'`,
-            ),
-          ),
         accountUsage(db, accountId),
       ]);
     isSuperadmin = row?.isSuperadmin ?? false;
     installCount = installs[0]?.count ?? 0;
-    sceneCount = scenes[0]?.count ?? 0;
     backupCount = backups[0]?.count ?? 0;
-    frameCount = frameRows[0]?.count ?? 0;
     usage = usageSnapshot;
   }
 
@@ -123,16 +105,12 @@ export default async function AccountLayout({
       <AccountNav
         counts={{
           backups: backupCount,
-          frames: frameCount,
           installs: installCount,
-          scenes: sceneCount,
         }}
         hrefs={{
           activity: getAccountUrl("/account/activity"),
           backups: getAccountUrl("/account/backups"),
-          frames: getAccountUrl("/account/frames"),
           installs: getAccountUrl("/account/installs"),
-          scenes: getAccountUrl("/account/scenes"),
           security: getAccountUrl("/account/security"),
         }}
       />

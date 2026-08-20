@@ -9,13 +9,14 @@ import {
 } from "@frameos/cloud-frontend/src/routes";
 import { urls } from "../../../../../../frontend/src/urls";
 
-// The fleet table (app/account/frames/page.tsx) is a Next.js server component
-// linking INTO the SPA. It used to hand-build `/frames/${id}`, but the SPA
-// mounts at /frames AND registers its own /frames/:id route, so the real path
-// is /frames/frames/:id — every frame name in the table rendered the SPA's
-// error404. It now uses cloud-frontend/src/routes.ts; this test is what keeps
-// that helper honest, because the Next.js side cannot call `urls.frame()`
-// itself (it reads window.FRAMEOS_APP_CONFIG, absent during SSR).
+// Next.js server components link INTO the SPA (the account frame table used
+// to; the pending-enrollment and activity emails still do). Hand-building
+// `/frames/${id}` is wrong: the SPA mounts at /frames AND registers its own
+// /frames/:id route, so the real path is /frames/frames/:id — every frame
+// name in the old table rendered the SPA's error404. The Next.js side uses
+// cloud-frontend/src/routes.ts; this test is what keeps that helper honest,
+// because it cannot call `urls.frame()` itself (it reads
+// window.FRAMEOS_APP_CONFIG, absent during SSR).
 
 function withCloudSpaConfig<T>(run: () => T): T {
   (window as unknown as { FRAMEOS_APP_CONFIG?: unknown }).FRAMEOS_APP_CONFIG = {

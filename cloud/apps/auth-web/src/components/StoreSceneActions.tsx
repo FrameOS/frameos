@@ -5,6 +5,10 @@ import { usePathname, useRouter } from "next/navigation";
 import posthog from "posthog-js";
 import { useState } from "react";
 
+// env.ts's myScenesPath, repeated here so this client component does not pull
+// the server-side env module into the browser bundle.
+const myScenesPath = "/my-scenes";
+
 // Owner controls for one published scene on the account page: flip
 // visibility, delete. Server state is refreshed after each action.
 export function StoreSceneActions({
@@ -90,10 +94,10 @@ export function StoreSceneActions({
     const ok = await call({ method: "DELETE" }, { refresh: false });
     if (ok) {
       posthog.capture("scene_deleted", { scene_id: sceneId });
-      if (pathname === "/account/scenes" || pathname === "/scenes") {
+      if (pathname === myScenesPath) {
         router.refresh();
       } else {
-        router.replace("/account/scenes");
+        router.replace(myScenesPath);
       }
     }
   }
