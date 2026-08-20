@@ -10,9 +10,12 @@ import {
 } from "../lib/env";
 
 // Shell for the public store pages: same chrome as AppShell but usable
-// signed out — signed-in visitors get the same nav as the app shell
-// (Account / Admin / Sign out), everyone else gets Sign in.
-// `title` is the page's heading, shown in the top row next to the logo.
+// signed out. A signed-in visitor sees the cloud header exactly as the app
+// shell draws it — "FrameOS Cloud" linking to the workspace, then Frames /
+// Scenes / Account / (Admin) / Sign out. Signed out, the store stands on its
+// own: the wordmark reads "FrameOS Scenes" and links to the store root, and
+// the only action is Sign in.
+// `title` is the page's heading, shown in the top row after the wordmark.
 export function PublicShell({
   children,
   isSuperadmin = false,
@@ -43,18 +46,29 @@ export function PublicShell({
   return (
     <div className="shell">
       <header className="frameos-account-header">
-        <HeaderBrand href={scenesHomeUrl} title={title} />
+        {signedIn ? (
+          <HeaderBrand href={framesUrl} title={title} />
+        ) : (
+          <HeaderBrand
+            href={scenesHomeUrl}
+            name="FrameOS Scenes"
+            title={title}
+          />
+        )}
         <nav aria-label="Primary" className="frameos-account-header__nav">
-          <Link className="frameos-account-header__link" href={scenesHomeUrl}>
-            Scenes
-          </Link>
           {signedIn ? (
             <>
-              {/* Signed-in only, and ordered as in AppShell (Scenes, Frames,
-                  Account): a signed-out visitor has no frames, so the link
-                  would only bounce them through the login page. */}
+              {/* Ordered as in AppShell. Signed-out visitors get none of
+                  this: they have no frames, so the links would only bounce
+                  them through the login page. */}
               <Link className="frameos-account-header__link" href={framesUrl}>
                 Frames
+              </Link>
+              <Link
+                className="frameos-account-header__link"
+                href={scenesHomeUrl}
+              >
+                Scenes
               </Link>
               <Link className="frameos-account-header__link" href={accountUrl}>
                 Account
