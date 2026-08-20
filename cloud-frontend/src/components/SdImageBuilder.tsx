@@ -839,8 +839,8 @@ export function SdImageBuilder({
                 </label>
               ) : (
                 <p className="frameos-muted text-xs">
-                  The card keeps working for as long as you keep it. Every frame it adds still waits for your
-                  confirmation here, and your frame limit caps how many it can ever add.
+                  You can flash and boot this image as many times as you like, forever. Each new frame shows up in your
+                  account within your frame limit.
                 </p>
               )}
             </div>

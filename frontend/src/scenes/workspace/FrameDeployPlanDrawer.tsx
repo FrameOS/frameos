@@ -2542,19 +2542,82 @@ function CloudOtaDeployView({
 
   return (
     <>
+      {/* Order: the action the user came for (firmware) sits where the
+          "Over the air" button was, then scenes & settings, then logs. */}
       <section className="space-y-2">
         <DrawerHeading>
           <span className="inline-flex items-center gap-2">
             <BackToDeployButton onClick={onBack} />
-            <span>Over the air</span>
+            <span>Firmware</span>
           </span>
         </DrawerHeading>
         <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
+          {canUpdateFirmware ? (
+            <>
+              <div className="frame-tool-muted text-sm leading-5">
+                Queues an update notification for the frame (valid for 24 hours). When the frame picks it up, it
+                downloads the latest released image from the cloud, verifies the signature on the device itself,
+                installs it into the spare OTA slot and reboots. Progress shows up in Logs as <code>ota:cloud</code>{' '}
+                lines.
+              </div>
+              {upToDate ? (
+                <div className="frame-tool-muted text-xs leading-4">
+                  The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
+                </div>
+              ) : null}
+              <button
+                type="button"
+                title={
+                  firmwareDisabledReason ??
+                  (alsoPushScenes
+                    ? 'Queue a firmware update and resend this frame’s scenes & settings'
+                    : 'Queue a firmware update notification')
+                }
+                disabled={Boolean(firmwareDisabledReason)}
+                onClick={() => {
+                  if (alsoPushScenes && !scenesInSync) {
+                    // Scenes first: the OTA reboot redelivers a queued push
+                    // when the frame reconnects.
+                    saveAndDeployFrame()
+                  }
+                  updateFrameFirmware(frame.id)
+                }}
+                // Primary while the device is behind the published release —
+                // an available upgrade is the thing to do on this screen.
+                className={clsx(
+                  upToDate ? 'frameos-secondary-button' : 'frameos-primary-action',
+                  'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
+                )}
+              >
+                <CloudArrowDownIcon className="h-4 w-4" />
+                {/* Constant label: the checkbox below says whether scenes ride
+                    along, so a button that renamed itself to "Update
+                    everything" only made the two disagree about what it does. */}
+                Upgrade firmware
+              </button>
+              <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+              {alsoPushScenes && scenesInSync ? (
+                <div className="frame-tool-muted text-xs leading-4">
+                  Scenes &amp; settings are already in sync — nothing extra is sent.
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="frame-tool-muted text-sm leading-5">
+              {firmwareDisabledReason ?? 'Firmware updates are not available for this frame.'}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <CloudScenesPushCard frame={frame} onPushed={onPushed} />
+
+      <section className="space-y-2">
+        <DrawerHeading>Logs</DrawerHeading>
+        <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
           <div className="frame-tool-muted text-sm leading-5">
-            The frame keeps an outbound connection open to your cloud account — the cloud never connects in to it.
-            Everything you deploy here is saved to the account first, then delivered over that connection: immediately
-            while the frame is online, otherwise queued until it next reconnects. The frame confirms every push, which
-            is what the sync state above reflects.
+            Pushes are saved to your account first and delivered over the frame&apos;s own connection — at once while it
+            is online, otherwise when it next reconnects. The frame confirms each one.
           </div>
           <button
             type="button"
@@ -2566,64 +2629,6 @@ function CloudOtaDeployView({
           </button>
         </div>
       </section>
-
-      <CloudScenesPushCard frame={frame} onPushed={onPushed} />
-
-      {canUpdateFirmware ? (
-        <section className="space-y-2">
-          <DrawerHeading>Firmware</DrawerHeading>
-          <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
-            <div className="frame-tool-muted text-sm leading-5">
-              Queues an update notification for the frame (it stays valid for 24 hours). When the frame picks it up, it
-              downloads the latest released image from the cloud, verifies the signature on the device itself, installs
-              it into the spare OTA slot and reboots. Progress shows up in Logs as <code>ota:cloud</code> lines.
-            </div>
-            {upToDate ? (
-              <div className="frame-tool-muted text-xs leading-4">
-                The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
-              </div>
-            ) : null}
-            <Checkbox label="Also push scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
-            {alsoPushScenes && scenesInSync ? (
-              <div className="frame-tool-muted text-xs leading-4">
-                Scenes &amp; settings are already in sync — nothing extra is sent.
-              </div>
-            ) : null}
-            <button
-              type="button"
-              title={
-                firmwareDisabledReason ??
-                (alsoPushScenes
-                  ? 'Queue a firmware update and push this frame’s scenes & settings'
-                  : 'Queue a firmware update notification')
-              }
-              disabled={Boolean(firmwareDisabledReason)}
-              onClick={() => {
-                if (alsoPushScenes && !scenesInSync) {
-                  // Scenes first: the OTA reboot redelivers a queued push
-                  // when the frame reconnects.
-                  saveAndDeployFrame()
-                }
-                updateFrameFirmware(frame.id)
-              }}
-              // Primary while the device is behind the published release —
-              // an available upgrade is the thing to do on this screen, and a
-              // secondary button next to a primary "push scenes" one read as
-              // the lesser action even when the version row said otherwise.
-              className={clsx(
-                upToDate ? 'frameos-secondary-button' : 'frameos-primary-action',
-                'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40'
-              )}
-            >
-              <CloudArrowDownIcon className="h-4 w-4" />
-              {/* Constant label: the checkbox above says whether scenes ride
-                  along, so a button that renamed itself to "Update
-                  everything" only made the two disagree about what it does. */}
-              Upgrade firmware
-            </button>
-          </div>
-        </section>
-      ) : null}
     </>
   )
 }
@@ -2990,7 +2995,7 @@ function CloudPiUpdateCard({
             The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
           </div>
         ) : null}
-        <Checkbox label="Also push scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+        <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
         {alsoPushScenes && scenesInSync ? (
           <div className="frame-tool-muted text-xs leading-4">
             Scenes &amp; settings are already in sync — nothing extra is sent.
