@@ -16,6 +16,7 @@ import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWith
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { isHiddenOrJunkAssetPath } from '../../../../utils/hiddenFiles'
 import { consumeFontSyncStream, isFontSyncStream } from '../../../../utils/fontSyncStream'
+import { normalizeAssetPath, normalizeAssetsPath, withRenamedAsset, withoutDeletedAsset } from './assetPaths'
 
 export interface AssetsLogicProps {
   frameId: FrameId
@@ -214,35 +215,6 @@ function latestDiskStats(metrics: MetricsType[]): DiskStats | null {
   return null
 }
 
-function normalizeAssetsPath(assetsPath?: string): string {
-  let normalizedPath = (assetsPath || '/srv/assets').replace(/\/+$/, '') || '/srv/assets'
-  while (normalizedPath.startsWith('./')) {
-    normalizedPath = normalizedPath.slice(2)
-  }
-  return normalizedPath || '.'
-}
-
-function normalizeAssetPath(path: string, assetsPath?: string): string {
-  const rawAssetsPath = (assetsPath || '/srv/assets').replace(/\/+$/, '') || '/srv/assets'
-  const normalizedAssetsPath = normalizeAssetsPath(assetsPath)
-  if (!path) {
-    return normalizedAssetsPath
-  }
-  if (
-    path === rawAssetsPath ||
-    path.startsWith(`${rawAssetsPath}/`) ||
-    path === normalizedAssetsPath ||
-    path.startsWith(`${normalizedAssetsPath}/`)
-  ) {
-    return path
-  }
-  if (path.startsWith('/')) {
-    return path
-  }
-  const normalizedPath = path.replace(/^\.\/+/, '').replace(/^\/+/, '')
-  return normalizedPath ? `${normalizedAssetsPath}/${normalizedPath}` : normalizedAssetsPath
-}
-
 async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const text = await response.text()
@@ -287,9 +259,9 @@ export const assetsLogic = kea<assetsLogicType>([
     setStorageMounted: (storageMounted: boolean | null) => ({ storageMounted }),
     syncAssets: true,
     deleteAsset: (path: string) => ({ path }),
-    assetDeleted: (path: string) => ({ path }),
+    assetDeleted: (path: string, assetsPath?: string) => ({ path, assetsPath }),
     renameAsset: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
-    assetRenamed: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
+    assetRenamed: (oldPath: string, newPath: string, assetsPath?: string) => ({ oldPath, newPath, assetsPath }),
     createFolder: (path: string) => ({ path }),
     toggleShowSystemFolders: true,
     toggleShowHiddenFiles: true,
@@ -493,16 +465,11 @@ export const assetsLogic = kea<assetsLogicType>([
       },
       uploadFailure: (state, { path }) =>
         state.map((asset) => (asset.path === path ? { ...asset, size: -2, mtime: -2 } : asset)),
-      assetDeleted: (state, { path }) => state.filter((a) => a.path !== path && !a.path.startsWith(`${path}/`)),
-      assetRenamed: (state, { oldPath, newPath }) => {
-        return state.map((a) =>
-          a.path === oldPath
-            ? { ...a, path: newPath }
-            : a.path.startsWith(`${oldPath}/`)
-            ? { ...a, path: `${newPath}${a.path.slice(oldPath.length)}` }
-            : a
-        )
-      },
+      // The listing's spelling depends on who produced it: the backend lists
+      // absolute paths, the cloud hub caches the device's relative ones. Match
+      // by canonical key so a delete/rename lands on the row either way.
+      assetDeleted: (state, { path, assetsPath }) => withoutDeletedAsset(state, path, assetsPath),
+      assetRenamed: (state, { oldPath, newPath, assetsPath }) => withRenamedAsset(state, oldPath, newPath, assetsPath),
     },
   }),
   selectors({
@@ -744,7 +711,7 @@ export const assetsLogic = kea<assetsLogicType>([
         if (!response.ok) {
           throw new Error('Failed to delete asset')
         }
-        actions.assetDeleted(normalizeAssetPath(path, values.frame.assets_path))
+        actions.assetDeleted(path, values.frame.assets_path)
       } catch (error) {
         console.error(error)
       }
@@ -758,10 +725,7 @@ export const assetsLogic = kea<assetsLogicType>([
         if (!response.ok) {
           throw new Error('Failed to rename asset')
         }
-        actions.assetRenamed(
-          normalizeAssetPath(oldPath, values.frame.assets_path),
-          normalizeAssetPath(newPath, values.frame.assets_path)
-        )
+        actions.assetRenamed(oldPath, newPath, values.frame.assets_path)
       } catch (error) {
         console.error(error)
       }
