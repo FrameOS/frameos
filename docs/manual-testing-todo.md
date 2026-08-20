@@ -27,9 +27,15 @@ flow (changes first-boot behavior for every new user).
   now stash the pending action and finish it on return; a Cancel on the
   reauth page leaves the frame untouched. Re-check once deployed: after the
   proof the frame should show as revoked without a second click.
-- [ ] **Two-tier re-auth windows (#382):** a ~20-min-old session can still
-  **approve** a pending frame but is refused on **revoke**; past 2 h both
-  prompt for re-auth.
+- [x] **Two-tier re-auth windows (#382):** verified from code 2026-08-20
+  rather than the clock: `recent-auth.ts` has 15 min (`requireRecentAuth`
+  default → `/api/frames/{id}/revoke`, `/api/device/revoke`) and 2 h
+  (`recentApprovalMaxAgeSeconds` → `/api/device/authorize` + the `/device`
+  page pre-check); both branches are pinned by
+  `reauth.integration.test.ts` ("approving rides the wider window; revoking
+  does not", session aged 20 min). Note: `/api/frames/{id}/confirm`
+  (pending → active frame) has no re-auth gate at all by design — the
+  2 h window is for device-link/scope approvals, not frame confirm.
 
 ## 2. Pi / Buildroot bench — cloud-managed frames
 
