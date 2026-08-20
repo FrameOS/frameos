@@ -105,6 +105,29 @@ SUPPORTED_BUILDROOT_PLATFORM = DEFAULT_BUILDROOT_PLATFORM
 BUILDROOT_HOST_CXXFLAGS = "-O2 -pipe -std=gnu++17"
 BUILDROOT_HOST_CFLAGS = "-O2 -pipe"
 BUILDROOT_JLEVEL = int(os.environ.get("FRAMEOS_BUILDROOT_JLEVEL", "0"))
+# Top-level parallel build (Buildroot's BR2_PER_PACKAGE_DIRECTORIES + a
+# top-level `make -jN`). Without it Buildroot builds packages strictly one
+# after another and BR2_JLEVEL only fans out *inside* a package, so the many
+# single-threaded configure/install phases leave a 32-core runner at load 1.
+# Number = top-level job count; 0/unset = off. Opt-in because switching it on
+# an existing /build/output (per-package host/staging layout changes) forces a
+# full rebuild; CI always starts from a fresh output directory.
+BUILDROOT_TOP_LEVEL_JOBS = int(os.environ.get("FRAMEOS_BUILDROOT_TOP_LEVEL_JOBS", "0"))
+
+
+def _effective_jlevel() -> int:
+    """BR2_JLEVEL to write into the config.
+
+    With top-level parallelism the effective fan-out is top_level_jobs ×
+    BR2_JLEVEL, and Buildroot's default of "0 = nproc+1" per package would
+    oversubscribe a 32-core box 8×. Cap per-package parallelism so the product
+    lands around 2× the core count — compile phases still saturate the box,
+    configure-heavy phases overlap across packages.
+    """
+    if BUILDROOT_JLEVEL or BUILDROOT_TOP_LEVEL_JOBS <= 0:
+        return BUILDROOT_JLEVEL
+    cores = os.cpu_count() or 4
+    return max(2, (cores * 2) // BUILDROOT_TOP_LEVEL_JOBS)
 BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "6"
 # 20: the Pi 5 gained dtoverlay=vc4-kms-v3d, which _frame_boot_config_lines
 # merges into /boot/config.txt during customization — cards cached from before
@@ -1918,7 +1941,8 @@ class BuildrootImageBuilder:
                     "BR2_TARGET_GENERIC_HOSTNAME=\"frameos\"",
                     "BR2_TARGET_GENERIC_ISSUE=\"Welcome to FrameOS\"",
                     "BR2_TARGET_ROOTFS_EXT2_SIZE=\"768M\"",
-                    f"BR2_JLEVEL={BUILDROOT_JLEVEL}",
+                    f"BR2_JLEVEL={_effective_jlevel()}",
+                    *(["BR2_PER_PACKAGE_DIRECTORIES=y"] if BUILDROOT_TOP_LEVEL_JOBS > 0 else []),
                     'BR2_DL_DIR="/cache/dl"',
                     'BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="/work/linux-fragment.config"',
                     f'BR2_LINUX_KERNEL_CUSTOM_LOGO_PATH="{BUILDROOT_BOOT_LOGO_WORK_PATH}"',
@@ -2108,6 +2132,7 @@ class BuildrootImageBuilder:
 
     @staticmethod
     def _write_build_script(path: Path, output_filename: str, platform: BuildrootPlatform) -> None:
+        top_level_make_flags = f"-j{BUILDROOT_TOP_LEVEL_JOBS}" if BUILDROOT_TOP_LEVEL_JOBS > 0 else ""
         tarball = f"buildroot-{BUILDROOT_VERSION}.tar.gz"
         path.write_text(
             f"""#!/usr/bin/env bash
@@ -2255,7 +2280,7 @@ FRAMEOS_CONFIG_CHECK_PY
 phase_end
 
 phase_start buildroot_make
-make -C /build/buildroot O=/build/output
+make -C /build/buildroot O=/build/output {top_level_make_flags}
 phase_end
 
 phase_start summarize_package_timings

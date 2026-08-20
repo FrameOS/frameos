@@ -39,9 +39,14 @@ on:
         default: false
         type: boolean
       buildroot_jlevel:
-        description: "Buildroot BR2_JLEVEL; 0 lets Buildroot choose"
+        description: "Buildroot BR2_JLEVEL (per-package -j); 0 = derive from top-level jobs / nproc"
         required: true
         default: "0"
+        type: string
+      buildroot_top_level_jobs:
+        description: "Top-level parallel package builds (BR2_PER_PACKAGE_DIRECTORIES + make -jN); 0 = serial packages"
+        required: true
+        default: "8"
         type: string
       buildroot_docker_image:
         description: "Optional FRAMEOS_BUILDROOT_DOCKER_IMAGE override"
@@ -158,6 +163,11 @@ jobs:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       FRAMEOS_BUILDROOT_JLEVEL: ${{ inputs.buildroot_jlevel }}
+      # Packages build concurrently (the serial default left the 32-core slot
+      # at load ~1 through every configure phase); see BUILDROOT_TOP_LEVEL_JOBS
+      # in backend/app/tasks/buildroot_image.py for the JLEVEL cap that keeps
+      # the product of the two within ~2× the core count.
+      FRAMEOS_BUILDROOT_TOP_LEVEL_JOBS: ${{ inputs.buildroot_top_level_jobs }}
       # FRAMEOS_BUILDROOT_CACHE_DIR is set by the "Pick the persistent cache
       # dir" step below (the shared /mnt/cache mount on self-hosted runners).
       # Pinned by resolve-matrix, not recomputed here — see the comment there.
@@ -215,6 +225,10 @@ jobs:
           fi
           if ! [[ "${FRAMEOS_BUILDROOT_JLEVEL}" =~ ^[0-9]+$ ]]; then
             echo "buildroot_jlevel must be an integer."
+            exit 1
+          fi
+          if ! [[ "${FRAMEOS_BUILDROOT_TOP_LEVEL_JOBS}" =~ ^[0-9]+$ ]]; then
+            echo "buildroot_top_level_jobs must be an integer."
             exit 1
           fi
           if [ -n "${BUILDROOT_DOCKER_IMAGE_OVERRIDE}" ]; then

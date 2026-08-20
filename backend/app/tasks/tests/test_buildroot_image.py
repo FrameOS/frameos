@@ -603,6 +603,42 @@ def test_buildroot_config_check_ignores_host_dependent_toolchain_symbols(tmp_pat
     assert result.returncode == 0, result.stderr
 
 
+def test_buildroot_serial_package_build_by_default(tmp_path):
+    config_path = tmp_path / "frameos-buildroot.config"
+    script_path = tmp_path / "buildroot-build.sh"
+
+    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_32)
+    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_32)
+
+    assert "BR2_PER_PACKAGE_DIRECTORIES" not in config_path.read_text(encoding="utf-8")
+    assert "make -C /build/buildroot O=/build/output \n" in script_path.read_text(encoding="utf-8")
+
+
+def test_buildroot_top_level_parallel_build_caps_per_package_jlevel(tmp_path, monkeypatch):
+    # Top-level -j8 on a 32-core host: per-package JLEVEL drops to 8 so the
+    # product stays at ~2x the core count instead of 8 x 33.
+    monkeypatch.setattr("app.tasks.buildroot_image.BUILDROOT_TOP_LEVEL_JOBS", 8)
+    monkeypatch.setattr("app.tasks.buildroot_image.os.cpu_count", lambda: 32)
+    config_path = tmp_path / "frameos-buildroot.config"
+    script_path = tmp_path / "buildroot-build.sh"
+
+    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_32)
+    BuildrootImageBuilder._write_build_script(script_path, "frameos-test.img", RASPBERRY_PI_32)
+    config = config_path.read_text(encoding="utf-8")
+    script = script_path.read_text(encoding="utf-8")
+
+    assert "BR2_PER_PACKAGE_DIRECTORIES=y" in config
+    assert "BR2_JLEVEL=8" in config
+    assert "make -C /build/buildroot O=/build/output -j8\n" in script
+    # Config steps stay serial; only the build itself fans out.
+    assert "O=/build/output olddefconfig\n" in script
+
+    # An explicit JLEVEL wins over the derived cap.
+    monkeypatch.setattr("app.tasks.buildroot_image.BUILDROOT_JLEVEL", 4)
+    BuildrootImageBuilder._write_buildroot_config(config_path, RASPBERRY_PI_32)
+    assert "BR2_JLEVEL=4" in config_path.read_text(encoding="utf-8")
+
+
 def test_buildroot_build_script_verifies_config_after_olddefconfig(tmp_path):
     script_path = tmp_path / "buildroot-build.sh"
 
