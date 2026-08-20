@@ -368,11 +368,13 @@ jobs:
 
       # Steps run as root inside the container: no sudo. git is for the
       # snapshot diff steps below; checkout itself falls back to the REST API
-      # without it, but `git diff` does not.
+      # without it, but `git diff` does not — and it refuses a workspace owned
+      # by another uid (the runner's) unless it is marked safe.
       - name: Install redis
         run: |
           apt-get -y update
           apt-get install -y --no-install-recommends redis-server git
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           redis-server --daemonize yes
 
       - name: Cache pip packages
