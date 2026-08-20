@@ -414,6 +414,7 @@ jobs:
         run: pnpm --dir frameos/frontend run build
 
       - name: Run frontend visual regression tests
+        shell: bash
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
         env:
           DEBUG: '1'
@@ -425,6 +426,7 @@ jobs:
           pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --shard=${{ matrix.shard }}/4
 
       - name: Update frontend visual snapshots
+        shell: bash
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         env:
           DEBUG: '1'
