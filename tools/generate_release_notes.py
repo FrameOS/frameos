@@ -33,6 +33,15 @@ DIFF_PREFIXES = (
     "tools/",
 )
 
+# The hosted FrameOS Cloud service (cloud.frameos.net). Nobody downloads it
+# with a release: its changes are already live by the time the tag exists, so
+# they are summarized as one count for the model instead of file by file, and
+# the prompt folds them into a single closing section.
+CLOUD_SERVICE_PREFIXES = (
+    "cloud/",
+    "cloud-frontend/",
+)
+
 DIFF_FILES = {
     ".dockerignore",
     "Dockerfile",
@@ -193,6 +202,28 @@ def changed_paths(name_status: str) -> List[str]:
     return paths
 
 
+def is_cloud_service_path(path: str) -> bool:
+    return path.startswith(CLOUD_SERVICE_PREFIXES)
+
+
+def split_cloud_service_lines(name_status: str) -> tuple[str, int]:
+    """Drop cloud-service-only file rows from a --name-status listing.
+
+    Returns the remaining listing and how many rows were dropped, so the model
+    still learns that cloud work happened without reading it path by path.
+    """
+    kept: List[str] = []
+    dropped = 0
+    for line in name_status.splitlines():
+        parts = line.split("\t")
+        path = parts[-1] if len(parts) >= 2 else line
+        if is_cloud_service_path(path):
+            dropped += 1
+            continue
+        kept.append(line)
+    return "\n".join(kept), dropped
+
+
 def prefix_match(path: str, pattern: str) -> bool:
     if "*" not in pattern:
         return path.startswith(pattern)
@@ -270,8 +301,15 @@ def build_release_context(args: argparse.Namespace, head: str, base_ref: str | N
         diff_stat = "No file-level diff stat found."
 
     name_status = run_git(["diff", "--name-status", "--find-renames", *range_args], check=False)
+    name_status, cloud_file_count = split_cloud_service_lines(name_status)
     if not name_status:
         name_status = "No changed files found."
+    cloud_summary = (
+        f"{cloud_file_count} file(s) under {', '.join(CLOUD_SERVICE_PREFIXES)} also changed "
+        "(the hosted FrameOS Cloud service; not part of this download)."
+        if cloud_file_count
+        else "No hosted FrameOS Cloud service files changed."
+    )
 
     patches = selected_patches(
         base_ref,
@@ -288,8 +326,10 @@ def build_release_context(args: argparse.Namespace, head: str, base_ref: str | N
             f"Release commit: {head}",
             "Commit subjects:",
             commit_log,
-            "Changed files:",
+            "Changed files (device, backend, frontend, firmware):",
             name_status,
+            "Hosted cloud service:",
+            cloud_summary,
             "Diff stat:",
             diff_stat,
             "Selected source diffs:",
@@ -301,21 +341,36 @@ def build_release_context(args: argparse.Namespace, head: str, base_ref: str | N
 def release_notes_prompt() -> str:
     return """You write concise, user-facing GitHub release notes for FrameOS.
 
+The reader owns a frame (a Raspberry Pi, an ESP32 board, or a self-hosted FrameOS backend) and is deciding
+whether to update. Write about what they will notice on their frame, in the frame admin UI, in the self-hosted
+backend, in the Home Assistant add-on, or when flashing a new SD card / firmware.
+
 Use the provided commit subjects and actual source diffs. Prefer facts that are clearly supported by code changes.
 
-Output Markdown only with exactly these sections:
+Output Markdown only with exactly these sections, in this order:
 
 ## New features
 ## Bug fixes
 ## Maintenance
+## FrameOS Cloud
 
 Rules:
-- Include both the New features and Bug fixes sections even when one has no notable entries.
-- Use bullets under each section.
-- Keep each bullet specific and written for FrameOS users/operators.
-- Mention UI, backend/API, runtime/device, deployment, and Home Assistant changes when relevant.
+- Include the New features and Bug fixes sections even when one has no notable entries.
+- Use bullets under each section. Lead each section with the changes most visible on a frame: rendering, scenes
+  and apps, display drivers and panels, networking and setup, firmware (ESP32, SD images), then the admin UI,
+  the self-hosted backend/API, deployment, and Home Assistant.
+- Keep each bullet specific and written for FrameOS users/operators. No internal module names unless the user
+  would search for them.
 - Put tests, build, refactors, dependency bumps, and release automation in Maintenance unless they are directly
   user-facing.
+- FrameOS Cloud (cloud.frameos.net) is a hosted service: its changes are already live and are not part of this
+  download. Do NOT list them under New features or Bug fixes. Under "## FrameOS Cloud" write at most three short
+  bullets, and only for things a frame owner who links their frame to the cloud would notice (what the frame
+  does differently, new things they can do from the cloud). Skip admin pages, internal tooling, ops, billing,
+  and anything that only the people running the service would see. If nothing qualifies, write one bullet:
+  "No user-visible cloud changes in this release."
+- Changes on the device side that exist to support the cloud (enrollment, the management link, cloud-managed
+  settings, OTA) are device changes: describe them by what the frame does, in New features / Bug fixes.
 - Do not mention versions.json, the OpenAI API, release note generation, or the prompt.
 - If a section has no notable entries, write one bullet saying that no notable changes were found for that category.
 """
