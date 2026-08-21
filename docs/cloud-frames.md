@@ -750,6 +750,36 @@ until its expiry, then the portal shows a "get a new code" hint. Downloads
 with embedded WiFi credentials must be short-lived links and labeled as
 containing secrets.
 
+### What the panel shows before a scene arrives
+
+Every board draws the same **FrameOS status screen**
+(`frameos/src/frameos/utils/status_screen.nim`): the mark and wordmark, one
+status line ("Checking network…", "Connected to FrameOS Cloud. Add a scene
+from the workspace to get started."), then label/value rows — name, device
+and resolution, network, who manages the frame, the frame URL, remote
+control — and the version in the corner. White on black for HDMI/LCD, black
+on white for e-ink.
+
+- **Pi, HDMI (`framebuffer`)**: the driver is brought up *before* the network
+  check (it is plain `/dev/fb0`, nothing that can wedge the board — the other
+  drivers keep their deliberate late init) and the boot steps are drawn as
+  they happen: "Starting up…", "Checking network… attempt N, T s", "Network
+  connected. Loading scenes…" / "No network. Starting the setup hotspot…".
+- **Pi, no scenes**: the `system/index` scene is this screen with the live
+  facts. It re-renders the moment the cloud link state changes (enrollment
+  completing, a disconnect) instead of at its 5-minute interval — only the
+  `system/*` scenes do; a photo scene on e-ink is never refreshed because the
+  provider reconnected.
+- **ESP32 with the Nim runtime, no scenes**: the built-in fallback scene
+  (`frameos/src/embedded/embedded_scene.nim`) is the same screen;
+  `fos_client.c` pushes name/panel/IP/cloud state/version into the runtime
+  (`frameos_nim_set_status_info`) before a pass that has no scene to draw.
+  The screen is static on purpose (no render counter), so the packed-image
+  hash skips the e-ink refresh when nothing changed.
+- **ESP32 thin client (C3, no Nim)**: `fos_status_screen.c` draws the portal
+  screen with the same header — the mark is a 24×28 1-bit bitmap generated
+  by `frameos/tools/gen_logo_bitmap.nim` into `fos_logo_bitmap.h`.
+
 ### Install script (existing OS)
 
 For a device that already runs a supported Linux (Raspberry Pi OS on any Pi,

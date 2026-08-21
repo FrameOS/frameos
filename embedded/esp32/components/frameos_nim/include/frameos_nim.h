@@ -80,6 +80,11 @@ void frameos_nim_set_fusion(int enabled);
  * (contain/cover/stretch/center; console `set scaling_mode`, settings sync,
  * cloud set_settings). Applied live — no restart. */
 void frameos_nim_set_scaling_mode(const char *mode);
+/* Facts for the built-in status screen (drawn when no scene is loaded):
+ * a JSON object with name, panel, ip, portal, portal_ssid, portal_ip,
+ * cloud_url, cloud_state, cloud_connected, backend_url, version. Push it
+ * before a render pass that may draw that screen; stored, not rendered. */
+void frameos_nim_set_status_info(const char *info_json);
 double frameos_nim_scene_interval(void);
 /* Sleep override from the scene's last render (logic/nextSleepDuration);
  * negative = no override. Consult only right after a successful render. */

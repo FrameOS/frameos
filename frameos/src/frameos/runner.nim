@@ -12,6 +12,7 @@ import frameos/device_setup
 import frameos/driver_render_hint
 import frameos/local_access
 import frameos/cloud/device_flow
+import frameos/cloud/link_state
 import frameos/logger
 import frameos/metrics
 import frameos/types
@@ -473,9 +474,19 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       var nextDriverRetryAt =
         if driverRetryImage.isNil: none(MonoTime)
         else: some(getMonoTime() + initDuration(milliseconds = int(driverRetrySeconds * 1000)))
+      # The system screens (system/index and friends) print the cloud link
+      # status; a frame that just enrolled used to say "standalone" for the
+      # rest of the 5-minute interval. Only those scenes wake on a link
+      # change: a photo scene on e-ink must not refresh because the
+      # provider reconnected.
+      let watchCloudLink = currentScene.id.string.startsWith("system/")
+      let cloudLinkGenerationAtSleep = currentCloudLinkGeneration()
       var remainingSleepMs = sleepDuration
       while remainingSleepMs > 0:
         if self.triggerRenderNext:
+          break
+        if watchCloudLink and currentCloudLinkGeneration() != cloudLinkGenerationAtSleep:
+          self.logger.log(%*{"event": "render:cloudLinkChanged", "sceneId": currentScene.id.string})
           break
         let now = getMonoTime()
         if nextDriverIdleTurnOffAt.isSome and now >= nextDriverIdleTurnOffAt.get():

@@ -1,5 +1,6 @@
 #include "fos_status_screen.h"
 #include "fos_framebuffer.h"
+#include "fos_logo_bitmap.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,6 +87,11 @@ static const uint8_t LOWER_LETTERS[26][7] = {
 static const uint8_t GLYPH_DASH[7] = {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00};
 static const uint8_t GLYPH_DOT[7] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C};
 static const uint8_t GLYPH_COLON[7] = {0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00};
+static const uint8_t GLYPH_SLASH[7] = {0x01, 0x02, 0x02, 0x04, 0x08, 0x08, 0x10};
+static const uint8_t GLYPH_LPAREN[7] = {0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02};
+static const uint8_t GLYPH_RPAREN[7] = {0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08};
+static const uint8_t GLYPH_COMMA[7] = {0x00, 0x00, 0x00, 0x00, 0x0C, 0x04, 0x08};
+static const uint8_t GLYPH_QUOTE[7] = {0x0A, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 static const uint8_t *glyph_for(char raw)
 {
@@ -96,6 +102,11 @@ static const uint8_t *glyph_for(char raw)
     if (c == '-') return GLYPH_DASH;
     if (c == '.') return GLYPH_DOT;
     if (c == ':') return GLYPH_COLON;
+    if (c == '/') return GLYPH_SLASH;
+    if (c == '(') return GLYPH_LPAREN;
+    if (c == ')') return GLYPH_RPAREN;
+    if (c == ',') return GLYPH_COMMA;
+    if (c == '"') return GLYPH_QUOTE;
     return NULL;
 }
 
@@ -190,14 +201,51 @@ static void draw_text(uint8_t *buf, int width, int height, fos_pixel_format_t fo
     }
 }
 
-static void draw_centered(uint8_t *buf, int width, int height, fos_pixel_format_t format,
-                          const char *text, int y, int scale)
+/* The largest scale (at most `scale`) at which `text` fits in `avail` px. */
+static int fit_scale(const char *text, int scale, int avail)
 {
-    while (scale > 1 && text_width(text, scale) > width - 24) {
+    while (scale > 1 && text_width(text, scale) > avail) {
         scale--;
     }
-    int x = (width - text_width(text, scale)) / 2;
-    draw_text(buf, width, height, format, text, x, y, scale);
+    return scale;
+}
+
+/* The FrameOS mark, `scale` panel pixels per bitmap pixel. */
+static void draw_mark(uint8_t *buf, int width, int height, fos_pixel_format_t format,
+                      int x, int y, int scale)
+{
+    for (int row = 0; row < FOS_LOGO_H; row++) {
+        uint32_t bits = FOS_LOGO_ROWS[row];
+        for (int col = 0; col < FOS_LOGO_W; col++) {
+            if (bits & (1u << (FOS_LOGO_W - 1 - col))) {
+                draw_rect(buf, width, height, format,
+                          x + col * scale, y + row * scale, scale, scale);
+            }
+        }
+    }
+}
+
+/* The header every FrameOS status screen shares (frameos/utils/status_screen.nim
+ * draws the same thing with pixie): the mark, "FrameOS" beside it, and one
+ * status line under the wordmark. Returns the y just below the header. */
+static int draw_header(uint8_t *buf, int width, int height, fos_pixel_format_t format,
+                       int x, int y, int scale, const char *status)
+{
+    int title_scale = scale + 1;
+    int title_h = 7 * title_scale;
+    int status_h = 7 * scale;
+    int text_h = title_h + scale * 2 + status_h;
+    int mark_scale = text_h >= FOS_LOGO_H * 2 ? 2 : 1;
+    int mark_h = FOS_LOGO_H * mark_scale;
+    int header_h = mark_h > text_h ? mark_h : text_h;
+
+    draw_mark(buf, width, height, format, x, y + (header_h - mark_h) / 2, mark_scale);
+    int text_x = x + FOS_LOGO_W * mark_scale + scale * 4;
+    int text_y = y + (header_h - text_h) / 2;
+    draw_text(buf, width, height, format, "FrameOS", text_x, text_y, title_scale);
+    draw_text(buf, width, height, format, status, text_x, text_y + title_h + scale * 2,
+              fit_scale(status, scale, width - text_x - x));
+    return y + header_h;
 }
 
 esp_err_t fos_status_screen_show_portal(const char *ssid, const char *ip)
@@ -216,28 +264,25 @@ esp_err_t fos_status_screen_show_portal(const char *ssid, const char *ip)
     memset(buf, white_fill(format), len);
 
     int scale = width >= 700 && height >= 400 ? 4 : width >= 400 ? 3 : 2;
-    int title_scale = scale + 1;
-    int ssid_scale = scale + 1;
-    int title_h = 7 * title_scale;
-    int body_h = 7 * scale;
-    int ssid_h = 7 * ssid_scale;
+    int margin = width / 16 < 12 ? 12 : width / 16;
     int gap = scale * 4;
-    int total_h = title_h + gap * 2 + body_h * 2 + ssid_h;
-    int y = (height - total_h) / 2;
-    if (y < 8) y = 8;
 
-    char ssid_line[40];
-    char ip_line[48];
-    snprintf(ssid_line, sizeof(ssid_line), "%s", ssid && ssid[0] ? ssid : "FrameOS");
-    snprintf(ip_line, sizeof(ip_line), "OPEN %s", ip && ip[0] ? ip : "192.168.4.1");
+    char ssid_line[48];
+    char ip_line[64];
+    snprintf(ssid_line, sizeof(ssid_line), "Wi-Fi: %s", ssid && ssid[0] ? ssid : "FrameOS");
+    snprintf(ip_line, sizeof(ip_line), "then open http://%s/", ip && ip[0] ? ip : "192.168.4.1");
 
-    draw_centered(buf, width, height, format, "FRAMEOS SETUP", y, title_scale);
-    y += title_h + gap;
-    draw_centered(buf, width, height, format, "CONNECT TO", y, scale);
-    y += body_h + gap / 2;
-    draw_centered(buf, width, height, format, ssid_line, y, ssid_scale);
-    y += ssid_h + gap;
-    draw_centered(buf, width, height, format, ip_line, y, scale);
+    int avail = width - 2 * margin;
+    const char *hint = "Join this network from your phone or laptop";
+    int y = draw_header(buf, width, height, format, margin, margin, scale, "Setup: not on a network yet");
+    y += gap * 2;
+    int hint_scale = fit_scale(hint, scale, avail);
+    draw_text(buf, width, height, format, hint, margin, y, hint_scale);
+    y += 7 * hint_scale + gap;
+    int ssid_scale = fit_scale(ssid_line, scale + 1, avail);
+    draw_text(buf, width, height, format, ssid_line, margin, y, ssid_scale);
+    y += 7 * ssid_scale + gap;
+    draw_text(buf, width, height, format, ip_line, margin, y, fit_scale(ip_line, scale, avail));
 
     esp_err_t err = fos_display_blit(buf, len);
     fos_framebuffer_release(buf);

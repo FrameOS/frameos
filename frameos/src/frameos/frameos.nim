@@ -1,4 +1,4 @@
-import json, asyncdispatch, pixie, strutils, options
+import json, asyncdispatch, pixie, strutils, strformat, options
 import std/oserrors
 import drivers/drivers as drivers
 import frameos/apps
@@ -19,6 +19,8 @@ import frameos/tls_proxy
 import frameos/setup_proxy
 import frameos/boot_guard
 import frameos/utils/image
+import frameos/utils/status_screen
+import frameos/version
 import frameos/watchdog
 import lib/tz
 when not defined(windows):
@@ -120,6 +122,66 @@ proc describeFatalStartupError*(err: ref CatchableError): FatalStartupError =
           showStackTrace: false,
         )
 
+# --- Boot screen -------------------------------------------------------------
+#
+# An HDMI frame used to sit on a black panel from power-on until the first
+# scene rendered — through the whole network check, which can be 90 s on a
+# bad router. The framebuffer driver is plain /dev/fb0 writes with nothing
+# that can wedge the board (no SPI overlay, no GPIO claims), so for that one
+# device the driver comes up first and the boot steps are drawn on the panel
+# as they happen. Every other display keeps the deliberate late init below.
+
+const bootScreenDevices = ["framebuffer"]
+var driversInitialized = false
+
+proc bootScreenSupported*(frameConfig: FrameConfig): bool =
+  frameConfig.device in bootScreenDevices
+
+proc initDriversOnce(self: FrameOS) =
+  if driversInitialized:
+    return
+  driversInitialized = true
+  drivers.init(self)
+
+proc bootScreen*(frameConfig: FrameConfig, status: string): StatusScreen =
+  ## The boot variant of the shared status screen: the facts known before
+  ## the network is up, and what the frame is doing right now.
+  let deviceName = if frameConfig.name.len > 0: frameConfig.name else: "Unnamed frame"
+  let deviceType = if frameConfig.device.len > 0: frameConfig.device else: "unknown device"
+  let version = publishedFrameOSVersion(compiledFrameOSVersion())
+  result = StatusScreen(
+    status: status,
+    rows: @[
+      ("Name", deviceName),
+      ("Device", &"{deviceType} · {frameConfig.width}×{frameConfig.height}"),
+      ("Time zone", frameConfig.timeZone),
+    ],
+    footer: if version.len == 0 or version == "unknown": "FrameOS" else: "FrameOS v" & version,
+    dark: true,
+  )
+
+proc renderBootScreen*(self: FrameOS, status: string) =
+  ## Draws `status` on the panel now. Best effort: a failure here is logged
+  ## and boot carries on — the screen is a courtesy, not a step.
+  if not bootScreenSupported(self.frameConfig):
+    return
+  try:
+    self.initDriversOnce()
+    let config = self.frameConfig
+    let image = newImage(config.renderWidth(), config.renderHeight())
+    drawStatusScreen(image, bootScreen(config, status))
+    case config.flip:
+    of "horizontal": image.flipHorizontal()
+    of "vertical": image.flipVertical()
+    of "both":
+      image.flipHorizontal()
+      image.flipVertical()
+    else: discard
+    drivers.render(image.rotateDegrees(config.rotate))
+    self.logger.log(%*{"event": "boot:screen", "status": status})
+  except CatchableError as e:
+    self.logger.log(%*{"event": "boot:screen:error", "status": status, "error": e.msg})
+
 proc newFrameOS*(): FrameOS =
   var frameConfig = loadConfig()
   initTimeZone()
@@ -183,6 +245,12 @@ proc start*(self: FrameOS) {.async.} =
     message["reboot"] = rebootInfo
   self.logger.log(message)
   netportal.setLogger(self.logger)
+  self.renderBootScreen("Starting up…")
+  if bootScreenSupported(self.frameConfig):
+    let frameOS = self
+    netportal.networkCheckProgressHook = proc(status: string) {.gcsafe.} =
+      {.gcsafe.}:
+        frameOS.renderBootScreen(status)
   # Decide (and log) NetworkManager vs wpa_supplicant before anything touches
   # the radio, and let the supplicant backend rejoin its saved network.
   netportal.ensureNetworkBackendReady(self)
@@ -193,6 +261,13 @@ proc start*(self: FrameOS) {.async.} =
   let hotspotBootOnly = self.frameConfig.network.wifiHotspot == "bootOnly"
   if self.frameConfig.network.networkCheck or hotspotBootOnly:
     let connected = checkNetwork(self)
+    netportal.networkCheckProgressHook = nil
+    if connected:
+      self.renderBootScreen("Network connected. Loading scenes…")
+    elif hotspotBootOnly:
+      self.renderBootScreen("No network. Starting the setup hotspot…")
+    else:
+      self.renderBootScreen("No network yet. Loading scenes…")
     if hotspotBootOnly:
       if connected:
         netportal.stopAp(self)
@@ -214,8 +289,9 @@ proc start*(self: FrameOS) {.async.} =
 
   # Deliberately after the network check, boot hotspot and boot-crash
   # accounting: a driver that dies here leaves a reachable frame, and the
-  # crash is counted by the boot guard on the next attempt.
-  drivers.init(self)
+  # crash is counted by the boot guard on the next attempt. (Already up on
+  # boot-screen devices — see initDriversOnce.)
+  self.initDriversOnce()
 
   self.runner.start(firstSceneId)
 

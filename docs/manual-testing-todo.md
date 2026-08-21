@@ -39,10 +39,19 @@ flow (changes first-boot behavior for every new user).
 
 ## 2. Pi / Buildroot bench — cloud-managed frames
 
-- [ ] **Auto-confirm enrollment (#382):** flash a personalized SD card, boot
-  it, watch the frame appear **active with no Confirm step** in the cloud
-  workspace (single-use card born active; a multi-use card's first boot is
-  active, later cards pending).
+- [x] **Auto-confirm enrollment (#382):** passed 2026-08-22 — a Pi Zero 2 W
+  SD card (v2026.8.33, HDMI/framebuffer, WiFi + passwordless sudo) from
+  cloud.frameos.net booted and the workspace showed "Frame “uus2w” joined.
+  Open frame" with no Confirm step. The HDMI panel said "standalone (no
+  server configured)" for a few minutes before flipping to "FrameOS Cloud
+  (cloud.frameos.net, connected) / Remote control enabled over HTTPS" — the
+  index scene only refreshed on its 5-minute interval. Fixed on
+  `cloud-admin-overhaul`: the system screens re-render on every cloud link
+  change, and the whole boot (network check included) now draws on HDMI.
+  Still open from that boot: the card shipped `Time zone: UTC` (the cloud
+  never sets one) and `frame.local` as the hostname (every cloud card gets
+  the same name — mDNS collides with two frames on one network).
+  Re-check the new boot/status screen on the next flash.
 - [ ] **First-boot cloud enrollment on a router that strips DNSSEC (PR #384):**
   2026-08-20 a Pi 5 card booted, joined WiFi, then every lookup failed with
   `systemd-resolved: DNSSEC validation failed ... no-signature`; the 30 s

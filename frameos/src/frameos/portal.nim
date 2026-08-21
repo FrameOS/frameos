@@ -127,6 +127,10 @@ var portalAutoTimeoutEnabledHook: PortalAutoTimeoutEnabledHook = proc(): bool {.
 var portalWriteFileHook: PortalWriteFileHook = defaultPortalWriteFileHook
 var portalReadFileHook: PortalReadFileHook = defaultPortalReadFileHook
 var portalPathExistsHook: PortalPathExistsHook = defaultPortalPathExistsHook
+## Called once per network-check attempt with a one-line human status
+## ("Checking network… attempt 3, 12 s"); the boot screen (frameos.nim) hooks
+## it so an HDMI frame shows the wait instead of a black panel. nil = silent.
+var networkCheckProgressHook*: proc(status: string) {.gcsafe.} = nil
 
 proc getLastError*(): string =
   {.gcsafe.}:
@@ -1391,6 +1395,14 @@ proc checkNetwork*(self: FrameOS): bool =
   self.network.status = NetworkStatus.connecting
   self.logger.log(%*{"event": "networkCheck", "url": url})
   while true:
+    if not networkCheckProgressHook.isNil:
+      let elapsedSeconds = int((getMonoTime() - timer).inSeconds)
+      let progress = if attempt == 1: "Checking network…"
+                     else: &"Checking network… attempt {attempt}, {elapsedSeconds} s of {int(timeout)} s"
+      try:
+        networkCheckProgressHook(progress)
+      except CatchableError:
+        discard
     if (getMonoTime() - timer) >= initDuration(milliseconds = int(timeout*1000)):
       self.network.status = NetworkStatus.timeout
       self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
