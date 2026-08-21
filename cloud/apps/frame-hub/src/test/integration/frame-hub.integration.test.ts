@@ -39,7 +39,7 @@ import {
   type FrameHub,
   type FrameHubOptions,
 } from "../../hub";
-import { maxMetricsBytes, maxStateBytes } from "../../protocol";
+import { maxHardwareBytes, maxMetricsBytes, maxStateBytes } from "../../protocol";
 
 const db = createDb();
 let hub: FrameHub;
@@ -1146,6 +1146,50 @@ describe("inbound size limits", () => {
     }, "recovered state");
     const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
     expect(row?.lastState).toEqual({ active_scene: "clock" });
+    device.ws.close();
+  });
+
+  it("refreshes the hardware report from a state message", async () => {
+    // A framebuffer frame learns its panel size after hello (Pi 5 late KMS)
+    // and re-sends hello-shaped state; the workspace must stop showing the
+    // image default. Same byte gate as hello: an oversized report is dropped
+    // while the rest of the state still lands.
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, {
+      hardware: { device: "framebuffer", height: 480, platform: "buildroot", width: 800 },
+    });
+    device.send({
+      hardware: { device: "framebuffer", height: 1080, platform: "buildroot", width: 1920 },
+      id: randomUUID(),
+      states: { active_scene: "clock" },
+      type: "state",
+    });
+    const row = await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      const hardware = r?.hardware as Record<string, unknown> | null;
+      return hardware?.width === 1920 ? r : undefined;
+    }, "hardware refreshed from state");
+    expect(row?.hardware).toEqual({
+      device: "framebuffer",
+      height: 1080,
+      platform: "buildroot",
+      width: 1920,
+    });
+
+    device.send({
+      hardware: { blob: "x".repeat(maxHardwareBytes) },
+      id: randomUUID(),
+      states: { active_scene: "weather" },
+      type: "state",
+    });
+    await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      const state = r?.lastState as Record<string, unknown> | null;
+      return state?.active_scene === "weather" ? r : undefined;
+    }, "state after oversized hardware");
+    const [after] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect((after?.hardware as Record<string, unknown>).width).toBe(1920);
     device.ws.close();
   });
 

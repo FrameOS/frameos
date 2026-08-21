@@ -336,6 +336,8 @@ proc setup*(frameOS: FrameOS): SetupResult =
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]
   let driverCtx = buildDriverContext(frameOS)
+  activeFrameOS = frameOS
+  activeDriverContext = driverCtx
   for spec in driverSpecsFor(frameOS):
     let path = driverLibraryPath(spec)
     let library = loadLib(path)
@@ -376,6 +378,7 @@ proc render*(image: Image) =
       # immediately after the call that could have set it.
       if not driver.earlierRender.isNil:
         requestEarlierRender(driver.earlierRender(driver.instance).float)
+  syncDriverContext(activeFrameOS, activeDriverContext)
 
 proc toPng*(rotate: int, flip: string): string =
   for driver in loadedDrivers:

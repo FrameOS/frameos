@@ -61,6 +61,10 @@ type Driver* = ref object of FrameOSDriver
   # failed pass up to PROBE_RETRY_MAX_SECONDS, resets once the panel answers.
   probeRetrySeconds*: float
   renderBuffer: seq[uint8]
+  # The host's view of the display, kept so a probe that lands AFTER init
+  # (Pi 5 late KMS fbdev) can still hand the real geometry back — the host
+  # re-reads it after every render (drivers.nim syncDriverContext).
+  context*: DriverContext
 
 proc logFrameBuffer(logger: DriverLogger, payload: JsonNode) =
   if not logger.isNil and not logger.log.isNil:
@@ -268,7 +272,19 @@ proc init*(frameOS: DriverContext): Driver =
     available: available,
     lastProbeError: probeError,
     probeRetrySeconds: PROBE_RETRY_START_SECONDS,
+    context: frameOS,
   )
+
+proc publishScreenSize*(self: Driver) =
+  ## Writes the probed geometry into the host's config view. A frame.json
+  ## that says 800x480 (the generic image default) on a 1080p HDMI panel is
+  ## what every new cloud card ships with; the host persists what we report
+  ## (frameos/display_detect) so scenes, the cloud and the next boot agree.
+  if self.isNil or self.context.isNil or self.context.frameConfig.isNil:
+    return
+  if self.screenInfo.width > 0 and self.screenInfo.height > 0:
+    self.context.frameConfig.width = self.screenInfo.width.int
+    self.context.frameConfig.height = self.screenInfo.height.int
 
 proc setup*(frameOS: DriverContext = nil): SetupResult =
   if frameOS.isNil or frameOS.frameConfig.isNil:
@@ -306,6 +322,7 @@ proc render*(self: Driver, image: Image) =
       self.available = true
       self.probeFailureLogged = false
       self.probeRetrySeconds = PROBE_RETRY_START_SECONDS
+      self.publishScreenSize()
     except DivByZeroDefect as e:
       self.lastProbeError = e.msg
     except Exception as e:

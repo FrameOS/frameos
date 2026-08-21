@@ -107,7 +107,7 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
 
   # Everything hangs off the mark's height; `shrink` pulls the whole block
   # down when a long scene list would run past the bottom.
-  var markHeight = clamp(unit * 0.16, 32.0'f32, 160.0'f32)
+  var markHeight = clamp(unit * 0.16, 32.0'f32, 400.0'f32)
   var shrink = 1.0'f32
   var rowFontSize, statusFontSize, headlineFontSize, noteFontSize, footerFontSize: float32
   var rowLineHeight, noteLineHeight, gap: float32

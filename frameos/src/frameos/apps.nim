@@ -14,6 +14,16 @@ proc renderWidth*(config: FrameConfig): int {.inline.} =
 proc renderHeight*(config: FrameConfig): int {.inline.} =
   if config.rotate in [90, 270]: config.width else: config.height
 
+proc panelScale*(config: FrameConfig): float =
+  ## How much bigger than a 7.5" 800x480 panel this display is, by its shorter
+  ## edge: 1.0 up to that size, 2.0 at 1080p, 4.0 at 4K. The system scenes and
+  ## the runner's overlays multiply their fixed pixel sizes by it so a 32px
+  ## hint that reads fine on e-ink is not a speck on a TV.
+  let shorter = min(config.width, config.height)
+  if shorter <= 0:
+    return 1.0
+  max(1.0, shorter.float / 540.0)
+
 proc maxHttpResponseBytes*(config: FrameConfig): int {.inline.} =
   if config != nil and config.maxHttpResponseBytes > 0:
     config.maxHttpResponseBytes

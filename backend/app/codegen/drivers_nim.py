@@ -156,10 +156,16 @@ proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
   )
 
 proc syncDriverContext(frameOS: FrameOS, context: driverContext.DriverContext) =
-  if context.isNil or context.frameConfig.isNil:
+  if frameOS.isNil or frameOS.frameConfig.isNil or context.isNil or context.frameConfig.isNil:
     return
   frameOS.frameConfig.width = context.frameConfig.width
   frameOS.frameConfig.height = context.frameConfig.height
+
+# The context handed to the drivers at init, kept so a geometry a driver only
+# learns later (the framebuffer's late KMS probe) reaches the host: render()
+# re-syncs after every pass, and frameos/display_detect persists the change.
+var activeFrameOS: FrameOS = nil
+var activeDriverContext: driverContext.DriverContext = nil
 """
 
 
@@ -354,11 +360,14 @@ import frameos/device_setup
 
 proc init*(frameOS: FrameOS) =
   let driverCtx = buildDriverContext(frameOS)
+  activeFrameOS = frameOS
+  activeDriverContext = driverCtx
   {(newline + '  ').join(init_drivers or ["discard"])}
   syncDriverContext(frameOS, driverCtx)
 
 proc render*(image: Image) =
   {(newline + '  ').join(render_drivers or ["discard"])}
+  syncDriverContext(activeFrameOS, activeDriverContext)
 
 proc toPng*(rotate: int, flip: string): string =
   {(newline + '  ').join(png_drivers or ['result = ""'])}
@@ -529,6 +538,8 @@ proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]
   let driverCtx = buildDriverContext(frameOS)
+  activeFrameOS = frameOS
+  activeDriverContext = driverCtx
   for spec in driverSpecs:
     let path = driverLibraryPath(spec)
     let library = loadLib(path)
@@ -569,6 +580,7 @@ proc render*(image: Image) =
       # immediately after the call that could have set it.
       if not driver.earlierRender.isNil:
         requestEarlierRender(driver.earlierRender(driver.instance).float)
+  syncDriverContext(activeFrameOS, activeDriverContext)
 
 proc toPng*(rotate: int, flip: string): string =
   for driver in loadedDrivers:

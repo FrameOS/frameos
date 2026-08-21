@@ -918,6 +918,14 @@ export async function startFrameHub(
               deployedSceneState: promotedSceneState(checksum),
             }
           : {}),
+        // `state` is hello-shaped and may carry a fresh hardware report: a
+        // framebuffer frame that learned its panel size after hello (Pi 5
+        // late KMS) sends one, so the workspace stops showing the image's
+        // 800x480 default. Same size gate as hello.
+        ...(isRecord(rest.hardware) &&
+        withinJsonByteLimit(rest.hardware, maxHardwareBytes)
+          ? { hardware: rest.hardware }
+          : {}),
       })
       .where(eq(frames.id, session.frame.id));
     await broadcastFrameUpdate(session.frame.id);
