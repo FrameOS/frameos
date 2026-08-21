@@ -15,6 +15,8 @@ import {
   esp32MaxGpioButtons,
   esp32OnlySettableKeys,
   esp32SettableKeys,
+  esp32TimeZoneFrameSettingKeys,
+  esp32TimeZoneFrameSettingsMinVersion,
   extendedFrameSettingKeys,
   extendedFrameSettingsMinVersion,
   frameForAccount,
@@ -98,6 +100,16 @@ export async function POST(
   ) {
     return jsonError("settings_need_newer_firmware", 400, {
       min_frameos_version: esp32ExtendedFrameSettingsMinVersion,
+    });
+  }
+  // Same shape for the 2026.8.34 time zone key.
+  if (
+    isEsp32 &&
+    !frameSupportsSettingsFrom(esp32TimeZoneFrameSettingsMinVersion, frame.frameosVersion) &&
+    Object.keys(settings).some((key) => esp32TimeZoneFrameSettingKeys.has(key))
+  ) {
+    return jsonError("settings_need_newer_firmware", 400, {
+      min_frameos_version: esp32TimeZoneFrameSettingsMinVersion,
     });
   }
   if (

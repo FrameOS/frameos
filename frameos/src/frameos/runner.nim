@@ -9,6 +9,7 @@ import frameos/apps
 import frameos/channels
 import frameos/config
 import frameos/device_setup
+import frameos/display_detect
 import frameos/driver_render_hint
 import frameos/local_access
 import frameos/cloud/device_flow
@@ -91,7 +92,7 @@ proc configureLocalAccessOverlay(self: RunnerThread) =
     offsetY: 0.0,
     padding: 16.0,
     fontColor: parseHtmlColor("#ffffff"),
-    fontSize: 32.0,
+    fontSize: 32.0 * panelScale(self.frameConfig),
     borderColor: parseHtmlColor("#000000"),
     borderWidth: 3,
     overflow: "fit-bounds",
@@ -112,7 +113,7 @@ proc configureLinkCodeOverlay(self: RunnerThread) =
     offsetY: 0.0,
     padding: 16.0,
     fontColor: parseHtmlColor("#ffffff"),
-    fontSize: 32.0,
+    fontSize: 32.0 * panelScale(self.frameConfig),
     borderColor: parseHtmlColor("#000000"),
     borderWidth: 3,
     overflow: "fit-bounds",
@@ -385,6 +386,11 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         setNextRenderSeconds(nextRenderSeconds)
         # TODO: render the driver part in another thread
         drivers.render(lastRotatedImage)
+        # The framebuffer's late probe (Pi 5 KMS) reports the real panel
+        # size through the driver context; persist it the first time it
+        # differs from the file, so scenes, the cloud and the next boot agree.
+        if detectedDisplayChanged(self.frameConfig):
+          discard persistDetectedDisplaySize(self.frameConfig, self.logger)
         let driverElapsedMs = round(durationToMilliseconds(getMonoTime() - driverTimer), 3)
         self.logger.log(%*{"event": "render:driver",
           "device": self.frameConfig.device, "ms": driverElapsedMs})
@@ -496,6 +502,11 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           try:
             setNextRenderSeconds(remainingSleepMs / 1000)
             drivers.render(driverRetryImage)
+            # This retry is exactly where a late framebuffer probe lands.
+            if detectedDisplayChanged(self.frameConfig):
+              discard persistDetectedDisplaySize(self.frameConfig, self.logger)
+              # The held canvas is the old size; render the scene afresh.
+              self.triggerRenderNext = true
           except Exception as e:
             self.logger.log(%*{"event": "render:driver:error", "error": $e.msg})
           finally:

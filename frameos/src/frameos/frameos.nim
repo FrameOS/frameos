@@ -3,6 +3,7 @@ import std/oserrors
 import drivers/drivers as drivers
 import frameos/apps
 import frameos/config
+import frameos/display_detect
 import frameos/logger
 import frameos/metrics
 import frameos/runner
@@ -142,6 +143,10 @@ proc initDriversOnce(self: FrameOS) =
     return
   driversInitialized = true
   drivers.init(self)
+  # A driver that probed the panel (framebuffer, HyperPixel) has overwritten
+  # width/height in memory; make frame.json and the cloud's hardware report
+  # say the same thing.
+  discard persistDetectedDisplaySize(self.frameConfig, self.logger)
 
 proc bootScreen*(frameConfig: FrameConfig, status: string): StatusScreen =
   ## The boot variant of the shared status screen: the facts known before

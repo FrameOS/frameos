@@ -39,6 +39,7 @@
 #include "fos_scenes.h"
 #include "fos_schedule.h"
 #include "fos_status_screen.h"
+#include "fos_tz.h"
 #include "fos_mem.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
@@ -133,6 +134,9 @@ void app_main(void)
     BOOTMEM("start");
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
+    /* Before anything formats a time: localtime(), QuickJS Date and the
+     * schedule all read TZ. */
+    fos_tz_apply(config->time_zone);
 
     fos_battery_init(config->battery_pin, config->battery_divider);
     if (fos_battery_present()) {

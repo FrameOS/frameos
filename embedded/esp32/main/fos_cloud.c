@@ -37,6 +37,7 @@
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
+#include "fos_tz.h"
 #include "fos_settings.h"
 #include "fos_wifi.h"
 #include "fos_netguard.h"
@@ -1993,6 +1994,8 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     }
     static const char *settable_keys[] = {
         "interval", "name", "rotate", "scaling_mode",
+        /* 2026.8.34: an IANA zone name, applied live through fos_tz. */
+        "timezone",
         "deep_sleep", "deep_sleep_on_battery", "wake_check_seconds",
         "battery_pin", "battery_divider",
         /* 2026.8.31: what the local admin API and the console already set. */
@@ -2062,6 +2065,18 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         /* No reboot: a per-decode fallback, pushed into the Nim runtime by
          * fos_client on the next pass. */
         strlcpy(config->scaling_mode, normalized, sizeof(config->scaling_mode));
+    }
+    const cJSON *timezone = cJSON_GetObjectItem(settings, "timezone");
+    if (timezone != NULL) {
+        if (!cJSON_IsString(timezone) || strlen(timezone->valuestring) >= sizeof(config->time_zone) ||
+            (timezone->valuestring[0] != '\0' && strcmp(timezone->valuestring, "UTC") != 0 &&
+             fos_tz_rule(timezone->valuestring) == NULL)) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        /* No reboot: TZ is read on every localtime() call. */
+        strlcpy(config->time_zone, timezone->valuestring, sizeof(config->time_zone));
+        fos_tz_apply(config->time_zone);
     }
     const cJSON *deep_sleep = cJSON_GetObjectItem(settings, "deep_sleep");
     if (deep_sleep != NULL) {

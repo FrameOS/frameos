@@ -1028,6 +1028,8 @@ static void client_task(void *arg)
         /* Fallback fit for consumers without their own placement — settings
          * sync, cloud set_settings and the console all write it live. */
         frameos_nim_set_scaling_mode(config->scaling_mode);
+        /* Same contract for the zone name: live, one string per pass. */
+        frameos_nim_set_time_zone(config->time_zone);
 
         /* Battery guardrail: when the cell is nearly empty, skip the (costly)
          * render + panel refresh and sleep long so a low battery can't keep

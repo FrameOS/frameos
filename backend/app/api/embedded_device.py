@@ -436,8 +436,12 @@ def embedded_frame_settings(frame: Frame) -> dict:
         # Applied live on the device (no restart); default and validation in
         # embedded_scaling_mode_for_frame.
         "scalingMode": embedded_scaling_mode_for_frame(frame),
-        # The device matches schedule events in frame-local wall-clock time
-        # but carries no tz database — it applies this offset to UTC. Sent as
+        # IANA zone name; firmware from 2026.8.34 maps it onto a POSIX TZ
+        # rule (fos_tz.c) and keeps its own clock, QuickJS Date and the
+        # schedule in it. Older firmware ignores the key.
+        "timeZone": (getattr(frame, "timezone", None) or "").strip(),
+        # The device matches schedule events in frame-local wall-clock time;
+        # firmware without fos_tz applies this flat offset to UTC. Sent as
         # the CURRENT offset, so a DST shift propagates on the next poll.
         "utcOffsetMinutes": _frame_utc_offset_minutes(frame),
     }

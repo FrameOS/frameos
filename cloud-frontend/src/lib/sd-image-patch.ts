@@ -93,6 +93,11 @@ export interface CloudConfigInput {
   // password logins disabled. The builder UI only omits it when the user
   // explicitly opts into passwordless root.
   rootPassword?: string | undefined;
+  // IANA zone name (Intl's resolvedOptions().timeZone in the builder). The
+  // first-boot script forwards it into the enrollment state and the runtime
+  // writes it into frame.json, so the frame keeps the clock of the browser
+  // that made the card instead of the image's UTC.
+  timeZone?: string | undefined;
 }
 
 // Render the personalized frameos-cloud.txt region: magic line, KEY=value
@@ -136,6 +141,7 @@ export function renderCloudConfig(input: CloudConfigInput): Uint8Array {
   push("vcom", input.vcom, "VCOM");
   push("upload_url", input.uploadUrl, "Upload URL");
   push("root_password", input.rootPassword, "Root password");
+  push("time_zone", input.timeZone, "Time zone");
 
   const content = new TextEncoder().encode(lines.join("\n") + "\n");
   if (content.length > CLOUD_CONFIG_REGION_SIZE) {

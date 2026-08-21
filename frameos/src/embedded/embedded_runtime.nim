@@ -142,6 +142,17 @@ proc fos_nim_set_scaling_mode_impl(mode: cstring) {.exportc, cdecl.} =
   if not frameConfig.isNil and mode != nil and mode.len > 0:
     frameConfig.scalingMode = $mode
 
+proc fos_nim_set_time_zone_impl(timeZone: cstring) {.exportc, cdecl.} =
+  ## The frame's IANA zone name, for scenes that pass it on (the weather
+  ## app's open-meteo `timezone=`, `frame.timeZone` in JS). Wall-clock
+  ## conversion on this board goes through newlib's TZ (fos_tz.c), which the
+  ## C side installs; chrono has no zone data here, so a scene that formats
+  ## through chrono with this name still gets UTC. fos_client pushes it
+  ## every render pass, like scaling_mode, so a console/cloud change applies
+  ## without a reboot.
+  if not frameConfig.isNil and timeZone != nil:
+    frameConfig.timeZone = $timeZone
+
 proc fos_nim_set_debug_impl(enabled: cint) {.exportc, cdecl.} =
   ## Turns the interpreter's per-node memory profile on and off at runtime
   ## (`set debug 1` on the console). It logs a line per node per render — the

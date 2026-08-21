@@ -157,11 +157,15 @@ Secret handling on the FAT boot partition:
 - The same first-boot service also watches `/boot/frameos-cloud.txt`, the
   cloud-enrollment personalization file (see `docs/cloud-frames.md`,
   "Provisioning"). When it contains at least one recognized key
-  (`cloud_url`, `claim_token`, `name`, `wifi_ssid`, `wifi_password`), the
-  script installs the optional WiFi credentials as a NetworkManager keyfile,
-  writes `/srv/frameos/current/state/cloud_enroll_pending.json` (0600) with
-  `{"claim_token", "provider_url", "name"?}` for the FrameOS runtime to
-  enroll with, and shreds the personalization file the same way. A
+  (`cloud_url`, `claim_token`, `name`, `wifi_ssid`, `wifi_password`,
+  `device`/`width`/`height`/`rotate`/`vcom`/`upload_url`, `root_password`,
+  `time_zone`), the script installs the optional WiFi credentials as a
+  NetworkManager keyfile, writes
+  `/srv/frameos/current/state/cloud_enroll_pending.json` (0600) with
+  `{"claim_token", "provider_url", "name"?, "time_zone"?}` for the FrameOS
+  runtime to enroll with (which then writes name + timeZone into
+  `frame.json`), sets `/etc/hostname` from the slugified `name`, and shreds
+  the personalization file the same way. A
   `wifi_ssid` without a `wifi_password` is an open network: the keyfile then
   carries no `[wifi-security]` section at all (`key-mgmt=wpa-psk` with an
   empty `psk=` yields a connection NetworkManager can never activate). On

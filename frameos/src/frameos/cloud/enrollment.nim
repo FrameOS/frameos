@@ -21,8 +21,14 @@
 ##   "claim_token": "FRCT-…",
 ##   "provider_url": "https://cloud.frameos.net",
 ##   "name": "Kitchen frame",          // optional
+##   "time_zone": "Europe/Brussels",   // optional (IANA name)
 ##   "expires_epoch": 1770000000       // optional; defaults to 24h after the
 ## }                                    //   first attempt
+##
+## `name` and `time_zone` are the card's personalization; on a successful
+## enrollment the hub thread writes them into frame.json (see
+## pendingPersonalization) — the name used to reach the provider only, so the
+## panel kept saying "FrameOS Setup" and the clock stayed on UTC.
 ## ```
 ##
 ## At startup the cloud hub thread calls `processPendingCloudEnrollment` with
@@ -358,6 +364,20 @@ proc savePendingEnrollment(pending: JsonNode) =
     discard
   moveFile(tempPath, path)
 
+proc pendingPersonalization*(pending: JsonNode): JsonNode =
+  ## The frame.json-bound fields of a pending enrollment, in the local admin
+  ## API's spelling (name, timezone) so persistFrameApiUpdate can take them
+  ## as-is. Empty object when there is nothing to apply.
+  result = newJObject()
+  if pending == nil or pending.kind != JObject:
+    return
+  let name = pending{"name"}.getStr("").strip()
+  if name.len > 0:
+    result["name"] = %name
+  let timeZone = pending{"time_zone"}.getStr("").strip()
+  if timeZone.len > 0:
+    result["timezone"] = %timeZone
+
 proc writePendingEnrollment*(claimToken, providerUrl, name: string): bool {.gcsafe.} =
   ## Queues a claim-token enrollment for the hub thread to redeem. Entry point
   ## for provisioning that happens after boot (the setup portal's claim-code
@@ -391,12 +411,16 @@ proc takeEnrollmentNudge*(): bool {.gcsafe.} =
   enrollmentNudge.exchange(false, moRelaxed)
 
 proc processPendingCloudEnrollment*(frameConfig: FrameConfig):
-    tuple[resolved: bool, attempted: bool, outcome: EnrollOutcome] {.gcsafe.} =
+    tuple[resolved: bool, attempted: bool, outcome: EnrollOutcome, personalization: JsonNode] {.gcsafe.} =
   ## Runs one enrollment attempt from ./state/cloud_enroll_pending.json.
   ## Returns resolved=true when the pending file is finished with (success,
   ## permanent rejection, or expiry) and has been deleted; resolved=false
   ## means "retry later with backoff" (network errors, 429/5xx).
+  ## `personalization` carries the card's name / time zone (see
+  ## pendingPersonalization) for the caller to write into frame.json once
+  ## `outcome.ok` — the pending file is gone by then.
   {.gcsafe.}:
+    result.personalization = newJObject()
     # "Resolved" must mean the file is really gone. Reporting resolved while it
     # is still on disk makes the hub thread reset its enrollment backoff and
     # come straight back (hub_client.nim), which on a full or read-only state
@@ -405,7 +429,9 @@ proc processPendingCloudEnrollment*(frameConfig: FrameConfig):
 
     var pending = loadPendingEnrollment()
     if pending == nil:
-      return (resolved: pendingGone(), attempted: false, outcome: EnrollOutcome())
+      return (resolved: pendingGone(), attempted: false, outcome: EnrollOutcome(),
+              personalization: newJObject())
+    let personalization = pendingPersonalization(pending)
 
     let now = int64(epochTime())
     let clockSynced = now >= PENDING_ENROLL_CLOCK_SANITY_EPOCH
@@ -428,7 +454,8 @@ proc processPendingCloudEnrollment*(frameConfig: FrameConfig):
     if expiresEpoch > 0 and expiresEpoch <= now:
       discard clearPendingEnrollment()
       return (resolved: pendingGone(), attempted: false,
-              outcome: EnrollOutcome(ok: false, error: "claim_token_expired"))
+              outcome: EnrollOutcome(ok: false, error: "claim_token_expired"),
+              personalization: newJObject())
 
     let outcome = enrollWithClaimTokenFromBoot(
       pending{"claim_token"}.getStr(""),
@@ -440,5 +467,6 @@ proc processPendingCloudEnrollment*(frameConfig: FrameConfig):
       # Success — or the provider/config permanently rejected the token
       # (claim tokens die on first use either way, so retrying cannot help).
       discard clearPendingEnrollment()
-      return (resolved: pendingGone(), attempted: true, outcome: outcome)
-    (resolved: false, attempted: true, outcome: outcome)
+      return (resolved: pendingGone(), attempted: true, outcome: outcome,
+              personalization: personalization)
+    (resolved: false, attempted: true, outcome: outcome, personalization: personalization)

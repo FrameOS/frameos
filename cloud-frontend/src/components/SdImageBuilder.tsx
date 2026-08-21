@@ -3,6 +3,18 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
 import { renderCloudConfig, sanitizeConfigValue, SdImagePatchError, patchCloudConfig } from '../lib/sd-image-patch'
+
+// The zone the card's frame should keep its clock in: the browser's, since
+// the person making the card is almost always where the frame will hang.
+// Undefined when the browser cannot say (the image then stays on UTC).
+function browserTimeZone(): string | undefined {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    return zone && zone.includes('/') ? zone : undefined
+  } catch {
+    return undefined
+  }
+}
 import { fetchReleaseListing } from '../lib/release-lookup'
 import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '../lib/remembered-wifi'
 import { piDeviceGroups } from '../lib/generated-devices'
@@ -459,6 +471,7 @@ export function SdImageBuilder({
         wifiPassword: wifiSsid ? wifiPassword : '',
         wifiSsid,
         rootPassword: rootPassword || undefined,
+        timeZone: browserTimeZone(),
       })
 
       setStatus(`Downloading ${board.asset.name}…`)

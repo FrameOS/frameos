@@ -73,6 +73,7 @@ typedef struct {
     char hostname[FOS_STR_LEN];    /* DHCP hostname, e.g. "kitchen" */
     char hardware_preset[FOS_STR_LEN]; /* e.g. waveshare_esp32_s3_photopainter */
     char panel[FOS_STR_LEN];       /* e.g. EPD_7in5_V2, or "none" */
+    char time_zone[FOS_STR_LEN];   /* IANA name, e.g. Europe/Brussels; "" = UTC (fos_tz.h) */
     fos_render_mode_t render_mode;
     uint32_t interval_sec;         /* refresh interval */
     uint16_t rotate;               /* 0/90/180/270 — scenes render rotated, packers map to panel */

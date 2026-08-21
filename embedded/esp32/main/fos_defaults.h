@@ -64,6 +64,10 @@
  * this config path does not change how existing embedded frames render. */
 #define FRAMEOS_DEFAULT_SCALING_MODE "cover"
 #endif
+#ifndef FRAMEOS_DEFAULT_TIME_ZONE
+/* IANA name; "" keeps the pre-2026.8.34 behaviour (UTC). See fos_tz.h. */
+#define FRAMEOS_DEFAULT_TIME_ZONE ""
+#endif
 #ifndef FRAMEOS_DEFAULT_INTERVAL_SEC
 #define FRAMEOS_DEFAULT_INTERVAL_SEC 300
 #endif

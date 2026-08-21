@@ -43,9 +43,11 @@ import {
 import { secureToken } from '../../../../utils/secureToken'
 import {
   cloudFrameSupportsEsp32ExtendedSettings,
+  cloudFrameSupportsEsp32TimeZone,
   cloudFrameSupportsExtendedSettings,
   cloudFrameSupportsHardwareSettings,
   esp32ExtendedCloudFrameSettingsMinVersion,
+  esp32TimeZoneCloudFrameSettingsMinVersion,
   extendedCloudFrameSettingsMinVersion,
   hardwareCloudFrameSettingsMinVersion,
   setCloudFrameServiceSettingsEnabled,
@@ -1268,6 +1270,8 @@ export function FrameSettings({
   // ceiling and GPIO buttons (esp32ExtendedCloudFrameSettingKeys).
   const cloudEsp32ExtendedSettingsSupported =
     esp32CloudProfile && cloudFrameSupportsEsp32ExtendedSettings(frame.frameos_version)
+  // 2026.8.34: the chip maps an IANA name onto a POSIX TZ rule (fos_tz.c).
+  const cloudEsp32TimeZoneSupported = esp32CloudProfile && cloudFrameSupportsEsp32TimeZone(frame.frameos_version)
   const cloudDevice = cloudProfile ? frame.hardware?.device ?? '' : ''
   const showBackendSection = frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-backend')
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
@@ -2180,6 +2184,23 @@ export function FrameSettings({
                   />
                 )}
               </Field>
+              {esp32CloudProfile ? (
+                <fieldset disabled={!cloudEsp32TimeZoneSupported} className="min-w-0">
+                  <Field
+                    name="timezone"
+                    label="Time zone"
+                    tooltip={
+                      cloudEsp32TimeZoneSupported
+                        ? 'The time zone the frame keeps its clock in: scene times, the weather forecast and the schedule. Applied live — no reboot.'
+                        : frame.frameos_version
+                          ? `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+                          : `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+                    }
+                  >
+                    <Select name="timezone" options={frameTimezoneOptions} />
+                  </Field>
+                </fieldset>
+              ) : null}
               {!esp32CloudProfile ? (
                 <>
                   <Field
@@ -2200,7 +2221,7 @@ export function FrameSettings({
               ) : null}
               <p className="frameos-muted text-sm">
                 {esp32CloudProfile
-                  ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or the FrameOS-Setup portal.'
+                  ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or the FrameOS-Setup portal.'
                   : 'These are the settings a cloud-managed frame accepts. Everything else this frame runs on — its panel and display driver, network and WiFi, GPIO buttons, mount points, palette and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
               </p>
             </div>

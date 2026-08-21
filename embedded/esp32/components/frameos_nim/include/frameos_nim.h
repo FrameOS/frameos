@@ -85,6 +85,11 @@ void frameos_nim_set_scaling_mode(const char *mode);
  * cloud_url, cloud_state, cloud_connected, backend_url, version. Push it
  * before a render pass that may draw that screen; stored, not rendered. */
 void frameos_nim_set_status_info(const char *info_json);
+/* The frame's IANA time zone name (frameConfig.timeZone in scenes: the
+ * weather app's open-meteo `timezone=`, `frame.timeZone` in JS apps). The
+ * C side installs the matching POSIX rule itself (fos_tz.h); this only
+ * tells scenes the name. "" = UTC. Applied live. */
+void frameos_nim_set_time_zone(const char *time_zone);
 double frameos_nim_scene_interval(void);
 /* Sleep override from the scene's last render (logic/nextSleepDuration);
  * negative = no override. Consult only right after a successful render. */

@@ -188,6 +188,47 @@ def test_cloud_config_written_to_pending_enroll_state_and_shredded(tmp_path):
     assert "cloud personalization" in (sandbox.boot / "frameos-setup-reset.log").read_text(encoding="utf-8").lower()
 
 
+def test_cloud_config_time_zone_rides_the_pending_state_and_name_sets_the_hostname(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    # A `hostname` on PATH that only records the call: the real one needs
+    # root and would rename the developer's machine.
+    hostname_log = sandbox.tmp / "hostname-calls"
+    (sandbox.bin / "hostname").write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$1" >> "{hostname_log}"\n', encoding="utf-8")
+    (sandbox.bin / "hostname").chmod(0o755)
+    sandbox.write_cloud_file(
+        "cloud_url=https://cloud.example.com\n"
+        "claim_token=FRCT-tz\n"
+        "name=Kitchen Frame (2nd floor)\n"
+        "time_zone=Europe/Brussels\n"
+    )
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    pending = json.loads(sandbox.pending_file.read_text(encoding="utf-8"))
+    assert pending == {
+        "claim_token": "FRCT-tz",
+        "provider_url": "https://cloud.example.com",
+        "name": "Kitchen Frame (2nd floor)",
+        "time_zone": "Europe/Brussels",
+    }
+    # The name becomes the hostname, slugified the way the backend does it,
+    # so two cloud cards on one network are not both frame.local.
+    assert (sandbox.etc / "hostname").read_text(encoding="utf-8") == "kitchen-frame-2nd-floor\n"
+    assert hostname_log.read_text(encoding="utf-8") == "kitchen-frame-2nd-floor\n"
+
+    # Without python3 the fallback writer carries the zone too.
+    sandbox.write_cloud_file("claim_token=FRCT-tz2\ntime_zone=Asia/Tokyo\n")
+    result = sandbox.run(disable_python3=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    pending = json.loads(sandbox.pending_file.read_text(encoding="utf-8"))
+    assert pending == {
+        "claim_token": "FRCT-tz2",
+        "provider_url": DEFAULT_CLOUD_PROVIDER_URL,
+        "time_zone": "Asia/Tokyo",
+    }
+
+
 def test_cloud_config_defaults_url_and_omits_optional_fields(tmp_path):
     sandbox = Sandbox(tmp_path)
     sandbox.write_cloud_file("claim_token=FRCT-xyz\n")

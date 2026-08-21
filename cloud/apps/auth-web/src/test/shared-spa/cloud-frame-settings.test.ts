@@ -14,6 +14,9 @@ import {
   esp32CloudFrameSettingKeysForVersion,
   esp32ExtendedCloudFrameSettingKeys,
   esp32ExtendedCloudFrameSettingsMinVersion,
+  esp32TimeZoneCloudFrameSettingKeys,
+  esp32TimeZoneCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32TimeZone,
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
   hardwareCloudFrameSettingKeys,
@@ -26,6 +29,8 @@ import {
   esp32ExtendedFrameSettingsMinVersion,
   esp32OnlySettableKeys,
   esp32SettableKeys,
+  esp32TimeZoneFrameSettingKeys,
+  esp32TimeZoneFrameSettingsMinVersion,
   extendedFrameSettingKeys,
   extendedFrameSettingsMinVersion,
   frameSupportsExtendedSettings,
@@ -82,8 +87,10 @@ describe("cloud settings push", () => {
   });
 
   it("agrees with the control plane on what the esp32 firmware applies, and its gated tail", () => {
-    // Ungated: exactly the control plane's esp32 subset minus the tail.
-    const ungated = [...esp32SettableKeys].filter((key) => !esp32ExtendedFrameSettingKeys.has(key));
+    // Ungated: exactly the control plane's esp32 subset minus the tails.
+    const ungated = [...esp32SettableKeys].filter(
+      (key) => !esp32ExtendedFrameSettingKeys.has(key) && !esp32TimeZoneFrameSettingKeys.has(key),
+    );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
     expect(esp32ExtendedCloudFrameSettingsMinVersion).toBe(esp32ExtendedFrameSettingsMinVersion);
@@ -98,8 +105,22 @@ describe("cloud settings push", () => {
       ...esp32CloudFrameSettingKeys,
       ...esp32ExtendedCloudFrameSettingKeys,
     ]);
+    // The 2026.8.34 time zone tail, same contract.
+    expect(new Set(esp32TimeZoneCloudFrameSettingKeys)).toEqual(esp32TimeZoneFrameSettingKeys);
+    expect(esp32TimeZoneCloudFrameSettingsMinVersion).toBe(esp32TimeZoneFrameSettingsMinVersion);
+    for (const key of esp32TimeZoneCloudFrameSettingKeys) {
+      expect(esp32SettableKeys.has(key)).toBe(true);
+      expect(allowedFrameSettings.has(key)).toBe(true);
+    }
+    expect(cloudFrameSupportsEsp32TimeZone("2026.8.33")).toBe(false);
+    expect(cloudFrameSupportsEsp32TimeZone("2026.8.34")).toBe(true);
+    expect(esp32CloudFrameSettingKeysForVersion("2026.8.34")).toEqual([
+      ...esp32CloudFrameSettingKeys,
+      ...esp32ExtendedCloudFrameSettingKeys,
+      ...esp32TimeZoneCloudFrameSettingKeys,
+    ]);
     // Never a Pi-only key toward the chip: the route (and the firmware)
-    // refuse the whole push on them.
+    // refuse the whole push on them. (timezone moved to the gated tail.)
     for (const key of [...esp32CloudFrameSettingKeys, ...esp32ExtendedCloudFrameSettingKeys]) {
       expect(key).not.toBe("timezone");
       expect(key).not.toBe("palette");

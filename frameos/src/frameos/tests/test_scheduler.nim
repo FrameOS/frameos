@@ -6,6 +6,7 @@ import ../scheduler
 import ../types
 import ../logger
 import ../channels
+import lib/tz
 
 suite "Scheduler Tests (Various Time Configurations)":
 
@@ -291,3 +292,52 @@ suite "Scheduler Tests (Various Time Configurations)":
     let events = drainEvents()
     check events.len == 1
     check events[0][1] == "evtMidnight"
+
+suite "Scheduler time zone":
+  # 2026-08-21 23:02 UTC = 2026-08-22 01:02 CEST (Europe/Brussels, DST).
+  const epoch = 1787353320.0
+
+  test "the frame's zone decides the wall clock, not the process zone":
+    initTimeZone()
+    let brussels = frameLocalTime("Europe/Brussels", epoch)
+    check brussels.hour == 1
+    check brussels.minute == 2
+    check brussels.monthday == 22
+    check brussels.weekday == dSat
+    let utcTime = frameLocalTime("UTC", epoch)
+    check utcTime.hour == 23
+    check utcTime.monthday == 21
+    let tokyo = frameLocalTime("Asia/Tokyo", epoch)
+    check tokyo.hour == 8
+    check tokyo.monthday == 22
+
+  test "an unknown zone falls back to the process clock":
+    let fallback = frameLocalTime("Mars/Olympus", epoch)
+    check fallback == epoch.fromUnixFloat().local()
+
+  test "a 01:02 reboot entry fires at 01:02 Brussels time":
+    var config = new(FrameConfig)
+    config.timeZone = "Europe/Brussels"
+    config.schedule = FrameSchedule(events: @[
+      ScheduledEvent(id: "nightly", minute: 2, hour: 1, weekday: 0, event: "reboot", payload: %*{})
+    ])
+    let scheduler = Scheduler(frameConfig: config, logger: newLogger(config))
+    while eventChannel.tryRecv()[0]: discard
+    scheduler.handleSchedule(frameLocalTime(config.timeZone, epoch))
+    let (fired, item) = eventChannel.tryRecv()
+    check fired
+    check item[1] == "reboot"
+    # The same instant read as UTC (23:02) must not fire it.
+    scheduler.handleSchedule(frameLocalTime("UTC", epoch))
+    check not eventChannel.tryRecv()[0]
+
+  test "next due entry is described in the frame's zone":
+    let schedule = FrameSchedule(events: @[
+      ScheduledEvent(id: "a", minute: 2, hour: 1, weekday: 0, event: "reboot", payload: %*{}),
+      ScheduledEvent(id: "b", minute: 30, hour: 7, weekday: 8, event: "render", payload: %*{}),
+    ])
+    # Saturday 01:02 → the weekday-only 07:30 is Monday; the daily 01:02 is tomorrow.
+    let sat = frameLocalTime("Europe/Brussels", epoch)
+    check nextDueDescription(schedule, sat) == "Sun 01:02 reboot"
+    check nextDueDescription(FrameSchedule(events: @[schedule.events[1]]), sat) == "Mon 07:30 render"
+    check nextDueDescription(FrameSchedule(events: @[]), sat) == ""

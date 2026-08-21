@@ -66,8 +66,8 @@ export const esp32PowerSettingKeys = [
 
 /**
  * What every ESP32 firmware with the cloud link applies: four of the base
- * six (no timezone — the chip carries no tz database — and no debug before
- * 2026.8.31) plus the power keys. Mirrors esp32SettableKeys on the control
+ * six (no timezone before 2026.8.34 — see esp32TimeZoneCloudFrameSettingKeys
+ * — and no debug before 2026.8.31) plus the power keys. Mirrors esp32SettableKeys on the control
  * plane minus its version-gated tail.
  */
 export const esp32CloudFrameSettingKeys = [
@@ -94,6 +94,19 @@ export function cloudFrameSupportsEsp32ExtendedSettings(frameosVersion: string |
   return cloudFrameSupportsSettingsFrom(esp32ExtendedCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/**
+ * 2026.8.34: the ESP32 firmware maps an IANA zone name onto a POSIX TZ rule
+ * (fos_tz.c) and applies it live, so the Pi's `timezone` wire key reaches
+ * the chip too — behind its own floor. Mirrors esp32TimeZoneFrameSettingKeys
+ * on the control plane.
+ */
+export const esp32TimeZoneCloudFrameSettingKeys = ['timezone'] as const
+export const esp32TimeZoneCloudFrameSettingsMinVersion = '2026.8.34'
+
+export function cloudFrameSupportsEsp32TimeZone(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32TimeZoneCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /** The keys an ESP32 cloud frame reporting `frameosVersion` can be sent. */
 export function esp32CloudFrameSettingKeysForVersion(
   frameosVersion: string | null | undefined
@@ -101,6 +114,9 @@ export function esp32CloudFrameSettingKeysForVersion(
   const keys: CloudFrameSettingKey[] = [...esp32CloudFrameSettingKeys]
   if (cloudFrameSupportsEsp32ExtendedSettings(frameosVersion)) {
     keys.push(...esp32ExtendedCloudFrameSettingKeys)
+  }
+  if (cloudFrameSupportsEsp32TimeZone(frameosVersion)) {
+    keys.push(...esp32TimeZoneCloudFrameSettingKeys)
   }
   return keys
 }

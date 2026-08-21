@@ -36,6 +36,7 @@
 #include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "fos_netguard.h"
+#include "fos_tz.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
 
@@ -143,6 +144,7 @@ static int cmd_status(int argc, char **argv)
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
     printf("rotate:      %u\n", (unsigned)config->rotate);
     printf("scaling_mode: %s\n", config->scaling_mode);
+    printf("time_zone:   %s\n", config->time_zone[0] ? config->time_zone : "(UTC)");
     printf("send_logs:   %d\n", (int)config->server_send_logs);
     printf("debug:       %d\n", (int)config->debug_logging);
     printf("fusion:      %d\n", (int)config->image_fusion);
@@ -318,7 +320,7 @@ static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
-               "cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|"
+               "cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|time_zone|"
                "interval|spill_force|debug|fusion|server_send_logs|allow_local_network|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
@@ -522,6 +524,18 @@ static int cmd_set(int argc, char **argv)
             return 1;
         }
         strlcpy(config->scaling_mode, mode, sizeof(config->scaling_mode));
+    }
+    else if (strcmp(key, "time_zone") == 0) {
+        /* IANA name ("Europe/Brussels"); "" or UTC clears it. Applied live:
+         * localtime, QuickJS Date and the schedule follow on the next pass. */
+        const char *zone = (strcmp(value, "\"\"") == 0 || strcmp(value, "-") == 0) ? "" : value;
+        if (zone[0] && fos_tz_rule(zone) == NULL && strcmp(zone, "UTC") != 0 &&
+            strcmp(zone, "Etc/UTC") != 0) {
+            printf("unknown time zone '%s' (want an IANA name such as Europe/Brussels)\n", zone);
+            return 1;
+        }
+        strlcpy(config->time_zone, zone, sizeof(config->time_zone));
+        fos_tz_apply(config->time_zone);
     }
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
     else if (strcmp(key, "debug") == 0) config->debug_logging = atoi(value) != 0;

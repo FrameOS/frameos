@@ -15,6 +15,7 @@ idf_component_register(
         "fos_scenes.c"
         "fos_schedule.c"
         "fos_settings.c"
+        "fos_tz.c"
         "fos_battery.c"
         "fos_assets.c"
         "fos_assets_sd.c"

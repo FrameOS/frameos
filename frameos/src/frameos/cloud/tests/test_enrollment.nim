@@ -216,10 +216,15 @@ suite "cloud enrollment":
       "claim_token": "FRCT-boot-1",
       "provider_url": providerUrl,
       "name": "Boot frame",
+      "time_zone": "Europe/Brussels",
     }))
-    let (resolved, attempted, outcome) = processPendingCloudEnrollment(standaloneConfig())
+    let (resolved, attempted, outcome, personalization) = processPendingCloudEnrollment(standaloneConfig())
     check resolved and attempted and outcome.ok
     check not fileExists(pendingEnrollmentPath())
+    # What the hub thread writes into frame.json, in the admin API's spelling.
+    check personalization == %*{"name": "Boot frame", "timezone": "Europe/Brussels"}
+    check pendingPersonalization(%*{"claim_token": "x"}) == %*{}
+    check pendingPersonalization(%*{"name": "  ", "time_zone": "UTC"}) == %*{"timezone": "UTC"}
     let state = linkState()
     check state{"mode"}.getStr("") == "managed"
     check state{"frame_id"}.getStr("") == "frame-boot"
@@ -233,7 +238,7 @@ suite "cloud enrollment":
       "claim_token": "FRCT-boot-dead",
       "provider_url": providerUrl,
     }))
-    let (resolved, attempted, outcome) = processPendingCloudEnrollment(standaloneConfig())
+    let (resolved, attempted, outcome, _) = processPendingCloudEnrollment(standaloneConfig())
     check resolved and attempted and not outcome.ok
     check not fileExists(pendingEnrollmentPath())
     check not isManagedLink(linkState())
@@ -244,7 +249,7 @@ suite "cloud enrollment":
       "claim_token": "FRCT-boot-retry",
       "provider_url": "http://127.0.0.1:1",
     }))
-    let (resolved, attempted, outcome) = processPendingCloudEnrollment(standaloneConfig())
+    let (resolved, attempted, outcome, _) = processPendingCloudEnrollment(standaloneConfig())
     check attempted and not resolved and outcome.retryable
     check fileExists(pendingEnrollmentPath())
     # The first attempt stamps a default expiry into the pending file.
@@ -253,7 +258,7 @@ suite "cloud enrollment":
     # An expired pending file resolves without another provider call.
     pending["expires_epoch"] = %(int(epochTime()) - 10)
     writeFile(pendingEnrollmentPath(), $pending)
-    let (resolvedAfter, attemptedAfter, outcomeAfter) = processPendingCloudEnrollment(standaloneConfig())
+    let (resolvedAfter, attemptedAfter, outcomeAfter, _) = processPendingCloudEnrollment(standaloneConfig())
     check resolvedAfter and not attemptedAfter
     check outcomeAfter.error == "claim_token_expired"
     check not fileExists(pendingEnrollmentPath())
@@ -278,7 +283,7 @@ suite "cloud enrollment":
       # below the sanity epoch.
       "expires_epoch": PENDING_ENROLL_CLOCK_SANITY_EPOCH - 1000,
     }))
-    let (resolved, attempted, outcome) = processPendingCloudEnrollment(standaloneConfig())
+    let (resolved, attempted, outcome, _) = processPendingCloudEnrollment(standaloneConfig())
     check resolved and attempted and outcome.ok
     check not fileExists(pendingEnrollmentPath())
     check linkState(){"frame_id"}.getStr("") == "frame-ntp"
@@ -341,7 +346,7 @@ suite "cloud enrollment":
     # Keep the inode alive so we can read what was left behind on disk.
     let copyPath = path & ".hardlink"
     createHardlink(path, copyPath)
-    let (resolved, _, outcome) = processPendingCloudEnrollment(standaloneConfig())
+    let (resolved, _, outcome, _) = processPendingCloudEnrollment(standaloneConfig())
     check resolved and outcome.ok
     check not fileExists(path)
     check "FRCT-secret-shred" notin readFile(copyPath)

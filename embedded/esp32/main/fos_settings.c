@@ -18,6 +18,7 @@
 #include "fos_config.h"
 #include "fos_mem.h"
 #include "fos_schedule.h"
+#include "fos_tz.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 
@@ -299,6 +300,17 @@ static bool apply_frame_settings(const cJSON *frame)
         /* The Nim runtime sizes the scene canvas at init; a rotation
          * change needs a restart to take effect. */
         s_restart_after_apply = true;
+        changed = true;
+    }
+
+    const cJSON *time_zone = cJSON_GetObjectItem(frame, "timeZone");
+    if (cJSON_IsString(time_zone) && strcmp(config->time_zone, time_zone->valuestring) != 0 &&
+        strlen(time_zone->valuestring) < sizeof(config->time_zone) &&
+        (time_zone->valuestring[0] == '\0' || fos_tz_rule(time_zone->valuestring) != NULL ||
+         strcmp(time_zone->valuestring, "UTC") == 0)) {
+        strlcpy(config->time_zone, time_zone->valuestring, sizeof(config->time_zone));
+        /* Live: localtime/QuickJS Date/schedule read TZ on their next call. */
+        fos_tz_apply(config->time_zone);
         changed = true;
     }
 
