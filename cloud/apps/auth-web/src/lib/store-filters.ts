@@ -73,17 +73,24 @@ export function storeBrowseSearchParams(
 }
 
 // A store-front URL with the given filters (and optional page).
-export function storeBrowseHref(filters: StoreBrowseFilters, page = 1) {
+// `basePath` is the store front's path — "/" on its own host, "/store" when
+// it shares the cloud origin (env.ts getStorePath()).
+export function storeBrowseHref(
+  filters: StoreBrowseFilters,
+  page = 1,
+  basePath = "/",
+) {
   const suffix = storeBrowseSearchParams(filters, page).toString();
-  return suffix ? `/?${suffix}` : "/";
+  return suffix ? `${basePath}?${suffix}` : basePath;
 }
 
 // The same URL with one filter flipped — clicking an active pill clears it.
 export function storeFilterHref(
   filters: StoreBrowseFilters,
   change: Partial<StoreBrowseFilters>,
+  basePath = "/",
 ) {
-  return storeBrowseHref({ ...filters, ...change });
+  return storeBrowseHref({ ...filters, ...change }, 1, basePath);
 }
 
 export function storeHasFilters(filters: StoreBrowseFilters) {

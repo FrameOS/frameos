@@ -19,12 +19,15 @@ import {
 // Previous/Next links are what renders on the server, and the button only
 // takes over once the component has mounted in a browser.
 export function StoreSceneFeed({
+  basePath = "/",
   filters,
   heading,
   initialScenes,
   loadedPage,
   totalPages,
 }: {
+  // The store front's path, for the no-JS pager links (env.ts getStorePath()).
+  basePath?: string;
   filters: StoreBrowseFilters;
   // Shown above the appended cards when the server rendered something else
   // above them (the shelves on the unfiltered front page).
@@ -97,7 +100,12 @@ export function StoreSceneFeed({
   // viewport. The button stays for keyboard users and for retries.
   useEffect(() => {
     const node = sentinel.current;
-    if (!node || exhausted || failed || typeof IntersectionObserver === "undefined") {
+    if (
+      !node ||
+      exhausted ||
+      failed ||
+      typeof IntersectionObserver === "undefined"
+    ) {
       return;
     }
     const observer = new IntersectionObserver(
@@ -160,7 +168,7 @@ export function StoreSceneFeed({
         // and crawlers can still walk the whole listing.
         <nav aria-label="Pagination" className="store-pager">
           {loadedPage > 1 ? (
-            <Link href={storeBrowseHref(filters, loadedPage - 1)}>
+            <Link href={storeBrowseHref(filters, loadedPage - 1, basePath)}>
               ← Previous
             </Link>
           ) : null}
@@ -168,7 +176,9 @@ export function StoreSceneFeed({
             Page {loadedPage} of {totalPages}
           </span>
           {loadedPage < totalPages ? (
-            <Link href={storeBrowseHref(filters, loadedPage + 1)}>Next →</Link>
+            <Link href={storeBrowseHref(filters, loadedPage + 1, basePath)}>
+              Next →
+            </Link>
           ) : null}
         </nav>
       ) : null}

@@ -19,13 +19,13 @@ describe("proxy", () => {
     process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
 
     const response = await proxy(
-      new NextRequest("https://localhost:3000/scenes?q=mine", {
+      new NextRequest("https://localhost:3000/backends", {
         headers: { host: "account.frameos.net" },
       }),
     );
 
     expect(response.headers.get("x-middleware-rewrite")).toBe(
-      "http://localhost:3000/account/scenes?q=mine",
+      "http://localhost:3000/account/installs",
     );
   });
 

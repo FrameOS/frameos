@@ -3,6 +3,7 @@ import {
   getAccountPath,
   getCloudBaseUrl,
   getScenesBaseUrl,
+  myScenesPath,
 } from "./env";
 
 const authPagePrefixes = [
@@ -20,7 +21,6 @@ const authPagePrefixes = [
 const accountPagePrefixes = ["/account", "/admin", "/device", "/frames"] as const;
 const accountSectionRewrites = new Map([
   ["/backends", "/account/installs"],
-  ["/scenes", "/account/scenes"],
   ["/backups", "/account/backups"],
   ["/activity", "/account/activity"],
   ["/security", "/account/security"],
@@ -62,6 +62,18 @@ export function isPublicScenePath(pathname: string) {
   );
 }
 
+// Everything the scenes host serves besides its store front: public scene
+// pages plus the signed-in "My private scenes" tab.
+function isScenesHostPath(pathname: string) {
+  return isPublicScenePath(pathname) || pathname === myScenesPath;
+}
+
+// The old homes of the private scene list — /account/scenes and its clean
+// alias /scenes — moved to the scenes host as the store's second tab.
+function isLegacyMyScenesPath(pathname: string) {
+  return pathname === "/scenes" || pathname === "/account/scenes";
+}
+
 export type SurfaceRoute = {
   destination: URL;
   kind: "redirect" | "rewrite";
@@ -96,22 +108,25 @@ export function resolveSurfaceRoute(
     if (matchesAny(pathname, authPagePrefixes)) {
       return undefined;
     }
-    if (isPublicScenePath(pathname)) {
+    if (isScenesHostPath(pathname)) {
       return redirectTo(requestUrl, scenes, pathname);
     }
+    if (isLegacyMyScenesPath(pathname)) {
+      return redirectTo(requestUrl, scenes, myScenesPath);
+    }
     if (pathname === "/") {
-      // With the account surface on this host, the root is the account home
-      // ("Linked backends"); the signed-out redirect to /login happens in
-      // the account layout. Otherwise the cloud host is only the login door.
+      // With the account surface on this host, the root is the frames
+      // workspace; its own sign-in gate handles signed-out visitors.
+      // Otherwise the cloud host is only the login door.
       return accountIsCloud
-        ? redirectTo(requestUrl, account, "/backends")
+        ? redirectTo(requestUrl, account, "/frames")
         : redirectTo(requestUrl, cloud, "/login");
     }
     if (matchesAny(pathname, accountPagePrefixes)) {
       const cleanPath = getAccountPath(pathname);
       if (accountIsCloud && cleanPath === pathname) {
-        // Paths that keep their full form (/account/frames, /admin, /device,
-        // the /frames SPA) are served here — redirecting would loop.
+        // Paths that keep their full form (/admin, /device, the /frames SPA)
+        // are served here — redirecting would loop.
         return undefined;
       }
       return redirectTo(requestUrl, account, cleanPath);
@@ -128,8 +143,11 @@ export function resolveSurfaceRoute(
   }
 
   if (host === scenes.host.toLowerCase()) {
-    if (pathname === "/" || isPublicScenePath(pathname)) {
+    if (pathname === "/" || isScenesHostPath(pathname)) {
       return undefined;
+    }
+    if (isLegacyMyScenesPath(pathname)) {
+      return redirectTo(requestUrl, scenes, myScenesPath);
     }
     if (matchesAny(pathname, authPagePrefixes)) {
       return redirectTo(requestUrl, cloud, pathname);
@@ -143,15 +161,17 @@ export function resolveSurfaceRoute(
     if (matchesAny(pathname, authPagePrefixes)) {
       return redirectTo(requestUrl, cloud, pathname);
     }
-    if (isPublicScenePath(pathname)) {
+    if (isScenesHostPath(pathname)) {
       return redirectTo(requestUrl, scenes, pathname);
     }
+    if (isLegacyMyScenesPath(pathname)) {
+      return redirectTo(requestUrl, scenes, myScenesPath);
+    }
     if (pathname === "/") {
-      return redirectTo(requestUrl, account, "/backends");
+      return redirectTo(requestUrl, account, "/frames");
     }
     if (pathMatchesPrefix(pathname, "/account")) {
-      // getAccountPath keeps some paths as-is (e.g. "/account/frames", which
-      // cannot shorten into the /frames SPA) — serve those directly instead
+      // getAccountPath keeps some paths as-is — serve those directly instead
       // of redirecting a URL to itself.
       const cleanPath = getAccountPath(pathname);
       if (cleanPath === pathname) {

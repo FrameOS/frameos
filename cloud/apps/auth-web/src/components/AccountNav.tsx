@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+// Frames and scenes are not account sections: frames live in the /frames
+// workspace and the private scene list is a tab of the scene store.
 const sections = [
-  { href: "/account/frames", key: "frames", label: "My frames" },
-  { href: "/account/scenes", key: "scenes", label: "My scenes" },
   { href: "/account/installs", key: "installs", label: "Backends" },
   { href: "/account/backups", key: "backups", label: "Backups" },
   { href: "/account/activity", key: "activity", label: "Activity" },

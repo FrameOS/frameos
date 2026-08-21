@@ -6,7 +6,7 @@ import {
   getAccountBaseUrl,
   getAccountUrl,
   getCloudBaseUrl,
-  getScenesBaseUrl,
+  getStoreUrl,
 } from "../lib/env";
 
 // Shell for the public store pages: same chrome as AppShell but usable
@@ -33,8 +33,7 @@ export function PublicShell({
   title?: React.ReactNode;
 }>) {
   const cloudBaseUrl = getCloudBaseUrl();
-  const scenesBaseUrl = getScenesBaseUrl();
-  const scenesHomeUrl = new URL("/", scenesBaseUrl).toString();
+  const scenesHomeUrl = getStoreUrl();
   const accountUrl = getAccountUrl();
   // The fleet workspace is served from the account origin (app/frames).
   const framesUrl = new URL("/frames", getAccountBaseUrl()).toString();

@@ -11,6 +11,7 @@ vi.mock("../lib/env", () => ({
     `https://cloud.example.net${path ?? "/account"}`,
   getCloudBaseUrl: () => "https://cloud.example.net",
   getScenesBaseUrl: () => "https://scenes.example.net",
+  getStoreUrl: () => "https://scenes.example.net/",
   // The shells render LegalFooter, which needs the cookie domain for the
   // "Cookie settings" button.
   getSessionCookieDomain: () => undefined,

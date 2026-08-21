@@ -88,12 +88,11 @@ describe("env", () => {
     );
     process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
 
-    // "My frames" keeps its full path: /frames on the account host is the
-    // fleet SPA, so shortening it would send the nav tab (and the /account
-    // landing redirect) to the workspace instead of the frame list.
-    expect(getAccountPath("/account/frames")).toBe("/account/frames");
+    // The old account frame table shortens straight into the fleet SPA,
+    // which is the one frames page now.
+    expect(getAccountPath("/account/frames")).toBe("/frames");
     expect(getAccountUrl("/account/frames")).toBe(
-      "https://account.frameos.net/account/frames",
+      "https://account.frameos.net/frames",
     );
   });
 

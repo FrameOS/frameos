@@ -50,7 +50,7 @@ describe("StoreSceneActions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     await vi.waitFor(() => {
-      expect(replaceMock).toHaveBeenCalledWith("/account/scenes");
+      expect(replaceMock).toHaveBeenCalledWith("/my-scenes");
     });
     expect(refreshMock).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith(

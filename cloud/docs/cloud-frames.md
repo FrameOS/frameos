@@ -534,8 +534,8 @@ bundle** of that SPA:
   never import `cloud-frontend/` — the same sources build the self-hosted and
   on-device bundles — so the cloud bundle registers the panel at startup via
   `frontend/src/scenes/workspace/addFramePanelRegistry.ts`. `/account/frames`
-  keeps only the frame index and the two account-level actions (confirm a
-  pending enrollment, revoke a frame).
+  is gone (it redirects to `/frames`): the workspace confirms pending
+  enrollments itself (banner) and revokes via delete.
 - Server-side config reaches the client-only bundle through named
   whole-line anchors in `cloud-frontend/src/index.html`, replaced by
   `app/frames/[[...path]]/route.ts`: `//__FRAMEOS_CLOUD_WS_ORIGIN__` (dev hub

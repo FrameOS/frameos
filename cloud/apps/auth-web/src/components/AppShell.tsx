@@ -6,7 +6,7 @@ import {
   getAccountBaseUrl,
   getAccountUrl,
   getCloudBaseUrl,
-  getScenesBaseUrl,
+  getStoreUrl,
 } from "../lib/env";
 
 // `title` is the page's heading, shown in the top row after the wordmark.
@@ -35,7 +35,7 @@ export function AppShell({
   const accountUrl = getAccountUrl();
   const adminUrl = new URL("/admin", getAccountBaseUrl()).toString();
   const logoutUrl = new URL("/api/auth/logout", cloudBaseUrl).toString();
-  const scenesUrl = new URL("/", getScenesBaseUrl()).toString();
+  const scenesUrl = getStoreUrl();
   // The fleet SPA is served from the account origin (app/frames/[[...path]]).
   const framesUrl = new URL("/frames", getAccountBaseUrl()).toString();
 

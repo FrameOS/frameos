@@ -12,7 +12,8 @@ import {
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { readBlob } from "../../lib/blobs";
-import HomePage from "../../../app/page";
+import HomePage from "../../../app/store/page";
+import MyScenesPage from "../../../app/my-scenes/page";
 import { PATCH as adminPatchScene } from "../../../app/api/admin/scenes/[sceneId]/route";
 import { generateMetadata as generateSceneMetadata } from "../../../app/s/[slug]/page";
 import {
@@ -39,6 +40,14 @@ import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
+
+// The "My private scenes" page renders client components (zip upload, row
+// actions) that read the app router; renderToStaticMarkup has none mounted.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  usePathname: () => "/my-scenes",
+  useRouter: () => ({ refresh: () => {}, replace: () => {} }),
+}));
 
 vi.mock("next/headers", () => ({
   cookies: async () => ({
@@ -471,7 +480,7 @@ describe("store publish and distribution", () => {
     expect(forkedPreview?.previewImage).toEqual(sourcePreview?.previewImage);
   });
 
-  it("puts the signed-in owner's private scenes at the top of the store", async () => {
+  it("offers the signed-in owner a 'My private scenes' tab that lists their scenes", async () => {
     const { accessToken } = await linkClient(publishScopes);
     await publish(accessToken);
 
@@ -479,7 +488,14 @@ describe("store publish and distribution", () => {
       await HomePage({ searchParams: Promise.resolve({}) }),
     );
     expect(signedInMarkup).toContain("My private scenes");
-    expect(signedInMarkup).toContain("Sunrise Clock");
+    expect(signedInMarkup).toContain("Public scene store");
+    // Private scenes are not on the store front itself any more.
+    expect(signedInMarkup).not.toContain("Sunrise Clock");
+
+    const myScenesMarkup = renderToStaticMarkup(
+      await MyScenesPage({ searchParams: Promise.resolve({}) }),
+    );
+    expect(myScenesMarkup).toContain("Sunrise Clock");
 
     cookieJar.clear();
     const anonymousMarkup = renderToStaticMarkup(
