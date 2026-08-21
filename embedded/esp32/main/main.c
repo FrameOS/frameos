@@ -18,6 +18,7 @@
 
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
+#include "esp_spiffs.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -284,13 +285,30 @@ void app_main(void)
     {
         const char *spill_dir = NULL;
         char sd_spill[160];
+        /* Extra per-body cap on top of the frame's max_http_response_bytes.
+         * SD card: none — the setting alone decides, so a 20 MB gallery JPEG
+         * needs nothing but a higher limit. /state (SPIFFS) also holds the
+         * scene store: leave headroom for it, and never more than 8 MB. */
+        size_t spill_cap = 0;
         if (fos_assets_sd_mounted()) {
             snprintf(sd_spill, sizeof(sd_spill), "%s/.cache",
                      config->assets_path[0] ? config->assets_path : "/srv/assets");
             mkdir(sd_spill, 0775);
             spill_dir = sd_spill;
         } else if (fos_scenes_state_mounted()) {
-            spill_dir = "/state";
+            size_t state_total = 0, state_used = 0;
+            spill_cap = 8 * 1024 * 1024;
+            if (esp_spiffs_info("state", &state_total, &state_used) == ESP_OK && state_total > state_used) {
+                size_t free_bytes = state_total - state_used;
+                size_t margin = 512 * 1024; /* scene updates must still fit */
+                size_t usable = free_bytes > margin ? free_bytes - margin : 0;
+                if (usable < spill_cap) spill_cap = usable;
+            }
+            if (spill_cap >= 256 * 1024) {
+                spill_dir = "/state";
+            } else {
+                ESP_LOGW(TAG, "http spill disabled: /state has too little free space");
+            }
         }
         if (spill_dir != NULL) {
             DIR *dir = opendir(spill_dir);
@@ -305,9 +323,10 @@ void app_main(void)
                 }
                 closedir(dir);
             }
-            fos_nim_http_set_spill_dir(spill_dir, 8 * 1024 * 1024);
+            fos_nim_http_set_spill_dir(spill_dir, spill_cap);
             fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);
-            ESP_LOGI(TAG, "http spill dir: %s%s", spill_dir,
+            ESP_LOGI(TAG, "http spill dir: %s (cap %u bytes%s)%s", spill_dir,
+                     (unsigned)spill_cap, spill_cap ? "" : " = setting only",
                      config->http_spill_force_bytes ? " (forced)" : "");
         }
     }

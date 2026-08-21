@@ -1876,8 +1876,25 @@ export function FrameSettings({
       label="Maximum HTTP response size for apps"
       tooltip={
         <>
-          Maximum number of bytes that FrameOS apps may download in a single HTTP response. Increase this for
-          larger calendar feeds, images, or APIs. ESP32 frames default to 4 MiB to avoid large PSRAM allocations.
+          <p>
+            The most bytes one HTTP response may carry for any app download — images, calendar feeds, APIs.
+            Enforced on the device at download time: a response that announces a larger size is refused
+            before the first byte, a stream that grows past it is cut off. Raise it for bigger sources.
+          </p>
+          <p className="mt-2">
+            ESP32 frames default to 4 MiB. There the body is buffered in PSRAM chunks, and when free PSRAM would
+            drop below the runtime&apos;s reserve the rest of the body spills to storage instead of failing — the SD
+            card&apos;s <code>.cache</code> folder when one is mounted, otherwise the internal <code>/state</code>
+            partition (capped by its free space, at most 8 MiB). A spilled image is decoded straight from the file
+            with the same streaming decoder that renders SD-card assets, so a multi-MB JPEG never has to fit in
+            memory: this limit, not PSRAM, is the ceiling. Spilled bodies must be baseline JPEGs (progressive
+            JPEG and PNG cannot be streamed from a file yet), and text/JSON responses never spill — they need to
+            fit in memory. With no SD card and no free <code>/state</code> space, spilling is off and the download
+            fails once PSRAM is exhausted.
+          </p>
+          <p className="mt-2">
+            The ESP32 reads this value at boot, so saving a change reboots the frame.
+          </p>
         </>
       }
     >
