@@ -32,4 +32,5 @@ export const getRoutes = () =>
     [urls.scenes(':frameId')]: 'sceneWorkspace',
     [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',
     [urls.frame(':id')]: 'frame',
+    [urls.frame(':id', ':tool')]: 'frame',
   } as const)

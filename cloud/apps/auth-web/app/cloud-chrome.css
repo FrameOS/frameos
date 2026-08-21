@@ -235,3 +235,129 @@ html[data-frameos-theme='dark'] .frameos-account-header__logo--dark,
 html.theme-dark .frameos-account-header__logo--dark {
   display: block;
 }
+
+/* "beta" after the wordmark. A button: it opens the dialog below. */
+.frameos-account-header__beta {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.1rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid rgba(28, 124, 102, 0.45);
+  border-radius: 999px;
+  background: rgba(28, 124, 102, 0.12);
+  color: rgb(20, 96, 78);
+  font: inherit;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.frameos-account-header__beta:hover {
+  background: rgba(28, 124, 102, 0.2);
+}
+
+.frameos-account-header__beta:focus-visible {
+  outline: 2px solid var(--frameos-primary-ring, rgb(28 124 102 / 0.42));
+  outline-offset: 2px;
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header__beta,
+html.theme-dark .frameos-account-header__beta {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.14);
+  color: rgb(110, 231, 183);
+}
+
+/* The "what beta means" dialog. Native <dialog>, so it needs no portal and
+   works the same in the Next pages and the SPA. */
+.frameos-beta-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+  margin: auto;
+  padding: 0;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 1rem;
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 24px 64px -24px rgba(15, 23, 42, 0.5);
+}
+
+.frameos-beta-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.frameos-beta-dialog__body {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.5rem 1.5rem 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.frameos-beta-dialog__body h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.frameos-beta-dialog__body p,
+.frameos-beta-dialog__body ul {
+  margin: 0;
+}
+
+.frameos-beta-dialog__body ul {
+  display: grid;
+  gap: 0.35rem;
+  padding-left: 1.2rem;
+  list-style: disc;
+}
+
+.frameos-beta-dialog__body a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.frameos-beta-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+}
+
+.frameos-beta-dialog__close {
+  padding: 0.5rem 0.95rem;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 0.65rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.frameos-beta-dialog__close:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+html[data-frameos-theme='dark'] .frameos-beta-dialog,
+html.theme-dark .frameos-beta-dialog {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: #1b1d22;
+  color: #f3f4f6;
+}
+
+html[data-frameos-theme='dark'] .frameos-beta-dialog__close,
+html.theme-dark .frameos-beta-dialog__close {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+html[data-frameos-theme='dark'] .frameos-beta-dialog__close:hover,
+html.theme-dark .frameos-beta-dialog__close:hover {
+  background: rgba(255, 255, 255, 0.08);
+}

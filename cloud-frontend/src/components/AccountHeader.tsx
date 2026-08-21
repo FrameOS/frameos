@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react'
+import { useRef, useState, type ReactElement } from 'react'
 
 import { accountNavUrls } from '../cloudConfig'
 
@@ -32,6 +32,7 @@ import { accountNavUrls } from '../cloudConfig'
 export function AccountHeader(): ReactElement {
   const { accountUrl, framesUrl, logoutUrl, scenesUrl } = accountNavUrls()
   const [open, setOpen] = useState(false)
+  const betaDialogRef = useRef<HTMLDialogElement>(null)
 
   return (
     <header className="frameos-account-header">
@@ -53,6 +54,64 @@ export function AccountHeader(): ReactElement {
           />
           <span className="frameos-account-header__name">FrameOS Cloud</span>
         </a>
+        <button
+          aria-haspopup="dialog"
+          className="frameos-account-header__beta"
+          onClick={() => betaDialogRef.current?.showModal()}
+          title="What beta means"
+          type="button"
+        >
+          beta
+        </button>
+        {/* Same copy as auth-web's BetaBadge.tsx — keep the two in step. */}
+        <dialog
+          aria-labelledby="frameos-beta-title"
+          className="frameos-beta-dialog"
+          onClick={(event) => {
+            if (event.target === betaDialogRef.current) {
+              betaDialogRef.current?.close()
+            }
+          }}
+          ref={betaDialogRef}
+        >
+          <div className="frameos-beta-dialog__body">
+            <h2 id="frameos-beta-title">FrameOS Cloud is in beta</h2>
+            <p>
+              The cloud is new and still changing. It works — frames enroll, scenes deploy, backups run — but expect
+              rough edges, and expect things to move around while we learn what people need.
+            </p>
+            <ul>
+              <li>
+                <strong>It is free while in beta.</strong> Limits (frames, storage, logs) exist so one account cannot
+                crowd out the rest; they may change.
+              </li>
+              <li>
+                <strong>Your data stays yours.</strong> Scenes, backups and frame settings can be exported from your
+                account at any time, and every frame keeps working on its own if the cloud is unreachable.
+              </li>
+              <li>
+                <strong>Self-hosting is not going anywhere.</strong> The cloud is an option next to the self-hosted
+                FrameOS backend, not a replacement for it.
+              </li>
+              <li>
+                <strong>Tell us what breaks.</strong> Bugs and ideas are welcome on{' '}
+                <a href="https://github.com/FrameOS/frameos/issues" rel="noreferrer" target="_blank">
+                  GitHub
+                </a>
+                .
+              </li>
+            </ul>
+            <div className="frameos-beta-dialog__actions">
+              <button
+                className="frameos-beta-dialog__close"
+                onClick={() => betaDialogRef.current?.close()}
+                type="button"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </dialog>
       </div>
       <button
         aria-controls="frameos-primary-nav"

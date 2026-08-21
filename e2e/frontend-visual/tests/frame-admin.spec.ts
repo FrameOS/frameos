@@ -77,7 +77,10 @@ interface FrameAdminOptions {
   cloudStatus?: Record<string, unknown>
 }
 
-async function serveFrameAdmin(page: Page, { authenticated = true, cloudStatus }: FrameAdminOptions = {}): Promise<void> {
+async function serveFrameAdmin(
+  page: Page,
+  { authenticated = true, cloudStatus }: FrameAdminOptions = {}
+): Promise<void> {
   // Playwright checks routes in REVERSE registration order: the static bundle
   // fallback goes first (lowest priority), then the API catch-all, then the
   // specific API mocks that must win.

@@ -168,17 +168,21 @@ export default async function StorePage({
   return (
     <PublicShell isSuperadmin={isSuperadmin} signedIn={Boolean(session)}>
       {/* The private list is the store's second tab; it needs an account. */}
-      {session?.accountId ? <StoreTabs active="store" /> : null}
-      <div className="content-header">
-        <div>
-          <p className="copy">
-            These scenes can be run on FrameOS devices.{" "}
-            <a href="https://frameos.net" rel="noreferrer noopener">
-              Learn more about FrameOS here.
-            </a>
-          </p>
+      {session?.accountId ? (
+        <StoreTabs active="store" />
+      ) : (
+        // Signed-in visitors know what FrameOS is; the tabs take the slot.
+        <div className="content-header">
+          <div>
+            <p className="copy">
+              These scenes can be run on FrameOS devices.{" "}
+              <a href="https://frameos.net" rel="noreferrer noopener">
+                Learn more about FrameOS here.
+              </a>
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       <form
         action={storePath}

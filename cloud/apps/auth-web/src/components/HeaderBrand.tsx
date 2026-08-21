@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BetaBadge } from "./BetaBadge";
 
 // The lead slot of the shared cloud header (cloud-chrome.css): the cloud
 // logo — light and dark renditions, CSS picks one — and the wordmark, both
@@ -39,6 +40,7 @@ export function HeaderBrand({
         />
         <span className="frameos-account-header__name">{name}</span>
       </Link>
+      <BetaBadge />
       {title ? (
         <span className="frameos-account-header__title">{title}</span>
       ) : null}

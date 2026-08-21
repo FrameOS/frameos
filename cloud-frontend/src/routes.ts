@@ -31,7 +31,7 @@ export function cloudFramesUrl(): string {
  */
 export function cloudFrameUrl(frameId: string, tool?: string): string {
   const path = `${cloudRouteBasePath}/${encodeURIComponent(frameId)}`
-  return tool ? `${path}?tool=${encodeURIComponent(tool)}` : path
+  return tool && tool !== 'overview' ? `${path}/${encodeURIComponent(tool)}` : path
 }
 
 /** A scene of a frame: /frames/<frameId>/scenes/<sceneId>. */

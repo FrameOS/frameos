@@ -31,7 +31,13 @@ import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
-import { frameToolScrollKey, isMobileWorkspaceViewport, workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
+import {
+  frameToolFromPathname,
+  frameToolScrollKey,
+  isMobileWorkspaceViewport,
+  workspaceLogic,
+  WorkspaceUtilityPanel,
+} from './workspaceLogic'
 import { urls } from '../../urls'
 import { frameLogic } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
@@ -284,12 +290,17 @@ function frameToolDefinitionsForMode(
     }))
 }
 
-function frameToolPanelFromSearchParams(
+// The tool the URL asks for: /frames/<id>/<tool>, or `?tool=` on an old
+// link. Unknown or disabled tools fall back to the overview.
+function frameToolPanelFromRoute(
+  pathname: string,
   searchParams: Record<string, unknown>,
+  frameId: FrameId | null,
   availableDefinitions: FrameToolDefinition[] = frameToolDefinitions
 ): WorkspaceUtilityPanel | null {
+  const fromPath = frameId !== null ? frameToolFromPathname(pathname, frameId) : null
   const value = searchParams.tool
-  const tool = Array.isArray(value) ? value[0] : value
+  const tool = fromPath ?? (Array.isArray(value) ? value[0] : value)
   if (!tool) {
     return 'overview'
   }
@@ -1377,7 +1388,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
   const { frame, scenes, undeployedChanges, unsavedChanges } = useValues(frameLogic(frameLogicProps))
   const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
     useValues(workspaceLogic)
-  const { searchParams } = useValues(router)
+  const { location, searchParams } = useValues(router)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
   // Computed with the frame in hand: the device profile can disable panels
   // the mode alone would allow (an esp32 cloud frame has no schedule or
@@ -1386,7 +1397,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
   // user inside one.
   const availableToolDefinitions = frameToolDefinitionsForMode(mode, frame)
   const enabledToolDefinitions = availableToolDefinitions.filter((definition) => !definition.disabledReason)
-  const requestedPanel = frameToolPanelFromSearchParams(searchParams, enabledToolDefinitions)
+  const requestedPanel = frameToolPanelFromRoute(location.pathname, searchParams, frameId, enabledToolDefinitions)
   const fallbackPanel = enabledToolDefinitions.some((definition) => definition.panel === utilityPanel)
     ? utilityPanel
     : 'overview'
@@ -1554,7 +1565,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
   useMountedLogic(sceneWorkspaceLogic({ routeFrameId: id ?? null, routeSceneId: null }))
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesList, framesLoading } = useValues(framesModel)
-  const { searchParams } = useValues(router)
+  const { location, searchParams } = useValues(router)
   const availableToolDefinitions = frameToolDefinitionsForMode()
   const routeFrameId = parseFrameId(id)
   const firstFrame =
@@ -1565,7 +1576,8 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
     null
 
   if (!firstFrame && framesLoading) {
-    const loadingTool = frameToolPanelFromSearchParams(searchParams, availableToolDefinitions) ?? 'overview'
+    const loadingTool =
+      frameToolPanelFromRoute(location.pathname, searchParams, routeFrameId, availableToolDefinitions) ?? 'overview'
     const loadingToolUsesPageScroll = frameToolUsesPageScroll(loadingTool)
 
     return (

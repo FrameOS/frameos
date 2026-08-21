@@ -45,7 +45,10 @@ test.describe.serial('@e2e frame installation setup flow', () => {
     })
 
     await expect(
-      page.locator('.workspace-drawer').last().getByRole('button', { name: /Build \/ download SD card/i })
+      page
+        .locator('.workspace-drawer')
+        .last()
+        .getByRole('button', { name: /Build \/ download SD card/i })
     ).toBeVisible()
 
     const downloadPromise = page.waitForEvent('download')
@@ -263,7 +266,7 @@ async function expectRenderDoneLog(page: Page, frameId: number): Promise<void> {
     )
   ).toBeTruthy()
 
-  await page.goto(`/frames/${frameId}?tool=logs`, { waitUntil: 'domcontentloaded' })
+  await page.goto(`/frames/${frameId}/logs`, { waitUntil: 'domcontentloaded' })
   await page.getByPlaceholder('Search logs...').fill('render:done')
   await expect(page.getByText('render:done')).toBeVisible()
 }
@@ -312,8 +315,14 @@ function deployPlan(frameId: number): Record<string, unknown> {
 }
 
 async function openAddFrameDrawer(page: Page) {
-  await page.getByRole('button', { name: /Add frame/i }).first().click()
-  const installationDrawer = page.locator('.workspace-drawer').filter({ hasText: /Installation method/i }).last()
+  await page
+    .getByRole('button', { name: /Add frame/i })
+    .first()
+    .click()
+  const installationDrawer = page
+    .locator('.workspace-drawer')
+    .filter({ hasText: /Installation method/i })
+    .last()
   await expect(installationDrawer).toBeVisible()
   await expect(installationDrawer.getByRole('button', { name: /Download SD card/i })).toBeVisible()
   const drawer = page.locator('.workspace-drawer').last()

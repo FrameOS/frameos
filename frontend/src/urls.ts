@@ -8,9 +8,12 @@ import { isCloudMode } from './utils/cloudMode'
 // other under the base path. Cloud: the SPA is mounted AT /frames, so a
 // frame is /frames/<id> (not /frames/frames/<id>) and its scenes nest under
 // it — /frames/<id>/scenes/<sceneId>. Apps keep /frames/apps/... on both.
+//
+// A frame tool is a path segment: /frames/<id>/logs. The overview is the
+// bare frame path. (`?tool=` is still read by the router for old links.)
 function frameUrl(id: FrameId, tool?: string): string {
   const path = isCloudMode() ? getRouteBasePath() + '/' + id : getRouteBasePath() + '/frames/' + id
-  return path + (tool ? `?tool=${encodeURIComponent(tool)}` : '')
+  return path + (tool && tool !== 'overview' ? '/' + encodeURIComponent(tool) : '')
 }
 
 function scenesUrl(frameId?: FrameId, sceneId?: string): string {

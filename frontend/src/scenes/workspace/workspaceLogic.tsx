@@ -49,9 +49,32 @@ function searchValue(search: Record<string, unknown>, key: string): string | nul
   return typeof value === 'string' ? value : null
 }
 
-function frameToolFromSearch(search: Record<string, unknown>): WorkspaceUtilityPanel {
+// The tool a frame route names: the path segment after the id
+// (/frames/<id>/logs), or — for links from before it was a segment — the
+// `?tool=` query. Anything else is the overview.
+export function frameToolFromRoute(routeTool: unknown, search: Record<string, unknown>): WorkspaceUtilityPanel {
+  if (isFrameToolPanel(routeTool)) {
+    return routeTool
+  }
   const tool = searchValue(search, 'tool')
   return isFrameToolPanel(tool) ? tool : 'overview'
+}
+
+// The tool segment of `pathname` when it is a frame route — null when it is
+// the bare frame path or not a frame route at all.
+export function frameToolFromPathname(pathname: string, frameId: FrameId): WorkspaceUtilityPanel | null {
+  const framePath = urls.frame(frameId)
+  if (!pathname.startsWith(`${framePath}/`)) {
+    return null
+  }
+  const segment = decodeURIComponent(pathname.slice(framePath.length + 1))
+  return isFrameToolPanel(segment) ? segment : null
+}
+
+function withoutTool(search: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...search }
+  delete next.tool
+  return next
 }
 
 function deployDrawerViewFromSearch(search: Record<string, unknown>): DeployDrawerView | undefined {
@@ -167,7 +190,7 @@ function isFramesRoutePath(pathname: string): boolean {
 }
 
 function isFrameRoutePathForFrame(pathname: string, frameId: FrameId): boolean {
-  return pathname === urls.frame(frameId)
+  return pathname === urls.frame(frameId) || frameToolFromPathname(pathname, frameId) !== null
 }
 
 function isFrameOverviewRoutePathForFrame(
@@ -175,7 +198,10 @@ function isFrameOverviewRoutePathForFrame(
   search: Record<string, unknown>,
   frameId: FrameId
 ): boolean {
-  return isFrameRoutePathForFrame(pathname, frameId) && frameToolFromSearch(search) === 'overview'
+  return (
+    isFrameRoutePathForFrame(pathname, frameId) &&
+    frameToolFromRoute(frameToolFromPathname(pathname, frameId), search) === 'overview'
+  )
 }
 
 function isWorkspaceRoutePathForFrame(pathname: string, frameId: FrameId): boolean {
@@ -206,7 +232,12 @@ function pathFrameIdAfterToken(pathname: string, tokenizedPath: string, token: s
   }
   const [segment, ...rest] = pathname.slice(prefix.length).split('/')
   const tail = rest.length > 0 ? '/' + rest.join('/') : ''
-  if (suffix ? tail !== suffix && !tail.startsWith(`${suffix}/`) : tail !== '') {
+  if (suffix) {
+    if (tail !== suffix && !tail.startsWith(`${suffix}/`)) {
+      return null
+    }
+  } else if (tail !== '' && !(rest.length === 1 && isFrameToolPanel(decodeURIComponent(rest[0])))) {
+    // A frame path may carry one tool segment: /frames/<id>/logs.
     return null
   }
   // Opaque, like every frame id: uuids on the cloud, numbers on the backend.
@@ -1772,28 +1803,25 @@ export const workspaceLogic = kea<workspaceLogicType>([
       navigateToFrame: ({ frameId }) => {
         actions.selectFrame(frameId)
         const panel = isFrameToolPanel(values.utilityPanel) ? values.utilityPanel : 'overview'
-        router.actions.push(
-          urls.frame(frameId),
-          { tool: panel },
-          utilityDrawerClosedHash(workspaceContentNavigationHash())
-        )
+        router.actions.push(urls.frame(frameId, panel), {}, utilityDrawerClosedHash(workspaceContentNavigationHash()))
       },
       openFrameTool: ({ frameId, panel }) => {
         router.actions.push(
-          urls.frame(frameId),
-          deployDrawerSearchForFrame(frameId, { tool: panel }),
+          urls.frame(frameId, panel),
+          deployDrawerSearchForFrame(frameId, {}),
           utilityDrawerClosedHash(workspaceContentNavigationHash())
         )
       },
       openFrameToolBehindDrawer: ({ frameId, panel }) => {
-        const search: Record<string, unknown> = {
-          ...router.values.searchParams,
-          tool: panel,
-        }
+        const search = withoutTool(router.values.searchParams)
         if (String(search.frameId ?? '') === String(frameId)) {
           delete search.frameId
         }
-        router.actions.push(urls.frame(frameId), search, utilityDrawerClosedHash(workspaceContentNavigationHash()))
+        router.actions.push(
+          urls.frame(frameId, panel),
+          search,
+          utilityDrawerClosedHash(workspaceContentNavigationHash())
+        )
       },
       navigateToSceneFrame: ({ frameId }) => {
         actions.selectFrame(frameId)
@@ -1955,12 +1983,20 @@ export const workspaceLogic = kea<workspaceLogicType>([
     }
     const applyFrameRoute = (
       id: unknown,
+      routeTool: unknown,
       search: Record<string, unknown>,
       hash: Record<string, unknown>,
       previousLocation: { pathname?: string; searchParams?: Record<string, unknown> }
     ) => {
       syncSecondarySidebarFromHashForMobile(hash)
       const validFrameId = parseRouteFrameId(typeof id === 'string' || typeof id === 'number' ? String(id) : null)
+      const tool = frameToolFromRoute(routeTool, search)
+      // An old `?tool=` link: move the tool into the path and come back
+      // through this handler with the canonical URL.
+      if (validFrameId && !isFrameToolPanel(routeTool) && searchValue(search, 'tool') !== null) {
+        router.actions.replace(urls.frame(validFrameId, tool), withoutTool(search), hash)
+        return
+      }
       const skipDeployDrawerPreserve = Boolean(cache.skipNextDeployDrawerPreserve)
       cache.skipNextDeployDrawerPreserve = false
       const preservedSearch =
@@ -1972,10 +2008,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
       if (validFrameId) {
         actions.selectFrame(validFrameId)
       }
-      actions.openUtilityPanel(frameToolFromSearch(effectiveSearch))
+      actions.openUtilityPanel(tool)
       applyDrawerFromSearch(validFrameId, effectiveSearch)
       if (validFrameId && preservedSearch && searchValue(preservedSearch, 'drawer') === 'deployPlan') {
-        router.actions.replace(urls.frame(validFrameId), preservedSearch, hash)
+        router.actions.replace(urls.frame(validFrameId, tool), preservedSearch, hash)
       }
     }
     const applyFrameAdminRootRoute = (
@@ -1985,7 +2021,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       _payload: { initial?: boolean },
       previousLocation: { pathname?: string; searchParams?: Record<string, unknown> }
     ) => {
-      applyFrameRoute(getFrameControlFrameId(), search, hash, previousLocation)
+      applyFrameRoute(getFrameControlFrameId(), searchValue(search, 'tool'), search, hash, previousLocation)
     }
     const framesPath = framesRoutePath()
     const rootRouteHandler = isInFrameAdminMode() ? applyFrameAdminRootRoute : applyFramesRoute
@@ -2001,7 +2037,9 @@ export const workspaceLogic = kea<workspaceLogicType>([
       [urls.apps(':frameId', ':sceneId')]: applySceneOrAppRoute,
       [urls.apps(':frameId', ':sceneId', ':nodeId')]: applySceneOrAppRoute,
       [urls.frame(':id')]: ({ id }, search, hash, _payload, previousLocation) =>
-        applyFrameRoute(id, search, hash, previousLocation),
+        applyFrameRoute(id, null, search, hash, previousLocation),
+      [urls.frame(':id', ':tool')]: ({ id, tool }, search, hash, _payload, previousLocation) =>
+        applyFrameRoute(id, tool, search, hash, previousLocation),
     }
   }),
   actionToUrl(() => ({
@@ -2019,8 +2057,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
       drawerUrlForFrame(payloadFrameId(payload.frameId), 'templates'),
     closeTemplateDrawer: clearDrawerUrl,
     openScheduleDrawer: (payload: Record<string, any>) => [
-      urls.frame(payloadFrameId(payload.frameId)),
-      { ...clearDrawerSearchParams(router.values.searchParams), tool: 'schedule' },
+      urls.frame(payloadFrameId(payload.frameId), 'schedule'),
+      withoutTool(clearDrawerSearchParams(router.values.searchParams)),
       utilityDrawerClosedHash(),
     ],
     closeScheduleDrawer: clearDrawerUrl,
@@ -2037,10 +2075,9 @@ export const workspaceLogic = kea<workspaceLogicType>([
         ? [
             urls.frame(payloadFrameId(payload.frameId)),
             {
-              ...clearDrawerSearchParams(router.values.searchParams),
+              ...withoutTool(clearDrawerSearchParams(router.values.searchParams)),
               drawer: 'deployPlan',
               ...(payload.deployDrawerView ? { deployView: payload.deployDrawerView } : {}),
-              tool: 'overview',
             },
             utilityDrawerClosedHash(),
           ]

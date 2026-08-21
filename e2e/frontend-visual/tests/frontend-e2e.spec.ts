@@ -9,17 +9,17 @@ import {
 } from './visual-helpers'
 
 const frameTools = [
-  { label: 'Overview', path: '/frames/1?tool=overview', text: /Kitchen dashboard/i },
-  { label: 'Scenes', path: '/frames/1?tool=scenes', text: /Add scene/i },
-  { label: 'Preview', path: '/frames/1?tool=preview', text: /Preview/i },
-  { label: 'Logs', path: '/frames/1?tool=logs', text: /Search logs/i },
-  { label: 'Metrics', path: '/frames/1?tool=metrics', text: /datapoints loaded/i },
-  { label: 'Assets', path: '/frames/1?tool=assets', text: /Files/i },
-  { label: 'Terminal', path: '/frames/1?tool=terminal', text: /Send command/i },
-  { label: 'Ping', path: '/frames/1?tool=ping', text: /Connectivity/i },
-  { label: 'Debug', path: '/frames/1?tool=debug', text: /Debug/i },
-  { label: 'Settings', path: '/frames/1?tool=settings', text: /Frame info/i },
-  { label: 'Schedule redirect', path: '/frames/1?tool=schedule', text: /Schedule/i },
+  { label: 'Overview', path: '/frames/1', text: /Kitchen dashboard/i },
+  { label: 'Scenes', path: '/frames/1', text: /Add scene/i },
+  { label: 'Preview', path: '/frames/1/preview', text: /Preview/i },
+  { label: 'Logs', path: '/frames/1/logs', text: /Search logs/i },
+  { label: 'Metrics', path: '/frames/1/metrics', text: /datapoints loaded/i },
+  { label: 'Assets', path: '/frames/1/assets', text: /Files/i },
+  { label: 'Terminal', path: '/frames/1/terminal', text: /Send command/i },
+  { label: 'Ping', path: '/frames/1/ping', text: /Connectivity/i },
+  { label: 'Debug', path: '/frames/1/debug', text: /Debug/i },
+  { label: 'Settings', path: '/frames/1/settings', text: /Frame info/i },
+  { label: 'Schedule redirect', path: '/frames/1/schedule', text: /Schedule/i },
 ] as const
 
 const sceneUtilityDrawers = ['Preview', 'State variables', 'Apps', 'Events', 'JSON'] as const
@@ -171,7 +171,7 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     await prepareStablePage(page, 'light')
     await login(page)
 
-    await page.goto('/frames/1?tool=scenes', { waitUntil: 'domcontentloaded' })
+    await page.goto('/frames/1', { waitUntil: 'domcontentloaded' })
     await settleForScreenshot(page)
 
     const sidebar = page.locator('.workspace-sidebar').first()
@@ -193,13 +193,13 @@ test.describe('backend frontend e2e coverage @e2e', () => {
 
     await page.goBack()
     await expect(sidebar).toHaveClass(/workspace-sidebar-collapsed/)
-    await expect(page).toHaveURL(/\/frames\/1\?tool=scenes$/)
+    await expect(page).toHaveURL(/\/frames\/1$/)
 
     await activeFrameNav.click()
     await expect(sidebar).toBeVisible()
     await page.locator('.frameos-nav-button[title="Hide frame panel"]').click()
     await expect(sidebar).toHaveClass(/workspace-sidebar-collapsed/)
-    await expect(page).toHaveURL(/\/frames\/1\?tool=scenes$/)
+    await expect(page).toHaveURL(/\/frames\/1$/)
 
     expectNoFrontendErrors(readErrors)
   })
@@ -282,7 +282,7 @@ test.describe('backend frontend e2e coverage @e2e', () => {
 
   test('frame settings subsection shortcuts target every section', async ({ page }) => {
     const readErrors = await prepareAuthenticatedPage(page)
-    await page.goto('/frames/1?tool=settings', { waitUntil: 'domcontentloaded' })
+    await page.goto('/frames/1/settings', { waitUntil: 'domcontentloaded' })
     await settleForScreenshot(page)
 
     for (const [label, id] of frameSettingsSections) {

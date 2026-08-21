@@ -75,6 +75,7 @@ export const getRoutes = () =>
     ...(getRouteBasePath() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
     [urls.frame(':id')]: 'frame',
+    [urls.frame(':id', ':tool')]: 'frame',
     [urls.scenes()]: 'sceneWorkspace',
     [urls.scenes(':frameId')]: 'sceneWorkspace',
     [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',

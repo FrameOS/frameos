@@ -1147,6 +1147,18 @@ a.tag-pill--active:hover {
   font-weight: 600;
 }
 
+/* The store's two tabs sit alone under the header with nothing else to
+   anchor them, so the active one is filled rather than tinted. */
+.subnav--store .subnav__link--active {
+  background: var(--primary-soft);
+  border: 1px solid color-mix(in srgb, var(--primary), transparent 60%);
+  color: var(--primary-strong);
+}
+
+.subnav--store .subnav__link {
+  border: 1px solid transparent;
+}
+
 .viewport-controls {
   display: inline-flex;
   align-items: center;
@@ -1784,4 +1796,26 @@ a.stat-tile:hover {
 
 .cell-nowrap {
   white-space: nowrap;
+}
+
+/* Store scene page: "Install on a frame". */
+.install-box {
+  display: grid;
+  gap: 10px;
+}
+
+.install-box__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.install-box__row .input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.install-box .notice,
+.install-box .notice-error {
+  margin: 0;
 }
