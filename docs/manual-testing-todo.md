@@ -48,10 +48,16 @@ flow (changes first-boot behavior for every new user).
   index scene only refreshed on its 5-minute interval. Fixed on
   `cloud-admin-overhaul`: the system screens re-render on every cloud link
   change, and the whole boot (network check included) now draws on HDMI.
-  Still open from that boot: the card shipped `Time zone: UTC` (the cloud
-  never sets one) and `frame.local` as the hostname (every cloud card gets
-  the same name — mDNS collides with two frames on one network).
-  Re-check the new boot/status screen on the next flash.
+  Both gaps from that boot are fixed on the branch (browser time zone +
+  slugified name ride `frameos-cloud.txt` into `frame.json` / `/etc/hostname`).
+- [ ] **Re-flash check (this branch):** HDMI boot screen draws during the
+  network check; `frame.json` ends up with the display's native mode (4K on
+  a Pi 4/5, 1080p on a Zero 2 W) and the cloud workspace shows it; panel
+  says the cloud frame name + Europe/Brussels; hostname is the slugified
+  name; a scheduled 01:02 reboot logs `scheduler:fire` at 01:02 *local*.
+- [ ] **ESP32 time zone (needs 2026.8.34 firmware):** set Europe/Brussels
+  from the cloud settings panel → weather scene hours match local time,
+  schedule entries fire in local time, `config` on the console shows it.
 - [ ] **First-boot cloud enrollment on a router that strips DNSSEC (PR #384):**
   2026-08-20 a Pi 5 card booted, joined WiFi, then every lookup failed with
   `systemd-resolved: DNSSEC validation failed ... no-signature`; the 30 s
