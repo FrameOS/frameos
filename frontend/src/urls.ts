@@ -13,7 +13,12 @@ import { isCloudMode } from './utils/cloudMode'
 // bare frame path. (`?tool=` is still read by the router for old links.)
 function frameUrl(id: FrameId, tool?: string): string {
   const path = isCloudMode() ? getRouteBasePath() + '/' + id : getRouteBasePath() + '/frames/' + id
-  return path + (tool && tool !== 'overview' ? '/' + encodeURIComponent(tool) : '')
+  if (!tool || tool === 'overview') {
+    return path
+  }
+  // `:tool` is the router pattern (scenes.tsx); encoding it would register
+  // `/frames/:id/%3Atool` and no tool route would ever match.
+  return path + '/' + (tool.startsWith(':') ? tool : encodeURIComponent(tool))
 }
 
 function scenesUrl(frameId?: FrameId, sceneId?: string): string {

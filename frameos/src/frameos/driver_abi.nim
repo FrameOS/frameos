@@ -48,5 +48,8 @@ type
   ## "no request" rather than as a broken driver: release binaries and their
   ## driver libraries are versioned together, but a hand-copied `.so` is not.
   DriverEarlierRenderProc* = proc(driver: pointer): cdouble {.cdecl.}
+  ## OPTIONAL symbol, same rules as above: the display geometry a driver found
+  ## after init (frameos/driver_render_hint), width << 32 | height, 0 = none.
+  DriverDetectedDisplaySizeProc* = proc(driver: pointer): uint64 {.cdecl.}
   DriverToPngProc* = proc(driver: pointer, rotate: cint, flip: cstring, length: ptr int): pointer {.cdecl.}
   DriverActionProc* = proc(driver: pointer) {.cdecl.}

@@ -674,7 +674,10 @@ static void push_status_info(void)
     json_escape_value(config->backend_url, backend_url, sizeof(backend_url));
     const esp_app_desc_t *app = esp_app_get_description();
 
-    char info[3 * FOS_URL_LEN + 4 * FOS_STR_LEN + 256];
+    /* Worst case of every %s below plus the fixed JSON: gcc's
+     * -Wformat-truncation wants the destination to hold it outright. */
+    char info[sizeof(name) + sizeof(panel) + sizeof(ssid) + sizeof(cloud_url) + sizeof(backend_url) +
+              4 * 64 + 256];
     snprintf(info, sizeof(info),
              "{\"name\":\"%s\",\"panel\":\"%s\",\"ip\":\"%s\","
              "\"portal\":%s,\"portal_ssid\":\"%s\",\"portal_ip\":\"%s\","

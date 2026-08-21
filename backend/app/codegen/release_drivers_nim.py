@@ -130,6 +130,7 @@ type
     instance: pointer
     render: DriverRenderProc
     earlierRender: DriverEarlierRenderProc
+    detectedDisplaySize: DriverDetectedDisplaySizeProc
     toPng: DriverToPngProc
     turnOn: DriverActionProc
     turnOff: DriverActionProc
@@ -337,7 +338,6 @@ proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]
   let driverCtx = buildDriverContext(frameOS)
   activeFrameOS = frameOS
-  activeDriverContext = driverCtx
   for spec in driverSpecsFor(frameOS):
     let path = driverLibraryPath(spec)
     let library = loadLib(path)
@@ -360,6 +360,8 @@ proc init*(frameOS: FrameOS) =
       loaded.render = loadRequiredSymbol[DriverRenderProc](library, spec.name, "frameos_driver_render")
       loaded.earlierRender = loadOptionalSymbol[DriverEarlierRenderProc](library,
           "frameos_driver_earlier_render_seconds")
+      loaded.detectedDisplaySize = loadOptionalSymbol[DriverDetectedDisplaySizeProc](library,
+          "frameos_driver_detected_display_size")
     if spec.canPng:
       loaded.toPng = loadRequiredSymbol[DriverToPngProc](library, spec.name, "frameos_driver_to_png")
     if spec.canTurnOnOff:
@@ -378,7 +380,11 @@ proc render*(image: Image) =
       # immediately after the call that could have set it.
       if not driver.earlierRender.isNil:
         requestEarlierRender(driver.earlierRender(driver.instance).float)
-  syncDriverContext(activeFrameOS, activeDriverContext)
+      if not driver.detectedDisplaySize.isNil:
+        foldDetectedDisplaySize(unpackDetectedDisplaySize(driver.detectedDisplaySize(driver.instance)))
+  # Statically linked drivers share this module's hint copy; shared
+  # libraries answered through their exported symbol above.
+  foldDetectedDisplaySize(takeDetectedDisplaySize())
 
 proc toPng*(rotate: int, flip: string): string =
   for driver in loadedDrivers:
