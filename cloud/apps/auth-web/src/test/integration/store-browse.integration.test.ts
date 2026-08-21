@@ -7,7 +7,7 @@ import {
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import HomePage from "../../../app/page";
+import HomePage from "../../../app/store/page";
 import { GET as getBrowse } from "../../../app/api/store/browse/route";
 import { GET as getRepositoryJson } from "../../../app/api/store/repository.json/route";
 import { GET as getVersionedRepositoryJson } from "../../../app/api/store/[frameosVersion]/repository.json/route";
