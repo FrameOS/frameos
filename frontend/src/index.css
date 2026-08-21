@@ -855,6 +855,27 @@ html[data-frameos-theme='dark'] .apps-source-mode-toggle-button:not(.frameos-pri
   color: #64748b;
 }
 
+/* The scene canvas with nothing to draw ("No scenes yet"). */
+.scene-canvas-empty {
+  background: rgba(255, 255, 255, 0.35);
+  color: #64748b;
+}
+
+.scene-canvas-empty__icon {
+  color: #cbd5e1;
+}
+
+.frameos-theme-dark .scene-canvas-empty,
+html[data-frameos-theme='dark'] .scene-canvas-empty {
+  background: rgba(22, 24, 29, 0.55);
+  color: #aeb6c3;
+}
+
+.frameos-theme-dark .scene-canvas-empty__icon,
+html[data-frameos-theme='dark'] .scene-canvas-empty__icon {
+  color: rgba(255, 255, 255, 0.22);
+}
+
 .frameos-dropdown-menu,
 .frameos-tooltip-panel {
   background: rgba(255, 255, 255, 0.96);

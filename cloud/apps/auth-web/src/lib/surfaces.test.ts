@@ -163,7 +163,7 @@ describe("surface routing", () => {
     // Full-form paths serve directly instead of redirect-looping.
     for (const path of [
       "/frames",
-      "/frames/frames/5",
+      "/frames/5",
       "/admin/scenes",
       "/device",
     ]) {
@@ -198,16 +198,16 @@ describe("surface routing", () => {
       kind: "redirect",
       url: "https://account.frameos.net/frames",
     });
-    expectRoute("https://cloud.frameos.net/frames/frames/5?tool=logs", {
+    expectRoute("https://cloud.frameos.net/frames/5?tool=logs", {
       kind: "redirect",
-      url: "https://account.frameos.net/frames/frames/5?tool=logs",
+      url: "https://account.frameos.net/frames/5?tool=logs",
     });
     expect(
       resolveSurfaceRoute(new URL("https://account.frameos.net/frames")),
     ).toBeUndefined();
     expect(
       resolveSurfaceRoute(
-        new URL("https://account.frameos.net/frames/scenes/5"),
+        new URL("https://account.frameos.net/frames/5/scenes"),
       ),
     ).toBeUndefined();
     expect(

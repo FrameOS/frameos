@@ -189,24 +189,35 @@ function isWorkspaceRoutePathForFrame(pathname: string, frameId: FrameId): boole
   )
 }
 
+// The frame id a pathname carries at `token`'s place in `tokenizedPath`,
+// checking what comes before AND after it. On the cloud every workspace
+// route starts with /frames/ — /frames/<id>, /frames/<id>/scenes/…,
+// /frames/apps/<id>/… — so matching the prefix alone would read "apps" as a
+// frame id; the tail after the id has to be the pattern's tail too.
 function pathFrameIdAfterToken(pathname: string, tokenizedPath: string, token: string): FrameId | null {
   const tokenIndex = tokenizedPath.indexOf(token)
   if (tokenIndex === -1) {
     return null
   }
   const prefix = tokenizedPath.slice(0, tokenIndex)
+  const suffix = tokenizedPath.slice(tokenIndex + token.length)
   if (!pathname.startsWith(prefix)) {
     return null
   }
+  const [segment, ...rest] = pathname.slice(prefix.length).split('/')
+  const tail = rest.length > 0 ? '/' + rest.join('/') : ''
+  if (suffix ? tail !== suffix && !tail.startsWith(`${suffix}/`) : tail !== '') {
+    return null
+  }
   // Opaque, like every frame id: uuids on the cloud, numbers on the backend.
-  return parseRouteFrameId(pathname.slice(prefix.length).split('/')[0])
+  return parseRouteFrameId(segment)
 }
 
 function frameIdFromWorkspacePath(pathname: string): FrameId | null {
   return (
-    pathFrameIdAfterToken(pathname, urls.frame(':frameId'), ':frameId') ??
     pathFrameIdAfterToken(pathname, urls.scenes(':frameId'), ':frameId') ??
-    pathFrameIdAfterToken(pathname, urls.apps(':frameId'), ':frameId')
+    pathFrameIdAfterToken(pathname, urls.apps(':frameId'), ':frameId') ??
+    pathFrameIdAfterToken(pathname, urls.frame(':frameId'), ':frameId')
   )
 }
 
@@ -494,6 +505,9 @@ function workspaceContentNavigationHash(
 }
 
 function isSceneRoutePath(pathname: string = router.values.location.pathname): boolean {
+  if (pathFrameIdAfterToken(pathname, urls.scenes(':frameId'), ':frameId') !== null) {
+    return true
+  }
   const scenesPath = urls.scenes()
   return pathname === scenesPath || pathname.startsWith(`${scenesPath}/`)
 }
@@ -1979,13 +1993,15 @@ export const workspaceLogic = kea<workspaceLogicType>([
     return {
       [framesPath]: rootRouteHandler,
       [`${framesPath.replace(/\/$/, '')}/`]: rootRouteHandler,
-      [urls.frame(':id')]: ({ id }, search, hash, _payload, previousLocation) =>
-        applyFrameRoute(id, search, hash, previousLocation),
+      // Literal paths before /frames/:id — on the cloud that pattern would
+      // otherwise swallow /frames/apps and /frames/settings.
       [urls.scenes(':frameId')]: applySceneOrAppRoute,
       [urls.scenes(':frameId', ':sceneId')]: applySceneOrAppRoute,
       [urls.apps(':frameId')]: applySceneOrAppRoute,
       [urls.apps(':frameId', ':sceneId')]: applySceneOrAppRoute,
       [urls.apps(':frameId', ':sceneId', ':nodeId')]: applySceneOrAppRoute,
+      [urls.frame(':id')]: ({ id }, search, hash, _payload, previousLocation) =>
+        applyFrameRoute(id, search, hash, previousLocation),
     }
   }),
   actionToUrl(() => ({

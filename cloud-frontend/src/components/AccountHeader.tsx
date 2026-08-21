@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react'
+import { useState, type ReactElement } from 'react'
 
 import { accountNavUrls } from '../cloudConfig'
 
@@ -25,8 +25,13 @@ import { accountNavUrls } from '../cloudConfig'
 // The "Admin" entry AppShell shows to superadmins is deliberately absent: this
 // bundle has no session, and a link that 403s for almost everyone is worse
 // than one more click through Account.
+//
+// Everything this bundle serves lives under /frames, so "Frames" is always
+// the active entry. Below 40rem the links fold into a panel behind the
+// hamburger (cloud-chrome.css), mirroring auth-web's HeaderNav.tsx.
 export function AccountHeader(): ReactElement {
   const { accountUrl, framesUrl, logoutUrl, scenesUrl } = accountNavUrls()
+  const [open, setOpen] = useState(false)
 
   return (
     <header className="frameos-account-header">
@@ -49,8 +54,28 @@ export function AccountHeader(): ReactElement {
           <span className="frameos-account-header__name">FrameOS Cloud</span>
         </a>
       </div>
-      <nav aria-label="Primary" className="frameos-account-header__nav">
-        <a className="frameos-account-header__link" href={framesUrl}>
+      <button
+        aria-controls="frameos-primary-nav"
+        aria-expanded={open}
+        aria-label={open ? 'Close menu' : 'Open menu'}
+        className="frameos-account-header__toggle"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        {open ? <CloseIcon /> : <MenuIcon />}
+      </button>
+      <nav
+        aria-label="Primary"
+        className={
+          open ? 'frameos-account-header__nav frameos-account-header__nav--open' : 'frameos-account-header__nav'
+        }
+        id="frameos-primary-nav"
+      >
+        <a
+          aria-current="page"
+          className="frameos-account-header__link frameos-account-header__link--active"
+          href={framesUrl}
+        >
           Frames
         </a>
         <a className="frameos-account-header__link" href={scenesUrl}>
@@ -66,5 +91,21 @@ export function AccountHeader(): ReactElement {
         </form>
       </nav>
     </header>
+  )
+}
+
+function MenuIcon(): ReactElement {
+  return (
+    <svg aria-hidden fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth={2} viewBox="0 0 24 24">
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  )
+}
+
+function CloseIcon(): ReactElement {
+  return (
+    <svg aria-hidden fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth={2} viewBox="0 0 24 24">
+      <path d="M6 6l12 12M18 6L6 18" />
+    </svg>
   )
 }

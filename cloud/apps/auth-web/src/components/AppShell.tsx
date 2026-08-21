@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { BackForwardRefresh } from "./BackForwardRefresh";
 import { HeaderBrand } from "./HeaderBrand";
+import { HeaderNav, type HeaderNavLink } from "./HeaderNav";
 import { LegalFooter } from "./LegalFooter";
 import {
   getAccountBaseUrl,
@@ -38,32 +38,20 @@ export function AppShell({
   const scenesUrl = getStoreUrl();
   // The fleet SPA is served from the account origin (app/frames/[[...path]]).
   const framesUrl = new URL("/frames", getAccountBaseUrl()).toString();
+  const links: HeaderNavLink[] = [
+    { href: framesUrl, label: "Frames", section: "frames" },
+    { href: scenesUrl, label: "Scenes", section: "scenes" },
+    { href: accountUrl, label: "Account", section: "account" },
+    ...(isSuperadmin
+      ? [{ href: adminUrl, label: "Admin", section: "admin" as const }]
+      : []),
+  ];
 
   return (
     <div className="shell">
       <header className="frameos-account-header">
         <HeaderBrand href={framesUrl} title={title} />
-        <nav aria-label="Primary" className="frameos-account-header__nav">
-          <Link className="frameos-account-header__link" href={framesUrl}>
-            Frames
-          </Link>
-          <Link className="frameos-account-header__link" href={scenesUrl}>
-            Scenes
-          </Link>
-          <Link className="frameos-account-header__link" href={accountUrl}>
-            Account
-          </Link>
-          {isSuperadmin ? (
-            <Link className="frameos-account-header__link" href={adminUrl}>
-              Admin
-            </Link>
-          ) : null}
-          <form action={logoutUrl} method="post">
-            <button className="frameos-account-header__link" type="submit">
-              Sign out
-            </button>
-          </form>
-        </nav>
+        <HeaderNav links={links} logoutUrl={logoutUrl} />
       </header>
       <main className={noCapture ? "content ph-no-capture" : "content"}>
         {children}

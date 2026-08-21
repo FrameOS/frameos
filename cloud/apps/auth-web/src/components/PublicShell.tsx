@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { BackForwardRefresh } from "./BackForwardRefresh";
 import { HeaderBrand } from "./HeaderBrand";
+import { HeaderNav, type HeaderNavLink } from "./HeaderNav";
 import { LegalFooter } from "./LegalFooter";
 import {
   getAccountBaseUrl,
@@ -41,6 +41,16 @@ export function PublicShell({
   const logoutUrl = new URL("/api/auth/logout", cloudBaseUrl).toString();
   const signInUrl = new URL("/login", cloudBaseUrl);
   signInUrl.searchParams.set("return_to", scenesHomeUrl);
+  // Ordered as in AppShell. Signed-out visitors get none of this: they have
+  // no frames, so the links would only bounce them through the login page.
+  const links: HeaderNavLink[] = [
+    { href: framesUrl, label: "Frames", section: "frames" },
+    { href: scenesHomeUrl, label: "Scenes", section: "scenes" },
+    { href: accountUrl, label: "Account", section: "account" },
+    ...(isSuperadmin
+      ? [{ href: adminUrl, label: "Admin", section: "admin" as const }]
+      : []),
+  ];
 
   return (
     <div className="shell">
@@ -54,44 +64,11 @@ export function PublicShell({
             title={title}
           />
         )}
-        <nav aria-label="Primary" className="frameos-account-header__nav">
-          {signedIn ? (
-            <>
-              {/* Ordered as in AppShell. Signed-out visitors get none of
-                  this: they have no frames, so the links would only bounce
-                  them through the login page. */}
-              <Link className="frameos-account-header__link" href={framesUrl}>
-                Frames
-              </Link>
-              <Link
-                className="frameos-account-header__link"
-                href={scenesHomeUrl}
-              >
-                Scenes
-              </Link>
-              <Link className="frameos-account-header__link" href={accountUrl}>
-                Account
-              </Link>
-              {isSuperadmin ? (
-                <Link className="frameos-account-header__link" href={adminUrl}>
-                  Admin
-                </Link>
-              ) : null}
-              <form action={logoutUrl} method="post">
-                <button className="frameos-account-header__link" type="submit">
-                  Sign out
-                </button>
-              </form>
-            </>
-          ) : (
-            <Link
-              className="frameos-account-header__link"
-              href={signInUrl.toString()}
-            >
-              Sign in
-            </Link>
-          )}
-        </nav>
+        {signedIn ? (
+          <HeaderNav links={links} logoutUrl={logoutUrl} />
+        ) : (
+          <HeaderNav links={[]} signInUrl={signInUrl.toString()} />
+        )}
       </header>
       <main className={noCapture ? "content ph-no-capture" : "content"}>
         {children}

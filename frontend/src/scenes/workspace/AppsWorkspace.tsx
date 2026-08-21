@@ -2,7 +2,12 @@ import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { router } from 'kea-router'
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeftIcon, CodeBracketIcon, CubeTransparentIcon } from '@heroicons/react/24/outline'
+import {
+  ArrowLeftIcon,
+  ArrowTopRightOnSquareIcon,
+  CodeBracketIcon,
+  CubeTransparentIcon,
+} from '@heroicons/react/24/outline'
 import Editor from '@monaco-editor/react'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
@@ -42,6 +47,7 @@ import {
 } from '../../utils/sceneApps'
 import { systemAppSourceLogic } from './systemAppSourceLogic'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { isCloudMode } from '../../utils/cloudMode'
 
 interface AppsWorkspaceProps {
   frameId?: string
@@ -241,7 +247,7 @@ function SourceModeToggle({
 }): JSX.Element {
   return (
     <div className="apps-source-mode-toggle grid grid-cols-2 rounded-xl border border-slate-200 bg-white/70 p-1 shadow-sm">
-      {(['system', 'frames'] as AppsSourceMode[]).map((candidate) => {
+      {(['frames', 'system'] as AppsSourceMode[]).map((candidate) => {
         const active = mode === candidate
         return (
           <button
@@ -454,16 +460,39 @@ function AppsTopBar({
   )
 }
 
+// Where a built-in app's source lives in the FrameOS repository: every
+// keyword is a directory under frameos/src/apps (e.g. data/chromiumScreenshot).
+const SYSTEM_APP_SOURCE_URL = 'https://github.com/FrameOS/frameos/tree/main/frameos/src/apps/'
+
+function systemAppGithubUrl(keyword: string): string {
+  return SYSTEM_APP_SOURCE_URL + keyword.split('/').map(encodeURIComponent).join('/')
+}
+
 function SystemAppsTopBar({ app }: { app: SystemAppOption | null }): JSX.Element {
   return (
     <div className="mb-4 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center">
       <div className="min-w-0">
-        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">System apps</div>
+        <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
+          System apps (read only)
+        </div>
         <h1 className="frameos-strong flex min-w-0 items-center gap-2 truncate text-2xl font-bold tracking-normal text-slate-950">
           <CodeBracketIcon className="h-7 w-7 shrink-0 text-slate-400" />
           <span className="truncate">{app?.label ?? 'Apps'}</span>
         </h1>
       </div>
+      {app ? (
+        <div className="flex flex-wrap items-center gap-2 @md:justify-end">
+          <a
+            href={systemAppGithubUrl(app.keyword)}
+            target="_blank"
+            rel="noreferrer"
+            className="apps-topbar-action frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <ArrowTopRightOnSquareIcon className="h-4 w-4" />
+            <span>Open in GitHub</span>
+          </a>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -662,9 +691,14 @@ function SystemAppSourceEditor({ keyword }: { keyword: string }): JSX.Element {
 
   return (
     <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
-      <div className="app-compiled-warning rounded-2xl p-3 text-sm">
-        <div className="space-y-3">To edit this app, first add it to a scene on a frame.</div>
-      </div>
+      {/* Self-hosted: the app becomes editable once a scene uses it. The cloud
+          only runs interpreted scenes, so there is nothing to add it to —
+          the "(read only)" in the heading says it all. */}
+      {!isCloudMode() ? (
+        <div className="app-compiled-warning rounded-2xl p-3 text-sm">
+          To edit this app, first add it to a scene on a frame.
+        </div>
+      ) : null}
       <div className="frameos-inset overflow-hidden rounded-md border font-mono text-sm w-full flex-1">
         <Editor
           height="100%"

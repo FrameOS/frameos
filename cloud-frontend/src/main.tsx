@@ -12,7 +12,7 @@ import { registerAddFramePanel, registerFramePanel } from '../../frontend/src/sc
 import { CloudAddFrameDrawer } from './components/CloudAddFrameDrawer'
 import { CloudFrameSdImageCard } from './components/CloudFrameSdImageCard'
 import { CloudFrameUsbRelink } from './components/CloudFrameUsbRelink'
-import { cloudAssetsBasePath, cloudRouteBasePath } from './routes'
+import { cloudAssetsBasePath, cloudRouteBasePath, legacyCloudPathRedirect } from './routes'
 import { seedThemeFromSharedCookie, syncThemeToSharedCookie } from './cloudThemeSync'
 
 if (typeof window !== 'undefined') {
@@ -27,6 +27,13 @@ if (typeof window !== 'undefined') {
     ingress_path: '',
     route_base_path: cloudRouteBasePath,
     assets_base_path: cloudAssetsBasePath,
+  }
+
+  // Pre-2026.8 workspace URLs, rewritten before the router reads the
+  // location so they never reach the 404 scene.
+  const redirect = legacyCloudPathRedirect(window.location.pathname)
+  if (redirect) {
+    window.history.replaceState(window.history.state, '', redirect + window.location.search + window.location.hash)
   }
 }
 

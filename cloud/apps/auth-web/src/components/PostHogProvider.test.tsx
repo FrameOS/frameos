@@ -75,6 +75,24 @@ describe("PostHogProvider", () => {
     expect(beforeSend({ event: "$identify" })).not.toBeNull();
   });
 
+  // The superadmin pages produce no analytics at all. before_send drops
+  // their events; this is the layer above it — the SDK is opted out while
+  // the browser is there, consent or not.
+  it("opts out on /admin even when consent was granted", () => {
+    document.cookie = "frameos_analytics_consent=granted; path=/";
+    window.history.pushState({}, "", "/admin");
+    render(<PostHogProvider>{null}</PostHogProvider>);
+    expect(optInCapturing).not.toHaveBeenCalled();
+    expect(optOutCapturing).toHaveBeenCalled();
+  });
+
+  it("opts in off /admin when consent was granted", () => {
+    document.cookie = "frameos_analytics_consent=granted; path=/";
+    window.history.pushState({}, "", "/account");
+    render(<PostHogProvider>{null}</PostHogProvider>);
+    expect(optInCapturing).toHaveBeenCalled();
+  });
+
   it("redacts capability tokens through the before_send hook", () => {
     const beforeSend = initConfig().before_send as (
       data: { event: string; properties: Record<string, unknown> } | null,

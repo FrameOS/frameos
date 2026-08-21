@@ -5,18 +5,20 @@ import {
   cloudFrameUrl,
   cloudFramesUrl,
   cloudRouteBasePath,
+  cloudSceneUrl,
+  legacyCloudPathRedirect,
   cloudSettingsUrl,
 } from "@frameos/cloud-frontend/src/routes";
 import { urls } from "../../../../../../frontend/src/urls";
 
 // Next.js server components link INTO the SPA (the account frame table used
-// to; the pending-enrollment and activity emails still do). Hand-building
-// `/frames/${id}` is wrong: the SPA mounts at /frames AND registers its own
-// /frames/:id route, so the real path is /frames/frames/:id — every frame
-// name in the old table rendered the SPA's error404. The Next.js side uses
-// cloud-frontend/src/routes.ts; this test is what keeps that helper honest,
-// because it cannot call `urls.frame()` itself (it reads
-// window.FRAMEOS_APP_CONFIG, absent during SSR).
+// to; the pending-enrollment and activity emails still do). The SPA mounts
+// at /frames and, in cloud mode, drops its own /frames segment so a frame is
+// /frames/:id and its scenes /frames/:id/scenes/:sceneId (it used to be
+// /frames/frames/:id). The Next.js side uses cloud-frontend/src/routes.ts;
+// this test is what keeps that helper honest, because it cannot call
+// `urls.frame()` itself (it reads window.FRAMEOS_APP_CONFIG, absent during
+// SSR).
 
 function withCloudSpaConfig<T>(run: () => T): T {
   (window as unknown as { FRAMEOS_APP_CONFIG?: unknown }).FRAMEOS_APP_CONFIG = {
@@ -44,11 +46,17 @@ describe("cloud SPA route helpers", () => {
     expect(cloudFramesUrl()).toBe(withCloudSpaConfig(() => urls.frames()));
   });
 
-  it("produces the doubled segment the SPA route table registers", () => {
-    expect(cloudFrameUrl("abc")).toBe("/frames/frames/abc");
-    // The bug: a hand-built "/frames/${id}" is the frames LIST route plus a
-    // stray segment, which the SPA renders as error404.
-    expect(cloudFrameUrl("abc")).not.toBe("/frames/abc");
+  it("puts a frame directly under /frames", () => {
+    expect(cloudFrameUrl("abc")).toBe("/frames/abc");
+  });
+
+  it("nests a frame's scenes under the frame, like urls.scenes()", () => {
+    expect(cloudSceneUrl("abc", "def")).toBe("/frames/abc/scenes/def");
+    expect(cloudSceneUrl("abc")).toBe("/frames/abc/scenes");
+    expect(cloudSceneUrl("abc", "def")).toBe(
+      withCloudSpaConfig(() => urls.scenes("abc", "def")),
+    );
+    expect(cloudSceneUrl("abc")).toBe(withCloudSpaConfig(() => urls.scenes("abc")));
   });
 
   it("passes the tool query through the same way urls.frame does", () => {
@@ -76,5 +84,32 @@ describe("cloud SPA route helpers", () => {
     const routes = withCloudSpaConfig(() => getRoutes());
     expect(routes[cloudSettingsUrl()]).toBe("settings");
     expect(scenes).toHaveProperty("settings");
+  });
+
+  it("rewrites the pre-2026.8 doubled-segment URLs", () => {
+    expect(legacyCloudPathRedirect("/frames/frames/abc")).toBe("/frames/abc");
+    expect(legacyCloudPathRedirect("/frames/scenes/abc/def")).toBe("/frames/abc/scenes/def");
+    expect(legacyCloudPathRedirect("/frames/scenes/abc")).toBe("/frames/abc/scenes");
+    expect(legacyCloudPathRedirect("/frames/abc")).toBeNull();
+    expect(legacyCloudPathRedirect("/frames/apps/system/x")).toBeNull();
+    expect(legacyCloudPathRedirect("/frames/settings")).toBeNull();
+  });
+
+  // kea-router takes the first pattern that matches. With frames at
+  // /frames/:id, the literal /frames/settings and /frames/apps routes have
+  // to be registered before it or they render as a frame named "settings".
+  it("registers the literal /frames/* routes before /frames/:id", async () => {
+    const scenesModulePath = "@frameos/cloud-frontend/src/scenes/scenes";
+    const { getRoutes } = (await import(scenesModulePath)) as {
+      getRoutes: () => Record<string, string>;
+    };
+    const paths = Object.keys(withCloudSpaConfig(() => getRoutes()));
+    const frameIndex = paths.indexOf("/frames/:id");
+    expect(frameIndex).toBeGreaterThan(-1);
+    for (const literal of ["/frames/settings", "/frames/apps", "/frames/apps/:frameId", "/frames/scenes"]) {
+      expect(paths.indexOf(literal)).toBeGreaterThan(-1);
+      expect(paths.indexOf(literal)).toBeLessThan(frameIndex);
+    }
+    expect(paths).toContain("/frames/:frameId/scenes/:sceneId");
   });
 });

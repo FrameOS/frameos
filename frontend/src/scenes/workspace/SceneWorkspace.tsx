@@ -932,16 +932,16 @@ function SceneCanvas({
   if (!selectedSceneId) {
     return (
       <div
-        className="flex h-screen min-h-screen items-center justify-center bg-white/35 text-slate-500"
+        className="scene-canvas-empty flex h-screen min-h-screen items-center justify-center"
         onDragOver={handleSceneDragOver}
         onDrop={handleSceneDrop}
       >
         <div className="text-center">
-          <PhotoIcon className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-          <div className="text-lg font-semibold text-slate-700">
+          <PhotoIcon className="scene-canvas-empty__icon mx-auto mb-3 h-10 w-10" />
+          <div className="frameos-strong text-lg font-semibold">
             {hasScenes ? 'No scene selected' : 'No scenes yet'}
           </div>
-          <div className="text-sm text-slate-500">
+          <div className="frameos-muted text-sm">
             {hasScenes ? 'Choose a scene from the left panel.' : 'Add a scene to start editing this frame.'}
           </div>
           {!hasScenes ? (

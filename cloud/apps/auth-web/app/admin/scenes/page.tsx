@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { createDb } from "@frameos-cloud/db";
 import { AdminPublisherBanButton } from "../../../src/components/AdminPublisherBanButton";
 import { AdminPublisherVerifyButton } from "../../../src/components/AdminPublisherVerifyButton";
@@ -8,10 +7,8 @@ import { AdminSceneActions } from "../../../src/components/AdminSceneActions";
 import { AdminSceneCategorySelect } from "../../../src/components/AdminSceneCategorySelect";
 import { AdminNav } from "../../../src/components/AdminNav";
 import { AppShell } from "../../../src/components/AppShell";
-import {
-  getSuperadminContext,
-  listScenesForAdmin,
-} from "../../../src/lib/admin";
+import { listScenesForAdmin } from "../../../src/lib/admin";
+import { requireSuperadmin, searchQueryOf } from "../../../src/lib/admin-page";
 import { formatDate } from "../../../src/lib/format";
 
 export const metadata = { title: "Store scenes" };
@@ -23,17 +20,9 @@ type AdminScenesPageProps = {
 export default async function AdminScenesPage({
   searchParams,
 }: AdminScenesPageProps) {
-  const context = await getSuperadminContext();
-  if (context.kind === "unauthenticated") {
-    redirect("/login?return_to=/admin/scenes");
-  }
-  if (context.kind === "forbidden") {
-    redirect("/account");
-  }
+  await requireSuperadmin("/admin/scenes");
 
-  const params = searchParams ? await searchParams : {};
-  const rawQuery = Array.isArray(params.q) ? params.q[0] : params.q;
-  const query = rawQuery?.trim() || undefined;
+  const query = searchQueryOf(searchParams ? await searchParams : {});
 
   const scenes = await listScenesForAdmin(createDb(), query);
 
@@ -73,6 +62,7 @@ export default async function AdminScenesPage({
             <p>No matching scenes.</p>
           </section>
         ) : (
+          <div className="table-scroll">
           <table className="table">
             <thead>
               <tr>
@@ -182,6 +172,7 @@ export default async function AdminScenesPage({
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </AppShell>
