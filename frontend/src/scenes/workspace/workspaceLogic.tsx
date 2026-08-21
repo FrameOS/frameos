@@ -762,6 +762,50 @@ function restoreFramesScrollAnchor(anchor: FramesScrollAnchor | null): void {
   main.scrollTop += nextTop - anchor.top
 }
 
+/**
+ * Scrolls `target` (an element or the window) to `top` over a fixed, short
+ * duration. Native `behavior: 'smooth'` takes time proportional to the
+ * distance — a sidebar click on the last of ten frames crawled for well over a
+ * second — whereas a fixed 220 ms ease-out feels instant at any distance.
+ * Honors prefers-reduced-motion by jumping.
+ */
+export const FRAME_FOCUS_SCROLL_MS = 220
+let frameFocusScrollFrame: number | null = null
+export function animateScrollTop(target: HTMLElement | Window, top: number, durationMs = FRAME_FOCUS_SCROLL_MS): void {
+  const isWindow = target === window
+  const readTop = (): number => (isWindow ? window.scrollY : (target as HTMLElement).scrollTop)
+  const writeTop = (value: number): void => {
+    if (isWindow) {
+      window.scrollTo({ top: value, behavior: 'auto' })
+    } else {
+      ;(target as HTMLElement).scrollTop = value
+    }
+  }
+  if (frameFocusScrollFrame !== null) {
+    window.cancelAnimationFrame(frameFocusScrollFrame)
+    frameFocusScrollFrame = null
+  }
+  const from = readTop()
+  const to = Math.max(0, top)
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  if (reduceMotion || durationMs <= 0 || Math.abs(to - from) < 2) {
+    writeTop(to)
+    return
+  }
+  const startedAt = window.performance.now()
+  const step = (): void => {
+    const progress = Math.min(1, (window.performance.now() - startedAt) / durationMs)
+    const eased = 1 - Math.pow(1 - progress, 3)
+    writeTop(from + (to - from) * eased)
+    if (progress < 1) {
+      frameFocusScrollFrame = window.requestAnimationFrame(step)
+    } else {
+      frameFocusScrollFrame = null
+    }
+  }
+  frameFocusScrollFrame = window.requestAnimationFrame(step)
+}
+
 export function scrollFramesHomeToTop(behavior: ScrollBehavior = 'auto', stabilize = true): void {
   if (typeof window === 'undefined') {
     return
@@ -1788,10 +1832,16 @@ export const workspaceLogic = kea<workspaceLogicType>([
             if (isMobileWorkspaceViewport()) {
               const headerOffset = window.matchMedia?.('(max-width: 639px)').matches ? 96 : 104
               const top = frameElement.getBoundingClientRect().top + window.scrollY - headerOffset
-              window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+              animateScrollTop(window, top)
               return
             }
-            frameElement.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            const main = framesMainElement()
+            if (main && main.scrollHeight > main.clientHeight) {
+              const top = frameElement.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop
+              animateScrollTop(main, top)
+              return
+            }
+            animateScrollTop(window, frameElement.getBoundingClientRect().top + window.scrollY)
             return
           }
           if (attempt < 20) {

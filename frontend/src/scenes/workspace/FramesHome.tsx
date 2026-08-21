@@ -39,6 +39,7 @@ import { FrameosShell } from './FrameosShell'
 import { isMobileWorkspaceViewport, sceneMatchesSearch, workspaceLogic } from './workspaceLogic'
 import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
 import { registeredAddFramePanel } from './addFramePanelRegistry'
+import { frameToolDefinitionsForMode } from './frameToolDefinitions'
 import { addFrameFlows, workspaceMode } from './workspaceSurfaces'
 import { sceneControlNoticeContent } from './sceneControlNotice'
 import { NewFrame } from '../frames/NewFrame'
@@ -133,6 +134,9 @@ function FrameTree(): JSX.Element {
   } = useValues(workspaceLogic)
   const { closeSecondarySidebar, focusFrame, openFrameChangeDrawer, openFrameTool, selectFrame } =
     useActions(workspaceLogic)
+  // The frame whose tool links are unfolded under its row. One at a time;
+  // the selected frame starts open, a click on the open row folds it.
+  const [expandedFrameId, setExpandedFrameId] = useState<FrameId | null>(selectedFrameId ?? null)
 
   const focusFrameAfterDrawerUpdate = (frameId: FrameId): void => {
     focusFrame(frameId)
@@ -152,6 +156,7 @@ function FrameTree(): JSX.Element {
     }
 
     event.preventDefault()
+    setExpandedFrameId((current) => (current === frameId && selectedFrameId === frameId ? null : frameId))
     selectFrame(frameId)
     if (isMobileWorkspaceViewport()) {
       closeSecondarySidebar()
@@ -186,6 +191,7 @@ function FrameTree(): JSX.Element {
             title="Active"
             frames={activeFramesList}
             selectedFrameId={selectedFrameId}
+            expandedFrameId={expandedFrameId}
             onSelect={handleFrameClick}
             onOpen={handleFrameDoubleClick}
             action={<SidebarAddFrameButton />}
@@ -194,6 +200,7 @@ function FrameTree(): JSX.Element {
             title="Inactive"
             frames={inactiveFramesList}
             selectedFrameId={selectedFrameId}
+            expandedFrameId={expandedFrameId}
             onSelect={handleFrameClick}
             onOpen={handleFrameDoubleClick}
             expanded={inactiveFramesExpanded}
@@ -228,6 +235,7 @@ function FrameTree(): JSX.Element {
                   key={frame.id}
                   frame={frame}
                   selected={selectedFrameId === frame.id}
+                  expanded={expandedFrameId === frame.id}
                   archived
                   onSelect={handleFrameClick}
                   onOpen={handleFrameDoubleClick}
@@ -244,6 +252,7 @@ function FrameTree(): JSX.Element {
 function FrameTreeRow({
   frame,
   selected,
+  expanded = false,
   archived = false,
   inactive = false,
   onSelect,
@@ -251,6 +260,7 @@ function FrameTreeRow({
 }: {
   frame: FrameType
   selected: boolean
+  expanded?: boolean
   archived?: boolean
   inactive?: boolean
   onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
@@ -259,34 +269,78 @@ function FrameTreeRow({
   const frameName = frame.name || frameHost(frame)
 
   return (
-    <div
-      className={clsx(
-        'frameos-frame-row flex w-full min-w-0 items-center gap-2 rounded-xl px-2.5 py-2 text-left transition',
-        archived && 'frameos-frame-row-archived',
-        selected
-          ? 'frameos-frame-row-selected'
-          : archived
-          ? 'text-slate-500 hover:bg-slate-100'
-          : 'text-slate-700 hover:bg-slate-100'
-      )}
-    >
-      <FrameChangeStatusIcon frameId={frame.id} />
-      <div className="flex min-w-0 flex-1 items-center gap-3">
-        <button
-          type="button"
-          title={`Scroll to ${frameName}. Double-click to open overview.`}
-          onClick={(event: MouseEvent<HTMLButtonElement>) => onSelect(event, frame.id)}
-          onDoubleClick={(event: MouseEvent<HTMLButtonElement>) => onOpen(event, frame.id)}
-          className="min-w-0 flex-1 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className={clsx('block min-w-0 truncate', !archived && 'text-base font-medium')}>{frameName}</span>
-          </span>
-          <span className="block truncate text-xs text-slate-400">{sidebarFrameActivityDescription(frame)}</span>
-        </button>
-        <FrameMetricAlertIndicator frame={frame} />
-        <SidebarStatusDots frame={frame} inactive={inactive} />
+    <div>
+      <div
+        className={clsx(
+          'frameos-frame-row flex w-full min-w-0 items-center gap-2 rounded-xl px-2.5 py-2 text-left transition',
+          archived && 'frameos-frame-row-archived',
+          selected
+            ? 'frameos-frame-row-selected'
+            : archived
+            ? 'text-slate-500 hover:bg-slate-100'
+            : 'text-slate-700 hover:bg-slate-100'
+        )}
+      >
+        <FrameChangeStatusIcon frameId={frame.id} />
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <button
+            type="button"
+            title={`Scroll to ${frameName}. Click again to fold the tool links; double-click to open.`}
+            aria-expanded={expanded}
+            onClick={(event: MouseEvent<HTMLButtonElement>) => onSelect(event, frame.id)}
+            onDoubleClick={(event: MouseEvent<HTMLButtonElement>) => onOpen(event, frame.id)}
+            className="min-w-0 flex-1 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className={clsx('block min-w-0 truncate', !archived && 'text-base font-medium')}>{frameName}</span>
+            </span>
+            <span className="block truncate text-xs text-slate-400">{sidebarFrameActivityDescription(frame)}</span>
+          </button>
+          <FrameMetricAlertIndicator frame={frame} />
+          <SidebarStatusDots frame={frame} inactive={inactive} />
+        </div>
       </div>
+      {expanded ? <FrameToolLinks frame={frame} /> : null}
+    </div>
+  )
+}
+
+/**
+ * The frame's tools (/frames/<id>/<tool>) as two columns of tiny links under
+ * its sidebar row — the same shape as the settings-section links under the
+ * Settings tool in the frame workspace (FrameSettingsSectionLinks there).
+ */
+function FrameToolLinks({ frame }: { frame: FrameType }): JSX.Element {
+  const { closeSecondarySidebar } = useActions(workspaceLogic)
+  const definitions = frameToolDefinitionsForMode(workspaceMode(), frame).filter(
+    (definition) => !definition.disabledReason
+  )
+  const splitIndex = Math.ceil(definitions.length / 2)
+  const columns = [definitions.slice(0, splitIndex), definitions.slice(splitIndex)]
+
+  return (
+    <div
+      data-testid="sidebar-frame-tool-links"
+      className="frameos-frame-tool-subnav mb-1 ml-10 grid grid-cols-2 gap-x-1 border-l border-slate-200/70 pl-3"
+    >
+      {columns.map((tools, columnIndex) => (
+        <div key={columnIndex} className="grid gap-0.5">
+          {tools.map((definition) => (
+            <A
+              key={definition.panel}
+              href={urls.frame(frame.id, definition.panel)}
+              onClick={() => {
+                if (isMobileWorkspaceViewport()) {
+                  closeSecondarySidebar()
+                }
+              }}
+              className="frameos-frame-tool-subrow min-w-0 rounded-lg px-2 py-1 text-left text-xs font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <span className="block truncate">{definition.label}</span>
+            </A>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }
@@ -353,6 +407,7 @@ function FrameTreeGroup({
   title,
   frames,
   selectedFrameId,
+  expandedFrameId,
   onSelect,
   onOpen,
   expanded,
@@ -363,6 +418,7 @@ function FrameTreeGroup({
   title: string
   frames: FrameType[]
   selectedFrameId: FrameId | null
+  expandedFrameId: FrameId | null
   onSelect: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
   onOpen: (event: MouseEvent<HTMLButtonElement>, frameId: FrameId) => void
   expanded?: boolean
@@ -410,6 +466,7 @@ function FrameTreeGroup({
               key={frame.id}
               frame={frame}
               selected={selectedFrameId === frame.id}
+              expanded={expandedFrameId === frame.id}
               inactive={inactive}
               onSelect={onSelect}
               onOpen={onOpen}
