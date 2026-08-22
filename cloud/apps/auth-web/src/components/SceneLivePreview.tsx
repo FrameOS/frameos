@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, KeyRound, Play, RotateCw, X } from "lucide-react";
+import { Camera, Download, KeyRound, Play, RotateCw, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -12,9 +12,8 @@ type SceneLivePreviewProps = {
   sceneId: string;
   width?: number | null;
   height?: number | null;
-  frameosVersion?: string | null;
-  /** Owner-only: "Save screenshot" uploads to the scene's image gallery
-   * instead of downloading the PNG. */
+  /** Owner-only: shows "Save to images", which uploads the current frame to
+   * the scene's image gallery. "Download" is there for everyone. */
   canSaveToGallery?: boolean;
   /** Share token for private scenes, so shared visitors can load scenes.json. */
   share?: string | undefined;
@@ -29,7 +28,6 @@ export function SceneLivePreview({
   sceneId,
   width,
   height,
-  frameosVersion,
   canSaveToGallery = false,
   share,
 }: SceneLivePreviewProps) {
@@ -263,48 +261,62 @@ export function SceneLivePreview({
     setAppliedSettings(nested);
   }
 
-  async function saveScreenshot() {
+  // The current frame as an opaque PNG, or null (with the error set) when
+  // there is nothing to capture yet.
+  async function captureFrame(): Promise<Blob | null> {
     const canvas = containerRef.current?.querySelector("canvas");
     if (!canvas || !hasPaintedFrame) {
       setError(
-        "The preview has not rendered a frame yet — wait for the first render before saving a screenshot.",
+        "The preview has not rendered a frame yet — wait for the first render before taking a screenshot.",
       );
+      return null;
+    }
+    // Composite over an opaque background before encoding: a canvas can
+    // hold transparent pixels, and a transparent PNG makes a blank store
+    // tile (same fillRect recipe as frontend's splitScreenThumbnail).
+    const flattened = document.createElement("canvas");
+    flattened.width = canvas.width;
+    flattened.height = canvas.height;
+    const context = flattened.getContext("2d");
+    if (!context) {
+      setError("Could not capture the canvas.");
+      return null;
+    }
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, flattened.width, flattened.height);
+    context.drawImage(canvas, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      flattened.toBlob(resolve, "image/png"),
+    );
+    if (!blob) {
+      setError("Could not capture the canvas.");
+    }
+    return blob;
+  }
+
+  async function downloadScreenshot() {
+    setError(null);
+    setNotice(null);
+    const blob = await captureFrame();
+    if (!blob) {
       return;
     }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${sceneId}-preview.png`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    setNotice("Screenshot downloaded.");
+  }
+
+  async function saveScreenshotToGallery() {
     setSavingShot(true);
     setError(null);
     setNotice(null);
     try {
-      // Composite over an opaque background before encoding: a canvas can
-      // hold transparent pixels, and a transparent PNG makes a blank store
-      // tile (same fillRect recipe as frontend's splitScreenThumbnail).
-      const flattened = document.createElement("canvas");
-      flattened.width = canvas.width;
-      flattened.height = canvas.height;
-      const context = flattened.getContext("2d");
-      if (!context) {
-        setError("Could not capture the canvas.");
-        return;
-      }
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, flattened.width, flattened.height);
-      context.drawImage(canvas, 0, 0);
-      const blob = await new Promise<Blob | null>((resolve) =>
-        flattened.toBlob(resolve, "image/png"),
-      );
+      const blob = await captureFrame();
       if (!blob) {
-        setError("Could not capture the canvas.");
-        return;
-      }
-      if (!canSaveToGallery) {
-        // Not the owner: hand the PNG to the browser instead.
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `${sceneId}-preview.png`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
-        setNotice("Screenshot downloaded.");
         return;
       }
       const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -344,7 +356,6 @@ export function SceneLivePreview({
       >
         <Play aria-hidden size={18} />
         Live preview
-        {frameosVersion ? ` (requires ${frameosVersion}+)` : ""}
       </a>
     );
   }
@@ -356,26 +367,37 @@ export function SceneLivePreview({
     // settings values, some of them user-supplied.
     <div aria-modal className="editor-modal ph-no-capture" role="dialog">
       <div className="editor-modal__bar">
-        <div className="editor-modal__title">
-          Live preview
-          {frameosVersion ? ` — requires FrameOS ${frameosVersion} or newer` : ""}
-        </div>
+        <div className="editor-modal__title">Live preview</div>
         <div className="button-row">
+          {canSaveToGallery ? (
+            <button
+              className="button button--subtle button--small"
+              disabled={savingShot || !hasPaintedFrame}
+              onClick={() => void saveScreenshotToGallery()}
+              title={
+                hasPaintedFrame
+                  ? "Save the current frame to this scene's images"
+                  : "Available after the preview renders its first frame"
+              }
+              type="button"
+            >
+              <Camera aria-hidden size={16} />
+              {savingShot ? "Saving…" : "Save to images"}
+            </button>
+          ) : null}
           <button
             className="button button--subtle button--small"
-            disabled={savingShot || !hasPaintedFrame}
-            onClick={() => void saveScreenshot()}
+            disabled={!hasPaintedFrame}
+            onClick={() => void downloadScreenshot()}
             title={
-              !hasPaintedFrame
-                ? "Available after the preview renders its first frame"
-                : canSaveToGallery
-                  ? "Save the current frame to this scene's images"
-                  : "Download the current frame as a PNG"
+              hasPaintedFrame
+                ? "Download the current frame as a PNG"
+                : "Available after the preview renders its first frame"
             }
             type="button"
           >
-            <Camera aria-hidden size={16} />
-            {savingShot ? "Saving…" : "Save screenshot"}
+            <Download aria-hidden size={16} />
+            Download
           </button>
           <button
             className="button button--subtle button--small"

@@ -40,14 +40,14 @@ afterEach(() => {
 });
 
 describe("SceneLivePreview screenshot gating", () => {
-  it("keeps Save screenshot disabled until the runtime paints a frame", async () => {
+  it("keeps the screenshot buttons disabled until the runtime paints a frame", async () => {
     render(<SceneLivePreview sceneId="scene-1" />);
 
     fireEvent.click(screen.getByText(/Live preview/));
     await waitFor(() => expect(mountMock).toHaveBeenCalledOnce());
 
     const saveButton = screen.getByRole("button", {
-      name: /Save screenshot/,
+      name: /Download/,
     }) as HTMLButtonElement;
     expect(saveButton.disabled).toBe(true);
     expect(saveButton.title).toContain("first frame");
@@ -72,12 +72,29 @@ describe("SceneLivePreview screenshot gating", () => {
     act(() => firstMount.onFrame!({ height: 480, renderMs: 4, width: 800 }));
 
     const saveButton = screen.getByRole("button", {
-      name: /Save screenshot/,
+      name: /Download/,
     }) as HTMLButtonElement;
     expect(saveButton.disabled).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: /Restart/ }));
     await waitFor(() => expect(mountMock).toHaveBeenCalledTimes(2));
     expect(saveButton.disabled).toBe(true);
+  });
+});
+
+describe("SceneLivePreview screenshot buttons", () => {
+  it("offers Save to images only to the owner, Download to everyone", async () => {
+    const { unmount } = render(<SceneLivePreview sceneId="scene-1" />);
+    fireEvent.click(screen.getByText(/Live preview/));
+    await waitFor(() => expect(mountMock).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("button", { name: /Save to images/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Download/ })).toBeTruthy();
+    unmount();
+
+    render(<SceneLivePreview canSaveToGallery sceneId="scene-1" />);
+    fireEvent.click(screen.getByText(/Live preview/));
+    await waitFor(() => expect(mountMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: /Save to images/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download/ })).toBeTruthy();
   });
 });

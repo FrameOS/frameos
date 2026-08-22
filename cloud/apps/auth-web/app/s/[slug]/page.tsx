@@ -470,7 +470,6 @@ export default async function ScenePage({
             />
             <SceneLivePreview
               canSaveToGallery={isOwner}
-              frameosVersion={scene.frameosVersion}
               height={scene.previewImageHeight}
               sceneId={scene.id}
               share={share}
