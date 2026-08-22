@@ -261,14 +261,18 @@ test.describe('backend frontend e2e coverage @e2e', () => {
 
   test('apps workspace app header has scene navigation and discard controls', async ({ page }) => {
     const readErrors = await prepareAuthenticatedPage(page)
+    // A built-in Nim app (render/text) in an interpreted scene: read only,
+    // like the system apps page — source link instead of save/discard.
     await page.goto('/apps/1/scene-dashboard/c3bbaf66-f11d-45d2-9bed-5395ac0c01b2', {
       waitUntil: 'domcontentloaded',
     })
     await settleForScreenshot(page)
 
     await expect(page.getByRole('button', { name: 'Back to scene' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Discard changes' })).toBeDisabled()
-    await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await expect(page.getByText('(read only)')).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Open in GitHub' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Discard changes' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0)
 
     await page.getByRole('button', { name: 'Back to scene' }).click()
     await expect(page).toHaveURL(
