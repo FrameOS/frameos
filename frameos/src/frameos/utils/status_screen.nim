@@ -41,6 +41,8 @@ const
   frameosMarkSvg = staticRead("status_screen/frameos_mark.svg")
   markAspect = 464.0 / 544.0 # width / height of the mark's viewBox
   wordmark = "FrameOS"
+  # The three squares' fills in frameos_mark.svg (same as logo-white-colors.svg).
+  markSquareColors = ["#1c7c66", "#8baa3a", "#c8a247"]
 
 var markLock: Lock
 initLock(markLock)
@@ -49,16 +51,22 @@ initLock(markLock)
 # re-parsing the SVG on every render of a scene that refreshes every minute.
 var markCache: Table[string, Image] = initTable[string, Image]()
 
-proc frameosMark*(height: int, color: Color): Image =
-  ## The FrameOS mark rasterized to `height` pixels, filled with `color`.
+proc frameosMark*(height: int, color: Color, coloredSquares = true): Image =
+  ## The FrameOS mark rasterized to `height` pixels: the frame filled with
+  ## `color`, the three squares in the brand colours — or, with
+  ## `coloredSquares = false` (1-bit e-ink, where colour would dither into
+  ## noise), also in `color`.
   let h = max(height, 8)
   let w = max(int(round(h.float * markAspect)), 8)
-  let key = $w & "x" & $h & "/" & color.toHtmlHex()
+  let key = $w & "x" & $h & "/" & color.toHtmlHex() & (if coloredSquares: "/c" else: "/m")
   withLock markLock:
     if markCache.hasKey(key):
       return markCache[key]
-  let recolored = frameosMarkSvg.replace("fill=\"#ffffff\"", "fill=\"" & color.toHtmlHex() & "\"")
-  let image = newImage(pixie_svg.parseSvg(recolored, w, h))
+  var svg = frameosMarkSvg.replace("fill=\"#ffffff\"", "fill=\"" & color.toHtmlHex() & "\"")
+  if not coloredSquares:
+    for brand in markSquareColors:
+      svg = svg.replace("fill=\"" & brand & "\"", "fill=\"" & color.toHtmlHex() & "\"")
+  let image = newImage(pixie_svg.parseSvg(svg, w, h))
   withLock markLock:
     markCache[key] = image
   image
@@ -166,7 +174,7 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
   # Header: mark, wordmark beside it, status line under the wordmark. The
   # status may wrap (a long cloud hint on a portrait panel); the rows start
   # below whichever is taller, the mark or the text block.
-  let mark = frameosMark(int(round(mh)), fg)
+  let mark = frameosMark(int(round(mh)), fg, coloredSquares = screen.dark)
   let headlineFont = makeFont(typeface, headlineFontSize, fg)
   let statusFont = makeFont(typeface, statusFontSize, muted)
   let textX = padding + mark.width.float32 + mh * 0.3
