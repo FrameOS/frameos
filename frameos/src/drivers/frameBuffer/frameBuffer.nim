@@ -270,6 +270,18 @@ proc init*(frameOS: DriverContext): Driver =
     probeRetrySeconds: PROBE_RETRY_START_SECONDS,
   )
 
+proc publishScreenSize*(self: Driver) =
+  ## Hands the probed geometry to the host through the driver→host hint
+  ## channel (frameos/driver_render_hint; polled after every render). A
+  ## frame.json that says 800x480 (the generic image default) on a 1080p HDMI
+  ## panel is what every new cloud card ships with; the host persists what we
+  ## report (frameos/display_detect) so scenes, the cloud and the next boot
+  ## agree. No host ref is kept here — see frameos/driver_abi.
+  if self.isNil:
+    return
+  if self.screenInfo.width > 0 and self.screenInfo.height > 0:
+    reportDetectedDisplaySize(self.screenInfo.width.int, self.screenInfo.height.int)
+
 proc setup*(frameOS: DriverContext = nil): SetupResult =
   if frameOS.isNil or frameOS.frameConfig.isNil:
     setupLog("FrameOS setup: frameBuffer: driver context unavailable; skipping framebuffer dimension detection")
@@ -306,6 +318,7 @@ proc render*(self: Driver, image: Image) =
       self.available = true
       self.probeFailureLogged = false
       self.probeRetrySeconds = PROBE_RETRY_START_SECONDS
+      self.publishScreenSize()
     except DivByZeroDefect as e:
       self.lastProbeError = e.msg
     except Exception as e:

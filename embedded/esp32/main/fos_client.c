@@ -12,6 +12,7 @@
 
 #include "esp_crt_bundle.h"
 #include "esp_err.h"
+#include "esp_app_desc.h"
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
@@ -32,6 +33,7 @@
 #include "fos_scenes.h"
 #include "fos_schedule.h"
 #include "fos_settings.h"
+#include "fos_tz.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -653,6 +655,42 @@ static esp_err_t fetch_remote_bitmap(uint8_t *buf, size_t buf_len)
 
 /* ------------------------------------------------------------- the loop */
 
+/* The facts behind the built-in status screen (frameos/utils/status_screen
+ * via embedded_scene.nim), pushed into the Nim runtime before a pass that
+ * has no scene to draw. Same rows as a Pi's boot screen / system/index:
+ * name, panel, network, who manages the frame, version. */
+static void push_status_info(void)
+{
+    fos_config_t *config = fos_config();
+    char name[2 * FOS_STR_LEN];
+    char panel[2 * FOS_STR_LEN];
+    char ssid[96];
+    char cloud_url[2 * FOS_URL_LEN];
+    char backend_url[2 * FOS_URL_LEN];
+    json_escape_value(config->hostname, name, sizeof(name));
+    json_escape_value(config->panel, panel, sizeof(panel));
+    bool portal = fos_wifi_state() == FOS_WIFI_PORTAL;
+    json_escape_value(portal ? fos_wifi_ap_ssid() : "", ssid, sizeof(ssid));
+    json_escape_value(config->cloud_url, cloud_url, sizeof(cloud_url));
+    json_escape_value(config->backend_url, backend_url, sizeof(backend_url));
+    const esp_app_desc_t *app = esp_app_get_description();
+
+    /* Worst case of every %s below plus the fixed JSON: gcc's
+     * -Wformat-truncation wants the destination to hold it outright. */
+    char info[sizeof(name) + sizeof(panel) + sizeof(ssid) + sizeof(cloud_url) + sizeof(backend_url) +
+              4 * 64 + 256];
+    snprintf(info, sizeof(info),
+             "{\"name\":\"%s\",\"panel\":\"%s\",\"ip\":\"%s\","
+             "\"portal\":%s,\"portal_ssid\":\"%s\",\"portal_ip\":\"%s\","
+             "\"cloud_url\":\"%s\",\"cloud_state\":\"%s\",\"cloud_connected\":%s,"
+             "\"backend_url\":\"%s\",\"version\":\"%s\"}",
+             name, panel, portal ? "" : fos_wifi_ip(),
+             portal ? "true" : "false", ssid, portal ? fos_wifi_ip() : "",
+             cloud_url, fos_cloud_state_name(), fos_cloud_ws_connected() ? "true" : "false",
+             backend_url, app ? app->version : "");
+    frameos_nim_set_status_info(info);
+}
+
 static esp_err_t render_once(void)
 {
     fos_config_t *config = fos_config();
@@ -677,6 +715,9 @@ static esp_err_t render_once(void)
     uint8_t *buf = NULL;
     esp_err_t err;
     if (local_render) {
+        if (fos_scenes_loaded() == 0) {
+            push_status_info();
+        }
         err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
     } else {
@@ -981,6 +1022,9 @@ static void client_task(void *arg)
         /* Live settings: pick up backend-side interval/name/render-mode
          * changes without a rebuild. ETag'd, so steady state is a 304. */
         fos_settings_sync(false);
+        /* A zone name with no tzdata slice yet (console `set time_zone`,
+         * an older provider): one fetch from tz.frameos.net, rate-limited. */
+        fos_tz_resolve_pending();
 
         /* A console `set spill_force` may have changed it since last pass. */
         fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);
@@ -991,6 +1035,8 @@ static void client_task(void *arg)
         /* Fallback fit for consumers without their own placement — settings
          * sync, cloud set_settings and the console all write it live. */
         frameos_nim_set_scaling_mode(config->scaling_mode);
+        /* Same contract for the zone name: live, one string per pass. */
+        frameos_nim_set_time_zone(config->time_zone);
 
         /* Battery guardrail: when the cell is nearly empty, skip the (costly)
          * render + panel refresh and sleep long so a low battery can't keep

@@ -111,15 +111,7 @@ export default async function AccountInstallsPage({
           <p className="copy">
             Self-managed frames and backends that link to your account for
             cloud services like login and backups. Cloud-managed frames live
-            under Frames.{" "}
-            <a
-              href="https://frameos.net/guide/"
-              rel="noreferrer noopener"
-              target="_blank"
-            >
-              Installation instructions
-            </a>
-            .
+            under Frames.
           </p>
         </div>
         <div className="inline-actions">

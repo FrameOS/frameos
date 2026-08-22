@@ -1811,6 +1811,7 @@ describe("frame management API", () => {
         "debug",
         "max_http_response_bytes",
         "gpio_buttons",
+        "timezone",
       ].sort(),
     );
     for (const key of esp32SettableKeys) {
@@ -2051,12 +2052,11 @@ describe("frame management API", () => {
   });
 
   it("refuses the settings an esp32 has no consumer for", async () => {
-    // timezone is unimplementable on a device with no tz database (its only
-    // timezone concept is the utcOffsetMinutes riding with set_schedule), and
-    // the Pi/Linux hardware batch has no firmware consumer at all. The
+    // The Pi/Linux hardware batch has no firmware consumer at all. The
     // firmware refuses the whole verb on any of them; the route says so
     // first, so nothing is half-applied. (scaling_mode joined the settable
-    // set when the firmware grew a consumer for it, debug in 2026.8.31.)
+    // set when the firmware grew a consumer for it, debug in 2026.8.31,
+    // timezone in 2026.8.34 — gated on the reported version below.)
     const keys = deviceKeypair();
     await signIn();
     const claimToken = await mintToken("Desk esp32");
@@ -2070,7 +2070,6 @@ describe("frame management API", () => {
     );
 
     for (const settings of [
-      { timezone: "Europe/Tallinn" },
       { palette: { colors: ["#000000"] } },
       { device_config: { partial: true } },
       { flip: "horizontal" },
@@ -2099,6 +2098,22 @@ describe("frame management API", () => {
       .from(frameCommands)
       .where(eq(frameCommands.frameId, frame_id));
     expect(commands).toHaveLength(0);
+
+    // timezone: a real key since 2026.8.34, refused with the floor on a
+    // frame that has not reported a version that supports it.
+    const tooEarly = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { timezone: "Europe/Tallinn" } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(tooEarly.status).toBe(400);
+    expect((await tooEarly.json()) as { error: string; min_frameos_version?: string }).toMatchObject({
+      error: "settings_need_newer_firmware",
+      min_frameos_version: "2026.8.34",
+    });
   });
 
   it("refuses a mixed esp32 settings payload without applying the name", async () => {
@@ -2122,7 +2137,7 @@ describe("frame management API", () => {
     const refused = await pushFrameSettings(
       postJson(
         `/api/frames/${frame_id}/settings`,
-        { settings: { name: "Half-applied", timezone: "Europe/Tallinn" } },
+        { settings: { name: "Half-applied", flip: "horizontal" } },
         { origin: baseUrl },
       ),
       routeParams(frame_id),

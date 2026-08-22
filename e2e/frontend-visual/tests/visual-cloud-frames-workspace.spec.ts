@@ -361,13 +361,17 @@ test.describe('cloud /frames workspace @e2e', () => {
 
     // Board options come from the mocked release listing.
     await expect(drawer.getByLabel('Board')).toHaveValue('raspberry-pi-64')
-    await expect(drawer.getByLabel('Board').locator('option', { hasText: 'Raspberry Pi Zero 2 W (2026.7.6)' })).toHaveCount(1)
+    await expect(
+      drawer.getByLabel('Board').locator('option', { hasText: 'Raspberry Pi Zero 2 W (2026.7.6)' })
+    ).toHaveCount(1)
 
     // No display picked yet: the detail fields stay hidden.
     await expect(drawer.getByLabel('Display width')).toHaveCount(0)
 
     // Picking a panel prefills its native dimensions.
-    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' })
+    await drawer
+      .getByLabel('Display', { exact: true })
+      .selectOption({ label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' })
     await expect(drawer.getByLabel('Display width')).toHaveValue('1200')
     await expect(drawer.getByLabel('Display height')).toHaveValue('1600')
     await expect(drawer.getByLabel('Rotation')).toHaveValue('0')
@@ -377,7 +381,9 @@ test.describe('cloud /frames workspace @e2e', () => {
     await expect(drawer.getByLabel('Upload URL')).toHaveCount(0)
 
     // A smaller panel swaps the prefill.
-    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 7.3" (E) 800x480 Spectra 6 Color' })
+    await drawer
+      .getByLabel('Display', { exact: true })
+      .selectOption({ label: 'Waveshare 7.3" (E) 800x480 Spectra 6 Color' })
     await expect(drawer.getByLabel('Display width')).toHaveValue('800')
     await expect(drawer.getByLabel('Display height')).toHaveValue('480')
 
@@ -387,7 +393,9 @@ test.describe('cloud /frames workspace @e2e', () => {
     await expect(drawer.getByLabel('VCOM (optional)')).toHaveCount(0)
 
     // The IT8951 10.3" is the one panel whose driver reads VCOM.
-    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 10.3" 1872x1404 16 Grayscale' })
+    await drawer
+      .getByLabel('Display', { exact: true })
+      .selectOption({ label: 'Waveshare 10.3" 1872x1404 16 Grayscale' })
     await expect(drawer.getByLabel('VCOM (optional)')).toBeVisible()
 
     // The rest of the SD builder's new controls.
@@ -398,9 +406,7 @@ test.describe('cloud /frames workspace @e2e', () => {
     await expect(
       drawer.getByLabel('Claim code validity').locator('option', { hasText: '3 months (default)' })
     ).toHaveCount(1)
-    await expect(
-      drawer.getByLabel('Claim code validity').locator('option', { hasText: 'Forever' })
-    ).toHaveCount(1)
+    await expect(drawer.getByLabel('Claim code validity').locator('option', { hasText: 'Forever' })).toHaveCount(1)
 
     // Root login on the device is an explicit choice: a password, or a
     // deliberate passwordless opt-in — the two controls exclude each other.
@@ -426,7 +432,9 @@ test.describe('cloud /frames workspace @e2e', () => {
     await expect(page.getByText('Kitchen frame').first()).toBeVisible()
     const drawer = await openAddFrameDrawer(page)
 
-    await drawer.getByLabel('Display', { exact: true }).selectOption({ label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' })
+    await drawer
+      .getByLabel('Display', { exact: true })
+      .selectOption({ label: 'Waveshare 13.3" (E) 1600x1200 Spectra 6 Color' })
     await expect(drawer.getByLabel('Display width')).toHaveValue('1200')
     await expect(drawer.getByText('FRCT_e2e00000000000000000000000000000000').first()).toBeVisible()
 
@@ -455,9 +463,7 @@ test.describe('cloud /frames workspace @e2e', () => {
     ).toHaveCount(1)
 
     // The full compiled-in panel table is offered for bare-panel XIAO builds.
-    await expect(
-      panelPicker.locator('option', { hasText: 'Waveshare 7.5" (V2) 800x480 Black/White' })
-    ).toHaveCount(1)
+    await expect(panelPicker.locator('option', { hasText: 'Waveshare 7.5" (V2) 800x480 Black/White' })).toHaveCount(1)
 
     expectNoCloudFrontendErrors(readErrors)
   })

@@ -460,8 +460,9 @@ function sameRouteParams(first: Record<string, unknown>, second: Record<string, 
 
 function isMetricsRouteForFrame(frameId: FrameId): boolean {
   return (
-    router.values.location.pathname === urls.frame(frameId) &&
-    routeValue(router.values.searchParams, 'tool') === 'metrics'
+    router.values.location.pathname === urls.frame(frameId, 'metrics') ||
+    (router.values.location.pathname === urls.frame(frameId) &&
+      routeValue(router.values.searchParams, 'tool') === 'metrics')
   )
 }
 
@@ -1238,9 +1239,9 @@ export const metricsLogic = kea<metricsLogicType>([
     },
   })),
   urlToAction(({ actions, props }) => ({
-    [urls.frame(':id')]: ({ id }, search, hash) => {
+    [urls.frame(':id', ':tool')]: ({ id, tool }, search, hash) => {
       const frameId = Number(id)
-      if (frameId !== props.frameId || routeValue(search, 'tool') !== 'metrics') {
+      if (frameId !== props.frameId || (tool ?? routeValue(search, 'tool')) !== 'metrics') {
         return
       }
       actions.syncSelectedTimeRangeFromHash(hash)

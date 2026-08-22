@@ -155,7 +155,7 @@ const cloudVisualCases: CloudVisualCase[] = [
   {
     id: 'templates-private-cloud',
     title: 'Templates panel private cloud scenes',
-    path: '/frames/1?tool=scenes',
+    path: '/frames/1',
     viewports: ['mobile', 'full'],
     variants: [
       {

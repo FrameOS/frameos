@@ -28,7 +28,7 @@ One prefix cannot serve all three concerns, so the wrapper splits them via
 | Concern | Config key | Value | Why |
 |---|---|---|---|
 | API calls | `ingress_path` | `''` (empty) | Cloud paths are already canonical (`/api/frames/...`) at the account origin. `getBasePath()` drives both `apiFetch` and the many direct URL builders (scene images, downloads, upload progress) — an empty base keeps every one of them correct without per-call-site edits. The apiFetch cloud branch additionally skips backend project scoping. |
-| SPA routes | `route_base_path` | `/frames` | `urls.ts` and the route tables build navigation URLs from `getRouteBasePath()`, so all links/routes live under `/frames/**` (`/frames`, `/frames/frames/:id`, `/frames/scenes/...`) while API URLs stay at the origin root. |
+| SPA routes | `route_base_path` | `/frames` | `urls.ts` and the route tables build navigation URLs from `getRouteBasePath()`, so all links/routes live under `/frames/**` (`/frames`, `/frames/:id`, `/frames/:id/scenes/...`, `/frames/apps/...`) while API URLs stay at the origin root. |
 | Public assets | `assets_base_path` | `/frames-app` | Root-absolute assets (`/img/...` logos, `/frameos-wasm/*` preview runtime, `/static/monaco/*`) resolve through `getAssetsBasePath()` to Next's `public/frames-app/`, matching esbuild's `publicPath: '/frames-app/static/'`. |
 
 The alternative — `ingress_path: '/frames'` plus stripping the base inside

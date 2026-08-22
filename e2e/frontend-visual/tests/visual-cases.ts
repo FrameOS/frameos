@@ -168,7 +168,10 @@ async function openAddFrameDrawer(page: Page): Promise<void> {
     .getByRole('button', { name: /Add frame/i })
     .first()
     .click()
-  const drawer = page.locator('.workspace-drawer').filter({ hasText: /Installation method/i }).last()
+  const drawer = page
+    .locator('.workspace-drawer')
+    .filter({ hasText: /Installation method/i })
+    .last()
   await drawer.waitFor()
   await drawer.getByRole('button', { name: /Download SD card/i }).waitFor()
 }
@@ -240,14 +243,14 @@ export const visualCases: VisualCase[] = [
   {
     id: 'frame-overview',
     title: 'Frame overview',
-    path: '/frames/1?tool=overview',
+    path: '/frames/1',
     fullPage: true,
     variants: [{ id: 'default' }],
   },
   {
     id: 'frame-scenes',
     title: 'Frame scenes',
-    path: '/frames/1?tool=scenes',
+    path: '/frames/1',
     fullPage: true,
     variants: [
       { id: 'default' },
@@ -258,60 +261,63 @@ export const visualCases: VisualCase[] = [
   {
     id: 'frame-schedule-route',
     title: 'Frame schedule route',
-    path: '/frames/1?tool=schedule',
+    path: '/frames/1/schedule',
     fullPage: true,
     variants: [{ id: 'default' }],
   },
   {
     id: 'frame-preview',
     title: 'Frame preview',
-    path: '/frames/1?tool=preview',
+    path: '/frames/1/preview',
     variants: [{ id: 'default' }],
   },
   {
     id: 'frame-logs',
     title: 'Frame logs',
-    path: '/frames/1?tool=logs',
-    variants: [{ id: 'default', prepare: scrollLogsToLatest }, { id: 'filtered-render', prepare: fillLogsSearch }],
+    path: '/frames/1/logs',
+    variants: [
+      { id: 'default', prepare: scrollLogsToLatest },
+      { id: 'filtered-render', prepare: fillLogsSearch },
+    ],
   },
   {
     id: 'frame-metrics',
     title: 'Frame metrics',
-    path: '/frames/1?tool=metrics',
+    path: '/frames/1/metrics',
     fullPage: true,
     variants: [{ id: 'default' }],
   },
   {
     id: 'frame-assets',
     title: 'Frame assets',
-    path: '/frames/1?tool=assets',
+    path: '/frames/1/assets',
     fullPage: true,
     variants: [{ id: 'default' }],
   },
   {
     id: 'frame-terminal',
     title: 'Frame terminal',
-    path: '/frames/1?tool=terminal',
+    path: '/frames/1/terminal',
     variants: [{ id: 'default', prepare: stabilizeTerminal }],
   },
   {
     id: 'frame-ping',
     title: 'Frame ping',
-    path: '/frames/1?tool=ping',
+    path: '/frames/1/ping',
     fullPage: true,
     variants: [{ id: 'default' }],
   },
   {
     id: 'frame-debug',
     title: 'Frame debug',
-    path: '/frames/1?tool=debug',
+    path: '/frames/1/debug',
     fullPage: true,
     variants: [{ id: 'default' }],
   },
   {
     id: 'frame-settings',
     title: 'Frame settings',
-    path: '/frames/1?tool=settings',
+    path: '/frames/1/settings',
     fullPage: true,
     variants: [{ id: 'default' }, { id: 'network', prepare: openSettingsNetworkSection }],
   },

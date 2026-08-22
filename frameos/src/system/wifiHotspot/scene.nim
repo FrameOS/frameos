@@ -7,6 +7,7 @@ import std/monotimes
 import frameos/values
 import frameos/utils/url
 import frameos/types
+import frameos/apps
 import frameos/channels
 import frameos/utils/image
 import frameos/utils/time
@@ -64,7 +65,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
       self.node4.run(context)
       nextNode = -1.NodeId
     of 3.NodeId: # render/text
-      self.node3.appConfig.text = fmt("^(48)Welcome to FrameOS!^(28)\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue.")
+      self.node3.appConfig.text = fmt("^({int(48 * panelScale(frameConfig))})Welcome to FrameOS!^({int(28 * panelScale(frameConfig))})\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue.")
       self.node3.run(context)
       nextNode = -1.NodeId
     of 2.NodeId: # render/split
@@ -166,7 +167,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     code: fmt"WIFI:T:WPA;S:" & frameConfig.network.wifiHotspotSsid.multiReplace(@[(";", "\\;"), (",", "\\,"), ("\\",
         "\\\\"), ("\"", "\\\""), (":", "\\:")]) & ";P:" & frameConfig.network.wifiHotspotPassword.multiReplace(@[(";",
         "\\;"), (",", "\\,"), ("\\", "\\\\"), ("\"", "\\\""), (":", "\\:")]) & ";;",
-    size: 4.0,
+    size: 4.0 * panelScale(frameConfig),
     sizeUnit: "pixels per dot",
     alRad: 30.0,
     moRad: 0.0,
@@ -178,7 +179,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node3 = render_textApp.App(nodeName: "render/text", nodeId: 3.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     vAlign: "top",
-    text: fmt("^(48)Welcome to FrameOS!^(28)\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue."),
+    text: fmt("^({int(48 * panelScale(frameConfig))})Welcome to FrameOS!^({int(28 * panelScale(frameConfig))})\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue."),
     richText: "basic-caret",
     inputImage: none(Image),
     position: "center",
@@ -186,7 +187,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     offsetY: 0.0,
     padding: 10.0,
     fontColor: parseHtmlColor("#ffffff"),
-    fontSize: 32.0,
+    fontSize: 32.0 * panelScale(frameConfig),
     borderColor: parseHtmlColor("#000000"),
     borderWidth: 2,
     overflow: "fit-bounds",
@@ -216,7 +217,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   ))
   scene.node7 = data_qrApp.App(nodeName: "data/qr", nodeId: 7.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: data_qrApp.AppConfig(
-    size: 4.0,
+    size: 4.0 * panelScale(frameConfig),
     codeType: "Custom",
     code: fmt"http://10.42.0.1:{hotspotSetupPort(frameConfig)}/",
     sizeUnit: "pixels per dot",

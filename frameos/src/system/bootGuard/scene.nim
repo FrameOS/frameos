@@ -4,6 +4,7 @@ import std/monotimes
 
 import frameos/values
 import frameos/types
+import frameos/apps
 import frameos/channels
 import frameos/utils/time
 import frameos/boot_guard
@@ -117,7 +118,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     offsetY: 0.0,
     padding: 16.0,
     fontColor: parseHtmlColor("#ffffff"),
-    fontSize: 26.0,
+    fontSize: 26.0 * panelScale(frameConfig),
     borderColor: parseHtmlColor("#000000"),
     borderWidth: 2,
     overflow: "fit-bounds",

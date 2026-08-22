@@ -2,19 +2,7 @@ import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { A, router } from 'kea-router'
 import clsx from 'clsx'
 import { useCallback, useLayoutEffect, useRef, type DragEvent, type MouseEvent } from 'react'
-import {
-  AdjustmentsHorizontalIcon,
-  BoltIcon,
-  CalendarDaysIcon,
-  ChartBarIcon,
-  CircleStackIcon,
-  ClockIcon,
-  CommandLineIcon,
-  DocumentTextIcon,
-  EyeIcon,
-  SignalIcon,
-  Squares2X2Icon,
-} from '@heroicons/react/24/outline'
+import { frameToolDefinitions, frameToolDefinitionsForMode, type FrameToolDefinition } from './frameToolDefinitions'
 import { frameHost, frameIsHealthy, frameIsStale, logUpdatesFrameActivity } from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
 import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent, FrameId } from '../../types'
@@ -31,7 +19,13 @@ import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
-import { frameToolScrollKey, isMobileWorkspaceViewport, workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
+import {
+  frameToolFromPathname,
+  frameToolScrollKey,
+  isMobileWorkspaceViewport,
+  workspaceLogic,
+  WorkspaceUtilityPanel,
+} from './workspaceLogic'
 import { urls } from '../../urls'
 import { frameLogic } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
@@ -64,7 +58,6 @@ import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import {
   frameSettingsSectionIsAllowed,
-  frameToolPanelDisabledReason,
   frameToolPanelIsAllowed,
   workspaceMode,
   type WorkspaceMode,
@@ -72,17 +65,6 @@ import {
 
 interface FrameWorkspaceProps {
   id?: string
-}
-
-interface FrameToolDefinition {
-  panel: WorkspaceUtilityPanel
-  label: string
-  description: string
-  icon: JSX.Element
-  // Non-null when the panel stays visible but this frame's device profile
-  // cannot serve it (e.g. Schedule on an esp32 cloud frame): the rail shows
-  // it disabled with this explanation instead of hiding it.
-  disabledReason?: string | null
 }
 
 const uploadedScenePrefix = 'uploaded/'
@@ -236,60 +218,17 @@ function frameToolInitialScrollTop(
   return panel === 'logs' || panel === 'terminal' ? null : 0
 }
 
-const frameToolDefinitions: FrameToolDefinition[] = [
-  {
-    panel: 'overview',
-    label: 'Scenes',
-    description: 'Frame overview',
-    icon: <Squares2X2Icon className="h-5 w-5" />,
-  },
-  {
-    panel: 'settings',
-    label: 'Settings',
-    description: 'Frame config',
-    icon: <AdjustmentsHorizontalIcon className="h-5 w-5" />,
-  },
-  { panel: 'preview', label: 'Preview', description: 'Current image', icon: <EyeIcon className="h-5 w-5" /> },
-  {
-    panel: 'schedule',
-    label: 'Schedule',
-    description: 'Scene timing',
-    icon: <CalendarDaysIcon className="h-5 w-5" />,
-  },
-  { panel: 'logs', label: 'Logs', description: 'Runtime output', icon: <DocumentTextIcon className="h-5 w-5" /> },
-  { panel: 'metrics', label: 'Metrics', description: 'Health charts', icon: <ChartBarIcon className="h-5 w-5" /> },
-  { panel: 'assets', label: 'Assets', description: 'Files on frame', icon: <CircleStackIcon className="h-5 w-5" /> },
-  { panel: 'terminal', label: 'Terminal', description: 'Shell access', icon: <CommandLineIcon className="h-5 w-5" /> },
-  { panel: 'ping', label: 'Ping', description: 'Connectivity', icon: <SignalIcon className="h-5 w-5" /> },
-  { panel: 'debug', label: 'Debug', description: 'Diagnostics', icon: <BoltIcon className="h-5 w-5" /> },
-  { panel: 'activity', label: 'Activity', description: 'Audit trail', icon: <ClockIcon className="h-5 w-5" /> },
-]
-
-// Allow-list, not deny-list: see workspaceSurfaces.ts. A panel added above is
-// invisible in every mode until it is listed there. The frame's device
-// profile never hides a panel — it disables it with an explanation (e.g.
-// Schedule on an esp32 cloud frame, whose firmware refuses `set_schedule`),
-// so the workspace keeps its shape whatever the hardware. Virtual frames are
-// the one exception: panels whose concepts don't exist for them (terminal,
-// ping, metrics) are hidden outright — see workspaceSurfaces.ts.
-function frameToolDefinitionsForMode(
-  mode: WorkspaceMode = workspaceMode(),
-  frame?: FrameType | null
-): FrameToolDefinition[] {
-  return frameToolDefinitions
-    .filter((definition) => frameToolPanelIsAllowed(mode, definition.panel, frame))
-    .map((definition) => ({
-      ...definition,
-      disabledReason: frameToolPanelDisabledReason(mode, definition.panel, frame),
-    }))
-}
-
-function frameToolPanelFromSearchParams(
+// The tool the URL asks for: /frames/<id>/<tool>, or `?tool=` on an old
+// link. Unknown or disabled tools fall back to the overview.
+function frameToolPanelFromRoute(
+  pathname: string,
   searchParams: Record<string, unknown>,
+  frameId: FrameId | null,
   availableDefinitions: FrameToolDefinition[] = frameToolDefinitions
 ): WorkspaceUtilityPanel | null {
+  const fromPath = frameId !== null ? frameToolFromPathname(pathname, frameId) : null
   const value = searchParams.tool
-  const tool = Array.isArray(value) ? value[0] : value
+  const tool = fromPath ?? (Array.isArray(value) ? value[0] : value)
   if (!tool) {
     return 'overview'
   }
@@ -1377,7 +1316,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
   const { frame, scenes, undeployedChanges, unsavedChanges } = useValues(frameLogic(frameLogicProps))
   const { sceneControlSelection, templateDrawerFrameId, utilityPanel, frameToolScrollPositions } =
     useValues(workspaceLogic)
-  const { searchParams } = useValues(router)
+  const { location, searchParams } = useValues(router)
   const { rememberFrameToolScroll } = useActions(workspaceLogic)
   // Computed with the frame in hand: the device profile can disable panels
   // the mode alone would allow (an esp32 cloud frame has no schedule or
@@ -1386,7 +1325,7 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
   // user inside one.
   const availableToolDefinitions = frameToolDefinitionsForMode(mode, frame)
   const enabledToolDefinitions = availableToolDefinitions.filter((definition) => !definition.disabledReason)
-  const requestedPanel = frameToolPanelFromSearchParams(searchParams, enabledToolDefinitions)
+  const requestedPanel = frameToolPanelFromRoute(location.pathname, searchParams, frameId, enabledToolDefinitions)
   const fallbackPanel = enabledToolDefinitions.some((definition) => definition.panel === utilityPanel)
     ? utilityPanel
     : 'overview'
@@ -1554,7 +1493,7 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
   useMountedLogic(sceneWorkspaceLogic({ routeFrameId: id ?? null, routeSceneId: null }))
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesList, framesLoading } = useValues(framesModel)
-  const { searchParams } = useValues(router)
+  const { location, searchParams } = useValues(router)
   const availableToolDefinitions = frameToolDefinitionsForMode()
   const routeFrameId = parseFrameId(id)
   const firstFrame =
@@ -1565,7 +1504,8 @@ export function FrameWorkspace({ id }: FrameWorkspaceProps): JSX.Element {
     null
 
   if (!firstFrame && framesLoading) {
-    const loadingTool = frameToolPanelFromSearchParams(searchParams, availableToolDefinitions) ?? 'overview'
+    const loadingTool =
+      frameToolPanelFromRoute(location.pathname, searchParams, routeFrameId, availableToolDefinitions) ?? 'overview'
     const loadingToolUsesPageScroll = frameToolUsesPageScroll(loadingTool)
 
     return (

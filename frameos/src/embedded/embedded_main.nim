@@ -224,11 +224,19 @@ proc packImagePalette(
 
   true
 
+proc fos_nim_set_status_info_impl(infoJson: cstring) {.exportc, cdecl.} =
+  ## The facts the built-in status screen prints when no interpreted scene is
+  ## loaded (embedded_scene.nim): name, panel, ip, cloud state… — pushed by
+  ## fos_client.c before a pass that will draw it. Cheap to call; nothing is
+  ## rendered here.
+  if infoJson != nil and infoJson.len > 0:
+    setStatusInfo($infoJson)
+
 proc renderFrameImage(): tuple[image: Image, source: string] =
   let interpreted = renderCurrentScene()
   if interpreted.isSome:
     return (interpreted.get(), "interpreted scene \"" & currentSceneName() & "\"")
-  (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "demo scene")
+  (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "status screen")
 
 proc packImageForFormat(
     image: Image;

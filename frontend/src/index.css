@@ -855,6 +855,27 @@ html[data-frameos-theme='dark'] .apps-source-mode-toggle-button:not(.frameos-pri
   color: #64748b;
 }
 
+/* The scene canvas with nothing to draw ("No scenes yet"). */
+.scene-canvas-empty {
+  background: rgba(255, 255, 255, 0.35);
+  color: #64748b;
+}
+
+.scene-canvas-empty__icon {
+  color: #cbd5e1;
+}
+
+.frameos-theme-dark .scene-canvas-empty,
+html[data-frameos-theme='dark'] .scene-canvas-empty {
+  background: rgba(22, 24, 29, 0.55);
+  color: #aeb6c3;
+}
+
+.frameos-theme-dark .scene-canvas-empty__icon,
+html[data-frameos-theme='dark'] .scene-canvas-empty__icon {
+  color: rgba(255, 255, 255, 0.22);
+}
+
 .frameos-dropdown-menu,
 .frameos-tooltip-panel {
   background: rgba(255, 255, 255, 0.96);
@@ -2985,7 +3006,9 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
 }
 
 .frame-settings-panel form > h6,
-.frame-settings-panel form > .frame-settings-heading-row {
+.frame-settings-panel form > .frame-settings-heading-row,
+.frame-settings-panel form > fieldset > h6,
+.frame-settings-panel form > fieldset > .frame-settings-heading-row {
   margin-top: 2rem;
   scroll-margin-top: 1rem;
 }
@@ -2995,9 +3018,14 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
   margin-top: 0;
 }
 
+/* The ESP32 "Device" group wraps its heading + box in a <fieldset> (so the
+   whole group can be disabled below the firmware floor); it gets the same
+   card as the sections that sit directly under the form. */
 .frame-settings-panel form > h6 + div,
 .frame-settings-panel form > h6 + p + div,
-.frame-settings-panel form > .frame-settings-heading-row + div {
+.frame-settings-panel form > .frame-settings-heading-row + div,
+.frame-settings-panel form > fieldset > h6 + div,
+.frame-settings-panel form > fieldset > .frame-settings-heading-row + div {
   background: var(--tool-bg);
   border: 1px solid var(--tool-border);
   border-radius: 22px;

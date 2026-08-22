@@ -10,7 +10,8 @@ import frameos/channels
 import frameos/cloud/link_state
 import frameos/utils/url
 import frameos/utils/time
-import apps/render/text/app as render_textApp
+import frameos/utils/status_screen
+import frameos/version
 import scenes/scenes as compiledScenes
 import system/options as sceneOptions
 
@@ -24,7 +25,6 @@ let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
 let PERSISTED_STATE_KEYS*: seq[string] = @[]
 
 type Scene* = ref object of FrameScene
-  node1: render_textApp.App
 
 proc loadInterpretedSceneOptions(): seq[(SceneId, string)] =
   var data = ""
@@ -159,21 +159,25 @@ proc remoteControlSecurityLine*(frameConfig: FrameConfig): string =
     return &"  over an UNENCRYPTED connection to {serverHost}:{port} — commands are signed, but traffic is readable on the network"
   ""
 
-proc buildSceneListText*(self: Scene): string =
+proc buildStatusScreen*(self: Scene): StatusScreen =
+  ## The facts on the panel, as rows for frameos/utils/status_screen — the
+  ## same screen the Pi boot sequence and the ESP32 fallback scene draw.
   let entries = self.buildSceneList()
   let frameConfig = self.frameConfig
-  let resolution = &"{frameConfig.width}x{frameConfig.height}"
   let deviceName = if frameConfig.name.len > 0: frameConfig.name else: "Unnamed frame"
   let deviceType = if frameConfig.device.len > 0: frameConfig.device else: "unknown device"
+  var deviceLine = &"{deviceType} · {frameConfig.width}×{frameConfig.height}"
+  if frameConfig.rotate != 0:
+    deviceLine.add(&" · rotated {frameConfig.rotate}°")
   let ipAddress = primaryIpAddress()
   let networkInterface = defaultRouteInterface()
   let networkLine =
     if ipAddress.len > 0 and networkInterface.len > 0:
-      &"Network: {ipAddress} ({networkInterface})"
+      &"{ipAddress} ({networkInterface})"
     elif ipAddress.len > 0:
-      &"Network: {ipAddress}"
+      ipAddress
     else:
-      "Network: not connected"
+      "not connected"
   # 0.0.0.0 means "listening everywhere" — as a URL it helps nobody, so show
   # the address the network actually reaches this frame on when we know it.
   let configuredFrameHost = if frameConfig.frameHost.len > 0: frameConfig.frameHost else: "0.0.0.0"
@@ -181,45 +185,58 @@ proc buildSceneListText*(self: Scene): string =
     if configuredFrameHost == "0.0.0.0" and ipAddress.len > 0: ipAddress
     else: configuredFrameHost
   let framePort = if publicPort(frameConfig) > 0: $publicPort(frameConfig) else: "?"
-  let frameScheme = publicScheme(frameConfig)
+  let frameUrl = &"{publicScheme(frameConfig)}://{frameHost}:{framePort}"
   # Cloud-managed frames take remote commands over the provider link even
   # when the self-hosted agent flag is off — "disabled" would be a lie there.
-  let cloudManaged = loadCloudLinkState(){"mode"}.getStr("") == "managed"
+  let linkState = loadCloudLinkState()
+  let cloudManaged = linkState{"mode"}.getStr("") == "managed"
+  let cloudConnected = cloudManaged and linkState{"status"}.getStr("") == "connected"
   let remoteControl =
     if cloudManaged or (frameConfig.agent != nil and frameConfig.agent.agentEnabled): "enabled"
     else: "disabled"
-  let remoteSecurity = remoteControlSecurityLine(frameConfig)
-  var lines: seq[string] = @[
-    "FrameOS System Info",
-    "",
-    &"Name: {deviceName}",
-    &"Device: {deviceType}",
-    &"Resolution: {resolution}",
-    &"Rotation: {frameConfig.rotate}°",
-    &"Time zone: {frameConfig.timeZone}",
-    networkLine,
-    managementLine(frameConfig),
-    &"Frame: {frameScheme}://{frameHost}:{framePort}",
-    &"FrameOS Remote control: {remoteControl}",
+  let remoteSecurity = remoteControlSecurityLine(frameConfig).strip()
+  let remoteLine = if remoteSecurity.len > 0: remoteControl & " — " & remoteSecurity else: remoteControl
+  let management = managementLine(frameConfig)
+  let managedVia = management[("Managed via: ".len) .. ^1]
+
+  result.dark = true
+  result.rows = @[
+    ("Name", deviceName),
+    ("Device", deviceLine),
+    ("Time zone", frameConfig.timeZone),
+    ("Network", networkLine),
+    ("Managed via", managedVia),
+    ("Frame", frameUrl),
+    ("Remote control", remoteLine),
   ]
-  if remoteSecurity.len > 0:
-    lines.add(remoteSecurity)
-  lines.add("")
+  let version = publishedFrameOSVersion(compiledFrameOSVersion())
+  result.footer = if version.len == 0 or version == "unknown": "FrameOS" else: "FrameOS v" & version
   if entries.len == 0:
-    lines.add("No scenes found.")
-    return lines.join("\n")
-  lines.add("Installed Scenes")
-  lines.add("")
-  for idx, (sceneId, sceneName) in entries.pairs:
-    lines.add(&"{idx + 1}. {sceneName}")
-  return lines.join("\n")
+    # What to do next depends on who is in charge of this frame.
+    result.status =
+      if cloudConnected: "Connected to FrameOS Cloud. Add a scene from the workspace to get started."
+      elif cloudManaged: "Connecting to FrameOS Cloud…"
+      elif managedVia.startsWith("self-hosted"): "Waiting for the backend to deploy a scene."
+      else: &"No scenes installed yet. Open {frameUrl} to add one."
+    result.notes = @["No scenes installed yet."]
+  else:
+    result.status =
+      if entries.len == 1: "1 scene installed."
+      else: &"{entries.len} scenes installed."
+    result.notes = @["Installed scenes"]
+    for idx, (sceneId, sceneName) in entries.pairs:
+      result.notes.add(&"{idx + 1}. {sceneName}")
+
+proc buildSceneListText*(self: Scene): string =
+  ## The screen as text — what the tests and the admin API see.
+  statusScreenText(self.buildStatusScreen())
 
 proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
   let timer = getMonoTime()
   case nodeId:
   of 1.NodeId:
-    self.node1.appConfig.text = self.buildSceneListText()
-    self.node1.run(context)
+    if context.hasImage and not context.image.isNil:
+      drawStatusScreen(context.image, self.buildStatusScreen())
   else:
     discard
   if DEBUG:
@@ -280,23 +297,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: ExecutionContext) = scene.runNode(nodeId, context))
   scene.getDataNode = (proc(nodeId: NodeId, context: ExecutionContext): Value = scene.getDataNode(nodeId, context))
-  scene.node1 = render_textApp.App(nodeName: "render/text", nodeId: 1.NodeId, scene: scene.FrameScene,
-    frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
-      inputImage: none(Image),
-      text: "",
-      richText: "basic-caret",
-      position: "left",
-      vAlign: "top",
-      offsetX: 0.0,
-      offsetY: 0.0,
-      padding: 24.0,
-      font: "",
-      fontColor: parseHtmlColor("#ffffff"),
-      fontSize: 28.0,
-      borderColor: parseHtmlColor("#000000"),
-      borderWidth: 0,
-      overflow: "fit-bounds",
-    ))
   runEvent(self, context)
 
 var exportedScene* = ExportedScene(

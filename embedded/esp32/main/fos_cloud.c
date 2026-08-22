@@ -37,6 +37,7 @@
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
+#include "fos_tz.h"
 #include "fos_settings.h"
 #include "fos_wifi.h"
 #include "fos_netguard.h"
@@ -1993,6 +1994,10 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     }
     static const char *settable_keys[] = {
         "interval", "name", "rotate", "scaling_mode",
+        /* 2026.8.34: an IANA zone name plus that zone's tzdata slice
+         * (fos_tz.h), applied live. */
+        "timezone",
+        "timezone_data",
         "deep_sleep", "deep_sleep_on_battery", "wake_check_seconds",
         "battery_pin", "battery_divider",
         /* 2026.8.31: what the local admin API and the console already set. */
@@ -2062,6 +2067,31 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         /* No reboot: a per-decode fallback, pushed into the Nim runtime by
          * fos_client on the next pass. */
         strlcpy(config->scaling_mode, normalized, sizeof(config->scaling_mode));
+    }
+    const cJSON *timezone = cJSON_GetObjectItem(settings, "timezone");
+    const cJSON *timezone_data = cJSON_GetObjectItem(settings, "timezone_data");
+    if (timezone != NULL) {
+        if (!cJSON_IsString(timezone) || strlen(timezone->valuestring) >= sizeof(config->time_zone)) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        if (timezone_data != NULL && !cJSON_IsNull(timezone_data) && !cJSON_IsObject(timezone_data)) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        /* No reboot: TZ is read on every localtime() call. The provider
+         * sends the zone's tzdata slice with the name; a name alone is
+         * resolved from tz.frameos.net by fos_tz_resolve_pending. */
+        if (strcmp(config->time_zone, timezone->valuestring) != 0) {
+            strlcpy(config->time_zone, timezone->valuestring, sizeof(config->time_zone));
+            fos_tz_clear();
+        }
+        char *slice = cJSON_IsObject(timezone_data) ? cJSON_PrintUnformatted(timezone_data) : NULL;
+        fos_tz_install(slice);
+        free(slice);
+    } else if (timezone_data != NULL) {
+        ws_ack(id, false, "invalid_settings");
+        return;
     }
     const cJSON *deep_sleep = cJSON_GetObjectItem(settings, "deep_sleep");
     if (deep_sleep != NULL) {

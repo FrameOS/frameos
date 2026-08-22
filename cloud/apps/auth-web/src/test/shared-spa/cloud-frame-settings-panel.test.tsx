@@ -293,7 +293,7 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(screen.queryByText("Power")).toBeTruthy();
   });
 
-  it("keeps its narrower set: no timezone the firmware ignores, no Pi-only batch", () => {
+  it("keeps its narrower set: no Pi-only batch", () => {
     renderPanel(cloudFrame("esp32-s3"));
 
     const rendered = new Set(renderedFieldNames());
@@ -302,9 +302,10 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(rendered.has("interval")).toBe(true);
     expect(rendered.has("rotate")).toBe(true);
     expect(rendered.has("scaling_mode")).toBe(true);
-    // Accepted by the control plane, unimplementable on the firmware — so
-    // offering it here would be the same lie in a smaller font.
-    expect(rendered.has("timezone")).toBe(false);
+    // Time zone arrived in firmware 2026.8.34 (IANA name -> POSIX TZ rule):
+    // offered, but disabled with the floor spelled out on older firmware.
+    expect(rendered.has("timezone")).toBe(true);
+    expect(document.querySelector('[name="timezone"]')?.matches(":disabled")).toBe(true);
     // The Pi/Linux extended batch: the firmware has no consumer for any of
     // it except the HTTP ceiling it learned in 2026.8.31 (its own gated
     // section below), and the route refuses the rest for esp32 frames.
@@ -315,6 +316,11 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(screen.queryByText("QR Control Code")).toBeNull();
     expect(screen.queryByText("Global errors")).toBeNull();
     expect(screen.queryByText("Panel")).toBeNull();
+  });
+
+  it("enables the time zone field from firmware 2026.8.34", () => {
+    renderPanel(cloudFrame("esp32-s3", "2026.8.34"));
+    expect(document.querySelector('[name="timezone"]')?.matches(":disabled")).toBe(false);
   });
 
   it("offers debug, the HTTP ceiling and GPIO buttons on firmware from 2026.8.31, disabled below it", () => {

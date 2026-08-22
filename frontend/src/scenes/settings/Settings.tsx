@@ -102,6 +102,23 @@ function settingsHeaderOffset(): number {
   return window.matchMedia?.('(max-width: 639px)').matches ? 96 : 104
 }
 
+// The element that scrolls the settings page. Self-hosted that is the
+// window; on the cloud the page is boxed under the account header and the
+// shell (.frameos-app-shell) scrolls instead, where window.scrollTo() is a
+// silent no-op. Walk up from the section and take the first ancestor that
+// actually overflows.
+function settingsScrollContainer(section: HTMLElement): HTMLElement | null {
+  let element: HTMLElement | null = section.parentElement
+  while (element && element !== document.body) {
+    const overflowY = window.getComputedStyle(element).overflowY
+    if ((overflowY === 'auto' || overflowY === 'scroll') && element.scrollHeight > element.clientHeight) {
+      return element
+    }
+    element = element.parentElement
+  }
+  return null
+}
+
 function scrollToSettingsSection(sectionId: string, attempt = 0): void {
   if (typeof document === 'undefined' || typeof window === 'undefined') {
     return
@@ -110,13 +127,30 @@ function scrollToSettingsSection(sectionId: string, attempt = 0): void {
   window.requestAnimationFrame(() => {
     const section = document.getElementById(sectionId)
     if (section) {
+      const container = settingsScrollContainer(section)
+      // Right after mount nothing overflows yet (the sections are still
+      // filling in); scrolling then would land on top. Wait a little.
+      const scrollable = container !== null || document.documentElement.scrollHeight > window.innerHeight
+      if (!scrollable && attempt < 20) {
+        window.setTimeout(() => scrollToSettingsSection(sectionId, attempt + 1), 100)
+        return
+      }
+      if (container) {
+        const top =
+          section.getBoundingClientRect().top -
+          container.getBoundingClientRect().top +
+          container.scrollTop -
+          settingsHeaderOffset()
+        container.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+        return
+      }
       const top = section.getBoundingClientRect().top + window.scrollY - settingsHeaderOffset()
       window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
       return
     }
 
-    if (attempt < 8) {
-      window.setTimeout(() => scrollToSettingsSection(sectionId, attempt + 1), 50)
+    if (attempt < 20) {
+      window.setTimeout(() => scrollToSettingsSection(sectionId, attempt + 1), 100)
     }
   })
 }
@@ -405,16 +439,34 @@ export function Settings() {
     }
 
     scheduleUpdate()
-    window.addEventListener('scroll', scheduleUpdate, { passive: true })
+    // Capture phase: scroll events do not bubble, and on the cloud the
+    // scroller is an ancestor element rather than the window.
+    document.addEventListener('scroll', scheduleUpdate, { capture: true, passive: true })
     window.addEventListener('resize', scheduleUpdate)
     return () => {
       if (frame !== null) {
         window.cancelAnimationFrame(frame)
       }
-      window.removeEventListener('scroll', scheduleUpdate)
+      document.removeEventListener('scroll', scheduleUpdate, { capture: true })
       window.removeEventListener('resize', scheduleUpdate)
     }
   }, [buildEnvironmentProvider, customFonts.length, openAiModelOverridesExpanded, savedSettingsLoading])
+
+  // A deep link (/settings#settings-unsplash): scroll there once the
+  // sections have rendered. The browser's own hash jump never fires for the
+  // cloud's element scroller, and the sections mount after the first paint.
+  useEffect(() => {
+    if (savedSettingsLoading || typeof window === 'undefined') {
+      return
+    }
+    const hash = window.location.hash as SettingsSectionId
+    if (settingsNavItems.some(([_label, href]) => href === hash)) {
+      setActiveSettingsSection(hash)
+      scrollToSettingsSection(hash.slice(1))
+    }
+    // Only on first load of the sections; later clicks scroll themselves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedSettingsLoading])
 
   useEffect(() => {
     settingsNavLinkRefs.current[activeSettingsSection]?.scrollIntoView({ block: 'nearest' })

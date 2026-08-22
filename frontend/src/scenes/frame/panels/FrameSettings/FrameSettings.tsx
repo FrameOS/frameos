@@ -43,9 +43,11 @@ import {
 import { secureToken } from '../../../../utils/secureToken'
 import {
   cloudFrameSupportsEsp32ExtendedSettings,
+  cloudFrameSupportsEsp32TimeZone,
   cloudFrameSupportsExtendedSettings,
   cloudFrameSupportsHardwareSettings,
   esp32ExtendedCloudFrameSettingsMinVersion,
+  esp32TimeZoneCloudFrameSettingsMinVersion,
   extendedCloudFrameSettingsMinVersion,
   hardwareCloudFrameSettingsMinVersion,
   setCloudFrameServiceSettingsEnabled,
@@ -1268,6 +1270,8 @@ export function FrameSettings({
   // ceiling and GPIO buttons (esp32ExtendedCloudFrameSettingKeys).
   const cloudEsp32ExtendedSettingsSupported =
     esp32CloudProfile && cloudFrameSupportsEsp32ExtendedSettings(frame.frameos_version)
+  // 2026.8.34: the chip maps an IANA name onto a POSIX TZ rule (fos_tz.c).
+  const cloudEsp32TimeZoneSupported = esp32CloudProfile && cloudFrameSupportsEsp32TimeZone(frame.frameos_version)
   const cloudDevice = cloudProfile ? frame.hardware?.device ?? '' : ''
   const showBackendSection = frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-backend')
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
@@ -1876,8 +1880,25 @@ export function FrameSettings({
       label="Maximum HTTP response size for apps"
       tooltip={
         <>
-          Maximum number of bytes that FrameOS apps may download in a single HTTP response. Increase this for
-          larger calendar feeds, images, or APIs. ESP32 frames default to 4 MiB to avoid large PSRAM allocations.
+          <p>
+            The most bytes one HTTP response may carry for any app download — images, calendar feeds, APIs.
+            Enforced on the device at download time: a response that announces a larger size is refused
+            before the first byte, a stream that grows past it is cut off. Raise it for bigger sources.
+          </p>
+          <p className="mt-2">
+            ESP32 frames default to 4 MiB. There the body is buffered in PSRAM chunks, and when free PSRAM would
+            drop below the runtime&apos;s reserve the rest of the body spills to storage instead of failing — the SD
+            card&apos;s <code>.cache</code> folder when one is mounted, otherwise the internal <code>/state</code>
+            partition (capped by its free space, at most 8 MiB). A spilled image is decoded straight from the file
+            with the same streaming decoder that renders SD-card assets, so a multi-MB JPEG never has to fit in
+            memory: this limit, not PSRAM, is the ceiling. Spilled bodies must be baseline JPEGs (progressive
+            JPEG and PNG cannot be streamed from a file yet), and text/JSON responses never spill — they need to
+            fit in memory. With no SD card and no free <code>/state</code> space, spilling is off and the download
+            fails once PSRAM is exhausted.
+          </p>
+          <p className="mt-2">
+            The ESP32 reads this value at boot, so saving a change reboots the frame.
+          </p>
         </>
       }
     >
@@ -2163,6 +2184,23 @@ export function FrameSettings({
                   />
                 )}
               </Field>
+              {esp32CloudProfile ? (
+                <fieldset disabled={!cloudEsp32TimeZoneSupported} className="min-w-0">
+                  <Field
+                    name="timezone"
+                    label="Time zone"
+                    tooltip={
+                      cloudEsp32TimeZoneSupported
+                        ? 'The time zone the frame keeps its clock in: scene times, the weather forecast and the schedule. Applied live — no reboot.'
+                        : frame.frameos_version
+                          ? `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+                          : `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+                    }
+                  >
+                    <Select name="timezone" options={frameTimezoneOptions} />
+                  </Field>
+                </fieldset>
+              ) : null}
               {!esp32CloudProfile ? (
                 <>
                   <Field
@@ -2183,7 +2221,7 @@ export function FrameSettings({
               ) : null}
               <p className="frameos-muted text-sm">
                 {esp32CloudProfile
-                  ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or the FrameOS-Setup portal.'
+                  ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or the FrameOS-Setup portal.'
                   : 'These are the settings a cloud-managed frame accepts. Everything else this frame runs on — its panel and display driver, network and WiFi, GPIO buttons, mount points, palette and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
               </p>
             </div>

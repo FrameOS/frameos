@@ -83,3 +83,47 @@ proc takeEarlierRenderRequest*(): Option[float] =
 proc clearEarlierRenderRequest*() =
   hasEarlierRenderRequest = false
   earlierRenderRequestValue = 0
+
+# ---------------------------------------------------------------------------
+# driver → host: the display geometry a driver found out AFTER init.
+#
+# The framebuffer driver on a Pi 5 may see /dev/fb0 register only after boot;
+# its render-time probe then knows the real mode, and the host's FrameConfig
+# (and frame.json, via frameos/display_detect) should follow. Same transport
+# as the earlier-render request: the driver writes into ITS copy of this
+# module, the generated library exports `frameos_driver_detected_display_size`
+# (width << 32 | height, 0 for "nothing new"), the host polls it after each
+# render and folds it in with `reportDetectedDisplaySize`. Two ints cross the
+# boundary; no ref is kept on either side (frameos/driver_abi).
+
+var
+  hasDetectedDisplaySize {.threadvar.}: bool
+  detectedDisplayWidth {.threadvar.}: int
+  detectedDisplayHeight {.threadvar.}: int
+
+proc reportDetectedDisplaySize*(width, height: int) =
+  if width <= 0 or height <= 0:
+    return
+  hasDetectedDisplaySize = true
+  detectedDisplayWidth = width
+  detectedDisplayHeight = height
+
+proc takeDetectedDisplaySize*(): Option[(int, int)] =
+  ## The last reported geometry, cleared on read.
+  if not hasDetectedDisplaySize:
+    return none((int, int))
+  hasDetectedDisplaySize = false
+  some((detectedDisplayWidth, detectedDisplayHeight))
+
+proc packDetectedDisplaySize*(): uint64 =
+  ## `takeDetectedDisplaySize` as the single integer that crosses the `.so`
+  ## boundary: width in the high 32 bits, height in the low, 0 when nothing.
+  let size = takeDetectedDisplaySize()
+  if size.isNone:
+    return 0
+  (size.get()[0].uint64 shl 32) or (size.get()[1].uint64 and 0xFFFFFFFF'u64)
+
+proc unpackDetectedDisplaySize*(packed: uint64): Option[(int, int)] =
+  if packed == 0:
+    return none((int, int))
+  some(((packed shr 32).int, (packed and 0xFFFFFFFF'u64).int))

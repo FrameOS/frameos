@@ -1181,6 +1181,12 @@ async function templateImageSource(template: Partial<TemplateType>): Promise<Sce
     if (localMatch) {
       return { templateId: localMatch[1] }
     }
+    // A FrameOS Cloud store cover (/api/store/scenes/<id>/image?v=N): the
+    // route redirects to the CDN, so the browser must not fetch it — hand the
+    // backend an absolute URL to copy from instead.
+    if (template.image.startsWith('/api/store/')) {
+      return { url: new URL(template.image, window.location.origin).toString() }
+    }
 
     // Same-origin, but not a shape the backend can resolve on its own (e.g.
     // /api/cloud/store/drive/image/{sceneId}, which the backend proxies with
@@ -1258,6 +1264,14 @@ async function saveTemplateSceneImages(
 
   const targetScenes = getScenesWithoutParents(newScenes)
   if (!targetScenes.length) {
+    return
+  }
+
+  // The cloud keeps no per-frame cover snapshot (assignSceneImages is a
+  // no-op there), so resolving the source would only fetch bytes to throw
+  // away — and a store cover 307s to the CDN, which answers without CORS
+  // headers, so that fetch failed and raised a "failed to copy" toast.
+  if (isCloudMode()) {
     return
   }
 

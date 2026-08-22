@@ -4,7 +4,9 @@ import { visualCases, visualThemes, visualViewports } from './visual-cases'
 
 for (const visualCase of visualCases) {
   const themes = visualCase.themes ?? visualThemes
-  const viewports = visualViewports.filter((viewport) => !visualCase.viewports || visualCase.viewports.includes(viewport.name))
+  const viewports = visualViewports.filter(
+    (viewport) => !visualCase.viewports || visualCase.viewports.includes(viewport.name)
+  )
   const variants = visualCase.variants ?? [{ id: 'default' }]
 
   for (const theme of themes) {
@@ -26,12 +28,9 @@ for (const visualCase of visualCases) {
           await variant.prepare?.(page)
           await settleForScreenshot(page)
 
-          await expect(page).toHaveScreenshot(
-            `${visualCase.id}--${variant.id}--${theme}--${viewport.name}.png`,
-            {
-              fullPage: variant.fullPage ?? visualCase.fullPage ?? false,
-            }
-          )
+          await expect(page).toHaveScreenshot(`${visualCase.id}--${variant.id}--${theme}--${viewport.name}.png`, {
+            fullPage: variant.fullPage ?? visualCase.fullPage ?? false,
+          })
           const errors = [...new Set(readErrors())]
           expect(errors, `Unexpected frontend errors:\n${errors.join('\n\n')}`).toEqual([])
         })

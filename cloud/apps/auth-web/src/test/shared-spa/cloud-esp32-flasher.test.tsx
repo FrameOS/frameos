@@ -447,7 +447,7 @@ describe("Esp32CloudFlasher", () => {
       timeout: 5000,
     });
     // cloudFrameUrl: SPA base path /frames + its own /frames/<id> route.
-    expect(open.getAttribute("href")).toBe("/frames/frames/abc-123");
+    expect(open.getAttribute("href")).toBe("/frames/abc-123");
     expect(done.textContent).toContain("Kitchen");
     expect(done.textContent).toContain("waiting for your confirmation");
   });

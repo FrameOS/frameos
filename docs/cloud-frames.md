@@ -416,7 +416,7 @@ goes out before the frames understand it.
 | Profile | Implements | Answers `unsupported_verb` for |
 |---|---|---|
 | Full (Linux/Raspberry Pi FrameOS) | the whole table | — |
-| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware), `set_settings` (the `interval`/`name`/`rotate`/`scaling_mode` subset plus the power keys `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up on the next render pass) and `battery_pin`/`battery_divider` (acked, then deferred-rebooted — the ADC is set up once at boot), and from firmware **2026.8.31** `debug` (debug_logging, pushed into the Nim runtime on the next render pass), `max_http_response_bytes` (1 KiB … 64 MiB; handed to the runtime at init → deferred reboot) and `gpio_buttons` (the Pi shape, ≤ FOS_GPIO_BUTTONS_MAX = 8 entries, labels without `:`/newline; `fos_buttons_init` runs at boot → deferred reboot) — a provider gates those three on the reported version, and any other allowlisted key refuses the whole verb with `setting_not_allowed`, so a provider should not enqueue them; `rotate` is normalized to 0/90/180/270 and, when it actually changes, acked first and then rebooted, because the renderer sizes its canvas once at init; `scaling_mode` is normalized to contain/cover/stretch/center and applied live on the next render pass — it is the fallback fit for image consumers without their own placement, so no reboot. `timezone` is unimplementable without a tz database — the device's only timezone concept is the `utcOffsetMinutes` that rides along with `set_schedule`), `assets_list`, `asset_get`, `asset_put`, `asset_put_chunk` (parts under `.uploads/` on the card, 256 KiB raw per chunk), `asset_mkdir`, `asset_delete`, `asset_rename` (all seven only while the SD card is mounted — otherwise an empty listing / `not_found`; `thumb` is ignored and the original bytes are returned; write acks are sent after the SD write finishes, from the same job queue the reads use), `image_get` (`image/bmp`), `get_logs` (replays the on-device ring of the last 128 lines), `get_metrics` (newest sample; the device also pushes a `metrics` message after every render pass when `telemetry:metrics` is granted), `set_schedule` (evaluated on-device once per wall-clock minute; matching uses UTC plus a provider/backend-supplied `utcOffsetMinutes` — the device carries no tz database; `setCurrentScene`, `render`, and from firmware **2026.8.32** `restart`/`reboot` — both `esp_restart()` after flushing the log — are handled by the firmware, anything else is handed to the Nim runtime), `refresh_service_settings` (the firmware's
+| ESP32 (microcontroller firmware) | `set_scenes`, `set_current_scene`, `get_state`, `render`, `reboot`, `restart_runtime` (identical to `reboot`: on ESP32 the runtime *is* the firmware), `set_settings` (the `interval`/`name`/`rotate`/`scaling_mode` subset plus the power keys `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up on the next render pass) and `battery_pin`/`battery_divider` (acked, then deferred-rebooted — the ADC is set up once at boot), and from firmware **2026.8.31** `debug` (debug_logging, pushed into the Nim runtime on the next render pass), `max_http_response_bytes` (1 KiB … 64 MiB; handed to the runtime at init → deferred reboot) and `gpio_buttons` (the Pi shape, ≤ FOS_GPIO_BUTTONS_MAX = 8 entries, labels without `:`/newline; `fos_buttons_init` runs at boot → deferred reboot) — a provider gates those three on the reported version, and any other allowlisted key refuses the whole verb with `setting_not_allowed`, so a provider should not enqueue them; `rotate` is normalized to 0/90/180/270 and, when it actually changes, acked first and then rebooted, because the renderer sizes its canvas once at init; `scaling_mode` is normalized to contain/cover/stretch/center and applied live on the next render pass — it is the fallback fit for image consumers without their own placement, so no reboot. from firmware **2026.8.34** `timezone` (an IANA name) plus `timezone_data` (that zone's **tzdata slice**: its transitions from last year to ten years out in the full tzdata.json's `{timezones, dstChanges}` shape, ~1.5 KB — the chip carries no tz database, so the slice is the zone. The device keeps it at `/state/tz.json`, loads it into the Nim runtime's chrono (exact conversions for scenes and apps) and installs the POSIX TZ rule chrono derives from it with `setenv("TZ")`, so libc `localtime`, QuickJS `Date` and the on-device schedule all follow, DST included; applied live, gated on the reported version like the 2026.8.31 keys. The provider fetches the slice from `https://tz.frameos.net/zone/<Zone>.json` (published by the `../tz` generator; the self-hosted backend cuts it from its own tzdata) and sends it in the command payload only — it is never stored as a frame setting. A `timezone` without `timezone_data` is still accepted: the device fetches the same URL once on its next online render pass. `timezone_data` on its own is refused. Before 2026.8.34 the device's only timezone concept was the `utcOffsetMinutes` that rides along with `set_schedule`, which firmware with a zone installed now ignores in favour of the zone), `assets_list`, `asset_get`, `asset_put`, `asset_put_chunk` (parts under `.uploads/` on the card, 256 KiB raw per chunk), `asset_mkdir`, `asset_delete`, `asset_rename` (all seven only while the SD card is mounted — otherwise an empty listing / `not_found`; `thumb` is ignored and the original bytes are returned; write acks are sent after the SD write finishes, from the same job queue the reads use), `image_get` (`image/bmp`), `get_logs` (replays the on-device ring of the last 128 lines), `get_metrics` (newest sample; the device also pushes a `metrics` message after every render pass when `telemetry:metrics` is granted), `set_schedule` (evaluated on-device once per wall-clock minute; matching uses the installed time zone (2026.8.34+, `timezone` setting) or, without one, UTC plus a provider/backend-supplied `utcOffsetMinutes`; `setCurrentScene`, `render`, and from firmware **2026.8.32** `restart`/`reboot` — both `esp_restart()` after flushing the log — are handled by the firmware, anything else is handed to the Nim runtime), `refresh_service_settings` (the firmware's
 settings poll fetches the six groups itself — from the provider on a cloud-only
 frame, from the FrameOS backend's `/embedded/settings` payload when one is
 configured, in which case the nudge is refused `backend_managed` because the
@@ -645,6 +645,7 @@ rotate=90              # optional: 0/90/180/270
 vcom=-1.48             # optional (IT8951-style panels)
 upload_url=https://…   # optional; required by device=http.upload
 root_password=…        # optional; sets the root password via chpasswd
+time_zone=Europe/Brussels   # optional IANA zone; the builder writes the browser's
 ```
 
 Parsing is deliberately forgiving: `KEY=value` lines, `#` comments, blank
@@ -682,6 +683,19 @@ makes this an explicit choice: enter a root password, or tick a
 "passwordless root" checkbox to accept the default. Like the WiFi
 credentials, the password is written into the image in the browser and
 never reaches the provider.
+
+`name` and `time_zone` are the card's personalization and end up in
+`frame.json`, not just in the enrollment request: first boot forwards
+`time_zone` into `cloud_enroll_pending.json`, and once the claim token is
+redeemed the runtime writes `name` / `timeZone` into `frame.json`, reloads,
+and sets the system zone (`/etc/localtime`) so QuickJS `Date` agrees with the
+scheduler. The name also becomes the hostname on first boot (slugified:
+"Kitchen Frame (2nd floor)" → `kitchen-frame-2nd-floor.local`), so two cloud
+cards on one network are not both `frame.local`. Without `time_zone` the
+image stays on UTC; the provider's builder fills it from
+`Intl.DateTimeFormat().resolvedOptions().timeZone`. Later changes come through
+the `timezone` settings key (Pi, and ESP32 from 2026.8.34 — see the ESP32
+row under Device profiles).
 
 **Placeholder + in-browser personalization.** Release images ship the file
 pre-created as an all-comments placeholder of exactly **4096 bytes**, first
@@ -749,6 +763,36 @@ the claim token is kept in the `0600` state file and retried with backoff
 until its expiry, then the portal shows a "get a new code" hint. Downloads
 with embedded WiFi credentials must be short-lived links and labeled as
 containing secrets.
+
+### What the panel shows before a scene arrives
+
+Every board draws the same **FrameOS status screen**
+(`frameos/src/frameos/utils/status_screen.nim`): the mark and wordmark, one
+status line ("Checking network…", "Connected to FrameOS Cloud. Add a scene
+from the workspace to get started."), then label/value rows — name, device
+and resolution, network, who manages the frame, the frame URL, remote
+control — and the version in the corner. White on black for HDMI/LCD, black
+on white for e-ink.
+
+- **Pi, HDMI (`framebuffer`)**: the driver is brought up *before* the network
+  check (it is plain `/dev/fb0`, nothing that can wedge the board — the other
+  drivers keep their deliberate late init) and the boot steps are drawn as
+  they happen: "Starting up…", "Checking network… attempt N, T s", "Network
+  connected. Loading scenes…" / "No network. Starting the setup hotspot…".
+- **Pi, no scenes**: the `system/index` scene is this screen with the live
+  facts. It re-renders the moment the cloud link state changes (enrollment
+  completing, a disconnect) instead of at its 5-minute interval — only the
+  `system/*` scenes do; a photo scene on e-ink is never refreshed because the
+  provider reconnected.
+- **ESP32 with the Nim runtime, no scenes**: the built-in fallback scene
+  (`frameos/src/embedded/embedded_scene.nim`) is the same screen;
+  `fos_client.c` pushes name/panel/IP/cloud state/version into the runtime
+  (`frameos_nim_set_status_info`) before a pass that has no scene to draw.
+  The screen is static on purpose (no render counter), so the packed-image
+  hash skips the e-ink refresh when nothing changed.
+- **ESP32 thin client (C3, no Nim)**: `fos_status_screen.c` draws the portal
+  screen with the same header — the mark is a 24×28 1-bit bitmap generated
+  by `frameos/tools/gen_logo_bitmap.nim` into `fos_logo_bitmap.h`.
 
 ### Install script (existing OS)
 

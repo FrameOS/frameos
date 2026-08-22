@@ -18,6 +18,7 @@
 
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
+#include "esp_spiffs.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -38,6 +39,7 @@
 #include "fos_scenes.h"
 #include "fos_schedule.h"
 #include "fos_status_screen.h"
+#include "fos_tz.h"
 #include "fos_mem.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
@@ -270,10 +272,15 @@ void app_main(void)
     /* Interpreted scenes: mount /state and queue any cached scenes.json;
      * the render task applies it and keeps it synced with the backend. */
     BOOTMEM("after-nim-init");
+
     if (fos_scenes_init() != ESP_OK) {
         ESP_LOGW(TAG, "scene storage unavailable, continuing without");
     }
     BOOTMEM("after-scenes-init");
+    /* Needs the Nim runtime (chrono) and /state (the stored slice): from
+     * here localtime(), QuickJS Date and the schedule run in the frame's
+     * zone. Thin clients stay in UTC. */
+    fos_tz_boot();
     fos_schedule_init();
 
     /* Oversized HTTP bodies (multi-MB gallery images) spill to storage
@@ -284,13 +291,30 @@ void app_main(void)
     {
         const char *spill_dir = NULL;
         char sd_spill[160];
+        /* Extra per-body cap on top of the frame's max_http_response_bytes.
+         * SD card: none — the setting alone decides, so a 20 MB gallery JPEG
+         * needs nothing but a higher limit. /state (SPIFFS) also holds the
+         * scene store: leave headroom for it, and never more than 8 MB. */
+        size_t spill_cap = 0;
         if (fos_assets_sd_mounted()) {
             snprintf(sd_spill, sizeof(sd_spill), "%s/.cache",
                      config->assets_path[0] ? config->assets_path : "/srv/assets");
             mkdir(sd_spill, 0775);
             spill_dir = sd_spill;
         } else if (fos_scenes_state_mounted()) {
-            spill_dir = "/state";
+            size_t state_total = 0, state_used = 0;
+            spill_cap = 8 * 1024 * 1024;
+            if (esp_spiffs_info("state", &state_total, &state_used) == ESP_OK && state_total > state_used) {
+                size_t free_bytes = state_total - state_used;
+                size_t margin = 512 * 1024; /* scene updates must still fit */
+                size_t usable = free_bytes > margin ? free_bytes - margin : 0;
+                if (usable < spill_cap) spill_cap = usable;
+            }
+            if (spill_cap >= 256 * 1024) {
+                spill_dir = "/state";
+            } else {
+                ESP_LOGW(TAG, "http spill disabled: /state has too little free space");
+            }
         }
         if (spill_dir != NULL) {
             DIR *dir = opendir(spill_dir);
@@ -305,9 +329,10 @@ void app_main(void)
                 }
                 closedir(dir);
             }
-            fos_nim_http_set_spill_dir(spill_dir, 8 * 1024 * 1024);
+            fos_nim_http_set_spill_dir(spill_dir, spill_cap);
             fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);
-            ESP_LOGI(TAG, "http spill dir: %s%s", spill_dir,
+            ESP_LOGI(TAG, "http spill dir: %s (cap %u bytes%s)%s", spill_dir,
+                     (unsigned)spill_cap, spill_cap ? "" : " = setting only",
                      config->http_spill_force_bytes ? " (forced)" : "");
         }
     }

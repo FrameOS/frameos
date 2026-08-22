@@ -1,4 +1,5 @@
 import std/[os, json, algorithm, strutils, times, sequtils, unittest]
+import pixie
 import ../../../frameos/types
 import ../scene as index_scene
 
@@ -75,18 +76,34 @@ suite "system/index scene":
   test "scene text output includes expected device metadata and numbered list":
     withScenesJson("[]") do (_: string):
       let text = makeIndexScene(testConfig()).buildSceneListText()
-      check "FrameOS System Info" in text
+      check text.startsWith("FrameOS\n")
       check "Name: Kitchen Frame" in text
-      check "Device: waveshare" in text
-      check "Resolution: 800x480" in text
-      check "Rotation: 90" in text
+      check "Device: waveshare · 800×480 · rotated 90°" in text
       check "Time zone: Europe/Brussels" in text
       check "Network: " in text
       check "Managed via: self-hosted backend (frameos.local:8989)" in text
       check "Frame: http://192.168.1.50:8787" in text
-      check "FrameOS Remote control: disabled" in text
-      check "Installed Scenes" in text
+      check "Remote control: disabled" in text
+      check "Installed scenes" in text
       check "1. Default Scene" in text
+
+  test "the scene paints the status screen onto the render canvas":
+    withScenesJson("[]") do (_: string):
+      let scene = makeIndexScene(testConfig())
+      let image = newImage(400, 240)
+      let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+        image: image, hasImage: true, loopIndex: 0, loopKey: ".")
+      discard index_scene.render(scene, context)
+      # Black background with white text: the canvas is no longer all one colour.
+      var white = 0
+      var black = 0
+      for y in 0 ..< image.height:
+        for x in 0 ..< image.width:
+          let px = image[x, y]
+          if px.r > 200 and px.g > 200 and px.b > 200: inc white
+          elif px.r < 30 and px.g < 30 and px.b < 30: inc black
+      check white > 100
+      check black > white
 
   test "management line prefers the cloud link and falls back to standalone":
     # loadCloudLinkState reads ./state/cloud_link.json relative to the cwd, so

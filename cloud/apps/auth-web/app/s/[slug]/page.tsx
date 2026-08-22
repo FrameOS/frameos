@@ -6,12 +6,14 @@ import { notFound, redirect } from "next/navigation";
 import {
   accounts,
   createDb,
+  frames,
   storeSceneImages,
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
 import { CopyUrlField } from "../../../src/components/CopyUrlField";
 import { ForkSceneButton } from "../../../src/components/ForkSceneButton";
+import { InstallOnFrameBox } from "../../../src/components/InstallOnFrameBox";
 import { PublicShell } from "../../../src/components/PublicShell";
 import { ReportSceneButton } from "../../../src/components/ReportSceneButton";
 import { SceneCategoryEditor } from "../../../src/components/SceneCategoryEditor";
@@ -26,7 +28,11 @@ import { StoreSceneActions } from "../../../src/components/StoreSceneActions";
 import { SceneViewTracker } from "../../../src/components/SceneViewTracker";
 import { YankVersionButton } from "../../../src/components/YankVersionButton";
 import { getStoreCategory } from "../../../src/lib/categories";
-import { getScenesBaseUrl, hasDatabaseUrl } from "../../../src/lib/env";
+import {
+  getAccountBaseUrl,
+  getScenesBaseUrl,
+  hasDatabaseUrl,
+} from "../../../src/lib/env";
 import {
   formatBytes,
   formatDate,
@@ -260,6 +266,23 @@ export default async function ScenePage({
       : null;
   const viewingVersionNumber = pinnedVersion?.version ?? scene.latestVersion;
 
+  // The signed-in visitor's cloud frames, for "Install on a frame". Only an
+  // active, non-pulled scene can be pushed; the box is skipped otherwise.
+  const installableFrames =
+    session?.accountId && scene.status === "active"
+      ? await db
+          .select({
+            connected: frames.connected,
+            id: frames.id,
+            name: frames.name,
+            status: frames.status,
+          })
+          .from(frames)
+          .where(eq(frames.accountId, session.accountId))
+          .orderBy(desc(frames.connected), frames.name)
+      : null;
+  const framesUrl = new URL("/frames/", getAccountBaseUrl()).toString();
+
   // Private scenes carry their ?share= token in every URL that leaves this
   // page (install link, zip meta tag, download/version links), so the links
   // keep working for people — and frames — without the owner's session.
@@ -454,8 +477,21 @@ export default async function ScenePage({
               width={scene.previewImageWidth}
             />
           </div>
+          {installableFrames ? (
+            <InstallOnFrameBox
+              frames={installableFrames}
+              framesUrl={framesUrl}
+              sceneId={scene.id}
+              sceneName={scene.name}
+              sceneVersion={pinnedVersion ? pinnedVersion.version : null}
+            />
+          ) : null}
           <section className="card">
-            <h3>Install on your FrameOS</h3>
+            <h3>
+              {installableFrames
+                ? "Install on a self-hosted FrameOS"
+                : "Install on your FrameOS"}
+            </h3>
             <p>
               Copy this link into the search box of a frame&apos;s Templates
               panel:

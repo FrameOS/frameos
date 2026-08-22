@@ -156,10 +156,23 @@ proc buildDriverContext(frameOS: FrameOS): driverContext.DriverContext =
   )
 
 proc syncDriverContext(frameOS: FrameOS, context: driverContext.DriverContext) =
-  if context.isNil or context.frameConfig.isNil:
+  if frameOS.isNil or frameOS.frameConfig.isNil or context.isNil or context.frameConfig.isNil:
     return
   frameOS.frameConfig.width = context.frameConfig.width
   frameOS.frameConfig.height = context.frameConfig.height
+
+# The host object the drivers were initialised for, so a geometry a driver
+# only learns later (the framebuffer's late KMS probe) can be folded into its
+# config after a render; frameos/display_detect persists the change.
+var activeFrameOS: FrameOS = nil
+
+proc foldDetectedDisplaySize(size: Option[(int, int)]) =
+  ## A driver learned the real panel geometry after init (late KMS fbdev):
+  ## update the host config; frameos/display_detect persists it.
+  if size.isNone or activeFrameOS.isNil or activeFrameOS.frameConfig.isNil:
+    return
+  activeFrameOS.frameConfig.width = size.get()[0]
+  activeFrameOS.frameConfig.height = size.get()[1]
 """
 
 
@@ -343,10 +356,12 @@ def write_static_drivers_nim(drivers: dict[str, Driver]) -> str:
     newline = "\n"
 
     code = f"""
+import std/options
 import pixie
 import frameos/types
 import frameos/driver_context as driverContext
 import frameos/device_setup
+import frameos/driver_render_hint
 {newline.join(imports)}
 {newline.join(setup_imports)}
 {newline.join(vars)}
@@ -354,11 +369,15 @@ import frameos/device_setup
 
 proc init*(frameOS: FrameOS) =
   let driverCtx = buildDriverContext(frameOS)
+  activeFrameOS = frameOS
   {(newline + '  ').join(init_drivers or ["discard"])}
   syncDriverContext(frameOS, driverCtx)
 
 proc render*(image: Image) =
   {(newline + '  ').join(render_drivers or ["discard"])}
+  # Statically linked drivers share this module's hint copy; shared
+  # libraries answered through their exported symbol above.
+  foldDetectedDisplaySize(takeDetectedDisplaySize())
 
 proc toPng*(rotate: int, flip: string): string =
   {(newline + '  ').join(png_drivers or ['result = ""'])}
@@ -438,6 +457,7 @@ type
     instance: pointer
     render: DriverRenderProc
     earlierRender: DriverEarlierRenderProc
+    detectedDisplaySize: DriverDetectedDisplaySizeProc
     toPng: DriverToPngProc
     turnOn: DriverActionProc
     turnOff: DriverActionProc
@@ -529,6 +549,7 @@ proc setupSharedDrivers(frameOS: FrameOS): SetupResult =
 proc init*(frameOS: FrameOS) =
   loadedDrivers = @[]
   let driverCtx = buildDriverContext(frameOS)
+  activeFrameOS = frameOS
   for spec in driverSpecs:
     let path = driverLibraryPath(spec)
     let library = loadLib(path)
@@ -551,6 +572,8 @@ proc init*(frameOS: FrameOS) =
       loaded.render = loadRequiredSymbol[DriverRenderProc](library, spec.name, "frameos_driver_render")
       loaded.earlierRender = loadOptionalSymbol[DriverEarlierRenderProc](library,
           "frameos_driver_earlier_render_seconds")
+      loaded.detectedDisplaySize = loadOptionalSymbol[DriverDetectedDisplaySizeProc](library,
+          "frameos_driver_detected_display_size")
     if spec.canPng:
       loaded.toPng = loadRequiredSymbol[DriverToPngProc](library, spec.name, "frameos_driver_to_png")
     if spec.canTurnOnOff:
@@ -569,6 +592,11 @@ proc render*(image: Image) =
       # immediately after the call that could have set it.
       if not driver.earlierRender.isNil:
         requestEarlierRender(driver.earlierRender(driver.instance).float)
+      if not driver.detectedDisplaySize.isNil:
+        foldDetectedDisplaySize(unpackDetectedDisplaySize(driver.detectedDisplaySize(driver.instance)))
+  # Statically linked drivers share this module's hint copy; shared
+  # libraries answered through their exported symbol above.
+  foldDetectedDisplaySize(takeDetectedDisplaySize())
 
 proc toPng*(rotate: int, flip: string): string =
   for driver in loadedDrivers:
@@ -652,6 +680,13 @@ proc frameos_driver_earlier_render_seconds*(driver: pointer): cdouble {{.cdecl, 
   ## reading it clears it, so one request is answered once.
   let request = takeEarlierRenderRequest()
   result = if request.isSome: request.get().cdouble else: -1.0
+
+proc frameos_driver_detected_display_size*(driver: pointer): uint64 {{.cdecl, exportc, dynlib.}} =
+  ## Driver -> host: the panel geometry this driver probed after init
+  ## (width << 32 | height, 0 for nothing new), from THIS library's copy of
+  ## frameos/driver_render_hint. Read once, cleared on read, like the
+  ## earlier-render request above.
+  packDetectedDisplaySize()
 """
 
     png_proc = ""

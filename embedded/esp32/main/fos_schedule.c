@@ -1,4 +1,5 @@
 #include "fos_schedule.h"
+#include "fos_tz.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -309,7 +310,10 @@ bool fos_schedule_tick(void)
      * reboots, so time() can be valid on a boot whose own SNTP timed out. */
     time_t now = time(NULL);
     if (now < 1000000000) return false; /* clock not actually set */
-    time_t local = now + (time_t)s_utc_offset_minutes * 60;
+    /* A configured zone (fos_tz, DST-aware) beats the pushed flat offset,
+     * which only the backend/cloud can refresh when DST flips. */
+    int offset_minutes = fos_tz_active() ? fos_tz_offset_minutes(now) : s_utc_offset_minutes;
+    time_t local = now + (time_t)offset_minutes * 60;
     int64_t minute_key = (int64_t)local / 60;
     if (minute_key == s_last_fired_minute) return false;
     /* First tick with a valid clock (boot, or SNTP landing late): treat the

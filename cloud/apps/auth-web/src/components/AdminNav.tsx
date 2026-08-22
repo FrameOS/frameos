@@ -4,29 +4,42 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const sections = [
-  { href: "/admin", label: "Users" },
-  { href: "/admin/scenes", label: "Store scenes" },
-  { href: "/admin/reports", label: "Reports" },
-];
+  { href: "/admin", key: "overview", label: "Overview" },
+  { href: "/admin/users", key: "users", label: "Users" },
+  { href: "/admin/backends", key: "backends", label: "Backends" },
+  { href: "/admin/frames", key: "frames", label: "Frames" },
+  { href: "/admin/scenes", key: "scenes", label: "Store scenes" },
+  { href: "/admin/reports", key: "reports", label: "Reports" },
+] as const;
+
+export type AdminNavCounts = Partial<
+  Record<(typeof sections)[number]["key"], number>
+>;
 
 // The stable tab bar every /admin page shows, mirroring AccountNav.
-export function AdminNav() {
+export function AdminNav({ counts }: { counts?: AdminNavCounts }) {
   const pathname = usePathname();
   return (
     <nav aria-label="Admin sections" className="subnav">
-      {sections.map((section) => (
-        <Link
-          className={
-            pathname === section.href
-              ? "subnav__link subnav__link--active"
-              : "subnav__link"
-          }
-          href={section.href}
-          key={section.href}
-        >
-          {section.label}
-        </Link>
-      ))}
+      {sections.map((section) => {
+        const count = counts?.[section.key];
+        return (
+          <Link
+            className={
+              pathname === section.href
+                ? "subnav__link subnav__link--active"
+                : "subnav__link"
+            }
+            href={section.href}
+            key={section.href}
+          >
+            {section.label}
+            {count !== undefined ? (
+              <span className="subnav__count">{count}</span>
+            ) : null}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

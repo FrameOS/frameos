@@ -57,6 +57,9 @@ extern void fos_nim_apply_service_settings_impl(const char *json);
 extern void fos_nim_set_debug_impl(int enabled);
 extern void fos_nim_set_fusion_impl(int enabled);
 extern void fos_nim_set_scaling_mode_impl(const char *mode);
+extern void fos_nim_set_status_info_impl(const char *info_json);
+extern void fos_nim_set_time_zone_impl(const char *time_zone);
+extern const char *fos_nim_load_tz_data_impl(const char *slice_json, const char *time_zone);
 extern double fos_nim_scene_interval_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
@@ -564,6 +567,36 @@ void frameos_nim_set_scaling_mode(const char *mode)
     if (!s_nim_ready || mode == NULL || mode[0] == '\0') return;
     if (!nim_lock_take()) return;
     fos_nim_set_scaling_mode_impl(mode);
+    nim_lock_give();
+}
+
+void frameos_nim_set_time_zone(const char *time_zone)
+{
+    if (!s_nim_ready || time_zone == NULL) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_time_zone_impl(time_zone);
+    nim_lock_give();
+}
+
+bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, char *rule_out, size_t rule_len)
+{
+    if (rule_out && rule_len) rule_out[0] = '\0';
+    if (!s_nim_ready || slice_json == NULL || slice_json[0] == '\0') return false;
+    if (!nim_lock_take()) return false;
+    const char *rule = fos_nim_load_tz_data_impl(slice_json, time_zone ? time_zone : "");
+    bool ok = rule != NULL && rule[0] != '\0';
+    if (ok && rule_out && rule_len) {
+        strlcpy(rule_out, rule, rule_len);
+    }
+    nim_lock_give();
+    return ok;
+}
+
+void frameos_nim_set_status_info(const char *info_json)
+{
+    if (!s_nim_ready || info_json == NULL || info_json[0] == '\0') return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_status_info_impl(info_json);
     nim_lock_give();
 }
 

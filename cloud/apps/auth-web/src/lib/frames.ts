@@ -499,12 +499,12 @@ export function validateFrameSettings(
 // same 0/90/180/270 normalization the backend settings poll uses, then
 // deferred-rebooted so the renderer re-inits), `scaling_mode`
 // (contain/cover/stretch/center, applied live — a per-decode fallback, no
-// reboot), the power keys, and from 2026.8.31 `debug` (debug_logging, live),
+// reboot), the power keys, from 2026.8.31 `debug` (debug_logging, live),
 // `max_http_response_bytes` and `gpio_buttons` (both read at boot → deferred
-// reboot). Everything else has no on-device consumer — `timezone` is
-// unimplementable without a tz database — so the firmware refuses the WHOLE
-// verb on them and the route refuses them up front instead of half-applying
-// a push.
+// reboot), and from 2026.8.34 `timezone` (an IANA name the firmware maps to
+// a POSIX TZ rule — fos_tz.c — live, no reboot). Everything else has no
+// on-device consumer, so the firmware refuses the WHOLE verb on them and the
+// route refuses them up front instead of half-applying a push.
 // Keys only the ESP32 firmware knows: the Pi runtime's
 // CLOUD_SETTINGS_ALLOWLIST refuses the whole verb on any of them, so the
 // settings route refuses them up front for non-esp32 frames.
@@ -534,6 +534,8 @@ export const esp32SettableKeys = new Set([
   "debug",
   "max_http_response_bytes",
   "gpio_buttons",
+  // 2026.8.34 (esp32TimeZoneFrameSettingKeys): applied live.
+  "timezone",
 ]);
 
 // The ESP32 firmware learned these in 2026.8.31; older firmware refuses the
@@ -546,6 +548,12 @@ export const esp32ExtendedFrameSettingKeys = new Set([
   "gpio_buttons",
 ]);
 export const esp32MaxGpioButtons = 8;
+
+// 2026.8.34: the ESP32 firmware maps an IANA zone name onto a POSIX TZ rule
+// (embedded/esp32/main/fos_tz.c), so the Pi's `timezone` wire key applies
+// there too — behind its own floor, like the 2026.8.31 tail.
+export const esp32TimeZoneFrameSettingsMinVersion = "2026.8.34";
+export const esp32TimeZoneFrameSettingKeys = new Set(["timezone"]);
 
 // The settings frames.settings mirrors, in the device's spelling. `name` is
 // excluded on purpose: frames.name is the authoritative display name, and a

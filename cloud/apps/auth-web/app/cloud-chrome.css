@@ -32,6 +32,9 @@
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   background: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(16px);
+  /* The collapsed nav (below) drops down from the header's bottom edge. */
+  position: relative;
+  z-index: 30;
 }
 
 /* Brand plus an optional page title. The wordmark always sits inside the
@@ -113,6 +116,86 @@
   outline-offset: 2px;
 }
 
+/* The section the visitor is in: Frames / Scenes / Account / Admin. A filled
+   pill plus aria-current, so it reads without colour too. */
+.frameos-account-header__link--active,
+.frameos-account-header__link--active:hover {
+  background: rgba(15, 23, 42, 0.09);
+}
+
+/* Hamburger, only drawn on narrow viewports (see the media query). */
+.frameos-account-header__toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.65rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.frameos-account-header__toggle:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.frameos-account-header__toggle:focus-visible {
+  outline: 2px solid var(--frameos-primary-ring, rgb(28 124 102 / 0.42));
+  outline-offset: 2px;
+}
+
+.frameos-account-header__toggle svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* Narrow screens: the links fold into a panel under the header that the
+   hamburger opens. The brand and title keep the top row; the title yields
+   first because the wordmark is what tells the apps apart. */
+@media (max-width: 40rem) {
+  .frameos-account-header {
+    padding: 0 0.75rem;
+  }
+
+  .frameos-account-header__toggle {
+    display: inline-flex;
+  }
+
+  .frameos-account-header__nav {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.125rem;
+    padding: 0.5rem 0.75rem 0.75rem;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 12px 24px -16px rgba(15, 23, 42, 0.35);
+  }
+
+  .frameos-account-header__nav--open {
+    display: flex;
+  }
+
+  .frameos-account-header__nav form {
+    display: contents;
+  }
+
+  .frameos-account-header__link {
+    width: 100%;
+    justify-content: flex-start;
+    padding: 0.6rem 0.75rem;
+    text-align: left;
+  }
+}
+
 html[data-frameos-theme='dark'] .frameos-account-header,
 html.theme-dark .frameos-account-header {
   border-bottom-color: rgba(255, 255, 255, 0.08);
@@ -121,8 +204,26 @@ html.theme-dark .frameos-account-header {
 }
 
 html[data-frameos-theme='dark'] .frameos-account-header__link:hover,
-html.theme-dark .frameos-account-header__link:hover {
+html.theme-dark .frameos-account-header__link:hover,
+html[data-frameos-theme='dark'] .frameos-account-header__toggle:hover,
+html.theme-dark .frameos-account-header__toggle:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header__link--active,
+html.theme-dark .frameos-account-header__link--active,
+html[data-frameos-theme='dark'] .frameos-account-header__link--active:hover,
+html.theme-dark .frameos-account-header__link--active:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+@media (max-width: 40rem) {
+  html[data-frameos-theme='dark'] .frameos-account-header__nav,
+  html.theme-dark .frameos-account-header__nav {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+    background: rgba(24, 26, 31, 0.97);
+    box-shadow: 0 12px 24px -16px rgba(0, 0, 0, 0.7);
+  }
 }
 
 html[data-frameos-theme='dark'] .frameos-account-header__logo--light,
@@ -133,4 +234,130 @@ html.theme-dark .frameos-account-header__logo--light {
 html[data-frameos-theme='dark'] .frameos-account-header__logo--dark,
 html.theme-dark .frameos-account-header__logo--dark {
   display: block;
+}
+
+/* "beta" after the wordmark. A button: it opens the dialog below. */
+.frameos-account-header__beta {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.1rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid rgba(28, 124, 102, 0.45);
+  border-radius: 999px;
+  background: rgba(28, 124, 102, 0.12);
+  color: rgb(20, 96, 78);
+  font: inherit;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.frameos-account-header__beta:hover {
+  background: rgba(28, 124, 102, 0.2);
+}
+
+.frameos-account-header__beta:focus-visible {
+  outline: 2px solid var(--frameos-primary-ring, rgb(28 124 102 / 0.42));
+  outline-offset: 2px;
+}
+
+html[data-frameos-theme='dark'] .frameos-account-header__beta,
+html.theme-dark .frameos-account-header__beta {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.14);
+  color: rgb(110, 231, 183);
+}
+
+/* The "what beta means" dialog. Native <dialog>, so it needs no portal and
+   works the same in the Next pages and the SPA. */
+.frameos-beta-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+  margin: auto;
+  padding: 0;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 1rem;
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 24px 64px -24px rgba(15, 23, 42, 0.5);
+}
+
+.frameos-beta-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.frameos-beta-dialog__body {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.5rem 1.5rem 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.frameos-beta-dialog__body h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.frameos-beta-dialog__body p,
+.frameos-beta-dialog__body ul {
+  margin: 0;
+}
+
+.frameos-beta-dialog__body ul {
+  display: grid;
+  gap: 0.35rem;
+  padding-left: 1.2rem;
+  list-style: disc;
+}
+
+.frameos-beta-dialog__body a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.frameos-beta-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+}
+
+.frameos-beta-dialog__close {
+  padding: 0.5rem 0.95rem;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 0.65rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.frameos-beta-dialog__close:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+html[data-frameos-theme='dark'] .frameos-beta-dialog,
+html.theme-dark .frameos-beta-dialog {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: #1b1d22;
+  color: #f3f4f6;
+}
+
+html[data-frameos-theme='dark'] .frameos-beta-dialog__close,
+html.theme-dark .frameos-beta-dialog__close {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+html[data-frameos-theme='dark'] .frameos-beta-dialog__close:hover,
+html.theme-dark .frameos-beta-dialog__close:hover {
+  background: rgba(255, 255, 255, 0.08);
 }

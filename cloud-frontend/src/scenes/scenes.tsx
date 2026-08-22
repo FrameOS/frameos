@@ -13,21 +13,24 @@ export const scenes = {
 
 // Routes come from the shared urls module so they always match the links
 // the shared components generate. With route_base_path = '/frames' these
-// resolve to /frames, /frames/frames/:id, /frames/scenes/..., /frames/apps/...
-// and /frames/settings (the account's service API keys).
+// resolve to /frames, /frames/:id, /frames/:id/scenes/..., /frames/apps/...
+// and /frames/settings (the account's service API keys). kea-router takes
+// the first matching pattern, so the literal /frames/* routes come before
+// the parametric /frames/:id.
 // The SPA's own login/signup scenes are deliberately absent: Next.js owns
 // auth on the cloud (apiFetch redirects to /login on 401).
 export const getRoutes = () =>
   ({
     [urls.frames()]: 'frames',
     [urls.frames() + '/']: 'frames',
-    [urls.frame(':id')]: 'frame',
+    [urls.settings()]: 'settings',
     [urls.scenes()]: 'sceneWorkspace',
-    [urls.scenes(':frameId')]: 'sceneWorkspace',
-    [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',
     [urls.apps()]: 'appsWorkspace',
     [urls.apps(':frameId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId', ':nodeId')]: 'appsWorkspace',
-    [urls.settings()]: 'settings',
-  }) as const
+    [urls.scenes(':frameId')]: 'sceneWorkspace',
+    [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',
+    [urls.frame(':id')]: 'frame',
+    [urls.frame(':id', ':tool')]: 'frame',
+  } as const)

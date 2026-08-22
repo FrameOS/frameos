@@ -58,6 +58,7 @@ import frameos/interpreter
 import frameos/js_runtime/app_runtime
 import frameos/scenes
 import frameos/server/api
+import frameos/setup as frameSetup
 import frameos/server/routes/admin_api_assets_routes
 import frameos/server/state
 import frameos/types
@@ -1010,6 +1011,30 @@ proc validateCloudSetting*(key: string, value: JsonNode): bool =
   else:
     false
 
+proc applySystemTimeZone(timeZone: string) {.gcsafe.} =
+  ## frame.json's timeZone drives the scheduler and the Nim apps, but QuickJS
+  ## `Date` and anything else on libc localtime() read /etc/localtime — which
+  ## only `frameos setup` used to write. Keep the two in step whenever the
+  ## zone changes at runtime. Best effort: logged, never fatal.
+  {.gcsafe.}:
+    try:
+      discard frameSetup.setupTimezone(timeZone)
+      log(%*{"event": "cloud:timezone:system", "timeZone": timeZone})
+    except CatchableError as error:
+      log(%*{"event": "cloud:timezone:system:error", "timeZone": timeZone, "error": error.msg})
+
+proc applyEnrollmentPersonalization(personalization: JsonNode) {.gcsafe.} =
+  {.gcsafe.}:
+    try:
+      if frameApiUpdateChangesConfig(personalization):
+        persistFrameApiUpdate(personalization)
+        log(%*{"event": "cloud:enroll:personalization", "applied": personalization})
+        sendEvent("reload", %*{})
+      if personalization.hasKey("timezone"):
+        applySystemTimeZone(personalization["timezone"].getStr(""))
+    except CatchableError as error:
+      log(%*{"event": "cloud:enroll:personalization:error", "error": error.msg})
+
 proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   let settings = msg{"settings"}
   if settings == nil or settings.kind != JObject:
@@ -1055,6 +1080,8 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
       for key in CLOUD_SETTINGS_RESTART_KEYS:
         if payload.hasKey(key):
           needsRestart = true
+      if payload.hasKey("timezone"):
+        applySystemTimeZone(payload["timezone"].getStr(""))
       # Same order as restart_runtime: the event queues here, the ack goes
       # out on return, the runner exits when it drains the queue.
       discard ctx.sendEventFn(if needsRestart: "restart" else: "reload", %*{})
@@ -1828,6 +1855,11 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   var lastMetricsSentAt = 0.0
   var lastStateCheckAt = 0.0
   var lastActiveScene = ""
+  # The display geometry last reported (hello sends the first). A framebuffer
+  # frame learns its real mode from the panel — sometimes only after hello on
+  # a Pi 5 — and the workspace showed the image default (800x480) until the
+  # next reconnect.
+  var lastReportedDisplay = $frameConfig.width & "x" & $frameConfig.height
   # Starts at the current value, so a reconnect does not announce a render that
   # happened while the link was down: the provider's own staleness check covers
   # that, and a fleet reconnecting after a hub restart must not all ask to be
@@ -2028,8 +2060,13 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
         # the admin page) without waiting for a link-state generation bump.
         refreshLocalNetworkPolicy(frameConfig)
         let (sceneId, _) = getAllPublicStates()
-        if sceneId.string != lastActiveScene:
+        let display = $frameConfig.width & "x" & $frameConfig.height
+        if sceneId.string != lastActiveScene or display != lastReportedDisplay:
           lastActiveScene = sceneId.string
+          if display != lastReportedDisplay:
+            log(%*{"event": "cloud:hardware:changed", "display": display,
+                   "previous": lastReportedDisplay})
+          lastReportedDisplay = display
           var stateMessage = helloStatePayload(frameConfig, ctx.scenesChecksum)
           stateMessage["type"] = %"state"
           await socket.send($stateMessage)
@@ -2113,10 +2150,15 @@ proc cloudHubThreadMain(frameConfig: FrameConfig) {.thread.} =
         # enrollment exactly that way — token redeemed, pending file gone,
         # not one line about it in a 300 KB log.
         log(%*{"event": "cloud:enroll:boot:attempt"})
-        let (resolved, attempted, outcome) = processPendingCloudEnrollment(frameConfig)
+        let (resolved, attempted, outcome, personalization) = processPendingCloudEnrollment(frameConfig)
         if attempted:
           log(%*{"event": "cloud:enroll:boot", "ok": outcome.ok,
                  "resolved": resolved, "error": outcome.error})
+        if outcome.ok and personalization.len > 0:
+          # The card's name and time zone belong in frame.json too: the
+          # panel otherwise keeps the image's "FrameOS Setup" name and its
+          # UTC clock until someone pushes settings from the cloud.
+          applyEnrollmentPersonalization(personalization)
         else:
           # No request went out, and until now nothing said so. An expired
           # claim token deletes the pending file and gives up on enrollment

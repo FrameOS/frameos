@@ -173,11 +173,14 @@ describe("renderCloudConfig", () => {
       name: "Kitchen frame",
       wifiPassword: "hunter2",
       wifiSsid: "MyNet",
+      timeZone: "Europe/Brussels",
     });
     const text = decoder.decode(full);
     expect(text).toContain("name=Kitchen frame\n");
     expect(text).toContain("wifi_ssid=MyNet\n");
     expect(text).toContain("wifi_password=hunter2\n");
+    // The first-boot script's key (setup_json_reset.py recognizes time_zone).
+    expect(text).toContain("time_zone=Europe/Brussels\n");
     expect(full.length).toBe(CLOUD_CONFIG_REGION_SIZE);
   });
 
@@ -185,6 +188,7 @@ describe("renderCloudConfig", () => {
     const text = decoder.decode(config);
     expect(text).not.toContain("name=");
     expect(text).not.toContain("wifi_ssid=");
+    expect(text).not.toContain("time_zone=");
   });
 
   it("rejects quotes in values", () => {

@@ -350,12 +350,14 @@ handle_cloud_config() {
   cloud_vcom=''
   cloud_upload_url=''
   cloud_root_password=''
+  cloud_time_zone=''
   cloud_recognized=0
   cloud_unknown_keys=''
   cloud_enrolled=0
   cloud_wifi_applied=0
   cloud_display_applied=0
   cloud_root_applied=0
+  cloud_hostname_applied=0
   while IFS= read -r cloud_line || [ -n "$cloud_line" ]; do
     # Tolerate CRLF line endings, comments, and surrounding whitespace.
     cloud_line="$(printf '%s' "$cloud_line" | tr -d '\\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -379,6 +381,7 @@ handle_cloud_config() {
       vcom) cloud_vcom="$cloud_value"; cloud_recognized=1 ;;
       upload_url) cloud_upload_url="$cloud_value"; cloud_recognized=1 ;;
       root_password) cloud_root_password="$cloud_value"; cloud_recognized=1 ;;
+      time_zone) cloud_time_zone="$cloud_value"; cloud_recognized=1 ;;
       *)
         echo "Ignoring unknown key '$cloud_key' in $CLOUD_FILE"
         cloud_unknown_keys="$cloud_unknown_keys $cloud_key"
@@ -404,7 +407,7 @@ handle_cloud_config() {
       # would destroy the user's only copy of what they typed. Warn loudly,
       # keep the file, do not enroll.
       echo "Warning: $CLOUD_FILE has KEY=value lines but no recognized keys; unrecognized:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone"
       echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     else
       echo "No personalization keys in $CLOUD_FILE (placeholder or comments only); leaving it in place"
@@ -441,6 +444,23 @@ handle_cloud_config() {
       echo "Warning: failed to create NetworkManager connection directory"
     fi
 __WPA_SUPPLICANT_FROM_CLOUD__
+  fi
+
+  # The frame's name doubles as its hostname (slugified like the backend's
+  # _hostname_for_frame), so two cloud cards on one network are not both
+  # frame.local. Written straight to /etc/hostname — /boot/frameos-hostname
+  # is the self-hosted card's channel and is left alone.
+  if [ -n "$cloud_name" ]; then
+    cloud_hostname="$(printf '%s' "$cloud_name" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//' | cut -c1-63)"
+    if [ -n "$cloud_hostname" ] && [ "$cloud_hostname" != "$(cat "$ETC_DIR"/hostname 2>/dev/null)" ]; then
+      echo "Setting hostname from cloud personalization: $cloud_hostname"
+      if printf '%s\\n' "$cloud_hostname" > "$ETC_DIR"/hostname; then
+        hostname "$cloud_hostname" 2>/dev/null || true
+        cloud_hostname_applied=1
+      else
+        echo "Warning: failed to write hostname"
+      fi
+    fi
   fi
 
   # Display driver personalization: the release image ships every compiled
@@ -549,10 +569,13 @@ os.replace(tmp, path)'; then
     umask 077
     if command -v python3 >/dev/null 2>&1 && \\
       FRAMEOS_CLOUD_URL="$cloud_url" FRAMEOS_CLAIM_TOKEN="$claim_token" FRAMEOS_CLOUD_NAME="$cloud_name" \\
+      FRAMEOS_CLOUD_TIME_ZONE="$cloud_time_zone" \\
       python3 -c 'import json, os
 data = {"claim_token": os.environ["FRAMEOS_CLAIM_TOKEN"], "provider_url": os.environ["FRAMEOS_CLOUD_URL"]}
 if os.environ.get("FRAMEOS_CLOUD_NAME"):
     data["name"] = os.environ["FRAMEOS_CLOUD_NAME"]
+if os.environ.get("FRAMEOS_CLOUD_TIME_ZONE"):
+    data["time_zone"] = os.environ["FRAMEOS_CLOUD_TIME_ZONE"]
 print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
       :
     else
@@ -561,13 +584,16 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
       json_claim_token="$(json_fallback_sanitize "$claim_token")"
       json_cloud_url="$(json_fallback_sanitize "$cloud_url")"
       json_cloud_name="$(json_fallback_sanitize "$cloud_name")"
+      json_cloud_time_zone="$(json_fallback_sanitize "$cloud_time_zone")"
+      json_extra=''
       if [ -n "$json_cloud_name" ]; then
-        printf '{"claim_token": "%s", "provider_url": "%s", "name": "%s"}\\n' \\
-          "$json_claim_token" "$json_cloud_url" "$json_cloud_name" > "$pending_file"
-      else
-        printf '{"claim_token": "%s", "provider_url": "%s"}\\n' \\
-          "$json_claim_token" "$json_cloud_url" > "$pending_file"
+        json_extra="$json_extra, \\"name\\": \\"$json_cloud_name\\""
       fi
+      if [ -n "$json_cloud_time_zone" ]; then
+        json_extra="$json_extra, \\"time_zone\\": \\"$json_cloud_time_zone\\""
+      fi
+      printf '{"claim_token": "%s", "provider_url": "%s"%s}\\n' \\
+        "$json_claim_token" "$json_cloud_url" "$json_extra" > "$pending_file"
     fi
     umask "$old_umask"
     chmod 600 "$pending_file"
@@ -586,7 +612,7 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     echo "Warning: nothing was applied from $CLOUD_FILE; leaving it in place instead of shredding it"
     if [ -n "$cloud_unknown_keys" ]; then
       echo "Warning: unrecognized keys:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone"
     fi
     echo "Warning: fix $CLOUD_FILE and reboot to enroll"
     return 0
@@ -596,7 +622,7 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     # WiFi was applied but the enrollment keys were mistyped: shredding here
     # would destroy the claim token the user meant to type.
     echo "Warning: no cloud enrollment happened; unrecognized keys:$cloud_unknown_keys"
-    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password"
+    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone"
     echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     return 0
   fi

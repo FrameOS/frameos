@@ -25,16 +25,40 @@ export function cloudFramesUrl(): string {
 }
 
 /**
- * A single frame's workspace. Note the doubled segment: the shared SPA's
- * `urls.frame()` is `${routeBasePath}/frames/${id}`, and the route base path
- * is itself "/frames".
+ * A single frame's workspace: /frames/<id>. The shared SPA's `urls.frame()`
+ * drops its own "/frames" segment in cloud mode because the route base path
+ * is already "/frames" (frontend/src/urls.ts).
  */
 export function cloudFrameUrl(frameId: string, tool?: string): string {
-  const path = `${cloudRouteBasePath}/frames/${encodeURIComponent(frameId)}`
-  return tool ? `${path}?tool=${encodeURIComponent(tool)}` : path
+  const path = `${cloudRouteBasePath}/${encodeURIComponent(frameId)}`
+  return tool && tool !== 'overview' ? `${path}/${encodeURIComponent(tool)}` : path
+}
+
+/** A scene of a frame: /frames/<frameId>/scenes/<sceneId>. */
+export function cloudSceneUrl(frameId: string, sceneId?: string): string {
+  const path = `${cloudRouteBasePath}/${encodeURIComponent(frameId)}/scenes`
+  return sceneId ? `${path}/${encodeURIComponent(sceneId)}` : path
 }
 
 /** The account settings page (service API keys) — the SPA's `settings` scene. */
 export function cloudSettingsUrl(): string {
   return `${cloudRouteBasePath}/settings`
+}
+
+/**
+ * The workspace URLs before August 2026 doubled the segment
+ * (/frames/frames/<id>, /frames/scenes/<frameId>/<sceneId>). Old bookmarks and
+ * emails still carry them; this maps one to its current shape, or returns
+ * null when the path is already current.
+ */
+export function legacyCloudPathRedirect(pathname: string): string | null {
+  const frameMatch = /^\/frames\/frames\/([^/]+)\/?$/.exec(pathname)
+  if (frameMatch) {
+    return `${cloudRouteBasePath}/${frameMatch[1]}`
+  }
+  const sceneMatch = /^\/frames\/scenes\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname)
+  if (sceneMatch) {
+    return `${cloudRouteBasePath}/${sceneMatch[1]}/scenes${sceneMatch[2] ? `/${sceneMatch[2]}` : ''}`
+  }
+  return null
 }

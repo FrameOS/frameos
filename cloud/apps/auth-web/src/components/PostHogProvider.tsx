@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import posthog from "posthog-js";
 import { useEffect } from "react";
 import {
@@ -8,12 +9,39 @@ import {
 } from "../lib/analytics-consent";
 import {
   SENSITIVE_QUERY_PARAMS,
+  isSuppressedUrl,
   sanitizeAnalyticsEvent,
 } from "../lib/analytics-redaction";
+
+// Consent decides whether anything is captured; the suppressed paths
+// (/admin) override it. `before_send` already drops every event from those
+// pages; opting the SDK out on top means it does not even try — no pageview,
+// no flag fetch, no session-recording decision — while the superadmin
+// tooling is open. Leaving the page re-applies the visitor's consent.
+function applyConsent(pathname: string | null) {
+  if (isSuppressedUrl(pathname ?? window.location.pathname)) {
+    posthog.opt_out_capturing();
+    return;
+  }
+  if (readConsentFromDocument() === "granted") {
+    // Only now does anything reach disk: PostHog's own cookie/localStorage
+    // entry is created here, not at init.
+    posthog.set_config({ persistence: "localStorage+cookie" });
+    posthog.opt_in_capturing();
+  } else {
+    posthog.opt_out_capturing();
+    // Withdrawal has to clear what was already stored, not just stop new
+    // events — otherwise the identifier survives the withdrawal.
+    posthog.set_config({ persistence: "memory" });
+    posthog.reset();
+  }
+}
 
 export function PostHogProvider({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const pathname = usePathname();
+
   useEffect(() => {
     posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "", {
       api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
@@ -46,25 +74,16 @@ export function PostHogProvider({
       persistence: "memory",
     });
 
-    const applyConsent = () => {
-      if (readConsentFromDocument() === "granted") {
-        // Only now does anything reach disk: PostHog's own cookie/localStorage
-        // entry is created here, not at init.
-        posthog.set_config({ persistence: "localStorage+cookie" });
-        posthog.opt_in_capturing();
-      } else {
-        posthog.opt_out_capturing();
-        // Withdrawal has to clear what was already stored, not just stop new
-        // events — otherwise the identifier survives the withdrawal.
-        posthog.set_config({ persistence: "memory" });
-        posthog.reset();
-      }
-    };
-
-    applyConsent();
-    window.addEventListener(consentChangeEvent, applyConsent);
-    return () => window.removeEventListener(consentChangeEvent, applyConsent);
+    const onConsentChange = () => applyConsent(window.location.pathname);
+    onConsentChange();
+    window.addEventListener(consentChangeEvent, onConsentChange);
+    return () => window.removeEventListener(consentChangeEvent, onConsentChange);
   }, []);
+
+  // Client-side navigation into or out of a suppressed path.
+  useEffect(() => {
+    applyConsent(pathname);
+  }, [pathname]);
 
   return <>{children}</>;
 }

@@ -1147,6 +1147,18 @@ a.tag-pill--active:hover {
   font-weight: 600;
 }
 
+/* The store's two tabs sit alone under the header with nothing else to
+   anchor them, so the active one is filled rather than tinted. */
+.subnav--store .subnav__link--active {
+  background: var(--primary-soft);
+  border: 1px solid color-mix(in srgb, var(--primary), transparent 60%);
+  color: var(--primary-strong);
+}
+
+.subnav--store .subnav__link {
+  border: 1px solid transparent;
+}
+
 .viewport-controls {
   display: inline-flex;
   align-items: center;
@@ -1705,4 +1717,105 @@ a.tag-pill:hover {
 
 .turnstile-widget:not(:empty) {
   margin-bottom: 4px;
+}
+
+/* Admin overview: one tile per thing the admin pages list. */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.stat-tile {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 14px 16px;
+  color: inherit;
+  text-decoration: none;
+}
+
+a.stat-tile:hover {
+  border-color: color-mix(in srgb, var(--primary), transparent 50%);
+}
+
+.stat-tile__label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.stat-tile__value {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-tile__value small {
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.stat-tile__detail {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* "active / total" cells in the admin tables. */
+.ratio {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.ratio__total {
+  color: var(--muted);
+}
+
+.ratio--empty {
+  color: var(--muted);
+}
+
+/* Wide admin tables scroll inside their own box instead of the page. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+.table-scroll .table {
+  min-width: 720px;
+}
+
+.table tr.row-muted td {
+  color: var(--muted);
+}
+
+.cell-nowrap {
+  white-space: nowrap;
+}
+
+/* Store scene page: "Install on a frame". */
+.install-box {
+  display: grid;
+  gap: 10px;
+}
+
+.install-box__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.install-box__row .input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.install-box .notice,
+.install-box .notice-error {
+  margin: 0;
 }

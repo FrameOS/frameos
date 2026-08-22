@@ -393,7 +393,13 @@ export async function mockCloudBackupsApi(
     backups = cloudBackupFixtures,
   }: { backupScenesEnabled?: boolean; backupFramesEnabled?: boolean; backups?: typeof cloudBackupFixtures } = {}
 ): Promise<CloudBackupMockCalls> {
-  const calls: CloudBackupMockCalls = { frameBackups: [], templateBackups: [], restores: [], deletes: [], keyImports: [] }
+  const calls: CloudBackupMockCalls = {
+    frameBackups: [],
+    templateBackups: [],
+    restores: [],
+    deletes: [],
+    keyImports: [],
+  }
   const status = connectedCloudStatus({ backupScenesEnabled, backupFramesEnabled })
   await page.route(projectApiPathPattern('/cloud/status'), fulfillJson(status))
   await page.route(projectApiPathPattern('/cloud/backup-features'), fulfillJson(status))

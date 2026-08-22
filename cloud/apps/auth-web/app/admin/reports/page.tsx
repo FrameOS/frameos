@@ -1,25 +1,16 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { createDb } from "@frameos-cloud/db";
 import { AdminNav } from "../../../src/components/AdminNav";
 import { AppShell } from "../../../src/components/AppShell";
 import { ResolveReportButton } from "../../../src/components/ResolveReportButton";
-import {
-  getSuperadminContext,
-  listOpenReportsForAdmin,
-} from "../../../src/lib/admin";
+import { listOpenReportsForAdmin } from "../../../src/lib/admin";
+import { requireSuperadmin } from "../../../src/lib/admin-page";
 import { formatDateTime } from "../../../src/lib/format";
 
 export const metadata = { title: "Scene reports" };
 
 export default async function AdminReportsPage() {
-  const context = await getSuperadminContext();
-  if (context.kind === "unauthenticated") {
-    redirect("/login?return_to=/admin/reports");
-  }
-  if (context.kind === "forbidden") {
-    redirect("/account");
-  }
+  await requireSuperadmin("/admin/reports");
 
   const reports = await listOpenReportsForAdmin(createDb());
 
@@ -45,6 +36,7 @@ export default async function AdminReportsPage() {
             <p>No open reports. Nothing needs your attention.</p>
           </section>
         ) : (
+          <div className="table-scroll">
           <table className="table">
             <thead>
               <tr>
@@ -90,6 +82,7 @@ export default async function AdminReportsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </AppShell>

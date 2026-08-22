@@ -3,6 +3,7 @@
 import { ShieldCheck, ShieldOff, Trash2, Unplug } from "lucide-react";
 import { useState } from "react";
 import { formatBytes, formatDate } from "../lib/format";
+import { Ratio } from "./Ratio";
 
 export type AdminUser = {
   activeSessions: number;
@@ -10,7 +11,8 @@ export type AdminUser = {
   backupCount: number;
   createdAt: string;
   displayName: string | null;
-  frameCount: number;
+  backends: { active: number; total: number };
+  frames: { active: number; connected: number; total: number };
   id: string;
   identities: {
     providerKey: string;
@@ -18,8 +20,8 @@ export type AdminUser = {
     emailVerified: boolean;
   }[];
   isSuperadmin: boolean;
-  linkedBackends: number;
   primaryEmail: string | null;
+  storeScenes: { public: number; total: number };
 };
 
 export function AdminUsersTable({
@@ -122,13 +124,15 @@ export function AdminUsersTable({
           <p>No matching users.</p>
         </section>
       ) : (
+        <div className="table-scroll">
         <table className="table">
           <thead>
             <tr>
               <th>User</th>
               <th>Sign-in methods</th>
-              <th>Backends</th>
-              <th>Frames</th>
+              <th title="Linked, not revoked / all linked">Backends</th>
+              <th title="Enrolled / all frames">Frames</th>
+              <th title="Public / all store scenes">Scenes</th>
               <th>Backups</th>
               <th>Sessions</th>
               <th>Created</th>
@@ -172,8 +176,27 @@ export function AdminUsersTable({
                       "none"
                     )}
                   </td>
-                  <td>{user.linkedBackends}</td>
-                  <td>{user.frameCount}</td>
+                  <td>
+                    <Ratio
+                      active={user.backends.active}
+                      title={`${user.backends.active} linked of ${user.backends.total} (the rest revoked)`}
+                      total={user.backends.total}
+                    />
+                  </td>
+                  <td>
+                    <Ratio
+                      active={user.frames.active}
+                      title={`${user.frames.active} enrolled of ${user.frames.total} · ${user.frames.connected} online now`}
+                      total={user.frames.total}
+                    />
+                  </td>
+                  <td>
+                    <Ratio
+                      active={user.storeScenes.public}
+                      title={`${user.storeScenes.public} public of ${user.storeScenes.total} store scenes`}
+                      total={user.storeScenes.total}
+                    />
+                  </td>
                   <td>
                     {user.backupCount > 0
                       ? `${user.backupCount} · ${formatBytes(user.backupBytes)}`
@@ -237,6 +260,7 @@ export function AdminUsersTable({
             })}
           </tbody>
         </table>
+        </div>
       )}
     </>
   );

@@ -11,6 +11,8 @@ import std/[json, locks, options, sequtils, strformat, tables]
 import pixie
 
 import frameos/types
+import lib/tz
+import std/times
 import frameos/channels
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
@@ -141,6 +143,40 @@ proc fos_nim_set_scaling_mode_impl(mode: cstring) {.exportc, cdecl.} =
   ## contain/cover/stretch/center before calling.
   if not frameConfig.isNil and mode != nil and mode.len > 0:
     frameConfig.scalingMode = $mode
+
+proc fos_nim_set_time_zone_impl(timeZone: cstring) {.exportc, cdecl.} =
+  ## The frame's IANA zone name: what scenes pass on (the weather app's
+  ## open-meteo `timezone=`, `frame.timeZone` in JS) and what chrono converts
+  ## with once fos_nim_load_tz_data_impl has loaded that zone's slice.
+  ## fos_client pushes it every render pass, like scaling_mode, so a
+  ## console/cloud change applies without a reboot.
+  if not frameConfig.isNil and timeZone != nil:
+    frameConfig.timeZone = $timeZone
+
+var tzRuleBuffer: string
+
+proc fos_nim_load_tz_data_impl(sliceJson: cstring, timeZone: cstring): cstring {.exportc, cdecl.} =
+  ## Loads a per-zone tzdata slice (lib/tz.nim, the same shape as the full
+  ## tzdata.json) into chrono and returns the POSIX TZ rule in force for
+  ## `timeZone` at this moment, for the C side to setenv("TZ") so newlib,
+  ## QuickJS Date and the schedule agree with chrono. Empty string when the
+  ## slice is unusable or does not contain the zone. The returned pointer is
+  ## valid until the next call.
+  tzRuleBuffer = ""
+  try:
+    if sliceJson != nil and sliceJson.len > 0 and loadTimeZoneSlice($sliceJson):
+      let zone = if timeZone != nil: $timeZone else: ""
+      tzRuleBuffer = posixTzRule(zone, epochTime())
+      if tzRuleBuffer.len > 0:
+        frameConfig.timeZone = zone
+        log("tz: loaded " & zone & " -> " & tzRuleBuffer)
+      else:
+        log("tz: slice loaded but zone '" & zone & "' not in it")
+  except Defect as e:
+    log("tz: load failed (defect): " & e.msg)
+  except CatchableError as e:
+    log("tz: load failed: " & e.msg)
+  tzRuleBuffer.cstring
 
 proc fos_nim_set_debug_impl(enabled: cint) {.exportc, cdecl.} =
   ## Turns the interpreter's per-node memory profile on and off at runtime

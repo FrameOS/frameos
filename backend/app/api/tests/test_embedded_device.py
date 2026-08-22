@@ -310,6 +310,8 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         # device_config means absent from the poll, so the device's own
         # (console-provisioned) values are never clobbered by defaults.
         'utcOffsetMinutes': 0,  # no timezone set on the frame
+        'timeZone': '',  # firmware >= 2026.8.34 installs the zone itself
+        'timeZoneData': None,
         'rotate': 0,
         'scalingMode': 'contain',
     }
@@ -333,6 +335,8 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'deepSleep': False,
         'wakeSchedule': False,
         'utcOffsetMinutes': 0,
+        'timeZone': '',
+        'timeZoneData': None,
         'rotate': 0,
         'scalingMode': 'cover',
     }
