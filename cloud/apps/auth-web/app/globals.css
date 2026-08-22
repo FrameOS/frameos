@@ -250,6 +250,10 @@ html.theme-dark .button-primary {
 }
 
 .shell {
+  /* A column so the legal footer sits at the bottom of the viewport on a
+     short page instead of floating up under the content. */
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
 }
 
@@ -261,6 +265,7 @@ html.theme-dark .button-primary {
   width: calc(100% - 40px);
   margin: 0 auto;
   padding: 32px 0 56px;
+  flex: 1 0 auto;
 }
 
 .content-header {
