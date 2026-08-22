@@ -73,31 +73,37 @@ export function configureAppSourceEditor(monaco: Monaco) {
   })
 }
 
-function CompiledAppWarning({ sceneName, compact }: { sceneName: string; compact?: boolean }): JSX.Element {
-  const body = (
-    <div>
-      This is a compiled Nim app, but the scene &quot;{sceneName}&quot; is currently running in interpreted mode. If you
-      edit and save it, the scene will switch to compiled mode. After that, future scene changes will require a full
-      frame recompilation. Inline JavaScript code nodes would also need to be rewritten in Nim. If you need
-      customization without compilation, consider using JavaScript apps or inline JavaScript code nodes instead.
-    </div>
-  )
+// Where a built-in app's source lives in the FrameOS repository: every
+// keyword is a directory under frameos/src/apps (e.g. data/chromiumScreenshot).
+const SYSTEM_APP_SOURCE_URL = 'https://github.com/FrameOS/frameos/tree/main/frameos/src/apps/'
 
-  if (compact) {
-    return (
-      <details className="app-compiled-warning app-compiled-warning-collapsible rounded-2xl p-3 text-sm">
-        <summary className="cursor-pointer font-semibold">Compiled Nim app in an interpreted scene</summary>
-        <div className="mt-3">{body}</div>
-      </details>
-    )
-  }
+export function systemAppGithubUrl(keyword: string): string {
+  return SYSTEM_APP_SOURCE_URL + keyword.split('/').map(encodeURIComponent).join('/')
+}
 
+/**
+ * A compiled Nim app inside an interpreted scene is shown the way the system
+ * apps page shows it: read only, with a link to the source. Editing it would
+ * flip the whole scene to compiled mode (a full frame recompilation on every
+ * later change), which is not something to stumble into from an editor tab.
+ */
+function ReadOnlyNimAppNotice({ keyword }: { keyword: string | null }): JSX.Element {
   return (
-    <div className="app-compiled-warning rounded-2xl p-3 text-sm">
-      <div className="space-y-3">
-        <div className="font-semibold">Compiled Nim app in an interpreted scene</div>
-        {body}
+    <div className="frame-tool-card flex flex-col gap-2 rounded-2xl p-3 text-sm @md:flex-row @md:items-center">
+      <div className="min-w-0 flex-1">
+        <span className="font-semibold">Read only.</span> This is a compiled Nim app. To customize it, use a JavaScript
+        app or an inline code node instead.
       </div>
+      {keyword ? (
+        <a
+          href={systemAppGithubUrl(keyword)}
+          target="_blank"
+          rel="noreferrer"
+          className="frameos-secondary-button inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold"
+        >
+          Open in GitHub
+        </a>
+      ) : null}
     </div>
   )
 }
@@ -196,6 +202,7 @@ export function EditApp({ editorKey, sceneId, nodeId, showFileList = true, compa
     activeFile,
     modelMarkers,
     requiresCompiledOnSave,
+    savedKeyword,
     appUsageCount,
     hasMultipleAppUsages,
     appTypeDeclarations,
@@ -250,7 +257,6 @@ export function EditApp({ editorKey, sceneId, nodeId, showFileList = true, compa
   }
 
   const editorLanguage = appSourceEditorLanguage(activeFile)
-  const sceneName = scene?.name || 'Untitled scene'
 
   return (
     <div className="flex flex-row gap-2 max-h-full h-full max-w-full w-full">
@@ -263,8 +269,8 @@ export function EditApp({ editorKey, sceneId, nodeId, showFileList = true, compa
       ) : null}
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
-        {requiresCompiledOnSave ? <CompiledAppWarning sceneName={sceneName} compact={compactWarnings} /> : null}
-        {hasMultipleAppUsages ? (
+        {requiresCompiledOnSave && !compactWarnings ? <ReadOnlyNimAppNotice keyword={savedKeyword} /> : null}
+        {hasMultipleAppUsages && !requiresCompiledOnSave ? (
           <div className="frame-tool-card flex flex-col gap-3 rounded-2xl p-3 text-sm @md:flex-row @md:items-center">
             <div className="min-w-0 font-medium">
               You are editing all {appUsageCount} uses of this app in this scene.
@@ -284,7 +290,11 @@ export function EditApp({ editorKey, sceneId, nodeId, showFileList = true, compa
             beforeMount={configureAppSourceEditor}
             onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
             onChange={(value) => updateFile(activeFile, value ?? '')}
-            options={{ minimap: { enabled: false } }}
+            options={{
+              minimap: { enabled: false },
+              readOnly: requiresCompiledOnSave,
+              domReadOnly: requiresCompiledOnSave,
+            }}
           />
         </div>
       </div>

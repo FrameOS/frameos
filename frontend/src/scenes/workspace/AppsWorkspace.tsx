@@ -35,6 +35,7 @@ import {
   configureAppSourceEditor,
   EditApp,
   EditAppFileList,
+  systemAppGithubUrl,
 } from '../frame/panels/EditApp/EditApp'
 import { editAppLogic } from '../frame/panels/EditApp/editAppLogic'
 import { groupFramesByStatus } from './frameStatusGroups'
@@ -428,12 +429,19 @@ function AppsTopBar({
   app: AppNodeOption | null
   unsavedChanges: boolean
 }): JSX.Element {
+  // A compiled Nim app in an interpreted scene is read only here, exactly
+  // like the system apps page: the source is on GitHub, not in this editor.
+  const { requiresCompiledOnSave } = useValues(
+    editAppLogic({ frameId: frame.id, sceneId: scene?.id ?? '', nodeId: app?.nodeId ?? '' })
+  )
+  const readOnly = Boolean(scene && app && requiresCompiledOnSave)
   return (
     <div className="mb-4 flex flex-col items-stretch justify-between gap-4 @md:flex-row @md:items-center">
       <div className="min-w-0">
         <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">
           {frame.name || frameHost(frame)}
           {scene ? ` / ${scene.name || 'Untitled scene'}` : ''}
+          {readOnly ? ' (read only)' : ''}
         </div>
         <h1 className="frameos-strong flex min-w-0 items-center gap-2 truncate text-2xl font-bold tracking-normal text-slate-950">
           <CodeBracketIcon className="h-7 w-7 shrink-0 text-slate-400" />
@@ -441,7 +449,20 @@ function AppsTopBar({
         </h1>
       </div>
       <div className="apps-topbar-actions flex flex-nowrap items-center justify-start gap-2">
-        {scene && app ? (
+        {scene && app && readOnly ? (
+          <>
+            <BackToSceneButton frameId={frame.id} sceneId={scene.id} nodeId={app.nodeId} />
+            <a
+              href={systemAppGithubUrl(app.keyword)}
+              target="_blank"
+              rel="noreferrer"
+              className="apps-topbar-action frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <ArrowTopRightOnSquareIcon className="h-4 w-4" />
+              <span>Open in GitHub</span>
+            </a>
+          </>
+        ) : scene && app ? (
           <>
             <BackToSceneButton frameId={frame.id} sceneId={scene.id} nodeId={app.nodeId} />
             <ActiveAppDiscardButton frameId={frame.id} sceneId={scene.id} nodeId={app.nodeId} />
@@ -458,14 +479,6 @@ function AppsTopBar({
       </div>
     </div>
   )
-}
-
-// Where a built-in app's source lives in the FrameOS repository: every
-// keyword is a directory under frameos/src/apps (e.g. data/chromiumScreenshot).
-const SYSTEM_APP_SOURCE_URL = 'https://github.com/FrameOS/frameos/tree/main/frameos/src/apps/'
-
-function systemAppGithubUrl(keyword: string): string {
-  return SYSTEM_APP_SOURCE_URL + keyword.split('/').map(encodeURIComponent).join('/')
 }
 
 function SystemAppsTopBar({ app }: { app: SystemAppOption | null }): JSX.Element {
