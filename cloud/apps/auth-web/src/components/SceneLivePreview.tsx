@@ -1,6 +1,6 @@
 "use client";
 
-import { Camera, Download, KeyRound, Play, RotateCw, X } from "lucide-react";
+import { Camera, ImageDown, KeyRound, Play, RotateCw, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -391,13 +391,13 @@ export function SceneLivePreview({
             onClick={() => void downloadScreenshot()}
             title={
               hasPaintedFrame
-                ? "Download the current frame as a PNG"
+                ? "Download a PNG screenshot of the current frame"
                 : "Available after the preview renders its first frame"
             }
             type="button"
           >
-            <Download aria-hidden size={16} />
-            Download
+            <ImageDown aria-hidden size={16} />
+            Download PNG
           </button>
           <button
             className="button button--subtle button--small"

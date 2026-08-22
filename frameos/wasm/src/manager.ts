@@ -228,6 +228,23 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
       }
       select.onchange = () => update(select.value)
       row.appendChild(select)
+    } else if (field.type === 'json') {
+      // Objects arrive from scenes.json as real values; show them as
+      // formatted JSON, keep what was typed verbatim (so an edit in progress
+      // is not re-formatted under the cursor), and flag text that does not
+      // parse — Apply sends it as a string otherwise.
+      const textarea = document.createElement('textarea')
+      textarea.className = 'frameos-manager__input frameos-manager__input--code'
+      textarea.rows = 8
+      textarea.spellcheck = false
+      textarea.value = jsonFieldText(value)
+      const markValidity = (): void => {
+        textarea.classList.toggle('frameos-manager__input--invalid', !isValidJson(textarea.value))
+      }
+      markValidity()
+      textarea.oninput = markValidity
+      textarea.onchange = () => update(textarea.value)
+      row.appendChild(textarea)
     } else if (field.type === 'text') {
       const textarea = document.createElement('textarea')
       textarea.className = 'frameos-manager__input'
@@ -270,6 +287,32 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
   }
 }
 
+function jsonFieldText(value: unknown): string {
+  if (value === undefined || value === null) {
+    return ''
+  }
+  if (typeof value === 'string') {
+    return value
+  }
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function isValidJson(text: string): boolean {
+  if (text.trim() === '') {
+    return true
+  }
+  try {
+    JSON.parse(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function el(tag: string, className: string, text?: string): HTMLElement {
   const node = document.createElement(tag)
   node.className = className
@@ -298,6 +341,8 @@ function injectStyles(): void {
 .frameos-manager__row--buttons { flex-wrap: wrap; }
 .frameos-manager__label { min-width: 120px; font-weight: 600; }
 .frameos-manager__input { flex: 1; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 8px; background: inherit; color: inherit; }
+.frameos-manager__input--code { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; overflow: auto; resize: vertical; }
+.frameos-manager__input--invalid { border-color: #dc2626; outline-color: #dc2626; }
 .frameos-manager__button { padding: 6px 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
 .frameos-manager__button:hover { background: rgba(100, 116, 139, 0.1); }
 .frameos-manager__button--primary { background: #2563eb; border-color: #2563eb; color: #fff; align-self: flex-start; }

@@ -74,6 +74,16 @@ export function coerceStateFieldValue(field: Pick<StateField, 'type'>, value: un
     const parsed = typeof value === 'number' ? value : parseFloat(String(value))
     return isNaN(parsed) ? undefined : parsed
   }
+  if (field.type === 'json' && typeof value === 'string') {
+    // Typed in a form: hand the runtime the parsed value, the way the
+    // scene's own default (a real object in scenes.json) reaches it. Text
+    // that does not parse stays a string rather than being dropped.
+    try {
+      return JSON.parse(value)
+    } catch {
+      return value
+    }
+  }
   return value
 }
 

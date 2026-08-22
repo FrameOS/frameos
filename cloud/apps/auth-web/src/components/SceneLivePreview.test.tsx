@@ -47,7 +47,7 @@ describe("SceneLivePreview screenshot gating", () => {
     await waitFor(() => expect(mountMock).toHaveBeenCalledOnce());
 
     const saveButton = screen.getByRole("button", {
-      name: /Download/,
+      name: /Download PNG/,
     }) as HTMLButtonElement;
     expect(saveButton.disabled).toBe(true);
     expect(saveButton.title).toContain("first frame");
@@ -72,7 +72,7 @@ describe("SceneLivePreview screenshot gating", () => {
     act(() => firstMount.onFrame!({ height: 480, renderMs: 4, width: 800 }));
 
     const saveButton = screen.getByRole("button", {
-      name: /Download/,
+      name: /Download PNG/,
     }) as HTMLButtonElement;
     expect(saveButton.disabled).toBe(false);
 
@@ -88,13 +88,13 @@ describe("SceneLivePreview screenshot buttons", () => {
     fireEvent.click(screen.getByText(/Live preview/));
     await waitFor(() => expect(mountMock).toHaveBeenCalledOnce());
     expect(screen.queryByRole("button", { name: /Save to images/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Download/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download PNG/ })).toBeTruthy();
     unmount();
 
     render(<SceneLivePreview canSaveToGallery sceneId="scene-1" />);
     fireEvent.click(screen.getByText(/Live preview/));
     await waitFor(() => expect(mountMock).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("button", { name: /Save to images/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Download/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download PNG/ })).toBeTruthy();
   });
 });
