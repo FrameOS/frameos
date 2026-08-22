@@ -68,6 +68,12 @@
 /* IANA name; "" keeps the pre-2026.8.34 behaviour (UTC). See fos_tz.h. */
 #define FRAMEOS_DEFAULT_TIME_ZONE ""
 #endif
+#ifndef FRAMEOS_DEFAULT_TZ_DATA
+/* The tzdata slice for FRAMEOS_DEFAULT_TIME_ZONE (lib/tz.nim shape, ~1.5 KB),
+ * baked by the backend (embedded_firmware.py); "" = fetch it from
+ * tz.frameos.net on the first online render pass. See fos_tz.h. */
+#define FRAMEOS_DEFAULT_TZ_DATA ""
+#endif
 #ifndef FRAMEOS_DEFAULT_INTERVAL_SEC
 #define FRAMEOS_DEFAULT_INTERVAL_SEC 300
 #endif

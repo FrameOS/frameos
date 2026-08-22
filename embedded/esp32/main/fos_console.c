@@ -145,6 +145,9 @@ static int cmd_status(int argc, char **argv)
     printf("rotate:      %u\n", (unsigned)config->rotate);
     printf("scaling_mode: %s\n", config->scaling_mode);
     printf("time_zone:   %s\n", config->time_zone[0] ? config->time_zone : "(UTC)");
+    printf("tz_data:     %s\n", !config->time_zone[0] ? "UTC0"
+                                  : fos_tz_slice_missing() ? "(no slice yet; fetched from tz.frameos.net when online)"
+                                  : (getenv("TZ") ? getenv("TZ") : "?"));
     printf("send_logs:   %d\n", (int)config->server_send_logs);
     printf("debug:       %d\n", (int)config->debug_logging);
     printf("fusion:      %d\n", (int)config->image_fusion);
@@ -526,16 +529,23 @@ static int cmd_set(int argc, char **argv)
         strlcpy(config->scaling_mode, mode, sizeof(config->scaling_mode));
     }
     else if (strcmp(key, "time_zone") == 0) {
-        /* IANA name ("Europe/Brussels"); "" or UTC clears it. Applied live:
-         * localtime, QuickJS Date and the schedule follow on the next pass. */
+        /* IANA name ("Europe/Brussels"); "" or UTC clears it. The zone's
+         * tzdata slice is fetched from tz.frameos.net on the next online
+         * render pass (fos_tz.h). Applied live: localtime, QuickJS Date and
+         * the schedule follow on the next call. */
         const char *zone = (strcmp(value, "\"\"") == 0 || strcmp(value, "-") == 0) ? "" : value;
-        if (zone[0] && fos_tz_rule(zone) == NULL && strcmp(zone, "UTC") != 0 &&
-            strcmp(zone, "Etc/UTC") != 0) {
-            printf("unknown time zone '%s' (want an IANA name such as Europe/Brussels)\n", zone);
+        if (strcmp(zone, "UTC") == 0 || strcmp(zone, "Etc/UTC") == 0) zone = "";
+        if (zone[0] && (strchr(zone, ' ') != NULL || strlen(zone) >= sizeof(config->time_zone))) {
+            printf("want an IANA name such as Europe/Brussels\n");
             return 1;
         }
-        strlcpy(config->time_zone, zone, sizeof(config->time_zone));
-        fos_tz_apply(config->time_zone);
+        if (strcmp(config->time_zone, zone) != 0) {
+            strlcpy(config->time_zone, zone, sizeof(config->time_zone));
+            fos_tz_clear();
+        }
+        if (!zone[0]) fos_tz_install(NULL);
+        else printf("time zone %s; tz data %s\n", zone,
+                    fos_tz_slice_missing() ? "fetched from tz.frameos.net on the next online render" : "installed");
     }
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
     else if (strcmp(key, "debug") == 0) config->debug_logging = atoi(value) != 0;

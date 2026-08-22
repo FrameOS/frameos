@@ -311,6 +311,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         # (console-provisioned) values are never clobbered by defaults.
         'utcOffsetMinutes': 0,  # no timezone set on the frame
         'timeZone': '',  # firmware >= 2026.8.34 installs the zone itself
+        'timeZoneData': None,
         'rotate': 0,
         'scalingMode': 'contain',
     }
@@ -335,6 +336,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'wakeSchedule': False,
         'utcOffsetMinutes': 0,
         'timeZone': '',
+        'timeZoneData': None,
         'rotate': 0,
         'scalingMode': 'cover',
     }

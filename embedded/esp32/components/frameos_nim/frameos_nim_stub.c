@@ -49,6 +49,12 @@ void frameos_nim_set_fusion(int enabled) { (void)enabled; }
 void frameos_nim_set_scaling_mode(const char *mode) { (void)mode; }
 void frameos_nim_set_status_info(const char *info_json) { (void)info_json; }
 void frameos_nim_set_time_zone(const char *time_zone) { (void)time_zone; }
+bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, char *rule_out, size_t rule_len)
+{
+    (void)slice_json; (void)time_zone;
+    if (rule_out && rule_len) rule_out[0] = '\0';
+    return false;
+}
 double frameos_nim_scene_interval(void) { return 0; }
 double frameos_nim_next_sleep(void) { return -1; }
 bool frameos_nim_render_requested(void) { return false; }

@@ -134,9 +134,6 @@ void app_main(void)
     BOOTMEM("start");
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
-    /* Before anything formats a time: localtime(), QuickJS Date and the
-     * schedule all read TZ. */
-    fos_tz_apply(config->time_zone);
 
     fos_battery_init(config->battery_pin, config->battery_divider);
     if (fos_battery_present()) {
@@ -275,10 +272,15 @@ void app_main(void)
     /* Interpreted scenes: mount /state and queue any cached scenes.json;
      * the render task applies it and keeps it synced with the backend. */
     BOOTMEM("after-nim-init");
+
     if (fos_scenes_init() != ESP_OK) {
         ESP_LOGW(TAG, "scene storage unavailable, continuing without");
     }
     BOOTMEM("after-scenes-init");
+    /* Needs the Nim runtime (chrono) and /state (the stored slice): from
+     * here localtime(), QuickJS Date and the schedule run in the frame's
+     * zone. Thin clients stay in UTC. */
+    fos_tz_boot();
     fos_schedule_init();
 
     /* Oversized HTTP bodies (multi-MB gallery images) spill to storage

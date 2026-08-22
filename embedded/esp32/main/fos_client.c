@@ -33,6 +33,7 @@
 #include "fos_scenes.h"
 #include "fos_schedule.h"
 #include "fos_settings.h"
+#include "fos_tz.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -1021,6 +1022,9 @@ static void client_task(void *arg)
         /* Live settings: pick up backend-side interval/name/render-mode
          * changes without a rebuild. ETag'd, so steady state is a 304. */
         fos_settings_sync(false);
+        /* A zone name with no tzdata slice yet (console `set time_zone`,
+         * an older provider): one fetch from tz.frameos.net, rate-limited. */
+        fos_tz_resolve_pending();
 
         /* A console `set spill_force` may have changed it since last pass. */
         fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);

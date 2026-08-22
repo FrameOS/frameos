@@ -304,14 +304,23 @@ static bool apply_frame_settings(const cJSON *frame)
     }
 
     const cJSON *time_zone = cJSON_GetObjectItem(frame, "timeZone");
-    if (cJSON_IsString(time_zone) && strcmp(config->time_zone, time_zone->valuestring) != 0 &&
-        strlen(time_zone->valuestring) < sizeof(config->time_zone) &&
-        (time_zone->valuestring[0] == '\0' || fos_tz_rule(time_zone->valuestring) != NULL ||
-         strcmp(time_zone->valuestring, "UTC") == 0)) {
-        strlcpy(config->time_zone, time_zone->valuestring, sizeof(config->time_zone));
-        /* Live: localtime/QuickJS Date/schedule read TZ on their next call. */
-        fos_tz_apply(config->time_zone);
-        changed = true;
+    if (cJSON_IsString(time_zone) && strlen(time_zone->valuestring) < sizeof(config->time_zone)) {
+        /* The backend sends that zone's tzdata slice next to the name
+         * (timeZoneData, fos_tz.h); without one the name is kept and
+         * fos_tz_resolve_pending fetches a slice from tz.frameos.net. */
+        const cJSON *data = cJSON_GetObjectItem(frame, "timeZoneData");
+        char *slice = cJSON_IsObject(data) ? cJSON_PrintUnformatted(data) : NULL;
+        bool name_changed = strcmp(config->time_zone, time_zone->valuestring) != 0;
+        if (name_changed) {
+            strlcpy(config->time_zone, time_zone->valuestring, sizeof(config->time_zone));
+            fos_tz_clear();
+            changed = true;
+        }
+        if (name_changed || fos_tz_slice_missing()) {
+            /* Live: localtime/QuickJS Date/schedule read TZ on their next call. */
+            fos_tz_install(slice);
+        }
+        free(slice);
     }
 
     const cJSON *scaling = cJSON_GetObjectItem(frame, "scalingMode");

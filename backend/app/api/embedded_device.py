@@ -37,6 +37,7 @@ from fastapi import Depends, Header, HTTPException
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
+from app.utils.tz_slice import tz_slice
 from app.database import get_db
 from app.drivers.devices import device_dimensions
 from app.models.frame import Frame, get_frame_json
@@ -436,10 +437,13 @@ def embedded_frame_settings(frame: Frame) -> dict:
         # Applied live on the device (no restart); default and validation in
         # embedded_scaling_mode_for_frame.
         "scalingMode": embedded_scaling_mode_for_frame(frame),
-        # IANA zone name; firmware from 2026.8.34 maps it onto a POSIX TZ
-        # rule (fos_tz.c) and keeps its own clock, QuickJS Date and the
-        # schedule in it. Older firmware ignores the key.
+        # IANA zone name plus that zone's tzdata slice (app.utils.tz_slice,
+        # ~1.5 KB): firmware from 2026.8.34 loads the slice into chrono and
+        # keeps its own clock, QuickJS Date and the schedule in the zone
+        # (fos_tz.h). Older firmware ignores both keys. The slice is omitted
+        # for a zone tzdata does not know; the device then asks tz.frameos.net.
         "timeZone": (getattr(frame, "timezone", None) or "").strip(),
+        "timeZoneData": tz_slice((getattr(frame, "timezone", None) or "").strip()),
         # The device matches schedule events in frame-local wall-clock time;
         # firmware without fos_tz applies this flat offset to UTC. Sent as
         # the CURRENT offset, so a DST shift propagates on the next poll.

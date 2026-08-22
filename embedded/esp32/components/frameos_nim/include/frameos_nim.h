@@ -90,6 +90,11 @@ void frameos_nim_set_status_info(const char *info_json);
  * C side installs the matching POSIX rule itself (fos_tz.h); this only
  * tells scenes the name. "" = UTC. Applied live. */
 void frameos_nim_set_time_zone(const char *time_zone);
+/* Load a per-zone tzdata slice (lib/tz.nim shape) into chrono and get back
+ * the POSIX TZ rule in force for `time_zone` now, for setenv("TZ"). False
+ * (rule_out = "") when the runtime is not up — thin clients have no chrono
+ * and keep UTC — or the slice does not hold the zone. */
+bool frameos_nim_load_tz_data(const char *slice_json, const char *time_zone, char *rule_out, size_t rule_len);
 double frameos_nim_scene_interval(void);
 /* Sleep override from the scene's last render (logic/nextSleepDuration);
  * negative = no override. Consult only right after a successful render. */
