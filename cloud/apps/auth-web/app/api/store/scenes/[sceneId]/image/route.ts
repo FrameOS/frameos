@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { storeScenes } from "@frameos-cloud/db";
+import { asc, eq } from "drizzle-orm";
+import { storeSceneImages, storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { publicBlobUrl, readBlob } from "../../../../../../src/lib/blobs";
 import { detectImageContentType } from "../../../../../../src/lib/store";
@@ -15,8 +15,10 @@ export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ sceneId: string }> };
 
-// The preview image extracted from the published zip at publish time; served
-// with a fixed image content type, never the uploader's choosing.
+// The preview image extracted from the published zip at publish time, or —
+// when the owner removed that and only gallery screenshots remain — the
+// first gallery image. Served with a fixed image content type, never the
+// uploader's choosing.
 async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:image", {
     limit: 1200,
@@ -51,8 +53,33 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     .where(eq(storeScenes.id, sceneId))
     .limit(1);
 
-  if (!scene || (!scene.previewImage && !scene.previewObjectKey)) {
+  if (!scene) {
     return jsonError("scene_not_found", 404);
+  }
+  let preview: {
+    content: Buffer | null;
+    objectKey: string | null;
+    tag: string;
+  } = {
+    content: scene.previewImage,
+    objectKey: scene.previewObjectKey,
+    tag: String(scene.latestVersion),
+  };
+  if (!scene.previewImage && !scene.previewObjectKey) {
+    const [lead] = await db
+      .select({
+        content: storeSceneImages.content,
+        id: storeSceneImages.id,
+        objectKey: storeSceneImages.objectKey,
+      })
+      .from(storeSceneImages)
+      .where(eq(storeSceneImages.sceneId, sceneId))
+      .orderBy(asc(storeSceneImages.position), asc(storeSceneImages.createdAt))
+      .limit(1);
+    if (!lead) {
+      return jsonError("scene_not_found", 404);
+    }
+    preview = { content: lead.content, objectKey: lead.objectKey, tag: lead.id };
   }
   if (scene.status === "pulled") {
     return jsonError("scene_pulled", 410);
@@ -82,7 +109,9 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   const versionParam = request.nextUrl.searchParams.get("v");
   const versionPinned =
     versionParam !== null && versionParam === String(scene.latestVersion);
-  const etag = `W/"${sceneId}-${scene.latestVersion}"`;
+  // A gallery lead is keyed by its row id: adding/removing images changes
+  // which one leads, while latestVersion may not move.
+  const etag = `W/"${sceneId}-${preview.tag}"`;
   const cacheControl = !isPublic
     ? "private, max-age=3600"
     : versionPinned
@@ -100,7 +129,7 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   // the CDN URL and let the edge serve the bytes. Private scenes (and any
   // deployment without a public alias — every dev machine) are proxied here,
   // where the authorization above still applies.
-  const cdnUrl = isPublic ? publicBlobUrl(scene.previewObjectKey) : undefined;
+  const cdnUrl = isPublic ? publicBlobUrl(preview.objectKey) : undefined;
   if (cdnUrl) {
     return NextResponse.redirect(cdnUrl, {
       headers: { "cache-control": cacheControl, etag },
@@ -108,24 +137,24 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     });
   }
 
-  const preview = await readBlob({
-    content: scene.previewImage,
-    objectKey: scene.previewObjectKey,
+  const bytes = await readBlob({
+    content: preview.content,
+    objectKey: preview.objectKey,
   });
-  if (!preview) {
+  if (!bytes) {
     return jsonError("scene_not_found", 404);
   }
 
-  return new NextResponse(new Uint8Array(preview), {
+  return new NextResponse(new Uint8Array(bytes), {
     headers: {
       "cache-control": cacheControl,
-      "content-length": String(preview.length),
+      "content-length": String(bytes.length),
       // Sniffed, not stored. previewImageType is only as good as whatever
       // wrote it, and rows published before the type was sniffed at all say
       // "image/jpeg" over PNG bytes. The bytes cannot be wrong about
       // themselves.
       "content-type":
-        detectImageContentType(preview) ?? scene.previewImageType ?? "image/jpeg",
+        detectImageContentType(bytes) ?? scene.previewImageType ?? "image/jpeg",
       etag,
       "x-content-type-options": "nosniff",
     },

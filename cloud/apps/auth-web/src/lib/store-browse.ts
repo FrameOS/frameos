@@ -2,6 +2,7 @@ import { and, desc, eq, gt, ilike, or, sql, type SQL } from "drizzle-orm";
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
 import { storePageSize, type StoreBrowseFilters } from "./store-filters";
 import { frameosVersionSatisfiesSql } from "./store-versions-sql";
+import { sceneHasAnyImageSql } from "./store-preview";
 
 // One definition of "browse the public store": the SQL that applies the
 // filters from store-filters.ts, and the row shape the cards need. The store
@@ -96,7 +97,7 @@ export async function listStoreScenes(
       downloadCount: storeScenes.downloadCount,
       featuredAt: storeScenes.featuredAt,
       frameosVersion: storeScenes.frameosVersion,
-      hasPreview: sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`,
+      hasPreview: sceneHasAnyImageSql,
       id: storeScenes.id,
       name: storeScenes.name,
       publisher: accounts.displayName,

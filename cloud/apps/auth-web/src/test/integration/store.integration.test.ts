@@ -848,6 +848,70 @@ describe("store publish and distribution", () => {
     });
   });
 
+  it("shows a gallery screenshot as the store tile once the primary preview is gone", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const scene = (
+      await readJson(await publish(accessToken, { visibility: "public" }))
+    ).scene as Record<string, unknown>;
+    const sceneId = scene.id as string;
+
+    const removed = await deletePrimaryImage(
+      request(`/api/account/scenes/${sceneId}/image`, "DELETE", {
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(removed.status).toBe(200);
+
+    // Nothing to show yet: the tile says so and the image route is a 404.
+    expect(
+      renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) })),
+    ).toContain("No preview");
+    expect(
+      (
+        await getSceneImage(
+          request(`/api/store/scenes/${sceneId}/image`, "GET"),
+          ctx(sceneId),
+        )
+      ).status,
+    ).toBe(404);
+
+    // A screenshot added later (live preview → "Save to images") leads.
+    const galleryBytes = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4,
+    ]);
+    const added = await addGalleryImage(
+      request(`/api/account/scenes/${sceneId}/images`, "POST", {
+        body: { content_base64: galleryBytes.toString("base64") },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(added.status).toBe(200);
+
+    const markup = renderToStaticMarkup(
+      await HomePage({ searchParams: Promise.resolve({}) }),
+    );
+    expect(markup).not.toContain("No preview");
+    expect(markup).toContain(`/api/store/scenes/${sceneId}/image`);
+
+    const image = await getSceneImage(
+      request(`/api/store/scenes/${sceneId}/image`, "GET"),
+      ctx(sceneId),
+    );
+    expect(image.status).toBe(200);
+    expect(Buffer.from(await image.arrayBuffer())).toEqual(galleryBytes);
+    expect(image.headers.get("content-type")).toBe("image/png");
+
+    const repo = await readJson(
+      await getRepositoryJson(request("/api/store/repository.json", "GET")),
+    );
+    const template = (repo.templates as Array<Record<string, unknown>>).find(
+      (entry) => entry.sceneId === sceneId || entry.id === scene.slug,
+    );
+    expect(template?.image).toContain(`/scenes/${sceneId}/image`);
+  });
+
   it("keeps private scenes private until the owner flips them", async () => {
     const { accessToken, accountId } = await linkClient(publishScopes);
 

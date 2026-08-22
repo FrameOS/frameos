@@ -2,6 +2,7 @@ import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
 import { getScenesBaseUrl } from "./env";
 import { frameosVersionSatisfiesSql } from "./store-versions-sql";
+import { sceneHasAnyImageSql } from "./store-preview";
 
 // The public store index in the frameos repository JSON format, shared by the
 // unversioned index (/api/store/repository.json) and the per-version ones
@@ -34,7 +35,7 @@ export async function buildStoreRepository(
       downloadCount: storeScenes.downloadCount,
       featuredAt: storeScenes.featuredAt,
       frameosVersion: storeScenes.frameosVersion,
-      hasPreview: sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`,
+      hasPreview: sceneHasAnyImageSql,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,

@@ -14,6 +14,7 @@ import {
 import { formatDate } from "../../src/lib/format";
 import { readSession } from "../../src/lib/session";
 import { accountIsSuperadmin } from "../../src/lib/superadmin";
+import { sceneHasAnyImageSql } from "../../src/lib/store-preview";
 
 export const metadata = { title: "My private scenes" };
 
@@ -76,7 +77,7 @@ export default async function MyScenesPage({
     ? await createDb()
         .select({
           downloadCount: storeScenes.downloadCount,
-          hasPreview: sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`,
+          hasPreview: sceneHasAnyImageSql,
           featuredAt: storeScenes.featuredAt,
           id: storeScenes.id,
           latestVersion: storeScenes.latestVersion,

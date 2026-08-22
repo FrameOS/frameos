@@ -44,6 +44,7 @@ import {
   shareTokenGrantsAccess,
 } from "../../../src/lib/store-auth";
 import { accountIsSuperadmin } from "../../../src/lib/superadmin";
+import { sceneHasPrimaryPreviewSql } from "../../../src/lib/store-preview";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +69,7 @@ export async function generateMetadata({
   const [scene] = await db
     .select({
       description: storeScenes.description,
-      hasPreview: sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`,
+      hasPreview: sceneHasPrimaryPreviewSql,
       id: storeScenes.id,
       name: storeScenes.name,
       previewImageHeight: storeScenes.previewImageHeight,
@@ -161,7 +162,7 @@ export default async function ScenePage({
       downloadCount: storeScenes.downloadCount,
       featuredAt: storeScenes.featuredAt,
       frameosVersion: storeScenes.frameosVersion,
-      hasPreview: sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`,
+      hasPreview: sceneHasPrimaryPreviewSql,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,

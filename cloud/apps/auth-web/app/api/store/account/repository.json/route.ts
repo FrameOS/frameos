@@ -14,6 +14,7 @@ import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 import { storePublishScope } from "../../../../../src/lib/store";
 import { storeRoute } from "../../../../../src/lib/store-cache";
+import { sceneHasAnyImageSql } from "../../../../../src/lib/store-preview";
 
 export const runtime = "nodejs";
 
@@ -67,7 +68,7 @@ async function handleGet(request: NextRequest) {
       authorName: accounts.displayName,
       description: storeScenes.description,
       frameosVersion: storeScenes.frameosVersion,
-      hasPreview: sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`,
+      hasPreview: sceneHasAnyImageSql,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,
