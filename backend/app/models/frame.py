@@ -430,7 +430,8 @@ async def new_frame(
     project_id: Optional[int] = None,
 ) -> Frame:
     if '@' in frame_host:
-        user_pass, frame_host = frame_host.split('@')
+        # rsplit: passwords may contain '@'
+        user_pass, frame_host = frame_host.rsplit('@', 1)
     else:
         user_pass, frame_host = 'pi', frame_host
 
@@ -443,7 +444,8 @@ async def new_frame(
         ssh_port = 22
 
     if ':' in user_pass:
-        user, password = user_pass.split(':')
+        # split once: passwords may contain ':'
+        user, password = user_pass.split(':', 1)
     else:
         user, password = user_pass, None
 

@@ -3368,3 +3368,23 @@ async def test_api_frame_adopt_keeps_minted_key_when_device_hides_secrets(async_
     # not blank the minted one.
     assert frame.name == 'My adopted frame'
     assert frame.frame_access_key
+
+
+@pytest.mark.asyncio
+async def test_api_frame_new_ssh_connection_string_keeps_password(async_client):
+    # The "Install over SSH" form sends user:pass@host and no ssh_pass field;
+    # the parsed password must survive creation so Full Deploy can use it.
+    payload = {
+        "name": "SshFrame",
+        "frame_host": "pi:s3cr:et@p@ss@192.168.1.20:2222",
+        "server_host": "backend.local",
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['ssh_user'] == 'pi'
+    assert frame['ssh_pass'] == 's3cr:et@p@ss'
+    assert frame['frame_host'] == '192.168.1.20'
+    assert frame['ssh_port'] == 2222

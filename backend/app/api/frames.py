@@ -3811,7 +3811,12 @@ async def api_frame_new(
             frame.ssh_keys = list(dict.fromkeys([key for key in data.ssh_keys if key]))
         else:
             frame.ssh_keys = default_ssh_key_ids(settings) or None
-        frame.ssh_pass = data.ssh_pass
+        # The SSH install form carries the password inside the connection
+        # string ("user:pass@host"), which new_frame() already parsed. Only
+        # an explicitly supplied ssh_pass (the SD-card form's root password
+        # field) may override it; a missing field must not wipe it.
+        if data.ssh_pass is not None:
+            frame.ssh_pass = data.ssh_pass
 
         frame.mode = data.mode or "rpios"
         if frame.mode == "buildroot":
