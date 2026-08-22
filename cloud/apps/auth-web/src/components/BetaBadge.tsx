@@ -54,8 +54,7 @@ export function BetaCopy() {
     <>
       <p>
         The cloud is new and still changing. It works — frames enroll, scenes
-        deploy — but expect rough edges, and expect things to move around
-        while we learn what people need.
+        deploy — but expect rough edges, and expect things to move around.
       </p>
       <ul>
         <li>
@@ -64,13 +63,15 @@ export function BetaCopy() {
         </li>
         <li>
           <strong>Your data stays yours.</strong> Scenes, backups and frame
-          settings can be exported from your account at any time, and every
-          frame keeps working on its own if the cloud is unreachable.
+          settings can be exported from your account at any time, every frame
+          keeps working on its own if the cloud is unreachable, and easy
+          cloud ↔ self-hosted migrations are coming.
         </li>
         <li>
           <strong>Self-hosting is not going anywhere.</strong> The cloud is an
           option next to the self-hosted FrameOS backend, not a replacement for
-          it.
+          it. The cloud itself is open source too — you can run your own, though
+          we do not recommend it yet.
         </li>
         <li>
           <strong>Tell us what breaks.</strong> Bugs and ideas are welcome on{" "}
