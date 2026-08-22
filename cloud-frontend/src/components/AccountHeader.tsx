@@ -77,8 +77,8 @@ export function AccountHeader(): ReactElement {
           <div className="frameos-beta-dialog__body">
             <h2 id="frameos-beta-title">FrameOS Cloud is in beta</h2>
             <p>
-              The cloud is new and still changing. It works — frames enroll, scenes deploy, backups run — but expect
-              rough edges, and expect things to move around while we learn what people need.
+              The cloud is new and still changing. It works — frames enroll, scenes deploy — but expect rough edges, and
+              expect things to move around while we learn what people need.
             </p>
             <ul>
               <li>
@@ -97,6 +97,10 @@ export function AccountHeader(): ReactElement {
                 <strong>Tell us what breaks.</strong> Bugs and ideas are welcome on{' '}
                 <a href="https://github.com/FrameOS/frameos/issues" rel="noreferrer" target="_blank">
                   GitHub
+                </a>{' '}
+                or{' '}
+                <a href="https://discord.gg/9dT9y7EzUw" rel="noreferrer" target="_blank">
+                  Discord
                 </a>
                 .
               </li>

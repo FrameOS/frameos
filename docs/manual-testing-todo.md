@@ -116,18 +116,18 @@ flow (changes first-boot behavior for every new user).
 
 ## 5. Older pending hardware item
 
-- [ ] **13.3" E hardware SPI fix:** validation still pending on frame 62
-  (`spi0-0cs` dual-CS overlay; do not claim GPIO 10/11). Close out now if
-  frame 62 is on the release path.
+- [x] **13.3" E hardware SPI fix:** closed 2026-08-22 — frame 62 was built,
+  delivered and worked on the `spi0-0cs` dual-CS overlay; the frame is long
+  gone, nothing left to validate.
 
 ## 6. CI / the release itself
 
-- [ ] **EPYC runner pool (#381):** trigger (or watch the next) **FrameOS
-  cross compilation** run and confirm the 6 `epyc-8` legs get picked up by
-  the self-hosted pool rather than queueing.
-- [ ] **The release run is a test (#381):** the first real
-  `docker-publish-multi` after #381 validates `epyc-32` and the Depot-built
-  esp32-ci path — babysit the release workflow rather than fire-and-forget.
+- [x] **EPYC runner pool (#381):** several **FrameOS cross compilation**
+  runs have gone through the self-hosted pool since (latest 2026-08-21,
+  success).
+- [x] **The release run is a test (#381):** `docker-publish-multi` has run
+  twice since #381 (2026-08-20, both success) — `epyc-32` and the Depot
+  esp32-ci path are validated.
 
 ## Not on the list, deliberately
 
