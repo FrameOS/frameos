@@ -7,6 +7,7 @@ from typing import Any, Optional
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean
 from sqlalchemy.orm import Session, mapped_column
+from app.utils.scene_execution import scene_is_interpreted
 from app.database import Base
 
 from app.drivers.devices import (
@@ -758,9 +759,4 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
     return frame_json
 
 def get_interpreted_scenes_json(frame: Frame) -> list[dict]:
-    interpreted_scenes = []
-    for scene in frame.scenes:
-        execution = scene.get("settings", {}).get("execution", "compiled")
-        if execution == "interpreted":
-            interpreted_scenes.append(scene)
-    return interpreted_scenes
+    return [scene for scene in frame.scenes if scene_is_interpreted(scene)]

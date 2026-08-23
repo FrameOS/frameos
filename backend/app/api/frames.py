@@ -91,6 +91,7 @@ from app.schemas.frames import (
 from app.api.auth import get_current_user_from_request
 from app.config import config
 from app.utils.network import is_safe_host
+from app.utils.scene_execution import normalize_scenes_execution
 from app.utils.remote_exec import (
     RemoteTransport,
     normalize_remote_transport,
@@ -3671,6 +3672,9 @@ async def api_frame_update_endpoint(
             update_data["scenes"] = json.loads(update_data["scenes"])
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
+    # Templates, imports and chat-built scenes arrive without an execution
+    # mode; stamp it here so nothing downstream has to guess.
+    normalize_scenes_execution(update_data.get("scenes"))
 
     old_mode = frame.mode
     old_device = frame.device

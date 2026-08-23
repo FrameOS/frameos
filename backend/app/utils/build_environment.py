@@ -9,6 +9,7 @@ from app.models.settings import get_settings_dict
 
 BuildEnvironmentProvider = Literal["none", "docker", "buildHost", "modal"]
 BUILD_ENVIRONMENT_PROVIDERS: set[str] = {"none", "docker", "buildHost", "modal"}
+DOCKER_SOCKET_PATH = "/var/run/docker.sock"
 
 
 def normalize_build_environment_provider(value: object) -> BuildEnvironmentProvider | None:
@@ -22,6 +23,12 @@ def selected_build_environment_provider(settings: dict | None) -> BuildEnvironme
     raw = settings.get("buildEnvironment")
     if isinstance(raw, dict):
         provider = normalize_build_environment_provider(raw.get("provider"))
+        if provider == "docker" and os.environ.get("HASSIO_RUN_MODE") and not os.path.exists(DOCKER_SOCKET_PATH):
+            # The settings page used to materialize "docker" into the form on
+            # every install, so Home Assistant add-ons saved it without anyone
+            # choosing it. Without a socket it can only fail, and it hides the
+            # add-on's own "precompiled or configure a build host" guidance.
+            return "none"
         if provider:
             return provider
 

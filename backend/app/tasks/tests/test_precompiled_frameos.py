@@ -11,16 +11,20 @@ from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.precompiled_frameos import download_precompiled_frameos_release, frame_compiled_scene_count
 
 
-def test_frame_compiled_scene_count_treats_missing_execution_as_compiled():
+def test_frame_compiled_scene_count_treats_missing_execution_as_interpreted():
+    # Absent means interpreted since c3d5e7f9a1b2: an unstamped scene must not
+    # force a source build (that is what sent HA users into Docker errors).
     frame = SimpleNamespace(
         scenes=[
             {"settings": {"execution": "interpreted"}},
             {"settings": {"execution": "compiled"}},
             {"settings": {}},
+            {},
+            "not a scene",
         ]
     )
 
-    assert frame_compiled_scene_count(frame) == 2
+    assert frame_compiled_scene_count(frame) == 1
 
 
 @pytest.mark.asyncio

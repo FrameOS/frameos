@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.models.apps import get_scene_apps_from_scenes
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
+from app.utils.scene_execution import scene_is_interpreted
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
 from app.utils.remote_exec import RemoteTransport, rename_path, upload_file, run_command
@@ -407,8 +408,7 @@ class FrameDeployer:
             f.write(write_apps_nim(source_dir))
 
         for scene in frame.scenes:
-            execution = scene.get("settings", {}).get("execution", "compiled")
-            if execution == "interpreted":
+            if scene_is_interpreted(scene):
                 # We're writing them to scenes.json post build
                 continue
             try:

@@ -70,7 +70,7 @@ import { getDeployPlanErrorMessage } from './frameDeployErrors'
 import { urls } from '../../urls'
 import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
-import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../utils/sceneExecution'
+import { frameRunsScenesInterpreted, normalizeSceneExecution, sceneExecutionForFrame } from '../../utils/sceneExecution'
 import { normalizeCustomEvent } from '../../utils/frameEvents'
 import { frameFormSceneErrors } from './frameFormSceneErrors'
 import {
@@ -1780,7 +1780,9 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
     customEvents: (scene.customEvents ?? []).map((event) => normalizeCustomEvent(event)),
     settings: {
       ...settings,
-      ...(frameRunsInterpreted ? { execution: 'interpreted' as const } : {}),
+      // Always materialized: templates, imports and chat scenes arrive
+      // without it, and "absent" used to be read as compiled downstream.
+      execution: frameRunsInterpreted ? ('interpreted' as const) : normalizeSceneExecution(scene),
       refreshInterval: settings.refreshInterval || frame.interval || 300,
       backgroundColor: cleanBackgroundColor(settings.backgroundColor || '#000000'),
     },

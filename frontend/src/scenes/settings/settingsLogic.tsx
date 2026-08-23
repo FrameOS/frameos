@@ -1,4 +1,5 @@
 import { MakeLogicType, actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
+import { inHassioAddon } from '../../utils/inHassioAddon'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../socketLogic'
 import { forms } from 'kea-forms'
@@ -13,9 +14,17 @@ import { guessBrowserTimezone } from '../../utils/timezone'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 
 function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, any>): FrameOSSettings {
+  // Mirrors selected_build_environment_provider on the backend: the add-on
+  // container has no Docker socket, so its default is on-device builds.
   const buildEnvironmentProvider =
     settings.buildEnvironment?.provider ||
-    (settings.modalSandbox?.enabled ? 'modal' : settings.buildHost?.enabled ? 'buildHost' : 'docker')
+    (settings.modalSandbox?.enabled
+      ? 'modal'
+      : settings.buildHost?.enabled
+      ? 'buildHost'
+      : inHassioAddon()
+      ? 'none'
+      : 'docker')
   const personalSettings = isSettingsObject(settings.personal) ? settings.personal : {}
   return {
     ...settings,

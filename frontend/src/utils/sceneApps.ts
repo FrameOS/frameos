@@ -1,4 +1,4 @@
-import { AppConfig, FrameScene, SceneApp } from '../types'
+import type { AppConfig, AppNodeData, CodeNodeData, FrameScene, SceneApp } from '../types'
 import { apiFetch } from './apiFetch'
 import { embeddedBuiltinAppSources } from '../generated/builtinApps'
 import { embeddedRepoAppConfigs, embeddedRepoAppSources } from '../generated/repoApps'
@@ -24,6 +24,36 @@ export function hasJavaScriptAppSource(sources?: Record<string, string> | null):
 
 export function hasCompiledAppSource(sources?: Record<string, string> | null): boolean {
   return !!(sources?.['app.nim'] || sources?.['config.nim'])
+}
+
+export function hasCompiledNimAppSource(sources?: Record<string, string> | null): boolean {
+  return hasCompiledAppSource(sources) && !hasJavaScriptAppSource(sources)
+}
+
+/**
+ * True when the scene holds content only the compiler can run: Nim-only app
+ * sources (on the scene's apps or an app node), a Nim code node with no
+ * JavaScript twin, or a source node. Mirrors `scene_requires_compilation`
+ * in backend/app/utils/scene_execution.py.
+ */
+export function sceneRequiresCompilation(scene: Partial<FrameScene>): boolean {
+  if (Object.values(scene.apps ?? {}).some((app) => hasCompiledNimAppSource(app.sources))) {
+    return true
+  }
+
+  return (scene.nodes ?? []).some((node) => {
+    if (node.type === 'app') {
+      const data = node.data as AppNodeData | undefined
+      return (
+        hasCompiledNimAppSource(data?.sources) || hasCompiledNimAppSource(scene.apps?.[data?.keyword ?? '']?.sources)
+      )
+    }
+    if (node.type === 'code') {
+      const data = node.data as CodeNodeData | undefined
+      return !!data?.code?.trim() && !data?.codeJS?.trim()
+    }
+    return node.type === 'source'
+  })
 }
 
 function parseAppConfigFromSources(sources?: Record<string, string> | null): Partial<AppConfig> {
@@ -256,8 +286,9 @@ export function updateSceneAppsInScenes(
           ...scene,
           apps: normalizedApps,
           ...(nodes ? { nodes } : {}),
+          // Absent means interpreted, so an unstamped scene gets flipped too.
           settings:
-            needsCompiled && scene.settings?.execution === 'interpreted'
+            needsCompiled && scene.settings?.execution !== 'compiled'
               ? { ...scene.settings, execution: 'compiled' }
               : scene.settings,
         }
