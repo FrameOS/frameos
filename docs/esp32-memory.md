@@ -41,11 +41,13 @@ photo into a clamped decode; dithered 565 costs nothing and removes the
 banding.
 
 Consequence for the 16 MB 13.3": idle free PSRAM drops from ~10.3 MB to
-~6.5 MB, so the streamed cover decode of a 24 MP photo (5.8 MB plan, see
-below) no longer fits the headroom and clamps mildly (~93% sampling
-resolution) until the cover column-window follow-up in todo.md lands
-(2.9 MB plan). That follow-up is what makes RGBX on 16 MB free of
-compromise.
+~6.5 MB. The streamed cover decode of a 24 MP photo planned 5.8 MB against
+that (a mild clamp) until the cover window landed (pixie 28a9cc3, same
+day): the scaled JPEG decoder now samples only the crop, so the same photo
+plans 2.9 MB with a 1.9 MB luma channel and fits the RGBX headroom with
+room to spare. Differential sweep: the whole jpeg suite (orientations
+included) byte-identical; 24 MP-class photos identical except the
+outermost crop-boundary row/column (footprint rounding).
 
 ## The canvas was 2 bytes per pixel everywhere (2026.8.31 – 2026-08-23)
 
@@ -113,10 +115,9 @@ Both leaks had a root cause, fixed in the pixie fork (ab4085b):
   that cannot. Measured on the host: 6 MB block -> untouched; 3 MB block ->
   2172x1448 sampling, 3.07 MB luma, decodes.
 
-Follow-up worth doing: cover-fit should sample only the cropped column
-window. A 3:2 photo on this 3:4 panel would plan 2.9 MB instead of 5.8 MB
-(luma 1.9 MB instead of 3.75 MB), which is the difference between full
-sharpness and a clamp on a heap that has seen a day of churn.
+(The cover column window shipped the same day — pixie 28a9cc3: a 3:2
+photo on this 3:4 panel plans 2.9 MB instead of 5.8 MB, luma 1.9 MB
+instead of 3.75 MB.)
 
 And two things changed on the visibility side:
 
