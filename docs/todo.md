@@ -21,6 +21,11 @@ Two rules that shape most entries:
 
 ## ESP32 memory
 
+- **Verify on hardware** (docs/esp32-memory.md, 2026-08-24): the Weather
+  scene renders on the 16 MB 13.3" (frame 529463b4) after a reboot with no
+  `memory:oomAbort`; post-render idle PSRAM stays near the ~6.9 MB
+  baseline; the sky gradient shows no strip seams. Then the same on an
+  8 MB 13.3" (565 canvas), where the strips are the only thing that fits.
 - **Verify on hardware** (docs/esp32-memory.md, 2026-08-23): a 24 MP photo
   cover-rendered on the 16 MB 13.3" is sharp (no `render:degraded` in the
   log — the cover window keeps the plan at 2.9 MB inside the RGBX canvas's
