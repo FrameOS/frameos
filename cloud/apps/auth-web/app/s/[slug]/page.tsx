@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { Download } from "lucide-react";
 import { headers } from "next/headers";
 import Link from "next/link";
