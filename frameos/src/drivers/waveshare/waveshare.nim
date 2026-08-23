@@ -442,7 +442,7 @@ proc notifyImageAvailable*(self: Driver) =
 proc renderBlack*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
   image.toGrayscaleFloat(gray)
-  gray.floydSteinberg(image.width, image.height)
+  gray.floydSteinberg(image.width, image.height, jitterUnit = 1 / 255)
   let levels = grayToLevels(gray, 1)
 
   setLastGrayImage(levels, 1)
@@ -465,7 +465,7 @@ proc renderBlack*(self: Driver, image: Image) =
 proc renderFourGray*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
   image.toGrayscaleFloat(gray, 3)
-  gray.floydSteinberg(image.width, image.height)
+  gray.floydSteinberg(image.width, image.height, jitterUnit = 3 / 255)
   let levels = grayToLevels(gray, 3)
   setLastGrayImage(levels, 3)
   self.notifyImageAvailable()
@@ -484,7 +484,7 @@ proc renderFourGray*(self: Driver, image: Image) =
 proc renderSixteenGray*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
   image.toGrayscaleFloat(gray, 15)
-  gray.floydSteinberg(image.width, image.height)
+  gray.floydSteinberg(image.width, image.height, jitterUnit = 15 / 255)
   let levels = grayToLevels(gray, 15)
   setLastGrayImage(levels, 15)
   self.notifyImageAvailable()

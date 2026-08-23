@@ -30,6 +30,11 @@ suite "dither helpers":
     check abs(grayscale[1] - 1.44) < 0.01
 
   test "ditherPaletteIndexed packs bytes for 1 2 4 and 8 bit palettes":
+    # This test pins the PACKING with palettes whose entries sit 1 unit
+    # apart, where any quantizer jitter changes the picks; turn it off.
+    let savedJitter = ditherJitterAmp
+    ditherJitterAmp = 0
+    defer: ditherJitterAmp = savedJitter
     let bwPalette = @[(0, 0, 0), (255, 255, 255)]
     let bwImage = newImage(8, 1)
     for x in 0 ..< 8:
@@ -92,7 +97,14 @@ proc referencePaletteIndexed(image: Image, palette: seq[(int, int, int)]): seq[u
       let imageR = img.data[dataIndex].r.int
       let imageG = img.data[dataIndex].g.int
       let imageB = img.data[dataIndex].b.int
-      let (index, palR, palG, palB) = closestPalette(palette, imageR, imageG, imageB)
+      # Same threshold modulation as the streamed template: jitter the
+      # pick, diffuse the true error.
+      let jitter =
+        if ditherJitterAmp > 0: ditherJitterFor(dataIndex, ditherJitterAmp)
+        else: 0
+      let (index, palR, palG, palB) = closestPalette(palette,
+        clip8(imageR + jitter).int, clip8(imageG + jitter).int,
+        clip8(imageB + jitter).int)
       let errorR = imageR - palR
       let errorG = imageG - palG
       let errorB = imageB - palB
@@ -157,7 +169,10 @@ suite "row-streamed dither equals the in-place reference":
         let image = noisyImage(w, h, uint32(maxLevel * 7 + w))
         var gray = newSeq[float](w * h)
         image.toGrayscaleFloat(gray, maxLevel.float)
-        gray.floydSteinberg(w, h)
+        # The streamed template jitters its quantizer (threshold
+        # modulation); the reference must use the same unit to stay
+        # comparable.
+        gray.floydSteinberg(w, h, jitterUnit = maxLevel / 255)
         var streamed = newSeq[int](w * h)
         image.forEachGrayDithered(maxLevel, x, y, level):
           streamed[y * w + x] = level

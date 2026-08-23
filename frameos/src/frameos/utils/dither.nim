@@ -67,7 +67,38 @@ proc toGrayscaleFloat*(image: Image, grayscale: var seq[float], multiple: float 
         p = image.unsafe[x, y]
       grayscale[index] = multiple * (p.r.float * 0.21 + p.g.float * 0.72 + p.b.float * 0.07) / 255.0
 
-proc floydSteinberg*(pixels: var seq[float], width, height: int) =
+# ------------------------------------------------------------ threshold jitter
+#
+# Floyd-Steinberg on a smooth input is its own artifact source: at slowly
+# varying densities the diffusion locks into periodic textures ("worms",
+# checker plateaus), and the boundaries where the texture changes read as
+# faint bands on the panel even from a full-precision canvas. Perturbing
+# only the QUANTIZER'S CHOICE by a small per-pixel hash offset breaks the
+# lock-in, while the diffused error stays measured against the true value —
+# so the local mean is exact and there is no colour shift. Found via the
+# 565 canvas's store dither, whose accidental noise made gradients render
+# visibly smoother than the RGBX canvas (2026-08-24 weather-sky bake-off;
+# amplitude 8 matched it, 16+ turned grainy).
+#
+# The amplitude is in 8-bit units and applies to every consumer of the
+# dither utils — ESP32 packers, Pi drivers, preview paths — so panels
+# render the same picture whatever board drives them. 0 disables.
+
+const DitherJitterDefaultAmp* = 8
+
+var ditherJitterAmp* = DitherJitterDefaultAmp
+
+template ditherJitterFor*(index, amp: int): int =
+  ## Deterministic per-pixel offset in [-amp, amp], hashed from the flat
+  ## pixel index (a pattern keyed on x alone would repeat row over row).
+  ((((index.uint32 * 0x9E3779B1'u32) shr 24).int * (2 * amp + 1)) shr 8) - amp
+
+proc floydSteinberg*(pixels: var seq[float], width, height: int,
+    jitterUnit: float = 0.0) =
+  ## `jitterUnit` is the float value of one 8-bit unit on this scale (pass
+  ## `maxLevel / 255` alongside `toGrayscaleFloat(maxLevel)`); with the
+  ## default 0 the quantizer is unperturbed. See the threshold-jitter note
+  ## below — the error is always against the true value.
   let
     distribution = [7.0 / 16.0, 3.0 / 16.0, 5.0 / 16.0, 1.0 / 16.0]
     dy = [0, 1, 1, 1]
@@ -76,7 +107,12 @@ proc floydSteinberg*(pixels: var seq[float], width, height: int) =
   for y in 0..<height:
     for x in 0..<width:
       let index = y * width + x
-      let value = round(pixels[index])
+      let jitter =
+        if jitterUnit > 0 and ditherJitterAmp > 0:
+          ditherJitterFor(index, ditherJitterAmp).float * jitterUnit
+        else:
+          0.0
+      let value = round(pixels[index] + jitter)
       let error = pixels[index] - value
       pixels[index] = value
 
@@ -150,7 +186,17 @@ template forEachPaletteDithered*(
             imageR = curRow[xx * 3 + 0].int
             imageG = curRow[xx * 3 + 1].int
             imageB = curRow[xx * 3 + 2].int
-            (palIndex, palR, palG, palB) = closestPalette(palette, imageR, imageG, imageB)
+            # The jitter moves only which palette colour is picked; the
+            # error the neighbours inherit is measured against the true
+            # value, so the mean stays exact (threshold modulation).
+            jitter =
+              if ditherJitterAmp > 0:
+                ditherJitterFor(yy * ditherWidth + xx, ditherJitterAmp)
+              else:
+                0
+            (palIndex, palR, palG, palB) = closestPalette(palette,
+              clip8(imageR + jitter).int, clip8(imageG + jitter).int,
+              clip8(imageB + jitter).int)
             errorR = imageR - palR
             errorG = imageG - palG
             errorB = imageB - palB
@@ -191,13 +237,19 @@ template forEachGrayDithered*(
           let p = image.unsafe[rx, ry]
           row[rx] = multiple * (p.r.float * 0.21 + p.g.float * 0.72 + p.b.float * 0.07) / 255.0
       loadRow(curRow, 0)
+      let jitterUnit = multiple / 255.0
       for yy in 0 ..< ditherHeight:
         let hasNext = yy + 1 < ditherHeight
         if hasNext:
           loadRow(nextRow, yy + 1)
         for xx in 0 ..< ditherWidth:
           let
-            value = round(curRow[xx])
+            jitter =
+              if ditherJitterAmp > 0:
+                ditherJitterFor(yy * ditherWidth + xx, ditherJitterAmp).float * jitterUnit
+              else:
+                0.0
+            value = round(curRow[xx] + jitter)
             error = curRow[xx] - value
           block:
             let

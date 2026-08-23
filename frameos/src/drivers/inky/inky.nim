@@ -147,7 +147,7 @@ proc renderFourColor*(self: Driver, image: Image) =
 proc renderBlack*(self: Driver, image: Image) =
   var gray = newSeq[float](image.width * image.height)
   image.toGrayscaleFloat(gray)
-  gray.floydSteinberg(image.width, image.height)
+  gray.floydSteinberg(image.width, image.height, jitterUnit = 1 / 255)
   let levels = grayToLevels(gray, 1)
   setLastGrayImage(levels, 1)
   self.notifyImageAvailable()
