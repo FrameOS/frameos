@@ -5,6 +5,7 @@
 import type { createDb } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { recordAuditEvent } from "./audit";
+import { defaultSignInRedirect } from "./sign-in-redirect";
 import {
   createSession,
   sessionCookieName,
@@ -106,7 +107,7 @@ export function signedInResponse(
 ) {
   const response = NextResponse.json({
     ok: true,
-    redirect: returnTo ?? "/account",
+    redirect: returnTo ?? defaultSignInRedirect,
     ...extra,
   });
   response.cookies.set(sessionCookieName, sessionToken, sessionCookieOptions());

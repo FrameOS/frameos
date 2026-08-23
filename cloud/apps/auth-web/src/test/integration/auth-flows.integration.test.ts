@@ -254,7 +254,7 @@ describe("password signup and login", () => {
     );
     expect(right.status).toBe(200);
     expect(right.headers.get("set-cookie")).toContain(sessionCookieName);
-    expect(await readJson(right)).toMatchObject({ redirect: "/account" });
+    expect(await readJson(right)).toMatchObject({ redirect: "/frames" });
   });
 
   it("rejects logins for unknown emails without leaking existence", async () => {

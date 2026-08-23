@@ -20,6 +20,7 @@ import {
   sessionCookieOptions,
 } from "../../../../src/lib/session";
 import { completeFirstFactor } from "../../../../src/lib/sign-in";
+import { defaultSignInRedirect } from "../../../../src/lib/sign-in-redirect";
 import {
   pendingSignInCookieName,
   pendingSignInCookieOptions,
@@ -122,7 +123,7 @@ export async function POST(request: NextRequest) {
 
   const response = NextResponse.json({
     ok: true,
-    redirect: returnTo ?? "/account",
+    redirect: returnTo ?? defaultSignInRedirect,
   });
   response.cookies.set(sessionCookieName, outcome.token, sessionCookieOptions());
   return response;

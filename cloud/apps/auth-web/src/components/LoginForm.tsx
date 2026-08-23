@@ -4,6 +4,7 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import { KeyRound, LogIn } from "lucide-react";
 import posthog from "posthog-js";
 import { useState } from "react";
+import { defaultSignInRedirect } from "../lib/sign-in-redirect";
 
 export function LoginForm({
   googleEnabled,
@@ -60,7 +61,7 @@ export function LoginForm({
       if (response.ok) {
         const payload = (await response.json()) as { redirect?: string };
         posthog.capture("user_logged_in", { method: "passkey" });
-        window.location.assign(payload.redirect ?? "/account");
+        window.location.assign(payload.redirect ?? defaultSignInRedirect);
         return;
       }
       setError(
@@ -97,7 +98,7 @@ export function LoginForm({
       if (response.ok) {
         const payload = (await response.json()) as { redirect?: string };
         posthog.capture("user_logged_in", { method: "password" });
-        window.location.assign(payload.redirect ?? "/account");
+        window.location.assign(payload.redirect ?? defaultSignInRedirect);
         return;
       }
 

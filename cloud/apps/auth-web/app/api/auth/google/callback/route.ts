@@ -21,6 +21,7 @@ import {
   sessionCookieOptions,
 } from "../../../../../src/lib/session";
 import { completeFirstFactor } from "../../../../../src/lib/sign-in";
+import { defaultSignInRedirect } from "../../../../../src/lib/sign-in-redirect";
 import {
   pendingSignInCookieName,
   pendingSignInCookieOptions,
@@ -178,7 +179,7 @@ export async function GET(request: NextRequest) {
   const sessionToken = outcome.token;
 
   const response = NextResponse.redirect(
-    new URL(returnTo ?? "/account", getBaseUrl()),
+    new URL(returnTo ?? defaultSignInRedirect, getBaseUrl()),
   );
   response.cookies.set(sessionCookieName, sessionToken, sessionCookieOptions());
   response.cookies.delete(authCookieNames.state);

@@ -4,6 +4,7 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import { KeyRound, LogIn } from "lucide-react";
 import posthog from "posthog-js";
 import { useState } from "react";
+import { defaultSignInRedirect } from "../lib/sign-in-redirect";
 
 type Mode = "code" | "recovery";
 
@@ -25,7 +26,7 @@ export function SecondFactorForm({
 
   function finish(payload: { redirect?: string }) {
     posthog.capture("user_logged_in", { method: "second_factor" });
-    window.location.assign(payload.redirect ?? "/account");
+    window.location.assign(payload.redirect ?? defaultSignInRedirect);
   }
 
   function explain(response: Response, payload: { error?: string } | undefined) {

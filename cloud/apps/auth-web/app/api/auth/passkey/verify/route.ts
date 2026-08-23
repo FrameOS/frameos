@@ -26,6 +26,7 @@ import {
   webauthnChallengeCookieName,
   webauthnChallengeCookieOptions,
 } from "../../../../../src/lib/webauthn";
+import { defaultSignInRedirect } from "../../../../../src/lib/sign-in-redirect";
 
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
       : undefined;
   const response = NextResponse.json({
     ok: true,
-    redirect: returnTo ?? "/account",
+    redirect: returnTo ?? defaultSignInRedirect,
   });
   response.cookies.set(sessionCookieName, token, sessionCookieOptions());
   response.cookies.set(webauthnChallengeCookieName, "", {
