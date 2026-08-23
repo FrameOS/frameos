@@ -21,14 +21,10 @@ Two rules that shape most entries:
 
 ## ESP32 memory
 
-- **JPEG cover-fit samples the full row and crops later** (now the gating
-  item for full-quality photos on the 16 MB 13.3" with its RGBX canvas). A 6000x4000
-  photo into the 13.3" 1200x1600 panel plans 5.8 MB with a single 3.75 MB
-  luma buffer; a column window over the cropped region would halve both
-  (docs/esp32-memory.md, 2026-08-23). Touches foldScaledSourceRow, the
-  band row range, EXIF orientation and the fill rects — do it with the
-  jpegsuite fingerprint sweep as the safety net.
-- **Verify on hardware** (docs/esp32-memory.md, 2026-08-23): the 7.3"
+- **Verify on hardware** (docs/esp32-memory.md, 2026-08-23): a 24 MP photo
+  cover-rendered on the 16 MB 13.3" is sharp (no `render:degraded` in the
+  log — the cover window keeps the plan at 2.9 MB inside the RGBX canvas's
+  ~5 MB headroom); the 7.3"
   weather sky renders without bands (RGBX canvas now; boot line
   `canvas: 800x480 rgbx`); the E1004 logs `canvas: 1200x1600 rgb565
   (dithered stores)` and its gradients are band-free; after a text
