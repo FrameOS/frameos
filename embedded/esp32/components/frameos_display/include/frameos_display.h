@@ -47,14 +47,24 @@ const char *fos_display_panel_name(size_t index);
 int fos_display_panel_width(size_t index);
 int fos_display_panel_height(size_t index);
 fos_pixel_format_t fos_display_panel_format(size_t index);
-/* Bytes per pixel of the scene canvas the Nim renderer composites into.
- * 2: pixie's 16-bit RGB 5/6/5 surface (frameos/src/embedded/embedded_runtime.nim,
- * `renderCanvas`). Every panel here is a dithered e-paper and the dither keeps
- * its own full-precision error rows, so the canvas's 5/6-bit colour is
- * below what the output can show — and it is what fits a 1200x1600 canvas
- * in an 8 MB module (3.7 MiB instead of 7.3 MiB). Mirrored by
- * EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL in backend embedded_firmware.py. */
-#define FOS_RENDER_CANVAS_BYTES_PER_PIXEL 2u
+/* Bytes per pixel of the scene canvas the Nim renderer composites into
+ * (frameos/src/embedded/embedded_runtime.nim, `renderCanvas`), decided per
+ * board: 4 (pixie's RGBX) when a full canvas takes at most half the
+ * module's PSRAM, else 2 (pixie's 16-bit RGB 5/6/5 surface). Both the
+ * 800x480 boards (1.5 MB of 8 MB) and a 1200x1600 panel on a 16 MB module
+ * (7.3 MB) get RGBX; 1200x1600 on an 8 MB module gets 565, which is what
+ * makes it fit at all (3.7 MB). Rendering into 565 costs colour: the
+ * dither keeps its error rows at full precision, but the 5/6-bit rounding
+ * of every stored pixel turns a smooth gradient into plateaus the
+ * diffusion then prints as visible bands — so 565 canvases store with a
+ * per-pixel dither (pixie `ditherStores`) and RGBX is used wherever it
+ * fits. The same rule lives in `embedded_render_canvas_bytes_per_pixel` in
+ * backend embedded_firmware.py and `sceneCanvasFormat` in
+ * embedded_runtime.nim; keep the three in step. */
+#define FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE 2u
+size_t fos_render_canvas_bytes_per_pixel(int width, int height, size_t psram_total_bytes);
+/* The above for the selected panel and this module's PSRAM. */
+size_t fos_display_canvas_bytes_per_pixel(void);
 /* Bytes of the scene canvas for the selected panel (0 when headless). */
 size_t fos_display_canvas_bytes(void);
 /* PSRAM the on-device renderer needs for this panel: the scene canvas

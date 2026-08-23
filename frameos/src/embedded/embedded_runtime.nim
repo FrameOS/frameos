@@ -503,16 +503,21 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 #
 # One scene canvas for the device's uptime, not one per render.
 #
-# Two decisions live here. The format: a 16-bit RGB 5/6/5 pixie image, half
-# the bytes of RGBA. Every panel the ESP32 firmware drives is a dithered
-# e-paper, and the dither (`forEachPaletteDithered`, `forEachGrayDithered`)
-# keeps its error state in its own rows at full precision, so the 5/6-bit
-# colour the canvas holds is a precision the output cannot show: a 6-colour
-# Floyd–Steinberg field has per-pixel error dozens of times the 565 step. It
-# is what makes 1200x1600 fit an 8 MB module — RGBA is 7.3 MiB and does not,
-# 565 is 3.7 MiB and does. `-d:frameosCanvasRgbx` keeps the old RGBA canvas
-# for A/B measurement; the Pi runtime and the wasm preview are untouched
-# either way and keep full RGBA.
+# Two decisions live here. The format, decided per board by the firmware
+# (`fos_render_canvas_bytes_per_pixel`, components/frameos_display): RGBX
+# when a full canvas takes at most half the module's PSRAM, else pixie's
+# 16-bit RGB 5/6/5 surface. The 800x480 boards and a 1200x1600 panel on a
+# 16 MB module render in full colour; 1200x1600 on an 8 MB module is the
+# one that needs 565 — RGBA is 7.3 MiB and does not fit, 565 is 3.7 MiB and
+# does. A 565 canvas costs colour even though the dither keeps its error
+# rows at full precision: rounding every stored pixel to 5/6 bits turns a
+# smooth gradient into plateaus (a 480-row sky keeps 11 blue levels of 90),
+# and the diffusion pass prints the plateau edges as bands — seen on the
+# 7.3" weather scene. So a 565 canvas stores with pixie's per-pixel dither
+# (`ditherStores`), which brings the gradient back at no memory cost, and
+# RGBX is used wherever it fits. `-d:frameosCanvasRgbx` / `-d:frameosCanvas565`
+# force a format for A/B measurement; the Pi runtime and the wasm preview are
+# untouched either way and keep full RGBA.
 #
 # The lifetime: the memory comes from one PSRAM block the firmware claims at
 # boot (`frameos_nim_reserve_canvas`, before Wi-Fi and TLS have carved the
@@ -524,12 +529,15 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 # cache never stores the live canvas), so reusing it is safe.
 
 proc canvasBuffer(len: csize_t): pointer {.importc: "frameos_nim_canvas_buffer", cdecl.}
+proc canvasBytesPerPixel(): csize_t {.importc: "fos_display_canvas_bytes_per_pixel", cdecl.}
 
 var sceneCanvas: Image
 
 proc sceneCanvasFormat*(): PixelFormat =
   when defined(frameosCanvasRgbx): pfRgbx
-  else: pfRgb565
+  elif defined(frameosCanvas565): pfRgb565
+  else:
+    if canvasBytesPerPixel() == 4: pfRgbx else: pfRgb565
 
 proc sceneCanvasWidth*(): int =
   if frameConfig.isNil: 0
@@ -564,6 +572,9 @@ proc renderCanvas*(): Image =
     sceneCanvas =
       if format == pfRgb565: newImage565(width, height)
       else: newImage(width, height)
+  if format == pfRgb565:
+    sceneCanvas.ditherStores = true
+  log(&"canvas: {width}x{height} " & (if format == pfRgb565: "rgb565 (dithered stores)" else: "rgbx"))
   sceneCanvas
 
 proc sceneRefreshSeconds*(): float =

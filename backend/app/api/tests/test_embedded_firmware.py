@@ -39,6 +39,7 @@ from app.tasks.embedded_firmware import (
     embedded_provisioning_plan,
     embedded_required_sdkconfig_for_frame,
     embedded_render_psram_bytes,
+    embedded_render_canvas_bytes_per_pixel,
     embedded_render_mode_for_frame,
     embedded_sdkconfig_defaults_for_frame,
     embedded_sd_card_assets_for_frame,
@@ -211,9 +212,10 @@ def test_embedded_firmware_layout_tracks_flash_and_ram():
     assert layout['ram']['width'] == 1200
     assert layout['ram']['height'] == 1600
     assert layout['ram']['pixelFormat'] == FOS_PIXEL_4BPP_SPECTRA6
-    # The canvas is 16-bit RGB (2 B/px); the old key name stays for the UI.
-    assert layout['ram']['canvasBytesPerPixel'] == 2
-    assert layout['ram']['canvasBufferBytes'] == 1200 * 1600 * 2
+    # 1200x1600 on a 16 MB module: a full RGBX canvas (7.3 MB) takes under
+    # half the PSRAM, so the canvas is 4 B/px; the old key name stays for the UI.
+    assert layout['ram']['canvasBytesPerPixel'] == 4
+    assert layout['ram']['canvasBufferBytes'] == 1200 * 1600 * 4
     assert layout['ram']['rgbaBufferBytes'] == layout['ram']['canvasBufferBytes']
     assert layout['ram']['packedBufferBytes'] == 960_000
     assert layout['ram']['renderWorkingBytes'] > layout['ram']['canvasBufferBytes']
@@ -557,14 +559,28 @@ def test_embedded_panel_formats_and_buffer_sizes():
     assert embedded_buffer_size(1200, 1600, FOS_PIXEL_4BPP_SPECTRA6) == 600 * 1600
 
 
+def test_embedded_render_canvas_bytes_per_pixel():
+    mb = 1024 * 1024
+    # RGBX whenever a full canvas is at most half the module's PSRAM.
+    assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb) == 4      # 1.5 MB of 8
+    assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 16 * mb) == 4   # 7.3 MB of 16
+    assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 8 * mb) == 2    # 7.3 MB of 8
+    assert embedded_render_canvas_bytes_per_pixel(0, 0, 8 * mb) == 0
+
+
 def test_embedded_render_psram_estimate():
-    # 800x480 at 2 B/px (768KB) + default packed 1bpp + ~1.5MB reserve is ~2.4MB.
+    mb = 1024 * 1024
+    # 800x480 on 8 MB: RGBX canvas (1.5 MB) + default packed 1bpp + ~1.5MB reserve is ~3.1MB.
     need = embedded_render_psram_bytes(800, 480)
-    assert 2_300_000 < need < 2_500_000
-    # 1200x1600 Spectra 6: 3.84MB canvas + 960KB packed + 1.5MB reserve, under 8MB.
-    need = embedded_render_psram_bytes(1200, 1600, FOS_PIXEL_4BPP_SPECTRA6)
+    assert 3_000_000 < need < 3_200_000
+    # 1200x1600 Spectra 6 on 8 MB: 3.84MB 565 canvas + 960KB packed + 1.5MB reserve, under 8MB.
+    need = embedded_render_psram_bytes(1200, 1600, FOS_PIXEL_4BPP_SPECTRA6, 8 * mb)
     assert 6_300_000 < need < 6_400_000
-    assert need < 8 * 1024 * 1024
+    assert need < 8 * mb
+    # The same panel on 16 MB gets the RGBX canvas: 7.68MB + 960KB + 1.5MB, under 16MB.
+    need = embedded_render_psram_bytes(1200, 1600, FOS_PIXEL_4BPP_SPECTRA6, 16 * mb)
+    assert 10_100_000 < need < 10_300_000
+    assert need < 16 * mb
 
 
 def test_panel_fits_default_8mb_module():
