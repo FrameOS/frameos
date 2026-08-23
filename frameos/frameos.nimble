@@ -16,7 +16,7 @@ bin           = @["frameos"]
 requires "chrono >= 0.3.1"
 requires "checksums >= 0.2.1"
 requires "nim >= 2.2.4"
-requires "https://github.com/FrameOS/pixie#64ce3c9d50170ba5c1e879b414710650a2811423"
+requires "https://github.com/FrameOS/pixie#622974d7531eadbdbf43f9c0037d215d2688b312"
 requires "mummy >= 0.4.7"
 requires "linuxfb >= 0.1.0"
 requires "QRgen >= 3.1.0"

@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
 import { PublicShell } from "../../../src/components/PublicShell";

@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { accounts, storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {

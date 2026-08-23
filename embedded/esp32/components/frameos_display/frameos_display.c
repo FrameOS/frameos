@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -161,11 +162,28 @@ fos_pixel_format_t fos_display_panel_format(size_t index)
  * (frameos/src/frameos/utils/memory.nim). */
 #define FOS_RENDER_PSRAM_RESERVE (1536u * 1024u)
 
+size_t fos_render_canvas_bytes_per_pixel(int width, int height, size_t psram_total_bytes)
+{
+    if (width <= 0 || height <= 0) return 0;
+    size_t rgbx = (size_t)width * (size_t)height * 4u;
+    if (psram_total_bytes > 0 && rgbx * FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE <= psram_total_bytes) {
+        return 4;
+    }
+    return 2;
+}
+
+size_t fos_display_canvas_bytes_per_pixel(void)
+{
+    if (!s_panel) return 0;
+    return fos_render_canvas_bytes_per_pixel(fos_display_width(), fos_display_height(),
+                                             heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
+}
+
 size_t fos_display_canvas_bytes(void)
 {
     if (!s_panel) return 0;
     return (size_t)fos_display_width() * (size_t)fos_display_height() *
-           (size_t)FOS_RENDER_CANVAS_BYTES_PER_PIXEL;
+           fos_display_canvas_bytes_per_pixel();
 }
 
 size_t fos_display_render_psram_bytes(void)

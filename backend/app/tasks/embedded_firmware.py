@@ -112,7 +112,7 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
 EMBEDDED_PLATFORM_ALIASES = EMBEDDED_PLATFORMS[SUPPORTED_EMBEDDED_PLATFORM]["aliases"]
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 48  # 16-bit render canvas reserved at boot, streamed packers, E1004 (T133A01) preset
+EMBEDDED_FIRMWARE_VERSION = 49  # RGBX canvas where it fits, dithered 565 stores, contiguous decode budget, OOM-leak restart
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -573,13 +573,17 @@ EMBEDDED_RELEASE_FIRMWARE: dict[str, dict[str, str]] = {
     "esp32-c3": {"asset": "esp32-c3-generic", "flashSize": "4MB"},
 }
 # Memory guardrail (M4): the on-device renderer composites into a pixie canvas
-# (16-bit RGB 5/6/5, 2 B/px — frameos/src/embedded/embedded_runtime.nim
-# `renderCanvas`), packs it to the selected panel format, and needs headroom
-# for the Nim heap + QuickJS. Keep both constants in sync with
-# FOS_RENDER_CANVAS_BYTES_PER_PIXEL / FOS_RENDER_PSRAM_RESERVE in
-# components/frameos_display (the firmware's boot-time fit check) and
-# EmbeddedReserveBytes in frameos/src/frameos/utils/memory.nim.
-EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL = 2
+# (frameos/src/embedded/embedded_runtime.nim `renderCanvas`), packs it to the
+# selected panel format, and needs headroom for the Nim heap + QuickJS. The
+# canvas is RGBX (4 B/px) when a full canvas takes at most half the module's
+# PSRAM, else 16-bit RGB 5/6/5 (2 B/px) — the 800x480 boards and a 1200x1600
+# panel on a 16 MB module render in full colour, 1200x1600 on 8 MB is the one
+# that needs 565. Keep the rule and the reserve in sync with
+# fos_render_canvas_bytes_per_pixel / FOS_RENDER_PSRAM_RESERVE in
+# components/frameos_display (the firmware's boot-time fit check),
+# sceneCanvasFormat in embedded_runtime.nim, and EmbeddedReserveBytes in
+# frameos/src/frameos/utils/memory.nim.
+EMBEDDED_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE = 2
 EMBEDDED_RENDER_PSRAM_RESERVE_BYTES = 1536 * 1024
 EMBEDDED_QUICKJS_HEAP_LIMIT_BYTES = 4 * 1024 * 1024
 EMBEDDED_PREVIEW_SNAPSHOT_RESERVE_BYTES = 1024 * 1024
@@ -1198,9 +1202,23 @@ def embedded_buffer_size(width: int, height: int, pixel_format: int) -> int:
     raise ValueError(f"Unsupported embedded pixel format: {pixel_format}")
 
 
-def embedded_render_psram_bytes(width: int, height: int, pixel_format: int = FOS_PIXEL_1BPP) -> int:
-    """PSRAM the on-device renderer needs for a width×height panel."""
-    canvas = width * height * EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL
+def embedded_render_canvas_bytes_per_pixel(width: int, height: int, psram_bytes: int) -> int:
+    """Bytes per pixel of the scene canvas on a module with ``psram_bytes`` of PSRAM:
+    4 (RGBX) when a full canvas takes at most half of it, else 2 (RGB 5/6/5)."""
+    if width <= 0 or height <= 0:
+        return 0
+    rgbx = width * height * 4
+    if psram_bytes > 0 and rgbx * EMBEDDED_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE <= psram_bytes:
+        return 4
+    return 2
+
+
+def embedded_render_psram_bytes(
+    width: int, height: int, pixel_format: int = FOS_PIXEL_1BPP, psram_bytes: int = 8 * 1024 * 1024
+) -> int:
+    """PSRAM the on-device renderer needs for a width×height panel on a module with
+    ``psram_bytes`` of PSRAM (the canvas format depends on it)."""
+    canvas = width * height * embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes)
     packed = embedded_buffer_size(width, height, pixel_format)
     return canvas + packed + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
 
@@ -1318,9 +1336,9 @@ def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | 
     dims = device_dimensions(frame.device) or (0, 0)
     width, height = dims
     pixel_format = embedded_pixel_format_for_panel(panel)
-    canvas_bytes = (
-        width * height * EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL if width > 0 and height > 0 else 0
-    )
+    psram_bytes = embedded_module_psram_bytes(frame)
+    canvas_bytes_per_pixel = embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes)
+    canvas_bytes = width * height * canvas_bytes_per_pixel
     packed_bytes = embedded_buffer_size(width, height, pixel_format) if width > 0 and height > 0 else 0
     render_mode = embedded_render_mode_for_frame(frame)
     render_working_bytes = (
@@ -1329,7 +1347,6 @@ def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | 
         else 0
     )
     preview_bmp_bytes = _embedded_bmp_preview_bytes(width, height, pixel_format)
-    psram_bytes = embedded_module_psram_bytes(frame)
     return {
         "flash": {
             "flashSize": flash_profile["flashSize"],
@@ -1350,10 +1367,10 @@ def embedded_firmware_layout_for_frame(frame: Frame, firmware: dict[str, Any] | 
             "pixelFormat": pixel_format,
             "pixelFormatName": _pixel_format_name(pixel_format),
             "renderMode": "local" if render_mode == EMBEDDED_RENDER_LOCAL else "remote",
-            # Historical key name: the canvas is 16-bit RGB now, not RGBA.
+            # Historical key name: the canvas is RGBX or 16-bit RGB, never RGBA.
             "rgbaBufferBytes": canvas_bytes,
             "canvasBufferBytes": canvas_bytes,
-            "canvasBytesPerPixel": EMBEDDED_RENDER_CANVAS_BYTES_PER_PIXEL,
+            "canvasBytesPerPixel": canvas_bytes_per_pixel,
             "packedBufferBytes": packed_bytes,
             "renderReserveBytes": EMBEDDED_RENDER_PSRAM_RESERVE_BYTES,
             "renderWorkingBytes": render_working_bytes,
@@ -1387,8 +1404,8 @@ def check_embedded_panel_fits_memory(frame: Frame) -> None:
     if not dims:
         return
     width, height = dims
-    need = embedded_render_psram_bytes(width, height, embedded_pixel_format_for_panel(panel))
     have = embedded_module_psram_bytes(frame)
+    need = embedded_render_psram_bytes(width, height, embedded_pixel_format_for_panel(panel), have)
     if need > have:
         raise ValueError(
             f"Panel {panel} ({width}x{height}) needs ~{need / (1024 * 1024):.1f} MB PSRAM to "
