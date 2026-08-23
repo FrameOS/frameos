@@ -58,6 +58,28 @@ pathological decodes — which the budget/degrade ladder already absorbs —
 while weakening the OOM-containment backstop that keeps a failed
 allocation from rebooting the device. Decision 2026-08-14: keep 1 MB.
 
+## Leaks are permanent, and they look like blur (2026-08-23)
+
+A longjmp OOM abort skips every Nim destructor, so whatever the aborted
+call held is gone until reboot. Case from a 16 MB 13.3" board on 2026.8.34:
+idle free PSRAM was 10.3 MB after boot; a scene switch cost 1.6 MB (open
+question, no abort logged); one `render-cycle-failed` at 01:08Z took it to
+4.3 MB with a 1.9 MB largest block. Every render afterwards "succeeded" —
+`decodeIntoTargetWithDegrade` dropped each 24 MP photo to a half/quarter
+decode and stretched it — so the abort streak reset on every render and
+the frame showed soft images for a day with nothing in the log.
+
+Two things changed:
+
+- `render:degraded` (utils/image.nim) is logged each time the ladder drops a
+  rung, with the rung, the decode size and the headroom it was planned
+  against. A frame whose photos got soft now says why in the cloud log.
+- `memory:oomAbort` (frameos_nim_glue.c) is logged on every abort, with
+  free/largest PSRAM and the post-first-render baseline. When one abort
+  leaves less than `FOS_NIM_OOM_LEAK_RESTART_PERCENT` (50%) of that
+  baseline free, the frame restarts immediately instead of rendering
+  degraded until someone power-cycles it. The old streak rules stay.
+
 ## Boot and render costs
 
 Same bench frame, for context when weighing "do less at boot" ideas:

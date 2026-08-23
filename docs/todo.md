@@ -19,6 +19,21 @@ Two rules that shape most entries:
 
 ---
 
+## ESP32 memory
+
+- **Scene switch leaks ~1.6 MB of PSRAM** (13.3" 16 MB board, 2026.8.34, log
+  2026-08-22T22:04Z): switching "SD card image" → "Unsplash image" (which
+  rendered its missing-API-key error frame) dropped idle free PSRAM from
+  10.3 MB to 8.7 MB and the largest block from 7.4 MB to 6–7 MB; switching
+  back did not recover it. No OOM abort was logged. Find what the old
+  scene's teardown keeps (cached image? QuickJS runtime? error-frame
+  intermediates?) — with the SD scene's 24 MP photos the headroom is thin
+  enough that this leak is what made the next abort possible.
+- **Verify on hardware**: `memory:oomAbort` + leak-percent restart and the
+  `render:degraded` event (docs/esp32-memory.md, 2026-08-23). Cheapest
+  repro: assign a scene that fetches an oversized image with the budget
+  forced low, watch the cloud log for both events.
+
 ## Pre-release manual test sweep
 
 `docs/manual-testing-todo.md` collects every unticked manual checkbox and

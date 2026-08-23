@@ -324,22 +324,64 @@ void fos_nim_fatal_oom(size_t size)
  * than one clean restart. */
 #define FOS_NIM_OOM_ABORT_RESTART_STREAK 4
 
+/* The streak rules above only fire when renders keep failing. A single abort
+ * that leaks a big chunk but leaves enough for the decode budget's degrade
+ * ladder is worse in practice: every render from then on "succeeds" at half
+ * or quarter resolution, the streak resets each time, and the frame shows
+ * soft images forever. Seen on a 16 MB 13.3" board: one abort took free
+ * PSRAM from 8.6 MB to 4.3 MB (largest block 6 MB -> 1.9 MB) and every
+ * photo after it rendered blurry for a day. Leaked memory never comes back,
+ * so when one abort has eaten more than this share of what a healthy boot
+ * had free, restart right away instead of rendering degraded until the next
+ * power cycle. The baseline is taken after the first successful render, the
+ * steady state the frame actually lives in. */
+#define FOS_NIM_OOM_LEAK_RESTART_PERCENT 50
+
 static int s_frame_width = 0;
 static int s_frame_height = 0;
 static unsigned s_nim_oom_abort_streak = 0;
+static size_t s_psram_free_baseline = 0;
+
+static void nim_note_healthy_render(void)
+{
+    s_nim_oom_abort_streak = 0;
+    if (s_psram_free_baseline == 0) {
+        s_psram_free_baseline = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        ESP_LOGI("fos_nim", "PSRAM baseline after first render: %u bytes free",
+                 (unsigned)s_psram_free_baseline);
+    }
+}
 
 static void nim_oom_abort_note(const char *what)
 {
     s_nim_oom_abort_streak++;
     size_t canvas_bytes = (size_t)s_frame_width * (size_t)s_frame_height * 4u;
     size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     bool canvas_impossible = canvas_bytes > 0 && largest < canvas_bytes;
-    ESP_LOGE("fos_nim", "%s aborted: out of memory (abort streak %u, largest PSRAM block %u, canvas needs %u)",
-             what, s_nim_oom_abort_streak, (unsigned)largest, (unsigned)canvas_bytes);
-    if ((s_nim_oom_abort_streak >= 2 && canvas_impossible) ||
-        s_nim_oom_abort_streak >= FOS_NIM_OOM_ABORT_RESTART_STREAK) {
+    bool leaked_too_much = s_psram_free_baseline > 0 &&
+        free_psram < s_psram_free_baseline / 100u * FOS_NIM_OOM_LEAK_RESTART_PERCENT;
+    ESP_LOGE("fos_nim", "%s aborted: out of memory (abort streak %u, PSRAM free %u largest block %u, baseline %u, canvas needs %u)",
+             what, s_nim_oom_abort_streak, (unsigned)free_psram, (unsigned)largest,
+             (unsigned)s_psram_free_baseline, (unsigned)canvas_bytes);
+    bool restart = (s_nim_oom_abort_streak >= 2 && canvas_impossible) ||
+                   s_nim_oom_abort_streak >= FOS_NIM_OOM_ABORT_RESTART_STREAK ||
+                   leaked_too_much;
+    /* The serial line above never reaches the cloud; this one does, so the
+     * "render-cycle-failed" it precedes has a cause next to it. */
+    char line[360];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"memory:oomAbort\",\"source\":\"esp32\","
+             "\"where\":\"%s\",\"streak\":%u,\"freePsram\":%u,"
+             "\"largestPsramBlock\":%u,\"baselinePsram\":%u,"
+             "\"status\":\"%s\"}",
+             what, s_nim_oom_abort_streak, (unsigned)free_psram, (unsigned)largest,
+             (unsigned)s_psram_free_baseline, restart ? "restarting" : "leaked");
+    frameos_nim_log_hook(line);
+    if (restart) {
         ESP_LOGE("fos_nim", "OOM aborts have leaked the Nim heap beyond recovery; restarting");
-        vTaskDelay(pdMS_TO_TICKS(250)); /* let the log lines drain */
+        frameos_nim_flush_logs();
+        vTaskDelay(pdMS_TO_TICKS(1500)); /* let the log lines drain, cloud included */
         esp_restart();
     }
 }
@@ -426,7 +468,7 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_impl(buf, len, pixel_format);
-        if (result == 0) s_nim_oom_abort_streak = 0;
+        if (result == 0) nim_note_healthy_render();
     } else {
         nim_oom_abort_note("render");
         result = -1;
@@ -445,7 +487,7 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_alloc_impl(buf, len, pixel_format);
-        if (result == 0) s_nim_oom_abort_streak = 0;
+        if (result == 0) nim_note_healthy_render();
     } else {
         nim_oom_abort_note("render");
         if (s_pending_render_buffer != NULL) {

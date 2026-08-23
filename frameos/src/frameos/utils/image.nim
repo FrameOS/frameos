@@ -14,6 +14,7 @@ import std/xmltree
 import std/strtabs
 
 import frameos/spool
+import frameos/channels
 import frameos/utils/http_client
 import frameos/utils/memory
 import frameos/utils/font
@@ -583,6 +584,20 @@ proc decodeIntoTargetWithDegrade*(target: Image, fit: ScaledDecodeFit,
         # decode, so the upscale is a pure stretch.
         target.scaleAndDrawImage(temp, "stretch")
         refreshDecodeBudgetInto()
+        # A degraded render is silent on the panel — it only looks soft — so
+        # say so in the log: a frame that "used to be sharp" is otherwise
+        # undiagnosable from the cloud (seen on a 13.3" whose heap had been
+        # leaked by an OOM abort: every render quietly fell to this rung).
+        log(%*{
+          "event": "render:degraded",
+          "divisor": divisor,
+          "width": temp.width,
+          "height": temp.height,
+          "targetWidth": target.width,
+          "targetHeight": target.height,
+          "headroomBytes": availableRenderHeadroomBytes(),
+          "reason": refusalMsg,
+        })
         return target
       except PixieError as retryRefusal:
         if not retryRefusal.msg.contains("memory budget"):
