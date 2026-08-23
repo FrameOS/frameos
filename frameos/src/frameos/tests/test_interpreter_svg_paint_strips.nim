@@ -4,14 +4,17 @@ import ../interpreter
 import ../types
 import ../utils/memory
 
-# End-to-end check for the banded SVG rasteriser on a real, JS-generated
-# scene: the bundled "Weather" graph in stacked mode. It puts a render/split
-# with two cells in front of three weatherPanel apps, each of which emits an
-# 800x192 / 800x288 SVG with a gradient background — the shape that made an
-# 8MB-PSRAM ESP32 run out of memory (see docs in utils/image.nim).
+# End-to-end check for pixie's striped paint-server fills on a real,
+# JS-generated scene: the bundled "Weather" graph in stacked mode. It puts a
+# render/split with two cells in front of three weatherPanel apps, each of
+# which emits an 800x192 / 800x288 SVG with a gradient background — the
+# shape whose whole-cell mask+fill pair OOM-aborted the 13.3" ESP32 (9.2 MB
+# for a 1200x960 cell) and once made the 8MB 7.3" run out of memory.
 #
-# The scene must render the same picture whether the SVGs are rasterised in
-# one pass (hosts, RAM-rich frames) or band by band (memory-tight devices).
+# The scene must render the same picture whether the gradient fills run in
+# one pass (hosts, RAM-rich frames) or strip by strip (memory-tight devices),
+# through the render/image fusion path that rasterises straight into the
+# canvas cell.
 
 const SceneFile = "../e2e/scenes/weatherStacked.json"
 
@@ -64,33 +67,33 @@ for color in onePass:
     inc inked
 doAssert inked > 20000, "weatherStacked drew only " & $inked & " bright pixels"
 
-# ESP32-class headroom: the panels come back band by band.
+# ESP32-class headroom: the gradient fills come back strip by strip.
 availableRenderBytesOverride = 3 * 1024 * 1024
 refreshDecodeBudget()
-let banded = renderScene()
-doAssert banded.width == 800 and banded.height == 480
+let striped = renderScene()
+doAssert striped.width == 800 and striped.height == 480
 
 var worst = 0
 var differing = 0
 for i in 0 ..< onePass.dataLen:
   let
     p = onePass.data[i]
-    q = banded.data[i]
+    q = striped.data[i]
     d = max(max(abs(p.r.int - q.r.int), abs(p.g.int - q.g.int)),
             max(abs(p.b.int - q.b.int), abs(p.a.int - q.a.int)))
   if d > 0:
     inc differing
     if d > worst: worst = d
 
-# Only float32 rounding of the band-shifted shape coordinates may move an
+# Only float32 rounding of the strip-shifted shape coordinates may move an
 # antialiased edge sample; nothing structural may change.
-doAssert worst <= 8, "banded weatherStacked differs by " & $worst & " (max channel)"
+doAssert worst <= 8, "striped weatherStacked differs by " & $worst & " (max channel)"
 doAssert differing * 100 <= onePass.dataLen,
-  "banded weatherStacked differs in " & $differing & " of " &
+  "striped weatherStacked differs in " & $differing & " of " &
   $onePass.dataLen & " pixels"
 
 availableRenderBytesOverride = 0
 refreshDecodeBudget()
 
-echo "test_interpreter_svg_banding: worstDiff=", worst, " differingPixels=",
+echo "test_interpreter_svg_paint_strips: worstDiff=", worst, " differingPixels=",
   differing, "/", onePass.dataLen
