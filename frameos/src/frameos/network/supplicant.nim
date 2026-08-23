@@ -44,9 +44,17 @@ const
   ## wpa_cli's compiled-in default. /var/run is a symlink to /run on both
   ## buildroot-systemd and Debian, so this one path works everywhere.
   wpaCtrlDir* = "/var/run/wpa_supplicant"
-  ## busybox udhcpc's default lease handler; passed explicitly because a
-  ## udhcpc without a script configures nothing.
-  udhcpcScriptPath* = "/usr/share/udhcpc/default.script"
+  ## busybox udhcpc's default lease handler. Only a last resort now: it
+  ## appends nameservers to /etc/resolv.conf, which is a dead letter on an
+  ## image that runs systemd-resolved (see udhcpcScript below).
+  stockUdhcpcScriptPath* = "/usr/share/udhcpc/default.script"
+  ## Our own lease handler, written at runtime so it ships with the binary
+  ## instead of the SD image (the precompiled-image path never rebuilds the
+  ## rootfs, and / is read-only anyway). udhcpc execs it, hence 0755.
+  udhcpcScriptPath* = networkStateDir & "/udhcpc.script"
+  ## What the lease handler learned, one `key=value` per line, for logging.
+  ## Lives in /run so a stale lease cannot outlive a reboot.
+  udhcpcLeaseInfoPrefix* = networkRunDir & "/udhcpc-"
   ## Same address NetworkManager's `ipv4.method shared` hands out, so the
   ## captive setup portal keeps the address users may have bookmarked.
   hotspotAddress* = "10.42.0.1"
@@ -95,6 +103,168 @@ type
     changed*: bool
     path*: string
     error*: string
+
+  DhcpLeaseInfo* = object
+    ## Parsed udhcpcLeaseInfoPrefix file; every field "" / empty when the
+    ## handler never ran (stock script, dhcpcd, no lease).
+    ip*: string
+    router*: string
+    dns*: seq[string]
+    domain*: string
+    ## "resolved" when systemd-resolved accepted the servers, "resolv.conf"
+    ## when they went into the file instead.
+    resolver*: string
+
+const
+  ## The udhcpc lease handler FrameOS installs at udhcpcScriptPath.
+  ##
+  ## Why not busybox's default.script: the armv6 buildroot image (Pi Zero W)
+  ## is systemd with systemd-resolved but - because the stable ARMv6 toolchain
+  ## has 4.19 headers - neither systemd-networkd nor NetworkManager. Buildroot
+  ## therefore points /etc/resolv.conf into /run/systemd/resolve and rewrites
+  ## nsswitch to `hosts: resolve [!UNAVAIL=return] files dns`, so glibc asks
+  ## resolved and never reads the file. The stock script only ever appends
+  ## `nameserver` lines to that file, so a frame got its address and default
+  ## route from DHCP and then failed every lookup with "Temporary failure in
+  ## name resolution" until the boot network check gave up and raised the
+  ## setup hotspot (Pi Zero W + Inky 13.3, 2026-08-23). Pi 4 frames never saw
+  ## this because NetworkManager feeds resolved over D-Bus.
+  ##
+  ## So: hand the DHCP servers to resolvectl when resolved answers, and only
+  ## fall back to resolv.conf - through the symlink, creating its parent in
+  ## /run if needed - when it does not. POSIX sh, busybox-only tools.
+  udhcpcScript* = """#!/bin/sh
+# FrameOS udhcpc lease handler. Written by frameos at boot
+# (frameos/src/frameos/network/supplicant.nim); edits here are overwritten.
+#
+# Unlike busybox's default.script this also tells systemd-resolved about the
+# DHCP nameservers. On images with resolved but no networkd/NetworkManager
+# (the Pi Zero W buildroot image) /etc/resolv.conf is never consulted, so
+# without this step every lookup fails with "Temporary failure in name
+# resolution" even though the interface has an address and a route.
+
+[ -n "$1" ] || { echo "Error: should be called from udhcpc" >&2; exit 1; }
+
+ACTION="$1"
+RESOLV_CONF="/etc/resolv.conf"
+LEASE_DIR="/run/frameos"
+LEASE_INFO="$LEASE_DIR/udhcpc-$interface.lease"
+
+# prefer the rfc3397 search list (option 119) over the single domain
+search_list=""
+if [ -n "$search" ]; then
+	search_list="$search"
+elif [ -n "$domain" ]; then
+	search_list="$domain"
+fi
+
+resolv_conf_target() {
+	# /etc/resolv.conf is a symlink into /run on systemd images, and its
+	# target does not exist until resolved creates it. Resolve the link by
+	# hand so the fallback can create the parent directory instead of
+	# failing silently the way the stock script did.
+	# readlink -f only counts when it succeeds: some builds print a partial
+	# path (up to the missing component) and still exit non-zero.
+	target=$(readlink -f "$RESOLV_CONF" 2>/dev/null) || target=""
+	if [ -z "$target" ] && [ -L "$RESOLV_CONF" ]; then
+		link=$(readlink "$RESOLV_CONF" 2>/dev/null)
+		case "$link" in
+			/*) target="$link" ;;
+			?*) target="$(dirname "$RESOLV_CONF")/$link" ;;
+		esac
+	fi
+	[ -n "$target" ] || target="$RESOLV_CONF"
+	echo "$target"
+}
+
+write_resolv_conf() {
+	target=$(resolv_conf_target)
+	mkdir -p "$(dirname "$target")" 2>/dev/null
+	tmp="$target.udhcpc.$$"
+	{
+		[ -e "$target" ] && grep -vE "# $interface\$" "$target"
+		[ -n "$search_list" ] && echo "search $search_list # $interface"
+		for i in $dns; do
+			echo "nameserver $i # $interface"
+		done
+		:
+	} > "$tmp" 2>/dev/null && mv -f "$tmp" "$target" 2>/dev/null || rm -f "$tmp"
+}
+
+apply_dns() {
+	# resolvectl fails fast when resolved is not running (no bus), which is
+	# exactly when resolv.conf is the file glibc will read.
+	if command -v resolvectl >/dev/null 2>&1 && \
+	   resolvectl dns "$interface" $dns >/dev/null 2>&1; then
+		if [ -n "$search_list" ]; then
+			resolvectl domain "$interface" $search_list >/dev/null 2>&1
+		fi
+		echo resolved
+	else
+		write_resolv_conf
+		echo resolv.conf
+	fi
+}
+
+write_lease_info() {
+	mkdir -p "$LEASE_DIR" 2>/dev/null
+	{
+		echo "action=$ACTION"
+		echo "ip=$ip"
+		echo "mask=$mask"
+		echo "router=$router"
+		echo "dns=$dns"
+		echo "domain=$search_list"
+		echo "resolver=$1"
+	} > "$LEASE_INFO" 2>/dev/null
+}
+
+case "$ACTION" in
+	deconfig)
+		ip link set "$interface" up 2>/dev/null
+		ip -4 addr flush dev "$interface" 2>/dev/null
+		if command -v resolvectl >/dev/null 2>&1; then
+			resolvectl revert "$interface" >/dev/null 2>&1
+		fi
+		dns=""
+		search_list=""
+		write_resolv_conf
+		rm -f "$LEASE_INFO" 2>/dev/null
+		;;
+
+	leasefail|nak)
+		write_lease_info none
+		;;
+
+	renew|bound)
+		ip -4 addr flush dev "$interface" 2>/dev/null
+		ip addr add "$ip/${mask:-24}" ${broadcast:+broadcast "$broadcast"} dev "$interface"
+
+		# RFC3442: a Classless Static Routes option overrides the Router option.
+		if [ -n "$staticroutes" ]; then
+			set -- $staticroutes
+			while [ -n "$1" ] && [ -n "$2" ]; do
+				ip route add "$1" via "$2" dev "$interface" 2>/dev/null
+				shift 2
+			done
+		elif [ -n "$router" ]; then
+			# bounded: an `ip` that never fails must not hang the lease
+			n=0
+			while [ $n -lt 8 ] && ip route del default dev "$interface" 2>/dev/null; do
+				n=$((n + 1))
+			done
+			for i in $router; do
+				ip route add default via "$i" dev "$interface" 2>/dev/null
+			done
+		fi
+
+		resolver=$(apply_dns)
+		write_lease_info "$resolver"
+		;;
+esac
+
+exit 0
+"""
 
 proc shq(s: string): string =
   ## Shell-safe single-quote wrapper (POSIX), same as portal.nim's.
@@ -563,7 +733,28 @@ proc dnsmasqCommand*(iface: string): string =
     " --address=/#/" & hotspotAddress &
     " --pid-file=" & shq(dnsmasqPidPath)
 
-proc dhcpClientCommand*(client, iface: string, scriptPath = ""): string =
+proc validDhcpHostname*(name: string): bool =
+  ## RFC 952/1123 label: what a router will accept in DHCP option 12 and
+  ## what is safe to splice into a command line.
+  if name.len == 0 or name.len > 63 or name[0] == '-' or name[^1] == '-':
+    return false
+  for ch in name:
+    if not (ch in {'a'..'z', 'A'..'Z', '0'..'9', '-'}):
+      return false
+  true
+
+proc udhcpcOptions(scriptPath, hostname: string): string =
+  ## busybox sends no hostname unless told to (`-x hostname:`), so without
+  ## this the router's DHCP table shows a bare MAC while Pi 4 frames, whose
+  ## lease NetworkManager takes, show up by name. Same reason the hostname
+  ## goes on the renew daemon: a renewal without it would drop the name.
+  result = ""
+  if scriptPath.len > 0:
+    result.add(" -s " & shq(scriptPath))
+  if validDhcpHostname(hostname):
+    result.add(" -x hostname:" & shq(hostname))
+
+proc dhcpClientCommand*(client, iface: string, scriptPath = "", hostname = ""): string =
   ## Bounded, foreground lease acquisition: every variant gets its own
   ## retry/timeout budget so none of them can sit on the portal thread until
   ## the outer process timeout fires.
@@ -572,15 +763,16 @@ proc dhcpClientCommand*(client, iface: string, scriptPath = ""): string =
     # busybox: -f foreground, -q quit once bound, -n give up instead of
     # backgrounding, -t/-T retry budget. Without -s it configures nothing.
     "sudo udhcpc -i " & shq(iface) & " -f -n -q -t 5 -T 3 -A 2" &
-      (if scriptPath.len > 0: " -s " & shq(scriptPath) else: "")
+      udhcpcOptions(scriptPath, hostname)
   of "dhcpcd":
+    # dhcpcd and dhclient send the system hostname on their own.
     "sudo dhcpcd -w -t 15 " & shq(iface)
   of "dhclient":
     "sudo dhclient -1 -v " & shq(iface)
   else:
     ""
 
-proc dhcpRenewCommand*(client, iface: string, scriptPath = ""): string =
+proc dhcpRenewCommand*(client, iface: string, scriptPath = "", hostname = ""): string =
   ## The acquisition above exits as soon as it is bound, so for udhcpc a
   ## second, daemonised client has to stay behind to renew - otherwise the
   ## frame silently loses its address when the lease expires. dhcpcd and
@@ -588,7 +780,31 @@ proc dhcpRenewCommand*(client, iface: string, scriptPath = ""): string =
   if client != "udhcpc":
     return ""
   "sudo udhcpc -i " & shq(iface) & " -t 5 -T 3 -A 20" &
-    (if scriptPath.len > 0: " -s " & shq(scriptPath) else: "")
+    udhcpcOptions(scriptPath, hostname)
+
+proc leaseInfoPath*(iface: string): string =
+  udhcpcLeaseInfoPrefix & iface & ".lease"
+
+proc parseLeaseInfo*(content: string): DhcpLeaseInfo =
+  ## Reads the `key=value` lines the lease handler leaves in /run/frameos.
+  for rawLine in content.splitLines():
+    let line = rawLine.strip()
+    let eq = line.find('=')
+    if eq <= 0:
+      continue
+    let key = line[0 ..< eq]
+    let value = line[eq + 1 .. ^1].strip()
+    case key
+    of "ip": result.ip = value
+    of "router": result.router = value
+    of "dns": result.dns = value.splitWhitespace()
+    of "domain": result.domain = value
+    of "resolver": result.resolver = value
+    else: discard
+
+proc leaseInfoJson*(info: DhcpLeaseInfo): JsonNode =
+  %*{"ip": info.ip, "router": info.router, "dns": info.dns,
+     "domain": info.domain, "resolver": info.resolver}
 
 # ---------------------------------------------------------------------------
 # Operations (all side effects go through NetworkContext)
@@ -849,18 +1065,53 @@ proc waitForAssociation(ctx: NetworkContext, device: string,
       return
     ctx.sleep(associateDelayMs)
 
+proc ensureUdhcpcScript*(ctx: NetworkContext): string =
+  ## Installs (or refreshes) the FrameOS lease handler and returns the path
+  ## udhcpc should run. Falls back to busybox's script only when the state
+  ## partition refuses the write - a lease without DNS still beats no lease.
+  ensureDir(ctx, networkStateDir)
+  ensureDir(ctx, networkRunDir)
+  if ctx.readFile(udhcpcScriptPath) == udhcpcScript or
+      ctx.writeFile(udhcpcScriptPath, udhcpcScript, 0o755):
+    return udhcpcScriptPath
+  ctx.log("portal:supplicant:dhcpScript:writeFailed", %*{"path": udhcpcScriptPath})
+  if ctx.pathExists(stockUdhcpcScriptPath): stockUdhcpcScriptPath else: ""
+
+proc dhcpHostname*(ctx: NetworkContext): string =
+  ## The name to announce in DHCP option 12: /etc/hostname is what the
+  ## first-boot script and the portal both write, `hostname` is the fallback
+  ## for images where that file is missing.
+  result = ctx.readFile("/etc/hostname").strip()
+  if result.len == 0:
+    let (output, _) = ctx.run("hostname 2>/dev/null || true", "")
+    result = output.strip()
+  if not validDhcpHostname(result):
+    result = ""
+
+proc readLeaseInfo*(ctx: NetworkContext, device: string): DhcpLeaseInfo =
+  parseLeaseInfo(ctx.readFile(leaseInfoPath(device)))
+
 proc requestDhcpLease(ctx: NetworkContext, device: string, probe: NetworkToolProbe): string =
   ## Returns the acquired IPv4 address, or "" when no lease arrived.
   let client = pickDhcpClient(probe.dhcpClients)
   if client.len == 0:
     return ""
-  let script = if ctx.pathExists(udhcpcScriptPath): udhcpcScriptPath else: ""
-  discard ctx.run(dhcpClientCommand(client, device, script) & " 2>&1 || true", "")
+  let script = if client == "udhcpc": ensureUdhcpcScript(ctx) else: ""
+  let hostname = dhcpHostname(ctx)
+  discard ctx.run(dhcpClientCommand(client, device, script, hostname) & " 2>&1 || true", "")
   let (output, _) = ctx.run("ip -4 addr show dev " & shq(device) & " 2>/dev/null || true", "")
   result = parseIpv4Address(output)
+  # One line that says whether DNS actually went anywhere; "connected but
+  # nothing resolves" used to be invisible in the logs.
+  var lease = leaseInfoJson(readLeaseInfo(ctx, device))
+  lease["device"] = %*device
+  lease["client"] = %*client
+  lease["address"] = %*result
+  lease["hostname"] = %*hostname
+  ctx.log("portal:supplicant:dhcp", lease)
   if result.len == 0:
     return
-  let renew = dhcpRenewCommand(client, device, script)
+  let renew = dhcpRenewCommand(client, device, script, hostname)
   if renew.len > 0:
     # Fire and forget: it daemonises immediately and keeps the lease alive.
     discard ctx.run(renew & " >/dev/null 2>&1 || true", "")

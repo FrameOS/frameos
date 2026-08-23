@@ -113,6 +113,17 @@ write_network() {
   if command -v rfkill >/dev/null 2>&1; then
     grab rfkill list
   fi
+  # The resolver is where a Pi Zero W frame failed while looking connected:
+  # udhcpc had set an address and a route, but nothing told systemd-resolved
+  # about the DNS servers.
+  section "resolver"
+  grab ls -l /etc/resolv.conf
+  grab cat /etc/resolv.conf
+  grab grep '^hosts:' /etc/nsswitch.conf
+  if command -v resolvectl >/dev/null 2>&1; then
+    grab resolvectl status
+  fi
+  grab sh -c 'cat /run/frameos/udhcpc-*.lease'
   section "network daemons"
   # busybox ps has no -a/-o flags, so keep this to the lowest common form.
   ps 2>/dev/null | grep -E 'wpa_supplicant|hostapd|udhcpc|dnsmasq|NetworkManager' \\
