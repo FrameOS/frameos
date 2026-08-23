@@ -21,18 +21,16 @@ Two rules that shape most entries:
 
 ## ESP32 memory
 
-- **Scene switch leaks ~1.6 MB of PSRAM** (13.3" 16 MB board, 2026.8.34, log
-  2026-08-22T22:04Z): switching "SD card image" → "Unsplash image" (which
-  rendered its missing-API-key error frame) dropped idle free PSRAM from
-  10.3 MB to 8.7 MB and the largest block from 7.4 MB to 6–7 MB; switching
-  back did not recover it. No OOM abort was logged. Find what the old
-  scene's teardown keeps (cached image? QuickJS runtime? error-frame
-  intermediates?) — with the SD scene's 24 MP photos the headroom is thin
-  enough that this leak is what made the next abort possible.
-- **Verify on hardware**: `memory:oomAbort` + leak-percent restart and the
-  `render:degraded` event (docs/esp32-memory.md, 2026-08-23). Cheapest
-  repro: assign a scene that fetches an oversized image with the budget
-  forced low, watch the cloud log for both events.
+- **JPEG cover-fit samples the full row and crops later.** A 6000x4000
+  photo into the 13.3" 1200x1600 panel plans 5.8 MB with a single 3.75 MB
+  luma buffer; a column window over the cropped region would halve both
+  (docs/esp32-memory.md, 2026-08-23). Touches foldScaledSourceRow, the
+  band row range, EXIF orientation and the fill rects — do it with the
+  jpegsuite fingerprint sweep as the safety net.
+- **Verify on hardware** (docs/esp32-memory.md, 2026-08-23): after a text
+  render idle PSRAM should drop ~0.5 MB, not 1.6 MB; `render:degraded` and
+  `memory:oomAbort` appear in the cloud log when provoked (force the budget
+  low with an oversized photo); the leak-percent restart fires.
 
 ## Pre-release manual test sweep
 

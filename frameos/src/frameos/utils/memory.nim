@@ -122,6 +122,19 @@ proc availableRenderHeadroomBytes*(): int =
     # Development hosts: plenty of memory, keep decodes bounded anyway.
     1024 * 1024 * 1024
 
+proc refreshDecodeContiguousBudget() =
+  ## The headroom budget answers whether a decode's buffers can coexist;
+  ## this one bounds the largest SINGLE buffer by the largest free block.
+  ## Both are needed: the 13.3E6 passed a 5.8MB streamed-JPEG plan with
+  ## 8.6MB free, then died allocating its 3.75MB luma channel in a heap
+  ## whose largest block had fragmented below that (2026-08-23). With the
+  ## limit set, pixie clamps the sampling resolution to what fits instead.
+  ## Hosts report "plenty" and effectively leave it unlimited.
+  when defined(frameosEmbedded):
+    setDecodeContiguousBudgetBytes(max(0, fos_psram_largest_free_block().int))
+  else:
+    setDecodeContiguousBudgetBytes(0)
+
 proc refreshDecodeBudget*() =
   ## Updates pixie's per-decode budget from live memory. Decode
   ## intermediates may take roughly half of what is available, leaving the
@@ -136,6 +149,7 @@ proc refreshDecodeBudget*() =
   let available = availableRenderHeadroomBytes()
   if available > 0:
     setDecodeBudgetBytes(available div 2)
+  refreshDecodeContiguousBudget()
 
 proc refreshDecodeBudgetInto*() =
   ## refreshDecodeBudget for decodes that stream into an existing target
@@ -147,6 +161,7 @@ proc refreshDecodeBudgetInto*() =
   let available = availableRenderHeadroomBytes()
   if available > 0:
     setDecodeBudgetBytes(available)
+  refreshDecodeContiguousBudget()
 
 proc ensureRenderAllocation*(bytes: int64, what: string) =
   ## Raises a catchable error when an allocation plan clearly exceeds the

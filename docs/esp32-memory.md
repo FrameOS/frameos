@@ -69,7 +69,34 @@ question, no abort logged); one `render-cycle-failed` at 01:08Z took it to
 decode and stretched it — so the abort streak reset on every render and
 the frame showed soft images for a day with nothing in the log.
 
-Two things changed:
+Both leaks had a root cause, fixed in the pixie fork (ab4085b):
+
+- **The 1.6 MB "scene switch leak" was the typeface.** The first text the
+  boot ever drew (the error frame) parsed Ubuntu-Regular into the global
+  typeface cache, and a parsed font kept the raw GPOS kerning matrix
+  (class1 x class2 ValueRecords, per lookup) next to the derived tables the
+  lookup actually reads — 1.6 MB of a 2 MB parsed font on a 64-bit host.
+  The parser now drops that scratch: 2039 KB -> 910 KB retained, kerning
+  and rendered pixels identical.
+- **The abort was a contiguity miss.** The streamed-JPEG plan for a
+  6000x4000 cover-fit into 1200x1600 is 5.8 MB, and its luma channel is
+  ONE 3.75 MB allocation (cover samples the full 2400-wide row and crops
+  later). The budget check asked only whether 5.8 MB fit the 7.1 MB
+  headroom; the largest free block had fragmented below 3.75 MB, the
+  malloc failed, and the longjmp abort leaked everything the render held.
+  pixie now carries a second, contiguous budget
+  (`setDecodeContiguousBudgetBytes`, fed from the largest free PSRAM block
+  by `refreshDecodeContiguousBudget`): the SOF plan clamps its sampling
+  resolution so the largest channel fits, and refuses catchably when even
+  that cannot. Measured on the host: 6 MB block -> untouched; 3 MB block ->
+  2172x1448 sampling, 3.07 MB luma, decodes.
+
+Follow-up worth doing: cover-fit should sample only the cropped column
+window. A 3:2 photo on this 3:4 panel would plan 2.9 MB instead of 5.8 MB
+(luma 1.9 MB instead of 3.75 MB), which is the difference between full
+sharpness and a clamp on a heap that has seen a day of churn.
+
+And two things changed on the visibility side:
 
 - `render:degraded` (utils/image.nim) is logged each time the ladder drops a
   rung, with the rung, the decode size and the headroom it was planned
