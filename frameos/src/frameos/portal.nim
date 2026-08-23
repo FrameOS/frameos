@@ -1337,6 +1337,14 @@ proc syncClock*() =
   except CatchableError:
     echo "⚠️  Time‑sync failed – will retry later"
 
+proc logNetworkDiagnostics*(reason: string) {.gcsafe.} =
+  ## Snapshot of resolver + interface state for the log, taken when the
+  ## network check fails. "Temporary failure in name resolution" on a frame
+  ## that plainly has an address used to be undiagnosable from the logs: the
+  ## check only ever said "error" and then raised the hotspot.
+  let (output, _) = portalRunHook(networkDiagnosticsCommand())
+  pLog("networkCheck:diagnostics", %*{"reason": reason, "output": output.strip()})
+
 proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
   let frameConfig = frameOS.frameConfig
 
@@ -1375,6 +1383,7 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
 
     if not connected:
       log(%*{"event": "portal:connect:netCheckFailed"})
+      logNetworkDiagnostics("portal connect")
       startAp(frameOS) # fall back to AP
   else:
     log(%*{"event": "portal:connectFailed"})
@@ -1392,6 +1401,7 @@ proc checkNetwork*(self: FrameOS): bool =
   let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
   let timer = getMonoTime()
   var attempt = 1
+  var diagnosticsLogged = false
   self.network.status = NetworkStatus.connecting
   self.logger.log(%*{"event": "networkCheck", "url": url})
   while true:
@@ -1406,6 +1416,7 @@ proc checkNetwork*(self: FrameOS): bool =
     if (getMonoTime() - timer) >= initDuration(milliseconds = int(timeout*1000)):
       self.network.status = NetworkStatus.timeout
       self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
+      logNetworkDiagnostics("timeout")
       return false
     let client = newHttpClient(timeout = 5000)
     try:
@@ -1430,6 +1441,9 @@ proc checkNetwork*(self: FrameOS): bool =
         continue
       else:
         self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
+        if not diagnosticsLogged:
+          diagnosticsLogged = true
+          logNetworkDiagnostics("first error: " & e.msg)
 
     finally:
       client.close()

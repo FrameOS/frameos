@@ -177,6 +177,23 @@ proc chooseNetworkBackend*(override: string, probe: NetworkToolProbe): NetworkBa
     "No usable network backend: neither nmcli (NetworkManager) nor wpa_supplicant is installed. " &
     "Install NetworkManager, or wpa_supplicant plus hostapd, iw and dnsmasq/udhcpd."
 
+proc networkDiagnosticsCommand*(): string =
+  ## One bounded shell round-trip that answers "the interface is up, so why
+  ## does nothing resolve?": where /etc/resolv.conf points and what is in it,
+  ## what systemd-resolved thinks (the resolver glibc actually asks on
+  ## buildroot images), the nsswitch order, addresses, routes and the last
+  ## DHCP lease summary. Every step tolerates its tool being absent; the
+  ## output is capped so a log line cannot balloon.
+  [
+    "echo '## resolv.conf'; ls -l /etc/resolv.conf 2>&1; cat /etc/resolv.conf 2>&1",
+    "echo '## nsswitch'; grep '^hosts:' /etc/nsswitch.conf 2>/dev/null",
+    "echo '## resolvectl'; command -v resolvectl >/dev/null 2>&1 && resolvectl status 2>&1",
+    "echo '## addr'; ip -4 -br addr 2>&1",
+    "echo '## route'; ip -4 route 2>&1",
+    "echo '## dhcp lease'; cat /run/frameos/udhcpc-*.lease 2>/dev/null",
+    "true",
+  ].join("; ") & " 2>&1 | head -c 4000"
+
 proc probeNetworkTools*(ctx: NetworkContext): NetworkToolProbe =
   ## Runs the bounded probe commands through the injected runner.
   let (output, _) = ctx.run(toolProbeCommand(), "")
