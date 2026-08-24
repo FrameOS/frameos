@@ -15,14 +15,25 @@ proc buildSvg(width, height: int): string =
   var parts: seq[string] = @[]
   parts.add("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" & $width &
     "\" height=\"" & $height & "\" viewBox=\"0 0 " & $width & " " & $height & "\">")
-  # pixie ignores <defs>; gradients have to sit at the top level and be in
-  # user space (the same shape the bundled JS apps emit).
+  # Gradients in user space, the shape the bundled JS apps emit; the linear
+  # one at the top level and the radial one in <defs>, both of which pixie
+  # registers.
   parts.add("<linearGradient id=\"bg\" gradientUnits=\"userSpaceOnUse\" " &
     "x1=\"0\" y1=\"0\" x2=\"0\" y2=\"" & $height & "\">" &
     "<stop offset=\"0\" stop-color=\"#12305a\"/><stop offset=\"1\" stop-color=\"#7a1f4b\"/>" &
     "</linearGradient>")
+  parts.add("<defs><radialGradient id=\"glow\" gradientUnits=\"userSpaceOnUse\" " &
+    "cx=\"" & $(width div 3) & "\" cy=\"" & $(height div 3) & "\" r=\"" & $(width div 2) & "\" " &
+    "gradientTransform=\"rotate(25 " & $(width div 3) & " " & $(height div 3) & ") scale(1 0.7)\">" &
+    "<stop offset=\"0\" stop-color=\"#ffe08a\" stop-opacity=\"0.9\"/>" &
+    "<stop offset=\"0.5\" stop-color=\"#ff7a45\" stop-opacity=\"0.5\"/>" &
+    "<stop offset=\"1\" stop-color=\"#ff7a45\" stop-opacity=\"0\"/>" &
+    "</radialGradient></defs>")
   parts.add("<rect x=\"0\" y=\"0\" width=\"" & $width & "\" height=\"" & $height &
     "\" fill=\"url(#bg)\"/>")
+  # A radial glow over the sky, spanning every strip.
+  parts.add("<rect x=\"0\" y=\"0\" width=\"" & $width & "\" height=\"" & $height &
+    "\" fill=\"url(#glow)\"/>")
   # Solid shapes, strokes and transforms spread over the whole canvas so every
   # strip contains geometry that starts outside it.
   for i in 0 ..< 24:
