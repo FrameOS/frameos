@@ -1254,8 +1254,9 @@ a.tag-pill--active:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 6px 8px;
-  background: var(--bg-soft);
-  color: inherit;
+  /* Same ground as .input: the soft panel tone read as "disabled". */
+  background: var(--surface);
+  color: var(--text);
   font: inherit;
   font-size: 13px;
 }
