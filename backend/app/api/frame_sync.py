@@ -31,6 +31,7 @@ from app.tasks.buildroot_image import (
 )
 from app.tasks.embedded_firmware import ensure_embedded_frame_defaults
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
+from app.utils.scene_execution import DEFAULT_SCENE_EXECUTION, normalize_scenes_execution
 from app.utils.timezone import stored_timezone
 from app.utils.versions import current_frameos_version
 
@@ -524,12 +525,24 @@ def _scene_edges_by_key(scene: Any) -> dict[str, Any]:
     }
 
 
+def _scene_compare_settings(settings: Any) -> dict[str, Any]:
+    # Absent means interpreted (app/utils/scene_execution.py), so a stamped
+    # backend copy and an unstamped device copy of the same scene must not
+    # count as a change - otherwise a frame whose scenes predate the stamp
+    # would show as out of sync until its next deploy.
+    pruned = _sync_prune_empty(settings)
+    result = dict(pruned) if isinstance(pruned, dict) else {}
+    if result.get("execution") == DEFAULT_SCENE_EXECUTION:
+        result.pop("execution")
+    return result
+
+
 def _scene_compare_value(scene: Any) -> dict[str, Any]:
     if not isinstance(scene, dict):
         return {}
     return {
         "name": _sync_prune_empty(scene.get("name")),
-        "settings": _sync_prune_empty(scene.get("settings")) or {},
+        "settings": _scene_compare_settings(scene.get("settings")),
         "fields": _sync_prune_empty(scene.get("fields")) or [],
         "customEvents": _sync_prune_empty(scene.get("customEvents")) or [],
         "apps": _sync_prune_empty(scene.get("apps")) or {},
@@ -1266,6 +1279,7 @@ async def adopt_standalone_frame(
             # Scenes pulled from a device may predate the removal of the
             # legacy/* apps.
             migrate_legacy_apps_in_scenes(remote_scenes)
+            normalize_scenes_execution(remote_scenes)
             frame.scenes = remote_scenes
         frame.frame_admin_auth = admin_auth
         # The frame is demonstrably running FrameOS — it just answered.
@@ -1393,9 +1407,12 @@ async def apply_frame_sync(
             if isinstance(backend_scenes, list):
                 # Scenes pulled from a device may predate the removal of the legacy/* apps
                 migrate_legacy_apps_in_scenes(backend_scenes)
+                normalize_scenes_execution(backend_scenes)
             frame.scenes = backend_scenes
             database_changed = True
         if not _sync_values_equal(frame_scenes, remote_scenes):
+            # Same stamp the stored copy gets, so device and backend agree.
+            normalize_scenes_execution(frame_scenes)
             backend_push_payload["scenes"] = frame_scenes
 
     if database_changed:

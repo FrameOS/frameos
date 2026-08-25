@@ -1,4 +1,5 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
+import { AdvancedSection } from '../../components/AdvancedSection'
 import { A as Link } from 'kea-router'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
@@ -658,24 +659,26 @@ function DeployBuildOptionsSection({
 
   return (
     <section className="space-y-2">
-      <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Installation mode</DrawerHeading>
-      <label className="block space-y-1">
-        <select
-          className={selectClassName}
-          value={compilationMode}
-          onChange={(event) =>
-            isBuildroot
-              ? updateBuildroot('compilationMode', event.target.value)
-              : updateRpios('compilationMode', event.target.value)
-          }
-        >
-          {frameCompilationModeOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <AdvancedSection label="advanced: installation mode" open={compilationMode === 'static'}>
+        <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Installation mode</DrawerHeading>
+        <label className="block space-y-1">
+          <select
+            className={selectClassName}
+            value={compilationMode}
+            onChange={(event) =>
+              isBuildroot
+                ? updateBuildroot('compilationMode', event.target.value)
+                : updateRpios('compilationMode', event.target.value)
+            }
+          >
+            {frameCompilationModeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </AdvancedSection>
     </section>
   )
 }
@@ -1397,20 +1400,22 @@ function BuildrootSdCardSection({
               ))}
             </select>
           </label>
-          <label className="block space-y-1">
-            <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Installation mode</span>
-            <select
-              className="frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30"
-              value={compilationMode}
-              onChange={(event) => updateBuildroot('compilationMode', event.target.value)}
-            >
-              {frameCompilationModeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <AdvancedSection label="advanced: installation mode" open={compilationMode === 'static'}>
+            <label className="block space-y-1">
+              <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Installation mode</span>
+              <select
+                className="frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30"
+                value={compilationMode}
+                onChange={(event) => updateBuildroot('compilationMode', event.target.value)}
+              >
+                {frameCompilationModeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </AdvancedSection>
           <label className="block space-y-1">
             <span className="text-xs font-semibold uppercase tracking-wide">
               Root password

@@ -2,7 +2,7 @@ import { MakeLogicType, actions, connect, kea, key, path, props, reducers, selec
 import { FrameScene, RepositoryType, SceneNodeData, TemplateType, FrameId } from '../../../../types'
 import { findConnectedScenes } from '../Scenes/utils'
 import { framesModel } from '../../../../models/framesModel'
-import { frameRunsScenesInterpreted } from '../../../../utils/sceneExecution'
+import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 import { fetchTemplateScenes } from './templatesLogic'
 import { livePreviewLogic } from '../Scenes/livePreviewLogic'
 import type { FrameType } from '../../../../types'
@@ -113,9 +113,7 @@ export const templateRowLogic = kea<templateRowLogicType>([
     trySceneConfig: [
       (s) => [s.scenes, s.frameMode],
       (scenes: templateRowLogicValues['scenes'], frameMode: templateRowLogicValues['frameMode']) => {
-        const interpretedScenes = frameRunsScenesInterpreted(frameMode)
-          ? scenes
-          : scenes.filter((scene) => scene.settings?.execution === 'interpreted')
+        const interpretedScenes = scenes.filter((scene) => sceneExecutionForFrame(scene, frameMode) === 'interpreted')
         if (!interpretedScenes.length) {
           return null
         }

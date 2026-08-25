@@ -324,7 +324,8 @@ async def test_restore_template_backup(async_client, db, backup_calls):
     restored = db.query(Template).first()
     assert restored is not None
     assert restored.name == "My template"
-    assert restored.scenes == [{"id": "scene-1", "nodes": []}]
+    # Restored scenes are stamped with an execution mode on the way in.
+    assert restored.scenes == [{"id": "scene-1", "nodes": [], "settings": {"execution": "interpreted"}}]
 
 
 @pytest.mark.asyncio
@@ -351,7 +352,8 @@ async def test_restore_frame_backup(async_client, db, backup_calls):
     assert restored is not None
     assert restored.name == "Kitchen frame"
     assert restored.status == "uninitialized"
-    assert restored.scenes == [{"id": "scene-1", "nodes": []}]
+    # Restored scenes are stamped with an execution mode on the way in.
+    assert restored.scenes == [{"id": "scene-1", "nodes": [], "settings": {"execution": "interpreted"}}]
     # Machine secrets were never in the backup; fresh ones are generated.
     assert restored.ssh_pass is None
     assert restored.frame_access_key

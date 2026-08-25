@@ -9,9 +9,9 @@ import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
 import { TextArea } from '../../../../components/TextArea'
 import { Tooltip } from '../../../../components/Tooltip'
-import type { AppNodeData, CodeNodeData, FrameScene } from '../../../../types'
-import { hasCompiledAppSource, hasJavaScriptAppSource } from '../../../../utils/sceneApps'
-import { frameRunsScenesInterpreted } from '../../../../utils/sceneExecution'
+import { AdvancedSection } from '../../../../components/AdvancedSection'
+import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
+import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -28,30 +28,6 @@ function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
   return <span className="frame-tool-control-label text-xs font-semibold uppercase tracking-wide">{children}</span>
 }
 
-function hasCompiledNimAppSource(sources?: Record<string, string> | null): boolean {
-  return hasCompiledAppSource(sources) && !hasJavaScriptAppSource(sources)
-}
-
-function sceneHasCompiledOnlyContent(scene: FrameScene): boolean {
-  if (Object.values(scene.apps ?? {}).some((app) => hasCompiledNimAppSource(app.sources))) {
-    return true
-  }
-
-  return (scene.nodes ?? []).some((node) => {
-    if (node.type === 'app') {
-      const data = node.data as AppNodeData | undefined
-      return (
-        hasCompiledNimAppSource(data?.sources) || hasCompiledNimAppSource(scene.apps?.[data?.keyword ?? '']?.sources)
-      )
-    }
-    if (node.type === 'code') {
-      const data = node.data as CodeNodeData | undefined
-      return !!data?.code?.trim() && !data?.codeJS?.trim()
-    }
-    return node.type === 'source'
-  })
-}
-
 export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm } = useValues(frameLogic)
   const { sceneIndex, scene } = useValues(sceneSettingsLogic({ frameId, sceneId }))
@@ -61,9 +37,12 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
   const fieldClassName = embedded ? sceneSettingsEmbeddedFieldClass : sceneSettingsFieldClass
   const promptFieldClassName = embedded ? sceneSettingsEmbeddedPromptFieldClass : sceneSettingsPromptFieldClass
   const frameRunsInterpreted = frameRunsScenesInterpreted(frameForm.mode)
-  const hasCompiledOnlyContent = sceneHasCompiledOnlyContent(scene)
-  const hasInterpretedCompiledOnlyContent =
-    (frameRunsInterpreted || scene.settings?.execution === 'interpreted') && hasCompiledOnlyContent
+  const execution = sceneExecutionForFrame(scene, frameForm.mode)
+  const hasCompiledOnlyContent = sceneRequiresCompilation(scene)
+  const hasInterpretedCompiledOnlyContent = execution === 'interpreted' && hasCompiledOnlyContent
+  // Compiled is the legacy mode: keep the switch out of the way unless this
+  // scene already uses it or carries content that needs it.
+  const showExecutionField = !frameRunsInterpreted && (execution === 'compiled' || hasCompiledOnlyContent)
 
   return (
     <Form
@@ -100,7 +79,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
             >
               <ColorInput name="backgroundColor" className="!h-10 !min-w-0" placeholder="#ffffff" />
             </Field>
-            {!frameRunsInterpreted ? (
+            {frameRunsInterpreted ? null : showExecutionField ? (
               <Field
                 className={fieldClassName}
                 name="execution"
@@ -116,8 +95,8 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                     <p>
                       <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the need
                       for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it doesn't
-                      matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim source
-                      of apps in this mode.
+                      matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim
+                      source of apps in this mode.
                     </p>
                     <p>A full deploy is needed if switching between modes.</p>
                   </div>
@@ -132,7 +111,41 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                   ]}
                 />
               </Field>
-            ) : null}
+            ) : (
+              <AdvancedSection className={fieldClassName}>
+                <Field
+                  className={fieldClassName}
+                  name="execution"
+                  label={<SceneSettingsLabel>Execution</SceneSettingsLabel>}
+                  tooltip={
+                    <div className="space-y-2">
+                      <p>Choose between compiled and interpreted execution modes.</p>
+                      <p>
+                        <strong>Compiled</strong> scenes are optimized for performance. They require a full redeploy
+                        whenever changes are made. If you edit the nim code for apps on the scene, you must use this
+                        mode. All inline code nodes must also be written in Nim.
+                      </p>
+                      <p>
+                        <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the
+                        need for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it
+                        doesn't matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit
+                        the nim source of apps in this mode.
+                      </p>
+                      <p>A full deploy is needed if switching between modes.</p>
+                    </div>
+                  }
+                >
+                  <Select
+                    name="execution"
+                    className="h-10"
+                    options={[
+                      { value: 'compiled', label: 'compiled' },
+                      { value: 'interpreted', label: 'interpreted' },
+                    ]}
+                  />
+                </Field>
+              </AdvancedSection>
+            )}
             {hasInterpretedCompiledOnlyContent ? (
               <div className="app-compiled-warning rounded-xl p-3 text-sm">
                 <div className="font-semibold">

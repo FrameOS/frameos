@@ -10,6 +10,11 @@ import httpx
 from fastapi import HTTPException
 from datetime import datetime, timedelta, timezone
 from PIL import Image
+
+
+def _stamped(scenes):
+    """What ingest does to scenes that arrive without an execution mode."""
+    return [{**scene, 'settings': {**scene.get('settings', {}), 'execution': 'interpreted'}} for scene in scenes]
 from urllib.parse import urlparse
 
 from app.api import frame_sync, frames as frames_api
@@ -1525,7 +1530,28 @@ async def test_api_frame_update_scenes_json_format(async_client, db, redis):
     assert resp.status_code == 200
     db.expire_all()
     updated = db.get(Frame, frame.id)
-    assert updated.scenes == [{"sceneName": "Scene1"}, {"sceneName": "Scene2"}]
+    # Scenes are stamped with an execution mode on the way in.
+    assert updated.scenes == [
+        {"sceneName": "Scene1", "settings": {"execution": "interpreted"}},
+        {"sceneName": "Scene2", "settings": {"execution": "interpreted"}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_stamps_execution_from_scene_content(async_client, db, redis):
+    frame = await new_frame(db, redis, 'SceneStamp', 'localhost', 'localhost')
+    nim_scene = {
+        "id": "nim",
+        "apps": {"custom": {"sources": {"app.nim": "proc run*() = discard"}}},
+        "nodes": [{"id": "n1", "type": "app", "data": {"keyword": "custom"}}],
+    }
+    explicit_scene = {"id": "kept", "settings": {"execution": "compiled"}, "nodes": []}
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"scenes": [nim_scene, explicit_scene]})
+    assert resp.status_code == 200
+    db.expire_all()
+    updated = db.get(Frame, frame.id)
+    assert updated.scenes[0]["settings"] == {"execution": "compiled"}
+    assert updated.scenes[1]["settings"] == {"execution": "compiled"}
 
 
 @pytest.mark.asyncio
@@ -1955,10 +1981,10 @@ async def test_api_frame_sync_apply_imports_frame_copy_and_marks_baseline(async_
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
     assert updated_frame.name == 'Frame Name'
-    assert updated_frame.scenes == remote_scenes
+    assert updated_frame.scenes == _stamped(remote_scenes)
     assert updated_frame.last_successful_deploy_at is not None
     assert updated_frame.last_successful_deploy['name'] == 'Frame Name'
-    assert updated_frame.last_successful_deploy['scenes'] == remote_scenes
+    assert updated_frame.last_successful_deploy['scenes'] == _stamped(remote_scenes)
     assert updated_frame.last_successful_deploy['frameos_version'] == frames_api.current_frameos_version()
     assert response.json()['sync']['has_changes'] is False
     assert posted_payloads[-1]['last_successful_deploy']['name'] == 'Frame Name'
@@ -3276,7 +3302,8 @@ async def test_api_frame_adopt_imports_config_scenes_and_writes_back_credentials
     assert frame.width == 800 and frame.height == 480
     assert frame.rotate == 90
     assert frame.interval == 300.0
-    assert frame.scenes == _standalone_device_payload()['scenes']
+    # Imported scenes are stamped with an execution mode on the way in.
+    assert frame.scenes == _stamped(_standalone_device_payload()['scenes'])
     # The device's web access key is taken over, so existing ?k= links keep working.
     assert frame.frame_access_key == 'device-web-key'
     assert frame.frame_access == 'private'

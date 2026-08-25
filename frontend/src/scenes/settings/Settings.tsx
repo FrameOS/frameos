@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { inHassioAddon } from '../../utils/inHassioAddon'
 import { Form, Group } from 'kea-forms'
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import clsx from 'clsx'
@@ -416,7 +417,7 @@ export function Settings() {
     showSection
   )
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
-  const buildEnvironmentProvider = settings?.buildEnvironment?.provider || 'docker'
+  const buildEnvironmentProvider = settings?.buildEnvironment?.provider || (inHassioAddon() ? 'none' : 'docker')
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>(settingsNavItems[0][1])
   const settingsNavLinkRefs = useRef<Record<string, HTMLAnchorElement | null>>({})
   const framesUsingKey = (keyId: string) =>

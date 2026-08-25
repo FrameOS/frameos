@@ -14,6 +14,14 @@ export const frameCompilationModeOptions: FrameBuildOption<FrameCompilationModeO
   { value: 'static', label: 'Build from source - single binary' },
 ]
 
+/** Same mapping for the select, where an empty value ("prefer binaries") is a real choice. */
+export function normalizeFrameCompilationModeOption(value: unknown): FrameCompilationModeOptionValue {
+  if (value === undefined || value === null || value === '') {
+    return ''
+  }
+  return normalizeFrameCompilationMode(value)
+}
+
 // Frames saved before 2026-08-16 may still hold `shared` or `shared-scenes`,
 // which built drivers and/or scenes as separate `.so`s. Both are retired; the
 // backend maps them to `static`, which builds the same scenes into the one

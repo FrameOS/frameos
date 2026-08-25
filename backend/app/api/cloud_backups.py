@@ -37,6 +37,7 @@ from app.models.template import Template
 from app.models.user import User
 from app.redis import get_redis
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
+from app.utils.scene_execution import normalize_scenes_execution
 from app.schemas.cloud import (
     CloudBackupKeyImportRequest,
     CloudBackupRestoreRequest,
@@ -286,6 +287,7 @@ async def restore_cloud_backup(
         scenes = fields.get("scenes") or []
         # Backups may predate the removal of the legacy/* apps
         migrate_legacy_apps_in_scenes(scenes)
+        normalize_scenes_execution(scenes)
         template = Template(
             project_id=project.id,
             name=fields.get("name") or backup.get("name") or "Restored template",
@@ -326,6 +328,7 @@ async def restore_cloud_backup(
         if isinstance(frame.scenes, list):
             # Backups may predate the removal of the legacy/* apps
             migrate_legacy_apps_in_scenes(frame.scenes)
+            normalize_scenes_execution(frame.scenes)
         agent = dict(frame.agent or {}) if isinstance(frame.agent, dict) else {}
         agent["agentSharedSecret"] = secure_token(32)
         frame.agent = agent

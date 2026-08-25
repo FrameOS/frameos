@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import { AdvancedSection } from '../../../../components/AdvancedSection'
 import { useState } from 'react'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
@@ -17,7 +18,7 @@ import {
   frameLogic,
   normalizeFrameErrorBehavior,
 } from '../../frameLogic'
-import { frameCompilationModeOptions } from '../../../../utils/frameBuildOptions'
+import { frameCompilationModeOptions, normalizeFrameCompilationModeOption } from '../../../../utils/frameBuildOptions'
 import { downloadJson } from '../../../../utils/downloadJson'
 import { Field } from '../../../../components/Field'
 import { PartialRefreshSettingsFields } from '../../../../components/PartialRefreshSettingsFields'
@@ -2664,23 +2665,28 @@ export function FrameSettings({
                   />
                 )}
               </Field>
-              <Field
-                name="compilationMode"
-                label="Installation mode"
-                tooltip={
-                  <div className="space-y-2">
-                    <p>
-                      Choose whether the SD image uses a published FrameOS release or compiles this checkout for the
-                      image.
-                    </p>
-                    <p>
-                      Use a build mode when testing local development changes that are not in a published release yet.
-                    </p>
-                  </div>
-                }
+              <AdvancedSection
+                open={normalizeFrameCompilationModeOption(frameForm.buildroot?.compilationMode) === 'static'}
               >
-                <Select name="buildroot.compilationMode" options={frameCompilationModeOptions} />
-              </Field>
+                <Field
+                  name="compilationMode"
+                  label="Installation mode"
+                  tooltip={
+                    <div className="space-y-2">
+                      <p>
+                        Choose whether the SD image uses a published FrameOS release or compiles this checkout for
+                        the image.
+                      </p>
+                      <p>
+                        Use a build mode when testing local development changes that are not in a published release
+                        yet.
+                      </p>
+                    </div>
+                  }
+                >
+                  <Select name="buildroot.compilationMode" options={frameCompilationModeOptions} />
+                </Field>
+              </AdvancedSection>
             </Group>
           ) : null}
           {isEmbeddedMode ? (
@@ -2950,24 +2956,28 @@ export function FrameSettings({
           {!hideForCloud &&
           ((!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode)) ? (
             <Group name="rpios">
-              <Field
-                name="compilationMode"
-                label="Installation mode"
-                tooltip={
-                  <div className="space-y-2">
-                    <p>
-                      Choose how FrameOS is installed on this frame. Install binaries uses the published FrameOS release
-                      for the current version when the frame only uses interpreted scenes.
-                    </p>
-                    <p>
-                      If source builds are needed, choose whether to install one self-contained executable, separate
-                      driver and scene libraries, or a combined scenes library next to the FrameOS binary.
-                    </p>
-                  </div>
-                }
+              <AdvancedSection
+                open={normalizeFrameCompilationModeOption(frameForm.rpios?.compilationMode) === 'static'}
               >
-                <Select name="rpios.compilationMode" options={frameCompilationModeOptions} />
-              </Field>
+                <Field
+                  name="compilationMode"
+                  label="Installation mode"
+                  tooltip={
+                    <div className="space-y-2">
+                      <p>
+                        Choose how FrameOS is installed on this frame. Install binaries uses the published FrameOS
+                        release for the current version when the frame only uses interpreted scenes.
+                      </p>
+                      <p>
+                        Building from source is only needed for compiled scenes or for testing local changes that are
+                        not in a published release yet.
+                      </p>
+                    </div>
+                  }
+                >
+                  <Select name="rpios.compilationMode" options={frameCompilationModeOptions} />
+                </Field>
+              </AdvancedSection>
             </Group>
           ) : null}
           <Field name="debug" label="Debug mode (noisy)">

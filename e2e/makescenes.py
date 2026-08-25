@@ -142,12 +142,28 @@ if __name__ == '__main__':
     scene_list.sort(key=lambda x: x['id'])
     scene_list[0]['default'] = True
 
+    # The Nim codegen only compiles scenes whose settings.execution reads
+    # "compiled"; an absent key means "interpreted" (app.utils.scene_execution).
+    # None of the fixtures carry the key, so stamp it - on a copy, never on the
+    # scene itself. The same dicts go to scenes.json below for the interpreter,
+    # and a settings block the fixture never had would come back as a different
+    # scene: interpreter.nim reads a missing block as a black background and an
+    # empty one as white. The interpreted half needs no stamp at all - absent is
+    # exactly what it wants to be.
+    compiled_scenes = {
+        scene_name: {
+            **scene_data,
+            'settings': {**(scene_data.get('settings') or {}), 'execution': 'compiled'},
+        }
+        for scene_name, scene_data in scenes.items()
+    }
+
     frame = Frame(
         name="Test frame",
-        scenes=scene_list
+        scenes=[compiled_scenes[scene_data['id']] for scene_data in scene_list]
     )
 
-    for scene_name, scene_data in scenes.items():
+    for scene_name, scene_data in compiled_scenes.items():
         scene_nim = write_scene_nim(frame, scene_data)
         scene_file_path = generated_dir / f'scene_{scene_name}.nim'
         with open(scene_file_path, 'w') as scene_file:

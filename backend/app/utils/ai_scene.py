@@ -827,7 +827,7 @@ def validate_scene_payload(payload: dict[str, Any]) -> list[str]:
         if not isinstance(edges, list):
             issues.append(f"Scene {index} must include edges.")
             continue
-        if settings.get("execution") != "interpreted":
+        if settings.get("execution") not in (None, "interpreted"):
             issues.append(f"Scene {index} settings.execution must be 'interpreted'.")
         node_ids: set[str] = set()
         render_event_found = False

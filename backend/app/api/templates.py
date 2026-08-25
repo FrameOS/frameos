@@ -29,6 +29,7 @@ from app.redis import get_redis
 from app.tenancy import current_project_id, get_user_project
 from app.utils.jwt_tokens import validate_scoped_token
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
+from app.utils.scene_execution import normalize_scenes_execution
 from app.utils.versions import current_frameos_version
 from app.api.auth import get_current_user_from_request
 
@@ -302,6 +303,7 @@ async def create_template(
     # Imported templates may predate the removal of the legacy/* apps
     if isinstance(create_req.scenes, list):
         migrate_legacy_apps_in_scenes(create_req.scenes)
+        normalize_scenes_execution(create_req.scenes)
 
     new_template = Template(
         project_id=project_id,

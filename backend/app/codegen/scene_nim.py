@@ -10,6 +10,7 @@ from app.models.apps import get_local_frame_apps, get_local_app_path, get_scene_
 from app.codegen.drivers_nim import DEFAULT_COMPILATION_MODE
 from app.codegen.utils import sanitize_nim_string, natural_keys, nim_comment
 from app.utils.js_apps import find_js_app_source_key
+from app.utils.scene_execution import scene_is_interpreted
 
 def get_events_schema() -> list[dict]:
     events_schema_path = os.path.join("..", "frontend", "schema", "events.json")
@@ -41,10 +42,7 @@ def compiled_frame_scenes(frame: Frame) -> list[dict]:
     scenes = getattr(frame, "scenes", None) or []
     compiled_scenes = []
     for scene in scenes:
-        if not isinstance(scene, dict):
-            continue
-        settings = scene.get("settings") or {}
-        if settings.get("execution", "compiled") != "interpreted":
+        if isinstance(scene, dict) and not scene_is_interpreted(scene):
             compiled_scenes.append(scene)
     return compiled_scenes
 
@@ -1055,8 +1053,7 @@ class SceneWriter:
                 app_import = f"import scenes/{scene_app_id} as {scene_app_id}"
                 node_integer = self.node_id_to_integer(node_id)
                 app_id = f"node{node_integer}"
-                execution_mode = scene.get("settings", {}).get("execution", "compiled")
-                is_interpreted_child = execution_mode == "interpreted"
+                is_interpreted_child = scene_is_interpreted(scene)
 
                 if is_interpreted_child:
                     interpreter_import = "import frameos/interpreter as interpreter"

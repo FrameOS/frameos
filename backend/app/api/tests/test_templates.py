@@ -23,6 +23,23 @@ async def test_create_template(async_client, db):
 
 
 @pytest.mark.asyncio
+async def test_create_template_stamps_scene_execution(async_client, db):
+    payload = {
+        "name": "Stamped",
+        "scenes": [
+            {"id": "plain", "nodes": []},
+            {"id": "nim", "nodes": [{"id": "n", "type": "source", "data": {}}]},
+            {"id": "explicit", "settings": {"execution": "interpreted"}, "nodes": []},
+        ],
+        "config": {},
+    }
+    response = await async_client.post("/api/templates", json=payload)
+    assert response.status_code == 201
+    template = db.get(Template, response.json()["id"])
+    assert [scene["settings"]["execution"] for scene in template.scenes] == ["interpreted", "compiled", "interpreted"]
+
+
+@pytest.mark.asyncio
 async def test_get_templates(async_client, db):
     # Insert a couple
     t1 = Template(project_id=async_client.project_id, name="Template1")
