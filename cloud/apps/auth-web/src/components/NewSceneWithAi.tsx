@@ -240,6 +240,7 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
       <div className="editor-modal__bar">
         <div className="editor-modal__title">
           <SceneEditorBackButton href={myScenesUrl} label="Back" />
+          <SceneEditorPanelToggles available={{ info: false }} onToggle={togglePanel} panels={panels} />
           <SceneNameTitle name={sceneName} onRename={renameScene} />
           {touched ? <span className="pill pill-warning">Not saved yet</span> : null}
           {error ? (
@@ -264,7 +265,6 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
               ))}
             </select>
           </label>
-          <SceneEditorPanelToggles available={{ info: false }} onToggle={togglePanel} panels={panels} />
           <button
             className="button button--small button-primary"
             disabled={saving || !scenes}

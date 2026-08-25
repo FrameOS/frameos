@@ -403,6 +403,7 @@ export default async function ScenePage({
         height={scene.previewImageHeight}
         info={info}
         loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
+        signupUrl={new URL("/signup", getCloudBaseUrl()).toString()}
         pinnedVersion={pinnedVersion ? pinnedVersion.version : null}
         sceneId={scene.id}
         settingsUrl={`${getFramesUrl()}/settings#settings-openai`}

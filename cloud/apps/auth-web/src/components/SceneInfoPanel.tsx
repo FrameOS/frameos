@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { getStoreCategory } from "../lib/categories";
 import { formatBytes, formatDate, formatDateTime } from "../lib/format";
-import { CopyUrlField } from "./CopyUrlField";
-import { InstallOnFrameBox, type InstallableFrame } from "./InstallOnFrameBox";
+import type { InstallableFrame } from "./InstallOnFrameBox";
 import { ReportSceneButton } from "./ReportSceneButton";
 import { SceneCategoryEditor } from "./SceneCategoryEditor";
 import { SceneDescriptionEditor } from "./SceneDescriptionEditor";
@@ -62,11 +61,11 @@ export type SceneInfoData = {
   signedIn: boolean;
   /** Share token for private scenes; travels with every link. */
   share?: string | undefined;
-  /** The scene page's absolute URL (share token included), for
-   * "Install on a self-hosted FrameOS". */
+  /** The scene page's absolute URL (share token included) — the bar's
+   * Install dialog's self-hosted link. */
   pageUrl: string;
   /** The signed-in visitor's cloud frames, or null when "Install on a
-   * frame" is not offered (signed out, pulled scene). */
+   * frame" is not offered (signed out, pulled scene); the Install dialog. */
   installableFrames: InstallableFrame[] | null;
   /** The workspace URL for a frame id, minus the id (…/frames/). */
   framesUrl: string;
@@ -80,16 +79,16 @@ export type SceneInfoPanelProps = SceneInfoData & {
   /** A click on a version row calls this (the Preview panel runs it)
    * instead of navigating the page to `?version=N`. */
   onSelectVersion?: ((version: number) => void) | undefined;
-  /** Whether the Preview panel is open beside this column: the gallery then
-   * keeps to its thumbnails (the preview shows the scene itself, and the
-   * column is narrow); each opens the lightbox. */
-  previewOpen?: boolean | undefined;
+  /** What heads the column: the workspace's scene name with its rename
+   * pencil. */
+  heading?: ReactNode;
 };
 
-// Everything the scene page says about a scene besides its name: gallery
-// first, then metadata, description, notices, install instructions and the
-// versions table — with the owner's editors in place of the read-only bits.
-// The workspace's Info column.
+// Everything the scene page says about a scene: its name (the heading)
+// with the publisher line under it, the images, tags, notices, description
+// and the versions table — with the owner's editors in place of the
+// read-only bits. Installing lives in the bar's Install dialog. The
+// workspace's Info column.
 export function SceneInfoPanel({
   scene,
   versions,
@@ -98,22 +97,14 @@ export function SceneInfoPanel({
   isAdmin,
   signedIn,
   share,
-  pageUrl,
-  installableFrames,
-  framesUrl,
   viewingVersion,
   onSelectVersion,
-  previewOpen = false,
+  heading,
 }: SceneInfoPanelProps) {
   const isPrivate = scene.visibility !== "public";
   const isActive = scene.status === "active";
   const withShare = (path: string) =>
     share ? `${path}${path.includes("?") ? "&" : "?"}share=${share}` : path;
-  // "Install on a frame" pushes the version being looked at when it is not
-  // the latest (a pinned page, a version picked in the editor's table).
-  const installVersion =
-    viewingVersion !== null && viewingVersion !== scene.latestVersion ? viewingVersion : null;
-
   function versionClick(version: number) {
     return (event: ReactMouseEvent<HTMLAnchorElement>) => {
       event.preventDefault();
@@ -125,27 +116,27 @@ export function SceneInfoPanel({
 
   return (
     <div className="scene-info scene-info--panel">
-      {/* ph-no-capture travels with the gallery (and the description below):
-          autocapture would otherwise ship image URLs as element attributes
-          and the scene's own text as click labels. */}
-      <SceneImageGallery
-        canEdit={isOwner}
-        compact={previewOpen}
-        hasPreview={scene.hasPreview}
-        imageIds={imageIds}
-        sceneId={scene.id}
-        sceneName={scene.name}
-        share={share}
-      />
-      <div className="scene-info__meta">
-        <p className="copy">
+      <header className="scene-info__header">
+        {heading ? <h1 className="scene-info__heading">{heading}</h1> : null}
+        <p className="copy scene-info__byline">
           by{" "}
           <Link href={`/publishers/${scene.accountId}`}>{scene.publisher ?? "FrameOS user"}</Link>{" "}
           · {scene.downloadCount} download
           {scene.downloadCount === 1 ? "" : "s"} · updated {formatDate(new Date(scene.updatedAt))}
           {scene.frameosVersion ? ` · requires FrameOS ${scene.frameosVersion} or newer` : ""}
         </p>
-      </div>
+      </header>
+      {/* ph-no-capture travels with the gallery (and the description below):
+          autocapture would otherwise ship image URLs as element attributes
+          and the scene's own text as click labels. */}
+      <SceneImageGallery
+        canEdit={isOwner}
+        hasPreview={scene.hasPreview}
+        imageIds={imageIds}
+        sceneId={scene.id}
+        sceneName={scene.name}
+        share={share}
+      />
       {isOwner ? (
         <SceneFrameosVersionEditor frameosVersion={scene.frameosVersion} sceneId={scene.id} />
       ) : null}
@@ -212,26 +203,6 @@ export function SceneInfoPanel({
           ) : (
             <SceneMarkdown description={scene.description} />
           )}
-          {installableFrames ? (
-            <InstallOnFrameBox
-              frames={installableFrames}
-              framesUrl={framesUrl}
-              sceneId={scene.id}
-              sceneName={scene.name}
-              sceneVersion={installVersion}
-            />
-          ) : null}
-          <section className="card">
-            <h3>{installableFrames ? "Install on a self-hosted FrameOS" : "Install on your FrameOS"}</h3>
-            <p>Copy this link into the search box of a frame&apos;s Templates panel:</p>
-            <CopyUrlField value={pageUrl} />
-            {isPrivate ? (
-              <p className="copy">
-                The link carries a sharing secret: anyone who has it can view and install this
-                private scene.
-              </p>
-            ) : null}
-          </section>
         </div>
       </div>
 

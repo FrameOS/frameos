@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useEffect, useRef } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PANELS_STORAGE_KEY,
@@ -117,19 +117,37 @@ vi.mock("./SceneAiPanel", () => ({
 type InfoProps = {
   viewingVersion: number | null;
   onSelectVersion?: ((version: number) => void) | undefined;
-  previewOpen?: boolean | undefined;
+  heading?: ReactNode;
   scene: { name: string };
 };
 vi.mock("./SceneInfoPanel", () => ({
   SceneInfoPanel: (props: InfoProps) => (
-    <div
-      data-preview-open={String(props.previewOpen)}
-      data-scene={props.scene.name}
-      data-testid="info-panel"
-      data-viewing={props.viewingVersion ?? ""}
-    >
+    <div data-scene={props.scene.name} data-testid="info-panel" data-viewing={props.viewingVersion ?? ""}>
+      <div data-testid="info-heading">{props.heading}</div>
       <button onClick={() => props.onSelectVersion?.(1)} type="button">
         pick v1
+      </button>
+    </div>
+  ),
+}));
+type InstallDialogProps = {
+  installVersion: number | null;
+  signedIn: boolean;
+  returnTo: string;
+  pageUrl: string;
+  onClose: () => void;
+};
+vi.mock("./SceneInstallDialog", () => ({
+  SceneInstallDialog: (props: InstallDialogProps) => (
+    <div
+      data-page-url={props.pageUrl}
+      data-return-to={props.returnTo}
+      data-signed-in={String(props.signedIn)}
+      data-testid="install-dialog"
+      data-version={props.installVersion ?? ""}
+    >
+      <button onClick={props.onClose} type="button">
+        close install
       </button>
     </div>
   ),
@@ -270,7 +288,6 @@ describe("SceneEditorModal landing", () => {
     expect(toggleOrder()).toEqual(["Info", "Editor", "AI", "Preview"]);
     expect(pressed()).toEqual({ AI: false, Editor: true, Info: true, Preview: true });
     expect(screen.getByTestId("info-panel")).toBeTruthy();
-    expect(screen.getByTestId("info-panel").dataset.previewOpen).toBe("true");
     expect(screen.queryByTestId("ai-panel")).toBeNull();
     // The preview mounts once scenes.json is in, on the loaded scenes.
     const panel = await screen.findByTestId("preview-panel");
@@ -513,10 +530,38 @@ describe("SceneEditorModal Info panel", () => {
     // Closing the preview forgets both.
     fireEvent.click(panelToggle("Preview"));
     expect(screen.getByTestId("info-panel").dataset.viewing).toBe("");
-    expect(screen.getByTestId("info-panel").dataset.previewOpen).toBe("false");
     fireEvent.click(panelToggle("Preview"));
     expect((await screen.findByTestId("preview-panel")).dataset.versionRequest).toBe("");
-    expect(screen.getByTestId("info-panel").dataset.previewOpen).toBe("true");
+  });
+});
+
+describe("SceneEditorModal Install dialog", () => {
+  it("opens from the bar for everyone, pinning the previewed version when it is not the latest", async () => {
+    remember({ ai: false, editor: false, info: true, preview: true });
+    window.history.replaceState(null, "", "/s/clock?share=tok#scene-info-preview");
+    render(<SceneEditorModal info={info} sceneId="scene-1" versions={versions} />);
+    expect(screen.queryByTestId("install-dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    let dialog = screen.getByTestId("install-dialog");
+    expect(dialog.dataset.version).toBe("");
+    expect(dialog.dataset.signedIn).toBe("true");
+    expect(dialog.dataset.pageUrl).toBe("https://scenes.frameos.net/s/clock");
+    expect(dialog.dataset.returnTo).toBe("/s/clock?share=tok#scene-info-preview");
+    fireEvent.click(screen.getByRole("button", { name: "close install" }));
+    expect(screen.queryByTestId("install-dialog")).toBeNull();
+
+    // The Preview panel runs v1 (not the latest, v2): a cloud install pins it.
+    await screen.findByTestId("preview-panel");
+    fireEvent.click(screen.getByRole("button", { name: "report v1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    dialog = screen.getByTestId("install-dialog");
+    expect(dialog.dataset.version).toBe("1");
+  });
+
+  it("is not offered without page info to install from", async () => {
+    render(<SceneEditorModal sceneId="scene-1" />);
+    expect(screen.queryByRole("button", { name: "Install" })).toBeNull();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   });
 });
 
@@ -672,7 +717,7 @@ describe("SceneEditorModal bar", () => {
     expect(screen.queryByRole("link", { name: /Download \.zip/ })).toBeNull();
   });
 
-  it("puts the panel toggles before Save, Fork and Download in the bar's right-hand cluster", async () => {
+  it("lays the bar out as Back, the panel toggles, then Save / Fork / Download on the right", async () => {
     render(
       <SceneEditorModal
         canFork
@@ -682,14 +727,40 @@ describe("SceneEditorModal bar", () => {
         sceneId="scene-1"
       />,
     );
-    const cluster = screen.getByRole("group", { name: "Panels" }).parentElement!;
-    const labels = Array.from(cluster.children).map(
-      (child) => child.getAttribute("aria-label") ?? child.textContent?.trim(),
-    );
-    expect(labels).toEqual(["Panels", "Save as new version", "Fork & save copy", "Download .zip"]);
-    // Back and the scene's name stay on the left, before the cluster.
-    expect(backButton().compareDocumentPosition(cluster) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const left = document.querySelector(".editor-modal__title")!;
+    const label = (child: Element) => child.getAttribute("aria-label") ?? child.textContent?.trim();
+    expect(Array.from(left.children).map(label)).toEqual(["Back", "Panels"]);
+    const right = document.querySelector(".editor-modal__bar .button-row")!;
+    expect(Array.from(right.children).map(label)).toEqual([
+      "Install",
+      "Save as new version",
+      "Fork & save copy",
+      "Download .zip",
+    ]);
+    expect(left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The scene's name heads the Info panel, not the bar.
+    await waitFor(() => expect(screen.getByText("Loaded")).toBeTruthy());
+    expect(screen.getByTestId("info-heading").contains(screen.getByText("Loaded"))).toBe(true);
+    expect(left.textContent).not.toContain("Loaded");
+    // Editing puts the Unsaved pill beside the actions.
+    fireEvent.click(await screen.findByRole("button", { name: "emit echo" }));
+    fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
+    expect(Array.from(right.children).map(label)[0]).toBe("Unsaved changes");
+  });
+
+  it("keeps the scene's name in the bar while the Info panel is closed, and without one", async () => {
+    remember({ ai: false, editor: true, info: false, preview: false });
+    const { unmount } = render(<SceneEditorModal info={info} sceneId="scene-1" />);
+    await waitFor(() => expect(screen.getByText("Loaded")).toBeTruthy());
+    expect(document.querySelector(".editor-modal__title")!.textContent).toContain("Loaded");
+    fireEvent.click(panelToggle("Info"));
+    expect(document.querySelector(".editor-modal__title")!.textContent).not.toContain("Loaded");
+    expect(screen.getByTestId("info-heading").textContent).toContain("Loaded");
+    unmount();
+
+    render(<SceneEditorModal sceneId="scene-1" />);
+    await waitFor(() => expect(screen.getByText("Loaded")).toBeTruthy());
+    expect(document.querySelector(".editor-modal__title")!.textContent).toContain("Loaded");
   });
 
   it("puts Back first in the bar, going back in history when one of our pages led here", async () => {
@@ -784,6 +855,26 @@ describe("SceneEditorModal scene name", () => {
     await waitFor(() => expect(screen.queryByText("Unsaved changes")).toBeNull());
     expect(refreshMock).toHaveBeenCalled();
     expect(screen.getByTestId("editor")).toBeTruthy();
+  });
+
+  it("renames from the Info panel's heading, through the editor, into Save", async () => {
+    remember({ ai: false, editor: true, info: true, preview: false });
+    render(<SceneEditorModal canSave info={info} sceneId="scene-1" />);
+    await screen.findByTestId("editor");
+    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
+    const heading = screen.getByTestId("info-heading");
+    fireEvent.click(within(heading).getByRole("button", { name: "Rename scene" }));
+    const input = within(heading).getByRole("textbox", { name: "Scene name" }) as HTMLInputElement;
+    expect(input.value).toBe("Loaded");
+    fireEvent.change(input, { target: { value: "From the panel" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(within(heading).getByText("From the panel")).toBeTruthy();
+    expect(renameCalls).toEqual([["s1", "From the panel"]]);
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: /Save as new version/ }));
+    await waitFor(() => expect(postedContent()?.scenes[0]?.name).toBe("From the panel"));
   });
 
   it("follows the editor's own rename", async () => {

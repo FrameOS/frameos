@@ -1,7 +1,18 @@
 "use client";
 
 import type { EmbeddedSceneEditorApi } from "frameos-editor/react";
-import { ArrowLeft, FileArchive, GitFork, Info, Pencil, Play, Save, Sparkles, Workflow } from "lucide-react";
+import {
+  ArrowLeft,
+  FileArchive,
+  GitFork,
+  Info,
+  MonitorDown,
+  Pencil,
+  Play,
+  Save,
+  Sparkles,
+  Workflow,
+} from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
@@ -25,6 +36,7 @@ import {
 } from "../lib/scene-views";
 import { SceneAiPanel, type SceneAiPanelProps } from "./SceneAiPanel";
 import { SceneInfoPanel, type SceneInfoData } from "./SceneInfoPanel";
+import { SceneInstallDialog } from "./SceneInstallDialog";
 import {
   SceneLivePreviewPanel,
   type PreviewSource,
@@ -65,8 +77,11 @@ type SceneEditorModalProps = {
   downloadUrl?: string | undefined;
   /** Where the OpenAI key is set (the fleet workspace's settings page). */
   settingsUrl?: string | undefined;
-  /** The sign-in page; the AI panel appends `return_to`. */
+  /** The sign-in page; the AI panel and the Install dialog append
+   * `return_to`. */
   loginUrl?: string | undefined;
+  /** The account creation page (the Install dialog's invite). */
+  signupUrl?: string | undefined;
   /** The scene's published versions, for the Preview panel's source list. */
   versions?: SceneVersionOption[] | undefined;
   /** The version the page is pinned to via ?version=N (not the latest):
@@ -827,7 +842,8 @@ export function SceneEditorModal({
   share,
   downloadUrl,
   settingsUrl,
-  loginUrl,
+  loginUrl = "/login",
+  signupUrl = "/signup",
   versions,
   pinnedVersion = null,
   info,
@@ -842,6 +858,7 @@ export function SceneEditorModal({
   const [versionRequest, setVersionRequest] = useState<{ version: number } | null>(null);
   const [previewSource, setPreviewSource] = useState<PreviewSource | null>(null);
   const [initialPrompt, setInitialPrompt] = useState<string | undefined>(undefined);
+  const [installOpen, setInstallOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [forking, setForking] = useState(false);
@@ -1169,16 +1186,28 @@ export function SceneEditorModal({
       ? "“Fork & save copy” saves your remix as a private scene in your account."
       : "Sign in to save a remix as a private scene in your account.";
 
+  // The scene's name (and its rename pencil) heads the Info column; only
+  // while that column is closed does the bar carry it.
+  const nameTitle = <SceneNameTitle name={sceneName} onRename={renameScene} />;
+  const nameInInfo = info !== undefined && panels.info;
+  // The version being looked at (the Preview panel's, when it runs a
+  // published one): the Info table marks it, and a cloud install pins it
+  // when it is not the latest.
+  const viewingVersion =
+    info && panels.preview && previewSource?.kind === "version"
+      ? (previewSource.version ?? info.scene.latestVersion)
+      : null;
+  const installVersion =
+    info && viewingVersion !== null && viewingVersion !== info.scene.latestVersion ? viewingVersion : null;
+
   return (
     // ph-no-capture: the scene's own diagram, node labels and settings.
     <div className="editor-modal ph-no-capture">
       <div className="editor-modal__bar">
         <div className="editor-modal__title">
           <SceneEditorBackButton label="Back" onClick={goBack} />
-          <SceneNameTitle name={sceneName} onRename={renameScene} />
-          {(canSave || canFork) && dirty ? (
-            <span className="pill pill-warning">Unsaved changes</span>
-          ) : null}
+          <SceneEditorPanelToggles available={available} onToggle={togglePanel} panels={panels} />
+          {nameInInfo ? null : nameTitle}
           {!canSave ? (
             <span className="pill" title="Explore and tweak freely; nothing you change here is saved anywhere">
               Playground — changes are not saved
@@ -1187,7 +1216,20 @@ export function SceneEditorModal({
           {error ? <span className="pill pill-warning">{error}</span> : null}
         </div>
         <div className="button-row">
-          <SceneEditorPanelToggles available={available} onToggle={togglePanel} panels={panels} />
+          {(canSave || canFork) && dirty ? (
+            <span className="pill pill-warning">Unsaved changes</span>
+          ) : null}
+          {info ? (
+            <button
+              className="button button--small"
+              onClick={() => setInstallOpen(true)}
+              title="Install this scene on a frame"
+              type="button"
+            >
+              <MonitorDown aria-hidden size={16} />
+              Install
+            </button>
+          ) : null}
           {canSave ? (
             <button
               className="button button--small"
@@ -1228,13 +1270,9 @@ export function SceneEditorModal({
           info ? (
             <SceneInfoPanel
               {...info}
+              heading={nameTitle}
               onSelectVersion={selectVersion}
-              previewOpen={panels.preview}
-              viewingVersion={
-                panels.preview && previewSource?.kind === "version"
-                  ? (previewSource.version ?? info.scene.latestVersion)
-                  : null
-              }
+              viewingVersion={viewingVersion}
             />
           ) : undefined
         }
@@ -1286,6 +1324,22 @@ export function SceneEditorModal({
         theme={theme}
         width={width || 800}
       />
+      {installOpen && info ? (
+        <SceneInstallDialog
+          framesUrl={info.framesUrl}
+          installVersion={installVersion}
+          installableFrames={info.installableFrames}
+          isPrivate={info.scene.visibility !== "public"}
+          loginUrl={loginUrl}
+          onClose={() => setInstallOpen(false)}
+          pageUrl={info.pageUrl}
+          returnTo={`${window.location.pathname}${window.location.search}${window.location.hash}`}
+          sceneId={sceneId}
+          sceneName={info.scene.name}
+          signedIn={info.signedIn}
+          signupUrl={signupUrl}
+        />
+      ) : null}
     </div>
   );
 }

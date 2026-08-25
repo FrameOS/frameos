@@ -82,7 +82,7 @@ afterEach(() => {
 });
 
 describe("SceneInfoPanel", () => {
-  it("shows the publisher line, gallery, description, install instructions and versions from its props", () => {
+  it("shows the publisher line, gallery, description and versions from its props", () => {
     render(<SceneInfoPanel {...info} onSelectVersion={vi.fn()} viewingVersion={2} />);
 
     expect(screen.getByText(/12 downloads/)).toBeTruthy();
@@ -90,12 +90,11 @@ describe("SceneInfoPanel", () => {
     expect(screen.getByText(/requires FrameOS 2026.8.1 or newer/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Report scene" })).toBeTruthy();
 
-    // Gallery: the zip's preview plus the uploaded image (thumbnails are
-    // decorative, alt=""); the main image zooms, it is not a link anywhere.
-    expect(screen.getByRole("button", { name: "Clock preview" })).toBeTruthy();
-    expect(document.querySelectorAll(".scene-gallery img")).toHaveLength(3);
-    expect(screen.queryByRole("link", { name: "Clock preview" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    // Gallery: the zip's preview plus the uploaded image, thumbnails only
+    // (decorative, alt=""), each a lightbox trigger; no removal for visitors.
+    expect(screen.getAllByRole("button", { name: /View image \d full size/ })).toHaveLength(2);
+    expect(document.querySelectorAll(".scene-gallery img")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /Remove image/ })).toBeNull();
 
     // Category and tags link into the store.
     expect(screen.getByRole("link", { name: "Weather" }).getAttribute("href")).toBe("/?category=weather");
@@ -105,12 +104,9 @@ describe("SceneInfoPanel", () => {
     expect(screen.getByText("station").tagName).toBe("STRONG");
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
 
-    // Self-hosted install with the page URL; no cloud frames box.
-    expect(screen.getByRole("heading", { name: "Install on your FrameOS" })).toBeTruthy();
-    expect((screen.getByRole("textbox", { name: "URL to copy" }) as HTMLInputElement).value).toBe(
-      "https://scenes.frameos.net/s/clock",
-    );
-    expect(screen.queryByRole("heading", { name: "Install on a frame" })).toBeNull();
+    // Installing lives in the bar's dialog, not here.
+    expect(screen.queryByRole("textbox", { name: "URL to copy" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Install/ })).toBeNull();
 
     // Versions: newest first, the latest flagged, the previewed one marked.
     const rows = within(versionsTable()).getAllByRole("row").slice(1);
@@ -134,30 +130,6 @@ describe("SceneInfoPanel", () => {
     ]);
     expect(versionsTable().closest(".table-scroll")).toBeNull();
     expect(versionsTable().parentElement?.tagName).toBe("SECTION");
-  });
-
-  it("puts the gallery first, above the publisher line", () => {
-    render(<SceneInfoPanel {...info} viewingVersion={2} />);
-    const gallery = document.querySelector(".scene-gallery")!;
-    const publisher = screen.getByText(/12 downloads/);
-    expect(gallery.compareDocumentPosition(publisher) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(document.querySelector(".scene-info")?.firstElementChild).toBe(gallery);
-  });
-
-  it("keeps to thumbnails while the Preview panel is open, each opening the lightbox", () => {
-    render(<SceneInfoPanel {...info} previewOpen viewingVersion={2} />);
-    // No main image; one thumbnail per image (the zip's preview, the upload).
-    expect(screen.queryByRole("button", { name: "Clock preview" })).toBeNull();
-    expect(document.querySelectorAll(".scene-gallery img")).toHaveLength(2);
-    const thumbs = screen.getAllByRole("button", { name: /View image \d full size/ });
-    expect(thumbs).toHaveLength(2);
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    fireEvent.click(thumbs[1]!);
-    const dialog = screen.getByRole("dialog", { name: "Scene image" });
-    expect(dialog.querySelector("img")?.getAttribute("src")).toBe("/api/store/scenes/scene-1/images/img-1");
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("gives the owner the versions' actions in the compact table", () => {
@@ -199,16 +171,15 @@ describe("SceneInfoPanel", () => {
     expect(screen.getByRole("link", { name: "v1" }).getAttribute("href")).toBe(
       "/s/clock?version=1&share=tok",
     );
-    expect(screen.getByRole("button", { name: "Clock preview" }).querySelector("img")?.getAttribute("src")).toBe(
-      "/api/store/scenes/scene-1/image?share=tok",
-    );
+    expect(
+      screen.getByRole("button", { name: "View image 1 full size" }).querySelector("img")?.getAttribute("src"),
+    ).toBe("/api/store/scenes/scene-1/image?share=tok");
     expect(screen.getByText(/viewing it through a sharing link/)).toBeTruthy();
-    expect(screen.getByText(/carries a sharing secret/)).toBeTruthy();
     // A private scene cannot be reported.
     expect(screen.queryByRole("button", { name: "Report scene" })).toBeNull();
   });
 
-  it("gives the owner the editors, the visibility actions and the frames box", () => {
+  it("gives the owner the editors, the image controls and the visibility actions", () => {
     render(
       <SceneInfoPanel
         {...info}
@@ -219,7 +190,8 @@ describe("SceneInfoPanel", () => {
         viewingVersion={1}
       />,
     );
-    expect(screen.getByRole("button", { name: "Remove" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Remove image \d/ })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Add an image to this scene's page" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit tags" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit category" })).toBeTruthy();
@@ -227,26 +199,31 @@ describe("SceneInfoPanel", () => {
     expect(screen.getByRole("button", { name: "Make public" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Unpublish" })).toHaveLength(2);
-    expect(screen.getByRole("heading", { name: "Install on a frame" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Install on a self-hosted FrameOS" })).toBeTruthy();
     expect(screen.getByText(/only visible to you/)).toBeTruthy();
   });
 
-  it("installs the previewed version when it is not the latest", () => {
-    fetchMock.mockResolvedValueOnce(Response.json({ connected: true }));
-    render(
-      <SceneInfoPanel
-        {...info}
-        installableFrames={[{ connected: true, id: "f1", name: "Kitchen", status: "active" }]}
-        onSelectVersion={vi.fn()}
-        signedIn
-        viewingVersion={1}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Install" }));
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/frames/f1/scenes/add",
-      expect.objectContaining({ body: JSON.stringify({ scene_id: "scene-1", scene_version: 1 }) }),
-    );
+
+  it("heads the column with the name it is given as a heading, the publisher line under it, then the images", () => {
+    render(<SceneInfoPanel {...info} heading={<span>Clock title</span>} viewingVersion={2} />);
+    const heading = screen.getByRole("heading", { level: 1, name: "Clock title" });
+    const byline = screen.getByText(/12 downloads/);
+    const gallery = document.querySelector(".scene-gallery")!;
+    const header = document.querySelector(".scene-info")!.firstElementChild!;
+    expect(header.contains(heading)).toBe(true);
+    expect(header.contains(byline)).toBe(true);
+    expect(heading.compareDocumentPosition(byline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(byline.compareDocumentPosition(gallery) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Thumbnails open the lightbox.
+    fireEvent.click(screen.getByRole("button", { name: "View image 2 full size" }));
+    expect(
+      screen.getByRole("dialog", { name: "Scene image" }).querySelector("img")?.getAttribute("src"),
+    ).toBe("/api/store/scenes/scene-1/images/img-1");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("has no heading element when it is given none", () => {
+    render(<SceneInfoPanel {...info} viewingVersion={2} />);
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 });

@@ -5,16 +5,12 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { ImageLightbox } from "./ImageLightbox";
 
-// The scene's image gallery (the Info panel): the zip's preview image plus
-// any owner-uploaded gallery images, shown as a bounded thumbnail with a
-// strip when there is more than one. Clicking the main image blows it up in
-// the lightbox. Owners add images (moderated server-side) and remove both
-// the primary preview and uploaded gallery images. Compact (the Preview
-// panel is open beside the column, showing the scene itself): the strip
-// alone, each thumbnail opening the lightbox.
+// The scene's images (the Info panel): the zip's preview plus any
+// owner-uploaded gallery images, as one grid of equal thumbnails — each
+// opens the lightbox full size. Owners add images (moderated server-side)
+// and remove any of them, the primary preview included.
 export function SceneImageGallery({
   canEdit,
-  compact = false,
   hasPreview,
   imageIds,
   sceneId,
@@ -22,8 +18,6 @@ export function SceneImageGallery({
   share,
 }: {
   canEdit: boolean;
-  /** Thumbnails only, each a lightbox trigger; no main image. */
-  compact?: boolean | undefined;
   hasPreview: boolean;
   imageIds: string[];
   sceneId: string;
@@ -45,11 +39,7 @@ export function SceneImageGallery({
       url: `/api/store/scenes/${sceneId}/images/${id}${shareSuffix}`,
     })),
   ];
-  const [selected, setSelected] = useState(0);
-  const selectedIndex = Math.min(selected, urls.length - 1);
-  const current = urls[selectedIndex];
   const [zoomed, setZoomed] = useState<string | null>(null);
-  const showThumbs = compact ? urls.length > 0 || canEdit : urls.length > 1 || canEdit;
 
   async function upload(file: File) {
     setBusy(true);
@@ -97,7 +87,6 @@ export function SceneImageGallery({
     );
     setBusy(false);
     if (response.ok) {
-      setSelected(0);
       router.refresh();
     } else {
       const payload = await response.json().catch(() => ({}));
@@ -109,55 +98,33 @@ export function SceneImageGallery({
     // ph-no-capture travels with the gallery rather than being left to each
     // page that mounts it: the scene's own images and name are never
     // analytics material, wherever it is rendered.
-    <div className={compact ? "scene-gallery scene-gallery--compact ph-no-capture" : "scene-gallery ph-no-capture"}>
-      {compact ? null : current ? (
-        <div className="scene-gallery__main">
-          <button
-            className="scene-gallery__zoom"
-            onClick={() => setZoomed(current.url)}
-            title="View full size"
-            type="button"
-          >
-            <img
-              alt={`${sceneName} preview`}
-              className="scene-card__image"
-              src={current.url}
-            />
-          </button>
-          {canEdit ? (
-            <button
-              className="scene-gallery__remove"
-              disabled={busy}
-              onClick={() => void remove(current.id)}
-              title="Remove this image"
-              type="button"
-            >
-              <Trash2 aria-hidden size={14} />
-              Remove
-            </button>
-          ) : null}
-        </div>
-      ) : (
-        <div aria-hidden className="scene-card__placeholder">
-          No preview
-        </div>
-      )}
-      {showThumbs ? (
+    <div className="scene-gallery ph-no-capture">
+      {urls.length > 0 || canEdit ? (
         <div className="scene-gallery__thumbs">
           {urls.map((image, index) => (
-            <button
-              aria-label={compact ? `View image ${index + 1} full size` : `Show image ${index + 1}`}
-              className={
-                !compact && index === selectedIndex
-                  ? "scene-gallery__thumb scene-gallery__thumb--active"
-                  : "scene-gallery__thumb"
-              }
-              key={image.id ?? "preview"}
-              onClick={() => (compact ? setZoomed(image.url) : setSelected(index))}
-              type="button"
-            >
-              <img alt="" src={image.url} />
-            </button>
+            <div className="scene-gallery__thumb-wrap" key={image.id ?? "preview"}>
+              <button
+                aria-label={`View image ${index + 1} full size`}
+                className="scene-gallery__thumb"
+                onClick={() => setZoomed(image.url)}
+                title="View full size"
+                type="button"
+              >
+                <img alt="" src={image.url} />
+              </button>
+              {canEdit ? (
+                <button
+                  aria-label={`Remove image ${index + 1}`}
+                  className="scene-gallery__thumb-remove"
+                  disabled={busy}
+                  onClick={() => void remove(image.id)}
+                  title="Remove this image from the scene page"
+                  type="button"
+                >
+                  <Trash2 aria-hidden size={12} />
+                </button>
+              ) : null}
+            </div>
           ))}
           {canEdit ? (
             <>
@@ -186,7 +153,11 @@ export function SceneImageGallery({
             </>
           ) : null}
         </div>
-      ) : null}
+      ) : (
+        <div aria-hidden className="scene-card__placeholder">
+          No preview
+        </div>
+      )}
       {error ? (
         <p className="notice-error" role="alert">
           {error}
