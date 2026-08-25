@@ -2244,8 +2244,9 @@ a.stat-tile:hover {
   inset: 0;
 }
 
-/* The Preview / AI switch in the modal bar: a segmented group where each
-   button is on or off on its own. */
+/* The Info · Editor · AI · Preview switch in the modal bar: a segmented
+   group where each button is on or off on its own, first in the bar's
+   right-hand cluster (before Save / Fork / Download). */
 .editor-modal__panels {
   margin-left: 0;
 }
@@ -2322,8 +2323,13 @@ a.stat-tile:hover {
   padding: 8px;
 }
 
+/* Fitted to the column and at most half the viewport, aspect kept; the
+   lightbox is where the frame shows at full size. */
 .live-preview-panel .live-preview__canvas {
-  max-height: 55vh;
+  max-width: 100%;
+  max-height: 50vh;
+  width: auto;
+  height: auto;
 }
 
 /* Narrower label column than the old full-page preview had. */
@@ -2356,6 +2362,153 @@ a.stat-tile:hover {
   min-width: 0;
   min-height: 0;
   background: var(--surface);
+}
+
+/* The Info column (left of the diagram): the scene page's gallery,
+   description, install instructions and versions, in one narrow column
+   that scrolls as one (nothing inside it scrolls sideways on its own). */
+.editor-modal__info {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  background: var(--surface);
+}
+
+/* The bar's leftmost control: back to the scene page (or My scenes). */
+.editor-modal__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.editor-modal__back:hover {
+  background: var(--bg-soft);
+}
+
+/* --- Scene info: the scene page's body, on the page and in the editor --- */
+
+.scene-info {
+  display: grid;
+  gap: 12px;
+}
+
+.scene-info > .section-block {
+  margin-top: 12px;
+}
+
+.scene-info--panel {
+  gap: 10px;
+  font-size: 13px;
+}
+
+.scene-info--panel > .section-block {
+  margin-top: 6px;
+  gap: 10px;
+}
+
+.scene-info--panel .copy {
+  margin: 0;
+}
+
+.scene-info--panel h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.scene-info--panel .card {
+  padding: 12px;
+}
+
+.scene-info--panel .card h3 {
+  font-size: 14px;
+}
+
+.scene-info--panel .copy-field__input {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.scene-info--panel .table {
+  font-size: 12px;
+}
+
+/* Gallery images are thumbnails in the column: bounded height, whole image
+   visible; the lightbox shows them full size. */
+.scene-gallery__zoom {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: zoom-in;
+}
+
+.scene-info--panel .scene-gallery .scene-card__image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 240px;
+  margin: 0 auto;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+
+.scene-info--panel .scene-gallery .scene-card__placeholder {
+  height: 160px;
+  aspect-ratio: auto;
+}
+
+/* A hidden Editor column stays mounted (its unsaved edits with it). */
+.editor-modal__editor[hidden] {
+  display: none;
+}
+
+/* The versions table fits the column: compact cells, text wrapping, the
+   version's pills and the zip's details stacked under their cells. */
+.scene-info--panel .table th,
+.scene-info--panel .table td {
+  padding: 8px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.scene-info--panel .table .pill,
+.scene-info--panel .table .button {
+  white-space: nowrap;
+}
+
+.scene-versions__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.scene-versions__detail {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Thumbnails only (the Preview panel is open): a little larger, each a
+   lightbox trigger. */
+.scene-gallery--compact .scene-gallery__thumb {
+  width: 80px;
+  height: 60px;
+  cursor: zoom-in;
 }
 
 /* The new-scene page's display-size picker in the modal bar. */
@@ -2684,18 +2837,20 @@ html.theme-dark .ai-panel__render {
 }
 
 @media (max-width: 900px) {
-  /* No room for side columns: the panels stack under the diagram. */
+  /* No room for columns: the open panels stack, equal shares, the Info
+     column last; the drag handles are for pointers with room to drag. */
   .editor-modal__frame--with-panels {
     grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: minmax(0, 1fr) 6px minmax(0, 45%);
-  }
-
-  .editor-modal__frame--panels-2 {
-    grid-template-rows: minmax(0, 1fr) 6px minmax(0, 32%) 6px minmax(0, 32%);
+    grid-template-rows: none;
+    grid-auto-rows: minmax(0, 1fr);
   }
 
   .editor-modal__resizer {
-    cursor: default;
+    display: none;
+  }
+
+  .editor-modal__info {
+    order: 2;
   }
 }
 

@@ -1,15 +1,17 @@
 "use client";
 
-import { ArrowLeft, Save } from "lucide-react";
+import { Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { applyAiScenes, blankScene, prepareForEditor, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
-import type { SceneEditorPanels } from "../lib/scene-views";
+import type { SceneEditorPanelName, SceneEditorPanels } from "../lib/scene-views";
 import {
   readDocumentTheme,
+  SceneEditorBackButton,
   SceneEditorPanelToggles,
   SceneEditorWorkspace,
   SceneNameTitle,
   sceneNameFor,
+  togglePanelIn,
   useEditorStylesheet,
   type EmbeddedSceneEditorApi,
 } from "./SceneEditorModal";
@@ -75,7 +77,7 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
   // sends it; follows the editor's edits and its scene tabs.
   const [sceneName, setSceneName] = useState<string | null>(null);
   const [presetIndex, setPresetIndex] = useState(0);
-  const [panels, setPanels] = useState<SceneEditorPanels>({ ai: true, preview: false });
+  const [panels, setPanels] = useState<SceneEditorPanels>({ ai: true, editor: true, info: false, preview: false });
   // The editor's latest scenes as state, for the Preview panel (kept up to
   // date only while it is open — each update re-renders the page).
   const [previewScenes, setPreviewScenes] = useState<SceneJson[] | null>(null);
@@ -180,8 +182,11 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
     return result.selectedSceneId;
   }
 
-  function togglePanel(panel: keyof SceneEditorPanels) {
-    const next = { ...panels, [panel]: !panels[panel] };
+  function togglePanel(panel: SceneEditorPanelName) {
+    const next = togglePanelIn(panels, panel);
+    if (!next) {
+      return;
+    }
     if (panel === "preview" && next.preview) {
       setPreviewScenes(latestScenesRef.current);
     }
@@ -234,6 +239,7 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
     <div className="editor-modal ph-no-capture">
       <div className="editor-modal__bar">
         <div className="editor-modal__title">
+          <SceneEditorBackButton href={myScenesUrl} label="Back" />
           <SceneNameTitle name={sceneName} onRename={renameScene} />
           {touched ? <span className="pill pill-warning">Not saved yet</span> : null}
           {error ? (
@@ -258,7 +264,7 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
               ))}
             </select>
           </label>
-          <SceneEditorPanelToggles onToggle={togglePanel} panels={panels} />
+          <SceneEditorPanelToggles available={{ info: false }} onToggle={togglePanel} panels={panels} />
           <button
             className="button button--small button-primary"
             disabled={saving || !scenes}
@@ -269,10 +275,6 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
             <Save aria-hidden size={16} />
             {saving ? "Saving…" : "Save to my scenes"}
           </button>
-          <a className="button button--small" href={myScenesUrl}>
-            <ArrowLeft aria-hidden size={16} />
-            Back
-          </a>
         </div>
       </div>
       <SceneEditorWorkspace

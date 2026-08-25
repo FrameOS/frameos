@@ -62,51 +62,70 @@ describe("SceneImageGallery", () => {
     expect(screen.queryByRole("button", { name: "Remove" })).toBe(null);
   });
 
-  it("opens the editor with its live preview when the image is clicked", () => {
-    const hashChanged = vi.fn();
-    window.addEventListener("hashchange", hashChanged);
+  it("shows thumbnails only in compact mode, each opening the lightbox", () => {
     render(
       <SceneImageGallery
         canEdit={false}
-        canOpenLivePreview
+        compact
         hasPreview
-        imageIds={[]}
+        imageIds={["img-1", "img-2"]}
         sceneId="scene-1"
         sceneName="Bird field journal"
       />,
     );
+    expect(screen.queryByRole("button", { name: "Bird field journal preview" })).toBeNull();
+    expect(document.querySelector(".scene-gallery--compact")).toBeTruthy();
+    const thumbs = screen.getAllByRole("button", { name: /View image \d full size/ });
+    expect(thumbs.map((thumb) => thumb.querySelector("img")?.getAttribute("src"))).toEqual([
+      "/api/store/scenes/scene-1/image",
+      "/api/store/scenes/scene-1/images/img-1",
+      "/api/store/scenes/scene-1/images/img-2",
+    ]);
+    // No "active" thumbnail: nothing is selected, each is its own trigger.
+    expect(document.querySelector(".scene-gallery__thumb--active")).toBeNull();
 
-    const link = screen.getByRole("link", {
-      name: "Bird field journal preview",
-    }) as HTMLAnchorElement;
-    expect(link.getAttribute("href")).toBe("#scene-editor-preview");
-    expect(link.textContent).toContain("Live preview");
-
-    fireEvent.click(link);
-
-    // Same URL + history-state convention as the "Live preview" button (the
-    // scene editor with its Preview panel), and the hashchange nudge
-    // SceneEditorModal's sync listens for.
-    expect(window.location.hash).toBe("#scene-editor-preview");
-    expect(window.history.state).toEqual({ frameosSceneEditor: true });
-    expect(hashChanged).toHaveBeenCalledOnce();
-    window.removeEventListener("hashchange", hashChanged);
+    fireEvent.click(thumbs[2]!);
+    const dialog = screen.getByRole("dialog", { name: "Scene image" });
+    expect(dialog.querySelector("img")?.getAttribute("src")).toBe("/api/store/scenes/scene-1/images/img-2");
   });
 
-  it("keeps the image a plain image when the scene cannot be previewed", () => {
+  it("shows a single image's thumbnail in compact mode (there is no main image to stand in)", () => {
     render(
       <SceneImageGallery
         canEdit={false}
-        canOpenLivePreview={false}
+        compact
         hasPreview
         imageIds={[]}
         sceneId="scene-1"
         sceneName="Bird field journal"
       />,
     );
+    expect(screen.getAllByRole("button", { name: /View image \d full size/ })).toHaveLength(1);
+  });
 
-    expect(screen.queryByRole("link")).toBe(null);
-    expect(screen.getByRole("img", { name: "Bird field journal preview" })).toBeTruthy();
+  it("blows the main image up in the lightbox when it is clicked", () => {
+    render(
+      <SceneImageGallery
+        canEdit={false}
+        hasPreview
+        imageIds={[]}
+        sceneId="scene-1"
+        sceneName="Bird field journal"
+      />,
+    );
+    expect(screen.queryByRole("dialog")).toBe(null);
+    fireEvent.click(screen.getByRole("button", { name: "Bird field journal preview" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Scene image" });
+    const image = dialog.querySelector("img")!;
+    expect(image.getAttribute("src")).toBe("/api/store/scenes/scene-1/image");
+    expect(image.className).toContain("lightbox__image--fit");
+    fireEvent.click(image);
+    expect(image.className).not.toContain("lightbox__image--fit");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBe(null);
+    // Nothing touched the URL.
     expect(window.location.hash).toBe("");
   });
 });

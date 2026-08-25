@@ -75,6 +75,14 @@ export interface DiagramLogicProps {
   updateNodeInternals?: (nodeId: string) => void
 }
 
+/** A host's request to shift the viewport by (dx, dy) screen pixels; `seq`
+ * makes each request distinct so the diagram applies repeats too. */
+export interface DiagramPanRequest {
+  dx: number
+  dy: number
+  seq: number
+}
+
 export interface NewNodePicker {
   screenX: number
   screenY: number
@@ -623,6 +631,7 @@ export interface diagramLogicValues {
   nodesById: Record<string, DiagramNode>
   nodesWithStyle: DiagramNode[]
   originalFrame: FrameType
+  panRequest: DiagramPanRequest | null
   rawEdges: DiagramEdge[]
   runtimeNodeErrorsByNodeId: Record<string, RuntimeNodeError>
   scene: FrameScene | null
@@ -691,6 +700,13 @@ export interface diagramLogicActions {
   }
   onNodesChange: (changes: NodeChange[]) => {
     changes: NodeChange[]
+  }
+  panDiagramView: (
+    dx: number,
+    dy: number
+  ) => {
+    dx: number
+    dy: number
   }
   pasteFromClipboard: () => {
     value: true
@@ -826,6 +842,7 @@ export const diagramLogic = kea<diagramLogicType>([
     deselectNode: true,
     rearrangeCurrentScene: true,
     fitDiagramView: true,
+    panDiagramView: (dx: number, dy: number) => ({ dx, dy }),
     keywordDropped: (keyword: string, type: string, position: XYPosition) => ({ keyword, type, position }),
     setSceneApps: (apps: Record<string, SceneApp>, forceCompiled: boolean = false) => ({ apps, forceCompiled }),
     forkSceneApp: (nodeId: string) => ({ nodeId }),
@@ -917,6 +934,10 @@ export const diagramLogic = kea<diagramLogicType>([
       },
     ],
     fitViewCounter: [0, { fitDiagramView: (state) => state + 1 }],
+    panRequest: [
+      null as DiagramPanRequest | null,
+      { panDiagramView: (state, { dx, dy }) => ({ dx, dy, seq: (state?.seq ?? 0) + 1 }) },
+    ],
     history: [
       { past: [], future: [] } as DiagramHistoryState,
       {

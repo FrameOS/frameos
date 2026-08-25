@@ -1,20 +1,20 @@
 "use client";
 
-import { ImagePlus, Play, Trash2 } from "lucide-react";
+import { ImagePlus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
-import { openLivePreviewView, sceneEditorPreviewHash } from "../lib/scene-views";
+import { ImageLightbox } from "./ImageLightbox";
 
-// Scene-page image gallery: the zip's preview image plus any owner-uploaded
-// gallery images, with a thumbnail strip when there is more than one. Owners
-// add images (moderated server-side) and remove both the primary preview and
-// uploaded gallery images. When the scene can run in the browser, clicking
-// the main image opens the live preview (the scene editor with its Preview
-// panel — the same #scene-editor-preview view as the "Live preview" button);
-// otherwise the image is just an image.
+// The scene's image gallery (the Info panel): the zip's preview image plus
+// any owner-uploaded gallery images, shown as a bounded thumbnail with a
+// strip when there is more than one. Clicking the main image blows it up in
+// the lightbox. Owners add images (moderated server-side) and remove both
+// the primary preview and uploaded gallery images. Compact (the Preview
+// panel is open beside the column, showing the scene itself): the strip
+// alone, each thumbnail opening the lightbox.
 export function SceneImageGallery({
   canEdit,
-  canOpenLivePreview = false,
+  compact = false,
   hasPreview,
   imageIds,
   sceneId,
@@ -22,9 +22,8 @@ export function SceneImageGallery({
   share,
 }: {
   canEdit: boolean;
-  /** False for scenes the wasm runtime cannot load (e.g. pulled ones), which
-   * keeps the image a plain, non-clickable image. */
-  canOpenLivePreview?: boolean;
+  /** Thumbnails only, each a lightbox trigger; no main image. */
+  compact?: boolean | undefined;
   hasPreview: boolean;
   imageIds: string[];
   sceneId: string;
@@ -47,7 +46,10 @@ export function SceneImageGallery({
     })),
   ];
   const [selected, setSelected] = useState(0);
-  const current = urls[Math.min(selected, urls.length - 1)];
+  const selectedIndex = Math.min(selected, urls.length - 1);
+  const current = urls[selectedIndex];
+  const [zoomed, setZoomed] = useState<string | null>(null);
+  const showThumbs = compact ? urls.length > 0 || canEdit : urls.length > 1 || canEdit;
 
   async function upload(file: File) {
     setBusy(true);
@@ -107,38 +109,21 @@ export function SceneImageGallery({
     // ph-no-capture travels with the gallery rather than being left to each
     // page that mounts it: the scene's own images and name are never
     // analytics material, wherever it is rendered.
-    <div className="scene-gallery ph-no-capture">
-      {current ? (
+    <div className={compact ? "scene-gallery scene-gallery--compact ph-no-capture" : "scene-gallery ph-no-capture"}>
+      {compact ? null : current ? (
         <div className="scene-gallery__main">
-          {canOpenLivePreview ? (
-            // A real link so right-click → "open in new tab" works (the hash
-            // reopens the preview there); left click keeps the in-page flow.
-            <a
-              className="scene-gallery__link"
-              href={sceneEditorPreviewHash}
-              onClick={(event) => {
-                event.preventDefault();
-                openLivePreviewView();
-              }}
-              title="Open the live preview"
-            >
-              <img
-                alt={`${sceneName} preview`}
-                className="scene-card__image"
-                src={current.url}
-              />
-              <span aria-hidden className="scene-gallery__hint">
-                <Play size={12} />
-                Live preview
-              </span>
-            </a>
-          ) : (
+          <button
+            className="scene-gallery__zoom"
+            onClick={() => setZoomed(current.url)}
+            title="View full size"
+            type="button"
+          >
             <img
               alt={`${sceneName} preview`}
               className="scene-card__image"
               src={current.url}
             />
-          )}
+          </button>
           {canEdit ? (
             <button
               className="scene-gallery__remove"
@@ -157,17 +142,18 @@ export function SceneImageGallery({
           No preview
         </div>
       )}
-      {urls.length > 1 || canEdit ? (
+      {showThumbs ? (
         <div className="scene-gallery__thumbs">
           {urls.map((image, index) => (
             <button
+              aria-label={compact ? `View image ${index + 1} full size` : `Show image ${index + 1}`}
               className={
-                index === Math.min(selected, urls.length - 1)
+                !compact && index === selectedIndex
                   ? "scene-gallery__thumb scene-gallery__thumb--active"
                   : "scene-gallery__thumb"
               }
               key={image.id ?? "preview"}
-              onClick={() => setSelected(index)}
+              onClick={() => (compact ? setZoomed(image.url) : setSelected(index))}
               type="button"
             >
               <img alt="" src={image.url} />
@@ -205,6 +191,14 @@ export function SceneImageGallery({
         <p className="notice-error" role="alert">
           {error}
         </p>
+      ) : null}
+      {zoomed ? (
+        <ImageLightbox
+          alt={`${sceneName} preview`}
+          label="Scene image"
+          onClose={() => setZoomed(null)}
+          url={zoomed}
+        />
       ) : null}
     </div>
   );

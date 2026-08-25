@@ -9,6 +9,8 @@ import ReactFlow, {
   OnConnectStartParams,
   EdgeProps,
   useUpdateNodeInternals,
+  useNodesInitialized,
+  useStoreApi,
   ReactFlowProvider,
   SelectionMode,
 } from 'reactflow'
@@ -20,6 +22,7 @@ import {
   WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -263,8 +266,10 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
   const { frameId } = useValues(frameLogic)
   const { theme } = useValues(workspaceLogic)
   const updateNodeInternals = useUpdateNodeInternals()
+  const flowStore = useStoreApi()
+  const nodesInitialized = useNodesInitialized()
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
-  const { nodes, nodesWithStyle, edges, selectedNodeIds, fitViewCounter, isCompiledScene } = useValues(
+  const { nodes, nodesWithStyle, edges, selectedNodeIds, fitViewCounter, panRequest, isCompiledScene } = useValues(
     diagramLogic(diagramLogicProps)
   )
   const { onEdgesChange, onNodesChange, setNodes, addEdge, keywordDropped, setCursorPosition } = useActions(
@@ -486,11 +491,39 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
     }
   }, [clearSelectionDragGuard])
 
+  // fitView is a no-op (returns false) until reactflow has measured every
+  // node, which is later than the diagram's own mount-time requests: a
+  // request is kept until nodesInitialized flips, then honoured once.
+  const fittedRequestRef = useRef(0)
   useEffect(() => {
-    if (fitViewCounter > 0) {
-      reactFlowInstance?.fitView({ maxZoom: 1, padding: 0.2 })
+    if (fitViewCounter === 0 || fitViewCounter === fittedRequestRef.current || !reactFlowInstance) {
+      return
     }
-  }, [fitViewCounter, reactFlowInstance])
+    if (reactFlowInstance.fitView({ maxZoom: 1, padding: 0.2 })) {
+      fittedRequestRef.current = fitViewCounter
+    }
+  }, [fitViewCounter, nodesInitialized, reactFlowInstance])
+
+  // A host's pan (the embedding page keeping the diagram centred while its
+  // column resizes): applied once per request, before paint, and never a
+  // stale one on a remount — the ref starts at whatever was requested last.
+  // Straight through d3-zoom, the way fitView goes: the instance's
+  // setViewport runs a (0ms) d3 transition, which only lands on the next
+  // animation frame — a frame behind the resize, a visible wobble while
+  // a handle is dragged. dx/dy are screen pixels; translateBy takes
+  // diagram units, hence the division by the zoom.
+  const appliedPanSeqRef = useRef(panRequest?.seq ?? 0)
+  useLayoutEffect(() => {
+    if (!panRequest || panRequest.seq === appliedPanSeqRef.current) {
+      return
+    }
+    appliedPanSeqRef.current = panRequest.seq
+    const { d3Zoom, d3Selection, transform } = flowStore.getState()
+    const zoom = transform[2]
+    if (d3Zoom && d3Selection && zoom) {
+      d3Zoom.translateBy(d3Selection, panRequest.dx / zoom, panRequest.dy / zoom)
+    }
+  }, [panRequest, flowStore])
 
   return (
     <BindLogic logic={diagramLogic} props={diagramLogicProps}>

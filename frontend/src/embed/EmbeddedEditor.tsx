@@ -54,6 +54,13 @@ export interface EmbeddedSceneEditorApi {
   /** Renames a scene through the editor's own form: the diagram keeps its
    * layout and the change streams out through onScenesChanged. */
   renameScene: (sceneId: string, name: string) => void
+  /** Shifts the shown scene's diagram by (dx, dy) screen pixels — what a host
+   * calls with half its column's width change to keep the diagram centred. */
+  panBy: (dx: number, dy: number) => void
+  /** Fits the shown scene's diagram to its column (what the toolbar's "Fit
+   * to view" does) — for a host whose column just appeared or changed size
+   * by a lot. */
+  fitView: () => void
 }
 
 export interface EmbeddedSceneEditorProps {
@@ -138,6 +145,8 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
 
   const onSelectedSceneChangedRef = useRef(props.onSelectedSceneChanged)
   onSelectedSceneChangedRef.current = props.onSelectedSceneChanged
+  const selectedSceneIdRef = useRef(selectedSceneId)
+  selectedSceneIdRef.current = selectedSceneId
   useEffect(() => {
     onSelectedSceneChangedRef.current?.(selectedSceneId)
   }, [selectedSceneId])
@@ -147,8 +156,15 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
     if (!apiRef) {
       return
     }
+    // Only the shown scene has a diagram (and a mounted logic) to drive.
+    const shownDiagram = () => {
+      const sceneId = selectedSceneIdRef.current
+      return sceneId ? diagramLogic.findMounted({ frameId: EMBED_FRAME_ID, sceneId }) : null
+    }
     apiRef.current = {
       renameScene: (sceneId, name) => updateScene(sceneId, { name }),
+      panBy: (dx, dy) => shownDiagram()?.actions.panDiagramView(dx, dy),
+      fitView: () => shownDiagram()?.actions.fitDiagramView(),
     }
     return () => {
       apiRef.current = null

@@ -51,6 +51,7 @@ export async function judgeRender({
   width,
   height,
   renderedAt,
+  comparePng,
   signal,
 }: {
   apiKey: string;
@@ -62,6 +63,8 @@ export async function judgeRender({
   height: number;
   /** When the frame was rendered, so clocks and dates can be verified. */
   renderedAt?: Date | undefined;
+  /** A "before" render: the verdict then scores the main image RELATIVE to it. */
+  comparePng?: Buffer | undefined;
   signal?: AbortSignal;
 }): Promise<JudgeVerdict> {
   const at = renderedAt ?? new Date();
@@ -71,20 +74,23 @@ export async function judgeRender({
     rubric ? `Rubric notes: ${rubric}` : null,
     `Frame size: ${width}x${height}`,
     `Rendered at: ${at.toLocaleString("en-GB", { timeZone, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })} (${timeZone})`,
-    "Grade the attached render.",
+    comparePng
+      ? "Two images follow. Image 1 is the scene BEFORE a design pass, image 2 is AFTER. Score image 2 RELATIVE to image 1: 5 = clearly better (more depth, intent and polish, nothing lost), 4 = somewhat better, 3 = no real difference, 2 = worse in some way, 1 = clearly worse. Any new overlap, clipped or covered text, clutter, decoration crossing content, or lost information caps at 2."
+      : "Grade the attached render.",
   ]
     .filter(Boolean)
     .join("\n");
+  const images = comparePng ? [comparePng, png] : [png];
   const body: Record<string, unknown> = {
     input: [
       {
         content: [
           { text, type: "input_text" },
-          {
+          ...images.map((image) => ({
             detail: "high",
-            image_url: `data:image/png;base64,${png.toString("base64")}`,
+            image_url: `data:image/png;base64,${image.toString("base64")}`,
             type: "input_image",
-          },
+          })),
         ],
         role: "user",
       },

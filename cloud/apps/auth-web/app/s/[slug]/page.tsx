@@ -11,34 +11,20 @@ import {
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
-import { CopyUrlField } from "../../../src/components/CopyUrlField";
-import { ForkSceneButton } from "../../../src/components/ForkSceneButton";
-import { InstallOnFrameBox } from "../../../src/components/InstallOnFrameBox";
 import { PublicShell } from "../../../src/components/PublicShell";
-import { ReportSceneButton } from "../../../src/components/ReportSceneButton";
-import { SceneCategoryEditor } from "../../../src/components/SceneCategoryEditor";
-import { SceneDescriptionEditor } from "../../../src/components/SceneDescriptionEditor";
-import { SceneFrameosVersionEditor } from "../../../src/components/SceneFrameosVersionEditor";
 import { SceneEditorModal } from "../../../src/components/SceneEditorModal";
-import { SceneImageGallery } from "../../../src/components/SceneImageGallery";
+import type { SceneInfoData } from "../../../src/components/SceneInfoPanel";
 import { SceneMarkdown } from "../../../src/components/SceneMarkdown";
-import { SceneTagsEditor } from "../../../src/components/SceneTagsEditor";
-import { StoreSceneActions } from "../../../src/components/StoreSceneActions";
 import { SceneViewTracker } from "../../../src/components/SceneViewTracker";
-import { YankVersionButton } from "../../../src/components/YankVersionButton";
-import { getStoreCategory } from "../../../src/lib/categories";
 import {
   getAccountBaseUrl,
   getCloudBaseUrl,
   getFramesUrl,
   getScenesBaseUrl,
+  getStorePath,
   hasDatabaseUrl,
 } from "../../../src/lib/env";
-import {
-  formatBytes,
-  formatDate,
-  formatDateTime,
-} from "../../../src/lib/format";
+import { formatDate, formatDateTime } from "../../../src/lib/format";
 import { readSession } from "../../../src/lib/session";
 import {
   canAccessPrivateScene,
@@ -266,7 +252,6 @@ export default async function ScenePage({
     requestedVersionRow && requestedVersionRow.version !== scene.latestVersion
       ? requestedVersionRow
       : null;
-  const viewingVersionNumber = pinnedVersion?.version ?? scene.latestVersion;
 
   // The signed-in visitor's cloud frames, for "Install on a frame". Only an
   // active, non-pulled scene can be pushed; the box is skipped otherwise.
@@ -307,6 +292,46 @@ export default async function ScenePage({
     getScenesBaseUrl(),
   ).toString();
 
+  // Everything the workspace's Info panel shows, as plain JSON (the
+  // workspace is a client component).
+  const info: SceneInfoData = {
+    framesUrl,
+    imageIds: galleryImages.map((image) => image.id),
+    installableFrames,
+    isAdmin,
+    isOwner,
+    pageUrl,
+    scene: {
+      accountId: scene.accountId,
+      category: scene.category,
+      description: scene.description,
+      downloadCount: scene.downloadCount,
+      frameosVersion: scene.frameosVersion,
+      hasPreview: scene.hasPreview,
+      id: scene.id,
+      latestVersion: scene.latestVersion,
+      name: scene.name,
+      publisher: scene.publisher,
+      pulledReason: scene.pulledReason,
+      riskFlags: scene.riskFlags,
+      slug: scene.slug,
+      status: scene.status,
+      tags: scene.tags,
+      updatedAt: scene.updatedAt.toISOString(),
+      visibility: scene.visibility,
+    },
+    share,
+    signedIn: Boolean(session),
+    versions: versions.map((version) => ({
+      createdAt: version.createdAt.toISOString(),
+      frameosVersion: version.frameosVersion,
+      sha256: version.sha256,
+      sizeBytes: version.sizeBytes,
+      version: version.version,
+      yankedAt: version.yankedAt ? version.yankedAt.toISOString() : null,
+    })),
+  };
+
   return (
     <PublicShell
       isSuperadmin={
@@ -326,6 +351,10 @@ export default async function ScenePage({
       <meta content={zipUrl} name="frameos:zip" />
       <meta content={scene.name} name="frameos:name" />
       <meta content={String(scene.latestVersion)} name="frameos:version" />
+      {/* The page IS the full-screen workspace below (a client component
+          that covers everything once mounted). This header is what crawlers
+          and browsers without JavaScript get: the name, the publisher line,
+          the description and the zip. */}
       <div className="content-header">
         <div>
           <h1>{scene.name}</h1>
@@ -341,51 +370,9 @@ export default async function ScenePage({
               ? ` · requires FrameOS ${scene.frameosVersion} or newer`
               : ""}
           </p>
-          {isOwner ? (
-            <SceneFrameosVersionEditor
-              frameosVersion={scene.frameosVersion}
-              sceneId={scene.id}
-            />
-          ) : null}
-          {scene.category || scene.tags.length > 0 || isOwner ? (
-            <div className="tag-list">
-              {scene.category ? (
-                <Link
-                  className="tag-pill tag-pill--category"
-                  href={`/?category=${encodeURIComponent(scene.category)}`}
-                >
-                  {getStoreCategory(scene.category)?.title ?? scene.category}
-                </Link>
-              ) : null}
-              {isOwner ? (
-                <SceneCategoryEditor
-                  category={scene.category}
-                  sceneId={scene.id}
-                />
-              ) : null}
-              {scene.tags.map((tag) => (
-                <Link
-                  className="tag-pill"
-                  href={`/?tag=${encodeURIComponent(tag)}`}
-                  key={tag}
-                >
-                  {tag}
-                </Link>
-              ))}
-              {isOwner ? (
-                <SceneTagsEditor sceneId={scene.id} tags={scene.tags} />
-              ) : null}
-            </div>
-          ) : null}
+          <SceneMarkdown description={scene.description} />
         </div>
         <div className="button-row">
-          {scene.visibility === "public" && scene.status === "active" ? (
-            <ReportSceneButton sceneId={scene.id} signedIn={Boolean(session)} />
-          ) : null}
-          {scene.status === "active" &&
-          (scene.visibility === "public" || isOwner) ? (
-            <ForkSceneButton sceneId={scene.id} signedIn={Boolean(session)} />
-          ) : null}
           <a className="button" href={downloadHref}>
             <Download aria-hidden size={18} />
             {pinnedVersion
@@ -394,7 +381,6 @@ export default async function ScenePage({
           </a>
         </div>
       </div>
-
       {pinnedVersion ? (
         <div className="notice">
           Viewing version {pinnedVersion.version}, published{" "}
@@ -404,185 +390,27 @@ export default async function ScenePage({
           <Link href={withShare(`/s/${scene.slug}`)}>Back to latest</Link>
         </div>
       ) : null}
-
-      {scene.status === "pulled" ? (
-        <p className="notice-error" role="alert">
-          This scene was pulled by moderation and is hidden from the store
-          {scene.pulledReason ? `: ${scene.pulledReason}` : "."}
-        </p>
-      ) : null}
-      {scene.visibility !== "public" && scene.status === "active" ? (
-        <div className="notice">
-          {isOwner || isAdmin
-            ? "This scene is private — it is only visible to you and to anyone you give the sharing link below."
-            : "This scene is private — you are viewing it through a sharing link."}
-          {isOwner ? (
-            <div className="notice__actions">
-              <StoreSceneActions
-                name={scene.name}
-                sceneId={scene.id}
-                status={scene.status}
-                visibility={scene.visibility}
-              />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      {scene.riskFlags.includes("shell") ? (
-        <p className="notice-error" role="alert">
-          This scene configures apps or custom code that run shell commands on
-          the frame. Only install it if you trust the publisher — review the
-          scene after installing, before deploying it.
-        </p>
-      ) : null}
-
-      {/* ph-no-capture: the scene itself — gallery images, live preview,
-          description, editor. Autocapture would otherwise ship image URLs as
-          element attributes and the scene's own text as click labels. The
-          deliberate scene_viewed / scene_forked events are unaffected. */}
-      <div className="scene-detail section-block ph-no-capture">
-        <SceneImageGallery
-          canEdit={isOwner}
-          canOpenLivePreview={scene.status !== "pulled"}
-          hasPreview={scene.hasPreview}
-          imageIds={galleryImages.map((image) => image.id)}
-          sceneId={scene.id}
-          sceneName={scene.name}
-          share={share}
-        />
-        <div className="stack">
-          {isOwner ? (
-            <SceneDescriptionEditor
-              description={scene.description}
-              sceneId={scene.id}
-            />
-          ) : (
-            <SceneMarkdown description={scene.description} />
-          )}
-          {/* The diagram is part of what a shared scene IS: everyone gets to
-              look behind it. Only the owner can save a new version. The
-              live preview is the same view with its Preview panel open. */}
-          <div className="button-row">
-            <SceneEditorModal
-              canFork={Boolean(session?.accountId)}
-              canPreview={scene.status !== "pulled"}
-              canRemix={scene.status === "active"}
-              canSave={isOwner && scene.status === "active"}
-              description={scene.description}
-              downloadUrl={downloadHref}
-              height={scene.previewImageHeight}
-              loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
-              pinnedVersion={pinnedVersion ? pinnedVersion.version : null}
-              sceneId={scene.id}
-              settingsUrl={`${getFramesUrl()}/settings#settings-openai`}
-              share={share}
-              signedIn={Boolean(session?.accountId)}
-              versions={versions.map((version) => ({
-                createdAt: version.createdAt.toISOString(),
-                version: version.version,
-                yankedAt: version.yankedAt
-                  ? version.yankedAt.toISOString()
-                  : null,
-              }))}
-              width={scene.previewImageWidth}
-            />
-          </div>
-          {installableFrames ? (
-            <InstallOnFrameBox
-              frames={installableFrames}
-              framesUrl={framesUrl}
-              sceneId={scene.id}
-              sceneName={scene.name}
-              sceneVersion={pinnedVersion ? pinnedVersion.version : null}
-            />
-          ) : null}
-          <section className="card">
-            <h3>
-              {installableFrames
-                ? "Install on a self-hosted FrameOS"
-                : "Install on your FrameOS"}
-            </h3>
-            <p>
-              Copy this link into the search box of a frame&apos;s Templates
-              panel:
-            </p>
-            <CopyUrlField value={pageUrl} />
-            {isPrivate ? (
-              <p className="copy">
-                The link carries a sharing secret: anyone who has it can view
-                and install this private scene.
-              </p>
-            ) : null}
-          </section>
-        </div>
-      </div>
-
-      <section className="section-block">
-        <h2>Versions</h2>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Version</th>
-              <th>Published</th>
-              <th>FrameOS</th>
-              <th>Size</th>
-              <th>SHA-256</th>
-              <th>Status</th>
-              {isOwner ? <th>Action</th> : null}
-            </tr>
-          </thead>
-          <tbody>
-            {versions.map((version) => (
-              <tr key={version.version}>
-                <td>
-                  <Link
-                    href={withShare(
-                      `/s/${scene.slug}?version=${version.version}`,
-                    )}
-                  >
-                    v{version.version}
-                  </Link>
-                  {viewingVersionNumber === version.version ? (
-                    <>
-                      {" "}
-                      <span className="pill">Viewing</span>
-                    </>
-                  ) : null}
-                </td>
-                <td>{formatDateTime(version.createdAt)}</td>
-                <td>{version.frameosVersion ?? "—"}</td>
-                <td>{formatBytes(version.sizeBytes)}</td>
-                <td>
-                  <code>{version.sha256.slice(0, 16)}…</code>
-                </td>
-                <td>
-                  {version.yankedAt ? (
-                    <span
-                      className="pill pill-warning"
-                      title="Skipped by new installs; still downloadable when requested explicitly"
-                    >
-                      Unpublished
-                    </span>
-                  ) : version.version === scene.latestVersion ? (
-                    <span className="pill pill-ok">Latest</span>
-                  ) : (
-                    <span className="pill">Published</span>
-                  )}
-                </td>
-                {isOwner ? (
-                  <td>
-                    <YankVersionButton
-                      sceneId={scene.id}
-                      version={version.version}
-                      yanked={Boolean(version.yankedAt)}
-                    />
-                  </td>
-                ) : null}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      {/* The diagram is part of what a shared scene IS: everyone gets to
+          look behind it. Only the owner can save a new version. */}
+      <SceneEditorModal
+        backUrl={getStorePath()}
+        canFork={Boolean(session?.accountId)}
+        canPreview={scene.status !== "pulled"}
+        canRemix={scene.status === "active"}
+        canSave={isOwner && scene.status === "active"}
+        description={scene.description}
+        downloadUrl={downloadHref}
+        height={scene.previewImageHeight}
+        info={info}
+        loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
+        pinnedVersion={pinnedVersion ? pinnedVersion.version : null}
+        sceneId={scene.id}
+        settingsUrl={`${getFramesUrl()}/settings#settings-openai`}
+        share={share}
+        signedIn={Boolean(session?.accountId)}
+        versions={info.versions}
+        width={scene.previewImageWidth}
+      />
     </PublicShell>
   );
 }

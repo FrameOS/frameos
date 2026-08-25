@@ -26,7 +26,7 @@ import { publishStoreScene } from "../src/lib/store-publish";
 import { sanitizeTagCandidates } from "../src/lib/store";
 import { DEFAULT_JUDGE_MODEL, judgeRender } from "./lib/judge";
 import { RENDER_CHECK_PREFIX } from "./lib/runner";
-import { evalAccountId } from "./lib/store";
+import { evalAccountId, loadStoreSceneBySlug } from "./lib/store";
 import type { JudgeVerdict } from "./lib/types";
 
 type JsonObject = Record<string, unknown>;
@@ -66,6 +66,8 @@ type Options = {
   concurrency: number;
   save: boolean;
   dryRun: boolean;
+  /** Design pass over the SAVED scenes: gradients, illustrations, polish; publish only when not worse. */
+  enhance: boolean;
   model: string;
   effort: string;
   judgeModel: string;
@@ -123,6 +125,7 @@ function parseArgs(argv: string[]): Options {
     attempts: 3,
     concurrency: 2,
     dryRun: false,
+    enhance: false,
     effort: "medium",
     filter: [],
     // 4:3 — the store crops thumbnails to that ratio, and 800x600 is a common panel size.
@@ -194,6 +197,9 @@ function parseArgs(argv: string[]): Options {
       case "--no-save":
         options.save = false;
         break;
+      case "--enhance":
+        options.enhance = true;
+        break;
       case "--dry-run":
         options.dryRun = true;
         break;
@@ -242,6 +248,19 @@ function buildPrompt(item: TodoItem, frame: { width: number; height: number }): 
     `- The scene MUST adapt to any panel: it is checked at ${frame.width}x${frame.height}, 480x800 (portrait) and 1600x1200. Derive every coordinate, box, gap and font size from the frame size (app.frame.width/height in JS apps, context.imageWidth/imageHeight in code nodes) — never hard-code 800/600 or a fixed viewBox; when the panel is taller than wide, stack columns vertically; wrap or truncate text to the available width (about width / (fontSize * 0.55) characters per line); keep everything inside the canvas with margins that scale.`,
     "- Prefer built-in apps and JavaScript code nodes; write a scene-local JS app only when the logic is substantial.",
     "- Deliver the complete scene with create_scenes, then summarise the scene fields a user can tweak in two sentences.",
+  ].join("\n");
+}
+
+function enhancePrompt(item: TodoItem, frame: { width: number; height: number }): string {
+  return [
+    `This scene ("${item.name}": ${item.description}) already works. Give it a visual design pass — the kind of polish that makes a panel look designed rather than assembled — and deliver the complete updated scene with update_scene.`,
+    "",
+    "Do, where it genuinely fits the content:",
+    "- Depth and light: a radialGradient glow or vignette (gradientUnits=\"userSpaceOnUse\", stop-opacity for soft edges) behind the key figure or in a corner; a linear sky/horizon or paper-like gradient instead of a flat fill.",
+    "- Illustration: a small, simple SVG illustration or icon set drawn from the subject (sun/moon discs, a tide curve, weather glyphs, a stylised parcel, a book spine, a chess piece silhouette, a coin mark…) built from paths/circles/rects — restrained, one or two colours, never clip-art clutter, never emoji.",
+    "- Shape and rhythm: rounded cards, hairline dividers, a coloured accent bar, subtle background shapes; better type hierarchy (a large display figure, muted labels).",
+    "Do NOT: change what the scene shows, its fields, data sources, refresh interval or texts; add stock photos or external images; use tags outside the supported SVG subset; break responsiveness (everything derived from the frame size, checked at 800x600, 480x800 and 1600x1200).",
+    `Panel: ${frame.width}x${frame.height} first, but it must still adapt. Keep the same node ids and structure where possible.`,
   ].join("\n");
 }
 
@@ -425,8 +444,10 @@ async function main() {
         state.judge = { problems: rendered.errors.slice(0, 3), score: 1, verdict: "did not render" };
         return;
       }
+      const baselinePng = options.enhance && best.pngPath && label !== "a0" ? await readFile(best.pngPath) : null;
       const primary = await judgeRender({
         apiKey,
+        ...(baselinePng ? { comparePng: baselinePng } : {}),
         height: options.frame.height,
         model: options.judgeModel,
         png: rendered.png,
@@ -492,8 +513,25 @@ async function main() {
       }
     };
 
+    let baselineScore: number | null = null;
+    let originalScenes: unknown[] | null = null;
     try {
-      await turn(buildPrompt(item, options.frame));
+      if (options.enhance) {
+        const existing = await loadStoreSceneBySlug(db, item.slug);
+        originalScenes = existing.scenes;
+        delivered = existing.scenes;
+        currentScene = obj(existing.scenes[0]);
+        await renderAndJudge("a0");
+        baselineScore = state.judge?.score ?? null;
+        console.log(`  [${item.slug}] baseline ${baselineScore ?? "-"}/5`);
+        best.scenes = delivered;
+        best.pngPath = pngPath;
+        best.judge = state.judge;
+        best.renderErrors = lastRenderErrors.length;
+        await turn(enhancePrompt(item, options.frame));
+      } else {
+        await turn(buildPrompt(item, options.frame));
+      }
       for (attempts = 1; attempts <= options.attempts; attempts += 1) {
         if (!delivered) {
           throw new Error("the agent delivered no scene");
@@ -532,7 +570,14 @@ async function main() {
       state.judge = best.judge;
       lastRenderErrors = new Array<string>(best.renderErrors).fill("(earlier attempt)");
     }
-    let finalScenes: unknown[] | null = delivered;
+    const enhancedIsBetter =
+      !options.enhance ||
+      baselineScore === null ||
+      ((state.judge?.score ?? 0) >= Math.max(baselineScore, options.minScore) && delivered !== null && delivered !== originalScenes);
+    if (options.enhance && !enhancedIsBetter) {
+      console.log(`  [${item.slug}] enhancement not better than baseline (${state.judge?.score ?? "-"} vs ${baselineScore}) — keeping the published version`);
+    }
+    let finalScenes: unknown[] | null = enhancedIsBetter ? delivered : null;
     if (!error && finalScenes && options.save && realigner) {
       try {
         finalScenes = await realigner.realign(finalScenes, {

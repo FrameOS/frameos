@@ -28,12 +28,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
 import { formatDate } from "../lib/format";
 import {
   requiredSettingsForScenes,
   type PreviewSettingsGroup,
 } from "../lib/preview-settings";
+import { ImageLightbox } from "./ImageLightbox";
 
 /** One published version of the scene, as listed in the source dropdown. */
 export type SceneVersionOption = {
@@ -73,6 +73,12 @@ type SceneLivePreviewPanelProps = {
   /** Which source to start on. Default: the editor when it has scenes,
    * else the pinned/latest version. */
   initialSource?: "editor" | "version" | undefined;
+  /** A published version asked for from outside (the Info panel's Versions
+   * table): the panel switches its source to it. A new object re-applies
+   * it, so asking for the version already running restarts it. */
+  versionRequest?: { version: number } | null | undefined;
+  /** Reports the source the panel runs, on mount and whenever it changes. */
+  onSourceChange?: ((source: PreviewSource) => void) | undefined;
 };
 
 type SceneJsonLike = { id: string } & Record<string, unknown>;
@@ -118,15 +124,16 @@ export function SceneLivePreviewPanel({
   versions = noVersions,
   pinnedVersion = null,
   initialSource,
+  versionRequest = null,
+  onSourceChange,
 }: SceneLivePreviewPanelProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [savingShot, setSavingShot] = useState(false);
   // The frame blown up over the page (a click on the canvas): the captured
-  // PNG as a data URL (the CSP's img-src allows data:, not blob:), shown
-  // fitted to the viewport or at 1:1.
-  const [lightbox, setLightbox] = useState<{ url: string; fit: boolean } | null>(null);
+  // PNG as a data URL (the CSP's img-src allows data:, not blob:).
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   // A notice ("Screenshot downloaded.") is transient: it goes away on its
   // own, or sooner with its × button.
@@ -182,6 +189,24 @@ export function SceneLivePreviewPanel({
   // the fetch effect below reloads it.
   const [fetchedScenes, setFetchedScenes] = useState<FrameOSScene[] | null>(null);
   const scenes = source.kind === "editor" ? editorScenes : fetchedScenes;
+
+  // A version picked outside the panel (the Info panel's table) — the same
+  // as choosing it in the source dropdown, and a repeat pick reloads it.
+  useEffect(() => {
+    if (!versionRequest || !hasVersionSource) {
+      return;
+    }
+    setSource({ kind: "version", version: versionRequest.version });
+    setError(null);
+    setNotice(null);
+    setFetchedScenes(null);
+  }, [versionRequest, hasVersionSource]);
+
+  const onSourceChangeRef = useRef(onSourceChange);
+  onSourceChangeRef.current = onSourceChange;
+  useEffect(() => {
+    onSourceChangeRef.current?.(source);
+  }, [source]);
 
   // The viewport applied to the running preview, and the form values being
   // typed (applied on "Resize").
@@ -638,21 +663,8 @@ export function SceneLivePreviewPanel({
     if (!flattened) {
       return;
     }
-    setLightbox({ fit: true, url: flattened.toDataURL("image/png") });
+    setLightbox(flattened.toDataURL("image/png"));
   }
-
-  useEffect(() => {
-    if (!lightbox) {
-      return;
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeLightbox();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [lightbox !== null]);
 
   async function downloadScreenshot() {
     setError(null);
@@ -976,46 +988,16 @@ export function SceneLivePreviewPanel({
           Rotate
         </button>
       </div>
-      {lightbox
-        ? createPortal(
-            // The overlay lives on <body>: the editor frame's transform would
-            // otherwise keep a fixed element inside the panel column.
-            <div
-              aria-label="Preview frame"
-              aria-modal
-              className="lightbox"
-              onClick={closeLightbox}
-              role="dialog"
-            >
-              <button
-                aria-label="Close"
-                className="lightbox__close"
-                onClick={closeLightbox}
-                type="button"
-              >
-                <X aria-hidden size={20} />
-              </button>
-              <div className="lightbox__hint">
-                {viewport.width} × {viewport.height} ·{" "}
-                {lightbox.fit ? "click the image for 1:1" : "click the image to fit"} · Esc to close
-              </div>
-              <div className={`lightbox__body${lightbox.fit ? " lightbox__body--fit" : ""}`}>
-                <img
-                  alt="The rendered frame"
-                  className={`lightbox__image${lightbox.fit ? " lightbox__image--fit" : ""}`}
-                  height={viewport.height}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setLightbox((current) => (current ? { ...current, fit: !current.fit } : current));
-                  }}
-                  src={lightbox.url}
-                  width={viewport.width}
-                />
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+      {lightbox ? (
+        <ImageLightbox
+          alt="The rendered frame"
+          height={viewport.height}
+          label="Preview frame"
+          onClose={closeLightbox}
+          url={lightbox}
+          width={viewport.width}
+        />
+      ) : null}
       {requiredSettings.length > 0 ? (
         <div className="card preview-settings">
           <h4 className="preview-settings__title">
