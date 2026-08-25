@@ -3181,12 +3181,11 @@ html.theme-dark .ai-panel__render {
   min-width: 0;
 }
 
-/* A segmented control of padded pills rather than flush cells: an active
-   button carries its own outline, and the 2px inset keeps that outline off
-   the group's border (which used to clip it) and off its neighbours. */
+/* A joined segmented control: the buttons sit flush and only the ends are
+   rounded. The group no longer clips them (that cut an active button's
+   outline at the ends) — a 2px inset keeps every outline inside instead. */
 .view-toggle {
   display: inline-flex;
-  gap: 2px;
   margin-left: auto;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -3198,14 +3197,30 @@ html.theme-dark .ai-panel__render {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   min-height: 28px;
   min-width: 34px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 0;
   padding: 0 8px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+}
+
+.view-toggle__button:first-child {
+  border-top-left-radius: 7px;
+  border-bottom-left-radius: 7px;
+}
+
+.view-toggle__button:last-child {
+  border-top-right-radius: 7px;
+  border-bottom-right-radius: 7px;
+}
+
+/* Neighbours share one line rather than stacking two outlines. */
+.view-toggle__button + .view-toggle__button {
+  margin-left: -1px;
 }
 
 .view-toggle__button:hover {
@@ -3216,6 +3231,8 @@ html.theme-dark .ai-panel__render {
    carries an outline in the full primary and heavier type. */
 .view-toggle__button[aria-pressed="true"],
 .view-toggle__button[aria-selected="true"] {
+  /* Above its neighbours, so the shared edge is drawn in the accent. */
+  z-index: 1;
   background: var(--primary-soft);
   color: var(--primary-strong);
   font-weight: 650;
