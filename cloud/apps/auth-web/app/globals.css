@@ -2318,7 +2318,7 @@ a.stat-tile:hover {
 
 .editor-modal__panels .view-toggle__button {
   gap: 6px;
-  min-height: 30px;
+  min-height: 26px;
   padding: 0 10px;
   font: inherit;
   font-size: 13px;
@@ -3181,30 +3181,31 @@ html.theme-dark .ai-panel__render {
   min-width: 0;
 }
 
+/* A segmented control of padded pills rather than flush cells: an active
+   button carries its own outline, and the 2px inset keeps that outline off
+   the group's border (which used to clip it) and off its neighbours. */
 .view-toggle {
   display: inline-flex;
+  gap: 2px;
   margin-left: auto;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 9px;
+  padding: 2px;
   background: var(--surface);
-  overflow: hidden;
 }
 
 .view-toggle__button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 32px;
-  min-width: 36px;
+  min-height: 28px;
+  min-width: 34px;
   border: 0;
+  border-radius: 7px;
   padding: 0 8px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-}
-
-.view-toggle__button + .view-toggle__button {
-  border-left: 1px solid var(--line);
 }
 
 .view-toggle__button:hover {
@@ -3212,15 +3213,11 @@ html.theme-dark .ai-panel__render {
 }
 
 /* The soft tint alone faded into the bar's grey, so an active button also
-   gets a ring and a thicker underline in the full primary, and heavier
-   type: three cues, none of them loud enough to shout when three of the
-   four panels are open at once. */
+   carries an outline in the full primary and heavier type. */
 .view-toggle__button[aria-pressed="true"],
 .view-toggle__button[aria-selected="true"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
   font-weight: 650;
-  box-shadow:
-    inset 0 0 0 1px var(--primary),
-    inset 0 -2px 0 0 var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
 }
