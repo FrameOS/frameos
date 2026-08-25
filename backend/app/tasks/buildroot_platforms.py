@@ -155,6 +155,14 @@ RASPBERRY_PI_32 = BuildrootPlatform(
     # This is a product decision, not a hard limit: swapping the toolchain line
     # above to BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_ARMV6_EABIHF_GLIBC_BLEEDING_EDGE
     # (gcc 14, 5.15 headers) makes NetworkManager + nmcli resolve on ARMv6 too.
+    #
+    # The same 4.19 headers also drop systemd-networkd (BR2_PACKAGE_SYSTEMD_NETWORKD
+    # depends on headers >= 5.4) while systemd-resolved stays, so on this image
+    # /etc/resolv.conf is a symlink into /run/systemd/resolve that glibc never
+    # reads (nsswitch: `resolve [!UNAVAIL=return]`). Nothing but FrameOS's own
+    # udhcpc lease handler (udhcpcScript in supplicant.nim) tells resolved the
+    # DHCP nameservers - busybox's default.script left a Pi Zero W with an
+    # address, a route and "Temporary failure in name resolution".
     uses_network_manager=False,
     # Same firmware/Linux split as the Zero 2 W; the reserve matters even
     # more on the 256MB Pi 1 A/A+ boards.

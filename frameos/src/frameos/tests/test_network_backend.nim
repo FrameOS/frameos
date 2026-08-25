@@ -32,6 +32,15 @@ dhcpcd
     for tool in networkToolNames:
       check cmd.contains("command -v " & tool & " ")
 
+  test "networkDiagnosticsCommand covers the resolver, not just the interface":
+    # What the network check logs when it fails: on a resolved-only image the
+    # interface can look perfectly healthy while nothing resolves.
+    let cmd = networkDiagnosticsCommand()
+    for needle in ["/etc/resolv.conf", "nsswitch.conf", "resolvectl status", "ip -4 route",
+                   "/run/frameos/udhcpc-*.lease", "head -c 4000"]:
+      check cmd.contains(needle)
+    check cmd.contains("command -v resolvectl >/dev/null 2>&1 && resolvectl status")
+
   test "parseNmRunning only accepts the bare running line":
     check parseNmRunning("running\n")
     check not parseNmRunning("Error: NetworkManager is not running.\n")
@@ -286,19 +295,79 @@ network={
 
   test "every DHCP client is invoked with its own timeout budget":
     check dhcpClientCommand("udhcpc", "wlan0") == "sudo udhcpc -i 'wlan0' -f -n -q -t 5 -T 3 -A 2"
-    check dhcpClientCommand("udhcpc", "wlan0", udhcpcScriptPath) ==
+    check dhcpClientCommand("udhcpc", "wlan0", stockUdhcpcScriptPath) ==
           "sudo udhcpc -i 'wlan0' -f -n -q -t 5 -T 3 -A 2 -s '/usr/share/udhcpc/default.script'"
+    check dhcpClientCommand("udhcpc", "wlan0", udhcpcScriptPath) ==
+          "sudo udhcpc -i 'wlan0' -f -n -q -t 5 -T 3 -A 2 -s '/srv/frameos/state/network/udhcpc.script'"
     check dhcpClientCommand("dhcpcd", "wlan0") == "sudo dhcpcd -w -t 15 'wlan0'"
     check dhcpClientCommand("dhclient", "wlan0") == "sudo dhclient -1 -v 'wlan0'"
     check dhcpClientCommand("nope", "wlan0") == ""
 
+  test "udhcpc announces the hostname; dhcpcd and dhclient do that on their own":
+    # busybox sends no DHCP option 12 unless asked, which is why a Pi Zero W
+    # showed up in the router's table as a bare MAC while a Pi 4 (whose lease
+    # NetworkManager takes) showed its name.
+    check dhcpClientCommand("udhcpc", "wlan0", udhcpcScriptPath, "frame-kitchen") ==
+          "sudo udhcpc -i 'wlan0' -f -n -q -t 5 -T 3 -A 2 -s '/srv/frameos/state/network/udhcpc.script'" &
+          " -x hostname:'frame-kitchen'"
+    check dhcpRenewCommand("udhcpc", "wlan0", udhcpcScriptPath, "frame-kitchen") ==
+          "sudo udhcpc -i 'wlan0' -t 5 -T 3 -A 20 -s '/srv/frameos/state/network/udhcpc.script'" &
+          " -x hostname:'frame-kitchen'"
+    check dhcpClientCommand("dhcpcd", "wlan0", "", "frame-kitchen") == "sudo dhcpcd -w -t 15 'wlan0'"
+    check dhcpClientCommand("dhclient", "wlan0", "", "frame-kitchen") == "sudo dhclient -1 -v 'wlan0'"
+    # Anything a router would reject - or that could break out of the
+    # command line - is dropped rather than quoted.
+    for bad in ["", "-frame", "frame-", "frame kitchen", "frame;rm", "frame.local", "a".repeat(64)]:
+      check not validDhcpHostname(bad)
+      check dhcpClientCommand("udhcpc", "wlan0", "", bad) == "sudo udhcpc -i 'wlan0' -f -n -q -t 5 -T 3 -A 2"
+    check validDhcpHostname("frame-1")
+    check validDhcpHostname("a".repeat(63))
+
   test "only udhcpc needs a second daemon to keep renewing the lease":
     # busybox udhcpc exits once bound (-q), so without this the frame loses
     # its address when the lease expires; dhcpcd/dhclient daemonise already.
-    check dhcpRenewCommand("udhcpc", "wlan0", udhcpcScriptPath) ==
+    check dhcpRenewCommand("udhcpc", "wlan0", stockUdhcpcScriptPath) ==
           "sudo udhcpc -i 'wlan0' -t 5 -T 3 -A 20 -s '/usr/share/udhcpc/default.script'"
     check dhcpRenewCommand("dhcpcd", "wlan0") == ""
     check dhcpRenewCommand("dhclient", "wlan0") == ""
+
+  test "the FrameOS lease handler feeds systemd-resolved and falls back to resolv.conf":
+    # The whole point of shipping our own script (see udhcpcScript's doc
+    # comment): busybox's default.script only appends to /etc/resolv.conf,
+    # which nss-resolve never reads, so a Pi Zero W got an address and a
+    # route but "Temporary failure in name resolution" on every lookup.
+    check udhcpcScript.startsWith("#!/bin/sh\n")
+    check udhcpcScript.contains("resolvectl dns \"$interface\" $dns")
+    check udhcpcScript.contains("resolvectl domain \"$interface\" $search_list")
+    check udhcpcScript.contains("resolvectl revert \"$interface\"")
+    check udhcpcScript.contains("nameserver $i # $interface")
+    # The stock script's bashism-free contract, kept: never run without an
+    # action, and the resolv.conf symlink is followed, not overwritten.
+    check udhcpcScript.contains("should be called from udhcpc")
+    check udhcpcScript.contains("readlink -f \"$RESOLV_CONF\"")
+    check udhcpcScript.contains("LEASE_INFO=\"$LEASE_DIR/udhcpc-$interface.lease\"")
+    for action in ["deconfig)", "leasefail|nak)", "renew|bound)"]:
+      check udhcpcScript.contains(action)
+
+  test "parseLeaseInfo reads what the lease handler wrote":
+    let info = parseLeaseInfo("""action=bound
+ip=192.168.1.50
+mask=24
+router=192.168.1.1
+dns=192.168.1.1 1.1.1.1
+domain=lan
+resolver=resolved
+""")
+    check info.ip == "192.168.1.50"
+    check info.router == "192.168.1.1"
+    check info.dns == @["192.168.1.1", "1.1.1.1"]
+    check info.domain == "lan"
+    check info.resolver == "resolved"
+    check leaseInfoJson(info)["dns"].len == 2
+    let empty = parseLeaseInfo("")
+    check empty.ip == ""
+    check empty.dns.len == 0
+    check leaseInfoPath("wlan0") == "/run/frameos/udhcpc-wlan0.lease"
 
   test "the wpa_supplicant config points at wpa_cli's default control socket":
     check buildWpaSupplicantConf("Home", "").conf.contains("ctrl_interface=/var/run/wpa_supplicant")
@@ -624,6 +693,46 @@ suite "supplicant credential import through NetworkContext":
     # No association in the stub, so it stops there - but it did try.
     check not res.ok
     check res.message == "not associated"
+
+  test "ensureUdhcpcScript installs an executable handler on the state partition":
+    let stub = newStubNetwork()
+    let ctx = stubContext(stub)
+    check ensureUdhcpcScript(ctx) == udhcpcScriptPath
+    check stub.files[udhcpcScriptPath] == udhcpcScript
+    # udhcpc execs the script, so it must be executable - the only non-0600
+    # file this backend writes.
+    check stub.modes[udhcpcScriptPath] == 0o755
+    # Both directories are created through the runner (sudo install -d), the
+    # state dir for the script and /run/frameos for the lease summary.
+    check stub.commands.anyIt(it.contains("install -d -m 700 '/srv/frameos/state/network'"))
+    check stub.commands.anyIt(it.contains("install -d -m 700 '/run/frameos'"))
+    # Rewriting an identical script every boot would be churn on the SD card.
+    let writes = stub.files.len
+    check ensureUdhcpcScript(ctx) == udhcpcScriptPath
+    check stub.files.len == writes
+
+  test "ensureUdhcpcScript falls back to the stock script when the write fails":
+    let stub = newStubNetwork()
+    var ctx = stubContext(stub)
+    ctx.writeFile = proc(path, content: string, mode: int): bool {.gcsafe.} = false
+    stub.files[stockUdhcpcScriptPath] = "#!/bin/sh\n"
+    check ensureUdhcpcScript(ctx) == stockUdhcpcScriptPath
+    check "portal:supplicant:dhcpScript:writeFailed" in stub.events
+    stub.files.del(stockUdhcpcScriptPath)
+    check ensureUdhcpcScript(ctx) == ""
+
+  test "dhcpHostname reads /etc/hostname, then the hostname command, and validates":
+    let stub = newStubNetwork()
+    let ctx = stubContext(stub)
+    stub.files["/etc/hostname"] = "frame-kitchen\n"
+    check dhcpHostname(ctx) == "frame-kitchen"
+    stub.files["/etc/hostname"] = "not a hostname\n"
+    check dhcpHostname(ctx) == ""
+    stub.files.del("/etc/hostname")
+    var hostCtx = stubContext(stub)
+    hostCtx.run = proc(cmd, loggedCmd: string): NetCmdResult {.gcsafe.} =
+      if cmd.startsWith("hostname"): (output: "frame7\n", rc: 0) else: (output: "", rc: 0)
+    check dhcpHostname(hostCtx) == "frame7"
 
   test "ensureStation still reports nothing to join when no keyfile exists":
     # The setup hotspot is the user's only way back in; it must stay reachable.

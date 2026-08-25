@@ -39,9 +39,19 @@ out=/boot/frameos-netdebug.txt
   iw dev wlan0 link 2>&1
 
   echo
+  echo "--- resolver (an address + route but no DNS looks exactly like no network) ---"
+  ip route 2>&1
+  ls -l /etc/resolv.conf 2>&1
+  cat /etc/resolv.conf 2>&1
+  grep '^hosts:' /etc/nsswitch.conf 2>/dev/null
+  command -v resolvectl >/dev/null 2>&1 && resolvectl status 2>&1
+  cat /run/frameos/udhcpc-*.lease 2>/dev/null
+  cat /srv/frameos/state/network/udhcpc.script >/dev/null 2>&1 && echo "frameos udhcpc.script: present" || echo "frameos udhcpc.script: MISSING (old binary?)"
+
+  echo
   echo "--- what FrameOS chose (grep for portal:networkBackend) ---"
   journalctl -u frameos --no-pager -n 400 2>/dev/null |
-    grep -iE "networkBackend|portal|wifi|wpa|hostapd|dhcp|network" | tail -60
+    grep -iE "networkBackend|portal|wifi|wpa|hostapd|dhcp|network|diagnostics" | tail -60
   # Buildroot images without persistent journald: fall back to the file log.
   tail -n 200 /srv/frameos/logs/frameos.log 2>/dev/null |
     grep -iE "networkBackend|portal|wifi|wpa|hostapd|dhcp" | tail -40

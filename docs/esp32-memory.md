@@ -130,6 +130,35 @@ And two things changed on the visibility side:
   baseline free, the frame restarts immediately instead of rendering
   degraded until someone power-cycles it. The old streak rules stay.
 
+## Gradient fills paint in strips (2026-08-24)
+
+The 16 MB 13.3" (frame 529463b4, fw 2026.8.35) OOM-aborted every Weather
+render: `memory:oomAbort where=render` at 3.7 MB free with a 1.5 MB largest
+block, 3.1 MB leaked, 54 % of the baseline left so no restart — the frame
+sat crippled until a reboot. The allocation was the weather panel's
+background: a `<rect fill="url(#bg)">` over the whole cell. pixie fills any
+non-solid paint through a coverage mask and a paint image, and sized BOTH
+to the whole target: 6.1 MB for the 1200×640 cell, 9.2 MB for the 1200×960
+one, against 1.8 MB for the same rect on the 7.3". The JS `frameos.svg` →
+`renderSvgIntoTarget` fusion path rasterised straight into the canvas cell
+with no band fallback, and the OOM abort is a longjmp, not a
+`CatchableError`, so the banded fallback after it never ran.
+
+Fixed in the pixie fork (`paintStripRows`, `paintThroughMask` in paths.nim):
+paint-server fills run in row strips sized from the decode budget (the pair
+takes at most half of it) and the contiguous budget (each image fits the
+largest block). The shape is re-rasterised per strip translated by an
+integer row offset; the gradient is evaluated at the strip's true
+coordinates, so colours are bit-exact and integer-coordinate rects are
+identical to a one-pass render (pinned by pixie `test_paint_strips` and
+`test_svg_paint_strips` here). With no budget — every host — it is one
+strip and the untouched original algorithm. FrameOS refreshes the budget
+right before each SVG raster (`decodeSvgWithFallback`,
+`renderSvgIntoTarget`), because the render tick's value predates the
+QuickJS runtimes the SVG came from. The SVG-level XML re-parse banding
+(`svgBandHeight`/`renderSvgBanded`) is gone: it only covered the standalone
+path and cost a full parse per band.
+
 ## Boot and render costs
 
 Same bench frame, for context when weighing "do less at boot" ideas:
