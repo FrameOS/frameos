@@ -493,16 +493,23 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
 
   // fitView is a no-op (returns false) until reactflow has measured every
   // node, which is later than the diagram's own mount-time requests: a
-  // request is kept until nodesInitialized flips, then honoured once.
-  const fittedRequestRef = useRef(0)
+  // request is kept until nodesInitialized flips, then honoured once. The
+  // counter is the logic's; this component outlives a logic when its
+  // sceneId changes in place (the embed switching scenes), so what was
+  // honoured is remembered per scene — the next scene's counter starts
+  // over and must not collide with the last one honoured here.
+  const fittedRequestRef = useRef({ sceneId, counter: 0 })
   useEffect(() => {
-    if (fitViewCounter === 0 || fitViewCounter === fittedRequestRef.current || !reactFlowInstance) {
+    if (fittedRequestRef.current.sceneId !== sceneId) {
+      fittedRequestRef.current = { sceneId, counter: 0 }
+    }
+    if (fitViewCounter === 0 || fitViewCounter === fittedRequestRef.current.counter || !reactFlowInstance) {
       return
     }
     if (reactFlowInstance.fitView({ maxZoom: 1, padding: 0.2 })) {
-      fittedRequestRef.current = fitViewCounter
+      fittedRequestRef.current.counter = fitViewCounter
     }
-  }, [fitViewCounter, nodesInitialized, reactFlowInstance])
+  }, [fitViewCounter, nodesInitialized, reactFlowInstance, sceneId])
 
   // A host's pan (the embedding page keeping the diagram centred while its
   // column resizes): applied once per request, before paint, and never a

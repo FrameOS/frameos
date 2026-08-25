@@ -22,7 +22,7 @@ import type { Node } from '@reactflow/core/dist/esm/types/nodes'
 import type { Connection } from '@reactflow/core/dist/esm/types/general'
 import type { EdgeChange, NodeChange } from '@reactflow/core/dist/esm/types/changes'
 import equal from 'fast-deep-equal'
-import { subscriptions } from 'kea-subscriptions'
+import { subscriptions } from '../../../../utils/keaSubscriptions'
 import type { CSSProperties } from 'react'
 import {
   AppConfig,
@@ -164,6 +164,20 @@ const normalizeNodes = (nodes: DiagramNode[]): DiagramNode[] =>
     return rest as DiagramNode
   })
 
+/** A node as the form holds it (normalized: no measured size), with the
+ * size the diagram's copy of it was measured at. reactflow only keeps a
+ * node's width/height while the `nodes` prop carries them, and until every
+ * node has them useNodesInitialized stays false — a pending fit
+ * (fitDiagramView) would wait forever, which is what left a freshly loaded
+ * version unfitted. A node whose content changes size is re-measured by
+ * reactflow's own observer regardless. */
+const withMeasuredSize = (node: DiagramNode, current: DiagramNode | undefined): DiagramNode => {
+  if (!current || node.width !== undefined || node.height !== undefined || !current.width || !current.height) {
+    return node
+  }
+  return { ...node, width: current.width, height: current.height }
+}
+
 const normalizeEdges = (edges: DiagramEdge[] = []): DiagramEdge[] =>
   edges.map((edge) => {
     const { selected, ...rest } = edge
@@ -172,6 +186,10 @@ const normalizeEdges = (edges: DiagramEdge[] = []): DiagramEdge[] =>
 
 const deselectNodes = (nodes: DiagramNode[]): DiagramNode[] =>
   nodes.map((node) => (node.selected ? { ...node, selected: false } : node))
+
+/** The window keydown handler of each mounted diagram (undo/redo, copy,
+ * paste), by logic path — see afterMount. */
+const keydownHandlers = new Map<string, (event: KeyboardEvent) => void>()
 
 const makeHistorySnapshot = (
   nodes: DiagramNode[],
@@ -1213,9 +1231,14 @@ export const diagramLogic = kea<diagramLogicType>([
     },
     scene: (scene: FrameScene, oldScene: FrameScene) => {
       if (scene && !equal(scene.nodes, oldScene?.nodes)) {
-        // nodes changed on the form, update our local state, but retain the selected flag
+        // nodes changed on the form, update our local state, but retain the
+        // selected flag and the measured sizes
         const selectedNodeIds = values.selectedNodeIds
-        const newNodes = scene.nodes.map((n) => (selectedNodeIds.includes(n.id) ? { ...n, selected: true } : n))
+        const currentById = new Map(values.nodes.map((node) => [node.id, node]))
+        const newNodes = scene.nodes.map((n) => {
+          const node = withMeasuredSize(n, currentById.get(n.id))
+          return selectedNodeIds.includes(n.id) ? { ...node, selected: true } : node
+        })
         if (!equal(newNodes, values.nodes)) {
           actions.setNodes(newNodes)
         }
@@ -1634,7 +1657,7 @@ export const diagramLogic = kea<diagramLogicType>([
       }
     },
   })),
-  afterMount(({ actions, values, cache, props }) => {
+  afterMount(({ actions, values, cache, props, pathString }) => {
     window.setTimeout(actions.fitDiagramView, 10)
     window.setTimeout(actions.fitDiagramView, 100)
     cache.ignoreHistory = false
@@ -1655,7 +1678,15 @@ export const diagramLogic = kea<diagramLogicType>([
       return activeEditor?.kind === 'diagram' && activeEditor.sceneId === props.sceneId
     }
 
-    cache.keydownHandler = (event: KeyboardEvent) => {
+    // Keyed by path, not kept on this instance's cache: React can re-mount
+    // a built logic object kea already dropped (StrictMode's effect replay),
+    // after which afterMount runs on one object and beforeUnmount on
+    // another — a handler on `cache` would outlive the diagram.
+    const previousHandler = keydownHandlers.get(pathString)
+    if (previousHandler) {
+      window.removeEventListener('keydown', previousHandler)
+    }
+    const keydownHandler = (event: KeyboardEvent) => {
       if (isEditableTarget(event.target)) {
         return
       }
@@ -1684,12 +1715,14 @@ export const diagramLogic = kea<diagramLogicType>([
       }
       actions.undo()
     }
-    window.addEventListener('keydown', cache.keydownHandler)
+    keydownHandlers.set(pathString, keydownHandler)
+    window.addEventListener('keydown', keydownHandler)
   }),
-  beforeUnmount(({ cache }) => {
-    if (cache.keydownHandler) {
-      window.removeEventListener('keydown', cache.keydownHandler)
-      cache.keydownHandler = null
+  beforeUnmount(({ cache, pathString }) => {
+    const keydownHandler = keydownHandlers.get(pathString)
+    if (keydownHandler) {
+      window.removeEventListener('keydown', keydownHandler)
+      keydownHandlers.delete(pathString)
     }
     if (cache.historyTimer) {
       window.clearTimeout(cache.historyTimer)

@@ -1,5 +1,5 @@
 import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
-import { subscriptions } from 'kea-subscriptions'
+import { subscriptions } from '../../../../utils/keaSubscriptions'
 import { v4 as uuidv4 } from 'uuid'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { frameLogic, sanitizeScene } from '../../frameLogic'

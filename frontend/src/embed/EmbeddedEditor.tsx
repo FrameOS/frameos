@@ -130,10 +130,18 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
       interval: props.interval ?? 300,
       rotate: 0,
     } as any)
-    setSelectedSceneId(
-      props.sceneId ?? (props.scenes.find((scene) => scene.default) || props.scenes[0])?.id ?? null
-    )
+    const nextSceneId = props.sceneId ?? (props.scenes.find((scene) => scene.default) || props.scenes[0])?.id ?? null
+    setSelectedSceneId(nextSceneId)
     setInitialized(true)
+    // A re-init (the host swapped the scenes: another version loaded, an AI
+    // build applied) leaves the diagram where it was, over nodes that may
+    // now be elsewhere: fit the new set to view. The diagram honours the
+    // request once reactflow has measured the new nodes (Diagram.tsx); on
+    // the first init nothing is mounted yet, and the diagram's own
+    // afterMount fits.
+    if (nextSceneId) {
+      diagramLogic.findMounted({ frameId: EMBED_FRAME_ID, sceneId: nextSceneId })?.actions.fitDiagramView()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.scenes])
 
