@@ -9,6 +9,21 @@ import { clearCachedProjectId, projectApiPath } from './projectApi'
 
 export interface ApiFetchOptions extends RequestInit {}
 
+// The standalone embedded editor has no backend at all: apiFetch answers
+// every call with a synthetic 404 (see below), so a catalog loader falling
+// back to its default there is the expected outcome, not a failure. Five of
+// them mount on every scene-store page load, and console.error would report
+// each one as a real error (Next.js dev even counts them as page "issues").
+// Loaders whose catch swallows the error and returns a fallback log through
+// this instead.
+export function logApiError(...args: unknown[]): void {
+  if (typeof window !== 'undefined' && (window as any).FRAMEOS_EMBEDDED_NO_BACKEND) {
+    console.debug(...args)
+    return
+  }
+  console.error(...args)
+}
+
 export type FirstUserStatus = 'exists' | 'missing' | 'unknown'
 
 export async function firstUserStatus(): Promise<FirstUserStatus> {
