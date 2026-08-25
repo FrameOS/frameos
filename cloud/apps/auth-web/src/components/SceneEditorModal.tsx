@@ -7,15 +7,18 @@ import {
   GitFork,
   Info,
   MonitorDown,
+  MoreHorizontal,
   Pencil,
   Play,
   Save,
   Sparkles,
   Workflow,
+  type LucideIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -23,25 +26,25 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { applyAiScenes, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
 import {
   defaultSceneEditorPanels,
+  onlyPanel,
   openPanelCount,
   sceneEditorHashFor,
   sceneEditorPanelNames,
   sceneEditorPanelsForHash,
+  singlePanelFor,
   type SceneEditorPanelName,
   type SceneEditorPanels,
 } from "../lib/scene-views";
 import { SceneAiPanel, type SceneAiPanelProps } from "./SceneAiPanel";
 import { SceneInfoPanel, type SceneInfoData } from "./SceneInfoPanel";
 import { SceneInstallDialog } from "./SceneInstallDialog";
-import {
-  SceneLivePreviewPanel,
-  type PreviewSource,
-  type SceneVersionOption,
-} from "./SceneLivePreview";
+import { SceneLivePreviewPanel } from "./SceneLivePreview";
+import { SceneVersionsDialog } from "./SceneVersionsDialog";
 
 // The FrameOS scene editor as a plain React component in this app's tree
 // (react/react-dom are externalized in its bundle — one React). It is
@@ -50,6 +53,16 @@ const EmbeddedSceneEditor = dynamic(
   () => import("frameos-editor/react").then((module) => module.EmbeddedSceneEditor),
   { ssr: false },
 );
+
+/** One published version of the scene, as the bar's version dropdown
+ * lists it. */
+export type SceneVersionOption = {
+  version: number;
+  /** ISO timestamp (serialisable from the server component). */
+  createdAt: string;
+  /** ISO timestamp when unpublished (yanked), null otherwise. */
+  yankedAt: string | null;
+};
 
 type SceneEditorModalProps = {
   sceneId: string;
@@ -82,10 +95,10 @@ type SceneEditorModalProps = {
   loginUrl?: string | undefined;
   /** The account creation page (the Install dialog's invite). */
   signupUrl?: string | undefined;
-  /** The scene's published versions, for the Preview panel's source list. */
+  /** The scene's published versions, for the bar's version dropdown. */
   versions?: SceneVersionOption[] | undefined;
   /** The version the page is pinned to via ?version=N (not the latest):
-   * the Preview panel then starts on it rather than on the editor. */
+   * the workspace then loads it rather than the latest. */
   pinnedVersion?: number | null | undefined;
   /** What the scene page shows besides the diagram (gallery, description,
    * versions, install instructions…), for the Info panel. Without it there
@@ -335,6 +348,41 @@ export function togglePanelIn(
   return openPanelCount(next) === 0 ? null : next;
 }
 
+/** Below this width the workspace shows one panel at a time, full width,
+ * and the panel toggles become tabs. */
+export const singlePanelQuery = "(max-width: 900px)";
+
+/** Whether the viewport is too narrow for panels side by side. The server
+ * render (and a browser without matchMedia) counts as wide. */
+export function useSinglePanelMode(): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    if (typeof window.matchMedia !== "function") {
+      return;
+    }
+    const query = window.matchMedia(singlePanelQuery);
+    const update = () => setNarrow(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return narrow;
+}
+
+/** The panels a workspace shows for a set: all of them side by side, or —
+ * in single-panel mode — just the one (singlePanelFor). */
+export function shownPanels(
+  panels: SceneEditorPanels,
+  narrow: boolean,
+  active: SceneEditorPanelName | null,
+): SceneEditorPanels {
+  if (!narrow) {
+    return panels;
+  }
+  const single = singlePanelFor(panels, active);
+  return single ? onlyPanel(single) : panels;
+}
+
 export type EditorViewportAdjustment = { kind: "fit" } | { kind: "pan"; dx: number } | { kind: "none" };
 
 /** What the diagram does when its column's width changes from `previousWidth`
@@ -492,16 +540,10 @@ function PanelResizer({ label, resize, side, className }: PanelResizerProps) {
 export type SceneEditorPreviewOptions = {
   /** The store scene (null for a scene that is not saved yet). */
   sceneId: string | null;
-  /** The editor's current scenes, kept up to date while the panel is open. */
+  /** The editor's current scenes, kept up to date while the panel is open
+   * (null while they load — the panel waits for them). */
   scenes: SceneJson[] | null;
   canSaveToGallery?: boolean | undefined;
-  share?: string | undefined;
-  versions?: SceneVersionOption[] | undefined;
-  pinnedVersion?: number | null | undefined;
-  initialSource?: "editor" | "version" | undefined;
-  /** A version to switch the panel to (from the Info panel's table). */
-  versionRequest?: { version: number } | null | undefined;
-  onSourceChange?: ((source: PreviewSource) => void) | undefined;
 };
 
 type SceneEditorWorkspaceProps = {
@@ -543,23 +585,49 @@ const panelCopy: Record<
 };
 
 /** The segmented panel switch in the bar: Info · Editor · AI · Preview, each
- * on or off on its own — except the last open one, which stays. */
+ * on or off on its own — except the last open one, which stays. In
+ * single-panel mode (`active` given) they are tabs: one shown at a time. */
 export function SceneEditorPanelToggles({
   panels,
   onToggle,
   available = {},
+  active,
 }: {
   panels: SceneEditorPanels;
   onToggle: (panel: SceneEditorPanelName) => void;
   available?: SceneEditorPanelAvailability | undefined;
+  /** The one panel shown (single-panel mode); undefined for toggles. */
+  active?: SceneEditorPanelName | null | undefined;
 }) {
   const openCount = openPanelCount(panels);
+  const tabs = active !== undefined && active !== null;
   return (
-    <div aria-label="Panels" className="view-toggle editor-modal__panels" role="group">
+    <div aria-label="Panels" className="view-toggle editor-modal__panels" role={tabs ? "tablist" : "group"}>
       {sceneEditorPanelNames
         .filter((name) => available[name] !== false)
         .map((name) => {
           const { label, Icon, show, hide } = panelCopy[name];
+          const content = (
+            <>
+              <Icon aria-hidden size={15} />
+              <span className="editor-modal__panel-label">{label}</span>
+            </>
+          );
+          if (tabs) {
+            return (
+              <button
+                aria-selected={active === name}
+                className="view-toggle__button"
+                key={name}
+                onClick={() => onToggle(name)}
+                role="tab"
+                title={show}
+                type="button"
+              >
+                {content}
+              </button>
+            );
+          }
           const last = panels[name] && openCount === 1;
           return (
             <button
@@ -571,12 +639,297 @@ export function SceneEditorPanelToggles({
               title={last ? "At least one panel stays open" : panels[name] ? hide : show}
               type="button"
             >
-              <Icon aria-hidden size={15} />
-              {label}
+              {content}
             </button>
           );
         })}
     </div>
+  );
+}
+
+/** One of the bar's right-hand actions (Install, Save, Fork, Download…):
+ * a button in the bar while there is room, a menu item when there is not. */
+export type SceneEditorAction = {
+  key: string;
+  label: string;
+  Icon: LucideIcon;
+  /** A link (the zip download) rather than a button. */
+  href?: string | undefined;
+  onSelect?: (() => void) | undefined;
+  disabled?: boolean | undefined;
+  title?: string | undefined;
+  /** The bar's main action: first in the overflow menu. */
+  primary?: boolean | undefined;
+  /** Drawn as the filled primary button while expanded. */
+  emphasized?: boolean | undefined;
+};
+
+function SceneEditorActionButton({ action }: { action: SceneEditorAction }) {
+  const className = action.emphasized ? "button button--small button-primary" : "button button--small";
+  const content = (
+    <>
+      <action.Icon aria-hidden size={16} />
+      {action.label}
+    </>
+  );
+  if (action.href !== undefined) {
+    return (
+      <a className={className} href={action.href} title={action.title}>
+        {content}
+      </a>
+    );
+  }
+  return (
+    <button className={className} disabled={action.disabled} onClick={action.onSelect} title={action.title} type="button">
+      {content}
+    </button>
+  );
+}
+
+/** The actions in menu order: the primary one first, the rest as in the bar. */
+export function menuOrder(actions: readonly SceneEditorAction[]): SceneEditorAction[] {
+  return [...actions.filter((action) => action.primary), ...actions.filter((action) => !action.primary)];
+}
+
+// The "…" button the actions collapse into when the bar has no room for
+// them, and its menu: the same actions as menu items (the primary one
+// first), opened by click, closed by Escape, Tab, an outside click or a
+// choice; arrow keys, Home and End move between the enabled items.
+function SceneEditorActionsMenu({ actions }: { actions: readonly SceneEditorAction[] }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  const items = () =>
+    Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? []);
+
+  useEffect(() => {
+    if (open) {
+      items()[0]?.focus();
+    }
+  }, [open]);
+
+  function close(refocus: boolean) {
+    setOpen(false);
+    if (refocus) {
+      buttonRef.current?.focus();
+    }
+  }
+
+  function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!open) {
+      return;
+    }
+    const list = items();
+    const index = list.indexOf(document.activeElement as HTMLElement);
+    const focusAt = (position: number) => list[(position + list.length) % list.length]?.focus();
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        focusAt(index + 1);
+        break;
+      case "ArrowUp":
+        event.preventDefault();
+        focusAt(index < 0 ? list.length - 1 : index - 1);
+        break;
+      case "Home":
+        event.preventDefault();
+        focusAt(0);
+        break;
+      case "End":
+        event.preventDefault();
+        focusAt(list.length - 1);
+        break;
+      case "Escape":
+        event.preventDefault();
+        close(true);
+        break;
+      case "Tab":
+        setOpen(false);
+        break;
+      default:
+        break;
+    }
+  }
+
+  return (
+    <div className="editor-modal__more" onKeyDown={onKeyDown} ref={rootRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label="More actions"
+        className="button button--small"
+        onClick={() => setOpen((value) => !value)}
+        ref={buttonRef}
+        title="More actions"
+        type="button"
+      >
+        <MoreHorizontal aria-hidden size={16} />
+      </button>
+      {open ? (
+        <div aria-label="Actions" className="editor-modal__more-menu" ref={menuRef} role="menu">
+          {menuOrder(actions).map((action) => {
+            const className = action.primary
+              ? "editor-modal__more-item editor-modal__more-item--primary"
+              : "editor-modal__more-item";
+            const content = (
+              <>
+                <action.Icon aria-hidden size={16} />
+                {action.label}
+              </>
+            );
+            if (action.href !== undefined) {
+              return (
+                <a
+                  className={className}
+                  href={action.href}
+                  key={action.key}
+                  onClick={() => close(false)}
+                  role="menuitem"
+                  title={action.title}
+                >
+                  {content}
+                </a>
+              );
+            }
+            return (
+              <button
+                className={className}
+                disabled={action.disabled}
+                key={action.key}
+                onClick={() => {
+                  close(true);
+                  action.onSelect?.();
+                }}
+                role="menuitem"
+                title={action.title}
+                type="button"
+              >
+                {content}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The width a row of flex children needs, each at its own width, gaps
+ * included (the children do not shrink: buttons at their text's width). */
+function rowWidth(row: HTMLElement): number {
+  const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+  const children = Array.from(row.children) as HTMLElement[];
+  return (
+    children.reduce((sum, child) => sum + child.getBoundingClientRect().width, 0) +
+    gap * Math.max(0, children.length - 1)
+  );
+}
+
+// Whether the bar's actions must collapse into the "…" menu: what they need
+// (their expanded width, remembered from the last time they were expanded)
+// against what the bar has to the right of its title. Measured before the
+// first paint, after every render (a pill appeared, a label changed) and on
+// the bar's resizes. The server render is expanded.
+function useCollapsedActions(
+  barRef: RefObject<HTMLDivElement | null>,
+  titleRef: RefObject<HTMLDivElement | null>,
+  clusterRef: RefObject<HTMLDivElement | null>,
+): boolean {
+  const [collapsed, setCollapsed] = useState(false);
+  const collapsedRef = useRef(collapsed);
+  collapsedRef.current = collapsed;
+  const requiredRef = useRef<number | null>(null);
+  const measure = useCallback(() => {
+    const bar = barRef.current;
+    const title = titleRef.current;
+    const cluster = clusterRef.current;
+    if (!bar || !title || !cluster) {
+      return;
+    }
+    const style = getComputedStyle(bar);
+    const available =
+      bar.getBoundingClientRect().right -
+      (parseFloat(style.paddingRight) || 0) -
+      title.getBoundingClientRect().right -
+      (parseFloat(style.columnGap) || 0);
+    if (!collapsedRef.current) {
+      requiredRef.current = rowWidth(cluster);
+    }
+    const required = requiredRef.current;
+    if (required === null || Number.isNaN(required) || Number.isNaN(available)) {
+      return;
+    }
+    setCollapsed(required > available + 0.5);
+  }, [barRef, titleRef, clusterRef]);
+  useLayoutEffect(measure);
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [barRef, measure]);
+  return collapsed;
+}
+
+/** The workspace's top bar: Back, the panel toggles and the rest of the
+ * title on the left; on the right `leading` (the Unsaved pill, a picker)
+ * and then the actions — as buttons while they fit, as a "…" menu when
+ * they do not. */
+export function SceneEditorBar({
+  children,
+  leading,
+  actions,
+}: {
+  children: ReactNode;
+  leading?: ReactNode;
+  actions: readonly SceneEditorAction[];
+}) {
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const titleRef = useRef<HTMLDivElement | null>(null);
+  const clusterRef = useRef<HTMLDivElement | null>(null);
+  const collapsed = useCollapsedActions(barRef, titleRef, clusterRef);
+  return (
+    <div className="editor-modal__bar editor-modal__bar--scene" ref={barRef}>
+      <div className="editor-modal__title" ref={titleRef}>
+        {children}
+      </div>
+      <div className="button-row editor-modal__actions" ref={clusterRef}>
+        {leading}
+        {actions.length === 0 ? null : collapsed ? (
+          <SceneEditorActionsMenu actions={actions} />
+        ) : (
+          actions.map((action) => <SceneEditorActionButton action={action} key={action.key} />)
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The bar's "Unsaved changes" pill; on phones just "Unsaved". */
+export function UnsavedPill({ label, short }: { label: string; short: string }) {
+  return (
+    <span className="pill pill-warning editor-modal__unsaved">
+      <span className="editor-modal__unsaved-long">{label}</span>
+      <span className="editor-modal__unsaved-short">{short}</span>
+    </span>
   );
 }
 
@@ -787,14 +1140,8 @@ export function SceneEditorWorkspace({
                 canSaveToGallery={preview.canSaveToGallery}
                 editorSceneId={sceneId ?? null}
                 height={height}
-                initialSource={preview.initialSource}
-                onSourceChange={preview.onSourceChange}
-                pinnedVersion={preview.pinnedVersion}
                 sceneId={preview.sceneId}
                 scenes={preview.scenes}
-                share={preview.share}
-                versionRequest={preview.versionRequest}
-                versions={preview.versions}
                 width={width}
               />
             ) : null}
@@ -823,12 +1170,48 @@ function cameFromOurPage(): boolean {
   return document.referrer.startsWith(origin) && window.history.length > 1;
 }
 
+/** The scenes.json URL for a version (null: the newest published one). */
+function scenesJsonUrl(sceneId: string, version: number | null, share: string | undefined): string {
+  const params = new URLSearchParams();
+  if (version !== null) {
+    params.set("version", String(version));
+  }
+  if (share) {
+    params.set("share", share);
+  }
+  const query = params.toString();
+  return `/api/store/scenes/${sceneId}/scenes.json${query ? `?${query}` : ""}`;
+}
+
+/** A URL of ours with its `version` query set (or, for null, removed):
+ * the page's `?version=N` and the zip link follow the loaded version. */
+export function withVersionParam(url: string, version: number | null): string {
+  const parsed = new URL(url, "http://frameos.invalid");
+  if (version === null) {
+    parsed.searchParams.delete("version");
+  } else {
+    parsed.searchParams.set("version", String(version));
+  }
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
+/** The dropdown's label for a version: "v3 (latest)", "v2 (unpublished)", "v1". */
+export function versionOptionLabel(option: SceneVersionOption, latestVersion: number | null): string {
+  if (option.yankedAt) {
+    return `v${option.version} (unpublished)`;
+  }
+  return option.version === latestVersion ? `v${option.version} (latest)` : `v${option.version}`;
+}
+
+const manageVersionsValue = "manage";
+
 // The store scene page's workspace: the scene's Info column, the FrameOS
 // editor rendered as a component in this page's React tree, the AI panel
-// and the live preview, toggled from the bar. Saving publishes the edited
-// scenes as a new immutable version; the Preview panel runs the editor's
-// unsaved state (or a published version); the AI panel edits the same
-// scenes; Save / Fork then do the rest.
+// and the live preview, toggled from the bar. The bar's version dropdown
+// loads any published version into the whole workspace (the diagram, the
+// preview, the AI all see it). Saving publishes the edited scenes as a new
+// immutable version; the Preview panel runs the editor's unsaved state;
+// the AI panel edits the same scenes; Save / Fork then do the rest.
 export function SceneEditorModal({
   sceneId,
   width,
@@ -853,10 +1236,23 @@ export function SceneEditorModal({
   // null until mounted: the URL hash and the browser's memory decide the
   // panel set, and the server render sees neither.
   const [panels, setPanels] = useState<SceneEditorPanels | null>(null);
-  // A version picked in the Info panel's table, handed to the Preview
-  // panel; and what that panel reports it runs, shown back in the table.
-  const [versionRequest, setVersionRequest] = useState<{ version: number } | null>(null);
-  const [previewSource, setPreviewSource] = useState<PreviewSource | null>(null);
+  // A narrow viewport shows one panel of the set at a time: the last one
+  // picked there (this session's, not remembered), else singlePanelFor's.
+  const narrow = useSinglePanelMode();
+  const [activePanel, setActivePanel] = useState<SceneEditorPanelName | null>(null);
+  // Newest first; the latest is the newest published (not unpublished) one
+  // — or the one a save here just published, until the page's list has it.
+  const versionList = [...(versions ?? [])].sort((a, b) => b.version - a.version);
+  const [publishedVersion, setPublishedVersion] = useState<number | null>(null);
+  const listedLatest = versionList.find((option) => !option.yankedAt)?.version ?? info?.scene.latestVersion ?? null;
+  const latestVersion =
+    publishedVersion !== null && (listedLatest === null || publishedVersion > listedLatest)
+      ? publishedVersion
+      : listedLatest;
+  // The version the workspace holds (its scenes are what the editor got):
+  // the page's pinned one, else the latest. null: no versions are known.
+  const [selectedVersion, setSelectedVersion] = useState<number | null>(pinnedVersion ?? latestVersion);
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const [initialPrompt, setInitialPrompt] = useState<string | undefined>(undefined);
   const [installOpen, setInstallOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -930,38 +1326,73 @@ export function SceneEditorModal({
     }
   }
 
+  // Loads a published version's scenes (null: the newest published one)
+  // into the whole workspace: the editor re-initialises on the new array,
+  // the preview and the AI follow, and the unsaved state resets to it. A
+  // later load supersedes an earlier one still in flight.
+  const loadRequestRef = useRef(0);
+  async function loadVersion(version: number | null) {
+    const request = ++loadRequestRef.current;
+    try {
+      const response = await fetch(scenesJsonUrl(sceneId, version, share));
+      if (!response.ok) {
+        throw new Error(`Could not load the scene (${response.status})`);
+      }
+      const loaded = (await response.json()) as SceneJson[];
+      if (request !== loadRequestRef.current) {
+        return;
+      }
+      latestScenesRef.current = loaded;
+      setPreviewScenes(loaded);
+      initialJsonRef.current = JSON.stringify(loaded);
+      baselinePendingRef.current = true;
+      setScenes(loaded);
+      setDirty(false);
+      const defaultScene = loaded.find((scene) => scene.default === true) ?? loaded[0];
+      selectScene(defaultScene?.id ?? null);
+    } catch (err) {
+      if (request === loadRequestRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+  }
+
   useEffect(() => {
     setTheme(readDocumentTheme());
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = await fetch(
-          `/api/store/scenes/${sceneId}/scenes.json${share ? `?share=${encodeURIComponent(share)}` : ""}`,
-        );
-        if (!response.ok) {
-          throw new Error(`Could not load the scene (${response.status})`);
-        }
-        const loaded = (await response.json()) as SceneJson[];
-        if (cancelled) {
-          return;
-        }
-        latestScenesRef.current = loaded;
-        setPreviewScenes(loaded);
-        initialJsonRef.current = JSON.stringify(loaded);
-        baselinePendingRef.current = true;
-        setScenes(loaded);
-        const defaultScene = loaded.find((scene) => scene.default === true) ?? loaded[0];
-        selectScene(defaultScene?.id ?? null);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      }
-    })();
+    void loadVersion(pinnedVersion);
     return () => {
-      cancelled = true;
+      // A remount (another scene) must not apply this one's load.
+      loadRequestRef.current += 1;
     };
+    // The scene and its pinned version are fixed for the page's life.
   }, [sceneId, share]);
+
+  /** The page's `?version=N` follows the loaded version (none for the
+   * latest), so a reload or a shared link opens the same one. */
+  function syncVersionUrl(version: number | null) {
+    const target = version === null || version === latestVersion ? null : version;
+    window.history.replaceState(
+      window.history.state,
+      "",
+      withVersionParam(`${window.location.pathname}${window.location.search}${window.location.hash}`, target),
+    );
+  }
+
+  // The bar's version dropdown (or the versions dialog): load that version
+  // into the workspace — after a word when it would discard unsaved edits.
+  function selectVersion(version: number) {
+    setVersionsOpen(false);
+    if (version === selectedVersion) {
+      return;
+    }
+    if (dirty && !window.confirm(`Discard your unsaved changes and load v${version}?`)) {
+      return;
+    }
+    setError(null);
+    setSelectedVersion(version);
+    syncVersionUrl(version);
+    void loadVersion(version);
+  }
 
   // The editor captured a frame (its render check, or the JSON panel's
   // screenshot). Owners get it saved to the scene's image gallery; everyone
@@ -1038,25 +1469,7 @@ export function SceneEditorModal({
     };
   }, []);
 
-  function togglePanel(panel: SceneEditorPanelName) {
-    if (!panels) {
-      return;
-    }
-    const next = togglePanelIn(panels, panel);
-    if (!next) {
-      return;
-    }
-    if (panel === "preview") {
-      if (next.preview) {
-        // Hand the panel what the editor holds right now; it follows edits
-        // from here on (publishScenes).
-        setPreviewScenes(latestScenesRef.current);
-      } else {
-        // A closed panel runs nothing; the next one starts afresh.
-        setVersionRequest(null);
-        setPreviewSource(null);
-      }
-    }
+  function commitPanels(next: SceneEditorPanels) {
     setPanels(next);
     storePanels(next);
     // Keep the URL truthful (a reload or a shared link reopens the same
@@ -1064,13 +1477,39 @@ export function SceneEditorModal({
     window.history.replaceState(window.history.state, "", sceneEditorHashFor(next));
   }
 
-  // A version row in the Info panel: run that version in the Preview panel
-  // (opening the panel first when it is closed).
-  function selectVersion(version: number) {
-    setVersionRequest({ version });
-    if (panels && !panels.preview) {
-      togglePanel("preview");
+  // Single-panel mode: show this panel (a tab), adding it to the remembered
+  // set when it was not in it — the set is what a wide viewport restores.
+  function showSinglePanel(panel: SceneEditorPanelName) {
+    if (!panels) {
+      return;
     }
+    setActivePanel(panel);
+    if (panel === "preview") {
+      setPreviewScenes(latestScenesRef.current);
+    }
+    if (!panels[panel]) {
+      commitPanels({ ...panels, [panel]: true });
+    }
+  }
+
+  function togglePanel(panel: SceneEditorPanelName) {
+    if (!panels) {
+      return;
+    }
+    if (narrow) {
+      showSinglePanel(panel);
+      return;
+    }
+    const next = togglePanelIn(panels, panel);
+    if (!next) {
+      return;
+    }
+    if (panel === "preview" && next.preview) {
+      // Hand the panel what the editor holds right now; it follows edits
+      // from here on (publishScenes).
+      setPreviewScenes(latestScenesRef.current);
+    }
+    commitPanels(next);
   }
 
   // Back: to the page that led here when it was one of ours (the store, My
@@ -1169,6 +1608,13 @@ export function SceneEditorModal({
       }
       setDirty(false);
       initialJsonRef.current = JSON.stringify(latest);
+      // The workspace now holds the version just published: the latest.
+      const published = typeof payload.scene?.version === "number" ? (payload.scene.version as number) : null;
+      if (published !== null) {
+        setPublishedVersion(published);
+        setSelectedVersion(published);
+      }
+      syncVersionUrl(null);
       // The page's data (versions, the Info panel) catches up.
       router.refresh();
     } finally {
@@ -1186,95 +1632,119 @@ export function SceneEditorModal({
       ? "“Fork & save copy” saves your remix as a private scene in your account."
       : "Sign in to save a remix as a private scene in your account.";
 
+  // What is on screen: the set, or in single-panel mode one of it.
+  const shown = shownPanels(panels, narrow, activePanel);
+  const single = narrow ? singlePanelFor(panels, activePanel) : undefined;
   // The scene's name (and its rename pencil) heads the Info column; only
   // while that column is closed does the bar carry it.
   const nameTitle = <SceneNameTitle name={sceneName} onRename={renameScene} />;
-  const nameInInfo = info !== undefined && panels.info;
-  // The version being looked at (the Preview panel's, when it runs a
-  // published one): the Info table marks it, and a cloud install pins it
-  // when it is not the latest.
-  const viewingVersion =
-    info && panels.preview && previewSource?.kind === "version"
-      ? (previewSource.version ?? info.scene.latestVersion)
-      : null;
+  const nameInInfo = info !== undefined && shown.info;
+  // The version the workspace holds: a cloud install pins it when it is
+  // not the latest, and the zip link downloads it.
   const installVersion =
-    info && viewingVersion !== null && viewingVersion !== info.scene.latestVersion ? viewingVersion : null;
+    info && selectedVersion !== null && latestVersion !== null && selectedVersion !== latestVersion
+      ? selectedVersion
+      : null;
+  const downloadHref =
+    downloadUrl && selectedVersion !== null
+      ? withVersionParam(downloadUrl, selectedVersion === latestVersion ? null : selectedVersion)
+      : downloadUrl;
+  // The dropdown lists the known versions — plus the one just published,
+  // until the page's data catches up with it.
+  const versionOptions =
+    versionList.length > 0 && selectedVersion !== null && !versionList.some((option) => option.version === selectedVersion)
+      ? [
+          { createdAt: "", version: selectedVersion, yankedAt: null } satisfies SceneVersionOption,
+          ...versionList,
+        ]
+      : versionList;
+
+  const actions: SceneEditorAction[] = [];
+  if (info) {
+    actions.push({
+      Icon: MonitorDown,
+      key: "install",
+      label: "Install",
+      onSelect: () => setInstallOpen(true),
+      title: "Install this scene on a frame",
+    });
+  }
+  if (canSave) {
+    actions.push({
+      Icon: Save,
+      disabled: saving || !dirty,
+      key: "save",
+      label: saving ? "Saving…" : "Save as new version",
+      onSelect: () => void save(),
+      primary: true,
+    });
+  }
+  if (canFork) {
+    actions.push({
+      Icon: GitFork,
+      disabled: forking,
+      key: "fork",
+      label: forking ? "Forking…" : "Fork & save copy",
+      onSelect: () => void forkAndSave(),
+      primary: !canSave,
+      title: "Save these scenes (including your edits) as a new private scene in your account",
+    });
+  }
+  if (downloadHref) {
+    actions.push({
+      Icon: FileArchive,
+      href: downloadHref,
+      key: "download",
+      label: "Download .zip",
+      title: "Download the scene as a zip (the published version, not the editor's unsaved edits)",
+    });
+  }
 
   return (
     // ph-no-capture: the scene's own diagram, node labels and settings.
     <div className="editor-modal ph-no-capture">
-      <div className="editor-modal__bar">
-        <div className="editor-modal__title">
-          <SceneEditorBackButton label="Back" onClick={goBack} />
-          <SceneEditorPanelToggles available={available} onToggle={togglePanel} panels={panels} />
-          {nameInInfo ? null : nameTitle}
-          {!canSave ? (
-            <span className="pill" title="Explore and tweak freely; nothing you change here is saved anywhere">
-              Playground — changes are not saved
-            </span>
-          ) : null}
-          {error ? <span className="pill pill-warning">{error}</span> : null}
-        </div>
-        <div className="button-row">
-          {(canSave || canFork) && dirty ? (
-            <span className="pill pill-warning">Unsaved changes</span>
-          ) : null}
-          {info ? (
-            <button
-              className="button button--small"
-              onClick={() => setInstallOpen(true)}
-              title="Install this scene on a frame"
-              type="button"
-            >
-              <MonitorDown aria-hidden size={16} />
-              Install
-            </button>
-          ) : null}
-          {canSave ? (
-            <button
-              className="button button--small"
-              disabled={saving || !dirty}
-              onClick={() => void save()}
-              type="button"
-            >
-              <Save aria-hidden size={16} />
-              {saving ? "Saving…" : "Save as new version"}
-            </button>
-          ) : null}
-          {canFork ? (
-            <button
-              className="button button--small"
-              disabled={forking}
-              onClick={() => void forkAndSave()}
-              title="Save these scenes (including your edits) as a new private scene in your account"
-              type="button"
-            >
-              <GitFork aria-hidden size={16} />
-              {forking ? "Forking…" : "Fork & save copy"}
-            </button>
-          ) : null}
-          {downloadUrl ? (
-            <a
-              className="button button--small"
-              href={downloadUrl}
-              title="Download the scene as a zip (the published version, not the editor's unsaved edits)"
-            >
-              <FileArchive aria-hidden size={16} />
-              Download .zip
-            </a>
-          ) : null}
-        </div>
-      </div>
+      <SceneEditorBar actions={actions}>
+        <SceneEditorBackButton label="Back" onClick={goBack} />
+        <SceneEditorPanelToggles active={single} available={available} onToggle={togglePanel} panels={panels} />
+        {versionOptions.length > 0 && selectedVersion !== null ? (
+          <select
+            aria-label="Version"
+            className="input editor-modal__version-select"
+            onChange={(event) => {
+              if (event.target.value === manageVersionsValue) {
+                setVersionsOpen(true);
+              } else {
+                selectVersion(Number(event.target.value));
+              }
+            }}
+            title="The version loaded in the workspace — pick another to load it"
+            value={String(selectedVersion)}
+          >
+            {versionOptions.map((option) => (
+              <option key={option.version} value={String(option.version)}>
+                {versionOptionLabel(option, latestVersion)}
+              </option>
+            ))}
+            {info ? (
+              <>
+                <option disabled>──────</option>
+                <option value={manageVersionsValue}>{info.isOwner ? "Manage versions…" : "Version details…"}</option>
+              </>
+            ) : null}
+          </select>
+        ) : null}
+        {(canSave || canFork) && dirty ? <UnsavedPill label="Unsaved changes" short="Unsaved" /> : null}
+        {nameInInfo ? null : nameTitle}
+        {!canSave ? (
+          <span className="pill" title="Explore and tweak freely; nothing you change here is saved anywhere">
+            Playground — changes are not saved
+          </span>
+        ) : null}
+        {error ? <span className="pill pill-warning">{error}</span> : null}
+      </SceneEditorBar>
       <SceneEditorWorkspace
         info={
-          info ? (
-            <SceneInfoPanel
-              {...info}
-              heading={nameTitle}
-              onSelectVersion={selectVersion}
-              viewingVersion={viewingVersion}
-            />
-          ) : undefined
+          info ? <SceneInfoPanel {...info} heading={nameTitle} /> : undefined
         }
         ai={{
           getScenes: () => latestScenesRef.current,
@@ -1307,23 +1777,31 @@ export function SceneEditorModal({
             selectScene(nextSceneId);
           }
         }}
-        panels={panels}
+        panels={shown}
         preview={{
           canSaveToGallery: canSave,
-          initialSource: pinnedVersion !== null ? "version" : "editor",
-          onSourceChange: setPreviewSource,
-          pinnedVersion,
           sceneId,
           scenes: previewScenes,
-          share,
-          versionRequest,
-          versions,
         }}
         sceneId={selectedSceneId}
         scenes={scenes}
         theme={theme}
         width={width || 800}
       />
+      {versionsOpen && info ? (
+        <SceneVersionsDialog
+          isOwner={info.isOwner}
+          latestVersion={info.scene.latestVersion}
+          onClose={() => setVersionsOpen(false)}
+          onSelectVersion={selectVersion}
+          sceneId={sceneId}
+          sceneName={info.scene.name}
+          share={share}
+          slug={info.scene.slug}
+          versions={info.versions}
+          viewingVersion={selectedVersion}
+        />
+      ) : null}
       {installOpen && info ? (
         <SceneInstallDialog
           framesUrl={info.framesUrl}

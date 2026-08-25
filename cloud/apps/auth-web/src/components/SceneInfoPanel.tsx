@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { getStoreCategory } from "../lib/categories";
-import { formatBytes, formatDate, formatDateTime } from "../lib/format";
+import { formatDate } from "../lib/format";
 import type { InstallableFrame } from "./InstallOnFrameBox";
 import { ReportSceneButton } from "./ReportSceneButton";
 import { SceneCategoryEditor } from "./SceneCategoryEditor";
@@ -13,7 +13,6 @@ import { SceneImageGallery } from "./SceneImageGallery";
 import { SceneMarkdown } from "./SceneMarkdown";
 import { SceneTagsEditor } from "./SceneTagsEditor";
 import { StoreSceneActions } from "./StoreSceneActions";
-import { YankVersionButton } from "./YankVersionButton";
 
 /** The store scene as the Info panel shows it: plain JSON (ISO dates), so
  * the server page can hand it to the client-side editor modal as-is. */
@@ -72,45 +71,28 @@ export type SceneInfoData = {
 };
 
 export type SceneInfoPanelProps = SceneInfoData & {
-  /** The version the visitor is looking at: the page's pinned version (or
-   * the latest), or in the editor the one the Preview panel runs. Null
-   * when none is (the preview runs the editor's unsaved scenes). */
-  viewingVersion: number | null;
-  /** A click on a version row calls this (the Preview panel runs it)
-   * instead of navigating the page to `?version=N`. */
-  onSelectVersion?: ((version: number) => void) | undefined;
   /** What heads the column: the workspace's scene name with its rename
    * pencil. */
   heading?: ReactNode;
 };
 
 // Everything the scene page says about a scene: its name (the heading)
-// with the publisher line under it, the images, tags, notices, description
-// and the versions table — with the owner's editors in place of the
-// read-only bits. Installing lives in the bar's Install dialog. The
-// workspace's Info column.
+// with the publisher line under it, the images, tags, notices and the
+// description — with the owner's editors in place of the read-only bits.
+// Installing lives in the bar's Install dialog, the versions in the bar's
+// version dropdown and its "Manage versions…" dialog. The workspace's Info
+// column.
 export function SceneInfoPanel({
   scene,
-  versions,
   imageIds,
   isOwner,
   isAdmin,
   signedIn,
   share,
-  viewingVersion,
-  onSelectVersion,
   heading,
 }: SceneInfoPanelProps) {
   const isPrivate = scene.visibility !== "public";
   const isActive = scene.status === "active";
-  const withShare = (path: string) =>
-    share ? `${path}${path.includes("?") ? "&" : "?"}share=${share}` : path;
-  function versionClick(version: number) {
-    return (event: ReactMouseEvent<HTMLAnchorElement>) => {
-      event.preventDefault();
-      onSelectVersion?.(version);
-    };
-  }
 
   const showTags = scene.category || scene.tags.length > 0 || isOwner;
 
@@ -206,76 +188,6 @@ export function SceneInfoPanel({
         </div>
       </div>
 
-      {/* One narrow column's worth of table: the version with its status
-          pills under it, the date with the zip's details under that, the
-          owner's action — everything wraps, nothing scrolls sideways. */}
-      <section className="section-block scene-info__versions">
-        <h2>Versions</h2>
-        <table className="table scene-versions">
-          <thead>
-            <tr>
-              <th>Version</th>
-              <th>Published</th>
-              {isOwner ? <th>Action</th> : null}
-            </tr>
-          </thead>
-          <tbody>
-            {versions.map((version) => (
-              <tr key={version.version}>
-                <td>
-                  <Link
-                    href={withShare(`/s/${scene.slug}?version=${version.version}`)}
-                    {...(onSelectVersion ? { onClick: versionClick(version.version) } : {})}
-                    title={
-                      onSelectVersion
-                        ? `Run v${version.version} in the Preview panel`
-                        : `View v${version.version}`
-                    }
-                  >
-                    v{version.version}
-                  </Link>
-                  <div className="scene-versions__pills">
-                    {version.yankedAt ? (
-                      <span
-                        className="pill pill-warning"
-                        title="Skipped by new installs; still downloadable when requested explicitly"
-                      >
-                        Unpublished
-                      </span>
-                    ) : version.version === scene.latestVersion ? (
-                      <span className="pill pill-ok">Latest</span>
-                    ) : (
-                      <span className="pill">Published</span>
-                    )}
-                    {viewingVersion === version.version ? <span className="pill">Previewing</span> : null}
-                  </div>
-                </td>
-                <td>
-                  {formatDateTime(new Date(version.createdAt))}
-                  <div className="scene-versions__detail">
-                    <span title="Minimum FrameOS version">
-                      {version.frameosVersion ? `FrameOS ${version.frameosVersion}+` : "any FrameOS"}
-                    </span>
-                    {" · "}
-                    <span>{formatBytes(version.sizeBytes)}</span>
-                    {" · "}
-                    <code title={`SHA-256 ${version.sha256}`}>{version.sha256.slice(0, 12)}…</code>
-                  </div>
-                </td>
-                {isOwner ? (
-                  <td>
-                    <YankVersionButton
-                      sceneId={scene.id}
-                      version={version.version}
-                      yanked={Boolean(version.yankedAt)}
-                    />
-                  </td>
-                ) : null}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
     </div>
   );
 }

@@ -58,6 +58,30 @@ export function openPanelCount(panels: SceneEditorPanels): number {
   return sceneEditorPanelNames.filter((name) => panels[name]).length;
 }
 
+/** A set of just one panel. */
+export function onlyPanel(name: SceneEditorPanelName): SceneEditorPanels {
+  return { ...noSceneEditorPanels, [name]: true };
+}
+
+/** The panel a narrow (single-panel) workspace shows for a set: the last
+ * one the user picked while it is still in the set, else the Preview when
+ * it is open, else the Info, else the first open one (null: empty set). */
+export function singlePanelFor(
+  panels: SceneEditorPanels,
+  active: SceneEditorPanelName | null,
+): SceneEditorPanelName | null {
+  if (active && panels[active]) {
+    return active;
+  }
+  if (panels.preview) {
+    return "preview";
+  }
+  if (panels.info) {
+    return "info";
+  }
+  return sceneEditorPanelNames.find((name) => panels[name]) ?? null;
+}
+
 /** The hash for a panel set (the exact set — a reload restores it). An
  * empty set spells as the editor alone: the workspace never shows nothing. */
 export function sceneEditorHashFor(panels: SceneEditorPanels): string {

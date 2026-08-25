@@ -3,17 +3,21 @@
 import { Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { applyAiScenes, blankScene, prepareForEditor, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
-import type { SceneEditorPanelName, SceneEditorPanels } from "../lib/scene-views";
+import { singlePanelFor, type SceneEditorPanelName, type SceneEditorPanels } from "../lib/scene-views";
 import {
   readDocumentTheme,
   SceneEditorBackButton,
+  SceneEditorBar,
   SceneEditorPanelToggles,
   SceneEditorWorkspace,
   SceneNameTitle,
   sceneNameFor,
+  shownPanels,
   togglePanelIn,
   useEditorStylesheet,
+  useSinglePanelMode,
   type EmbeddedSceneEditorApi,
+  type SceneEditorAction,
 } from "./SceneEditorModal";
 
 export const newScenePresets = [
@@ -78,6 +82,10 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
   const [sceneName, setSceneName] = useState<string | null>(null);
   const [presetIndex, setPresetIndex] = useState(0);
   const [panels, setPanels] = useState<SceneEditorPanels>({ ai: true, editor: true, info: false, preview: false });
+  // A narrow viewport shows one panel of the set at a time (the last one
+  // picked there, else singlePanelFor's).
+  const narrow = useSinglePanelMode();
+  const [activePanel, setActivePanel] = useState<SceneEditorPanelName | null>(null);
   // The editor's latest scenes as state, for the Preview panel (kept up to
   // date only while it is open — each update re-renders the page).
   const [previewScenes, setPreviewScenes] = useState<SceneJson[] | null>(null);
@@ -183,6 +191,17 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
   }
 
   function togglePanel(panel: SceneEditorPanelName) {
+    if (narrow) {
+      // A tab: show this panel, adding it to the set a wide viewport shows.
+      setActivePanel(panel);
+      if (panel === "preview") {
+        setPreviewScenes(latestScenesRef.current);
+      }
+      if (!panels[panel]) {
+        setPanels({ ...panels, [panel]: true });
+      }
+      return;
+    }
     const next = togglePanelIn(panels, panel);
     if (!next) {
       return;
@@ -234,22 +253,26 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
     }
   }
 
+  const shown = shownPanels(panels, narrow, activePanel);
+  const actions: SceneEditorAction[] = [
+    {
+      Icon: Save,
+      disabled: saving || !scenes,
+      emphasized: true,
+      key: "save",
+      label: saving ? "Saving…" : "Save to my scenes",
+      onSelect: () => void save(),
+      primary: true,
+      title: "Create a private scene in your account from what is in the editor",
+    },
+  ];
+
   return (
     // ph-no-capture: the scene being built is the user's own.
     <div className="editor-modal ph-no-capture">
-      <div className="editor-modal__bar">
-        <div className="editor-modal__title">
-          <SceneEditorBackButton href={myScenesUrl} label="Back" />
-          <SceneEditorPanelToggles available={{ info: false }} onToggle={togglePanel} panels={panels} />
-          <SceneNameTitle name={sceneName} onRename={renameScene} />
-          {touched ? <span className="pill pill-warning">Not saved yet</span> : null}
-          {error ? (
-            <span className="pill pill-warning" role="alert">
-              {error}
-            </span>
-          ) : null}
-        </div>
-        <div className="button-row">
+      <SceneEditorBar
+        actions={actions}
+        leading={
           <label className="editor-modal__preset">
             <span className="editor-modal__preset-label">Display</span>
             <select
@@ -265,18 +288,23 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
               ))}
             </select>
           </label>
-          <button
-            className="button button--small button-primary"
-            disabled={saving || !scenes}
-            onClick={() => void save()}
-            title="Create a private scene in your account from what is in the editor"
-            type="button"
-          >
-            <Save aria-hidden size={16} />
-            {saving ? "Saving…" : "Save to my scenes"}
-          </button>
-        </div>
-      </div>
+        }
+      >
+        <SceneEditorBackButton href={myScenesUrl} label="Back" />
+        <SceneEditorPanelToggles
+          active={narrow ? singlePanelFor(panels, activePanel) : undefined}
+          available={{ info: false }}
+          onToggle={togglePanel}
+          panels={panels}
+        />
+        <SceneNameTitle name={sceneName} onRename={renameScene} />
+        {touched ? <span className="pill pill-warning">Not saved yet</span> : null}
+        {error ? (
+          <span className="pill pill-warning" role="alert">
+            {error}
+          </span>
+        ) : null}
+      </SceneEditorBar>
       <SceneEditorWorkspace
         ai={{
           getScenes: () => latestScenesRef.current,
@@ -303,7 +331,7 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
             selectScene(nextSceneId);
           }
         }}
-        panels={panels}
+        panels={shown}
         // Not saved yet: the only source is the editor (no versions exist).
         preview={{ sceneId: null, scenes: previewScenes }}
         sceneId={selectedSceneId}

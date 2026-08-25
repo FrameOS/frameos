@@ -2268,6 +2268,88 @@ a.stat-tile:hover {
   background: var(--surface);
 }
 
+/* The workspace bar's two sides: the title keeps its width (its scene name
+   is capped, see .editor-modal__name-text), the actions cluster on the
+   right does not wrap — when it would not fit it collapses into the "…"
+   menu instead (useCollapsedActions measures the two). */
+.editor-modal__bar--scene .editor-modal__title {
+  flex-shrink: 0;
+}
+
+.editor-modal__actions {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.editor-modal__more {
+  position: relative;
+}
+
+.editor-modal__more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  min-width: 200px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.editor-modal__more-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.editor-modal__more-item:hover:not(:disabled),
+.editor-modal__more-item:focus-visible {
+  background: var(--bg-soft);
+}
+
+.editor-modal__more-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.editor-modal__more-item--primary {
+  font-weight: 650;
+}
+
+.editor-modal__unsaved {
+  white-space: nowrap;
+}
+
+/* The bar's version dropdown, right after the panel toggles. */
+.editor-modal__version-select.input {
+  flex-shrink: 0;
+  width: auto;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.editor-modal__unsaved-short {
+  display: none;
+}
+
 .live-preview-panel {
   padding: 12px;
   gap: 12px;
@@ -2302,18 +2384,6 @@ a.stat-tile:hover {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-
-.live-preview-panel__source {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.live-preview-panel__source .live-preview__version {
-  min-width: 0;
-  flex: 1;
 }
 
 .live-preview-panel__actions {
@@ -2522,17 +2592,18 @@ a.stat-tile:hover {
   display: none;
 }
 
-/* The versions table fits the column: compact cells, text wrapping, the
-   version's pills and the zip's details stacked under their cells. */
-.scene-info--panel .table th,
-.scene-info--panel .table td {
+/* The versions table (the bar's "Manage versions…" dialog): compact cells,
+   text wrapping, the version's pills and the zip's details stacked under
+   their cells. */
+.scene-versions th,
+.scene-versions td {
   padding: 8px;
   vertical-align: top;
   overflow-wrap: anywhere;
 }
 
-.scene-info--panel .table .pill,
-.scene-info--panel .table .button {
+.scene-versions .pill,
+.scene-versions .button {
   white-space: nowrap;
 }
 
@@ -2572,6 +2643,10 @@ a.stat-tile:hover {
   background: var(--bg, #fff);
   color: var(--text);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.dialog__panel--wide {
+  width: min(760px, 100%);
 }
 
 .dialog__head {
@@ -2930,21 +3005,43 @@ html.theme-dark .ai-panel__render {
   line-height: 1.4;
 }
 
+/* Below 900px the workspace shows one panel at a time (SceneEditorModal's
+   single-panel mode: the toggles become tabs, no columns, no handles), so
+   the bar is what has to make room: a shorter scene name, and on phones
+   icon-only tabs and a shorter Unsaved pill. */
 @media (max-width: 900px) {
-  /* No room for columns: the open panels stack, equal shares, the Info
-     column last; the drag handles are for pointers with room to drag. */
-  .editor-modal__frame--with-panels {
-    grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: none;
-    grid-auto-rows: minmax(0, 1fr);
+  .editor-modal__name-text {
+    max-width: 140px;
+  }
+}
+
+@media (max-width: 640px) {
+  .editor-modal__bar {
+    gap: 8px;
+    padding: 8px 10px;
   }
 
-  .editor-modal__resizer {
+  .editor-modal__panels .view-toggle__button {
+    position: relative;
+    gap: 0;
+    padding: 0 9px;
+  }
+
+  .editor-modal__panel-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .editor-modal__unsaved-long {
     display: none;
   }
 
-  .editor-modal__info {
-    order: 2;
+  .editor-modal__unsaved-short {
+    display: inline;
   }
 }
 
@@ -3022,7 +3119,8 @@ html.theme-dark .ai-panel__render {
   color: var(--text);
 }
 
-.view-toggle__button[aria-pressed="true"] {
+.view-toggle__button[aria-pressed="true"],
+.view-toggle__button[aria-selected="true"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SceneInfoPanel, type SceneInfoData } from "./SceneInfoPanel";
 
@@ -64,10 +64,6 @@ const info: SceneInfoData = {
   ],
 };
 
-function versionsTable() {
-  return screen.getByRole("table");
-}
-
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   window.history.replaceState(null, "", "/s/clock");
@@ -83,7 +79,7 @@ afterEach(() => {
 
 describe("SceneInfoPanel", () => {
   it("shows the publisher line, gallery, description and versions from its props", () => {
-    render(<SceneInfoPanel {...info} onSelectVersion={vi.fn()} viewingVersion={2} />);
+    render(<SceneInfoPanel {...info} />);
 
     expect(screen.getByText(/12 downloads/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Marius" }).getAttribute("href")).toBe("/publishers/acc-1");
@@ -108,55 +104,11 @@ describe("SceneInfoPanel", () => {
     expect(screen.queryByRole("textbox", { name: "URL to copy" })).toBeNull();
     expect(screen.queryByRole("heading", { name: /Install/ })).toBeNull();
 
-    // Versions: newest first, the latest flagged, the previewed one marked.
-    const rows = within(versionsTable()).getAllByRole("row").slice(1);
-    expect(rows).toHaveLength(2);
-    expect(within(rows[0]!).getByRole("link", { name: "v2" }).getAttribute("href")).toBe(
-      "/s/clock?version=2",
-    );
-    expect(within(rows[0]!).getByText("Latest")).toBeTruthy();
-    expect(within(rows[0]!).getByText("Previewing")).toBeTruthy();
-    expect(within(rows[0]!).getByText("FrameOS 2026.8.1+")).toBeTruthy();
-    expect(within(rows[1]!).getByText("Published")).toBeTruthy();
-    expect(within(rows[1]!).getByText("1.0 KB")).toBeTruthy();
-    expect(within(rows[1]!).getByText("any FrameOS")).toBeTruthy();
-    expect(within(rows[1]!).getByText("0123456789ab…").getAttribute("title")).toBe(
-      "SHA-256 0123456789abcdef0123456789abcdef",
-    );
-    // Three columns that wrap within the panel: no inner scroll container.
-    expect(within(versionsTable()).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
-      "Version",
-      "Published",
-    ]);
-    expect(versionsTable().closest(".table-scroll")).toBeNull();
-    expect(versionsTable().parentElement?.tagName).toBe("SECTION");
-  });
-
-  it("gives the owner the versions' actions in the compact table", () => {
-    render(<SceneInfoPanel {...info} isOwner signedIn viewingVersion={2} />);
-    expect(within(versionsTable()).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
-      "Version",
-      "Published",
-      "Action",
-    ]);
-    const rows = within(versionsTable()).getAllByRole("row").slice(1);
-    expect(within(rows[0]!).getByRole("button", { name: "Unpublish" })).toBeTruthy();
-    expect(within(rows[0]!).getByText("Previewing")).toBeTruthy();
-  });
-
-  it("hands a version click to the callback instead of navigating", () => {
-    const onSelectVersion = vi.fn();
-    render(<SceneInfoPanel {...info} onSelectVersion={onSelectVersion} viewingVersion={null} />);
-    const link = screen.getByRole("link", { name: "v1" });
-    // Still a real link (open in a new tab pins the page to that version)…
-    expect(link.getAttribute("href")).toBe("/s/clock?version=1");
-    const click = new MouseEvent("click", { bubbles: true, cancelable: true });
-    fireEvent(link, click);
-    // …but a plain click goes to the Preview panel.
-    expect(onSelectVersion).toHaveBeenCalledWith(1);
-    expect(click.defaultPrevented).toBe(true);
-    expect(window.location.search).toBe("");
-    expect(screen.queryByText("Previewing")).toBeNull();
+    // The versions live in the bar (its dropdown and "Manage versions…"
+    // dialog), not in the column.
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Versions" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "v2" })).toBeNull();
   });
 
   it("keeps the share token on every link of a private scene, and explains it", () => {
@@ -165,11 +117,7 @@ describe("SceneInfoPanel", () => {
         {...info}
         scene={{ ...info.scene, visibility: "private" }}
         share="tok"
-        viewingVersion={2}
       />,
-    );
-    expect(screen.getByRole("link", { name: "v1" }).getAttribute("href")).toBe(
-      "/s/clock?version=1&share=tok",
     );
     expect(
       screen.getByRole("button", { name: "View image 1 full size" }).querySelector("img")?.getAttribute("src"),
@@ -187,7 +135,6 @@ describe("SceneInfoPanel", () => {
         isOwner
         scene={{ ...info.scene, visibility: "private" }}
         signedIn
-        viewingVersion={1}
       />,
     );
     expect(screen.getAllByRole("button", { name: /Remove image \d/ })).toHaveLength(2);
@@ -198,13 +145,14 @@ describe("SceneInfoPanel", () => {
     expect(screen.getByRole("button", { name: /Edit minimum FrameOS version/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Make public" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Unpublish" })).toHaveLength(2);
+    // No per-version actions here: those are in the bar's versions dialog.
+    expect(screen.queryByRole("button", { name: "Unpublish" })).toBeNull();
     expect(screen.getByText(/only visible to you/)).toBeTruthy();
   });
 
 
   it("heads the column with the name it is given as a heading, the publisher line under it, then the images", () => {
-    render(<SceneInfoPanel {...info} heading={<span>Clock title</span>} viewingVersion={2} />);
+    render(<SceneInfoPanel {...info} heading={<span>Clock title</span>} />);
     const heading = screen.getByRole("heading", { level: 1, name: "Clock title" });
     const byline = screen.getByText(/12 downloads/);
     const gallery = document.querySelector(".scene-gallery")!;
@@ -223,7 +171,7 @@ describe("SceneInfoPanel", () => {
   });
 
   it("has no heading element when it is given none", () => {
-    render(<SceneInfoPanel {...info} viewingVersion={2} />);
+    render(<SceneInfoPanel {...info} />);
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 });

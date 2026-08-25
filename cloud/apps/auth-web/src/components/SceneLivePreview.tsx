@@ -28,34 +28,20 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { formatDate } from "../lib/format";
 import {
   requiredSettingsForScenes,
   type PreviewSettingsGroup,
 } from "../lib/preview-settings";
 import { ImageLightbox } from "./ImageLightbox";
 
-/** One published version of the scene, as listed in the source dropdown. */
-export type SceneVersionOption = {
-  version: number;
-  /** ISO timestamp (serialisable from the server component). */
-  createdAt: string;
-  /** ISO timestamp when unpublished (yanked), null otherwise. */
-  yankedAt: string | null;
-};
-
-/** What the panel runs: the editor's unsaved scenes, or one published
- * version (null = whatever scenes.json serves without `?version=`). */
-export type PreviewSource = { kind: "editor" } | { kind: "version"; version: number | null };
-
 type SceneLivePreviewPanelProps = {
-  /** The store scene, or null for a scene that is not saved yet (then only
-   * the editor source exists and screenshots cannot go to a gallery). */
+  /** The store scene, or null for a scene that is not saved yet (then
+   * screenshots cannot go to a gallery). */
   sceneId: string | null;
-  /** The editor's current scenes, as last reported by onScenesChanged. The
-   * runtime reloads (debounced) whenever their content changes. null when
-   * there is no editor to preview. */
-  scenes?: readonly SceneJsonLike[] | null | undefined;
+  /** The editor's current scenes, as last reported by onScenesChanged —
+   * what the panel runs. The runtime reloads (debounced) whenever their
+   * content changes. */
+  scenes: readonly SceneJsonLike[];
   /** The scene selected in the editor — the runtime shows that one. */
   editorSceneId?: string | null | undefined;
   width?: number | null | undefined;
@@ -63,50 +49,16 @@ type SceneLivePreviewPanelProps = {
   /** Owner-only: shows "Save to images", which uploads the current frame to
    * the scene's image gallery. "Download PNG" is there for everyone. */
   canSaveToGallery?: boolean | undefined;
-  /** Share token for private scenes, so shared visitors can load scenes.json. */
-  share?: string | undefined;
-  /** The scene's versions (any order); lists them as sources. */
-  versions?: readonly SceneVersionOption[] | undefined;
-  /** The version the page is pinned to via ?version=N, when it is not the
-   * latest — the "version" source starts there. */
-  pinnedVersion?: number | null | undefined;
-  /** Which source to start on. Default: the editor when it has scenes,
-   * else the pinned/latest version. */
-  initialSource?: "editor" | "version" | undefined;
-  /** A published version asked for from outside (the Info panel's Versions
-   * table): the panel switches its source to it. A new object re-applies
-   * it, so asking for the version already running restarts it. */
-  versionRequest?: { version: number } | null | undefined;
-  /** Reports the source the panel runs, on mount and whenever it changes. */
-  onSourceChange?: ((source: PreviewSource) => void) | undefined;
 };
 
 type SceneJsonLike = { id: string } & Record<string, unknown>;
 
-const noVersions: SceneVersionOption[] = [];
 const maxLogLines = 200;
 /** Editor edits arrive debounced already; this keeps a burst of them from
  * booting the runtime more than once. */
 export const EDITOR_RELOAD_DEBOUNCE_MS = 700;
 /** How long a transient notice ("Screenshot downloaded.") stays up. */
 export const NOTICE_HIDE_MS = 4000;
-const editorSourceValue = "editor";
-const serverDefaultVersionValue = "";
-
-function sourceValue(source: PreviewSource): string {
-  if (source.kind === "editor") {
-    return editorSourceValue;
-  }
-  return source.version === null ? serverDefaultVersionValue : String(source.version);
-}
-
-function sourceFromValue(value: string): PreviewSource {
-  if (value === editorSourceValue) {
-    return { kind: "editor" };
-  }
-  return { kind: "version", version: value === serverDefaultVersionValue ? null : Number(value) };
-}
-
 // Runs a scene in the browser through the frameos-wasm runtime: canvas,
 // showIf-aware state fields, event buttons, and logs — no frame needed. The
 // runtime assets are copied into /frameos-wasm by scripts/copy-wasm-assets.mjs.
@@ -115,17 +67,11 @@ function sourceFromValue(value: string): PreviewSource {
 // own mountFrameOSManager.
 export function SceneLivePreviewPanel({
   sceneId,
-  scenes: editorScenesProp = null,
+  scenes: editorScenesProp,
   editorSceneId = null,
   width,
   height,
   canSaveToGallery = false,
-  share,
-  versions = noVersions,
-  pinnedVersion = null,
-  initialSource,
-  versionRequest = null,
-  onSourceChange,
 }: SceneLivePreviewPanelProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -145,30 +91,12 @@ export function SceneLivePreviewPanel({
     return () => clearTimeout(timer);
   }, [notice]);
 
-  // Newest first; "latest" is what an unversioned fetch would serve.
-  const sortedVersions = useMemo(
-    () => [...versions].sort((a, b) => b.version - a.version),
-    [versions],
-  );
-  const latestVersion =
-    sortedVersions.find((candidate) => !candidate.yankedAt)?.version ?? null;
-  const hasEditorSource = editorScenesProp !== null;
-  const hasVersionSource = sceneId !== null;
-  const [source, setSource] = useState<PreviewSource>(() =>
-    hasEditorSource && (initialSource !== "version" || !hasVersionSource)
-      ? { kind: "editor" }
-      : { kind: "version", version: pinnedVersion ?? latestVersion },
-  );
-
   // The editor's scenes, committed to the runtime after a quiet period. The
   // first payload lands at once (nothing is running yet); later ones only
   // when their content actually differs from what runs.
   const [editorScenes, setEditorScenes] = useState<FrameOSScene[] | null>(null);
   const committedEditorJsonRef = useRef("");
   useEffect(() => {
-    if (!editorScenesProp) {
-      return;
-    }
     const json = JSON.stringify(editorScenesProp);
     if (json === committedEditorJsonRef.current) {
       return;
@@ -185,28 +113,7 @@ export function SceneLivePreviewPanel({
     return () => clearTimeout(timer);
   }, [editorScenesProp]);
 
-  // A published version's scenes.json; cleared when the version changes so
-  // the fetch effect below reloads it.
-  const [fetchedScenes, setFetchedScenes] = useState<FrameOSScene[] | null>(null);
-  const scenes = source.kind === "editor" ? editorScenes : fetchedScenes;
-
-  // A version picked outside the panel (the Info panel's table) — the same
-  // as choosing it in the source dropdown, and a repeat pick reloads it.
-  useEffect(() => {
-    if (!versionRequest || !hasVersionSource) {
-      return;
-    }
-    setSource({ kind: "version", version: versionRequest.version });
-    setError(null);
-    setNotice(null);
-    setFetchedScenes(null);
-  }, [versionRequest, hasVersionSource]);
-
-  const onSourceChangeRef = useRef(onSourceChange);
-  onSourceChangeRef.current = onSourceChange;
-  useEffect(() => {
-    onSourceChangeRef.current?.(source);
-  }, [source]);
+  const scenes = editorScenes;
 
   // The viewport applied to the running preview, and the form values being
   // typed (applied on "Resize").
@@ -264,47 +171,6 @@ export function SceneLivePreviewPanel({
   const fieldIdPrefix = useId();
   const editorSceneIdRef = useRef(editorSceneId);
   editorSceneIdRef.current = editorSceneId;
-  const sourceRef = useRef(source);
-  sourceRef.current = source;
-
-  // Loads the selected version's scenes.json; switching versions clears
-  // `fetchedScenes`, which re-runs this with the new `?version=`.
-  useEffect(() => {
-    if (source.kind !== "version" || sceneId === null || fetchedScenes !== null) {
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const params = new URLSearchParams();
-        if (source.version !== null) {
-          params.set("version", String(source.version));
-        }
-        if (share) {
-          params.set("share", share);
-        }
-        const query = params.toString();
-        const response = await fetch(
-          `/api/store/scenes/${sceneId}/scenes.json${query ? `?${query}` : ""}`,
-        );
-        if (!response.ok) {
-          throw new Error(`Could not load the scene (${response.status})`);
-        }
-        const loaded = (await response.json()) as FrameOSScene[];
-        if (!cancelled) {
-          setFetchedScenes(loaded);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [source, fetchedScenes, sceneId, share]);
-
   useEffect(() => {
     if (storedSettings !== null) {
       return;
@@ -406,13 +272,10 @@ export function SceneLivePreviewPanel({
           }
           setSceneInfo(info ?? null);
           setStatus("");
-          // Previewing the editor: show the scene being edited, not the
-          // default one, when the editor has several.
+          // Show the scene being edited, not the default one, when the
+          // editor has several.
           const wanted = editorSceneIdRef.current;
-          const wantedExists =
-            sourceRef.current.kind === "editor" &&
-            wanted !== null &&
-            scenes.some((scene) => scene.id === wanted);
+          const wantedExists = wanted !== null && scenes.some((scene) => scene.id === wanted);
           if (wantedExists && wanted !== info?.currentSceneId) {
             preview.selectScene(wanted);
             setCurrentSceneId(wanted);
@@ -479,12 +342,7 @@ export function SceneLivePreviewPanel({
   // The editor switched scenes while the runtime is up: follow it.
   const runtimeReady = sceneInfo !== null;
   useEffect(() => {
-    if (
-      !runtimeReady ||
-      source.kind !== "editor" ||
-      !editorSceneId ||
-      !scenes?.some((scene) => scene.id === editorSceneId)
-    ) {
+    if (!runtimeReady || !editorSceneId || !scenes?.some((scene) => scene.id === editorSceneId)) {
       return;
     }
     setCurrentSceneId((current) => {
@@ -493,7 +351,7 @@ export function SceneLivePreviewPanel({
       }
       return editorSceneId;
     });
-  }, [runtimeReady, source.kind, editorSceneId, scenes]);
+  }, [runtimeReady, editorSceneId, scenes]);
 
   useEffect(() => {
     if (logRef.current) {
@@ -568,21 +426,6 @@ export function SceneLivePreviewPanel({
     setEdits({});
     setCurrentSceneId(id);
     previewRef.current?.selectScene(id);
-  }
-
-  function selectSource(value: string) {
-    const next = sourceFromValue(value);
-    if (sourceValue(next) === sourceValue(source)) {
-      return;
-    }
-    setSource(next);
-    setError(null);
-    setNotice(null);
-    if (next.kind === "version") {
-      // Clearing the scenes stops the runtime and re-fetches scenes.json for
-      // the new version (same path as the initial load).
-      setFetchedScenes(null);
-    }
   }
 
   // Portrait <-> landscape: swaps the two sizes and applies at once (the
@@ -718,22 +561,6 @@ export function SceneLivePreviewPanel({
   }
 
   const runtimeScenes = sceneInfo?.scenes ?? [];
-  const sourceOptions: { label: string; value: string }[] = [];
-  if (hasEditorSource) {
-    sourceOptions.push({ label: "Editor (unsaved)", value: editorSourceValue });
-  }
-  if (hasVersionSource) {
-    if (sortedVersions.length > 0) {
-      for (const candidate of sortedVersions) {
-        sourceOptions.push({
-          label: versionLabel(candidate, latestVersion),
-          value: String(candidate.version),
-        });
-      }
-    } else if (!hasEditorSource || source.kind === "version") {
-      sourceOptions.push({ label: "Published", value: serverDefaultVersionValue });
-    }
-  }
   // Typed into the form but not sent yet (an applied edit is dropped as
   // soon as the runtime confirms it, see onState).
   const hasUnappliedEdits = Object.entries(edits).some(
@@ -751,23 +578,6 @@ export function SceneLivePreviewPanel({
     <div className="live-preview-panel stack">
       <div className="live-preview-panel__header stack">
         <div className="live-preview-panel__bar">
-        <label className="live-preview-panel__source">
-          <span className="live-preview__label">Source</span>
-          <select
-            aria-label="Preview source"
-            className="live-preview__version"
-            disabled={sourceOptions.length <= 1}
-            onChange={(event) => selectSource(event.target.value)}
-            title="What the preview runs: the editor's current state, or a published version"
-            value={sourceValue(source)}
-          >
-            {sourceOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
         <div className="button-row live-preview-panel__actions">
           <button
             aria-label="Restart"
@@ -1091,20 +901,6 @@ export function SceneLivePreviewPanel({
       </p>
     </div>
   );
-}
-
-// "v3 · 24 Aug 2026 · latest" — the same date wording as the Versions table.
-function versionLabel(
-  candidate: SceneVersionOption,
-  latestVersion: number | null,
-): string {
-  const parts = [`v${candidate.version}`, formatDate(new Date(candidate.createdAt))];
-  if (candidate.yankedAt) {
-    parts.push("unpublished");
-  } else if (candidate.version === latestVersion) {
-    parts.push("latest");
-  }
-  return parts.join(" · ");
 }
 
 function textValue(value: unknown): string {

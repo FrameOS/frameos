@@ -72,20 +72,10 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
   throw new Error(`Unexpected fetch: ${url}`);
 });
 
-const versions = [
-  { createdAt: "2026-08-10T10:00:00.000Z", version: 1, yankedAt: null },
-  { createdAt: "2026-08-20T10:00:00.000Z", version: 2, yankedAt: "2026-08-21T10:00:00.000Z" },
-  { createdAt: "2026-08-24T10:00:00.000Z", version: 3, yankedAt: null },
-];
-
 function scenesJsonUrls() {
   return fetchMock.mock.calls
     .map(([input]) => String(input))
     .filter((url) => url.includes("/scenes.json"));
-}
-
-function sourceSelect() {
-  return screen.getByRole("combobox", { name: "Preview source" }) as HTMLSelectElement;
 }
 
 beforeEach(() => {
@@ -102,7 +92,7 @@ afterEach(() => {
 
 describe("SceneLivePreviewPanel screenshot gating", () => {
   it("keeps the screenshot buttons disabled until the runtime paints a frame", async () => {
-    render(<SceneLivePreviewPanel sceneId="scene-1" />);
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
     await waitFor(() => expect(previews).toHaveLength(1));
 
     const saveButton = screen.getByRole("button", {
@@ -119,7 +109,7 @@ describe("SceneLivePreviewPanel screenshot gating", () => {
   });
 
   it("re-disables the button when the runtime is restarted", async () => {
-    render(<SceneLivePreviewPanel sceneId="scene-1" />);
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
     await waitFor(() => expect(previews).toHaveLength(1));
     act(() => previews[0]!.options.onFrame!({ height: 480, renderMs: 4, width: 800 }));
 
@@ -152,7 +142,7 @@ function stubCanvas() {
 
 describe("SceneLivePreviewPanel lightbox", () => {
   it("opens the frame at full size on a canvas click, toggles fit/1:1, and closes on Esc", async () => {
-    render(<SceneLivePreviewPanel height={600} sceneId="scene-1" width={800} />);
+    render(<SceneLivePreviewPanel height={600} sceneId="scene-1" scenes={[clockScene]} width={800} />);
     await waitFor(() => expect(previews).toHaveLength(1));
     const canvas = document.querySelector("canvas.live-preview__canvas") as HTMLCanvasElement;
     // Nothing to zoom into before the first frame.
@@ -195,7 +185,7 @@ describe("SceneLivePreviewPanel lightbox", () => {
 
 describe("SceneLivePreviewPanel notices", () => {
   it("shows 'Screenshot downloaded.' with an ×, and hides it on its own", async () => {
-    render(<SceneLivePreviewPanel sceneId="scene-1" />);
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
     await waitFor(() => expect(previews).toHaveLength(1));
     act(() => previews[0]!.options.onFrame!({ height: 480, renderMs: 4, width: 800 }));
 
@@ -227,7 +217,7 @@ describe("SceneLivePreviewPanel notices", () => {
 
 describe("SceneLivePreviewPanel viewport", () => {
   it("Rotate swaps width and height and reboots the runtime at once", async () => {
-    render(<SceneLivePreviewPanel height={600} sceneId="scene-1" width={800} />);
+    render(<SceneLivePreviewPanel height={600} sceneId="scene-1" scenes={[clockScene]} width={800} />);
     await waitFor(() => expect(previews).toHaveLength(1));
     const sized = (index: number) =>
       previews[index]!.options as unknown as { width: number; height: number };
@@ -249,13 +239,13 @@ describe("SceneLivePreviewPanel viewport", () => {
 
 describe("SceneLivePreviewPanel screenshot buttons", () => {
   it("offers Save to images only to the owner of a saved scene, Download to everyone", async () => {
-    const { unmount } = render(<SceneLivePreviewPanel sceneId="scene-1" />);
+    const { unmount } = render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
     await waitFor(() => expect(previews).toHaveLength(1));
     expect(screen.queryByRole("button", { name: /Save to images/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Download PNG/ })).toBeTruthy();
     unmount();
 
-    render(<SceneLivePreviewPanel canSaveToGallery sceneId="scene-1" />);
+    render(<SceneLivePreviewPanel canSaveToGallery sceneId="scene-1" scenes={[clockScene]} />);
     await waitFor(() => expect(previews).toHaveLength(2));
     expect(screen.getByRole("button", { name: /Save to images/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Download PNG/ })).toBeTruthy();
@@ -268,81 +258,18 @@ describe("SceneLivePreviewPanel screenshot buttons", () => {
   });
 });
 
-describe("SceneLivePreviewPanel source selector", () => {
-  it("runs the editor's scenes by default, and fetches a version on request", async () => {
+describe("SceneLivePreviewPanel source", () => {
+  it("runs the editor's scenes as they are handed to it — there is no source to pick", async () => {
     const editorScenes = [{ ...clockScene, id: "edited", name: "Edited" }];
-    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={editorScenes} versions={versions} />);
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={editorScenes} />);
     await waitFor(() => expect(previews).toHaveLength(1));
-
-    const select = sourceSelect();
-    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
-      "Editor (unsaved)",
-      "v3 · 24 Aug 2026 · latest",
-      "v2 · 20 Aug 2026 · unpublished",
-      "v1 · 10 Aug 2026",
-    ]);
-    expect(select.value).toBe("editor");
-    // The editor's scenes go straight to the runtime: nothing to fetch.
-    expect(scenesJsonUrls()).toEqual([]);
     expect(previews[0]!.options.scenes).toBe(editorScenes);
-
-    fireEvent.change(select, { target: { value: "1" } });
-    await waitFor(() =>
-      expect(scenesJsonUrls()).toEqual(["/api/store/scenes/scene-1/scenes.json?version=1"]),
-    );
-    // The old runtime is torn down and a new one boots with the fetched scenes.
-    await waitFor(() => expect(previews).toHaveLength(2));
-    expect(previews[0]!.destroy).toHaveBeenCalled();
-    expect(previews[1]!.options.scenes).toEqual([clockScene]);
-    expect(select.value).toBe("1");
-
-    // Back to the editor: its scenes are still at hand, no fetch.
-    fireEvent.change(select, { target: { value: "editor" } });
-    await waitFor(() => expect(previews).toHaveLength(3));
-    expect(previews[2]!.options.scenes).toBe(editorScenes);
-    expect(scenesJsonUrls()).toHaveLength(1);
-  });
-
-  it("starts on the pinned version when asked to, keeping the share token in the URL", async () => {
-    render(
-      <SceneLivePreviewPanel
-        initialSource="version"
-        pinnedVersion={2}
-        sceneId="scene-1"
-        scenes={[clockScene]}
-        share="tok"
-        versions={versions}
-      />,
-    );
-    await waitFor(() => expect(previews).toHaveLength(1));
-
-    expect(sourceSelect().value).toBe("2");
-    expect(scenesJsonUrls()).toEqual([
-      "/api/store/scenes/scene-1/scenes.json?version=2&share=tok",
-    ]);
-  });
-
-  it("defaults to the latest published version when there is no editor to preview", async () => {
-    render(<SceneLivePreviewPanel sceneId="scene-1" versions={versions} />);
-    await waitFor(() => expect(previews).toHaveLength(1));
-    expect(sourceSelect().value).toBe("3");
-    expect(scenesJsonUrls()).toEqual(["/api/store/scenes/scene-1/scenes.json?version=3"]);
-  });
-
-  it("fetches without ?version= when no version list is known", async () => {
-    render(<SceneLivePreviewPanel sceneId="scene-1" />);
-    await waitFor(() => expect(previews).toHaveLength(1));
-    expect(sourceSelect().disabled).toBe(true);
-    expect(scenesJsonUrls()).toEqual(["/api/store/scenes/scene-1/scenes.json"]);
-  });
-
-  it("only offers the editor for a scene that is not saved yet", async () => {
-    render(<SceneLivePreviewPanel sceneId={null} scenes={[clockScene]} />);
-    await waitFor(() => expect(previews).toHaveLength(1));
-    const select = sourceSelect();
-    expect(Array.from(select.options).map((option) => option.value)).toEqual(["editor"]);
-    expect(select.disabled).toBe(true);
+    // The editor's scenes go straight to the runtime: nothing to fetch, and
+    // no dropdown of published versions (the bar's, in the workspace, loads
+    // a version into the editor instead).
     expect(scenesJsonUrls()).toEqual([]);
+    expect(screen.queryByRole("combobox", { name: "Preview source" })).toBeNull();
+    expect(screen.queryByText("Source")).toBeNull();
   });
 });
 
@@ -458,7 +385,7 @@ describe("SceneLivePreviewPanel editor reloads", () => {
 
 describe("SceneLivePreviewPanel state-field form", () => {
   async function openWithFields() {
-    render(<SceneLivePreviewPanel sceneId="scene-1" />);
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
     await waitFor(() => expect(previews).toHaveLength(1));
     // Fields render from scenes.json straight away; the actions wait for the
     // runtime to report ready.
