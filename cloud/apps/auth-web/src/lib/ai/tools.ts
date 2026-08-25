@@ -17,6 +17,7 @@ import {
   storeSceneVersions,
 } from "@frameos-cloud/db";
 import {
+  appCatalog,
   getApp,
   getExample,
   knownAppKeywords,
@@ -26,6 +27,7 @@ import {
   searchExamples,
 } from "./context";
 import {
+  bundleRepoApps,
   splitStateNodesByApp,
   stampScenePrompt,
   validateAppKeywords,
@@ -33,6 +35,7 @@ import {
   type JsonObject,
 } from "./scene-utils";
 import type { ResponsesToolDefinition } from "./openai";
+import { formatLintIssues, lintScenes, type LintIssue } from "./scene-lint";
 import {
   assignScenesToFrame,
   currentSceneAssignments,
@@ -72,6 +75,12 @@ export type ToolContext = {
   deliveredScenes?: unknown[];
   // Audit actor for anything save_scene writes. Undefined only in tests.
   providerSubject?: string | undefined;
+  // The store scene the user is viewing/editing (scenes.frameos.net). Makes
+  // save_scene default to a fork of it, so lineage + preview image carry over.
+  storeSceneId?: string | null;
+  // Every scene currently open in the editor (multi-scene templates); used
+  // to resolve scene-node references when linting.
+  editorScenes?: unknown[] | null;
 };
 
 const MAX_TOOL_OUTPUT_CHARS = 60_000;
@@ -465,6 +474,12 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
     parameters: {
       additionalProperties: false,
       properties: {
+        rewrite: {
+          description:
+            "Set true ONLY when the user asked to replace most of the scene (\"start over\", \"remove everything except…\"). " +
+            "Without it, a scene that drops most of the current nodes is refused as an accidental partial update.",
+          type: "boolean",
+        },
         scene: { description: "The complete updated FrameOS scene JSON object.", type: "object" },
       },
       required: ["scene"],
@@ -542,11 +557,53 @@ async function assignedScenes(ctx: ToolContext, frameId: string) {
     .orderBy(frameSceneAssignments.position);
 }
 
+// Lint issues are keyed by message so a modification is judged on what it
+// CHANGED: a scene fetched from the store may carry legacy values the model
+// never touched (an old sample's "position": "top-left"), and bouncing the
+// update over those would block every edit to such a scene.
+function lintKey(issue: LintIssue): string {
+  return `${issue.level}|${issue.node ?? ""}|${issue.message}`;
+}
+
+function newIssues(issues: LintIssue[], baseline: LintIssue[]): LintIssue[] {
+  const seen = new Set(baseline.map(lintKey));
+  return issues.filter((issue) => !seen.has(lintKey(issue)));
+}
+
+// update_scene must carry the WHOLE scene. A model under time pressure sends
+// just the nodes it touched (three clock nodes standing in for a 32-node
+// weather scene), which the editor would faithfully apply as "delete the
+// rest". Refuse when most of the current nodes vanish, unless the model says
+// the user asked for a rewrite.
+function partialSceneIssue(current: JsonObject, delivered: JsonObject): string | undefined {
+  const ids = (scene: JsonObject) =>
+    new Set(
+      (Array.isArray(scene.nodes) ? scene.nodes : [])
+        .map((node) => (node as JsonObject)?.id)
+        .filter((id): id is string => typeof id === "string"),
+    );
+  const before = ids(current);
+  const after = ids(delivered);
+  if (before.size < 4) {
+    return undefined;
+  }
+  const kept = [...before].filter((id) => after.has(id)).length;
+  if (kept / before.size >= 0.5) {
+    return undefined;
+  }
+  return (
+    `This looks like a partial update: the current scene has ${before.size} nodes and only ${kept} of their ids are in the delivered scene ` +
+    `(${after.size} nodes). update_scene replaces the WHOLE scene, so send the complete scene — every existing node, edge, field and the "apps" map — ` +
+    `with your changes applied and the original node ids kept. If the user really asked to replace most of the scene, call again with rewrite: true.`
+  );
+}
+
 function deliverScenes(
   ctx: ToolContext,
   rawScenes: unknown,
   tool: "build_scene" | "modify_scene",
   title?: string,
+  options: { rewrite?: boolean } = {},
 ): string {
   const scenes = Array.isArray(rawScenes) ? rawScenes : [];
   const payload: JsonObject = { scenes };
@@ -569,6 +626,47 @@ function deliverScenes(
   if (issues.length > 0) {
     return JSON.stringify({ ok: false, issues });
   }
+  if (tool === "modify_scene" && ctx.currentScene && !options.rewrite) {
+    const partial = partialSceneIssue(ctx.currentScene, scenes[0] as JsonObject);
+    if (partial) {
+      return JSON.stringify({ issues: [partial], ok: false });
+    }
+  }
+  const bundled = bundleRepoApps(payload, appCatalog());
+
+  // Deep structural lint against the app catalog. Scene-node references may
+  // point at scenes that stay untouched in the editor, so lint with those in
+  // view; report only what the delivered scenes themselves get wrong.
+  const deliveredIds = new Set(
+    scenes.map((scene) => (scene as JsonObject)?.id).filter((id) => typeof id === "string"),
+  );
+  const companions = (ctx.editorScenes ?? []).filter(
+    (scene) => !deliveredIds.has((scene as JsonObject)?.id as string),
+  );
+  const lint = lintScenes([...scenes, ...companions]);
+  const deliveredNames = new Set(
+    scenes.map((scene) => {
+      const entry = scene as JsonObject;
+      return (typeof entry?.name === "string" && entry.name) || (entry?.id as string) || "scene";
+    }),
+  );
+  let errors = lint.errors.filter((issue) => deliveredNames.has(issue.scene));
+  let warnings = lint.warnings.filter((issue) => deliveredNames.has(issue.scene));
+  if (tool === "modify_scene" && ctx.currentScene) {
+    const baseline = lintScenes([ctx.currentScene, ...companions]);
+    errors = newIssues(errors, baseline.errors);
+    warnings = newIssues(warnings, baseline.warnings);
+  }
+  if (errors.length > 0) {
+    return JSON.stringify({
+      issues: formatLintIssues(errors),
+      note:
+        "The scene did not reach the editor. Fix every issue (check the app's fields with get_app) and call the tool again with the complete corrected scene.",
+      ok: false,
+      ...(warnings.length > 0 ? { warnings: formatLintIssues(warnings) } : {}),
+    });
+  }
+
   splitStateNodesByApp(payload);
   stampScenePrompt(payload.scenes as unknown[], ctx.prompt);
   ctx.deliveredTool = tool;
@@ -585,6 +683,20 @@ function deliverScenes(
       "The scene is now in the user's editor as an unsaved change. Either remind them to review and save, " +
       "or call save_scene to save a copy to their account for them.",
     ok: true,
+    ...(bundled.length > 0
+      ? {
+          bundledApps: bundled,
+          bundledNote:
+            "Repo JS apps were bundled into the scene's own apps map under their short keywords (as the runtime requires); the delivered scene uses those keywords.",
+        }
+      : {}),
+    ...(warnings.length > 0
+      ? {
+          warnings: formatLintIssues(warnings),
+          warningsNote:
+            "Delivered despite these warnings. Fix them with another call only if they affect what the user asked for.",
+        }
+      : {}),
   });
 }
 
@@ -615,7 +727,9 @@ async function saveSceneToAccount(
       : undefined) ??
     "Untitled scene";
   const description = asString(args.description);
-  const sourceSceneId = asString(args.source_scene_id);
+  // A chat opened on a store scene forks THAT scene unless the model names
+  // another source — the editor's fork button has the same default.
+  const sourceSceneId = asString(args.source_scene_id) ?? ctx.storeSceneId ?? undefined;
   const actor = {
     accountId: ctx.accountId,
     providerSubject: ctx.providerSubject ?? "",
@@ -1049,7 +1163,9 @@ export async function executeTool(
             "There is no current scene in this chat. Use create_scenes to build a new one, or ask the user to open a scene.",
         });
       }
-      return deliverScenes(ctx, args.scene ? [args.scene] : [], "modify_scene");
+      return deliverScenes(ctx, args.scene ? [args.scene] : [], "modify_scene", undefined, {
+        rewrite: args.rewrite === true,
+      });
     }
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });

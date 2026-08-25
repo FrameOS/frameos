@@ -10,4 +10,11 @@ import { storeSceneImages, storeScenes } from "@frameos-cloud/db";
 // not listed twice.
 export const sceneHasPrimaryPreviewSql = sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null)`;
 
-export const sceneHasAnyImageSql = sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null or exists (select 1 from ${storeSceneImages} where ${storeSceneImages.sceneId} = ${storeScenes.id}))`;
+//
+// The gallery subquery names its tables explicitly instead of interpolating
+// the columns: in a single-table select (my-scenes) drizzle strips the table
+// qualifier from every column inside a `sql` field, so `${storeScenes.id}`
+// became a bare "id" that the subquery resolved against store_scene_images —
+// and the fallback was never true. The joined listings (store, publishers,
+// repository indexes) happened to keep their qualifiers, which hid it.
+export const sceneHasAnyImageSql = sql<boolean>`(${storeScenes.previewImage} is not null or ${storeScenes.previewObjectKey} is not null or exists (select 1 from ${storeSceneImages} where ${storeSceneImages}.scene_id = ${storeScenes}.id))`;

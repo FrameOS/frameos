@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  paidServicesForScenes,
   previewSettingsGroups,
   requiredSettingsForScenes,
 } from "./preview-settings";
@@ -154,6 +155,50 @@ describe("requiredSettingsForScenes", () => {
     expect(groupKeys([{}, { nodes: [] }, { nodes: [{ type: "app" }] }])).toEqual(
       [],
     );
+  });
+});
+
+// A render in the live preview is a real request to every service the scene
+// uses; the paid ones must be flagged so the preview asks before spending.
+describe("paidServicesForScenes", () => {
+  it("flags OpenAI and nothing else", () => {
+    const paid = Object.values(previewSettingsGroups)
+      .filter((group) => group.paid)
+      .map((group) => group.key);
+    expect(paid).toEqual(["openAI"]);
+  });
+
+  it("reports the paid services a scene calls, through either detection path", () => {
+    const keys = (scenes: Record<string, unknown>[]) =>
+      paidServicesForScenes(scenes).map((group) => group.key);
+    expect(keys([{ nodes: [{ type: "app", data: { keyword: "data/openaiImage" } }] }])).toEqual(
+      ["openAI"],
+    );
+    expect(
+      keys([
+        {
+          nodes: [
+            {
+              type: "app",
+              data: {
+                keyword: "custom/poet",
+                sources: { "config.json": JSON.stringify({ settings: ["openAI"] }) },
+              },
+            },
+          ],
+        },
+      ]),
+    ).toEqual(["openAI"]);
+    expect(
+      keys([
+        {
+          nodes: [
+            { type: "app", data: { keyword: "data/unsplash" } },
+            { type: "app", data: { keyword: "data/immich" } },
+          ],
+        },
+      ]),
+    ).toEqual([]);
   });
 });
 

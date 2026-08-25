@@ -625,6 +625,33 @@ html.theme-dark .button-primary {
   color: var(--danger);
 }
 
+/* A notice with an × on its right (the live preview's transient messages). */
+.notice--dismissible {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notice__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin: -4px -6px -4px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.notice__dismiss:hover {
+  background: color-mix(in srgb, currentColor, transparent 88%);
+}
+
 .theme-toggle {
   position: fixed;
   right: 16px;
@@ -961,6 +988,56 @@ a.tag-pill--active:hover {
   position: relative;
 }
 
+/* The main image doubles as the "Live preview" trigger: the whole image is
+   the link, with a small caption that surfaces on hover/focus (and stays
+   visible where there is no hover to reveal it). */
+.scene-gallery__link {
+  position: relative;
+  display: block;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.scene-gallery__link img {
+  display: block;
+  transition: border-color 0.15s ease;
+}
+
+.scene-gallery__link:hover img,
+.scene-gallery__link:focus-visible img {
+  border-color: var(--accent, #888);
+}
+
+.scene-gallery__hint {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 8px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.scene-gallery__link:hover .scene-gallery__hint,
+.scene-gallery__link:focus-visible .scene-gallery__hint {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .scene-gallery__hint {
+    opacity: 1;
+  }
+}
+
 .scene-gallery__remove {
   position: absolute;
   right: 8px;
@@ -988,8 +1065,8 @@ a.tag-pill--active:hover {
 }
 
 .scene-gallery__thumb {
-  width: 64px;
-  height: 48px;
+  width: 80px;
+  height: 60px;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1177,8 +1254,9 @@ a.tag-pill--active:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 6px 8px;
-  background: var(--bg-soft);
-  color: inherit;
+  /* Same ground as .input: the soft panel tone read as "disabled". */
+  background: var(--surface);
+  color: var(--text);
   font: inherit;
   font-size: 13px;
 }
@@ -1466,6 +1544,12 @@ a.tag-pill:hover {
   font-size: 12px;
 }
 
+.preview-settings__hint a {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .preview-settings__group {
   display: flex;
   flex-wrap: wrap;
@@ -1492,10 +1576,17 @@ a.tag-pill:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 6px 8px;
-  background: var(--bg-soft);
-  color: inherit;
+  /* Same ground and ink as the panel's other controls: the soft tone read
+     as disabled in the light theme, and `inherit` took the label's grey. */
+  background: var(--surface);
+  color: var(--text);
   font: inherit;
   font-size: 13px;
+}
+
+.preview-settings__input:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary), transparent 40%);
+  outline-offset: 1px;
 }
 
 .editor-modal {
@@ -1523,6 +1614,56 @@ a.tag-pill:hover {
   font-weight: 650;
 }
 
+/* The bar's title: the selected scene's name plus a pencil to rename it. */
+.editor-modal__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.editor-modal__name-text {
+  max-width: 320px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.editor-modal__name-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.editor-modal__name-edit:hover:not(:disabled) {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+.editor-modal__name-edit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.editor-modal__name-input.input {
+  width: 280px;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.editor-modal__name-input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
 .editor-modal__frame {
   flex: 1;
   width: 100%;
@@ -1545,32 +1686,355 @@ a.tag-pill:hover {
   margin: 0 auto;
 }
 
-/* The live preview mounts frameos-wasm's own DOM (.frameos-manager) here, and
-   that bundle injects its stylesheet into <head> at mount time — i.e. after
-   this file. These selectors are deliberately more specific than the injected
-   single-class rules so they win regardless of injection order.
-
-   Without them a single unwrappable log line (the wasm manager's log pane is a
-   <pre> with the default `white-space: pre`) becomes the widest thing in the
-   grid, the `auto` column grows to fit it, and the canvas stage — which
-   centres the frame inside itself — is stretched with it, shoving the preview
-   image off to the side. The `minmax(0, 1fr)` column is the containment that
-   makes that impossible for *any* over-wide child, log pane or not; the
-   wrapping rules keep the log itself readable instead of just clipped. */
+/* The live preview's body is a single column: the `minmax(0, 1fr)` track keeps
+   any over-wide child (a log line, a wide canvas) from stretching the grid
+   and shoving the preview off to the side. */
 .editor-modal__body.stack {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.editor-modal__body .frameos-manager {
+/* --- Live preview: canvas stage, state-field form, logs ------------------ */
+
+.live-preview__version {
+  max-width: 100%;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.live-preview {
+  display: grid;
+  gap: 12px;
   min-width: 0;
   max-width: 100%;
 }
 
-.editor-modal__body pre.frameos-manager__logs {
+.live-preview__stage {
+  display: flex;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--bg-soft);
+}
+
+.live-preview__canvas {
+  max-width: 100%;
+  max-height: min(60vh, 480px);
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.live-preview__canvas--zoomable {
+  cursor: zoom-in;
+}
+
+/* The rendered frame over the whole page (a click on the preview canvas):
+   fitted to the viewport, or 1:1 with the body scrolling. */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 10, 14, 0.9);
+  color: #e6e8ec;
+}
+
+.lightbox__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  cursor: pointer;
+}
+
+.lightbox__close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.lightbox__hint {
+  flex-shrink: 0;
+  padding: 16px 64px 8px 16px;
+  font-size: 12px;
+  color: rgba(230, 232, 236, 0.7);
+}
+
+.lightbox__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  /* Centred when the frame fits, scrollable (not clipped) when it doesn't. */
+  align-items: safe center;
+  justify-content: safe center;
+  overflow: auto;
+  padding: 8px 16px 16px;
+}
+
+.lightbox__body--fit {
+  overflow: hidden;
+}
+
+.lightbox__image {
+  display: block;
+  margin: 0 auto;
+  width: auto;
+  height: auto;
+  max-width: none;
+  background: #fff;
+  cursor: zoom-out;
+}
+
+.lightbox__image--fit {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+
+.live-preview__status {
+  min-height: 1.2em;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.live-preview__status--error {
+  color: var(--danger);
+}
+
+/* Two columns: a fixed label column and the controls filling the rest.
+   Each field is `display: contents`, so its label and control land in the
+   grid cells directly; wide fields (textareas) span both columns instead. */
+.live-preview__form {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 10px 14px;
+  align-items: center;
+}
+
+.live-preview__field {
+  display: contents;
+}
+
+.live-preview__field--wide {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+}
+
+.live-preview__label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+/* One height for every inline control (text, number, date, select, hex). */
+.live-preview__control {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.live-preview__control:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary), transparent 40%);
+  outline-offset: 1px;
+}
+
+.live-preview__control--invalid {
+  border-color: color-mix(in srgb, var(--danger), transparent 40%);
+}
+
+.live-preview__textarea {
+  min-height: 0;
+  padding: 8px 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.live-preview__textarea--code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre;
+  overflow: auto;
+}
+
+/* Colour: a compact swatch beside the hex text, both editing one value. */
+.live-preview__color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-preview__swatch {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 34px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.live-preview__swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.live-preview__swatch::-webkit-color-swatch {
+  border: 0;
+  border-radius: 5px;
+}
+
+.live-preview__swatch::-moz-color-swatch {
+  border: 0;
+  border-radius: 5px;
+}
+
+.live-preview__hex {
+  width: 120px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  text-transform: lowercase;
+}
+
+.live-preview__checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.live-preview__checkbox {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.live-preview__checkbox-label {
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* The preview's runtime log: a virtualised list (PreviewLog.tsx) in the
+   same footprint the old <pre> had. The colours are theme variables, so
+   html.theme-dark is covered by the palette swap above. */
+.preview-log {
   min-width: 0;
   max-width: 100%;
-  white-space: pre-wrap;
+  height: 160px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+}
+
+.preview-log__list {
+  height: 100%;
+  padding: 4px 0;
+}
+
+.preview-log__empty {
+  display: flex;
+  height: 100%;
+  min-height: 150px;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.preview-log__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 1px 10px;
+}
+
+.preview-log__row--warn {
+  background: color-mix(in srgb, var(--warning), transparent 88%);
+}
+
+.preview-log__row--error {
+  background: color-mix(in srgb, var(--danger), transparent 88%);
+  color: var(--danger);
+}
+
+.preview-log__time {
+  flex: none;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.preview-log__body {
+  min-width: 0;
+  flex: 1;
   overflow-wrap: anywhere;
+}
+
+.preview-log__event {
+  margin-right: 8px;
+  color: var(--warning);
+}
+
+.preview-log__row--error .preview-log__event {
+  color: var(--danger);
+}
+
+.preview-log__field {
+  margin-right: 8px;
+}
+
+.preview-log__key {
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .live-preview__form {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .live-preview__field {
+    display: grid;
+    gap: 4px;
+  }
+
+  .live-preview__field + .live-preview__field {
+    margin-top: 6px;
+  }
 }
 
 /* --- Legal pages, consent banner, footer ------------------------------- */
@@ -1823,4 +2287,1072 @@ a.stat-tile:hover {
 .install-box .notice,
 .install-box .notice-error {
   margin: 0;
+}
+
+/* --- Scene editor: Preview / AI side columns ----------------------------- */
+
+/* With a side panel open the editor area becomes a grid: editor, then a
+   drag handle and a column per open panel (Preview, then AI; the column
+   widths are set inline from the dragged widths). The editor cell — not the
+   frame — is the containing block for the embedded editor's `fixed`
+   drawers, so they stay over the diagram instead of spilling across the
+   panels. */
+.editor-modal__frame--with-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6px 520px;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+/* Every panel closed: the scene's name and the four toggles, centred, in
+   larger type. The editor stays mounted (hidden) behind this. */
+.editor-modal__frame--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.editor-modal__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.editor-modal__empty-title {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.editor-modal__empty-hint {
+  margin: 0;
+  font-size: 13px;
+}
+
+.editor-modal__panels--hero {
+  /* The generic .view-toggle pushes itself right with margin-left:auto and
+     wins over the column's align-items:center, so the hero copy needs the
+     matching margin-right to sit under the name rather than off to one
+     side. */
+  margin-right: auto;
+  border-radius: 12px;
+  padding: 3px;
+}
+
+.editor-modal__panels--hero .view-toggle__button {
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 18px;
+  font-size: 16px;
+}
+
+.editor-modal__panels--hero .view-toggle__button:first-child {
+  border-top-left-radius: 9px;
+  border-bottom-left-radius: 9px;
+}
+
+.editor-modal__panels--hero .view-toggle__button:last-child {
+  border-top-right-radius: 9px;
+  border-bottom-right-radius: 9px;
+}
+
+.editor-modal__editor {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  transform: translateZ(0);
+}
+
+.editor-modal__frame:not(.editor-modal__frame--with-panels) .editor-modal__editor {
+  position: absolute;
+  inset: 0;
+}
+
+/* The Info · Editor · AI · Preview switch in the modal bar: a segmented
+   group where each button is on or off on its own, right after the Back
+   arrow; Save / Fork / Download keep the right-hand cluster. */
+/* The generic .view-toggle pushes itself right with margin-left:auto and
+   is defined later in this file, so the bar's copy needs the extra class
+   to win: the back button, tabs and version pack at the left whether or
+   not the title's scene name is there to fill the room (it is only in the
+   bar while the Info panel is closed). */
+.editor-modal__bar .editor-modal__panels {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
+.editor-modal__panels .view-toggle__button {
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.editor-modal__preview {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+/* The workspace bar's two sides: the actions cluster on the right does not
+   wrap — when it would not fit it collapses into the "…" menu instead
+   (useCollapsedActions measures the two against the title's natural width).
+   The title side can shrink too: its scene name ellipsizes (see
+   .editor-modal__name-text) and the version select clips, so on a phone
+   the cluster never leaves the screen. */
+.editor-modal__bar--scene .editor-modal__title {
+  /* Shrinks down to its min-content: the name (overflow hidden) goes to
+     nothing before the back button and tabs give up any width. */
+  flex: 1 1 auto;
+}
+
+/* The name contributes nothing to the title's minimum (inline-size
+   containment) and grows into what is left: it is the first thing to
+   ellipsize as the bar narrows and the last to come back. */
+.editor-modal__bar--scene .editor-modal__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  contain: inline-size;
+}
+
+.editor-modal__actions {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.editor-modal__more {
+  position: relative;
+}
+
+.editor-modal__more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  min-width: 200px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.editor-modal__more-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.editor-modal__more-item:hover:not(:disabled),
+.editor-modal__more-item:focus-visible {
+  background: var(--bg-soft);
+}
+
+.editor-modal__more-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.editor-modal__more-item--primary {
+  font-weight: 650;
+}
+
+.editor-modal__unsaved {
+  white-space: nowrap;
+}
+
+/* The bar's version dropdown, right after the panel toggles. */
+.editor-modal__version-select.input {
+  flex: 0 1 auto;
+  width: auto;
+  /* A native select sizes to its widest option ("Manage versions…"); the
+     value shown is "v6 (latest)", so cap it and let the popup be wide. */
+  min-width: 64px;
+  max-width: 120px;
+  min-height: 30px;
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.editor-modal__unsaved-short {
+  display: none;
+}
+
+.live-preview-panel {
+  padding: 12px;
+  gap: 12px;
+}
+
+/* Source picker + action row: pinned to the top of the scrolling column so
+   "Apply & render" is reachable however long the form below gets. */
+.live-preview-panel__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  gap: 8px;
+  margin: -12px -12px 0;
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.live-preview-panel__toolbar {
+  gap: 6px;
+}
+
+.live-preview-panel__unapplied {
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* "Auto apply" sits at the end of the action row as a small checkbox. */
+.live-preview-panel__auto-apply {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* A paid scene (OpenAI) takes the canvas's place with this until the user
+   starts the preview by hand: a render is a billed API call. */
+.live-preview__gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.live-preview__gate-icon {
+  color: var(--warning);
+}
+
+.live-preview__gate-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.live-preview__gate-copy {
+  margin: 0;
+  max-width: 36em;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.live-preview-panel__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.live-preview-panel__actions {
+  gap: 6px;
+}
+
+.live-preview-panel .live-preview__stage {
+  padding: 8px;
+}
+
+/* Fitted to the column and at most half the viewport, aspect kept; the
+   lightbox is where the frame shows at full size. */
+.live-preview-panel .live-preview__canvas {
+  max-width: 100%;
+  max-height: 50vh;
+  width: auto;
+  height: auto;
+}
+
+/* Narrower label column than the old full-page preview had. */
+.live-preview-panel .live-preview__form {
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 8px 10px;
+}
+
+.live-preview-panel__footnote {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.editor-modal__resizer {
+  cursor: col-resize;
+  background: var(--line);
+  touch-action: none;
+}
+
+.editor-modal__resizer:hover,
+.editor-modal__resizer:active {
+  background: color-mix(in srgb, var(--primary), var(--line) 40%);
+}
+
+.editor-modal__ai {
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+}
+
+/* The Info column (left of the diagram): the scene page's gallery,
+   description, install instructions and versions, in one narrow column
+   that scrolls as one (nothing inside it scrolls sideways on its own). */
+.editor-modal__info {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  background: var(--surface);
+}
+
+/* The bar's leftmost control: back to the scene page (or My scenes). */
+.editor-modal__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.editor-modal__back:hover {
+  background: var(--bg-soft);
+}
+
+/* --- Scene info: the scene page's body, on the page and in the editor --- */
+
+.scene-info {
+  display: grid;
+  gap: 12px;
+}
+
+/* The column's header: the scene's name with its rename pencil — a real
+   heading, wrapping rather than clipped (the bar's version is a one-liner
+   with an ellipsis) — and the publisher line under it, muted. */
+.scene-info__header {
+  display: grid;
+  gap: 4px;
+}
+
+.scene-info__heading {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.scene-info__heading .editor-modal__name {
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.scene-info__heading .editor-modal__name-edit {
+  width: 30px;
+  height: 30px;
+  margin-top: 1px;
+}
+
+.scene-info__byline {
+  font-size: 13px;
+}
+
+.scene-info__heading .editor-modal__name-text {
+  max-width: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.scene-info__heading .editor-modal__name-input.input {
+  width: 100%;
+  font-size: 16px;
+}
+
+.scene-info > .section-block {
+  margin-top: 12px;
+}
+
+.scene-info--panel {
+  gap: 10px;
+  font-size: 13px;
+}
+
+.scene-info--panel > .section-block {
+  margin-top: 6px;
+  gap: 10px;
+}
+
+.scene-info--panel .copy {
+  margin: 0;
+}
+
+.scene-info--panel h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.scene-info--panel .card {
+  padding: 12px;
+}
+
+.scene-info--panel .card h3 {
+  font-size: 14px;
+}
+
+.scene-info--panel .copy-field__input {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.scene-info--panel .table {
+  font-size: 12px;
+}
+
+/* The column's images: a grid of equal thumbnails (the lightbox shows them
+   full size); the owner's remove sits on each one's corner. */
+.scene-info--panel .scene-gallery .scene-card__placeholder {
+  height: 72px;
+  aspect-ratio: auto;
+}
+
+.scene-gallery__thumb-wrap {
+  position: relative;
+}
+
+.scene-gallery__thumb-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.scene-gallery__thumb-remove:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* A hidden Editor column stays mounted (its unsaved edits with it). */
+.editor-modal__editor[hidden] {
+  display: none;
+}
+
+/* The versions table (the bar's "Manage versions…" dialog): compact cells,
+   text wrapping, the version's pills and the zip's details stacked under
+   their cells. */
+.scene-versions th,
+.scene-versions td {
+  padding: 8px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.scene-versions .pill,
+.scene-versions .button {
+  white-space: nowrap;
+}
+
+.scene-versions__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.scene-versions__detail {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* The "what changed" note a save carries, under the version's pills. */
+.scene-versions__message {
+  margin-top: 4px;
+  max-width: 32em;
+  font-size: 12px;
+}
+
+/* A dialog over the workspace (the bar's Install): a centred panel on a
+   dimmed backdrop, closed by its ×, the backdrop or Esc. */
+.dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(8, 10, 14, 0.55);
+}
+
+.dialog__panel {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg, #fff);
+  color: var(--text);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.dialog__panel--wide {
+  width: min(760px, 100%);
+}
+
+.dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.dialog__head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.dialog__close:hover {
+  background: var(--bg-soft);
+}
+
+/* The new-scene page's display-size picker in the modal bar. */
+.editor-modal__preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.editor-modal__preset-select.input {
+  width: auto;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.ai-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  font-size: 14px;
+}
+
+.ai-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  font-weight: 650;
+}
+
+.ai-panel__beta {
+  margin-left: auto;
+  padding: 2px 7px;
+  font-size: 11px;
+}
+
+.ai-panel__transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.ai-panel__empty {
+  display: grid;
+  gap: 10px;
+}
+
+.ai-panel__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-panel__chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ai-panel__chip:hover {
+  border-color: color-mix(in srgb, var(--primary), var(--line) 45%);
+  background: var(--surface-strong);
+}
+
+.ai-panel__chip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ai-panel__bubble {
+  border-radius: 10px;
+  padding: 9px 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ai-panel__bubble--user {
+  align-self: flex-end;
+  max-width: 88%;
+  background: var(--primary-soft);
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.ai-panel__bubble--assistant {
+  display: grid;
+  gap: 8px;
+  align-self: stretch;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+
+/* Render-check feedback the panel sends on the user's behalf: present, but
+   clearly not something they typed. */
+.ai-panel__bubble--auto {
+  align-self: flex-end;
+  max-width: 88%;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-panel__auto-label {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10.5px;
+}
+
+.ai-panel__auto-text {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.ai-panel__bubble--assistant .markdown-description {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.ai-panel__markdown pre {
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+
+.ai-panel__markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.ai-panel__tools {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.ai-panel__tools-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ai-panel__tools-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-panel__tools-summary::before {
+  content: "›";
+  display: inline-block;
+  width: 10px;
+  transition: transform 0.12s ease;
+}
+
+.ai-panel__tools[open] .ai-panel__tools-summary::before {
+  transform: rotate(90deg);
+}
+
+.ai-panel__tool-list {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 0;
+  padding-left: 16px;
+  list-style: none;
+}
+
+.ai-panel__tool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-panel__tool--error {
+  color: var(--danger);
+}
+
+.ai-panel__thinking,
+.ai-panel__status,
+.ai-panel__check,
+.ai-panel__muted {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.ai-panel__status {
+  padding: 2px 4px;
+}
+
+.ai-panel__check--ok {
+  color: var(--primary-strong);
+}
+
+.ai-panel__check--warn {
+  color: var(--warning);
+}
+
+/* The frame the render check drew, right under its verdict. Shrink-wrapped
+   so the frame's own aspect ratio holds; the PNG is flattened onto white,
+   so it stays a white panel in the dark theme too (that is what the frame
+   would show). */
+.ai-panel__render-link {
+  display: block;
+  justify-self: start;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.ai-panel__render {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.ai-panel__render-link:hover .ai-panel__render {
+  border-color: color-mix(in srgb, var(--primary), var(--line) 45%);
+}
+
+html.theme-dark .ai-panel__render {
+  border-color: var(--surface-strong);
+}
+
+.ai-panel__spin {
+  animation: ai-panel-spin 0.9s linear infinite;
+}
+
+@keyframes ai-panel-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ai-panel__notice {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.ai-panel__notice .copy {
+  font-size: 13px;
+}
+
+.ai-panel__notice .button {
+  justify-self: start;
+}
+
+.ai-panel__notice-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+
+.ai-panel__composer {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.ai-panel__input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.45;
+  resize: vertical;
+  min-height: 64px;
+}
+
+.ai-panel__input:focus {
+  outline: 0;
+  border-color: color-mix(in srgb, var(--primary), var(--line) 30%);
+}
+
+.ai-panel__input:disabled {
+  opacity: 0.6;
+}
+
+.ai-panel__composer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-panel__hint,
+.ai-panel__save-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+/* Below 900px the workspace shows one panel at a time (SceneEditorModal's
+   single-panel mode: the toggles become tabs, no columns, no handles), so
+   the bar is what has to make room: a shorter scene name, and on phones
+   icon-only tabs and a shorter Unsaved pill. */
+@media (max-width: 900px) {
+  .editor-modal__name-text {
+    max-width: 140px;
+  }
+}
+
+@media (max-width: 640px) {
+  .editor-modal__bar {
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .editor-modal__version-select.input {
+    min-width: 56px;
+    max-width: 88px;
+    padding: 0 4px;
+  }
+
+  .editor-modal__panels .view-toggle__button {
+    position: relative;
+    gap: 0;
+    padding: 0 9px;
+  }
+
+  .editor-modal__panel-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  /* The name would be down to an ellipsis next to a lone pencil; drop it
+     (the Info panel heads the scene with it). */
+  .editor-modal__bar--scene .editor-modal__name {
+    display: none;
+  }
+
+  .editor-modal__unsaved-long {
+    display: none;
+  }
+
+  .editor-modal__unsaved-short {
+    display: inline;
+  }
+}
+
+/* "Create a scene with AI" on the store front and in My private scenes. */
+.ai-create-box {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(320px, 1fr);
+  align-items: center;
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.ai-create-box h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-create-box__row {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-create-box__row .input {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .ai-create-box {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* "My private scenes": filter form on the left, grid/list switch on the right. */
+.my-scenes-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.my-scenes-toolbar .filter-bar {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A joined segmented control: the buttons sit flush and only the ends are
+   rounded. The group no longer clips them (that cut an active button's
+   outline at the ends) — a 2px inset keeps every outline inside instead. */
+.view-toggle {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 2px;
+  background: var(--surface);
+}
+
+.view-toggle__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 28px;
+  min-width: 34px;
+  border: 0;
+  border-radius: 0;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.view-toggle__button:first-child {
+  border-top-left-radius: 7px;
+  border-bottom-left-radius: 7px;
+}
+
+.view-toggle__button:last-child {
+  border-top-right-radius: 7px;
+  border-bottom-right-radius: 7px;
+}
+
+/* Neighbours share one line rather than stacking two outlines. */
+.view-toggle__button + .view-toggle__button {
+  margin-left: -1px;
+}
+
+.view-toggle__button:hover {
+  color: var(--text);
+}
+
+/* The soft tint alone faded into the bar's grey, so an active button also
+   carries an outline in the full primary and heavier type. */
+.view-toggle__button[aria-pressed="true"],
+.view-toggle__button[aria-selected="true"] {
+  /* Above its neighbours, so the shared edge is drawn in the accent. */
+  z-index: 1;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 650;
+  box-shadow: inset 0 0 0 1px var(--primary);
 }

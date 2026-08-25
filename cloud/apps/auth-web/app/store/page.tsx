@@ -7,7 +7,13 @@ import { StoreSceneFeed } from "../../src/components/StoreSceneFeed";
 import { StoreTabs } from "../../src/components/StoreTabs";
 import { StoreVersionSelect } from "../../src/components/StoreVersionSelect";
 import { getStoreCategory, storeCategories } from "../../src/lib/categories";
-import { getStorePath, hasDatabaseUrl } from "../../src/lib/env";
+import { CreateSceneWithAiBox } from "../../src/components/CreateSceneWithAiBox";
+import {
+  getScenesBaseUrl,
+  getStorePath,
+  hasDatabaseUrl,
+  myScenesPath,
+} from "../../src/lib/env";
 import { readSession } from "../../src/lib/session";
 import {
   countStoreScenes,
@@ -48,6 +54,7 @@ export default async function StorePage({
   searchParams: Promise<StoreBrowseParams>;
 }) {
   const storePath = getStorePath();
+  const newSceneUrl = new URL(`${myScenesPath}/new`, getScenesBaseUrl()).toString();
   const session = await readSession();
   const isSuperadmin = await accountIsSuperadmin(session?.accountId);
   const params = await searchParams;
@@ -212,6 +219,8 @@ export default async function StorePage({
           Search
         </button>
       </form>
+
+      <CreateSceneWithAiBox action={newSceneUrl} />
 
       {categoryCounts.size > 0 ? (
         <div className="tag-list store-tag-row">

@@ -1,5 +1,5 @@
 import { MakeLogicType, actions, afterMount, beforeUnmount, connect, kea, listeners, path, reducers } from 'kea'
-import { subscriptions } from 'kea-subscriptions'
+import { subscriptions } from '../../utils/keaSubscriptions'
 import { framesModel } from '../../models/framesModel'
 import { newFrameForm } from '../frames/newFrameForm'
 import { isMobileWorkspaceViewport, workspaceLogic } from './workspaceLogic'

@@ -44,6 +44,18 @@
   flight together, so the next failure explains itself instead of printing
   `expected 2 to be 1`.
 
+## AI scene chat: change the prompt/linter, then run the evals
+
+- The cloud AI (`cloud/apps/auth-web/src/lib/ai/`) builds and edits scenes on
+  the frames workspace AND on the scene store (`SceneAiPanel`). Every delivered
+  scene passes `scene-lint.ts` (catalog-aware structural lint) before reaching
+  the editor. When you touch `prompts.ts`, the linter, the app catalog or
+  `docs/js-apps-and-code-nodes.md`, run the evals against real OpenAI and
+  compare with the previous report: `pnpm --filter @frameos-cloud/auth-web
+  ai:eval --compare evals/results/<prev>/report.json` (needs the dev server on
+  :3000, the local DB filled by `scripts/import-store-scenes.mjs`, and
+  `OPENAI_API_KEY`). See `cloud/apps/auth-web/evals/README.md`.
+
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】

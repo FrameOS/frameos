@@ -14,11 +14,16 @@
     "scene:sweep-duplicate-copies": "node scripts/sweep-duplicate-scene-copies.mjs",
     "scene:set-preview": "node scripts/set-scene-preview.mjs",
     "scene:sync-preview": "node scripts/sync-scene-preview.mjs",
+    "ai:render": "tsx evals/render-scene.ts",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "ai:eval": "tsx evals/run.ts",
+    "ai:build-scenes": "tsx evals/build-todo-scenes.ts",
+    "ai:realign": "tsx evals/realign-scenes.ts",
+    "ai:refresh-previews": "tsx evals/refresh-previews.ts"
   },
   "dependencies": {
     "@frameos-cloud/auth-client": "workspace:*",
@@ -37,6 +42,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
+    "react-virtuoso": "^4.6.1",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
@@ -50,7 +56,9 @@
     "eslint": "^9.39.1",
     "frameos-editor": "workspace:*",
     "jsdom": "^29.1.1",
+    "playwright": "^1.60.0",
     "postgres": "^3.4.9",
+    "tsx": "^4.23.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
   }

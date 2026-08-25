@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowsPointingInIcon,
   BoltIcon,
@@ -31,7 +31,7 @@ import { RenameSceneModal } from '../scenes/frame/panels/Scenes/RenameSceneModal
 import { scenesLogic } from '../scenes/frame/panels/Scenes/scenesLogic'
 import { livePreviewLogic } from '../scenes/frame/panels/Scenes/livePreviewLogic'
 import { workspaceLogic } from '../scenes/workspace/workspaceLogic'
-import { FrameScene } from '../types'
+import { FrameScene, FrameType } from '../types'
 import { embedBridge, embedFrameLogic } from './embedFrameLogic'
 import { EmbedScenePreview } from './EmbedScenePreview'
 import { ensurePortalRoots } from './portalRoots'
@@ -39,6 +39,7 @@ import { ensurePortalRoots } from './portalRoots'
 // under its public name so BindLogic wires the same instance the Diagram
 // dependency graph connects to.
 import { frameLogic } from '../scenes/frame/frameLogic'
+import { sanitizeIncomingScenes } from './sanitizeIncomingScenes'
 
 const EMBED_FRAME_ID = 1
 
@@ -47,6 +48,20 @@ export interface EmbeddedSceneEditorScreenshotResult {
   error?: string
   /** When false, a failed save does not fall back to a local PNG download. */
   fallbackDownload?: boolean
+}
+
+/** What a host page can drive in the mounted editor (see `apiRef`). */
+export interface EmbeddedSceneEditorApi {
+  /** Renames a scene through the editor's own form: the diagram keeps its
+   * layout and the change streams out through onScenesChanged. */
+  renameScene: (sceneId: string, name: string) => void
+  /** Shifts the shown scene's diagram by (dx, dy) screen pixels — what a host
+   * calls with half its column's width change to keep the diagram centred. */
+  panBy: (dx: number, dy: number) => void
+  /** Fits the shown scene's diagram to its column (what the toolbar's "Fit
+   * to view" does) — for a host whose column just appeared or changed size
+   * by a lot. */
+  fitView: () => void
 }
 
 export interface EmbeddedSceneEditorProps {
@@ -68,6 +83,14 @@ export interface EmbeddedSceneEditorProps {
    * PNG locally (or, under the iframe/mount embeds, to let the embedding
    * page's protocol handler answer instead). */
   onSaveScreenshot?: (dataUrl: string, sceneId: string | null) => Promise<EmbeddedSceneEditorScreenshotResult>
+  /** Hide the toolbar's built-in wasm Preview panel (default true). Hosts
+   * with their own live preview next to the diagram pass false. */
+  showPreviewButton?: boolean
+  /** Fires with the scene the editor shows whenever the user switches scene
+   * tabs (and once on init), so a host can follow the selection. */
+  onSelectedSceneChanged?: (sceneId: string | null) => void
+  /** Filled with the editor's imperative API while it is mounted. */
+  apiRef?: { current: EmbeddedSceneEditorApi | null }
 }
 
 // The scene editor as a plain React component: render it inside any React
@@ -80,7 +103,7 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
   useState(ensurePortalRoots)
   const logicProps = { frameId: EMBED_FRAME_ID }
   useMountedLogic(embedFrameLogic(logicProps))
-  const { initEmbedFrame } = useActions(embedFrameLogic(logicProps))
+  const { initEmbedFrame, updateScene } = useActions(embedFrameLogic(logicProps))
   const { scenes } = useValues(embedFrameLogic(logicProps))
   const { setTheme } = useActions(workspaceLogic)
   const [initialized, setInitialized] = useState(false)
@@ -99,19 +122,30 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
       const config = ((window as any).FRAMEOS_APP_CONFIG = (window as any).FRAMEOS_APP_CONFIG || {})
       config.preview_proxy_url = props.previewProxyUrl
     }
-    initEmbedFrame({
+    const frame: Partial<FrameType> = {
       id: EMBED_FRAME_ID,
-      scenes: props.scenes,
-      mode: props.mode || 'rpios',
+      // `mode` is a free string on the public prop; the editor only reads it
+      // to pick the scene execution default.
+      mode: (props.mode || 'rpios') as FrameType['mode'],
       width: props.width || 800,
       height: props.height || 480,
       interval: props.interval ?? 300,
       rotate: 0,
-    } as any)
-    setSelectedSceneId(
-      props.sceneId ?? (props.scenes.find((scene) => scene.default) || props.scenes[0])?.id ?? null
-    )
+    }
+    const sceneList = sanitizeIncomingScenes(props.scenes, frame)
+    initEmbedFrame({ ...frame, scenes: sceneList } as any)
+    const nextSceneId = props.sceneId ?? (sceneList.find((scene) => scene.default) || sceneList[0])?.id ?? null
+    setSelectedSceneId(nextSceneId)
     setInitialized(true)
+    // A re-init (the host swapped the scenes: another version loaded, an AI
+    // build applied) leaves the diagram where it was, over nodes that may
+    // now be elsewhere: fit the new set to view. The diagram honours the
+    // request once reactflow has measured the new nodes (Diagram.tsx); on
+    // the first init nothing is mounted yet, and the diagram's own
+    // afterMount fits.
+    if (nextSceneId) {
+      diagramLogic.findMounted({ frameId: EMBED_FRAME_ID, sceneId: nextSceneId })?.actions.fitDiagramView()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.scenes])
 
@@ -120,6 +154,35 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
       setSelectedSceneId(props.sceneId)
     }
   }, [props.sceneId])
+
+  const onSelectedSceneChangedRef = useRef(props.onSelectedSceneChanged)
+  onSelectedSceneChangedRef.current = props.onSelectedSceneChanged
+  const selectedSceneIdRef = useRef(selectedSceneId)
+  selectedSceneIdRef.current = selectedSceneId
+  useEffect(() => {
+    onSelectedSceneChangedRef.current?.(selectedSceneId)
+  }, [selectedSceneId])
+
+  useEffect(() => {
+    const apiRef = props.apiRef
+    if (!apiRef) {
+      return
+    }
+    // Only the shown scene has a diagram (and a mounted logic) to drive.
+    const shownDiagram = () => {
+      const sceneId = selectedSceneIdRef.current
+      return sceneId ? diagramLogic.findMounted({ frameId: EMBED_FRAME_ID, sceneId }) : null
+    }
+    apiRef.current = {
+      renameScene: (sceneId, name) => updateScene(sceneId, { name }),
+      panBy: (dx, dy) => shownDiagram()?.actions.panDiagramView(dx, dy),
+      fitView: () => shownDiagram()?.actions.fitDiagramView(),
+    }
+    return () => {
+      apiRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.apiRef])
 
   useEffect(() => {
     if (!props.onScenesChanged) {
@@ -174,6 +237,7 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
           scenes={scenes}
           theme={theme}
           sceneDescription={props.description?.trim() ? props.description : null}
+          showPreviewButton={props.showPreviewButton ?? true}
         />
       </BindLogic>
     </BindLogic>
@@ -215,20 +279,21 @@ export function EmbeddedEditor(): JSX.Element {
         return
       }
       if (message.type === 'frameos-editor:init' && Array.isArray(message.scenes)) {
-        // Also dispatch synchronously (EmbeddedSceneEditor re-inits in an
-        // effect, i.e. a tick later): a get-scenes message in the same tick
-        // must already see the new scenes in the form.
-        logic.actions.initEmbedFrame({
+        const frame: Partial<FrameType> = {
           id: EMBED_FRAME_ID,
-          scenes: message.scenes,
           mode: message.mode || 'rpios',
           width: message.width || 800,
           height: message.height || 480,
           interval: message.interval ?? 300,
           rotate: 0,
-        } as any)
+        }
+        const sceneList = sanitizeIncomingScenes(message.scenes, frame)
+        // Also dispatch synchronously (EmbeddedSceneEditor re-inits in an
+        // effect, i.e. a tick later): a get-scenes message in the same tick
+        // must already see the new scenes in the form.
+        logic.actions.initEmbedFrame({ ...frame, scenes: sceneList } as any)
         setInit({
-          scenes: message.scenes,
+          scenes: sceneList,
           mode: message.mode,
           width: message.width,
           height: message.height,
@@ -433,12 +498,14 @@ function EmbeddedEditorBody({
   scenes,
   theme,
   sceneDescription,
+  showPreviewButton,
 }: {
   selectedSceneId: string | null
   setSelectedSceneId: (sceneId: string) => void
   scenes: FrameScene[]
   theme: FrameosTheme
   sceneDescription: string | null
+  showPreviewButton: boolean
 }): JSX.Element {
   const { activeEditor } = useValues(frameEditorsLogic({ frameId: EMBED_FRAME_ID }))
   const { closeEditor } = useActions(frameEditorsLogic({ frameId: EMBED_FRAME_ID }))
@@ -447,6 +514,9 @@ function EmbeddedEditorBody({
   useMountedLogic(livePreviewLogic({ frameId: EMBED_FRAME_ID }))
   const [activePanel, setActivePanel] = useState<EmbedPanel | null>(null)
   const appEditor = activeEditor?.kind === 'editApp' ? activeEditor : null
+  const visiblePanels = showPreviewButton
+    ? panelDefinitions
+    : panelDefinitions.filter((definition) => definition.panel !== 'preview')
 
   const dark = theme === 'dark'
   const surface = dark ? 'bg-[#16181c] text-slate-100' : 'bg-white text-slate-900'
@@ -489,7 +559,7 @@ function EmbeddedEditorBody({
               <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
                 <EmbedDiagramButtons sceneId={selectedSceneId} />
                 <div className="h-2" />
-                {panelDefinitions.map((definition) => (
+                {visiblePanels.map((definition) => (
                   <button
                     key={definition.panel}
                     type="button"
@@ -511,7 +581,7 @@ function EmbeddedEditorBody({
             </div>
           </div>
         ) : null}
-        {activePanel && selectedScene ? (
+        {activePanel && selectedScene && (showPreviewButton || activePanel !== 'preview') ? (
           <EmbedUtilityDrawer
             panel={activePanel}
             scene={selectedScene}

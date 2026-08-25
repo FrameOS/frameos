@@ -2,7 +2,7 @@ import { MakeLogicType, actions, afterMount, kea, listeners, path, reducers, sel
 
 import { loaders } from 'kea-loaders'
 import { RepositoryType } from '../types'
-import { apiFetch } from '../utils/apiFetch'
+import { apiFetch, logApiError } from '../utils/apiFetch'
 import { isCloudMode } from '../utils/cloudMode'
 import { cloudStoreRepository } from '../utils/cloudStoreRepository'
 import { isFrameControlMode } from '../utils/frameControlMode'
@@ -127,7 +127,7 @@ export const repositoriesModel = kea<repositoriesModelType>([
             const data = await response.json()
             return [...systemData, ...data] as RepositoryType[]
           } catch (error) {
-            console.error(error)
+            logApiError(error)
             return values.repositories
           }
         },

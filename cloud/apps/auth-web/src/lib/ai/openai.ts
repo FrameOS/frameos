@@ -25,12 +25,46 @@ export type ResponsesToolDefinition = {
   strict?: boolean;
 };
 
+export type ResponseUsage = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+};
+
 export type StreamedResponse = {
   output: ResponseInputItem[];
   outputText: string;
   functionCalls: FunctionCallItem[];
   status: string;
+  usage: ResponseUsage;
 };
+
+export function emptyUsage(): ResponseUsage {
+  return { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+}
+
+export function addUsage(total: ResponseUsage, part: ResponseUsage): ResponseUsage {
+  return {
+    cachedInputTokens: total.cachedInputTokens + part.cachedInputTokens,
+    inputTokens: total.inputTokens + part.inputTokens,
+    outputTokens: total.outputTokens + part.outputTokens,
+    reasoningTokens: total.reasoningTokens + part.reasoningTokens,
+  };
+}
+
+function usageFrom(raw: unknown): ResponseUsage {
+  const usage = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+  const inputDetails = usage.input_tokens_details as Record<string, unknown> | undefined;
+  const outputDetails = usage.output_tokens_details as Record<string, unknown> | undefined;
+  return {
+    cachedInputTokens: num(inputDetails?.cached_tokens),
+    inputTokens: num(usage.input_tokens),
+    outputTokens: num(usage.output_tokens),
+    reasoningTokens: num(outputDetails?.reasoning_tokens),
+  };
+}
 
 export const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 // Per-call budget. The whole route runs under maxDuration below OpenAI's own
@@ -186,7 +220,7 @@ export async function streamResponse({
     }
     if (type === "response.completed" || type === "response.incomplete") {
       const responsePayload = event.response as
-        | { output?: unknown[]; status?: string }
+        | { output?: unknown[]; status?: string; usage?: unknown }
         | undefined;
       const output = Array.isArray(responsePayload?.output)
         ? (responsePayload.output as ResponseInputItem[])
@@ -202,6 +236,7 @@ export async function streamResponse({
           typeof responsePayload?.status === "string"
             ? responsePayload.status
             : "completed",
+        usage: usageFrom(responsePayload?.usage),
       };
       return;
     }

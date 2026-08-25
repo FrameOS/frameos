@@ -2,7 +2,7 @@ import { MakeLogicType, afterMount, kea, path, selectors } from 'kea'
 
 import { loaders } from 'kea-loaders'
 import { AppConfig } from '../types'
-import { apiFetch } from '../utils/apiFetch'
+import { apiFetch, logApiError } from '../utils/apiFetch'
 import { embeddedBuiltinAppConfigs } from '../generated/builtinApps'
 import { embeddedRepoAppConfigs } from '../generated/repoApps'
 
@@ -60,7 +60,7 @@ export const appsModel = kea<appsModelType>([
             const data = await response.json()
             return withEmbeddedRepoApps(data.apps as Record<string, AppConfig>)
           } catch (error) {
-            console.error(error)
+            logApiError(error)
             return withEmbeddedRepoApps(values.apps)
           }
         },

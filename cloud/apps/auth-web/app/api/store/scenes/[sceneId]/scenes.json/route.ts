@@ -15,9 +15,11 @@ export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ sceneId: string }> };
 
-// The scenes.json extracted from a scene's latest template zip — what the
-// in-browser live preview (frameos-wasm) executes. Same access rules as the
-// zip download: public scenes are open, private ones owner-only, pulled 410.
+// The scenes.json extracted from a scene's template zip — what the
+// in-browser live preview (frameos-wasm) executes. Same access and version
+// rules as the zip download: public scenes are open, private ones owner-only,
+// pulled 410; `?version=N` picks a version (yanked ones included), the
+// default is the newest non-yanked one.
 async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:scenes-json", {
     limit: 240,
@@ -64,6 +66,13 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     return jsonError("scene_not_found", 404);
   }
 
+  const requestedVersion = versionParam(request);
+  if (requestedVersion === null) {
+    return jsonError("invalid_version", 400);
+  }
+
+  // Default to the newest non-yanked version; an explicitly requested
+  // version is served even when yanked (yank hides, it does not break).
   const [version] = await db
     .select({
       content: storeSceneVersions.content,
@@ -74,7 +83,9 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     .where(
       and(
         eq(storeSceneVersions.sceneId, scene.id),
-        isNull(storeSceneVersions.yankedAt),
+        requestedVersion
+          ? eq(storeSceneVersions.version, requestedVersion)
+          : isNull(storeSceneVersions.yankedAt),
       ),
     )
     .orderBy(desc(storeSceneVersions.version))
@@ -101,6 +112,17 @@ async function handleGet(request: NextRequest, context: RouteContext) {
       "x-scene-version": String(version.version),
     },
   });
+}
+
+// Same contract as the download route: absent → default, a positive integer
+// → that version, anything else → 400.
+function versionParam(request: NextRequest): number | undefined | null {
+  const raw = request.nextUrl.searchParams.get("version");
+  if (!raw) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 // The zip was validated at publish (validateSceneZip); this re-extract only

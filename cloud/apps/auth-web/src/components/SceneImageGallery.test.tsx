@@ -13,6 +13,7 @@ vi.mock("next/navigation", () => ({
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   vi.spyOn(window, "confirm").mockReturnValue(true);
+  window.history.replaceState(null, "", "/");
 });
 
 afterEach(() => {
@@ -23,41 +24,95 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function thumbs() {
+  return screen.getAllByRole("button", { name: /View image \d full size/ });
+}
+
 describe("SceneImageGallery", () => {
-  it("lets the owner remove the primary preview", async () => {
-    fetchMock.mockResolvedValueOnce(Response.json({ status: "removed" }));
-    render(
-      <SceneImageGallery
-        canEdit
-        hasPreview
-        imageIds={[]}
-        sceneId="scene-1"
-        sceneName="Bird field journal"
-      />,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
-
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/account/scenes/scene-1/image",
-        { method: "DELETE" },
-      );
-    });
-    expect(refreshMock).toHaveBeenCalledOnce();
-  });
-
-  it("does not show removal controls to visitors", () => {
+  it("shows every image as an equal thumbnail, the zip's preview first", () => {
     render(
       <SceneImageGallery
         canEdit={false}
         hasPreview
-        imageIds={[]}
+        imageIds={["img-1", "img-2"]}
+        sceneId="scene-1"
+        sceneName="Bird field journal"
+        share="tok"
+      />,
+    );
+    expect(thumbs().map((thumb) => thumb.querySelector("img")?.getAttribute("src"))).toEqual([
+      "/api/store/scenes/scene-1/image?share=tok",
+      "/api/store/scenes/scene-1/images/img-1?share=tok",
+      "/api/store/scenes/scene-1/images/img-2?share=tok",
+    ]);
+    // No large image, nothing "selected": each thumbnail is its own trigger.
+    expect(document.querySelectorAll(".scene-gallery img")).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: "Bird field journal preview" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Remove/ })).toBeNull();
+  });
+
+  it("lets the owner remove the primary preview and an uploaded image from the grid", async () => {
+    fetchMock.mockResolvedValue(Response.json({ status: "removed" }));
+    render(
+      <SceneImageGallery
+        canEdit
+        hasPreview
+        imageIds={["img-1"]}
         sceneId="scene-1"
         sceneName="Bird field journal"
       />,
     );
+    expect(screen.getByRole("button", { name: "Add an image to this scene's page" })).toBeTruthy();
 
-    expect(screen.queryByRole("button", { name: "Remove" })).toBe(null);
+    fireEvent.click(screen.getByRole("button", { name: "Remove image 1" }));
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/account/scenes/scene-1/image", { method: "DELETE" });
+      expect(refreshMock).toHaveBeenCalledTimes(1);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Remove image 2" }));
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/account/scenes/scene-1/images/img-1", {
+        method: "DELETE",
+      });
+    });
+    expect(refreshMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("blows a thumbnail up in the lightbox when it is clicked", () => {
+    render(
+      <SceneImageGallery
+        canEdit={false}
+        hasPreview
+        imageIds={["img-1"]}
+        sceneId="scene-1"
+        sceneName="Bird field journal"
+      />,
+    );
+    expect(screen.queryByRole("dialog")).toBe(null);
+    fireEvent.click(thumbs()[1]!);
+
+    const dialog = screen.getByRole("dialog", { name: "Scene image" });
+    const image = dialog.querySelector("img")!;
+    expect(image.getAttribute("src")).toBe("/api/store/scenes/scene-1/images/img-1");
+    expect(image.className).toContain("lightbox__image--fit");
+    fireEvent.click(image);
+    expect(image.className).not.toContain("lightbox__image--fit");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBe(null);
+    // Nothing touched the URL.
+    expect(window.location.hash).toBe("");
+  });
+
+  it("shows a placeholder to visitors of a scene without images, and just the add button to its owner", () => {
+    const { unmount } = render(
+      <SceneImageGallery canEdit={false} hasPreview={false} imageIds={[]} sceneId="scene-1" sceneName="Empty" />,
+    );
+    expect(screen.getByText("No preview")).toBeTruthy();
+    unmount();
+    render(<SceneImageGallery canEdit hasPreview={false} imageIds={[]} sceneId="scene-1" sceneName="Empty" />);
+    expect(screen.queryByText("No preview")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add an image to this scene's page" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /View image/ })).toBeNull();
   });
 });

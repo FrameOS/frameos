@@ -32,3 +32,4 @@ apps/auth-web/public/install.template.sh
 # does not need it (verified with the file and .next/ both absent), and
 # turbo runs auth-web#build before auth-web#typecheck anyway.
 apps/auth-web/next-env.d.ts
+apps/auth-web/evals/results/

@@ -63,6 +63,22 @@ proc findStatementEnd(tokens: seq[JsToken], start: int): int =
 proc isTypeBoundary(typ: TokenType): bool =
   typ in {ttComma, ttSemi, ttEq, ttBraceR, ttParenR, ttBracketR, ttArrow, ttEof}
 
+proc spanLooksLikeTypeArguments(tokens: seq[JsToken], open, close: int): bool =
+  ## Tokens strictly between `<` and `>` may only be what a TypeScript type
+  ## argument list is made of: names, punctuation that structures types, and
+  ## nested angle brackets. Anything that only an expression or a statement
+  ## can contain means the `<` was a comparison.
+  const allowed = {ttName, ttComma, ttDot, ttColon, ttQuestion, ttBracketL, ttBracketR,
+                   ttBraceL, ttBraceR, ttParenL, ttParenR, ttLessThan, ttGreaterThan,
+                   ttBitwiseOR, ttBitwiseAND, ttArrow, ttString, ttEllipsis, ttTypeParameterStart,
+                   ttEof, ttTemplate, ttBackQuote}
+  if close - open <= 1:
+    return false
+  for j in (open + 1)..<close:
+    if tokens[j].typ notin allowed:
+      return false
+  true
+
 proc markRangeType(tokens: var seq[JsToken], first, lastInclusive: int) =
   if first < 0 or lastInclusive < first:
     return
@@ -358,12 +374,17 @@ proc annotateTypeSpans(code: string, tokens: var seq[JsToken]) =
       while prev >= 0 and tokens[prev].typ == ttEof:
         dec prev
       let close = findMatching(tokens, i, ttLessThan, ttGreaterThan)
-      if close > i and prev >= 0 and tokens[prev].typ in {ttName, ttFunction, ttClass, ttParenR}:
+      # A comparison `phase < 0.5;` followed twenty lines later by `nx > (…)`
+      # also matches "<…>(", so only a span that could be a type-argument
+      # list counts: no statement separators, keywords, literals, or
+      # arithmetic between the angle brackets.
+      let looksLikeTypeArgs = close > i and spanLooksLikeTypeArguments(tokens, i, close)
+      if looksLikeTypeArgs and prev >= 0 and tokens[prev].typ in {ttName, ttFunction, ttClass, ttParenR}:
         var after = close + 1
         if after < tokens.len and tokens[after].typ in {ttParenL, ttBraceL, ttExtends, ttImplements}:
           markRangeType(tokens, i, close)
           i = close
-      elif close > i and close + 1 < tokens.len and tokens[close + 1].typ == ttParenL:
+      elif looksLikeTypeArgs and close + 1 < tokens.len and tokens[close + 1].typ == ttParenL:
         let parenClose = findMatching(tokens, close + 1, ttParenL, ttParenR)
         if parenClose > close and parenClose + 1 < tokens.len and tokens[parenClose + 1].typ == ttArrow:
           markRangeType(tokens, i, close)

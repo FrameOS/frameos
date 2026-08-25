@@ -863,9 +863,14 @@ describe("store publish and distribution", () => {
     );
     expect(removed.status).toBe(200);
 
-    // Nothing to show yet: the tile says so and the image route is a 404.
+    // Nothing to show yet: the tiles say so and the image route is a 404.
     expect(
       renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) })),
+    ).toContain("No preview");
+    expect(
+      renderToStaticMarkup(
+        await MyScenesPage({ searchParams: Promise.resolve({}) }),
+      ),
     ).toContain("No preview");
     expect(
       (
@@ -894,6 +899,13 @@ describe("store publish and distribution", () => {
     );
     expect(markup).not.toContain("No preview");
     expect(markup).toContain(`/api/store/scenes/${sceneId}/image`);
+    // The owner's own listing selects from store_scenes alone (no publisher
+    // join), which is where the gallery fallback used to render false.
+    const ownMarkup = renderToStaticMarkup(
+      await MyScenesPage({ searchParams: Promise.resolve({}) }),
+    );
+    expect(ownMarkup).not.toContain("No preview");
+    expect(ownMarkup).toContain(`/api/store/scenes/${sceneId}/image`);
 
     const image = await getSceneImage(
       request(`/api/store/scenes/${sceneId}/image`, "GET"),
@@ -1346,6 +1358,61 @@ describe("store publish and distribution", () => {
     expect(owner.status).toBe(200);
   });
 
+  it("serves a requested scenes.json version, yanked or not, defaulting to the newest live one", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const scenesV1 = [{ fields: [], id: "scene-1", nodes: [{ data: { keyword: "v1" } }] }];
+    const scenesV2 = [{ fields: [], id: "scene-1", nodes: [{ data: { keyword: "v2" } }] }];
+    const scene = (
+      await readJson(
+        await publish(accessToken, {
+          content_base64: templateZip({ scenes: scenesV1 }).toString("base64"),
+          visibility: "public",
+        }),
+      )
+    ).scene as Record<string, unknown>;
+    const sceneId = scene.id as string;
+    await publish(accessToken, {
+      content_base64: templateZip({ scenes: scenesV2 }).toString("base64"),
+    }); // v2
+
+    const get = (query = "") =>
+      getScenesJson(
+        request(`/api/store/scenes/${sceneId}/scenes.json${query}`, "GET"),
+        ctx(sceneId),
+      );
+
+    // Newest by default; an explicit version picks that one.
+    const latest = await get();
+    expect(latest.headers.get("x-scene-version")).toBe("2");
+    expect(latest.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(await latest.json()).toEqual(scenesV2);
+    const first = await get("?version=1");
+    expect(first.headers.get("x-scene-version")).toBe("1");
+    expect(await first.json()).toEqual(scenesV1);
+
+    // Yank v2: the default falls back to v1, ?version=2 still serves it.
+    const yank = await patchVersion(
+      request(`/api/account/scenes/${sceneId}/versions/2`, "PATCH", {
+        body: { yanked: true },
+        headers: { origin: baseUrl },
+      }),
+      { params: Promise.resolve({ sceneId, version: "2" }) },
+    );
+    expect(yank.status).toBe(200);
+    cookieJar.clear();
+    const fallback = await get();
+    expect(fallback.headers.get("x-scene-version")).toBe("1");
+    expect(await fallback.json()).toEqual(scenesV1);
+    const yanked = await get("?version=2");
+    expect(yanked.status).toBe(200);
+    expect(yanked.headers.get("x-scene-version")).toBe("2");
+    expect(await yanked.json()).toEqual(scenesV2);
+
+    expect((await get("?version=9")).status).toBe(404);
+    expect((await get("?version=abc")).status).toBe(400);
+    expect((await get("?version=0")).status).toBe(400);
+  });
+
   it("lets owners edit scene contents as a new version, and tag scenes", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scene = (
@@ -1360,7 +1427,9 @@ describe("store publish and distribution", () => {
     ];
     const edited = await editSceneContent(
       request(`/api/account/scenes/${sceneId}/content`, "POST", {
-        body: { scenes: editedScenes },
+        // The save dialog's "what changed" note, stored with the version it
+        // publishes (normalized to one trimmed line).
+        body: { message: "  Added a\n  reboot node  ", scenes: editedScenes },
         headers: { origin: baseUrl },
       }),
       ctx(sceneId),
@@ -1370,6 +1439,20 @@ describe("store publish and distribution", () => {
     const editedScene = editedPayload.scene as Record<string, unknown>;
     expect(editedScene.version).toBe(2);
     expect(editedScene.risk_flags).toEqual(["shell"]);
+    expect(editedScene.message).toBe("Added a reboot node");
+    const versionMessages = await db
+      .select({
+        message: storeSceneVersions.message,
+        version: storeSceneVersions.version,
+      })
+      .from(storeSceneVersions)
+      .where(eq(storeSceneVersions.sceneId, sceneId))
+      .orderBy(storeSceneVersions.version);
+    // The published-from-a-zip v1 has none; only the editor asks.
+    expect(versionMessages).toEqual([
+      { message: null, version: 1 },
+      { message: "Added a reboot node", version: 2 },
+    ]);
 
     // The new version's zip round-trips the edited scenes; the manifest and
     // preview image carried over.

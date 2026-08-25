@@ -32,6 +32,22 @@ export const maxReportReasonLength = 1000;
 
 export const sceneVisibilities = new Set(["private", "public"]);
 
+// The "what changed" note a save can carry. One line, so the version
+// dropdown and the Versions table can show it whole; long enough for a
+// sentence, short enough that nobody writes release notes in it.
+export const maxVersionMessageLength = 200;
+
+// Normalizes a user-supplied version message: a single trimmed line, capped.
+// Returns null for anything empty or not a string — no message is a normal
+// state, not an error.
+export function normalizeVersionMessage(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const message = value.replace(/\s+/g, " ").trim();
+  return message ? message.slice(0, maxVersionMessageLength) : null;
+}
+
 // Publisher-assigned tags: short lowercase slugs for browsing/filtering.
 export const maxTagsPerScene = 5;
 const tagPattern = /^[a-z0-9][a-z0-9-]{0,23}$/;

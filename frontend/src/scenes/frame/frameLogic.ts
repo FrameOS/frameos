@@ -15,7 +15,7 @@ import {
 import { router } from 'kea-router'
 import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
 import { publishedReleaseModel } from '../../models/publishedReleaseModel'
-import { subscriptions } from 'kea-subscriptions'
+import { subscriptions } from '../../utils/keaSubscriptions'
 import {
   AppNodeData,
   DiagramEdge,

@@ -16,7 +16,7 @@ import { socketLogic } from '../scenes/socketLogic'
 import { router } from 'kea-router'
 import { frameLogic, sanitizeScene } from '../scenes/frame/frameLogic'
 import { compareFrames } from '../utils/frameSort'
-import { apiFetch } from '../utils/apiFetch'
+import { apiFetch, logApiError } from '../utils/apiFetch'
 import { isCloudMode } from '../utils/cloudMode'
 import {
   sendCloudFrameCommand,
@@ -953,7 +953,7 @@ export const framesModel = kea<framesModelType>([
             )
             return framesDict
           } catch (error) {
-            console.error(error)
+            logApiError(error)
             return values.frames
           }
         },

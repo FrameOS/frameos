@@ -46,6 +46,7 @@
     // components. Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/cloud-frame-change-details.test.ts",
     "src/test/shared-spa/cloud-scene-persist-equality.test.ts",
+    "src/test/shared-spa/embedded-editor-scene-sanitize.test.ts",
     // The widest graph of the lot: it mounts the whole FrameSettings panel,
     // which reaches the colour picker and every device-settings component
     // behind it. Vitest still runs it; only tsc leaves it out.

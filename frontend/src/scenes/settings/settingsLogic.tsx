@@ -4,7 +4,7 @@ import { loaders } from 'kea-loaders'
 import { socketLogic } from '../socketLogic'
 import { forms } from 'kea-forms'
 import { FrameOSSettings, SSHKeyEntry } from '../../types'
-import { apiFetch } from '../../utils/apiFetch'
+import { apiFetch, logApiError } from '../../utils/apiFetch'
 import { normalizeSshKeys } from '../../utils/sshKeys'
 import { v4 as uuidv4 } from 'uuid'
 import { showWorkingMessage } from '../../utils/workingMessage'
@@ -361,7 +361,7 @@ export const settingsLogic = kea<settingsLogicType>([
             const data = await response.json()
             return setDefaultSettings({ ...values.savedSettings, ...data })
           } catch (error) {
-            console.error(error)
+            logApiError(error)
             return values.savedSettings
           }
         },
@@ -379,7 +379,7 @@ export const settingsLogic = kea<settingsLogicType>([
             const data = await response.json()
             return data.filter((asset: CustomFont) => asset.path.startsWith('fonts/') && asset.path.endsWith('.ttf'))
           } catch (error) {
-            console.error(error)
+            logApiError(error)
             return values.customFonts
           }
         },

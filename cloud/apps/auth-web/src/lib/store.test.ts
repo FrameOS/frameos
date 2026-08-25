@@ -1,6 +1,11 @@
 import { strToU8, zipSync, zlibSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { isProvablyFullyTransparentImage, validateSceneZip } from "./store";
+import {
+  isProvablyFullyTransparentImage,
+  maxVersionMessageLength,
+  normalizeVersionMessage,
+  validateSceneZip,
+} from "./store";
 
 // Minimal PNG writer for the detector tests: real chunk layout, real CRCs,
 // real zlib IDAT — the pieces the detector actually parses.
@@ -282,5 +287,26 @@ describe("validateSceneZip transparency rejection", () => {
       sceneZip(png({ filteredData: plainRows(rows), height: 1, width: 4 })),
     );
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("normalizeVersionMessage", () => {
+  it("keeps a trimmed single line", () => {
+    expect(normalizeVersionMessage("  Bigger clock  ")).toBe("Bigger clock");
+    expect(normalizeVersionMessage("Bigger clock,\n  warmer palette")).toBe(
+      "Bigger clock, warmer palette",
+    );
+  });
+
+  it("treats an empty or non-string message as none", () => {
+    expect(normalizeVersionMessage("")).toBeNull();
+    expect(normalizeVersionMessage("   \n ")).toBeNull();
+    expect(normalizeVersionMessage(undefined)).toBeNull();
+    expect(normalizeVersionMessage(42)).toBeNull();
+  });
+
+  it("caps a long message rather than rejecting the save", () => {
+    const message = normalizeVersionMessage("x".repeat(500));
+    expect(message).toHaveLength(maxVersionMessageLength);
   });
 });

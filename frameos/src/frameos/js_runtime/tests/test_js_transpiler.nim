@@ -155,6 +155,19 @@ const arrow = <T>(value: T): T => value;
     check "const arrow = (value)" in output
     check "=> value" in output
 
+  test "keeps less-than comparisons that are followed by a later greater-than":
+    let output = transformFrameosScript("""
+var waxing = phase < 0.5;
+var out = String(s).replace(/[&<>"]/g, function(c) { return c === '&' ? '&amp;' : 'x'; });
+var lit = waxing ? nx > (1 - 2 * illum) * edge : nx < -(1 - 2 * illum) * edge;
+var big = a < b > c;
+""")
+    check "phase < 0.5" in output
+    check "/[&<>\"]/g" in output
+    check "nx > (1 - 2 * illum) * edge" in output
+    check "nx < -(1 - 2 * illum) * edge" in output
+    check "a < b > c" in output
+
   test "strips multiple variable declarator types without touching initializers":
     let output = transformFrameosScript("""
 const first: number = 1, second: string = "two", obj = { label: "ok", nested: { count: 1 } };
