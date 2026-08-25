@@ -19,7 +19,17 @@ export function normalizeEmail(email: string) {
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 
-const clientCache = new Map<string, Database>();
+// Next's dev server re-evaluates its server modules on every hot reload, so a
+// module-level Map would give each generation of this module its own cache —
+// and postgres.js keeps every earlier generation's pool open for good. A day
+// of editing then walks the connection count up five at a time until Postgres
+// answers "sorry, too many clients already" and every page 500s. The process's
+// globalThis outlives those reloads, so keep the one cache there.
+const cacheHolder = globalThis as typeof globalThis & {
+  __frameosCloudDbClients?: Map<string, Database>;
+};
+const clientCache = (cacheHolder.__frameosCloudDbClients ??=
+  new Map<string, Database>());
 
 export function createDb(databaseUrl = process.env.DATABASE_URL) {
   if (!databaseUrl) {
