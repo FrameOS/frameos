@@ -18,6 +18,9 @@ export type PreviewSettingsGroup = {
   key: string;
   title: string;
   fields: PreviewSettingsField[];
+  /** The service bills per request (OpenAI): the preview must not call it
+   * without the user asking for that render. */
+  paid?: boolean;
 };
 
 // Also the source of truth for which settings an ACCOUNT may persist
@@ -60,6 +63,7 @@ export const previewSettingsGroups: Readonly<
     key: "openAI",
     title: "OpenAI",
     fields: [{ label: "API key", path: ["openAI", "apiKey"], secret: true }],
+    paid: true,
   },
   unsplash: {
     key: "unsplash",
@@ -146,4 +150,12 @@ export function requiredSettingsForScenes(
   return Object.values(previewSettingsGroups).filter((group) =>
     keys.has(group.key),
   );
+}
+
+// The pay-per-request services the given scenes call (see `paid` above). The
+// live preview gates its rendering on these: a render is a real API call.
+export function paidServicesForScenes(
+  rawScenes: Record<string, unknown>[],
+): PreviewSettingsGroup[] {
+  return requiredSettingsForScenes(rawScenes).filter((group) => group.paid);
 }

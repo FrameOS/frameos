@@ -548,6 +548,8 @@ export type SceneEditorPreviewOptions = {
    * (null while they load — the panel waits for them). */
   scenes: SceneJson[] | null;
   canSaveToGallery?: boolean | undefined;
+  /** The account settings page, linked from the panel's credentials hint. */
+  settingsUrl?: string | undefined;
 };
 
 type SceneEditorWorkspaceProps = {
@@ -1203,6 +1205,7 @@ export function SceneEditorWorkspace({
                 height={height}
                 sceneId={preview.sceneId}
                 scenes={preview.scenes}
+                settingsUrl={preview.settingsUrl}
                 width={width}
               />
             ) : null}
@@ -1897,6 +1900,7 @@ export function SceneEditorModal({
           canSaveToGallery: canSave,
           sceneId,
           scenes: previewScenes,
+          settingsUrl,
         }}
         sceneId={selectedSceneId}
         scenes={scenes}

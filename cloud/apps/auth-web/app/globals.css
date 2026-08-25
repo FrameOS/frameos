@@ -1544,6 +1544,12 @@ a.tag-pill:hover {
   font-size: 12px;
 }
 
+.preview-settings__hint a {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .preview-settings__group {
   display: flex;
   flex-wrap: wrap;
@@ -2523,6 +2529,48 @@ a.stat-tile:hover {
   color: var(--warning);
   font-size: 12px;
   font-weight: 600;
+}
+
+/* "Auto apply" sits at the end of the action row as a small checkbox. */
+.live-preview-panel__auto-apply {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* A paid scene (OpenAI) takes the canvas's place with this until the user
+   starts the preview by hand: a render is a billed API call. */
+.live-preview__gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.live-preview__gate-icon {
+  color: var(--warning);
+}
+
+.live-preview__gate-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.live-preview__gate-copy {
+  margin: 0;
+  max-width: 36em;
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .live-preview-panel__bar {

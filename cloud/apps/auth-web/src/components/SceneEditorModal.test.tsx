@@ -336,6 +336,7 @@ describe("SceneEditorModal landing", () => {
       "height",
       "sceneId",
       "scenes",
+      "settingsUrl",
       "width",
     ]);
     // The editor mounts with the scenes, in its own column.

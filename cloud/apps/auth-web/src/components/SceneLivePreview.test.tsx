@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AUTO_APPLY_DEBOUNCE_MS,
   EDITOR_RELOAD_DEBOUNCE_MS,
   normalizeHexColor,
   NOTICE_HIDE_MS,
@@ -88,6 +89,7 @@ afterEach(() => {
   fetchMock.mockClear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  window.localStorage.clear();
 });
 
 describe("SceneLivePreviewPanel screenshot gating", () => {
@@ -336,7 +338,8 @@ describe("SceneLivePreviewPanel editor reloads", () => {
     // The form still shows what was being tried out…
     expect((screen.getByLabelText("Clock style") as HTMLSelectElement).value).toBe("minimal");
     expect((screen.getByLabelText("Accent color") as HTMLInputElement).value).toBe("#112233");
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    // The "Show date" box is gone (the "Auto apply" one is the toolbar's).
+    expect(screen.queryByRole("checkbox", { name: /^(Yes|No)$/ })).toBeNull();
     // …and the applied values are replayed into the fresh runtime, minus
     // the field that no longer exists.
     act(() =>
@@ -454,7 +457,8 @@ describe("SceneLivePreviewPanel state-field form", () => {
     expect(screen.queryByLabelText("secret")).toBeNull();
     const style = screen.getByLabelText("Clock style") as HTMLSelectElement;
     expect(style.value).toBe("station");
-    const showDate = screen.getByRole("checkbox") as HTMLInputElement;
+    // The boolean's checkbox is labelled by its Yes/No caption.
+    const showDate = screen.getByRole("checkbox", { name: /^(Yes|No)$/ }) as HTMLInputElement;
     expect(showDate.checked).toBe(true);
 
     fireEvent.change(style, { target: { value: "minimal" } });
@@ -480,6 +484,125 @@ describe("SceneLivePreviewPanel state-field form", () => {
       showDate: true,
       style: "station",
     });
+  });
+});
+
+describe("SceneLivePreviewPanel auto apply", () => {
+  it("applies and renders on its own, debounced, once the box is ticked", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() =>
+      previews[0]!.options.onReady!({
+        currentSceneId: "scene-runtime-1",
+        scenes: [{ id: "scene-runtime-1", name: "Clock", refreshInterval: 60 }],
+      }),
+    );
+    vi.useFakeTimers();
+    const style = screen.getByLabelText("Clock style");
+    const setSceneState = previews[0]!.setSceneState;
+
+    // Off by default: an edit waits for "Apply & render".
+    fireEvent.change(style, { target: { value: "minimal" } });
+    act(() => vi.advanceTimersByTime(AUTO_APPLY_DEBOUNCE_MS + 50));
+    expect(setSceneState).not.toHaveBeenCalled();
+
+    // Ticking it applies what is pending, then every later change.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Auto apply" }));
+    act(() => vi.advanceTimersByTime(AUTO_APPLY_DEBOUNCE_MS + 50));
+    expect(setSceneState).toHaveBeenCalledTimes(1);
+    expect(setSceneState).toHaveBeenLastCalledWith({
+      accent: "#d98a5a",
+      showDate: true,
+      style: "minimal",
+    });
+    act(() =>
+      previews[0]!.options.onState!({ accent: "#d98a5a", showDate: true, style: "minimal" }),
+    );
+
+    // A burst of typing is one render, after the pause.
+    const hex = screen.getByLabelText("Accent color");
+    fireEvent.change(hex, { target: { value: "#1" } });
+    act(() => vi.advanceTimersByTime(AUTO_APPLY_DEBOUNCE_MS - 100));
+    fireEvent.change(hex, { target: { value: "#112233" } });
+    act(() => vi.advanceTimersByTime(AUTO_APPLY_DEBOUNCE_MS - 100));
+    expect(setSceneState).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(200));
+    expect(setSceneState).toHaveBeenCalledTimes(2);
+    expect(setSceneState).toHaveBeenLastCalledWith({
+      accent: "#112233",
+      showDate: true,
+      style: "minimal",
+    });
+    // Confirmed by the runtime: nothing pending, nothing re-sent.
+    act(() =>
+      previews[0]!.options.onState!({ accent: "#112233", showDate: true, style: "minimal" }),
+    );
+    act(() => vi.advanceTimersByTime(AUTO_APPLY_DEBOUNCE_MS + 50));
+    expect(setSceneState).toHaveBeenCalledTimes(2);
+    expect(window.localStorage.getItem("frameos.preview.autoApply")).toBe("1");
+  });
+});
+
+describe("SceneLivePreviewPanel paid scenes", () => {
+  // OpenAI bills per request; a render is one.
+  const openAiScene = {
+    ...clockScene,
+    nodes: [{ data: { keyword: "data/openaiText" }, id: "n1", type: "app" }],
+  };
+
+  it("never renders on its own: the runtime only boots after Run preview, and a scene change gates it again", async () => {
+    window.localStorage.setItem("frameos.preview.autoApply", "1");
+    const { rerender } = render(
+      <SceneLivePreviewPanel sceneId="scene-1" scenes={[openAiScene]} />,
+    );
+    // The settings fetch has settled once the form shows the OpenAI group;
+    // still no runtime.
+    await screen.findByText("OpenAI");
+    expect(screen.getByRole("status", { name: "" }).textContent).toContain("OpenAI");
+    expect(screen.getByText(/bills per request/)).toBeTruthy();
+    expect(previews).toHaveLength(0);
+    // Auto apply is not on offer, however it was remembered.
+    expect(screen.queryByRole("checkbox", { name: "Auto apply" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Restart" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: /Run preview/ }));
+    await waitFor(() => expect(previews).toHaveLength(1));
+    expect(screen.queryByText(/bills per request/)).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Auto apply" })).toBeNull();
+
+    // An editor change takes the go-ahead back instead of re-rendering.
+    vi.useFakeTimers();
+    rerender(
+      <SceneLivePreviewPanel sceneId="scene-1" scenes={[{ ...openAiScene, name: "Edited" }]} />,
+    );
+    act(() => vi.advanceTimersByTime(EDITOR_RELOAD_DEBOUNCE_MS + 50));
+    vi.useRealTimers();
+    expect(previews).toHaveLength(1);
+    expect(previews[0]!.destroy).toHaveBeenCalled();
+    expect(screen.getByText(/bills per request/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Run preview/ }));
+    await waitFor(() => expect(previews).toHaveLength(2));
+  });
+
+  it("links the credentials hint to the account settings page", async () => {
+    render(
+      <SceneLivePreviewPanel
+        sceneId="scene-1"
+        scenes={[openAiScene]}
+        settingsUrl="https://cloud.example/frames/settings#settings-openai"
+      />,
+    );
+    const link = (await screen.findByRole("link", { name: "account settings" })) as HTMLAnchorElement;
+    expect(link.href).toBe("https://cloud.example/frames/settings#settings-openai");
+    expect(link.target).toBe("_blank");
+  });
+
+  it("offers auto apply for a scene without paid services", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    expect(screen.queryByText(/bills per request/)).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Auto apply" })).toBeTruthy();
   });
 });
 

@@ -12,8 +12,10 @@ import {
 } from "frameos-wasm";
 import {
   Camera,
+  CircleDollarSign,
   ImageDown,
   KeyRound,
+  Play,
   RectangleHorizontal,
   RectangleVertical,
   RotateCw,
@@ -29,6 +31,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  paidServicesForScenes,
   requiredSettingsForScenes,
   type PreviewSettingsGroup,
 } from "../lib/preview-settings";
@@ -51,6 +54,9 @@ type SceneLivePreviewPanelProps = {
   /** Owner-only: shows "Save to images", which uploads the current frame to
    * the scene's image gallery. "Download PNG" is there for everyone. */
   canSaveToGallery?: boolean | undefined;
+  /** The account's settings page (where service keys are saved), linked from
+   * the credentials hint when a scene needs keys. */
+  settingsUrl?: string | undefined;
 };
 
 type SceneJsonLike = { id: string } & Record<string, unknown>;
@@ -61,6 +67,11 @@ const maxLogLines = 200;
 export const EDITOR_RELOAD_DEBOUNCE_MS = 700;
 /** How long a transient notice ("Screenshot downloaded.") stays up. */
 export const NOTICE_HIDE_MS = 4000;
+/** With "Auto apply" on, a burst of typing in the state form becomes one
+ * render: this long after the last keystroke. */
+export const AUTO_APPLY_DEBOUNCE_MS = 400;
+/** Where "Auto apply" is remembered between editor sessions (this browser). */
+const AUTO_APPLY_STORAGE_KEY = "frameos.preview.autoApply";
 // Runs a scene in the browser through the frameos-wasm runtime: canvas,
 // showIf-aware state fields, event buttons, and logs — no frame needed. The
 // runtime assets are copied into /frameos-wasm by scripts/copy-wasm-assets.mjs.
@@ -74,6 +85,7 @@ export function SceneLivePreviewPanel({
   width,
   height,
   canSaveToGallery = false,
+  settingsUrl,
 }: SceneLivePreviewPanelProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +109,8 @@ export function SceneLivePreviewPanel({
   // first payload lands at once (nothing is running yet); later ones only
   // when their content actually differs from what runs.
   const [editorScenes, setEditorScenes] = useState<FrameOSScene[] | null>(null);
+  // The JSON of what runs — the identity a paid-preview go-ahead is tied to.
+  const [editorScenesJson, setEditorScenesJson] = useState("");
   const committedEditorJsonRef = useRef("");
   useEffect(() => {
     const json = JSON.stringify(editorScenesProp);
@@ -105,6 +119,7 @@ export function SceneLivePreviewPanel({
     }
     const commit = () => {
       committedEditorJsonRef.current = json;
+      setEditorScenesJson(json);
       setEditorScenes(editorScenesProp as unknown as FrameOSScene[]);
     };
     if (committedEditorJsonRef.current === "") {
@@ -152,6 +167,39 @@ export function SceneLivePreviewPanel({
     () => (scenes ? requiredSettingsForScenes(scenes) : []),
     [scenes],
   );
+
+  // A scene that calls a pay-per-request service (OpenAI) never renders on
+  // its own: not on open, not after an editor change. "Run preview" gives
+  // the go-ahead for the scene content as it is now; the next content change
+  // takes it back, so an editor (or AI) edit cannot quietly bill a render.
+  // Restart, Resize and new settings keep the go-ahead: they are clicks.
+  const paidServices = useMemo(
+    () => (scenes ? paidServicesForScenes(scenes) : []),
+    [scenes],
+  );
+  const [paidRunJson, setPaidRunJson] = useState<string | null>(null);
+  const previewGated =
+    paidServices.length > 0 && paidRunJson !== editorScenesJson;
+
+  // "Auto apply": every change in the state form is applied and rendered
+  // (debounced) without pressing "Apply & render". Never offered for a paid
+  // scene — there every render is a deliberate click. Remembered per browser.
+  const [autoApply, setAutoApply] = useState(false);
+  useEffect(() => {
+    try {
+      setAutoApply(window.localStorage.getItem(AUTO_APPLY_STORAGE_KEY) === "1");
+    } catch {
+      // Storage blocked: the checkbox still works for this session.
+    }
+  }, []);
+  function toggleAutoApply(checked: boolean) {
+    setAutoApply(checked);
+    try {
+      window.localStorage.setItem(AUTO_APPLY_STORAGE_KEY, checked ? "1" : "0");
+    } catch {
+      // See above.
+    }
+  }
 
   // Runtime plumbing: the canvas the worker paints onto, the live preview
   // handle, and what the runtime has reported so far.
@@ -231,7 +279,7 @@ export function SceneLivePreviewPanel({
   // Boots the runtime (a worker) against the canvas; torn down and recreated
   // whenever the scenes, viewport or settings change, or on Restart.
   useEffect(() => {
-    if (!scenes || storedSettings === null || !canvasRef.current) {
+    if (!scenes || storedSettings === null || !canvasRef.current || previewGated) {
       return;
     }
     let cancelled = false;
@@ -342,7 +390,7 @@ export function SceneLivePreviewPanel({
         previewRef.current = null;
       }
     };
-  }, [scenes, viewport, storedSettings, previewSettings, restartCount]);
+  }, [scenes, viewport, storedSettings, previewSettings, restartCount, previewGated]);
 
   // The editor switched scenes while the runtime is up: follow it.
   const runtimeReady = sceneInfo !== null;
@@ -405,6 +453,26 @@ export function SceneLivePreviewPanel({
     appliedStateRef.current = { ...appliedStateRef.current, ...state };
     previewRef.current?.setSceneState(state);
   }
+
+  // Typed into the form but not sent yet (an applied edit is dropped as
+  // soon as the runtime confirms it, see onState).
+  const hasUnappliedEdits = Object.entries(edits).some(
+    ([key, value]) => String(runtimeState[key] ?? "") !== String(value ?? ""),
+  );
+  const autoApplyOffered = paidServices.length === 0;
+  const autoApplyActive = autoApply && autoApplyOffered;
+
+  // Auto apply: once the typing pauses, send what "Apply & render" would.
+  // Keyed on the edits themselves, so the closure applies the latest values;
+  // a confirmed edit clears out of `edits` and does not re-trigger.
+  useEffect(() => {
+    if (!autoApplyActive || !runtimeReady || !hasUnappliedEdits) {
+      return;
+    }
+    const timer = setTimeout(applyState, AUTO_APPLY_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+    // applyState is recreated every render; `edits` is what actually changes.
+  }, [autoApplyActive, runtimeReady, hasUnappliedEdits, edits]);
 
   // Back to the values in the scene: shown in the form at once (as
   // overrides, until the runtime confirms them) and sent to the runtime.
@@ -560,11 +628,6 @@ export function SceneLivePreviewPanel({
   }
 
   const runtimeScenes = sceneInfo?.scenes ?? [];
-  // Typed into the form but not sent yet (an applied edit is dropped as
-  // soon as the runtime confirms it, see onState).
-  const hasUnappliedEdits = Object.entries(edits).some(
-    ([key, value]) => String(runtimeState[key] ?? "") !== String(value ?? ""),
-  );
   const viewportValid =
     Number.isFinite(viewportForm.width) &&
     Number.isFinite(viewportForm.height) &&
@@ -581,11 +644,16 @@ export function SceneLivePreviewPanel({
           <button
             aria-label="Restart"
             className="button button--subtle button--small"
+            disabled={previewGated}
             onClick={() => {
               setError(null);
               setRestartCount((count) => count + 1);
             }}
-            title="Restart: reload the wasm FrameOS runtime from scratch"
+            title={
+              previewGated
+                ? "Start the preview first"
+                : "Restart: reload the wasm FrameOS runtime from scratch"
+            }
             type="button"
           >
             <RotateCw aria-hidden size={16} />
@@ -681,11 +749,49 @@ export function SceneLivePreviewPanel({
             >
               Render
             </button>
+            {visibleFields.length > 0 && autoApplyOffered ? (
+              <label
+                className="live-preview-panel__auto-apply"
+                title="Apply & render as soon as a value below changes"
+              >
+                <input
+                  checked={autoApply}
+                  onChange={(event) => toggleAutoApply(event.target.checked)}
+                  type="checkbox"
+                />
+                Auto apply
+              </label>
+            ) : null}
           </div>
         ) : null}
       </div>
       <div className="live-preview">
-        <div className="live-preview__stage">
+        {previewGated ? (
+          <div className="live-preview__gate" role="status">
+            <CircleDollarSign aria-hidden className="live-preview__gate-icon" size={28} />
+            <p className="live-preview__gate-title">
+              This preview waits for you to start it
+            </p>
+            <p className="live-preview__gate-copy">
+              This scene calls {joinNames(paidServices.map((group) => group.title))},
+              which bills per request. To keep that under your control, nothing
+              renders until you ask for it — and every change to the scene
+              needs a fresh go-ahead.
+            </p>
+            <button
+              className="button button-primary"
+              onClick={() => {
+                setError(null);
+                setPaidRunJson(editorScenesJson);
+              }}
+              type="button"
+            >
+              <Play aria-hidden size={16} />
+              Run preview
+            </button>
+          </div>
+        ) : null}
+        <div className="live-preview__stage" hidden={previewGated}>
           <canvas
             aria-label={hasPaintedFrame ? "Show the frame at full size" : undefined}
             className={`live-preview__canvas${hasPaintedFrame ? " live-preview__canvas--zoomable" : ""}`}
@@ -707,7 +813,7 @@ export function SceneLivePreviewPanel({
         <div
           className={`live-preview__status${error ? " live-preview__status--error" : ""}`}
         >
-          {scenes === null ? "Loading the scene…" : status}
+          {scenes === null ? "Loading the scene…" : previewGated ? "" : status}
         </div>
       </div>
       {error ? (
@@ -814,9 +920,16 @@ export function SceneLivePreviewPanel({
             This scene uses services that need credentials
           </h4>
           <p className="copy preview-settings__hint">
-            Keys saved in your account settings are applied automatically.
-            Anything typed here stays in this browser tab and is used only by
-            the preview.
+            Keys saved in your{" "}
+            {settingsUrl ? (
+              <a href={settingsUrl} rel="noreferrer" target="_blank">
+                account settings
+              </a>
+            ) : (
+              "account settings"
+            )}{" "}
+            are applied automatically. Anything typed here stays in this
+            browser tab and is used only by the preview.
           </p>
           {requiredSettings.map((group) => (
             <div className="preview-settings__group" key={group.key}>
@@ -898,6 +1011,14 @@ export function SceneLivePreviewPanel({
       </p>
     </div>
   );
+}
+
+// "OpenAI" / "OpenAI and Immich" / "OpenAI, Immich and X".
+function joinNames(names: string[]): string {
+  if (names.length <= 1) {
+    return names[0] ?? "a paid service";
+  }
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 function textValue(value: unknown): string {

@@ -333,7 +333,7 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
         }}
         panels={shown}
         // Not saved yet: the only source is the editor (no versions exist).
-        preview={{ sceneId: null, scenes: previewScenes }}
+        preview={{ sceneId: null, scenes: previewScenes, settingsUrl }}
         sceneId={selectedSceneId}
         scenes={scenes}
         theme={theme}
