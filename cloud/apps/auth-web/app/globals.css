@@ -2306,7 +2306,12 @@ a.stat-tile:hover {
 /* The Info · Editor · AI · Preview switch in the modal bar: a segmented
    group where each button is on or off on its own, right after the Back
    arrow; Save / Fork / Download keep the right-hand cluster. */
-.editor-modal__panels {
+/* The generic .view-toggle pushes itself right with margin-left:auto and
+   is defined later in this file, so the bar's copy needs the extra class
+   to win: the back button, tabs and version pack at the left whether or
+   not the title's scene name is there to fill the room (it is only in the
+   bar while the Info panel is closed). */
+.editor-modal__bar .editor-modal__panels {
   margin-left: 0;
   flex-shrink: 0;
 }
