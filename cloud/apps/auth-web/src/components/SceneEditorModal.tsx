@@ -1717,15 +1717,6 @@ export function SceneEditorModal({
       : versionList;
 
   const actions: SceneEditorAction[] = [];
-  if (info) {
-    actions.push({
-      Icon: MonitorDown,
-      key: "install",
-      label: "Install",
-      onSelect: () => setInstallOpen(true),
-      title: "Install this scene on a frame",
-    });
-  }
   if (canSave) {
     actions.push({
       Icon: Save,
@@ -1756,11 +1747,27 @@ export function SceneEditorModal({
       title: "Download the scene as a zip (the published version, not the editor's unsaved edits)",
     });
   }
+  // Install sits at the far right: the end of the bar, and the end of the
+  // overflow menu.
+  if (info) {
+    actions.push({
+      Icon: MonitorDown,
+      key: "install",
+      label: "Install",
+      onSelect: () => setInstallOpen(true),
+      title: "Install this scene on a frame",
+    });
+  }
 
   return (
     // ph-no-capture: the scene's own diagram, node labels and settings.
     <div className="editor-modal ph-no-capture">
-      <SceneEditorBar actions={actions}>
+      <SceneEditorBar
+        actions={actions}
+        leading={
+          (canSave || canFork) && dirty ? <UnsavedPill label="Unsaved changes" short="Unsaved" /> : null
+        }
+      >
         <SceneEditorBackButton label="Back" onClick={goBack} />
         <SceneEditorPanelToggles active={single} available={available} onToggle={togglePanel} panels={panels} />
         {versionOptions.length > 0 && selectedVersion !== null ? (
@@ -1790,7 +1797,6 @@ export function SceneEditorModal({
             ) : null}
           </select>
         ) : null}
-        {(canSave || canFork) && dirty ? <UnsavedPill label="Unsaved changes" short="Unsaved" /> : null}
         {nameInInfo ? null : nameTitle}
         {!canSave ? (
           <span className="pill" title="Explore and tweak freely; nothing you change here is saved anywhere">

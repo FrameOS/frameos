@@ -882,7 +882,7 @@ describe("SceneEditorModal bar", () => {
     expect(screen.queryByRole("link", { name: /Download \.zip/ })).toBeNull();
   });
 
-  it("lays the bar out as Back, the panel toggles, the version, then Save / Fork / Download on the right", async () => {
+  it("lays the bar out as Back, the panel toggles, the version, then Save / Fork / Download / Install on the right", async () => {
     render(
       <SceneEditorModal
         canFork
@@ -898,28 +898,30 @@ describe("SceneEditorModal bar", () => {
     expect(Array.from(left.children).map(label)).toEqual(["Back", "Panels", "Version"]);
     const right = document.querySelector(".editor-modal__bar .button-row")!;
     expect(Array.from(right.children).map(label)).toEqual([
-      "Install",
       "Save as new version",
       "Fork & save copy",
       "Download .zip",
+      "Install",
     ]);
     expect(left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The scene's name heads the Info panel, not the bar.
     await waitFor(() => expect(screen.getByText("Loaded")).toBeTruthy());
     expect(screen.getByTestId("info-heading").contains(screen.getByText("Loaded"))).toBe(true);
     expect(left.textContent).not.toContain("Loaded");
-    // Editing puts the Unsaved pill right after the version dropdown (its
-    // long and its phone-length spelling; CSS shows one).
+    // Editing puts the Unsaved pill immediately left of Save (its long and
+    // its phone-length spelling; CSS shows one), and the left side is
+    // untouched.
     fireEvent.click(await screen.findByRole("button", { name: "emit echo" }));
     fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
-    expect(Array.from(left.children).map(label)).toEqual(["Back", "Panels", "Version", "Unsaved changesUnsaved"]);
-    expect(within(left.children[3] as HTMLElement).getByText("Unsaved changes")).toBeTruthy();
+    expect(Array.from(left.children).map(label)).toEqual(["Back", "Panels", "Version"]);
     expect(Array.from(right.children).map(label)).toEqual([
-      "Install",
+      "Unsaved changesUnsaved",
       "Save as new version",
       "Fork & save copy",
       "Download .zip",
+      "Install",
     ]);
+    expect(within(right.children[0] as HTMLElement).getByText("Unsaved changes")).toBeTruthy();
   });
 
   it("keeps the scene's name in the bar while the Info panel is closed, and without one", async () => {
@@ -1200,14 +1202,14 @@ describe("SceneEditorModal bar overflow", () => {
     const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
     expect(items.map((item) => item.textContent)).toEqual([
       "Save as new version",
-      "Install",
       "Fork & save copy",
       "Download .zip",
+      "Install",
     ]);
     expect((items[0] as HTMLButtonElement).disabled).toBe(true);
     expect((items[1] as HTMLButtonElement).disabled).toBe(false);
-    expect((items[2] as HTMLButtonElement).disabled).toBe(false);
-    expect(items[3]!.getAttribute("href")).toBe("/dl.zip");
+    expect(items[2]!.getAttribute("href")).toBe("/dl.zip");
+    expect((items[3] as HTMLButtonElement).disabled).toBe(false);
 
     // Escape closes it and puts focus back on the button.
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
@@ -1242,30 +1244,36 @@ describe("SceneEditorModal bar overflow", () => {
     const menu = screen.getByRole("menu");
     const item = (name: string) => within(menu).getByRole("menuitem", { name });
     // Save is disabled (nothing edited): the first enabled item gets focus.
-    expect(document.activeElement).toBe(item("Install"));
-    fireEvent.keyDown(menu, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item("Fork & save copy"));
     fireEvent.keyDown(menu, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item("Download .zip"));
-    // Wraps, both ways.
     fireEvent.keyDown(menu, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item("Install"));
+    // Wraps, both ways.
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(item("Fork & save copy"));
     fireEvent.keyDown(menu, { key: "ArrowUp" });
-    expect(document.activeElement).toBe(item("Download .zip"));
-    fireEvent.keyDown(menu, { key: "Home" });
     expect(document.activeElement).toBe(item("Install"));
+    fireEvent.keyDown(menu, { key: "Home" });
+    expect(document.activeElement).toBe(item("Fork & save copy"));
     fireEvent.keyDown(menu, { key: "End" });
-    expect(document.activeElement).toBe(item("Download .zip"));
+    expect(document.activeElement).toBe(item("Install"));
 
     // A choice runs the action and closes the menu.
     fireEvent.click(item("Install"));
     expect(screen.queryByRole("menu")).toBeNull();
     expect(screen.getByTestId("install-dialog")).toBeTruthy();
 
-    // After an edit the Unsaved pill shows in the title, and Save is live.
+    // After an edit the Unsaved pill shows beside the collapsed actions
+    // (never inside the menu), and Save is live.
     fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
     fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
-    expect(document.querySelector(".editor-modal__title")!.contains(screen.getByText("Unsaved changes"))).toBe(true);
+    const cluster = document.querySelector(".editor-modal__bar .button-row")!;
+    expect(cluster.contains(screen.getByText("Unsaved changes"))).toBe(true);
+    expect(Array.from(cluster.children).map((child) => child.className)).toEqual([
+      "pill pill-warning editor-modal__unsaved",
+      "editor-modal__more",
+    ]);
     fireEvent.click(moreButton());
     expect((within(screen.getByRole("menu")).getByRole("menuitem", { name: "Save as new version" }) as HTMLButtonElement).disabled).toBe(false);
   });
@@ -1277,8 +1285,8 @@ describe("SceneEditorModal bar overflow", () => {
     fireEvent.click(moreButton());
     expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "Fork & save copy",
-      "Install",
       "Download .zip",
+      "Install",
     ]);
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   });
