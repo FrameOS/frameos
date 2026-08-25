@@ -3211,8 +3211,16 @@ html.theme-dark .ai-panel__render {
   color: var(--text);
 }
 
+/* The soft tint alone faded into the bar's grey, so an active button also
+   gets a ring and a thicker underline in the full primary, and heavier
+   type: three cues, none of them loud enough to shout when three of the
+   four panels are open at once. */
 .view-toggle__button[aria-pressed="true"],
 .view-toggle__button[aria-selected="true"] {
   background: var(--primary-soft);
   color: var(--primary-strong);
+  font-weight: 650;
+  box-shadow:
+    inset 0 0 0 1px var(--primary),
+    inset 0 -2px 0 0 var(--primary);
 }
