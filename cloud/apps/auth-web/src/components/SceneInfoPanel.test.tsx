@@ -151,16 +151,18 @@ describe("SceneInfoPanel", () => {
   });
 
 
-  it("heads the column with the name it is given as a heading, the publisher line under it, then the images", () => {
+  it("heads the column with the name it is given as a heading, the publisher line under it, then the description, then the images", () => {
     render(<SceneInfoPanel {...info} heading={<span>Clock title</span>} />);
     const heading = screen.getByRole("heading", { level: 1, name: "Clock title" });
     const byline = screen.getByText(/12 downloads/);
+    const description = screen.getByText("station").closest(".section-block")!;
     const gallery = document.querySelector(".scene-gallery")!;
     const header = document.querySelector(".scene-info")!.firstElementChild!;
     expect(header.contains(heading)).toBe(true);
     expect(header.contains(byline)).toBe(true);
     expect(heading.compareDocumentPosition(byline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(byline.compareDocumentPosition(gallery) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(byline.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(description.compareDocumentPosition(gallery) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // Thumbnails open the lightbox.
     fireEvent.click(screen.getByRole("button", { name: "View image 2 full size" }));
     expect(

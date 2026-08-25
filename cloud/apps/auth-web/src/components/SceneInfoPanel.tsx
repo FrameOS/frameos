@@ -108,9 +108,19 @@ export function SceneInfoPanel({
           {scene.frameosVersion ? ` · requires FrameOS ${scene.frameosVersion} or newer` : ""}
         </p>
       </header>
-      {/* ph-no-capture travels with the gallery (and the description below):
-          autocapture would otherwise ship image URLs as element attributes
-          and the scene's own text as click labels. */}
+      {/* The description reads right under the title; ph-no-capture keeps
+          the scene's own text (and the gallery's image URLs below) out of
+          autocapture labels and attributes. */}
+      <div className="section-block ph-no-capture">
+        <div className="stack">
+          {isOwner ? (
+            <SceneDescriptionEditor description={scene.description} sceneId={scene.id} />
+          ) : (
+            <SceneMarkdown description={scene.description} />
+          )}
+        </div>
+      </div>
+      {/* ph-no-capture travels with the gallery too. */}
       <SceneImageGallery
         canEdit={isOwner}
         hasPreview={scene.hasPreview}
@@ -177,16 +187,6 @@ export function SceneInfoPanel({
           deploying it.
         </p>
       ) : null}
-
-      <div className="section-block ph-no-capture">
-        <div className="stack">
-          {isOwner ? (
-            <SceneDescriptionEditor description={scene.description} sceneId={scene.id} />
-          ) : (
-            <SceneMarkdown description={scene.description} />
-          )}
-        </div>
-      </div>
 
     </div>
   );
