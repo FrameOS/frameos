@@ -863,9 +863,14 @@ describe("store publish and distribution", () => {
     );
     expect(removed.status).toBe(200);
 
-    // Nothing to show yet: the tile says so and the image route is a 404.
+    // Nothing to show yet: the tiles say so and the image route is a 404.
     expect(
       renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) })),
+    ).toContain("No preview");
+    expect(
+      renderToStaticMarkup(
+        await MyScenesPage({ searchParams: Promise.resolve({}) }),
+      ),
     ).toContain("No preview");
     expect(
       (
@@ -894,6 +899,13 @@ describe("store publish and distribution", () => {
     );
     expect(markup).not.toContain("No preview");
     expect(markup).toContain(`/api/store/scenes/${sceneId}/image`);
+    // The owner's own listing selects from store_scenes alone (no publisher
+    // join), which is where the gallery fallback used to render false.
+    const ownMarkup = renderToStaticMarkup(
+      await MyScenesPage({ searchParams: Promise.resolve({}) }),
+    );
+    expect(ownMarkup).not.toContain("No preview");
+    expect(ownMarkup).toContain(`/api/store/scenes/${sceneId}/image`);
 
     const image = await getSceneImage(
       request(`/api/store/scenes/${sceneId}/image`, "GET"),
