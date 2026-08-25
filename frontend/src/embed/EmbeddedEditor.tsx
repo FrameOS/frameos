@@ -31,7 +31,7 @@ import { RenameSceneModal } from '../scenes/frame/panels/Scenes/RenameSceneModal
 import { scenesLogic } from '../scenes/frame/panels/Scenes/scenesLogic'
 import { livePreviewLogic } from '../scenes/frame/panels/Scenes/livePreviewLogic'
 import { workspaceLogic } from '../scenes/workspace/workspaceLogic'
-import { FrameScene } from '../types'
+import { FrameScene, FrameType } from '../types'
 import { embedBridge, embedFrameLogic } from './embedFrameLogic'
 import { EmbedScenePreview } from './EmbedScenePreview'
 import { ensurePortalRoots } from './portalRoots'
@@ -39,6 +39,7 @@ import { ensurePortalRoots } from './portalRoots'
 // under its public name so BindLogic wires the same instance the Diagram
 // dependency graph connects to.
 import { frameLogic } from '../scenes/frame/frameLogic'
+import { sanitizeIncomingScenes } from './sanitizeIncomingScenes'
 
 const EMBED_FRAME_ID = 1
 
@@ -121,16 +122,19 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
       const config = ((window as any).FRAMEOS_APP_CONFIG = (window as any).FRAMEOS_APP_CONFIG || {})
       config.preview_proxy_url = props.previewProxyUrl
     }
-    initEmbedFrame({
+    const frame: Partial<FrameType> = {
       id: EMBED_FRAME_ID,
-      scenes: props.scenes,
-      mode: props.mode || 'rpios',
+      // `mode` is a free string on the public prop; the editor only reads it
+      // to pick the scene execution default.
+      mode: (props.mode || 'rpios') as FrameType['mode'],
       width: props.width || 800,
       height: props.height || 480,
       interval: props.interval ?? 300,
       rotate: 0,
-    } as any)
-    const nextSceneId = props.sceneId ?? (props.scenes.find((scene) => scene.default) || props.scenes[0])?.id ?? null
+    }
+    const sceneList = sanitizeIncomingScenes(props.scenes, frame)
+    initEmbedFrame({ ...frame, scenes: sceneList } as any)
+    const nextSceneId = props.sceneId ?? (sceneList.find((scene) => scene.default) || sceneList[0])?.id ?? null
     setSelectedSceneId(nextSceneId)
     setInitialized(true)
     // A re-init (the host swapped the scenes: another version loaded, an AI
@@ -275,20 +279,21 @@ export function EmbeddedEditor(): JSX.Element {
         return
       }
       if (message.type === 'frameos-editor:init' && Array.isArray(message.scenes)) {
-        // Also dispatch synchronously (EmbeddedSceneEditor re-inits in an
-        // effect, i.e. a tick later): a get-scenes message in the same tick
-        // must already see the new scenes in the form.
-        logic.actions.initEmbedFrame({
+        const frame: Partial<FrameType> = {
           id: EMBED_FRAME_ID,
-          scenes: message.scenes,
           mode: message.mode || 'rpios',
           width: message.width || 800,
           height: message.height || 480,
           interval: message.interval ?? 300,
           rotate: 0,
-        } as any)
+        }
+        const sceneList = sanitizeIncomingScenes(message.scenes, frame)
+        // Also dispatch synchronously (EmbeddedSceneEditor re-inits in an
+        // effect, i.e. a tick later): a get-scenes message in the same tick
+        // must already see the new scenes in the form.
+        logic.actions.initEmbedFrame({ ...frame, scenes: sceneList } as any)
         setInit({
-          scenes: message.scenes,
+          scenes: sceneList,
           mode: message.mode,
           width: message.width,
           height: message.height,
