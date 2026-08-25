@@ -1570,10 +1570,17 @@ a.tag-pill:hover {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 6px 8px;
-  background: var(--bg-soft);
-  color: inherit;
+  /* Same ground and ink as the panel's other controls: the soft tone read
+     as disabled in the light theme, and `inherit` took the label's grey. */
+  background: var(--surface);
+  color: var(--text);
   font: inherit;
   font-size: 13px;
+}
+
+.preview-settings__input:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary), transparent 40%);
+  outline-offset: 1px;
 }
 
 .editor-modal {
