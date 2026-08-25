@@ -7,7 +7,7 @@ import pytest
 
 from app.tasks.prebuilt_deps import PrebuiltEntry, resolve_prebuilt_target
 from app.utils.build_executor import create_build_executor
-from app.utils.cross_compile import CrossCompiler, TargetMetadata
+from app.utils.cross_compile import CrossCompiler, TargetMetadata, env_or
 from app.utils.modal_sandbox import ModalSandboxConfig
 
 
@@ -74,6 +74,20 @@ def test_cross_compiler_uses_buildroot_toolchain_base_for_buildroot_release(tmp_
 
     assert compiler._docker_image() == "ubuntu:22.04"
     assert compiler._toolchain_image() == "frameos/frameos-cross-toolchain:ubuntu_22.04-linux_arm64-latest"
+
+
+def test_env_or_treats_an_empty_variable_as_unset(monkeypatch: pytest.MonkeyPatch):
+    # The cross workflow exports FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG as "" on
+    # every non-dispatch run. Honouring that empty value asks Docker Hub for a
+    # tag nobody publishes, so all thirteen jobs rebuild the toolchain by hand.
+    monkeypatch.setenv("FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG", "")
+    assert env_or("FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG", "latest") == "latest"
+
+    monkeypatch.setenv("FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG", "pr-123")
+    assert env_or("FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG", "latest") == "pr-123"
+
+    monkeypatch.delenv("FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG")
+    assert env_or("FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG", "latest") == "latest"
 
 
 def test_cross_compiler_falls_back_from_invalid_detected_release(tmp_path, monkeypatch: pytest.MonkeyPatch):

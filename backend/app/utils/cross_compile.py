@@ -68,23 +68,39 @@ DEFAULT_FEATURE_CFLAGS = {
     "armv6l": ["-march=armv6zk", "-mtune=arm1176jzf-s", "-mfpu=vfp", "-mfloat-abi=hard"],
     "armv6": ["-march=armv6zk", "-mtune=arm1176jzf-s", "-mfpu=vfp", "-mfloat-abi=hard"],
 }
-CROSS_TOOLCHAIN_IMAGE = os.environ.get("FRAMEOS_CROSS_TOOLCHAIN_IMAGE")
-TOOLCHAIN_IMAGE_REPO = os.environ.get(
+
+
+def env_or(name: str, default: str) -> str:
+    """Return ``$name``, treating a set-but-empty variable as unset.
+
+    Workflows pass optional overrides through expressions that fall back to
+    an empty string rather than leaving the variable out. With a plain
+    ``os.environ.get(name, default)`` that empty value wins over the default —
+    which silently sent every CI cross build to the toolchain image tag
+    ``<slug>`` instead of the published ``<slug>-latest``, so the pull 404'd
+    and each job rebuilt the toolchain from apt instead.
+    """
+
+    return os.environ.get(name) or default
+
+
+CROSS_TOOLCHAIN_IMAGE = os.environ.get("FRAMEOS_CROSS_TOOLCHAIN_IMAGE") or None
+TOOLCHAIN_IMAGE_REPO = env_or(
     "FRAMEOS_CROSS_TOOLCHAIN_IMAGE_REPO",
     "frameos/frameos-cross-toolchain",
 )
-TOOLCHAIN_IMAGE_TAG = os.environ.get("FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG", "latest")
-TOOLCHAIN_FORCE_LOCAL_BUILD = os.environ.get(
+TOOLCHAIN_IMAGE_TAG = env_or("FRAMEOS_CROSS_TOOLCHAIN_IMAGE_TAG", "latest")
+TOOLCHAIN_FORCE_LOCAL_BUILD = env_or(
     "FRAMEOS_CROSS_TOOLCHAIN_FORCE_LOCAL_BUILD",
     "0",
 ).lower() in {"1", "true", "yes", "on"}
-TOOLCHAIN_SKIP_PULL = os.environ.get(
+TOOLCHAIN_SKIP_PULL = env_or(
     "FRAMEOS_CROSS_TOOLCHAIN_SKIP_PULL",
     "0",
 ).lower() in {"1", "true", "yes", "on"}
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_ROOT.parent
-CROSS_TOOLCHAIN_DIGESTS_PATH = os.environ.get(
+CROSS_TOOLCHAIN_DIGESTS_PATH = env_or(
     "FRAMEOS_CROSS_TOOLCHAIN_DIGESTS_PATH",
     str(REPO_ROOT / "cross-toolchain-images.json"),
 )
