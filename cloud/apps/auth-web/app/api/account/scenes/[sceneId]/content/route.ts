@@ -21,6 +21,7 @@ import {
   maxSceneEditsPer15Minutes,
   maxSceneEditsPerHour,
   maxSceneZipBytes,
+  normalizeVersionMessage,
   rebuildZipWithScenes,
   sceneSummary,
   validateSceneZip,
@@ -75,6 +76,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (!Array.isArray(body.scenes) || body.scenes.length === 0) {
     return jsonError("invalid_scenes", 400);
   }
+  // The optional "what changed" note the save dialog asks for. It shows on
+  // the public scene page, so it is moderated below with the name.
+  const message = normalizeVersionMessage(body.message);
 
   const [latest] = await db
     .select({
@@ -137,9 +141,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (clash) {
       return jsonError("scene_name_taken", 409, { name: nextSceneName });
     }
-    // Names show on public pages, so a rename passes the same gate publishing
-    // and description edits do.
-    const moderation = await moderateStoreContent({ texts: [nextSceneName] });
+    renameTo = nextSceneName;
+  }
+
+  // Names and version messages show on public pages, so they pass the same
+  // gate publishing and description edits do — one call for both, and none
+  // at all for the usual save that carries neither.
+  if (renameTo || message) {
+    const moderation = await moderateStoreContent({
+      texts: [renameTo, message],
+    });
     if (!moderation.ok) {
       if (moderation.error === "content_rejected") {
         await recordAuditEvent(db, {
@@ -151,7 +162,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
           eventType: "store.publish_rejected",
           metadata: {
             categories: moderation.categories,
-            name: nextSceneName,
+            name: renameTo ?? scene.name,
+            ...(message ? { message } : {}),
           },
           target: { sceneId: scene.id },
         });
@@ -161,7 +173,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
       }
       return jsonError("moderation_unavailable", 503);
     }
-    renameTo = nextSceneName;
   }
 
   const content = rebuildZipWithScenes(
@@ -203,6 +214,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   await db.insert(storeSceneVersions).values({
     contentType: "application/zip",
     frameosVersion: validated.value.frameosVersion ?? latest.frameosVersion,
+    message,
     objectKey: stored.objectKey,
     riskFlags: validated.value.riskFlags,
     sceneId: scene.id,
@@ -237,6 +249,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     },
     eventType: "store.scene_content_edited",
     metadata: {
+      ...(message ? { message } : {}),
       name: renameTo ?? scene.name,
       ...(renameTo ? { renamedFrom: scene.name } : {}),
       sceneCount: validated.value.sceneCount,
@@ -246,7 +259,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   });
 
   return NextResponse.json({
-    scene: { ...sceneSummary(updated), version: nextVersion },
+    scene: { ...sceneSummary(updated), message, version: nextVersion },
     status: "published",
   });
 }

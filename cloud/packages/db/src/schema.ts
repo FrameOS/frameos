@@ -541,6 +541,10 @@ export const storeSceneVersions = pgTable(
     contentType: text("content_type").default("application/zip").notNull(),
     // Minimum compatible FrameOS version declared by this payload.
     frameosVersion: text("frameos_version"),
+    // The publisher's one-line "what changed" note (see
+    // normalizeVersionMessage). Null for versions published without one —
+    // everything before this column existed, and every zip upload.
+    message: text("message"),
     publishedByLinkedClientId: uuid("published_by_linked_client_id").references(
       () => linkedClients.id,
       { onDelete: "set null" },

@@ -2763,6 +2763,13 @@ a.stat-tile:hover {
   font-size: 11px;
 }
 
+/* The "what changed" note a save carries, under the version's pills. */
+.scene-versions__message {
+  margin-top: 4px;
+  max-width: 32em;
+  font-size: 12px;
+}
+
 /* A dialog over the workspace (the bar's Install): a centred panel on a
    dimmed backdrop, closed by its ×, the backdrop or Esc. */
 .dialog {

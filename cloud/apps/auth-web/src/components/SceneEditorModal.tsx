@@ -44,6 +44,7 @@ import { SceneAiPanel, type SceneAiPanelProps } from "./SceneAiPanel";
 import { SceneInfoPanel, type SceneInfoData } from "./SceneInfoPanel";
 import { SceneInstallDialog } from "./SceneInstallDialog";
 import { SceneLivePreviewPanel } from "./SceneLivePreview";
+import { SceneSaveDialog } from "./SceneSaveDialog";
 import { SceneVersionsDialog } from "./SceneVersionsDialog";
 
 // The FrameOS scene editor as a plain React component in this app's tree
@@ -60,6 +61,8 @@ export type SceneVersionOption = {
   version: number;
   /** ISO timestamp (serialisable from the server component). */
   createdAt: string;
+  /** The publisher's "what changed" note, null without one. */
+  message: string | null;
   /** ISO timestamp when unpublished (yanked), null otherwise. */
   yankedAt: string | null;
 };
@@ -1253,12 +1256,26 @@ export function withVersionParam(url: string, version: number | null): string {
   return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
-/** The dropdown's label for a version: "v3 (latest)", "v2 (unpublished)", "v1". */
+/** How much of a version's message the dropdown shows before it is cut;
+ * the whole note is in the Versions dialog. */
+const versionMessagePreviewLength = 40;
+
+/** The dropdown's label for a version: "v3 (latest)", "v2 (unpublished)",
+ * "v1" — each followed by its "what changed" note when it has one. */
 export function versionOptionLabel(option: SceneVersionOption, latestVersion: number | null): string {
-  if (option.yankedAt) {
-    return `v${option.version} (unpublished)`;
+  const label = option.yankedAt
+    ? `v${option.version} (unpublished)`
+    : option.version === latestVersion
+      ? `v${option.version} (latest)`
+      : `v${option.version}`;
+  if (!option.message) {
+    return label;
   }
-  return option.version === latestVersion ? `v${option.version} (latest)` : `v${option.version}`;
+  const message =
+    option.message.length > versionMessagePreviewLength
+      ? `${option.message.slice(0, versionMessagePreviewLength).trimEnd()}…`
+      : option.message;
+  return `${label} — ${message}`;
 }
 
 const manageVersionsValue = "manage";
@@ -1311,6 +1328,14 @@ export function SceneEditorModal({
   // the page's pinned one, else the latest. null: no versions are known.
   const [selectedVersion, setSelectedVersion] = useState<number | null>(pinnedVersion ?? latestVersion);
   const [versionsOpen, setVersionsOpen] = useState(false);
+  // The Save dialog: open while it asks what changed, and what the version
+  // it publishes carries as its note (kept so the dropdown can show the
+  // just-published version with it, before the page's list catches up).
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [publishedMessage, setPublishedMessage] = useState<string | null>(null);
+  // What the Save dialog's message field starts with: the prompt behind the
+  // AI panel's last change, which is usually exactly what changed.
+  const [suggestedMessage, setSuggestedMessage] = useState<string | undefined>(undefined);
   const [initialPrompt, setInitialPrompt] = useState<string | undefined>(undefined);
   const [installOpen, setInstallOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1406,6 +1431,8 @@ export function SceneEditorModal({
       baselinePendingRef.current = true;
       setScenes(loaded);
       setDirty(false);
+      // Whatever the AI panel changed is gone with the edits.
+      setSuggestedMessage(undefined);
       const defaultScene = loaded.find((scene) => scene.default === true) ?? loaded[0];
       selectScene(defaultScene?.id ?? null);
     } catch (err) {
@@ -1581,6 +1608,7 @@ export function SceneEditorModal({
   // editor re-initialises on identity change), select the right one, and
   // let Save / Fork take it from there.
   function applyAiEvent(event: AiScenesEvent): string | null {
+    setSuggestedMessage(event.title || undefined);
     const current = latestScenesRef.current ?? scenes ?? [];
     const result = applyAiScenes(current, event, selectedSceneIdRef.current);
     baselinePendingRef.current = false;
@@ -1629,24 +1657,28 @@ export function SceneEditorModal({
     }
   }
 
-  async function save() {
+  /** The bar's Save: the dialog asks what changed and publishes from there. */
+  function openSave() {
     const latest = latestScenesRef.current;
     if (!latest || latest.length === 0) {
       setError("Nothing to save yet.");
       return;
     }
-    if (
-      !window.confirm(
-        "Publish the edited scenes as a new version? Everyone installing or updating this scene will get it.",
-      )
-    ) {
+    setError(null);
+    setSaveOpen(true);
+  }
+
+  async function save(message: string) {
+    const latest = latestScenesRef.current;
+    if (!latest || latest.length === 0) {
+      setError("Nothing to save yet.");
       return;
     }
     setSaving(true);
     setError(null);
     try {
       const response = await fetch(`/api/account/scenes/${sceneId}/content`, {
-        body: JSON.stringify({ scenes: latest }),
+        body: JSON.stringify({ message, scenes: latest }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -1657,16 +1689,23 @@ export function SceneEditorModal({
           // your scenes may not share a name.
           payload.error === "scene_name_taken"
             ? `You already have another scene called “${payload.name ?? "that"}” — rename this one to something else.`
-            : `Saving failed: ${payload.error ?? response.status}`,
+            : // The name and the note show on the public page, so both are
+              // moderated; the note is the usual suspect.
+              payload.error === "content_rejected"
+              ? "The scene's name or your note was flagged by moderation — please reword it."
+              : `Saving failed: ${payload.error ?? response.status}`,
         );
         return;
       }
       setDirty(false);
+      setSaveOpen(false);
+      setSuggestedMessage(undefined);
       initialJsonRef.current = JSON.stringify(latest);
       // The workspace now holds the version just published: the latest.
       const published = typeof payload.scene?.version === "number" ? (payload.scene.version as number) : null;
       if (published !== null) {
         setPublishedVersion(published);
+        setPublishedMessage(typeof payload.scene?.message === "string" ? (payload.scene.message as string) : null);
         setSelectedVersion(published);
       }
       syncVersionUrl(null);
@@ -1711,7 +1750,12 @@ export function SceneEditorModal({
   const versionOptions =
     versionList.length > 0 && selectedVersion !== null && !versionList.some((option) => option.version === selectedVersion)
       ? [
-          { createdAt: "", version: selectedVersion, yankedAt: null } satisfies SceneVersionOption,
+          {
+            createdAt: "",
+            message: publishedMessage,
+            version: selectedVersion,
+            yankedAt: null,
+          } satisfies SceneVersionOption,
           ...versionList,
         ]
       : versionList;
@@ -1723,7 +1767,7 @@ export function SceneEditorModal({
       disabled: saving || !dirty,
       key: "save",
       label: saving ? "Saving…" : "Save as new version",
-      onSelect: () => void save(),
+      onSelect: openSave,
       primary: true,
     });
   }
@@ -1859,6 +1903,22 @@ export function SceneEditorModal({
         theme={theme}
         width={width || 800}
       />
+      {saveOpen && canSave ? (
+        <SceneSaveDialog
+          error={error}
+          isPublic={info ? info.scene.visibility === "public" : true}
+          nextVersion={latestVersion === null ? null : latestVersion + 1}
+          onClose={() => {
+            if (!saving) {
+              setSaveOpen(false);
+            }
+          }}
+          onSave={(message) => void save(message)}
+          saving={saving}
+          sceneName={sceneName ?? info?.scene.name ?? "scene"}
+          {...(suggestedMessage ? { defaultMessage: suggestedMessage } : {})}
+        />
+      ) : null}
       {versionsOpen && info ? (
         <SceneVersionsDialog
           isOwner={info.isOwner}

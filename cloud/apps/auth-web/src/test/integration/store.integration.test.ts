@@ -1415,7 +1415,9 @@ describe("store publish and distribution", () => {
     ];
     const edited = await editSceneContent(
       request(`/api/account/scenes/${sceneId}/content`, "POST", {
-        body: { scenes: editedScenes },
+        // The save dialog's "what changed" note, stored with the version it
+        // publishes (normalized to one trimmed line).
+        body: { message: "  Added a\n  reboot node  ", scenes: editedScenes },
         headers: { origin: baseUrl },
       }),
       ctx(sceneId),
@@ -1425,6 +1427,20 @@ describe("store publish and distribution", () => {
     const editedScene = editedPayload.scene as Record<string, unknown>;
     expect(editedScene.version).toBe(2);
     expect(editedScene.risk_flags).toEqual(["shell"]);
+    expect(editedScene.message).toBe("Added a reboot node");
+    const versionMessages = await db
+      .select({
+        message: storeSceneVersions.message,
+        version: storeSceneVersions.version,
+      })
+      .from(storeSceneVersions)
+      .where(eq(storeSceneVersions.sceneId, sceneId))
+      .orderBy(storeSceneVersions.version);
+    // The published-from-a-zip v1 has none; only the editor asks.
+    expect(versionMessages).toEqual([
+      { message: null, version: 1 },
+      { message: "Added a reboot node", version: 2 },
+    ]);
 
     // The new version's zip round-trips the edited scenes; the manifest and
     // preview image carried over.

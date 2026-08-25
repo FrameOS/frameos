@@ -222,6 +222,7 @@ export default async function ScenePage({
     .select({
       createdAt: storeSceneVersions.createdAt,
       frameosVersion: storeSceneVersions.frameosVersion,
+      message: storeSceneVersions.message,
       sha256: storeSceneVersions.sha256,
       sizeBytes: storeSceneVersions.sizeBytes,
       version: storeSceneVersions.version,
@@ -325,6 +326,7 @@ export default async function ScenePage({
     versions: versions.map((version) => ({
       createdAt: version.createdAt.toISOString(),
       frameosVersion: version.frameosVersion,
+      message: version.message,
       sha256: version.sha256,
       sizeBytes: version.sizeBytes,
       version: version.version,

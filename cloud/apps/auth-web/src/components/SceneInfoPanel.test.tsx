@@ -48,6 +48,7 @@ const info: SceneInfoData = {
     {
       createdAt: "2026-08-24T10:00:00.000Z",
       frameosVersion: "2026.8.1",
+      message: null,
       sha256: "abcdef0123456789abcdef0123456789",
       sizeBytes: 2048,
       version: 2,
@@ -56,6 +57,7 @@ const info: SceneInfoData = {
     {
       createdAt: "2026-08-10T10:00:00.000Z",
       frameosVersion: null,
+      message: null,
       sha256: "0123456789abcdef0123456789abcdef",
       sizeBytes: 1024,
       version: 1,

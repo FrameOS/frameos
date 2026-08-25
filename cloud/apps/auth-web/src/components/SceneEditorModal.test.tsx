@@ -100,9 +100,27 @@ vi.mock("./SceneLivePreview", () => ({
     />
   ),
 }));
+type AiPanelProps = {
+  initialPrompt?: string | undefined;
+  onScenes: (event: { type: "scenes"; tool: "modify_scene"; title?: string; scenes: unknown[] }) => unknown;
+};
 vi.mock("./SceneAiPanel", () => ({
-  SceneAiPanel: (props: { initialPrompt?: string | undefined }) => (
-    <div data-prompt={props.initialPrompt ?? ""} data-testid="ai-panel" />
+  SceneAiPanel: (props: AiPanelProps) => (
+    <div data-prompt={props.initialPrompt ?? ""} data-testid="ai-panel">
+      <button
+        onClick={() =>
+          props.onScenes({
+            scenes: [{ default: true, edges: [], id: "s1", name: "Loaded", nodes: [] }],
+            title: "Made the clock bigger",
+            tool: "modify_scene",
+            type: "scenes",
+          })
+        }
+        type="button"
+      >
+        emit ai scenes
+      </button>
+    </div>
   ),
 }));
 type InfoProps = {
@@ -154,14 +172,16 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
     return Response.json(url.includes("version=1") ? v1Scenes : scenesJson);
   }
   if (url.endsWith("/content") && init?.method === "POST") {
-    return Response.json({ ok: true, scene: { version: 3 } });
+    const body = JSON.parse(String(init.body)) as { message?: string };
+    return Response.json({ ok: true, scene: { message: body.message || null, version: 3 } });
   }
   throw new Error(`Unexpected fetch: ${url}`);
 });
 
+/** The body of the most recent save (a retry after a failed one counts). */
 function postedContent() {
-  const call = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/content"));
-  return call ? (JSON.parse(String(call[1]?.body)) as { scenes: { name: string }[] }) : null;
+  const call = [...fetchMock.mock.calls].reverse().find(([input]) => String(input).endsWith("/content"));
+  return call ? (JSON.parse(String(call[1]?.body)) as { message?: string; scenes: { name: string }[] }) : null;
 }
 
 function scenesJsonUrls() {
@@ -176,13 +196,26 @@ function versionOptions() {
   return Array.from(versionSelect().options).map((option) => option.textContent);
 }
 
+/** The bar's Save, through the dialog it opens: types the "what changed"
+ * note when one is given, then publishes. */
+async function saveVersion(message?: string) {
+  fireEvent.click(screen.getByRole("button", { name: /Save as new version/ }));
+  const dialog = await screen.findByRole("dialog", { name: /^Save / });
+  if (message !== undefined) {
+    fireEvent.change(within(dialog).getByLabelText("What changed? (optional)"), {
+      target: { value: message },
+    });
+  }
+  fireEvent.click(within(dialog).getByRole("button", { name: "Publish" }));
+}
+
 function renameInput() {
   return screen.getByRole("textbox", { name: "Scene name" }) as HTMLInputElement;
 }
 
 const versions = [
-  { createdAt: "2026-08-10T10:00:00.000Z", version: 1, yankedAt: null },
-  { createdAt: "2026-08-24T10:00:00.000Z", version: 2, yankedAt: null },
+  { createdAt: "2026-08-10T10:00:00.000Z", message: null, version: 1, yankedAt: null },
+  { createdAt: "2026-08-24T10:00:00.000Z", message: "Warmer palette", version: 2, yankedAt: null },
 ];
 
 // What the page hands the workspace for its Info panel (the panel itself is
@@ -546,7 +579,7 @@ describe("SceneEditorModal versions", () => {
       "Panels",
       "Version",
     ]);
-    expect(versionOptions()).toEqual(["v2 (latest)", "v1", "──────", "Manage versions…"]);
+    expect(versionOptions()).toEqual(["v2 (latest) — Warmer palette", "v1", "──────", "Manage versions…"]);
     expect(versionSelect().value).toBe("2");
     expect(scenesJsonUrls()).toEqual(["/api/store/scenes/scene-1/scenes.json"]);
     expect(screen.getByRole("link", { name: /Download \.zip/ }).getAttribute("href")).toBe(
@@ -629,11 +662,19 @@ describe("SceneEditorModal versions", () => {
     await screen.findByTestId("editor");
     fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
     fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    fireEvent.click(screen.getByRole("button", { name: /Save as new version/ }));
+    await saveVersion("Bigger clock");
     await waitFor(() => expect(screen.queryByText("Unsaved changes")).toBeNull());
+    expect(postedContent()?.message).toBe("Bigger clock");
     expect(versionSelect().value).toBe("3");
-    expect(versionOptions()).toEqual(["v3 (latest)", "v2", "v1", "──────", "Manage versions…"]);
+    // The note travels with the version the dropdown gains, before the
+    // page's list knows about either.
+    expect(versionOptions()).toEqual([
+      "v3 (latest) — Bigger clock",
+      "v2 — Warmer palette",
+      "v1",
+      "──────",
+      "Manage versions…",
+    ]);
     expect(refreshMock).toHaveBeenCalled();
   });
 
@@ -655,6 +696,7 @@ describe("SceneEditorModal versions", () => {
     ]);
     expect(within(rows[0]!).getByRole("link", { name: "v2" }).getAttribute("href")).toBe("/s/clock?version=2");
     expect(within(rows[0]!).getByText("Latest")).toBeTruthy();
+    expect(within(rows[0]!).getByText("Warmer palette")).toBeTruthy();
     expect(within(rows[0]!).getByText("In the editor")).toBeTruthy();
     expect(within(rows[0]!).getByRole("button", { name: "Unpublish" })).toBeTruthy();
     expect(within(rows[1]!).getByText("Published")).toBeTruthy();
@@ -683,7 +725,7 @@ describe("SceneEditorModal versions", () => {
     const { unmount } = render(
       <SceneEditorModal info={{ ...info, isOwner: false }} sceneId="scene-1" versions={versions} />,
     );
-    expect(versionOptions()).toEqual(["v2 (latest)", "v1", "──────", "Version details…"]);
+    expect(versionOptions()).toEqual(["v2 (latest) — Warmer palette", "v1", "──────", "Version details…"]);
     fireEvent.change(versionSelect(), { target: { value: "manage" } });
     const dialog = screen.getByRole("dialog", { name: "Versions of Clock" });
     expect(within(dialog).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
@@ -697,6 +739,102 @@ describe("SceneEditorModal versions", () => {
     render(<SceneEditorModal sceneId="scene-1" />);
     expect(screen.queryByRole("combobox", { name: "Version" })).toBeNull();
     await screen.findByTestId("editor");
+  });
+});
+
+describe("SceneEditorModal save dialog", () => {
+  it("asks what changed, sends the note with the scenes, and closes on the save", async () => {
+    render(<SceneEditorModal canSave info={info} sceneId="scene-1" versions={versions} />);
+    await screen.findByTestId("editor");
+    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
+    fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
+
+    fireEvent.click(screen.getByRole("button", { name: /Save as new version/ }));
+    const dialog = screen.getByRole("dialog", { name: "Save Edited" });
+    // On <body>, and headed by the version the save will publish.
+    expect(dialog.parentElement).toBe(document.body);
+    expect(within(dialog).getByRole("heading").textContent).toBe("Save v3");
+    const field = within(dialog).getByLabelText("What changed? (optional)") as HTMLInputElement;
+    expect(field.value).toBe("");
+    expect(field.maxLength).toBe(200);
+
+    fireEvent.change(field, { target: { value: "Bigger clock, warmer palette" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Publish" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(postedContent()).toEqual({
+      message: "Bigger clock, warmer palette",
+      scenes: [{ id: "s1", name: "Edited" }],
+    });
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+  });
+
+  it("publishes without a note, and cancelling posts nothing", async () => {
+    render(<SceneEditorModal canSave info={info} sceneId="scene-1" versions={versions} />);
+    await screen.findByTestId("editor");
+    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
+    fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
+
+    // Cancel: the dialog goes, the edits stay, nothing is published.
+    fireEvent.click(screen.getByRole("button", { name: /Save as new version/ }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(postedContent()).toBeNull();
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+
+    // Esc closes it too.
+    fireEvent.click(screen.getByRole("button", { name: /Save as new version/ }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(postedContent()).toBeNull();
+
+    // The note is optional: an empty field publishes.
+    await saveVersion();
+    await waitFor(() => expect(postedContent()).not.toBeNull());
+    expect(postedContent()?.message).toBe("");
+    expect(versionOptions()[0]).toBe("v3 (latest)");
+  });
+
+  it("keeps the dialog and the note when the save fails, so the retry needs no retyping", async () => {
+    render(<SceneEditorModal canSave info={info} sceneId="scene-1" versions={versions} />);
+    await screen.findByTestId("editor");
+    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
+    fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
+
+    fetchMock.mockImplementationOnce(async () =>
+      Response.json({ error: "content_rejected" }, { status: 422 }),
+    );
+    await saveVersion("Something rude");
+    const dialog = await screen.findByRole("dialog", { name: "Save Edited" });
+    await within(dialog).findByText(/flagged by moderation/);
+    expect((within(dialog).getByLabelText("What changed? (optional)") as HTMLInputElement).value).toBe(
+      "Something rude",
+    );
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+
+    // Reworded, the retry goes through.
+    fireEvent.change(within(dialog).getByLabelText("What changed? (optional)"), {
+      target: { value: "Something nice" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Publish" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(postedContent()?.message).toBe("Something nice");
+  });
+
+  it("starts the note off with what the AI panel was asked for", async () => {
+    remember({ ai: true, editor: true, info: false, preview: false });
+    render(<SceneEditorModal canSave canRemix sceneId="scene-1" versions={versions} />);
+    await screen.findByTestId("editor");
+    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
+    fireEvent.click(screen.getByRole("button", { name: "emit ai scenes" }));
+    expect(screen.getByText("Unsaved changes")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Save as new version/ }));
+    const field = within(screen.getByRole("dialog")).getByLabelText(
+      "What changed? (optional)",
+    ) as HTMLInputElement;
+    expect(field.value).toBe("Made the clock bigger");
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    await waitFor(() => expect(postedContent()?.message).toBe("Made the clock bigger"));
   });
 });
 
@@ -1023,8 +1161,7 @@ describe("SceneEditorModal scene name", () => {
     // …and the echo marks the scenes dirty, so Save lights up.
     expect(screen.getByText("Unsaved changes")).toBeTruthy();
 
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    fireEvent.click(screen.getByRole("button", { name: /Save as new version/ }));
+    await saveVersion();
     await waitFor(() => expect(postedContent()).not.toBeNull());
     expect(postedContent()?.scenes[0]?.name).toBe("Birthdays");
     // Saved: the workspace stays, clean, and the page's data is refreshed.
@@ -1048,8 +1185,7 @@ describe("SceneEditorModal scene name", () => {
     expect(renameCalls).toEqual([["s1", "From the panel"]]);
     expect(screen.getByText("Unsaved changes")).toBeTruthy();
 
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    fireEvent.click(screen.getByRole("button", { name: /Save as new version/ }));
+    await saveVersion();
     await waitFor(() => expect(postedContent()?.scenes[0]?.name).toBe("From the panel"));
   });
 

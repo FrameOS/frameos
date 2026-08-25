@@ -42,6 +42,8 @@ export type SceneInfoVersion = {
   /** ISO timestamp. */
   createdAt: string;
   frameosVersion: string | null;
+  /** The publisher's one-line "what changed" note, null without one. */
+  message: string | null;
   sizeBytes: number;
   sha256: string;
   /** ISO timestamp when unpublished (yanked), null otherwise. */

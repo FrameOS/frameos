@@ -116,6 +116,9 @@ export function SceneVersionsDialog({
                     )}
                     {viewingVersion === version.version ? <span className="pill">In the editor</span> : null}
                   </div>
+                  {version.message ? (
+                    <div className="scene-versions__message">{version.message}</div>
+                  ) : null}
                 </td>
                 <td>
                   {formatDateTime(new Date(version.createdAt))}
