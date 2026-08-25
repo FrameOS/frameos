@@ -32,7 +32,9 @@ import {
   requiredSettingsForScenes,
   type PreviewSettingsGroup,
 } from "../lib/preview-settings";
+import type { PreviewLogLine } from "../lib/preview-log";
 import { ImageLightbox } from "./ImageLightbox";
+import { PreviewLog } from "./PreviewLog";
 
 type SceneLivePreviewPanelProps = {
   /** The store scene, or null for a scene that is not saved yet (then
@@ -155,7 +157,6 @@ export function SceneLivePreviewPanel({
   // handle, and what the runtime has reported so far.
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewRef = useRef<FrameOSPreview | null>(null);
-  const logRef = useRef<HTMLPreElement | null>(null);
   const [sceneInfo, setSceneInfo] = useState<SceneInfo | null>(null);
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null);
   const [runtimeState, setRuntimeState] = useState<Record<string, unknown>>({});
@@ -167,7 +168,10 @@ export function SceneLivePreviewPanel({
   // values being tried out rather than snapping back to the defaults.
   const appliedStateRef = useRef<Record<string, unknown>>({});
   const [status, setStatus] = useState("");
-  const [logs, setLogs] = useState<string[]>([]);
+  // Runtime output, one entry per line, stamped when it arrived (the
+  // runtime's lines carry no time of their own); ids are list keys.
+  const [logs, setLogs] = useState<PreviewLogLine[]>([]);
+  const logIdRef = useRef(0);
   const fieldIdPrefix = useId();
   const editorSceneIdRef = useRef(editorSceneId);
   editorSceneIdRef.current = editorSceneId;
@@ -250,8 +254,9 @@ export function SceneLivePreviewPanel({
       if (cancelled) {
         return;
       }
+      const entry: PreviewLogLine = { id: logIdRef.current++, line, receivedAt: Date.now() };
       setLogs((previous) => {
-        const next = [...previous, line];
+        const next = [...previous, entry];
         return next.length > maxLogLines ? next.slice(-maxLogLines) : next;
       });
     };
@@ -352,12 +357,6 @@ export function SceneLivePreviewPanel({
       return editorSceneId;
     });
   }, [runtimeReady, editorSceneId, scenes]);
-
-  useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [logs]);
 
   // The scene whose fields the form shows: the runtime's current one, else
   // the default from scenes.json (so the form is there before the worker is).
@@ -892,9 +891,7 @@ export function SceneLivePreviewPanel({
           </div>
         </div>
       ) : null}
-      <pre className="live-preview__logs" ref={logRef}>
-        {logs.join("\n")}
-      </pre>
+      <PreviewLog lines={logs} />
       <p className="copy live-preview-panel__footnote">
         Runs in your browser via WebAssembly. Scenes that fetch external data or use device-only
         apps may render incompletely.

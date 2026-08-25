@@ -840,6 +840,25 @@ function rowWidth(row: HTMLElement): number {
   );
 }
 
+/** The width the bar's title wants: its children at their own widths, the
+ * scene name at its full text (up to its cap) rather than what the flex
+ * layout left it — it grows into spare room and ellipsizes when squeezed,
+ * neither of which says what it needs. */
+function titleWidth(title: HTMLElement): number {
+  const gap = parseFloat(getComputedStyle(title).columnGap) || 0;
+  const children = Array.from(title.children) as HTMLElement[];
+  const width = children.reduce((sum, child) => {
+    const text = child.querySelector<HTMLElement>(".editor-modal__name-text");
+    if (!text) {
+      return sum + child.getBoundingClientRect().width;
+    }
+    const cap = parseFloat(getComputedStyle(text).maxWidth);
+    const wanted = Number.isFinite(cap) ? Math.min(text.scrollWidth, cap) : text.scrollWidth;
+    return sum + wanted + rowWidth(child) - text.getBoundingClientRect().width;
+  }, 0);
+  return width + gap * Math.max(0, children.length - 1);
+}
+
 // Whether the bar's actions must collapse into the "…" menu: what they need
 // (their expanded width, remembered from the last time they were expanded)
 // against what the bar has to the right of its title. Measured before the
@@ -862,10 +881,14 @@ function useCollapsedActions(
       return;
     }
     const style = getComputedStyle(bar);
+    // Room for the cluster once the title has what it wants (see
+    // titleWidth): the actions collapse before the name is crushed, and the
+    // name only gives way when even the menu would not fit.
     const available =
-      bar.getBoundingClientRect().right -
+      bar.clientWidth -
+      (parseFloat(style.paddingLeft) || 0) -
       (parseFloat(style.paddingRight) || 0) -
-      title.getBoundingClientRect().right -
+      titleWidth(title) -
       (parseFloat(style.columnGap) || 0);
     if (!collapsedRef.current) {
       requiredRef.current = rowWidth(cluster);

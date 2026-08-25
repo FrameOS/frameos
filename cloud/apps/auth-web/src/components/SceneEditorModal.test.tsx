@@ -1133,16 +1133,18 @@ describe("SceneEditorModal scene name", () => {
 // The bar's overflow measurement, as the test wants it: the bar's right
 // edge, the title's right edge (what is left between them is the actions'
 // room) and every other element `childWidth` wide (each action button).
-function barRects(barRight: number, titleRight = 400, childWidth = 120) {
+// The bar measures its own inner width and the widths of the title's and
+// the cluster's children (jsdom measures nothing): a bar of `barWidth` with
+// three title children and four actions, each `childWidth` wide.
+function barRects(childWidth = 120) {
   return function (this: HTMLElement) {
-    if (this.classList.contains("editor-modal__bar")) {
-      return { right: barRight } as DOMRect;
-    }
-    if (this.classList.contains("editor-modal__title")) {
-      return { right: titleRight } as DOMRect;
-    }
     return { width: childWidth } as DOMRect;
   };
+}
+function stubBarWidth(barWidth: number) {
+  return vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains("editor-modal__bar") ? barWidth : 0;
+  });
 }
 function barElement() {
   return document.querySelector(".editor-modal__bar") as HTMLElement;
@@ -1158,15 +1160,18 @@ describe("SceneEditorModal bar overflow", () => {
   });
 
   it("collapses the actions into a … menu when the bar has no room, and brings them back when it does", async () => {
-    // Four actions of 120 need 480; 1400 − 400 leaves 1000.
-    const rects = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(barRects(1400));
+    // Four actions of 120 need 480; 1400 − a 360-wide title leaves 1040.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(barRects());
+    const width = stubBarWidth(1400);
     render(<SceneEditorModal canFork canSave downloadUrl="/dl.zip" info={info} sceneId="scene-1" />);
     expect(screen.getByRole("button", { name: "Install" })).toBeTruthy();
     expect(screen.getByRole("link", { name: /Download \.zip/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
 
-    // 700 − 400 leaves 300: not enough.
-    rects.mockImplementation(barRects(700));
+    // 700 − 360 leaves 340: not enough.
+    width.mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("editor-modal__bar") ? 700 : 0;
+    });
     fakeResize(barElement(), 700);
     const more = moreButton();
     expect(more.getAttribute("aria-haspopup")).toBe("menu");
@@ -1205,7 +1210,9 @@ describe("SceneEditorModal bar overflow", () => {
     expect(screen.queryByRole("menu")).toBeNull();
 
     // Wide again: the buttons are back.
-    rects.mockImplementation(barRects(1400));
+    width.mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("editor-modal__bar") ? 1400 : 0;
+    });
     fakeResize(barElement(), 1400);
     expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
     expect(screen.getByRole("button", { name: "Install" })).toBeTruthy();
@@ -1214,7 +1221,8 @@ describe("SceneEditorModal bar overflow", () => {
   });
 
   it("moves between the enabled items with the arrow keys, and runs the chosen one", async () => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(barRects(700));
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(barRects());
+    stubBarWidth(700);
     render(<SceneEditorModal canFork canSave downloadUrl="/dl.zip" info={info} sceneId="scene-1" />);
     await screen.findByTestId("editor");
     fireEvent.click(moreButton());
@@ -1250,7 +1258,8 @@ describe("SceneEditorModal bar overflow", () => {
   });
 
   it("puts Fork first in the menu for a visitor who cannot save", async () => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(barRects(700));
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(barRects());
+    stubBarWidth(700);
     render(<SceneEditorModal canFork downloadUrl="/dl.zip" info={info} sceneId="scene-1" />);
     fireEvent.click(moreButton());
     expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([

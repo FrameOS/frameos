@@ -1932,22 +1932,80 @@ a.tag-pill:hover {
   cursor: pointer;
 }
 
-.live-preview__logs {
+/* The preview's runtime log: a virtualised list (PreviewLog.tsx) in the
+   same footprint the old <pre> had. The colours are theme variables, so
+   html.theme-dark is covered by the palette swap above. */
+.preview-log {
   min-width: 0;
   max-width: 100%;
-  max-height: 200px;
-  overflow: auto;
-  margin: 0;
+  height: 160px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 8px 10px;
   background: var(--bg-soft);
-  color: var(--muted);
+  color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+}
+
+.preview-log__list {
+  height: 100%;
+  padding: 4px 0;
+}
+
+.preview-log__empty {
+  display: flex;
+  height: 100%;
+  min-height: 150px;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.preview-log__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 1px 10px;
+}
+
+.preview-log__row--warn {
+  background: color-mix(in srgb, var(--warning), transparent 88%);
+}
+
+.preview-log__row--error {
+  background: color-mix(in srgb, var(--danger), transparent 88%);
+  color: var(--danger);
+}
+
+.preview-log__time {
+  flex: none;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.preview-log__body {
+  min-width: 0;
+  flex: 1;
   overflow-wrap: anywhere;
+}
+
+.preview-log__event {
+  margin-right: 8px;
+  color: var(--warning);
+}
+
+.preview-log__row--error .preview-log__event {
+  color: var(--danger);
+}
+
+.preview-log__field {
+  margin-right: 8px;
+}
+
+.preview-log__key {
+  color: var(--muted);
 }
 
 @media (max-width: 640px) {
@@ -2269,12 +2327,25 @@ a.stat-tile:hover {
   background: var(--surface);
 }
 
-/* The workspace bar's two sides: the title keeps its width (its scene name
-   is capped, see .editor-modal__name-text), the actions cluster on the
-   right does not wrap — when it would not fit it collapses into the "…"
-   menu instead (useCollapsedActions measures the two). */
+/* The workspace bar's two sides: the actions cluster on the right does not
+   wrap — when it would not fit it collapses into the "…" menu instead
+   (useCollapsedActions measures the two against the title's natural width).
+   The title side can shrink too: its scene name ellipsizes (see
+   .editor-modal__name-text) and the version select clips, so on a phone
+   the cluster never leaves the screen. */
 .editor-modal__bar--scene .editor-modal__title {
-  flex-shrink: 0;
+  /* Shrinks down to its min-content: the name (overflow hidden) goes to
+     nothing before the back button and tabs give up any width. */
+  flex: 1 1 auto;
+}
+
+/* The name contributes nothing to the title's minimum (inline-size
+   containment) and grows into what is left: it is the first thing to
+   ellipsize as the bar narrows and the last to come back. */
+.editor-modal__bar--scene .editor-modal__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  contain: inline-size;
 }
 
 .editor-modal__actions {
@@ -2339,10 +2410,17 @@ a.stat-tile:hover {
 
 /* The bar's version dropdown, right after the panel toggles. */
 .editor-modal__version-select.input {
-  flex-shrink: 0;
+  flex: 0 1 auto;
   width: auto;
+  /* A native select sizes to its widest option ("Manage versions…"); the
+     value shown is "v6 (latest)", so cap it and let the popup be wide. */
+  min-width: 64px;
+  max-width: 120px;
   min-height: 30px;
   padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 600;
 }
@@ -2408,10 +2486,6 @@ a.stat-tile:hover {
 .live-preview-panel .live-preview__form {
   grid-template-columns: 130px minmax(0, 1fr);
   gap: 8px 10px;
-}
-
-.live-preview-panel .live-preview__logs {
-  max-height: 140px;
 }
 
 .live-preview-panel__footnote {
@@ -3022,6 +3096,12 @@ html.theme-dark .ai-panel__render {
     padding: 8px 10px;
   }
 
+  .editor-modal__version-select.input {
+    min-width: 56px;
+    max-width: 88px;
+    padding: 0 4px;
+  }
+
   .editor-modal__panels .view-toggle__button {
     position: relative;
     gap: 0;
@@ -3035,6 +3115,12 @@ html.theme-dark .ai-panel__render {
     overflow: hidden;
     clip: rect(0 0 0 0);
     white-space: nowrap;
+  }
+
+  /* The name would be down to an ellipsis next to a lone pencil; drop it
+     (the Info panel heads the scene with it). */
+  .editor-modal__bar--scene .editor-modal__name {
+    display: none;
   }
 
   .editor-modal__unsaved-long {
