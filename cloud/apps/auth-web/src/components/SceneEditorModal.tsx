@@ -1626,8 +1626,10 @@ export function SceneEditorModal({
     return null;
   }
 
+  // Owners get no hint: the bar's buttons say it. Visitors learn where a
+  // remix ends up.
   const saveHint = canSave
-    ? "“Save as new version” publishes the edited scene as a new version for everyone who installs it."
+    ? undefined
     : canFork
       ? "“Fork & save copy” saves your remix as a private scene in your account."
       : "Sign in to save a remix as a private scene in your account.";
