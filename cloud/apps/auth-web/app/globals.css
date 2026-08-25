@@ -2327,6 +2327,11 @@ a.stat-tile:hover {
 }
 
 .editor-modal__panels--hero {
+  /* The generic .view-toggle pushes itself right with margin-left:auto and
+     wins over the column's align-items:center, so the hero copy needs the
+     matching margin-right to sit under the name rather than off to one
+     side. */
+  margin-right: auto;
   border-radius: 12px;
   padding: 3px;
 }
