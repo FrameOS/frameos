@@ -46,6 +46,8 @@ export const defaultSceneEditorPanels: SceneEditorPanels = {
 const scenePrefix = "#scene";
 /** The editor alone. */
 export const sceneEditorHash = "#scene-editor";
+/** Every panel closed: the workspace shows its title and the four toggles. */
+export const sceneEmptyHash = "#scene-none";
 /** The pre-unification live-preview view: the preview alone. */
 export const livePreviewHash = "#live-preview";
 
@@ -82,12 +84,15 @@ export function singlePanelFor(
   return sceneEditorPanelNames.find((name) => panels[name]) ?? null;
 }
 
-/** The hash for a panel set (the exact set — a reload restores it). An
- * empty set spells as the editor alone: the workspace never shows nothing. */
+/** The hash for a panel set (the exact set — a reload restores it), down to
+ * the empty set: closing every panel is a view of its own. */
 export function sceneEditorHashFor(panels: SceneEditorPanels): string {
+  if (openPanelCount(panels) === 0) {
+    return sceneEmptyHash;
+  }
   const tokens = hashTokens.filter((name) => panels[name]);
   const suffix = tokens.length === 0 ? "" : `-${tokens.join("-")}`;
-  if (panels.editor || tokens.length === 0) {
+  if (panels.editor) {
     return `${sceneEditorHash}${suffix}`;
   }
   return `${scenePrefix}${suffix}`;
@@ -99,6 +104,9 @@ export function sceneEditorHashFor(panels: SceneEditorPanels): string {
 export function sceneEditorPanelsForHash(hash: string): SceneEditorPanels | null {
   if (hash === livePreviewHash) {
     return { ...noSceneEditorPanels, preview: true };
+  }
+  if (hash === sceneEmptyHash) {
+    return { ...noSceneEditorPanels };
   }
   if (!hash.startsWith(scenePrefix)) {
     return null;

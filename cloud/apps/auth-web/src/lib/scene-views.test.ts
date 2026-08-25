@@ -49,8 +49,9 @@ describe("scene editor hashes", () => {
     expect(sceneEditorHashFor(panels({ info: true }))).toBe("#scene-info");
     expect(sceneEditorHashFor(panels({ ai: true, info: true }))).toBe("#scene-info-ai");
     expect(sceneEditorHashFor(panels({ ai: true, preview: true }))).toBe("#scene-preview-ai");
-    // Nothing open is not a view; it spells as the editor alone.
-    expect(sceneEditorHashFor(panels({}))).toBe("#scene-editor");
+    // Nothing open is a view of its own.
+    expect(sceneEditorHashFor(panels({}))).toBe("#scene-none");
+    expect(sceneEditorPanelsForHash("#scene-none")).toEqual(panels({}));
   });
 
   it("reads the panel names in any order, once each", () => {

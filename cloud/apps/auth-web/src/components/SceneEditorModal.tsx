@@ -326,7 +326,9 @@ export function constrainPanels(
       next[name] = false;
     }
   }
-  if (openPanelCount(next) === 0) {
+  // Availability closed everything the caller had open: stand something in.
+  // A set that was already empty is the reader's own choice — left alone.
+  if (openPanelCount(next) === 0 && openPanelCount(panels) > 0) {
     const fallback =
       available.editor === false
         ? sceneEditorPanelNames.find((name) => available[name] !== false)
@@ -338,14 +340,13 @@ export function constrainPanels(
   return next;
 }
 
-/** The set after toggling one panel, or null when that would close the
- * last open one (at least one panel stays). */
+/** The set after toggling one panel. Closing the last one is allowed: the
+ * workspace then shows its title and the toggles, nothing else. */
 export function togglePanelIn(
   panels: SceneEditorPanels,
   panel: SceneEditorPanelName,
-): SceneEditorPanels | null {
-  const next = { ...panels, [panel]: !panels[panel] };
-  return openPanelCount(next) === 0 ? null : next;
+): SceneEditorPanels {
+  return { ...panels, [panel]: !panels[panel] };
 }
 
 /** Below this width the workspace shows one panel at a time, full width,
@@ -567,6 +568,8 @@ type SceneEditorWorkspaceProps = {
   /** The Info column's content (left of the diagram); none for a scene
    * that has no page yet. */
   info?: ReactNode;
+  /** What fills the frame when every panel is closed. */
+  empty?: ReactNode;
 };
 
 const panelCopy: Record<
@@ -592,17 +595,23 @@ export function SceneEditorPanelToggles({
   onToggle,
   available = {},
   active,
+  hero,
 }: {
   panels: SceneEditorPanels;
   onToggle: (panel: SceneEditorPanelName) => void;
   available?: SceneEditorPanelAvailability | undefined;
   /** The one panel shown (single-panel mode); undefined for toggles. */
   active?: SceneEditorPanelName | null | undefined;
+  /** The larger copy the empty workspace shows in the middle of the page. */
+  hero?: boolean | undefined;
 }) {
-  const openCount = openPanelCount(panels);
   const tabs = active !== undefined && active !== null;
   return (
-    <div aria-label="Panels" className="view-toggle editor-modal__panels" role={tabs ? "tablist" : "group"}>
+    <div
+      aria-label="Panels"
+      className={`view-toggle editor-modal__panels${hero ? " editor-modal__panels--hero" : ""}`}
+      role={tabs ? "tablist" : "group"}
+    >
       {sceneEditorPanelNames
         .filter((name) => available[name] !== false)
         .map((name) => {
@@ -628,15 +637,13 @@ export function SceneEditorPanelToggles({
               </button>
             );
           }
-          const last = panels[name] && openCount === 1;
           return (
             <button
               aria-pressed={panels[name]}
               className="view-toggle__button"
-              disabled={last}
               key={name}
               onClick={() => onToggle(name)}
-              title={last ? "At least one panel stays open" : panels[name] ? hide : show}
+              title={panels[name] ? hide : show}
               type="button"
             >
               {content}
@@ -912,6 +919,29 @@ function useCollapsedActions(
   return collapsed;
 }
 
+/** What the workspace shows with every panel closed: the scene's name and
+ * the four toggles, in the middle of the page and in larger type. The bar
+ * keeps its own copy of the toggles. */
+export function SceneEditorEmptyState({
+  name,
+  panels,
+  onToggle,
+  available,
+}: {
+  name: string;
+  panels: SceneEditorPanels;
+  onToggle: (panel: SceneEditorPanelName) => void;
+  available?: SceneEditorPanelAvailability | undefined;
+}) {
+  return (
+    <div className="editor-modal__empty">
+      <h1 className="editor-modal__empty-title">{name}</h1>
+      <SceneEditorPanelToggles available={available} hero onToggle={onToggle} panels={panels} />
+      <p className="copy editor-modal__empty-hint">Pick a panel to open it.</p>
+    </div>
+  );
+}
+
 /** The workspace's top bar: Back, the panel toggles and the rest of the
  * title on the left; on the right `leading` (the Unsaved pill, a picker)
  * and then the actions — as buttons while they fit, as a "…" menu when
@@ -1001,6 +1031,7 @@ export function SceneEditorWorkspace({
   ai,
   preview,
   info,
+  empty,
 }: SceneEditorWorkspaceProps) {
   const resizes: Record<SceneEditorPanelName, Resize> = {
     ai: useResizableWidth(panelWidths.ai),
@@ -1077,6 +1108,9 @@ export function SceneEditorWorkspace({
       ? "preview"
       : layout[layout.length - 1];
   const editorOnly = layout.length === 1 && layout[0] === "editor";
+  // Every panel closed: the frame carries `empty` instead of columns, while
+  // the editor stays mounted (hidden) below it with its edits intact.
+  const nothingOpen = layout.length === 0;
   const template = panelColumnTemplate(
     layout,
     flexible,
@@ -1109,13 +1143,14 @@ export function SceneEditorWorkspace({
   return (
     <div
       className={
-        editorOnly
-          ? "editor-modal__frame"
+        editorOnly || nothingOpen
+          ? `editor-modal__frame${nothingOpen ? " editor-modal__frame--empty" : ""}`
           : `editor-modal__frame editor-modal__frame--with-panels editor-modal__frame--panels-${layout.length}`
       }
       ref={frameRef}
-      style={editorOnly ? undefined : { gridTemplateColumns: template }}
+      style={editorOnly || nothingOpen ? undefined : { gridTemplateColumns: template }}
     >
+      {nothingOpen ? empty : null}
       {open.info ? (
         <aside aria-label="Scene info" className="editor-modal__info">
           {info}
@@ -1524,9 +1559,6 @@ export function SceneEditorModal({
       return;
     }
     const next = togglePanelIn(panels, panel);
-    if (!next) {
-      return;
-    }
     if (panel === "preview" && next.preview) {
       // Hand the panel what the editor holds right now; it follows edits
       // from here on (publishScenes).
@@ -1802,6 +1834,14 @@ export function SceneEditorModal({
             selectScene(nextSceneId);
           }
         }}
+        empty={
+          <SceneEditorEmptyState
+            available={available}
+            name={sceneName ?? info?.scene.name ?? "Scene"}
+            onToggle={togglePanel}
+            panels={panels}
+          />
+        }
         panels={shown}
         preview={{
           canSaveToGallery: canSave,

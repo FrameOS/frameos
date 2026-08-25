@@ -2297,6 +2297,57 @@ a.stat-tile:hover {
   grid-template-rows: minmax(0, 1fr);
 }
 
+/* Every panel closed: the scene's name and the four toggles, centred, in
+   larger type. The editor stays mounted (hidden) behind this. */
+.editor-modal__frame--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.editor-modal__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.editor-modal__empty-title {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.editor-modal__empty-hint {
+  margin: 0;
+  font-size: 13px;
+}
+
+.editor-modal__panels--hero {
+  border-radius: 12px;
+  padding: 3px;
+}
+
+.editor-modal__panels--hero .view-toggle__button {
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 18px;
+  font-size: 16px;
+}
+
+.editor-modal__panels--hero .view-toggle__button:first-child {
+  border-top-left-radius: 9px;
+  border-bottom-left-radius: 9px;
+}
+
+.editor-modal__panels--hero .view-toggle__button:last-child {
+  border-top-right-radius: 9px;
+  border-bottom-right-radius: 9px;
+}
+
 .editor-modal__editor {
   position: relative;
   min-width: 0;

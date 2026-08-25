@@ -224,22 +224,26 @@ const info = {
 
 type ToggleName = "Info" | "Editor" | "AI" | "Preview";
 
+/** The bar's copy of the toggles: with every panel closed the workspace
+ * shows a second, larger set in the middle of the page. */
+function barToggles(): HTMLElement {
+  return document.querySelector(".editor-modal__bar .editor-modal__panels") as HTMLElement;
+}
+
 function panelToggle(name: ToggleName) {
-  return screen.getByRole("button", { name }) as HTMLButtonElement;
+  return within(barToggles()).getByRole("button", { name }) as HTMLButtonElement;
 }
 
 function pressed(): Record<ToggleName, boolean | null> {
   const read = (name: ToggleName) => {
-    const button = screen.queryByRole("button", { name });
+    const button = within(barToggles()).queryByRole("button", { name });
     return button ? button.getAttribute("aria-pressed") === "true" : null;
   };
   return { AI: read("AI"), Editor: read("Editor"), Info: read("Info"), Preview: read("Preview") };
 }
 
 function toggleOrder() {
-  return Array.from(screen.getByRole("group", { name: "Panels" }).querySelectorAll("button")).map(
-    (button) => button.textContent,
-  );
+  return Array.from(barToggles().querySelectorAll("button")).map((button) => button.textContent);
 }
 
 function editorCell() {
@@ -321,8 +325,7 @@ describe("SceneEditorModal landing", () => {
     remember({ ai: false, editor: false, info: true, preview: false });
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
     expect(pressed()).toEqual({ AI: false, Editor: false, Info: true, Preview: false });
-    // The only open panel cannot be closed.
-    expect(panelToggle("Info").disabled).toBe(true);
+    expect(panelToggle("Info").disabled).toBe(false);
     expect(panelToggle("Editor").disabled).toBe(false);
   });
 
@@ -442,19 +445,29 @@ describe("SceneEditorModal panel toggles", () => {
     expect(window.history.state).toBeNull();
   });
 
-  it("keeps the last open panel open", async () => {
+  it("closes the last panel too, and offers them again in the middle of the page", async () => {
     remember({ ai: false, editor: true, info: false, preview: false });
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
     const editorToggle = panelToggle("Editor");
-    expect(editorToggle.disabled).toBe(true);
-    expect(editorToggle.getAttribute("title")).toBe("At least one panel stays open");
+    expect(editorToggle.disabled).toBe(false);
     fireEvent.click(editorToggle);
-    expect(pressed().Editor).toBe(true);
-    expect(window.location.hash).toBe("");
-    // Opening a second one frees it.
-    fireEvent.click(panelToggle("Preview"));
-    expect(panelToggle("Editor").disabled).toBe(false);
-    expect(panelToggle("Preview").disabled).toBe(false);
+    expect(pressed()).toEqual({ AI: false, Editor: false, Info: false, Preview: false });
+    expect(window.location.hash).toBe("#scene-none");
+
+    // The scene's name and a second, larger set of toggles.
+    const empty = document.querySelector(".editor-modal__empty")!;
+    expect(empty).toBeTruthy();
+    expect(within(empty as HTMLElement).getByRole("heading", { level: 1 }).textContent).toBe("Clock");
+    const hero = within(empty as HTMLElement).getAllByRole("button");
+    expect(hero.map((button) => button.textContent)).toEqual(["Info", "Editor", "AI", "Preview"]);
+    // The bar keeps its own copy.
+    expect(document.querySelectorAll(".editor-modal__panels").length).toBe(2);
+
+    // One of them opens its panel again.
+    fireEvent.click(hero[3]!);
+    expect(pressed().Preview).toBe(true);
+    expect(document.querySelector(".editor-modal__empty")).toBeNull();
+    expect(window.location.hash).toBe("#scene-preview");
   });
 
   it("keeps unsaved edits while the Editor is hidden", async () => {
