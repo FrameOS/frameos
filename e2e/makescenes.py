@@ -49,6 +49,17 @@ def include_scene_dependencies(files, all_files_by_stem):
 
     return sorted(selected_files)
 
+# The fixtures under scenes/ carry no settings.execution, and an absent key now
+# reads as "interpreted" everywhere (app.utils.scene_execution). Every fixture is
+# rendered twice here, once through the Nim codegen and once through the
+# interpreter, so neither copy can lean on the default: say which one it is.
+def set_scene_execution(scene, execution):
+    settings = scene.get('settings')
+    if not isinstance(settings, dict):
+        settings = {}
+        scene['settings'] = settings
+    settings['execution'] = execution
+
 def rewrite_fixture_urls(value, fixture_base_url):
     if isinstance(value, dict):
         return {
@@ -136,6 +147,7 @@ if __name__ == '__main__':
             scene = rewrite_fixture_urls(json.load(file), fixture_base_url)
             scene['id'] = file_path.stem
             scene['default'] = False
+            set_scene_execution(scene, 'compiled')
             scenes[file_path.stem] = scene
 
     scene_list = list(scenes.values())
@@ -163,6 +175,7 @@ if __name__ == '__main__':
     # update scene IDs so we could run them alongside the compiled scenes
     for scene_name, scene_data in scenes.items():
         scene_data['id'] = scene_data['id'] + '_interpreted'
+        set_scene_execution(scene_data, 'interpreted')
         for node in scene_data.get('nodes', []):
             if node['type'] == 'scene':
                 node['data']['keyword'] = node['data']['keyword'] + '_interpreted'
