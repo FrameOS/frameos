@@ -296,6 +296,55 @@ proc findMatchingReverse(code: string, closeIndex: int, openCh: char, closeCh: c
     dec i
   -1
 
+# A '/' starts a regex literal (rather than a division) when the previous
+# significant token cannot end an expression: an operator, an opening
+# bracket, a statement boundary, or a keyword like `return`. Without this,
+# `/[<>"]/g` inside a scene's code node opened a phantom string at its `"`
+# and the angle-bracket scan below ran off into unrelated code.
+proc regexLiteralStartsAt(code: string, i: int): bool =
+  if i >= code.len or code[i] != '/':
+    return false
+  if i + 1 < code.len and code[i + 1] in {'/', '*'}:
+    return false
+  var prev = i - 1
+  while prev >= 0 and code[prev] in {' ', '\t', '\n', '\r'}:
+    dec prev
+  if prev < 0:
+    return true
+  if code[prev] in {'(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '~', '^', '+', '-', '*', '%', '<', '>'}:
+    return true
+  if isIdentPart(code[prev]):
+    var start = prev
+    while start >= 0 and isIdentPart(code[start]):
+      dec start
+    let word = code[start + 1..prev]
+    return word in ["return", "typeof", "case", "throw", "in", "of", "delete", "void", "new", "do", "else", "instanceof", "yield", "await"]
+  false
+
+proc skipRegexLiteral(code: string, i: var int) =
+  ## `i` points at the opening '/'; leaves it just past the closing '/' and
+  ## any flags. Character classes may contain unescaped '/'.
+  inc i
+  var inClass = false
+  while i < code.len:
+    let ch = code[i]
+    if ch == '\\':
+      i += 2
+      continue
+    if ch == '\n':
+      return
+    if inClass:
+      if ch == ']':
+        inClass = false
+    elif ch == '[':
+      inClass = true
+    elif ch == '/':
+      inc i
+      while i < code.len and isIdentPart(code[i]):
+        inc i
+      return
+    inc i
+
 proc findMatchingAngle(code: string, openIndex: int): int =
   var i = openIndex
   var depth = 0
@@ -313,6 +362,9 @@ proc findMatchingAngle(code: string, openIndex: int): int =
         continue
       if i + 1 < code.len and code[i + 1] == '*':
         skipBlockComment(code, i)
+        continue
+      if regexLiteralStartsAt(code, i):
+        skipRegexLiteral(code, i)
         continue
     of '<':
       inc depth
@@ -792,7 +844,10 @@ proc stripTypeParametersAndArguments(code: string): string =
     if content.len == 0:
       return false
     for ch in content:
-      if ch in {'{', '}', '"', '\'', '`'}:
+      # Statement separators, newlines and arithmetic never occur inside a
+      # type-argument list; without this, `phase < 0.5;` followed twenty
+      # lines later by `nx > (…)` was stripped as one giant generic.
+      if ch in {'{', '}', '"', '\'', '`', ';', '\n', '\r', '+', '*', '/', '%', '!', '~', '^'}:
         return false
     if "=" in content and not ("extends" in content):
       return false

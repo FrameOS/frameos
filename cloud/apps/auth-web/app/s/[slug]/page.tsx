@@ -21,7 +21,6 @@ import { SceneDescriptionEditor } from "../../../src/components/SceneDescription
 import { SceneFrameosVersionEditor } from "../../../src/components/SceneFrameosVersionEditor";
 import { SceneEditorModal } from "../../../src/components/SceneEditorModal";
 import { SceneImageGallery } from "../../../src/components/SceneImageGallery";
-import { SceneLivePreview } from "../../../src/components/SceneLivePreview";
 import { SceneMarkdown } from "../../../src/components/SceneMarkdown";
 import { SceneTagsEditor } from "../../../src/components/SceneTagsEditor";
 import { StoreSceneActions } from "../../../src/components/StoreSceneActions";
@@ -30,6 +29,8 @@ import { YankVersionButton } from "../../../src/components/YankVersionButton";
 import { getStoreCategory } from "../../../src/lib/categories";
 import {
   getAccountBaseUrl,
+  getCloudBaseUrl,
+  getFramesUrl,
   getScenesBaseUrl,
   hasDatabaseUrl,
 } from "../../../src/lib/env";
@@ -442,6 +443,7 @@ export default async function ScenePage({
       <div className="scene-detail section-block ph-no-capture">
         <SceneImageGallery
           canEdit={isOwner}
+          canOpenLivePreview={scene.status !== "pulled"}
           hasPreview={scene.hasPreview}
           imageIds={galleryImages.map((image) => image.id)}
           sceneId={scene.id}
@@ -458,22 +460,30 @@ export default async function ScenePage({
             <SceneMarkdown description={scene.description} />
           )}
           {/* The diagram is part of what a shared scene IS: everyone gets to
-              look behind it. Only the owner can save a new version. */}
+              look behind it. Only the owner can save a new version. The
+              live preview is the same view with its Preview panel open. */}
           <div className="button-row">
             <SceneEditorModal
               canFork={Boolean(session?.accountId)}
+              canPreview={scene.status !== "pulled"}
+              canRemix={scene.status === "active"}
               canSave={isOwner && scene.status === "active"}
               description={scene.description}
+              downloadUrl={downloadHref}
               height={scene.previewImageHeight}
+              loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
+              pinnedVersion={pinnedVersion ? pinnedVersion.version : null}
               sceneId={scene.id}
+              settingsUrl={`${getFramesUrl()}/settings#settings-openai`}
               share={share}
-              width={scene.previewImageWidth}
-            />
-            <SceneLivePreview
-              canSaveToGallery={isOwner}
-              height={scene.previewImageHeight}
-              sceneId={scene.id}
-              share={share}
+              signedIn={Boolean(session?.accountId)}
+              versions={versions.map((version) => ({
+                createdAt: version.createdAt.toISOString(),
+                version: version.version,
+                yankedAt: version.yankedAt
+                  ? version.yankedAt.toISOString()
+                  : null,
+              }))}
               width={scene.previewImageWidth}
             />
           </div>

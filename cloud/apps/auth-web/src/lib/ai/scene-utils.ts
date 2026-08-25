@@ -293,3 +293,53 @@ export function stampScenePrompt(scenes: unknown[], prompt: string): void {
     (settings as JsonObject).prompt = prompt;
   }
 }
+
+// Repo JS apps (repo/apps/code/*) are templates, not runtime keywords: the
+// frame only knows an app once its config + sources sit in the scene's own
+// "apps" map under a short keyword (the Weather sample carries weatherIcons
+// and weatherPanel that way, with "origin" naming the template). The catalog
+// lists them under their repo path — which the model naturally uses — so
+// bundle them at delivery instead of bouncing a scene the runtime would
+// reject with "Unknown app keyword". Mutates in place; returns what it did.
+export function bundleRepoApps(
+  payload: JsonObject,
+  catalog: Record<string, { keyword: string; sources?: Record<string, string>; [key: string]: unknown }>,
+): string[] {
+  const bundled: string[] = [];
+  const scenes = Array.isArray(payload.scenes) ? payload.scenes : [];
+  for (const scene of scenes) {
+    if (!scene || typeof scene !== "object" || Array.isArray(scene)) {
+      continue;
+    }
+    const entry = scene as JsonObject;
+    const nodes = Array.isArray(entry.nodes) ? entry.nodes : [];
+    for (const node of nodes) {
+      if (!node || typeof node !== "object" || Array.isArray(node)) {
+        continue;
+      }
+      const nodeEntry = node as JsonObject;
+      const data = (nodeEntry.data ?? {}) as JsonObject;
+      const keyword = data.keyword;
+      if (nodeEntry.type !== "app" || typeof keyword !== "string" || !keyword.startsWith("repo/apps/")) {
+        continue;
+      }
+      const template = catalog[keyword];
+      if (!template?.sources || Object.keys(template.sources).length === 0) {
+        continue;
+      }
+      const short = keyword.slice(keyword.lastIndexOf("/") + 1);
+      const apps =
+        entry.apps && typeof entry.apps === "object" && !Array.isArray(entry.apps)
+          ? (entry.apps as JsonObject)
+          : (entry.apps = {});
+      if (!apps[short]) {
+        const { keyword: _keyword, sources, ...config } = template;
+        apps[short] = { ...config, origin: keyword, sources: { ...sources } };
+      }
+      data.keyword = short;
+      nodeEntry.data = data;
+      bundled.push(`${keyword} -> apps.${short}`);
+    }
+  }
+  return bundled;
+}

@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowsPointingInIcon,
   BoltIcon,
@@ -49,6 +49,13 @@ export interface EmbeddedSceneEditorScreenshotResult {
   fallbackDownload?: boolean
 }
 
+/** What a host page can drive in the mounted editor (see `apiRef`). */
+export interface EmbeddedSceneEditorApi {
+  /** Renames a scene through the editor's own form: the diagram keeps its
+   * layout and the change streams out through onScenesChanged. */
+  renameScene: (sceneId: string, name: string) => void
+}
+
 export interface EmbeddedSceneEditorProps {
   scenes: FrameScene[]
   sceneId?: string
@@ -68,6 +75,14 @@ export interface EmbeddedSceneEditorProps {
    * PNG locally (or, under the iframe/mount embeds, to let the embedding
    * page's protocol handler answer instead). */
   onSaveScreenshot?: (dataUrl: string, sceneId: string | null) => Promise<EmbeddedSceneEditorScreenshotResult>
+  /** Hide the toolbar's built-in wasm Preview panel (default true). Hosts
+   * with their own live preview next to the diagram pass false. */
+  showPreviewButton?: boolean
+  /** Fires with the scene the editor shows whenever the user switches scene
+   * tabs (and once on init), so a host can follow the selection. */
+  onSelectedSceneChanged?: (sceneId: string | null) => void
+  /** Filled with the editor's imperative API while it is mounted. */
+  apiRef?: { current: EmbeddedSceneEditorApi | null }
 }
 
 // The scene editor as a plain React component: render it inside any React
@@ -80,7 +95,7 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
   useState(ensurePortalRoots)
   const logicProps = { frameId: EMBED_FRAME_ID }
   useMountedLogic(embedFrameLogic(logicProps))
-  const { initEmbedFrame } = useActions(embedFrameLogic(logicProps))
+  const { initEmbedFrame, updateScene } = useActions(embedFrameLogic(logicProps))
   const { scenes } = useValues(embedFrameLogic(logicProps))
   const { setTheme } = useActions(workspaceLogic)
   const [initialized, setInitialized] = useState(false)
@@ -120,6 +135,26 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
       setSelectedSceneId(props.sceneId)
     }
   }, [props.sceneId])
+
+  const onSelectedSceneChangedRef = useRef(props.onSelectedSceneChanged)
+  onSelectedSceneChangedRef.current = props.onSelectedSceneChanged
+  useEffect(() => {
+    onSelectedSceneChangedRef.current?.(selectedSceneId)
+  }, [selectedSceneId])
+
+  useEffect(() => {
+    const apiRef = props.apiRef
+    if (!apiRef) {
+      return
+    }
+    apiRef.current = {
+      renameScene: (sceneId, name) => updateScene(sceneId, { name }),
+    }
+    return () => {
+      apiRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.apiRef])
 
   useEffect(() => {
     if (!props.onScenesChanged) {
@@ -174,6 +209,7 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
           scenes={scenes}
           theme={theme}
           sceneDescription={props.description?.trim() ? props.description : null}
+          showPreviewButton={props.showPreviewButton ?? true}
         />
       </BindLogic>
     </BindLogic>
@@ -433,12 +469,14 @@ function EmbeddedEditorBody({
   scenes,
   theme,
   sceneDescription,
+  showPreviewButton,
 }: {
   selectedSceneId: string | null
   setSelectedSceneId: (sceneId: string) => void
   scenes: FrameScene[]
   theme: FrameosTheme
   sceneDescription: string | null
+  showPreviewButton: boolean
 }): JSX.Element {
   const { activeEditor } = useValues(frameEditorsLogic({ frameId: EMBED_FRAME_ID }))
   const { closeEditor } = useActions(frameEditorsLogic({ frameId: EMBED_FRAME_ID }))
@@ -447,6 +485,9 @@ function EmbeddedEditorBody({
   useMountedLogic(livePreviewLogic({ frameId: EMBED_FRAME_ID }))
   const [activePanel, setActivePanel] = useState<EmbedPanel | null>(null)
   const appEditor = activeEditor?.kind === 'editApp' ? activeEditor : null
+  const visiblePanels = showPreviewButton
+    ? panelDefinitions
+    : panelDefinitions.filter((definition) => definition.panel !== 'preview')
 
   const dark = theme === 'dark'
   const surface = dark ? 'bg-[#16181c] text-slate-100' : 'bg-white text-slate-900'
@@ -489,7 +530,7 @@ function EmbeddedEditorBody({
               <div className="scene-diagram-utility-buttons scene-diagram-utility-toolbar pointer-events-none flex shrink-0 flex-col items-center gap-2">
                 <EmbedDiagramButtons sceneId={selectedSceneId} />
                 <div className="h-2" />
-                {panelDefinitions.map((definition) => (
+                {visiblePanels.map((definition) => (
                   <button
                     key={definition.panel}
                     type="button"
@@ -511,7 +552,7 @@ function EmbeddedEditorBody({
             </div>
           </div>
         ) : null}
-        {activePanel && selectedScene ? (
+        {activePanel && selectedScene && (showPreviewButton || activePanel !== 'preview') ? (
           <EmbedUtilityDrawer
             panel={activePanel}
             scene={selectedScene}

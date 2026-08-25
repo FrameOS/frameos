@@ -1,15 +1,20 @@
 "use client";
 
-import { ImagePlus, Trash2 } from "lucide-react";
+import { ImagePlus, Play, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { openLivePreviewView, sceneEditorPreviewHash } from "../lib/scene-views";
 
 // Scene-page image gallery: the zip's preview image plus any owner-uploaded
 // gallery images, with a thumbnail strip when there is more than one. Owners
 // add images (moderated server-side) and remove both the primary preview and
-// uploaded gallery images.
+// uploaded gallery images. When the scene can run in the browser, clicking
+// the main image opens the live preview (the scene editor with its Preview
+// panel — the same #scene-editor-preview view as the "Live preview" button);
+// otherwise the image is just an image.
 export function SceneImageGallery({
   canEdit,
+  canOpenLivePreview = false,
   hasPreview,
   imageIds,
   sceneId,
@@ -17,6 +22,9 @@ export function SceneImageGallery({
   share,
 }: {
   canEdit: boolean;
+  /** False for scenes the wasm runtime cannot load (e.g. pulled ones), which
+   * keeps the image a plain, non-clickable image. */
+  canOpenLivePreview?: boolean;
   hasPreview: boolean;
   imageIds: string[];
   sceneId: string;
@@ -102,11 +110,35 @@ export function SceneImageGallery({
     <div className="scene-gallery ph-no-capture">
       {current ? (
         <div className="scene-gallery__main">
-          <img
-            alt={`${sceneName} preview`}
-            className="scene-card__image"
-            src={current.url}
-          />
+          {canOpenLivePreview ? (
+            // A real link so right-click → "open in new tab" works (the hash
+            // reopens the preview there); left click keeps the in-page flow.
+            <a
+              className="scene-gallery__link"
+              href={sceneEditorPreviewHash}
+              onClick={(event) => {
+                event.preventDefault();
+                openLivePreviewView();
+              }}
+              title="Open the live preview"
+            >
+              <img
+                alt={`${sceneName} preview`}
+                className="scene-card__image"
+                src={current.url}
+              />
+              <span aria-hidden className="scene-gallery__hint">
+                <Play size={12} />
+                Live preview
+              </span>
+            </a>
+          ) : (
+            <img
+              alt={`${sceneName} preview`}
+              className="scene-card__image"
+              src={current.url}
+            />
+          )}
           {canEdit ? (
             <button
               className="scene-gallery__remove"

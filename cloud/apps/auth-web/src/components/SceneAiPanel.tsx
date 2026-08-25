@@ -1,0 +1,750 @@
+"use client";
+
+import {
+  AlertTriangle,
+  Check,
+  KeyRound,
+  Loader2,
+  Send,
+  Sparkles,
+  Square,
+} from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  AiChatRequestError,
+  streamAiChat,
+  type AiChatHistoryItem,
+} from "../lib/ai-chat-client";
+import type { AiScenesEvent, SceneJson } from "../lib/ai-scenes-apply";
+import { renderSceneCheck } from "../lib/scene-render-check";
+
+export const RENDER_CHECK_PREFIX = "[Automatic render check]";
+export const MAX_RENDER_CHECK_ROUNDS = 2;
+const MAX_HISTORY_ITEMS = 12;
+/** Rendered-frame previews kept in the transcript (each is a full PNG). */
+export const MAX_RENDER_PREVIEWS = 6;
+
+export const existingSceneSuggestions = [
+  "Change the colour scheme",
+  "Make the text bigger and bolder",
+  "Add today's date in a corner",
+  "Rearrange for a portrait 480×800 panel",
+  "Explain what this scene does",
+];
+
+export const newSceneSuggestions = [
+  "A minimal clock with the date underneath",
+  "Today's weather for Berlin with a big temperature",
+  "A daily quote on a soft gradient background",
+  "A countdown to New Year's Eve",
+];
+
+type ToolLine = {
+  key: string;
+  name: string;
+  label: string;
+  status: "start" | "done" | "error";
+  detail?: string | undefined;
+};
+
+/** The frame the render check drew, ready for an <img>. */
+type RenderPreview = { src: string; width: number; height: number };
+
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  /** A render-check feedback turn the panel sent on the user's behalf. */
+  auto?: boolean;
+  tools?: ToolLine[];
+  streaming?: boolean;
+  stopped?: boolean;
+  error?: string | null;
+  /** Outcome of the in-browser render check, once it ran. */
+  check?: { ok: boolean; text: string } | null;
+  /** What the render check drew; dropped from older messages to bound memory. */
+  preview?: RenderPreview | null;
+};
+
+type FatalState =
+  | { kind: "login_required" }
+  | { kind: "missing_api_key" }
+  | { kind: "rate_limited" }
+  | { kind: "error"; message: string };
+
+export type SceneAiPanelProps = {
+  /** The store scene being viewed/edited, if any. */
+  storeSceneId?: string | undefined;
+  /** The editor's LATEST scenes (the editor reports edits debounced). */
+  getScenes: () => SceneJson[] | null;
+  selectedSceneId?: string | null | undefined;
+  width: number;
+  height: number;
+  /** Apply a scenes event to the editor. May return the id of the scene it
+   * ended up selecting, which the render check then targets. */
+  onScenes: (event: AiScenesEvent) => void | string | null;
+  signedIn: boolean;
+  /** Submitted as the first turn as soon as the panel mounts (signed in), or
+   * pre-filled into the prompt box (signed out). */
+  initialPrompt?: string | undefined;
+  suggestions?: string[] | undefined;
+  /** Whether the editor holds an existing scene or a brand-new blank one;
+   * picks the default suggestions and placeholder. */
+  mode?: "existing" | "new" | undefined;
+  /** Where the OpenAI key is set (the fleet workspace's settings page). */
+  settingsUrl?: string | undefined;
+  /** The sign-in page; `return_to` is appended. */
+  loginUrl?: string | undefined;
+  /** One line telling the user where their saves go. */
+  saveHint?: string | undefined;
+};
+
+function newId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function historyFromMessages(messages: ChatMessage[]): AiChatHistoryItem[] {
+  return messages
+    .filter((message) => message.content.trim() && !message.error && !message.streaming)
+    .map((message) => ({ content: message.content.trim(), role: message.role }))
+    .slice(-MAX_HISTORY_ITEMS);
+}
+
+function formatCheckFeedback(errors: string[], rendered: boolean): string {
+  const reported = errors.slice(0, 8);
+  return (
+    `${RENDER_CHECK_PREFIX} The scene rendered${rendered ? "" : " no image and"} with these errors:\n` +
+    reported.map((error) => `- ${error}`).join("\n") +
+    (errors.length > reported.length ? `\n(and ${errors.length - reported.length} more)` : "") +
+    "\nPlease fix the scene so it renders without errors and deliver the corrected version."
+  );
+}
+
+// Attaches the preview to `id` and drops previews from older messages past
+// MAX_RENDER_PREVIEWS, keeping their status text.
+function withPreview(messages: ChatMessage[], id: string, preview: RenderPreview | null): ChatMessage[] {
+  const next = messages.map((message) => (message.id === id ? { ...message, preview } : message));
+  let kept = 0;
+  for (let index = next.length - 1; index >= 0; index -= 1) {
+    const message = next[index]!;
+    if (!message.preview) {
+      continue;
+    }
+    if (kept < MAX_RENDER_PREVIEWS) {
+      kept += 1;
+    } else {
+      next[index] = { ...message, preview: null };
+    }
+  }
+  return next;
+}
+
+function blobUrlFromDataUrl(dataUrl: string): string | null {
+  const match = /^data:image\/png;base64,([A-Za-z0-9+/=]*)$/.exec(dataUrl);
+  if (!match || typeof URL === "undefined" || typeof URL.createObjectURL !== "function") {
+    return null;
+  }
+  try {
+    const binary = atob(match[1]!);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+  } catch {
+    return null;
+  }
+}
+
+// Browsers refuse top-frame navigation to data: URLs, so a click opens the
+// same bytes as a blob: URL; the href stays for copy-link and hover.
+function openRenderPreview(event: MouseEvent<HTMLAnchorElement>, src: string): void {
+  const url = blobUrlFromDataUrl(src);
+  if (!url) {
+    return;
+  }
+  event.preventDefault();
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+function RenderPreviewImage({ preview }: { preview: RenderPreview }) {
+  return (
+    <a
+      className="ai-panel__render-link"
+      href={preview.src}
+      onClick={(event) => openRenderPreview(event, preview.src)}
+      rel="noopener"
+      target="_blank"
+      title="Open the rendered frame in a new tab"
+    >
+      <img
+        alt="Rendered preview of the scene"
+        className="ai-panel__render"
+        height={preview.height}
+        src={preview.src}
+        width={preview.width}
+      />
+    </a>
+  );
+}
+
+function AssistantMarkdown({ content }: { content: string }) {
+  return (
+    <div className="markdown-description ai-panel__markdown">
+      <ReactMarkdown
+        components={{
+          a: ({ children, href, node, ...props }) => {
+            void node;
+            const external = href?.startsWith("https://") || href?.startsWith("http://");
+            return (
+              <a {...props} href={href} {...(external ? { rel: "noreferrer", target: "_blank" } : {})}>
+                {children}
+              </a>
+            );
+          },
+        }}
+        remarkPlugins={[remarkGfm]}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function ToolActivity({ tools, streaming }: { tools: ToolLine[]; streaming: boolean }) {
+  if (tools.length === 0) {
+    return null;
+  }
+  const last = tools[tools.length - 1]!;
+  const summary =
+    streaming && last.status === "start"
+      ? `${last.label}…`
+      : `${tools.length} step${tools.length === 1 ? "" : "s"}`;
+  return (
+    <details className="ai-panel__tools">
+      <summary className="ai-panel__tools-summary">
+        {streaming && last.status === "start" ? (
+          <Loader2 aria-hidden className="ai-panel__spin" size={13} />
+        ) : null}
+        {summary}
+      </summary>
+      <ul className="ai-panel__tool-list">
+        {tools.map((tool) => (
+          <li
+            className={
+              tool.status === "error"
+                ? "ai-panel__tool ai-panel__tool--error"
+                : "ai-panel__tool"
+            }
+            key={tool.key}
+          >
+            {tool.status === "start" ? (
+              <Loader2 aria-hidden className="ai-panel__spin" size={12} />
+            ) : tool.status === "error" ? (
+              <AlertTriangle aria-hidden size={12} />
+            ) : (
+              <Check aria-hidden size={12} />
+            )}
+            <span>
+              {tool.label}
+              {tool.status === "error" && tool.detail ? ` — ${tool.detail}` : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+// The AI chat column of the scene editor: a transcript, streaming replies,
+// tool activity, and the scenes the agent delivers, applied to the editor
+// through onScenes. State stays in React — this app doesn't use kea.
+export function SceneAiPanel({
+  storeSceneId,
+  getScenes,
+  selectedSceneId,
+  width,
+  height,
+  onScenes,
+  signedIn,
+  initialPrompt,
+  suggestions,
+  mode = "existing",
+  settingsUrl,
+  loginUrl = "/login",
+  saveHint,
+}: SceneAiPanelProps) {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [fatal, setFatal] = useState<FatalState | null>(null);
+  const [chatId, setChatId] = useState<string>(() => newId());
+  const [returnTo, setReturnTo] = useState<string>("");
+  const abortRef = useRef<AbortController | null>(null);
+  const busyRef = useRef(false);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const chatIdRef = useRef(chatId);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  messagesRef.current = messages;
+  chatIdRef.current = chatId;
+
+  // Always the freshest props for the in-flight turn (it spans awaits).
+  const propsRef = useRef({ getScenes, height, mode, onScenes, selectedSceneId, storeSceneId, width });
+  propsRef.current = { getScenes, height, mode, onScenes, selectedSceneId, storeSceneId, width };
+
+  useEffect(() => {
+    setReturnTo(window.location.href);
+  }, []);
+
+  useEffect(() => {
+    const element = transcriptRef.current;
+    if (element) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [messages, status]);
+
+  const updateMessage = useCallback((id: string, patch: Partial<ChatMessage> | ((message: ChatMessage) => Partial<ChatMessage>)) => {
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === id
+          ? { ...message, ...(typeof patch === "function" ? patch(message) : patch) }
+          : message,
+      ),
+    );
+  }, []);
+
+  const submit = useCallback(
+    async (rawPrompt: string, round = 0): Promise<void> => {
+      const prompt = rawPrompt.trim();
+      if (!prompt || busyRef.current || !signedIn) {
+        return;
+      }
+      busyRef.current = true;
+      setBusy(true);
+      setFatal(null);
+      setStatus(null);
+
+      const history = historyFromMessages(messagesRef.current);
+      const userMessage: ChatMessage = {
+        auto: prompt.startsWith(RENDER_CHECK_PREFIX),
+        content: prompt,
+        id: newId(),
+        role: "user",
+      };
+      const assistantId = newId();
+      setMessages((current) => [
+        ...current,
+        userMessage,
+        { content: "", id: assistantId, role: "assistant", streaming: true, tools: [] },
+      ]);
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const { getScenes: readScenes, onScenes: applyScenes, selectedSceneId: selected, storeSceneId: storeId } =
+        propsRef.current;
+      const editorScenes = readScenes() ?? [];
+      const targetScene =
+        editorScenes.find((scene) => scene.id === selected) ?? editorScenes[0];
+
+      let content = "";
+      let streamError: string | null = null;
+      let deliveredSceneId: string | null = null;
+      let aborted = false;
+      try {
+        await streamAiChat(
+          {
+            chatId: chatIdRef.current,
+            history,
+            prompt,
+            ...(storeId ? { storeSceneId: storeId } : {}),
+            surface: propsRef.current.mode === "new" ? "store-new" : "store",
+            ...(targetScene ? { scene: targetScene, sceneId: targetScene.id } : {}),
+            ...(editorScenes.length > 0 ? { scenes: editorScenes } : {}),
+          },
+          {
+            onEvent: (event) => {
+              switch (event.type) {
+                case "chat":
+                  if (event.chatId && event.chatId !== chatIdRef.current) {
+                    chatIdRef.current = event.chatId;
+                    setChatId(event.chatId);
+                  }
+                  break;
+                case "delta":
+                  content += event.text;
+                  updateMessage(assistantId, { content });
+                  break;
+                case "tool":
+                  updateMessage(assistantId, (message) => {
+                    const tools = [...(message.tools ?? [])];
+                    if (event.status === "start") {
+                      tools.push({
+                        key: `${tools.length}-${event.name}`,
+                        label: event.label || event.name,
+                        name: event.name,
+                        status: "start",
+                      });
+                    } else {
+                      // Close the most recent open line for this tool.
+                      for (let index = tools.length - 1; index >= 0; index -= 1) {
+                        const line = tools[index]!;
+                        if (line.name === event.name && line.status === "start") {
+                          tools[index] = { ...line, detail: event.detail, status: event.status };
+                          break;
+                        }
+                      }
+                    }
+                    return { tools };
+                  });
+                  break;
+                case "scenes": {
+                  const applied = applyScenes(event);
+                  const incomingId = event.scenes[0]?.id;
+                  deliveredSceneId =
+                    (typeof applied === "string" && applied) ||
+                    (typeof incomingId === "string" && incomingId) ||
+                    (event.tool === "modify_scene" ? (targetScene?.id ?? null) : null);
+                  break;
+                }
+                case "done":
+                  break;
+                case "error":
+                  streamError = event.detail;
+                  break;
+              }
+            },
+            signal: controller.signal,
+          },
+        );
+      } catch (error) {
+        if (controller.signal.aborted) {
+          aborted = true;
+        } else if (error instanceof AiChatRequestError) {
+          if (error.code === "login_required") {
+            setFatal({ kind: "login_required" });
+          } else if (error.code === "missing_api_key") {
+            setFatal({ kind: "missing_api_key" });
+          } else if (error.code === "rate_limited" || error.status === 429) {
+            setFatal({ kind: "rate_limited" });
+          } else {
+            setFatal({ kind: "error", message: error.message });
+          }
+          // A pre-stream failure: drop the empty placeholder, keep the prompt.
+          setMessages((current) => current.filter((message) => message.id !== assistantId));
+          busyRef.current = false;
+          setBusy(false);
+          abortRef.current = null;
+          return;
+        } else {
+          streamError = error instanceof Error ? error.message : String(error);
+        }
+      }
+      abortRef.current = null;
+
+      updateMessage(assistantId, {
+        content: content || (streamError || aborted ? "" : "Done."),
+        error: streamError,
+        stopped: aborted,
+        streaming: false,
+      });
+
+      if (deliveredSceneId && !streamError && !aborted) {
+        // Render the delivered scene once in the wasm preview runtime and
+        // hand runtime errors straight back to the agent — a scene that
+        // validated as JSON can still fail at render time.
+        setStatus("Checking that the scene renders…");
+        const { getScenes: readLatest, height: checkHeight, width: checkWidth } = propsRef.current;
+        const check = await renderSceneCheck({
+          height: checkHeight,
+          sceneId: deliveredSceneId,
+          scenes: readLatest() ?? editorScenes,
+          width: checkWidth,
+        });
+        setStatus(null);
+        const uniqueErrors = [...new Set(check.errors)];
+        const passed = uniqueErrors.length === 0 && check.rendered;
+        const verdict = passed
+          ? {
+              ok: true,
+              text: `Render check passed${check.renderMs !== null ? ` (${(check.renderMs / 1000).toFixed(1)}s)` : ""}`,
+            }
+          : {
+              ok: false,
+              text: `Render check found ${uniqueErrors.length || "a render"} problem${uniqueErrors.length === 1 ? "" : "s"}`,
+            };
+        // The frame is shown even when errors were logged: it is what the
+        // panel would display.
+        const preview: RenderPreview | null = check.pngDataUrl
+          ? {
+              height: check.height > 0 ? check.height : checkHeight,
+              src: check.pngDataUrl,
+              width: check.width > 0 ? check.width : checkWidth,
+            }
+          : null;
+        setMessages((current) =>
+          withPreview(
+            current.map((message) =>
+              message.id === assistantId ? { ...message, check: verdict } : message,
+            ),
+            assistantId,
+            preview,
+          ),
+        );
+        if (!passed) {
+          if (round < MAX_RENDER_CHECK_ROUNDS) {
+            busyRef.current = false;
+            setBusy(false);
+            await submit(formatCheckFeedback(uniqueErrors, check.rendered), round + 1);
+            return;
+          }
+        }
+      }
+      busyRef.current = false;
+      setBusy(false);
+    },
+    [signedIn, updateMessage],
+  );
+
+  // The entry points hand over a prompt (?ai=… / ?prompt=…): send it right
+  // away when signed in, otherwise leave it in the box for after sign-in.
+  const initialPromptRef = useRef(initialPrompt);
+  useEffect(() => {
+    const prompt = initialPromptRef.current?.trim();
+    if (!prompt) {
+      return;
+    }
+    if (signedIn) {
+      void submit(prompt);
+    } else {
+      setInput(prompt);
+    }
+    // Runs once on mount by design: the prompt is a one-off hand-over.
+  }, []);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  function stop() {
+    abortRef.current?.abort();
+  }
+
+  function send() {
+    const prompt = input.trim();
+    if (!prompt || busy) {
+      return;
+    }
+    setInput("");
+    void submit(prompt);
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      send();
+    }
+  }
+
+  const chips = suggestions ?? (mode === "new" ? newSceneSuggestions : existingSceneSuggestions);
+  const signInHref = `${loginUrl}${loginUrl.includes("?") ? "&" : "?"}return_to=${encodeURIComponent(returnTo || "/")}`;
+  const placeholder =
+    mode === "new"
+      ? "Describe the scene, e.g. “A clock with the date underneath, big white text on dark green”"
+      : "Ask for a change, e.g. “make the title text bigger”";
+
+  return (
+    <section aria-label="AI assistant" className="ai-panel">
+      <header className="ai-panel__header">
+        <Sparkles aria-hidden size={16} />
+        <span>AI assistant</span>
+        <span className="pill ai-panel__beta">Beta</span>
+      </header>
+
+      <div className="ai-panel__transcript" ref={transcriptRef}>
+        {!signedIn ? (
+          <div className="notice ai-panel__notice">
+            <strong>Sign in to use the AI.</strong>
+            <p className="copy">
+              The assistant edits the scene in the editor and runs on your own
+              OpenAI key.
+            </p>
+            <a className="button button--small" href={signInHref}>
+              Sign in
+            </a>
+          </div>
+        ) : null}
+
+        {messages.length === 0 && signedIn && !fatal ? (
+          <div className="ai-panel__empty">
+            <p className="copy">
+              {mode === "new"
+                ? "Describe the scene you want and the assistant builds it in the editor. A few ideas:"
+                : "Ask for changes to this scene and the assistant edits it in the editor. A few ideas:"}
+            </p>
+            <div className="ai-panel__chips">
+              {chips.map((chip) => (
+                <button
+                  className="ai-panel__chip"
+                  disabled={busy}
+                  key={chip}
+                  onClick={() => void submit(chip)}
+                  type="button"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {messages.map((message) =>
+          message.role === "user" ? (
+            message.auto ? (
+              <div className="ai-panel__bubble ai-panel__bubble--auto" key={message.id}>
+                <span className="ai-panel__auto-label">Automatic render check</span>
+                <pre className="ai-panel__auto-text">
+                  {message.content.slice(RENDER_CHECK_PREFIX.length).trim()}
+                </pre>
+              </div>
+            ) : (
+              <div className="ai-panel__bubble ai-panel__bubble--user" key={message.id}>
+                {message.content}
+              </div>
+            )
+          ) : (
+            <div className="ai-panel__bubble ai-panel__bubble--assistant" key={message.id}>
+              <ToolActivity streaming={Boolean(message.streaming)} tools={message.tools ?? []} />
+              {message.content ? <AssistantMarkdown content={message.content} /> : null}
+              {message.streaming && !message.content ? (
+                <span className="ai-panel__thinking">
+                  <Loader2 aria-hidden className="ai-panel__spin" size={14} />
+                  Thinking…
+                </span>
+              ) : null}
+              {message.stopped ? <span className="ai-panel__muted">Stopped.</span> : null}
+              {message.error ? (
+                <p className="notice notice-error ai-panel__notice" role="alert">
+                  {message.error}
+                </p>
+              ) : null}
+              {message.check ? (
+                <span
+                  className={
+                    message.check.ok
+                      ? "ai-panel__check ai-panel__check--ok"
+                      : "ai-panel__check ai-panel__check--warn"
+                  }
+                >
+                  {message.check.ok ? (
+                    <Check aria-hidden size={12} />
+                  ) : (
+                    <AlertTriangle aria-hidden size={12} />
+                  )}
+                  {message.check.text}
+                </span>
+              ) : null}
+              {message.preview ? <RenderPreviewImage preview={message.preview} /> : null}
+            </div>
+          ),
+        )}
+
+        {status ? (
+          <div className="ai-panel__status" role="status">
+            <Loader2 aria-hidden className="ai-panel__spin" size={14} />
+            {status}
+          </div>
+        ) : null}
+
+        {fatal?.kind === "login_required" ? (
+          <div className="notice ai-panel__notice" role="alert">
+            Your session has expired. <a href={signInHref}>Sign in again</a> to keep going.
+          </div>
+        ) : null}
+        {fatal?.kind === "missing_api_key" ? (
+          <div className="notice ai-panel__notice" role="alert">
+            <strong className="ai-panel__notice-title">
+              <KeyRound aria-hidden size={14} />
+              The AI needs an OpenAI API key.
+            </strong>
+            <p className="copy">
+              The assistant runs on your own key, which is not set yet.
+              {settingsUrl ? (
+                <>
+                  {" "}
+                  Add it under{" "}
+                  <a href={settingsUrl} rel="noreferrer" target="_blank">
+                    Settings → OpenAI → API key for AI chat
+                  </a>
+                  , then try again.
+                </>
+              ) : (
+                " Add it in your account's settings (OpenAI → API key for AI chat), then try again."
+              )}
+            </p>
+          </div>
+        ) : null}
+        {fatal?.kind === "rate_limited" ? (
+          <p className="notice notice-error ai-panel__notice" role="alert">
+            Too many requests — wait a minute and try again.
+          </p>
+        ) : null}
+        {fatal?.kind === "error" ? (
+          <p className="notice notice-error ai-panel__notice" role="alert">
+            {fatal.message}
+          </p>
+        ) : null}
+      </div>
+
+      <form
+        className="ai-panel__composer"
+        onSubmit={(event) => {
+          event.preventDefault();
+          send();
+        }}
+      >
+        <textarea
+          aria-label="Message the AI"
+          className="ai-panel__input"
+          disabled={!signedIn}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          ref={textareaRef}
+          rows={3}
+          value={input}
+        />
+        <div className="ai-panel__composer-row">
+          <span className="ai-panel__hint">Enter to send · Shift+Enter for a new line</span>
+          {busy ? (
+            <button className="button button--small button--subtle" onClick={stop} type="button">
+              <Square aria-hidden size={14} />
+              Stop
+            </button>
+          ) : (
+            <button
+              className="button button--small button-primary"
+              disabled={!signedIn || !input.trim()}
+              type="submit"
+            >
+              <Send aria-hidden size={14} />
+              Send
+            </button>
+          )}
+        </div>
+        {saveHint ? <p className="ai-panel__save-hint">{saveHint}</p> : null}
+      </form>
+    </section>
+  );
+}

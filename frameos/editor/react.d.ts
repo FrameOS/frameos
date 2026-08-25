@@ -19,6 +19,13 @@ export interface EmbeddedSceneEditorScreenshotResult {
   fallbackDownload?: boolean | undefined
 }
 
+/** What a host page can drive in the mounted editor (see `apiRef`). */
+export interface EmbeddedSceneEditorApi {
+  /** Renames a scene through the editor's own form: the diagram keeps its
+   * layout and the change streams out through onScenesChanged. */
+  renameScene: (sceneId: string, name: string) => void
+}
+
 export interface EmbeddedSceneEditorProps {
   scenes: unknown[]
   sceneId?: string | undefined
@@ -35,6 +42,14 @@ export interface EmbeddedSceneEditorProps {
   onScenesChanged?: ((scenes: unknown[]) => void) | undefined
   /** Preview-panel screenshot handler; omit to let the editor download the PNG locally. */
   onSaveScreenshot?: ((dataUrl: string, sceneId: string | null) => Promise<EmbeddedSceneEditorScreenshotResult>) | undefined
+  /** Hide the toolbar's built-in wasm Preview panel (default true); hosts with
+   * their own live preview next to the diagram pass false. */
+  showPreviewButton?: boolean | undefined
+  /** Fires with the scene the editor shows whenever the user switches scene
+   * tabs (and once on init), so a host can follow the selection. */
+  onSelectedSceneChanged?: ((sceneId: string | null) => void) | undefined
+  /** Filled with the editor's imperative API while it is mounted. */
+  apiRef?: { current: EmbeddedSceneEditorApi | null } | undefined
 }
 
 export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Element

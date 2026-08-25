@@ -1108,6 +1108,13 @@ export const diagramLogic = kea<diagramLogicType>([
       if (shouldRearrange && !isDragging && !cache.hasAutoArranged) {
         cache.hasAutoArranged = true
         actions.rearrangeCurrentScene()
+        // rearrangeCurrentScene dispatched synchronously: the arranged nodes
+        // already went through this listener and into the frame form. Falling
+        // through would write THIS invocation's stale snapshot (the -9999
+        // sentinels) back over that layout, which is why scenes loaded with
+        // autoArrangeOnLoad came out unarranged unless someone pressed
+        // "Realign nodes" by hand.
+        return
       }
 
       if (shouldRearrangeForMarker && cache.hasAutoArranged) {

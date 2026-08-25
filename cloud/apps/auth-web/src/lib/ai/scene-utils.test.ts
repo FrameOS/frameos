@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bundleRepoApps,
   splitStateNodesByApp,
   validateAppKeywords,
   validateScenePayload,
@@ -185,5 +186,39 @@ describe("splitStateNodesByApp", () => {
       "app-a",
     ]);
     expect(edge.source).toBe("state-1");
+  });
+});
+
+describe("bundleRepoApps", () => {
+  it("copies repo JS app templates into the scene's apps map under short keywords", () => {
+    const catalog = {
+      "repo/apps/code/weatherIcons": {
+        category: "data",
+        keyword: "repo/apps/code/weatherIcons",
+        name: "Weather icon set (JS)",
+        output: [{ name: "icons", type: "json" }],
+        sources: { "app.ts": "export function get() { return {} }", "config.json": "{}" },
+      },
+      "render/text": { keyword: "render/text" },
+    };
+    const scene = minimalScene();
+    (scene.nodes as JsonObject[]).push({
+      data: { config: {}, keyword: "repo/apps/code/weatherIcons" },
+      id: "icons",
+      type: "app",
+    });
+    const payload = { scenes: [scene] };
+    expect(bundleRepoApps(payload, catalog)).toEqual(["repo/apps/code/weatherIcons -> apps.weatherIcons"]);
+    const apps = scene.apps as Record<string, JsonObject>;
+    expect(apps.weatherIcons).toMatchObject({
+      category: "data",
+      name: "Weather icon set (JS)",
+      origin: "repo/apps/code/weatherIcons",
+      sources: { "app.ts": expect.stringContaining("export function get") },
+    });
+    expect(apps.weatherIcons?.keyword).toBeUndefined();
+    expect((scene.nodes as JsonObject[])[2]?.data).toEqual({ config: {}, keyword: "weatherIcons" });
+    // Idempotent: a second pass finds nothing left to bundle.
+    expect(bundleRepoApps(payload, catalog)).toEqual([]);
   });
 });

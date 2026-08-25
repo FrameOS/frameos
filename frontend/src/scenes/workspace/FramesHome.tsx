@@ -5,6 +5,7 @@ import { useMemo, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent } from 'react'
 import {
   ArchiveBoxIcon,
+  ArrowUpTrayIcon,
   ArrowUturnLeftIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -671,8 +672,9 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
   const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
   const [newBlankSceneModalOpen, setNewBlankSceneModalOpen] = useState(false)
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
-  const { applyFavouriteTemplatesToFrame } = useActions(templatesLogic({ frameId: frame.id }))
+  const { applyFavouriteTemplatesToFrame, uploadSceneFile } = useActions(templatesLogic({ frameId: frame.id }))
   const { favouriteTemplates, installableFavouriteTemplates } = useValues(templatesLogic({ frameId: frame.id }))
+  const uploadSceneInputRef = useRef<HTMLInputElement>(null)
   // Live list, so "Split screen" unlocks as soon as the first scene is added.
   const hasScenes = liveScenes.length > 0
   const favouriteTemplateCount = favouriteTemplates.length
@@ -735,6 +737,35 @@ function AddSceneDrawerActions({ frame }: { frame: FrameType }): JSX.Element {
           <span className="frameos-muted block truncate text-xs">Open AI chat for this frame</span>
         </span>
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          uploadSceneInputRef.current?.click()
+        }}
+        className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
+          <ArrowUpTrayIcon className="h-6 w-6" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="frameos-strong block truncate text-sm font-semibold">Upload scene</span>
+          <span className="frameos-muted block truncate text-xs">Upload a template .zip or a scenes .json</span>
+        </span>
+      </button>
+      <input
+        ref={uploadSceneInputRef}
+        type="file"
+        accept=".zip,.json,application/zip,application/json"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          // Reset so picking the same file again re-fires onChange.
+          event.target.value = ''
+          if (file) {
+            uploadSceneFile(file)
+          }
+        }}
+      />
       {favouriteTemplateCount > 0 ? (
         <button
           type="button"

@@ -114,6 +114,16 @@ proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image]
   except CatchableError:
     return none(Image)
 
+proc svgDecodeError*(svg: string, width: int, height: int): string =
+  ## Why `decodeSvgWithFallback` produced nothing — the parser's own message,
+  ## so a JS app's broken markup (an unescaped '&', an unsupported tag) is
+  ## reported instead of surfacing as an unexplained "No image provided".
+  try:
+    discard parseSvg(svg, width, height)
+    ""
+  except CatchableError as e:
+    e.msg
+
 proc renderSvgIntoTarget*(svg: string, target: Image): bool =
   ## Rasterizes an SVG straight into a buffer the caller already owns, rather
   ## than allocating one and blending it away afterwards. Returns false when

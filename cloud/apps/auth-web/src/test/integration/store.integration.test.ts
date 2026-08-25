@@ -1346,6 +1346,61 @@ describe("store publish and distribution", () => {
     expect(owner.status).toBe(200);
   });
 
+  it("serves a requested scenes.json version, yanked or not, defaulting to the newest live one", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const scenesV1 = [{ fields: [], id: "scene-1", nodes: [{ data: { keyword: "v1" } }] }];
+    const scenesV2 = [{ fields: [], id: "scene-1", nodes: [{ data: { keyword: "v2" } }] }];
+    const scene = (
+      await readJson(
+        await publish(accessToken, {
+          content_base64: templateZip({ scenes: scenesV1 }).toString("base64"),
+          visibility: "public",
+        }),
+      )
+    ).scene as Record<string, unknown>;
+    const sceneId = scene.id as string;
+    await publish(accessToken, {
+      content_base64: templateZip({ scenes: scenesV2 }).toString("base64"),
+    }); // v2
+
+    const get = (query = "") =>
+      getScenesJson(
+        request(`/api/store/scenes/${sceneId}/scenes.json${query}`, "GET"),
+        ctx(sceneId),
+      );
+
+    // Newest by default; an explicit version picks that one.
+    const latest = await get();
+    expect(latest.headers.get("x-scene-version")).toBe("2");
+    expect(latest.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(await latest.json()).toEqual(scenesV2);
+    const first = await get("?version=1");
+    expect(first.headers.get("x-scene-version")).toBe("1");
+    expect(await first.json()).toEqual(scenesV1);
+
+    // Yank v2: the default falls back to v1, ?version=2 still serves it.
+    const yank = await patchVersion(
+      request(`/api/account/scenes/${sceneId}/versions/2`, "PATCH", {
+        body: { yanked: true },
+        headers: { origin: baseUrl },
+      }),
+      { params: Promise.resolve({ sceneId, version: "2" }) },
+    );
+    expect(yank.status).toBe(200);
+    cookieJar.clear();
+    const fallback = await get();
+    expect(fallback.headers.get("x-scene-version")).toBe("1");
+    expect(await fallback.json()).toEqual(scenesV1);
+    const yanked = await get("?version=2");
+    expect(yanked.status).toBe(200);
+    expect(yanked.headers.get("x-scene-version")).toBe("2");
+    expect(await yanked.json()).toEqual(scenesV2);
+
+    expect((await get("?version=9")).status).toBe(404);
+    expect((await get("?version=abc")).status).toBe(400);
+    expect((await get("?version=0")).status).toBe(400);
+  });
+
   it("lets owners edit scene contents as a new version, and tag scenes", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scene = (

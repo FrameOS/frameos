@@ -1232,6 +1232,9 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       when defined(memProbe): memProbe("    svg decode AFTER")
       if image.isSome:
         return image.get()
+      let reason = svgDecodeError(spec["svg"].getStr(), svgWidth, svgHeight)
+      frameos_apps.logError(owner, "JS app returned an SVG that failed to render: " &
+        (if reason.len > 0: reason else: "unknown error") & " — check for unescaped & < > \" in text, unsupported tags (defs, use, image, filter, mask, clipPath, style, radialGradient) and gradients without gradientUnits=\"userSpaceOnUse\"")
       return nil
     if spec.hasKey("dataUrl"):
       return decodeDataUrl(spec["dataUrl"].getStr())
