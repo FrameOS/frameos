@@ -152,6 +152,29 @@ describe("SceneInfoPanel", () => {
     expect(screen.getByText(/only visible to you/)).toBeTruthy();
   });
 
+  it("freezes a pulled scene for its owner: the notice, no image controls, only Delete", () => {
+    render(
+      <SceneInfoPanel
+        {...info}
+        isOwner
+        scene={{ ...info.scene, pulledReason: "malware report", status: "pulled" }}
+        signedIn
+      />,
+    );
+    const notice = screen.getByRole("alert");
+    expect(notice.textContent).toContain("Pulled");
+    expect(notice.textContent).toContain("pulled by moderation");
+    expect(notice.textContent).toContain("malware report");
+    // The images still render (the owner's session may read them) but the
+    // server refuses edits on a pulled scene, so no add/remove buttons.
+    expect(document.querySelectorAll(".scene-gallery img")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: /Remove image/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add an image to this scene's page" })).toBeNull();
+    // The way out is deleting the scene; visibility cannot be flipped.
+    expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Make (public|private)/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Report scene" })).toBeNull();
+  });
 
   it("heads the column with the name it is given as a heading, the publisher line under it, then the description, then the images", () => {
     render(<SceneInfoPanel {...info} heading={<span>Clock title</span>} />);

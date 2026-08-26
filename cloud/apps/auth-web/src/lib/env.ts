@@ -146,7 +146,7 @@ export function getStoreUrl() {
   return new URL(getStorePath(), getScenesBaseUrl()).toString();
 }
 
-// "My private scenes": the second tab of the scene store, on the scenes host
+// "My scenes": the second tab of the scene store, on the scenes host
 // next to the public store front. It replaced /account/scenes (and its clean
 // alias /scenes on the cloud host), which now redirect here.
 export const myScenesPath = "/my-scenes";

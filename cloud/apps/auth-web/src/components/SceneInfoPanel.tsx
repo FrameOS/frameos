@@ -122,9 +122,11 @@ export function SceneInfoPanel({
           )}
         </div>
       </div>
-      {/* ph-no-capture travels with the gallery too. */}
+      {/* ph-no-capture travels with the gallery too. A pulled scene is
+          frozen server-side (image edits answer scene_pulled), so the owner
+          gets no add/remove controls on it rather than failing ones. */}
       <SceneImageGallery
-        canEdit={isOwner}
+        canEdit={isOwner && isActive}
         hasPreview={scene.hasPreview}
         imageIds={imageIds}
         sceneId={scene.id}
@@ -160,10 +162,24 @@ export function SceneInfoPanel({
       ) : null}
 
       {scene.status === "pulled" ? (
-        <p className="notice-error" role="alert">
-          This scene was pulled by moderation and is hidden from the store
+        <div className="notice notice-error" role="alert">
+          <span className="pill pill-warning">Pulled</span> This scene was pulled by moderation
+          and is hidden from the store
           {scene.pulledReason ? `: ${scene.pulledReason}` : "."}
-        </p>
+          {isOwner || isAdmin
+            ? " Only you and moderators can open this page; the scene cannot be edited, installed or made visible while it is pulled."
+            : ""}
+          {isOwner ? (
+            <div className="notice__actions">
+              <StoreSceneActions
+                name={scene.name}
+                sceneId={scene.id}
+                status={scene.status}
+                visibility={scene.visibility}
+              />
+            </div>
+          ) : null}
+        </div>
       ) : null}
       {isPrivate && isActive ? (
         <div className="notice">

@@ -5,9 +5,13 @@ import { publicBlobUrl, readBlob } from "../../../../../../src/lib/blobs";
 import { detectImageContentType } from "../../../../../../src/lib/store";
 import {
   canAccessPrivateScene,
+  canViewPulledScene,
   shareTokenGrantsAccess,
 } from "../../../../../../src/lib/store-auth";
-import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
+import {
+  jsonError,
+  requireDatabase,
+} from "../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
 
@@ -79,9 +83,16 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     if (!lead) {
       return jsonError("scene_not_found", 404);
     }
-    preview = { content: lead.content, objectKey: lead.objectKey, tag: lead.id };
+    preview = {
+      content: lead.content,
+      objectKey: lead.objectKey,
+      tag: lead.id,
+    };
   }
-  if (scene.status === "pulled") {
+  if (
+    scene.status === "pulled" &&
+    !(await canViewPulledScene(scene.accountId))
+  ) {
     return jsonError("scene_pulled", 410);
   }
   if (scene.visibility !== "public") {
@@ -91,7 +102,11 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     );
     if (
       !shared &&
-      !(await canAccessPrivateScene(db, request.headers.get("authorization"), scene.accountId))
+      !(await canAccessPrivateScene(
+        db,
+        request.headers.get("authorization"),
+        scene.accountId,
+      ))
     ) {
       return jsonError("scene_not_found", 404);
     }

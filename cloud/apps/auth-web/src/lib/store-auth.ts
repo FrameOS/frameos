@@ -1,11 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import type { createDb } from "@frameos-cloud/db";
-import {
-  authenticateLinkedClient,
-  linkedClientHasScope,
-} from "./backend-auth";
+import { authenticateLinkedClient, linkedClientHasScope } from "./backend-auth";
 import { readSession } from "./session";
 import { storePublishScope } from "./store";
+import { accountIsSuperadmin } from "./superadmin";
 
 // A private scene is reachable by its owner two ways: the owner's web session
 // (browsing the store signed in) or a linked client of the owner's account
@@ -22,14 +20,11 @@ export async function canAccessPrivateScene(
     return true;
   }
 
-  const linkedClient = await authenticateLinkedClient(
-    db,
-    authorizationHeader,
-  );
+  const linkedClient = await authenticateLinkedClient(db, authorizationHeader);
   return Boolean(
     linkedClient &&
-      linkedClient.accountId === ownerAccountId &&
-      linkedClientHasScope(linkedClient, storePublishScope),
+    linkedClient.accountId === ownerAccountId &&
+    linkedClientHasScope(linkedClient, storePublishScope),
   );
 }
 
@@ -51,4 +46,21 @@ export function shareTokenGrantsAccess(
   const expected = Buffer.from(sceneShareToken);
   const actual = Buffer.from(provided);
   return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+// A pulled scene is gone for the public, for share-token holders and for
+// linked frames alike — but its owner and moderators still open its page
+// (the store page itself lets them through), so the reads that page is made
+// of (images, scenes.json, the zip) follow the same rule: the owner's or a
+// superadmin's web session, nothing else. Without this the owner sees a
+// page of broken images and a "Could not load the scene (410)".
+export async function canViewPulledScene(ownerAccountId: string) {
+  const session = await readSession();
+  if (!session?.accountId) {
+    return false;
+  }
+  return (
+    session.accountId === ownerAccountId ||
+    (await accountIsSuperadmin(session.accountId))
+  );
 }

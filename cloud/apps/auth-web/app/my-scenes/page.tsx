@@ -4,7 +4,9 @@ import { redirect } from "next/navigation";
 import { createDb, storeScenes } from "@frameos-cloud/db";
 import { CreateSceneWithAiBox } from "../../src/components/CreateSceneWithAiBox";
 import {
+  MyScenesGroupHeading,
   MyScenesView,
+  groupMyScenes,
   type MyScenesRow,
 } from "../../src/components/MyScenesView";
 import { PublicShell } from "../../src/components/PublicShell";
@@ -21,14 +23,16 @@ import { readSession } from "../../src/lib/session";
 import { accountIsSuperadmin } from "../../src/lib/superadmin";
 import { sceneHasAnyImageSql } from "../../src/lib/store-preview";
 
-export const metadata = { title: "My private scenes" };
+export const metadata = { title: "My scenes" };
 
 export const dynamic = "force-dynamic";
 
-// The "My private scenes" tab of the scene store: every scene the signed-in
+// The "My scenes" tab of the scene store: every scene the signed-in
 // account published (private or public), with filters, zip upload, and the
-// visibility/delete actions. This used to be the /account/scenes page (alias
-// /scenes on the cloud host); both now redirect here.
+// visibility/delete actions. Without a visibility filter the list is split
+// into a Public and a Private section, so the two kinds are never mistaken
+// for each other. This used to be the /account/scenes page (alias /scenes on
+// the cloud host); both now redirect here.
 export default async function MyScenesPage({
   searchParams,
 }: {
@@ -109,10 +113,17 @@ export default async function MyScenesPage({
     id: scene.id,
     name: scene.name,
     slug: scene.slug,
+    status: scene.status,
     tags: scene.tags,
     updatedAt: scene.updatedAt.toISOString(),
     visibility: scene.visibility,
   }));
+  // One table per visibility group when nothing narrows the list to a single
+  // visibility; a filtered list is one flat table without a heading.
+  const grouped = !visibility;
+  const tableGroups = grouped
+    ? groupMyScenes(sceneRows)
+    : [{ key: "all", scenes: sceneRows, title: null }];
 
   return (
     <PublicShell isSuperadmin={isSuperadmin} noCapture signedIn>
@@ -120,7 +131,7 @@ export default async function MyScenesPage({
       <section className="section-block">
         <div className="content-header compact-header">
           <div>
-            <h2>My private scenes</h2>
+            <h2>My scenes</h2>
             <p className="copy">
               Scenes you saved to the FrameOS cloud. Private scenes are visible
               only to you and people with a sharing link; public scenes appear
@@ -134,6 +145,7 @@ export default async function MyScenesPage({
         ) : null}
         {accountId ? <SceneZipUpload /> : null}
         <MyScenesView
+          grouped={grouped}
           filters={
             <form action={myScenesUrl} className="filter-bar" method="get">
               <input
@@ -181,91 +193,103 @@ export default async function MyScenesPage({
           scenes={gridRows}
         >
           {sceneRows.length > 0 ? (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th aria-label="Preview" />
-                  <th>Name</th>
-                  <th>Tags</th>
-                  <th>Visibility</th>
-                  <th>Status</th>
-                  <th>Version</th>
-                  <th>Downloads</th>
-                  <th>Updated</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sceneRows.map((scene) => (
-                  <tr key={scene.id}>
-                    <td className="table-thumb-cell">
-                      <Link href={`/s/${scene.slug}`} tabIndex={-1}>
-                        {scene.hasPreview ? (
-                          <img
-                            alt=""
-                            className="table-thumb"
-                            loading="lazy"
-                            src={`/api/store/scenes/${scene.id}/image`}
-                          />
-                        ) : (
+            tableGroups.map((group) => (
+              <section className="scene-group" key={group.key}>
+                {group.title ? (
+                  <MyScenesGroupHeading
+                    count={group.scenes.length}
+                    title={group.title}
+                  />
+                ) : null}
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th aria-label="Preview" />
+                      <th>Name</th>
+                      <th>Tags</th>
+                      <th>Visibility</th>
+                      <th>Status</th>
+                      <th>Version</th>
+                      <th>Downloads</th>
+                      <th>Updated</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.scenes.map((scene) => (
+                      <tr key={scene.id}>
+                        <td className="table-thumb-cell">
+                          <Link href={`/s/${scene.slug}`} tabIndex={-1}>
+                            {scene.hasPreview ? (
+                              <img
+                                alt=""
+                                className="table-thumb"
+                                loading="lazy"
+                                src={`/api/store/scenes/${scene.id}/image`}
+                              />
+                            ) : (
+                              <span
+                                aria-hidden
+                                className="table-thumb table-thumb--empty"
+                              />
+                            )}
+                          </Link>
+                        </td>
+                        <td>
+                          <Link href={`/s/${scene.slug}`}>{scene.name}</Link>
+                        </td>
+                        <td>
+                          {scene.tags.length > 0 ? (
+                            <div className="tag-list">
+                              {scene.tags.map((tag) => (
+                                <span className="tag-pill" key={tag}>
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
                           <span
-                            aria-hidden
-                            className="table-thumb table-thumb--empty"
+                            className={
+                              scene.visibility === "public"
+                                ? "pill pill-ok"
+                                : "pill"
+                            }
+                          >
+                            {scene.visibility === "public"
+                              ? "Public"
+                              : "Private"}
+                          </span>
+                        </td>
+                        <td>
+                          {scene.status === "pulled" ? (
+                            <span className="pill pill-warning">Pulled</span>
+                          ) : scene.featuredAt ? (
+                            <span className="pill pill-ok">Featured</span>
+                          ) : (
+                            <span className="pill">Active</span>
+                          )}
+                        </td>
+                        <td>v{scene.latestVersion}</td>
+                        <td>{scene.downloadCount}</td>
+                        <td>{formatDate(scene.updatedAt)}</td>
+                        <td>
+                          <StoreSceneActions
+                            name={scene.name}
+                            sceneId={scene.id}
+                            status={scene.status}
+                            visibility={scene.visibility}
                           />
-                        )}
-                      </Link>
-                    </td>
-                    <td>
-                      <Link href={`/s/${scene.slug}`}>{scene.name}</Link>
-                    </td>
-                    <td>
-                      {scene.tags.length > 0 ? (
-                        <div className="tag-list">
-                          {scene.tags.map((tag) => (
-                            <span className="tag-pill" key={tag}>
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td>
-                      <span
-                        className={
-                          scene.visibility === "public"
-                            ? "pill pill-ok"
-                            : "pill"
-                        }
-                      >
-                        {scene.visibility === "public" ? "Public" : "Private"}
-                      </span>
-                    </td>
-                    <td>
-                      {scene.status === "pulled" ? (
-                        <span className="pill pill-warning">Pulled</span>
-                      ) : scene.featuredAt ? (
-                        <span className="pill pill-ok">Featured</span>
-                      ) : (
-                        <span className="pill">Active</span>
-                      )}
-                    </td>
-                    <td>v{scene.latestVersion}</td>
-                    <td>{scene.downloadCount}</td>
-                    <td>{formatDate(scene.updatedAt)}</td>
-                    <td>
-                      <StoreSceneActions
-                        name={scene.name}
-                        sceneId={scene.id}
-                        status={scene.status}
-                        visibility={scene.visibility}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+            ))
           ) : query || visibility || status ? (
             <section className="card">
               <p>No scenes match these filters.</p>

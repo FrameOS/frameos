@@ -16,6 +16,9 @@ export type SceneCardScene = {
   publisher?: string | null | undefined;
   riskFlags?: string[];
   slug: string;
+  // "active" | "pulled"; a pulled scene shows a "Pulled" pill in place of
+  // its visibility (the owner's listing).
+  status?: string | undefined;
   tags?: string[];
   updatedAt: Date;
   // "private" | "public"; shown as a pill when set (the owner's listing).
@@ -57,7 +60,9 @@ export function SceneCard({ scene }: { scene: SceneCardScene }) {
       {scene.description ? <p className="copy">{scene.description}</p> : null}
       {scene.visibility || category || tags.length > 0 ? (
         <div className="tag-list">
-          {scene.visibility ? (
+          {scene.visibility && scene.status === "pulled" ? (
+            <span className="pill pill-warning">Pulled</span>
+          ) : scene.visibility ? (
             <span
               className={
                 scene.visibility === "public" ? "pill pill-ok" : "pill"

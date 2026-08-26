@@ -5,6 +5,7 @@ import { publicBlobUrl, readBlob } from "../../../../../../../src/lib/blobs";
 import { detectImageContentType } from "../../../../../../../src/lib/store";
 import {
   canAccessPrivateScene,
+  canViewPulledScene,
   shareTokenGrantsAccess,
 } from "../../../../../../../src/lib/store-auth";
 import {
@@ -35,10 +36,7 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   }
 
   const { imageId, sceneId } = await context.params;
-  if (
-    !/^[0-9a-f-]{36}$/i.test(sceneId) ||
-    !/^[0-9a-f-]{36}$/i.test(imageId)
-  ) {
+  if (!/^[0-9a-f-]{36}$/i.test(sceneId) || !/^[0-9a-f-]{36}$/i.test(imageId)) {
     return jsonError("image_not_found", 404);
   }
 
@@ -65,7 +63,7 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   if (!row) {
     return jsonError("image_not_found", 404);
   }
-  if (row.status === "pulled") {
+  if (row.status === "pulled" && !(await canViewPulledScene(row.accountId))) {
     return jsonError("scene_pulled", 410);
   }
   if (row.visibility !== "public") {

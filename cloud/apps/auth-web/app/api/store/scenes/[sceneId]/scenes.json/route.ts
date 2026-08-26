@@ -5,9 +5,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../../../src/lib/blobs";
 import {
   canAccessPrivateScene,
+  canViewPulledScene,
   shareTokenGrantsAccess,
 } from "../../../../../../src/lib/store-auth";
-import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
+import {
+  jsonError,
+  requireDatabase,
+} from "../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
 
@@ -18,8 +22,9 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // The scenes.json extracted from a scene's template zip — what the
 // in-browser live preview (frameos-wasm) executes. Same access and version
 // rules as the zip download: public scenes are open, private ones owner-only,
-// pulled 410; `?version=N` picks a version (yanked ones included), the
-// default is the newest non-yanked one.
+// pulled 410 for everyone but the owner's and moderators' own sessions;
+// `?version=N` picks a version (yanked ones included), the default is the
+// newest non-yanked one.
 async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:scenes-json", {
     limit: 240,
@@ -54,14 +59,24 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   if (!scene) {
     return jsonError("scene_not_found", 404);
   }
-  if (scene.status === "pulled") {
+  if (
+    scene.status === "pulled" &&
+    !(await canViewPulledScene(scene.accountId))
+  ) {
     return jsonError("scene_pulled", 410);
   }
   const isPublic = scene.visibility === "public";
   if (
     !isPublic &&
-    !shareTokenGrantsAccess(scene.shareToken, request.nextUrl.searchParams.get("share")) &&
-    !(await canAccessPrivateScene(db, request.headers.get("authorization"), scene.accountId))
+    !shareTokenGrantsAccess(
+      scene.shareToken,
+      request.nextUrl.searchParams.get("share"),
+    ) &&
+    !(await canAccessPrivateScene(
+      db,
+      request.headers.get("authorization"),
+      scene.accountId,
+    ))
   ) {
     return jsonError("scene_not_found", 404);
   }

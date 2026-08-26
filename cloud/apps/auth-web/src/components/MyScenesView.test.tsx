@@ -21,6 +21,7 @@ function row(name: string, overrides: Partial<MyScenesRow> = {}): MyScenesRow {
     id: `id-${name}`,
     name,
     slug: name.toLowerCase(),
+    status: "active",
     tags: ["time"],
     updatedAt: "2026-08-01T00:00:00.000Z",
     visibility: "private",
@@ -104,6 +105,46 @@ describe("MyScenesView", () => {
         .getByRole("button", { name: "List view" })
         .getAttribute("aria-pressed"),
     ).toBe("true");
+  });
+
+  it("splits the unfiltered grid into Public and Private sections", () => {
+    render(
+      <MyScenesView
+        grouped
+        scenes={[
+          ...scenes,
+          row("Storm", { status: "pulled", visibility: "public" }),
+        ]}
+      />,
+    );
+
+    const headings = Array.from(
+      document.querySelectorAll(".scene-group__heading"),
+    );
+    expect(headings.map((heading) => heading.textContent)).toEqual([
+      "Public scenes2",
+      "Private scenes1",
+    ]);
+    // Public first, then private; a pulled scene stays in its visibility
+    // group but its pill says "Pulled" rather than a visibility that no
+    // longer applies.
+    const cards = screen.getAllByRole("link");
+    expect(cards.map((card) => card.textContent?.slice(0, 5))).toEqual([
+      "Tides",
+      "Storm",
+      "Sunri",
+    ]);
+    expect(screen.getByRole("link", { name: /Storm/ }).textContent).toContain(
+      "Pulled",
+    );
+    expect(
+      screen.getByRole("link", { name: /Storm/ }).textContent,
+    ).not.toContain("Public");
+  });
+
+  it("keeps a flat grid without headings when not grouped", () => {
+    renderView();
+    expect(document.querySelector(".scene-group__heading")).toBeNull();
   });
 
   it("shows the children (empty state) when there are no scenes", () => {

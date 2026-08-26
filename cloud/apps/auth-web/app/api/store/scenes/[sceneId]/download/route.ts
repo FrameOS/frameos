@@ -4,9 +4,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../../../src/lib/blobs";
 import {
   canAccessPrivateScene,
+  canViewPulledScene,
   shareTokenGrantsAccess,
 } from "../../../../../../src/lib/store-auth";
-import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
+import {
+  jsonError,
+  requireDatabase,
+} from "../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
 
@@ -17,7 +21,9 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // Download a scene's template zip. Public scenes need no auth (this URL is
 // what repository.json points frameos installs at). Private scenes are
 // downloadable only by their owner's web session. Pulled scenes answer 410
-// everywhere — the moderation kill switch.
+// everywhere — the moderation kill switch — except to the owner's and
+// moderators' own web sessions, who can still open the scene page and get
+// their own zip back from it.
 async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:download", {
     limit: 600,
@@ -53,7 +59,10 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   if (!scene) {
     return jsonError("scene_not_found", 404);
   }
-  if (scene.status === "pulled") {
+  if (
+    scene.status === "pulled" &&
+    !(await canViewPulledScene(scene.accountId))
+  ) {
     return jsonError("scene_pulled", 410);
   }
   if (scene.visibility !== "public") {
@@ -63,7 +72,11 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     );
     if (
       !shared &&
-      !(await canAccessPrivateScene(db, request.headers.get("authorization"), scene.accountId))
+      !(await canAccessPrivateScene(
+        db,
+        request.headers.get("authorization"),
+        scene.accountId,
+      ))
     ) {
       return jsonError("scene_not_found", 404);
     }
