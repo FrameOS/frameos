@@ -472,45 +472,55 @@ static int cmd_set(int argc, char **argv)
               "rst=2,dc=11,cs=10,cs2=3,busy=12,sck=9,mosi=46,pwr=1",
               "",
               "cs=15,sck=6,miso=5,mosi=7", 8, 3.0f, -1, 0, 0 },
-            /* TRMNL OG / BWRY (ESP32-C3 firmware). */
+            /* TRMNL OG / BWRY (ESP32-C3 firmware). Battery: VBAT through a
+             * 2:1 divider on GPIO3 (ADC1_CH3) — usetrmnl/trmnl-firmware
+             * PIN_BATTERY 3, adc_battery.cpp multiplies the pin reading by 2. */
             { "trmnl_og", "EPD_7in5_V2",
               "rst=10,dc=5,cs=6,cs2=-1,busy=4,sck=7,mosi=8,pwr=-1",
               "2:BUTTON",
-              "", -1, 2.0f, -1, 0, 0 },
+              "", 3, 2.0f, -1, 0, 0 },
             { "trmnl_bwry", "EPD_7in5yr",
               "rst=10,dc=5,cs=6,cs2=-1,busy=4,sck=7,mosi=8,pwr=-1",
               "2:BUTTON",
-              "", -1, 2.0f, -1, 0, 0 },
-            /* Seeed XIAO ePaper Driver Board (TRMNL DIY kits, XIAO ESP32-S3). */
+              "", 3, 2.0f, -1, 0, 0 },
+            /* Seeed XIAO ePaper Driver Board (TRMNL DIY kits, XIAO ESP32-S3).
+             * Battery: 2:1 divider on GPIO1 (ADC1_CH0) behind a load switch
+             * on GPIO6, active high (trmnl-firmware PIN_BATTERY 1 /
+             * PIN_VBAT_SWITCH 6 for BOARD_XIAO_EPAPER_DISPLAY). */
             { "trmnl_og_diy_kit", "EPD_7in5_V2",
               "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=-1",
               "0:BOOT\n5:KEY3",
-              "", -1, 2.0f, -1, 0, 0 },
+              "", 1, 2.0f, 6, 0, 0 },
             { "trmnl_4in26_diy_kit", "EPD_4in26",
               "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=-1",
               "0:BOOT\n2:KEY1",
-              "", -1, 2.0f, -1, 0, 0 },
+              "", 1, 2.0f, 6, 0, 0 },
             /* XTEINK X4 (ESP32-C3 firmware). TF socket shares the EPD SPI bus,
-             * so SD assets stay off. */
+             * so SD assets stay off. Battery: 2:1 divider on GPIO0 (ADC1_CH0),
+             * trmnl-firmware PIN_BATTERY 0 for BOARD_XTEINK_X4. */
             { "xteink_x4", "EPD_4in26",
               "rst=5,dc=4,cs=21,cs2=-1,busy=6,sck=8,mosi=10,pwr=-1",
               "3:POWER",
-              "", -1, 2.0f, -1, 0, 0 },
+              "", 0, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash). */
             { "seeed_reterminal_sticky", "EPD_3in97",
               "rst=17,dc=16,cs=15,cs2=-1,busy=18,sck=13,mosi=14,pwr=-1",
               "4:POWER",
               "", -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal E1001 (7.5" mono) / E1002 (7.3" Spectra 6):
-             * same EPD wiring on both. SD pins unconfirmed, assets off. */
+             * same EPD wiring on both. SD pins unconfirmed, assets off.
+             * Battery: the E1004's switched 2:1 divider — GPIO1 (ADC1_CH0)
+             * enabled by GPIO21 HIGH (trmnl-firmware PIN_BATTERY 1 /
+             * PIN_VBAT_SWITCH 21 for both boards). Same heartbeat-LED clash
+             * as the E1004: main.c skips the LED when it owns GPIO21. */
             { "seeed_reterminal_e1001", "EPD_7in5_V2",
               "rst=12,dc=11,cs=10,cs2=-1,busy=13,sck=7,mosi=9,pwr=-1",
               "3:REFRESH\n4:LEFT\n5:RIGHT",
-              "", -1, 2.0f, -1, 0, 0 },
+              "", 1, 2.0f, 21, 0, 0 },
             { "seeed_reterminal_e1002", "EPD_7in3e",
               "rst=12,dc=11,cs=10,cs2=-1,busy=13,sck=7,mosi=9,pwr=-1",
               "3:REFRESH\n4:LEFT\n5:RIGHT",
-              "", -1, 2.0f, -1, 0, 0 },
+              "", 1, 2.0f, 21, 0, 0 },
             /* Seeed reTerminal E1004: 13.3" 1200x1600 Spectra 6 (T133A01) on
              * the E-series bus, second CS on GPIO2, reset 38, panel power 12.
              * The display component selects the T133A01 init tuning from this

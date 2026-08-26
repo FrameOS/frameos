@@ -1,7 +1,9 @@
 import asyncio
 import os
+import re
 import shlex
 import sys
+from pathlib import Path
 
 import pytest
 from unittest.mock import AsyncMock, patch
@@ -806,6 +808,11 @@ def test_embedded_hardware_preset_for_trmnl_og():
         "busy": 4, "sck": 7, "mosi": 8, "pwr": -1,
     }
     assert frame.gpio_buttons == [{"pin": 2, "label": "BUTTON"}]
+    # VBAT through a 2:1 divider on GPIO3 (trmnl-firmware PIN_BATTERY 3, no
+    # load switch) — the metrics battery gauge on a stock TRMNL.
+    assert frame.device_config["batteryPin"] == 3
+    assert frame.device_config["batteryDivider"] == 2.0
+    assert "batteryEnablePin" not in frame.device_config
     assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
     assert embedded_sdkconfig_defaults_for_frame(frame) == (
         "sdkconfig.defaults;sdkconfig.defaults.4mb-no-ota;sdkconfig.defaults.esp32c3"
@@ -822,6 +829,8 @@ def test_embedded_hardware_preset_for_trmnl_bwry():
     assert embedded_panel_for_frame(frame) == "EPD_7in5yr"
     assert embedded_platform_for_frame(frame) == "esp32-c3"
     assert embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE
+    assert frame.device_config["batteryPin"] == 3
+    assert frame.device_config["batteryDivider"] == 2.0
 
 
 def test_embedded_hardware_preset_for_xteink_x4():
@@ -844,6 +853,10 @@ def test_embedded_hardware_preset_for_xteink_x4():
     # Every pin fits the C3's GPIO range (0-21).
     assert all(-1 <= pin <= 21 for pin in pins.values())
     assert frame.gpio_buttons == [{"pin": 3, "label": "POWER"}]
+    # 2:1 divider on GPIO0 = ADC1_CH0 (trmnl-firmware PIN_BATTERY 0).
+    assert frame.device_config["batteryPin"] == 0
+    assert frame.device_config["batteryDivider"] == 2.0
+    assert "batteryEnablePin" not in frame.device_config
 
 
 def test_embedded_pins_clamp_uses_platform_gpio_range():
@@ -1077,6 +1090,73 @@ def test_embedded_hardware_preset_for_trmnl_diy_kits():
             "busy": 4, "sck": 7, "mosi": 9, "pwr": -1,
         }
         assert button in frame.gpio_buttons
+        # The driver board's battery divider sits behind a load switch on
+        # GPIO6 (trmnl-firmware PIN_BATTERY 1 / PIN_VBAT_SWITCH 6, active high).
+        assert frame.device_config["batteryPin"] == 1
+        assert frame.device_config["batteryDivider"] == 2.0
+        assert frame.device_config["batteryEnablePin"] == 6
+
+
+_FOS_CONSOLE_C = Path(__file__).resolve().parents[4] / "embedded" / "esp32" / "main" / "fos_console.c"
+
+
+def _console_hardware_presets() -> dict[str, dict]:
+    """The `set hardware` table in fos_console.c, parsed from source: the
+    device applies it over USB when the cloud flasher provisions a board, so
+    it is the copy that decides what a cloud-flashed frame actually runs."""
+    source = _FOS_CONSOLE_C.read_text(encoding="utf-8")
+    table = re.search(r"\} presets\[\] = \{(.*?)\n        \};", source, re.DOTALL)
+    assert table, "presets[] table not found in fos_console.c"
+    body = re.sub(r"/\*.*?\*/", "", table.group(1), flags=re.DOTALL)
+    entry = re.compile(
+        r'\{\s*"(?P<name>[a-z0-9_]+)",\s*"(?P<panel>[A-Za-z0-9_]+)",\s*"(?P<pins>[^"]*)",'
+        r'\s*"(?P<buttons>[^"]*)",\s*"(?P<sd_pins>[^"]*)",'
+        r"\s*(?P<battery_pin>-?\d+),\s*(?P<battery_divider>[\d.]+)f,\s*(?P<battery_enable_pin>-?\d+),"
+        r"\s*(?P<deep_sleep_on_battery>\d+),\s*(?P<wake_check>\d+)\s*\}"
+    )
+    presets = {}
+    for match in entry.finditer(body):
+        presets[match.group("name")] = {
+            "panel": match.group("panel"),
+            "pins": match.group("pins"),
+            "gpio_buttons": match.group("buttons").replace("\\n", ","),
+            "assets_sd_pins": match.group("sd_pins"),
+            "battery_pin": match.group("battery_pin"),
+            "battery_divider": float(match.group("battery_divider")),
+            "battery_enable_pin": match.group("battery_enable_pin"),
+            "deep_sleep_on_battery": match.group("deep_sleep_on_battery") == "1",
+            "wake_check": match.group("wake_check"),
+        }
+    assert presets, "no preset rows parsed from fos_console.c"
+    return presets
+
+
+@pytest.mark.skipif(not _FOS_CONSOLE_C.is_file(), reason="needs the embedded firmware sources")
+def test_console_hardware_preset_table_matches_backend_presets():
+    """EMBEDDED_HARDWARE_PRESETS and the `set hardware` table in
+    fos_console.c are hand-mirrored copies. A row that drifts is a board the
+    cloud flasher provisions differently from the backend — the E1001/E1002
+    shipped for weeks with battery sensing in one table and not the other."""
+    console = _console_hardware_presets()
+    for preset_key, preset in embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS.items():
+        platform = preset.get("platform", embedded_firmware_module.SUPPORTED_EMBEDDED_PLATFORM)
+        if not str(platform).startswith("esp32"):
+            continue  # Pico boards never see the ESP32 console
+        assert preset_key in console, f"{preset_key} is missing from the fos_console.c `set hardware` table"
+        row = console[preset_key]
+        frame = Frame(id=9, embedded={"hardwarePreset": preset_key})
+        ensure_embedded_frame_defaults(frame)
+        settings = _provisioned(embedded_provisioning_plan(frame))
+        assert row["panel"] == settings["panel"], preset_key
+        assert row["pins"] == settings["pins"], preset_key
+        assert row["gpio_buttons"] == settings.get("gpio_buttons", ""), preset_key
+        assert row["assets_sd_pins"] == settings.get("assets_sd_pins", ""), preset_key
+        assert row["battery_pin"] == settings.get("battery_pin", "-1"), preset_key
+        assert row["battery_divider"] == float(settings.get("battery_divider", "2.0")), preset_key
+        assert row["battery_enable_pin"] == settings.get("battery_enable_pin", "-1"), preset_key
+        assert row["deep_sleep_on_battery"] == (settings.get("deep_sleep_on_battery") == "1"), preset_key
+        if row["deep_sleep_on_battery"]:
+            assert row["wake_check"] == settings["wake_check"], preset_key
 
 
 def test_embedded_hardware_preset_keeps_explicit_gpio_buttons():

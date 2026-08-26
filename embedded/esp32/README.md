@@ -144,11 +144,11 @@ or the preset dropdown in the frontends — the authoritative table is
 | --- | --- | --- | --- |
 | `waveshare_esp32_s3_photopainter` | S3 | EPD_7in3e 7.3" Spectra | PMIC power-up, TF socket |
 | `waveshare_esp32_s3_epaper_13_3e6` | S3 | EPD_13in3e 13.3" Spectra | dual CS, TF socket |
-| `trmnl_og` | C3 | EPD_7in5_V2 7.5" mono | TRMNL OG |
-| `trmnl_bwry` | C3 | EPD_7in5yr 7.5" BWRY | TRMNL BWRY |
-| `trmnl_og_diy_kit` | S3 | EPD_7in5_V2 | Seeed XIAO ePaper Driver Board |
-| `trmnl_4in26_diy_kit` | S3 | EPD_4in26 4.26" | Seeed XIAO ePaper Driver Board |
-| `xteink_x4` | C3 | EPD_4in26 4.26" | XTEINK X4 reader; TF shares EPD SPI, SD assets off |
+| `trmnl_og` | C3 | EPD_7in5_V2 7.5" mono | TRMNL OG; battery GPIO3 ÷2 |
+| `trmnl_bwry` | C3 | EPD_7in5yr 7.5" BWRY | TRMNL BWRY; battery GPIO3 ÷2 |
+| `trmnl_og_diy_kit` | S3 | EPD_7in5_V2 | Seeed XIAO ePaper Driver Board; battery GPIO1 ÷2, switch GPIO6 |
+| `trmnl_4in26_diy_kit` | S3 | EPD_4in26 4.26" | Seeed XIAO ePaper Driver Board; battery GPIO1 ÷2, switch GPIO6 |
+| `xteink_x4` | C3 | EPD_4in26 4.26" | XTEINK X4 reader; TF shares EPD SPI, SD assets off; battery GPIO0 ÷2 |
 
 Board facts worth knowing before reading a schematic (from the Waveshare docs),
 for the two Spectra boards most of the bench work runs on:
@@ -167,8 +167,8 @@ for the two Spectra boards most of the bench work runs on:
 - **PhotoPainter 7.3"** — 8 MB PSRAM, PMIC power-up, TF socket, and a KEY
   button next to BOOT (`0:BOOT`, `4:KEY1` in the preset's `gpio_buttons`).
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" | reTerminal Sticky, 32MB flash |
-| `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash |
-| `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash |
+| `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21 |
+| `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; battery GPIO1 ÷2, switch GPIO21 |
 | `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
 
@@ -363,13 +363,20 @@ Wi-Fi). The reading is divider-corrected (`battery_divider`, default 2.0 for a
 100k/100k tap), mapped to a percentage via a Li-ion curve, and reported in
 `status` and `GET /status`. Below 3% the render + panel refresh is skipped and
 the device sleeps 6h to keep a low cell from being cycled down to damage. The
-integrated-board hardware presets carry known battery wiring (the Waveshare
-13.3" E6 board taps VBAT on GPIO 8 through a 3.0 divider). The backend can
-bake these in per-frame via `device_config`: `deepSleep`, `deepSleepOnBattery`,
-`wakeSchedule`, `wakeCheckSeconds`, `batteryPin`, `batteryDivider` — and the
-cloud can set the same live over `set_settings` (`deep_sleep`,
-`deep_sleep_on_battery`, `wake_check_seconds`, `battery_pin`,
-`battery_divider`), surfaced as the frame's "Power" settings section.
+integrated-board hardware presets carry known battery wiring (see the Notes
+column of the preset table: the Waveshare 13.3" E6 taps VBAT on GPIO 8 through
+a 3.0 divider; the reTerminal E-series, the XIAO ePaper Driver Board, the
+TRMNL OG/BWRY and the XTEINK X4 use a 2:1 divider, on the Seeed boards behind
+a load switch that `battery_enable_pin` pulses around each read). Applying a
+preset (`set hardware`, or the preset in the frontends) seeds these; a frame
+provisioned before its preset knew the wiring keeps `battery_pin -1` until the
+three values are set — over the console, or in the frame's "Power" settings.
+The backend can bake them in per-frame via `device_config`: `deepSleep`,
+`deepSleepOnBattery`, `wakeSchedule`, `wakeCheckSeconds`, `batteryPin`,
+`batteryDivider`, `batteryEnablePin` — and the cloud can set the same live
+over `set_settings` (`deep_sleep`, `deep_sleep_on_battery`,
+`wake_check_seconds`, `battery_pin`, `battery_divider`, `battery_enable_pin`),
+surfaced as the frame's "Power" settings section.
 
 ## Scene storage and memory (2026.8.13)
 

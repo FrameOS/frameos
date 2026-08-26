@@ -772,7 +772,9 @@ describe("Esp32CloudFlasher", () => {
 
   it("fails loudly when the flashed firmware never shows a console prompt", async () => {
     mockCloudApi();
-    // Device never speaks: the stream ends without a prompt.
+    // Device never speaks: the stream ends without a prompt. The boot wait
+    // must give up on the closed stream at once rather than probing it for
+    // its whole 90 s budget (this test's 5 s cap is the regression check).
     stubSerial(
       createPort({
         onOpen: (_port, controls) => {
@@ -789,7 +791,7 @@ describe("Esp32CloudFlasher", () => {
       await screen.findByRole("alert", undefined, { timeout: 5000 }),
     ).toHaveProperty(
       "textContent",
-      expect.stringMatching(/never showed its FrameOS console prompt/),
+      expect.stringMatching(/Nothing at all arrived on this serial port/),
     );
     expect(screen.queryByTestId("esp32-flash-done")).toBeNull();
   });

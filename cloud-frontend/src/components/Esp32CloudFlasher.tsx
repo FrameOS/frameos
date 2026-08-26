@@ -421,6 +421,11 @@ async function provisionOverSerial(
     // resolves later, and its chunk (possibly the one carrying the prompt) is
     // lost. So the pending promise is kept and re-awaited until it settles.
     let pendingRead: Promise<{ result: ReadableStreamReadResult<Uint8Array>; tag: 'read' }> | undefined
+    // Set once read() reports done: the port closed under us (the board
+    // re-enumerated, the cable came out). No probe brings bytes back on a
+    // closed stream, so the boot wait must stop instead of poking it until
+    // its 90 s budget runs out.
+    let streamEnded = false
     const readUntil = async (needle: string, timeoutMs: number): Promise<boolean> => {
       const deadline = Date.now() + timeoutMs
       if (buffer.includes(needle)) {
@@ -447,6 +452,7 @@ async function provisionOverSerial(
         pendingRead = undefined
         if (outcome.result.done) {
           // The device closed the stream; no further bytes will arrive.
+          streamEnded = true
           return buffer.includes(needle)
         }
         if (outcome.result.value) {
@@ -487,8 +493,9 @@ async function provisionOverSerial(
       if (promptSeen) {
         break
       }
-      if (buffer.includes(romDownloadModeMarker)) {
-        // The ROM will sit there forever; no point in waiting out the budget.
+      if (streamEnded || buffer.includes(romDownloadModeMarker)) {
+        // A closed stream never speaks again and the ROM will sit there
+        // forever; no point in waiting out the budget either way.
         break
       }
       await writer.write(newline)
