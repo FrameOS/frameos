@@ -161,6 +161,37 @@ def test_copy_waveshare_build_files_stages_lgpio_header(tmp_path: Path):
     assert (destination_dir / "lgpio.h").read_text(encoding="utf-8") == "native lgpio header\n"
 
 
+def test_copy_waveshare_build_files_12in48_has_no_dev_debug(tmp_path: Path):
+    # epd12in48/ keeps the vendor HAL: no DEV_Debug.c there, so the deployer
+    # must not try to stage it (this broke every release cross build).
+    source_dir = tmp_path / "frameos"
+    destination_dir = tmp_path / "build"
+    waveshare_dir = source_dir / "src" / "drivers" / "waveshare" / "epd12in48"
+    lib_dir = source_dir / "src" / "lib"
+    waveshare_dir.mkdir(parents=True)
+    lib_dir.mkdir(parents=True)
+    destination_dir.mkdir()
+
+    for file_name in ("Debug.h", "DEV_Config.c", "DEV_Config.h", "EPD_12in48b_V2.nim", "EPD_12in48b_V2.c", "EPD_12in48b_V2.h"):
+        (waveshare_dir / file_name).write_text(f"{file_name}\n", encoding="utf-8")
+    (lib_dir / "lgpio.h").write_text("native lgpio header\n", encoding="utf-8")
+
+    deployer = FrameDeployer(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        nim_path="/usr/bin/nim",
+        temp_dir=str(tmp_path / "work"),
+    )
+    waveshare = replace(DRIVERS["waveshare"], variant="EPD_12in48b_V2")
+
+    deployer._copy_waveshare_driver_build_files(str(source_dir), str(destination_dir), waveshare)
+
+    assert (destination_dir / "EPD_12in48b_V2.c").read_text(encoding="utf-8") == "EPD_12in48b_V2.c\n"
+    assert (destination_dir / "DEV_Config.c").read_text(encoding="utf-8") == "DEV_Config.c\n"
+    assert not (destination_dir / "DEV_Debug.c").exists()
+
+
 @pytest.fixture(autouse=True)
 def _no_local_pixie_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A pixie checkout next to the repo would trigger the override log call,

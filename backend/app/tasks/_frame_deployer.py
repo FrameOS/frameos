@@ -672,7 +672,12 @@ $(OBJECTS): pre-build
         if variant_folder == "it8951":
             util_files: list[str] = []
         else:
-            util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h", "DEV_Debug.c"]
+            util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h"]
+            # The shared diagnostics helper (DEV_Debug.c) is built on the
+            # DEV_Config hooks that only the ePaper/ HAL provides; the 12.48"
+            # panels keep the vendor HAL and have no such file.
+            if variant_folder == "ePaper":
+                util_files.append("DEV_Debug.c")
 
         if waveshare.variant in [
             "EPD_2in9b", "EPD_2in9c", "EPD_2in13b", "EPD_2in13c",
