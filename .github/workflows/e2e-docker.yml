@@ -125,7 +125,7 @@ jobs:
       - name: Build and boot ESP32 firmware image
         timeout-minutes: 60
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/.ccache"
+          mkdir -p "$GITHUB_WORKSPACE/.ccache" "$GITHUB_WORKSPACE/.firmware-size"
           # The esp32-ci image does not carry versions.json (only the
           # app-builder stage copies it), so the firmware version has to come
           # from the runner's checkout. ci_build_image.sh refuses to build
@@ -139,6 +139,7 @@ jobs:
             -e CCACHE_DIR=/ccache \
             -e CCACHE_MAXSIZE=2G \
             -v "$GITHUB_WORKSPACE/.ccache:/ccache" \
+            -v "$GITHUB_WORKSPACE/.firmware-size:/firmware-size" \
             frameos-esp32-ci \
             bash -lc '
               set -euo pipefail
