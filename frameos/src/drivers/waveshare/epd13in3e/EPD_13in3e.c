@@ -334,7 +334,7 @@ void EPD_13IN3E_Init(void)
         DEV_Digital_Write(EPD_CS_M_PIN, 0);
         EPD_13IN3E_SPI_Sand(DCDC_T133A01, DCDC_V_T133A01, sizeof(DCDC_V_T133A01));
         EPD_13IN3E_CS_ALL(1);
-    EPD_13IN3E_Settle();
+        EPD_13IN3E_Settle();
     }
 
     EPD_13IN3E_CS_ALL(0);
@@ -362,11 +362,11 @@ void EPD_13IN3E_Init(void)
     EPD_13IN3E_Settle();
 
     if (!t133a01) {
-        /* The T133A01 vendor sequence does not program CCSET. */
+        /* The T133A01 vendor sequence programs CCSET right before each pixel
+         * transfer instead (EPD_13IN3E_PrepareData), not here at init. */
         EPD_13IN3E_CS_ALL(0);
         EPD_13IN3E_SPI_Sand(CCSET, CCSET_V, sizeof(CCSET_V));
         EPD_13IN3E_CS_ALL(1);
-    EPD_13IN3E_Settle();
     }
 
     EPD_13IN3E_CS_ALL(0);

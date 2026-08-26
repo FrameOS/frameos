@@ -1122,10 +1122,17 @@ static void ws_handle_get_metrics(const cJSON *id)
 
 /* The scene the render task is currently on, "" until one is selected
  * (selection happens on the first render pass, minutes after boot). */
+/* How long WS-task and cloud-task callers wait for the Nim runtime. A render
+ * holds it for its whole duration (90 s+ on a 13.3" panel); the hub closes
+ * an unauthenticated socket after 15 s, so a hello must never queue behind
+ * one. When busy, the fields are simply left out and ws_poll_active_scene
+ * reports the scene once the render is done. */
+#define FOS_CLOUD_NIM_WAIT_MS 250
+
 static void current_scene_id(char *out, size_t out_len)
 {
     out[0] = '\0';
-    const char *info = frameos_nim_scene_info_json();
+    const char *info = frameos_nim_scene_info_json_wait(FOS_CLOUD_NIM_WAIT_MS);
     cJSON *info_json = info && info[0] ? cJSON_Parse(info) : NULL;
     if (info_json) {
         json_field_str(info_json, "currentSceneId", out, out_len);
@@ -1139,7 +1146,7 @@ static void add_state_fields(cJSON *msg)
     cJSON_AddStringToObject(msg, "frameos_version", esp_app_get_description()->version);
     add_hardware_json(msg);
     cJSON *states = NULL;
-    const char *state_json = frameos_nim_scene_state_json();
+    const char *state_json = frameos_nim_scene_state_json_wait(FOS_CLOUD_NIM_WAIT_MS);
     if (state_json && state_json[0]) states = cJSON_Parse(state_json);
     if (!states) states = cJSON_CreateObject();
     cJSON_AddItemToObject(msg, "states", states);
@@ -2476,6 +2483,13 @@ static void ws_backoff_reset(void)
 /* One failed attempt can raise both ERROR and DISCONNECTED (and a clean close
  * raises CLOSED), so the advance is made idempotent per attempt instead of
  * per event — otherwise the delay would double two or three times per retry. */
+/* Set from the event handler when the socket went away without a session
+ * (or lost one): the cloud task recreates the client once this deadline
+ * passes. esp_websocket_client does not redial after a clean server close —
+ * the hub's 4408 (challenge unanswered within its 15 s) is exactly that — so
+ * without this the link stayed dead until the 120 s stall watchdog. */
+static volatile int64_t s_ws_redial_due_us = 0;
+
 static void ws_backoff_advance(void)
 {
     if (!s_ws_client || s_ws_backoff_advanced) return;
@@ -2483,6 +2497,7 @@ static void ws_backoff_advance(void)
     uint32_t half = s_ws_backoff_ms / 2;
     uint32_t delay_ms = half + (esp_random() % (half + 1));
     esp_websocket_client_set_reconnect_timeout(s_ws_client, (int)delay_ms);
+    s_ws_redial_due_us = esp_timer_get_time() + (int64_t)delay_ms * 1000;
     ESP_LOGI(TAG, "ws: reconnecting in %lu ms", (unsigned long)delay_ms);
     if (s_ws_backoff_ms < FOS_CLOUD_WS_BACKOFF_MAX_MS) {
         s_ws_backoff_ms *= 2;
@@ -2513,6 +2528,9 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
     (void)arg;
     (void)base;
     esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
+    /* ws_stop() detaches the handle before tearing the client down; whatever
+     * that client still emits must not schedule redials for its successor. */
+    if (data && data->client != s_ws_client) return;
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
             s_ws_ready = false;
@@ -2520,6 +2538,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
             s_metrics_granted = false;
             s_ws_backoff_advanced = false; /* a new attempt got this far */
             ESP_LOGI(TAG, "ws: connected, sending hello");
+            printf("ws: connected, sending hello\n");
             FOS_MEM_LOG_MILESTONE(TAG, "cloud-connected");
             ws_send_hello();
             break;
@@ -2530,10 +2549,28 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
                          data->error_handle.esp_ws_handshake_status_code == 403)) {
                 ws_note_auth_rejected("handshake 401/403");
             }
+            /* The transport logs are silenced (see ws_start) and INFO is
+             * compiled out, so this WARN is the only trace of WHY a dial
+             * failed — one line per attempt, paced by the backoff. */
+            if (data) {
+                ESP_LOGW(TAG, "ws: dial failed: type=%d tls_err=0x%x tls_stack=0x%x errno=%d http=%d "
+                              "(clock %s)",
+                         (int)data->error_handle.error_type,
+                         (unsigned)data->error_handle.esp_tls_last_esp_err,
+                         (unsigned)data->error_handle.esp_tls_stack_err,
+                         (int)data->error_handle.esp_transport_sock_errno,
+                         (int)data->error_handle.esp_ws_handshake_status_code,
+                         fos_wifi_time_synced() ? "synced" : "not synced");
+            }
             ws_backoff_advance();
             break;
         case WEBSOCKET_EVENT_DISCONNECTED:
         case WEBSOCKET_EVENT_CLOSED:
+            /* printf, not ESP_LOGI (compiled out): a close code on the console
+             * is what distinguishes the hub's 4408 auth timeout from Wi-Fi. */
+            printf("ws: %s (close code %d)\n",
+                   event_id == WEBSOCKET_EVENT_CLOSED ? "closed" : "disconnected",
+                   data ? (int)data->close_status_code : -1);
             s_ws_ready = false;
             s_logs_granted = false;
             s_metrics_granted = false;
@@ -2722,6 +2759,7 @@ static void ws_start(void)
              s_access_token);
 
     s_ws_backoff_ms = FOS_CLOUD_WS_BACKOFF_MIN_MS;
+    s_ws_redial_due_us = 0;
     esp_websocket_client_config_t config = {
         .uri = s_ws_uri,
         .headers = s_ws_headers,
@@ -2770,9 +2808,10 @@ static void ws_start(void)
 static void ws_stop(void)
 {
     if (!s_ws_client) return;
-    esp_websocket_client_stop(s_ws_client);
-    esp_websocket_client_destroy(s_ws_client);
-    s_ws_client = NULL;
+    esp_websocket_client_handle_t client = s_ws_client;
+    s_ws_client = NULL; /* detach first: late events from it are ignored */
+    esp_websocket_client_stop(client);
+    esp_websocket_client_destroy(client);
     s_ws_ready = false;
     s_logs_granted = false;
     s_metrics_granted = false;
@@ -2904,9 +2943,18 @@ static void cloud_task(void *arg)
              * IS the cloud task — and cheap at this cadence. */
             if (fos_cloud_ws_connected()) {
                 ws_stall_since_us = 0;
+                s_ws_redial_due_us = 0;
             } else {
                 int64_t now_us = esp_timer_get_time();
-                if (ws_stall_since_us == 0) {
+                if (s_ws_redial_due_us != 0 && now_us >= s_ws_redial_due_us) {
+                    /* A close/error scheduled a redial (jittered backoff);
+                     * recreate the client here, the one task allowed to. */
+                    s_ws_redial_due_us = 0;
+                    printf("ws: redialing after close\n");
+                    ws_stop();
+                    ws_start();
+                    ws_stall_since_us = now_us;
+                } else if (ws_stall_since_us == 0) {
                     ws_stall_since_us = now_us;
                 } else if (now_us - ws_stall_since_us > FOS_CLOUD_WS_STALL_RESTART_US) {
                     ESP_LOGW(TAG, "ws: no session for %d s; recreating the client",

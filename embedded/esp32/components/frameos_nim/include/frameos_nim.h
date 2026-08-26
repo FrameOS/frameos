@@ -47,8 +47,14 @@ int frameos_nim_render_1bpp(uint8_t *buf, size_t len);
 const char *frameos_nim_info(void);
 /* JSON with current interpreted-scene state and selectable scenes. */
 const char *frameos_nim_scene_info_json(void);
+/* Same, but gives up after timeout_ms (-1 = wait forever) and returns NULL
+ * when the runtime is busy rendering. For tasks that must stay responsive
+ * (the cloud WebSocket task's hello/get_state): a render holds the runtime
+ * lock for its whole duration, over a minute on a 13.3" panel. */
+const char *frameos_nim_scene_info_json_wait(int timeout_ms);
 /* JSON state for the active interpreted scene. */
 const char *frameos_nim_scene_state_json(void);
+const char *frameos_nim_scene_state_json_wait(int timeout_ms);
 /* Select an interpreted scene by id; the next render initializes it. */
 bool frameos_nim_set_scene(const char *scene_id);
 

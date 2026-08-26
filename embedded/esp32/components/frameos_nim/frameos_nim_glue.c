@@ -104,6 +104,17 @@ static bool nim_lock_take(void)
     return xSemaphoreTake(s_nim_lock, portMAX_DELAY) == pdTRUE;
 }
 
+/* Bounded variant for callers that must not park behind a render: the
+ * cloud WebSocket task builds its hello from the scene state, and a hello
+ * that waits 90 s for a 13.3" render to release the lock arrives long after
+ * the hub's 15 s auth timeout closed the socket (seen on the E1004). */
+static bool nim_lock_take_for(int timeout_ms)
+{
+    if (s_nim_lock == NULL) return true;
+    if (timeout_ms < 0) return xSemaphoreTake(s_nim_lock, portMAX_DELAY) == pdTRUE;
+    return xSemaphoreTake(s_nim_lock, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+
 static void nim_lock_give(void)
 {
     if (s_nim_lock != NULL) xSemaphoreGive(s_nim_lock);
@@ -519,22 +530,34 @@ const char *frameos_nim_info(void)
     return info;
 }
 
-const char *frameos_nim_scene_info_json(void)
+const char *frameos_nim_scene_info_json_wait(int timeout_ms)
 {
     if (!s_nim_ready) return "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
-    if (!nim_lock_take()) return "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"busy\":true,\"scenes\":[]}";
+    if (!nim_lock_take_for(timeout_ms)) return NULL;
     const char *json = fos_nim_scene_info_json_impl();
+    nim_lock_give();
+    return json;
+}
+
+const char *frameos_nim_scene_info_json(void)
+{
+    const char *json = frameos_nim_scene_info_json_wait(-1);
+    return json ? json : "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"busy\":true,\"scenes\":[]}";
+}
+
+const char *frameos_nim_scene_state_json_wait(int timeout_ms)
+{
+    if (!s_nim_ready) return "{}";
+    if (!nim_lock_take_for(timeout_ms)) return NULL;
+    const char *json = fos_nim_scene_state_json_impl();
     nim_lock_give();
     return json;
 }
 
 const char *frameos_nim_scene_state_json(void)
 {
-    if (!s_nim_ready) return "{}";
-    if (!nim_lock_take()) return "{\"busy\":true}";
-    const char *json = fos_nim_scene_state_json_impl();
-    nim_lock_give();
-    return json;
+    const char *json = frameos_nim_scene_state_json_wait(-1);
+    return json ? json : "{\"busy\":true}";
 }
 
 bool frameos_nim_set_scene(const char *scene_id)
