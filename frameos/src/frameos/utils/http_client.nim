@@ -126,6 +126,129 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       response.bodyLen = 0
       response.chunks = @[]
 
+  when defined(frameosEmbedded):
+    proc fos_nim_http_stream_open(url: cstring, headers: pointer, headersLen: csize_t,
+                                  timeoutMs: cint, outStatus: ptr cint,
+                                  outContentLength: ptr int64,
+                                  errBuf: cstring, errLen: csize_t): pointer
+                                  {.importc: "fos_nim_http_stream_open", cdecl.}
+    proc fos_nim_http_stream_read(stream: pointer, buf: pointer, len: csize_t): cint
+                                  {.importc: "fos_nim_http_stream_read", cdecl.}
+    proc fos_nim_http_stream_close(stream: pointer)
+                                  {.importc: "fos_nim_http_stream_close", cdecl.}
+
+    type
+      HttpBodyStream* = ref object
+        ## A GET whose body is pulled straight off the socket, for decoders
+        ## that read their input sequentially (pixie's windowed JPEG/PNG
+        ## paths). Nothing of the body is buffered beyond the few bytes
+        ## peeked to sniff the format, so the download costs no PSRAM and
+        ## never needs the flash spill. `rewind` reopens the request: the
+        ## decode-with-degrade ladder restarts the decode from byte 0.
+        handle: pointer
+        url: string
+        headerBlock: string
+        timeoutMs: int
+        code*: int
+        contentLength*: int64 ## -1 when the response carries no Content-Length
+        prefix: string        ## bytes peeked for format sniffing, served first
+        prefixPos: int
+        consumed: int64       ## bytes handed out past the prefix
+        opened: bool
+
+    proc closeHttpBodyStream*(stream: HttpBodyStream) =
+      if stream.isNil or stream.handle == nil:
+        return
+      fos_nim_http_stream_close(stream.handle)
+      stream.handle = nil
+
+    proc openStreamHandle(stream: HttpBodyStream) =
+      var status: cint = 0
+      var contentLength: int64 = -1
+      var errBuf = newString(192)
+      let headerPtr = if stream.headerBlock.len > 0: unsafeAddr stream.headerBlock[0] else: nil
+      stream.handle = fos_nim_http_stream_open(stream.url.cstring, headerPtr,
+        stream.headerBlock.len.csize_t, stream.timeoutMs.cint, addr status,
+        addr contentLength, errBuf.cstring, errBuf.len.csize_t)
+      stream.prefix = ""
+      stream.prefixPos = 0
+      stream.consumed = 0
+      if stream.handle == nil:
+        let detail = $errBuf.cstring
+        raise newException(IOError,
+          "HTTP request failed: " & stream.url &
+          (if detail.len > 0: " (" & detail & ")" else: ""))
+      stream.code = status.int
+      stream.contentLength = contentLength
+      stream.opened = true
+
+    proc openHttpBodyStream*(url: string, headers: seq[SimpleHttpHeader] = @[],
+        timeoutMs = DefaultFetchTimeoutMs): HttpBodyStream =
+      ## Opens the request; raises IOError when no response arrives at all.
+      ## An HTTP error status is not an exception — check `code`.
+      if url.strip().len == 0:
+        raise newException(ValueError, "Invalid HTTP URL: empty")
+      if not (url.startsWith("http://") or url.startsWith("https://")):
+        raise newException(ValueError, &"Invalid HTTP URL: {url}")
+      result = HttpBodyStream(url: url, headerBlock: encodeSimpleHeaders(headers),
+        timeoutMs: timeoutMs, contentLength: -1)
+      result.openStreamHandle()
+
+    proc readRaw(stream: HttpBodyStream, dst: pointer, maxBytes: int): int =
+      if stream.handle == nil or maxBytes <= 0:
+        return 0
+      let got = fos_nim_http_stream_read(stream.handle, dst, maxBytes.csize_t)
+      if got <= 0:
+        return 0
+      got.int
+
+    proc peekHttpBodyStream*(stream: HttpBodyStream, bytes: int): string =
+      ## The first `bytes` of the body (fewer at EOF), kept so the reads that
+      ## follow still see the body from byte 0.
+      if stream.consumed > 0:
+        raise newException(IOError, "cannot peek an HTTP body stream after reading it")
+      while stream.prefix.len < bytes:
+        var chunk = newString(bytes - stream.prefix.len)
+        let got = stream.readRaw(addr chunk[0], chunk.len)
+        if got <= 0:
+          break
+        chunk.setLen(got)
+        stream.prefix.add(chunk)
+      stream.prefix
+
+    proc readHttpBodyStream*(stream: HttpBodyStream, dst: pointer, maxBytes: int): int =
+      ## Sequential read: the peeked prefix first, then the socket.
+      if maxBytes <= 0 or dst == nil:
+        return 0
+      if stream.prefixPos < stream.prefix.len:
+        let n = min(maxBytes, stream.prefix.len - stream.prefixPos)
+        copyMem(dst, unsafeAddr stream.prefix[stream.prefixPos], n)
+        stream.prefixPos += n
+        return n
+      let got = stream.readRaw(dst, maxBytes)
+      if got > 0:
+        stream.consumed += got
+      got
+
+    proc rewindHttpBodyStream*(stream: HttpBodyStream) =
+      ## Back to byte 0. Free while only the peeked prefix was consumed;
+      ## otherwise the request is reopened (a second GET).
+      if stream.consumed == 0:
+        stream.prefixPos = 0
+        return
+      stream.closeHttpBodyStream()
+      stream.openStreamHandle()
+
+    proc httpBodyStreamSource*(stream: HttpBodyStream):
+        proc(dst: pointer, maxBytes: int): int {.gcsafe, raises: [].} =
+      ## Pull callback shape pixie's streaming decoders take.
+      result = proc(dst: pointer, maxBytes: int): int {.gcsafe, raises: [].} =
+        try:
+          {.cast(gcsafe).}:
+            stream.readHttpBodyStream(dst, maxBytes)
+        except CatchableError:
+          0
+
   proc boundedRequestBuffer*(
       url: string,
       httpMethod = "GET",

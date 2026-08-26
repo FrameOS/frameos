@@ -503,10 +503,19 @@ proc decodeIntoTargetWithDegrade*(target: Image, fit: ScaledDecodeFit,
     # Halving the target quarters the plan's channel buffers; two rungs cover
     # everything short of a heap that cannot hold even a quarter-res frame.
     for divisor in [2, 4]:
+      let tempWidth = max(1, target.width div divisor)
+      let tempHeight = max(1, target.height div divisor)
+      when defined(frameosEmbedded):
+        # An allocation the heap cannot satisfy is not a catchable failure on
+        # embedded — the runtime longjmp-aborts the whole render and leaks
+        # everything on the stack. Ask first: seen on an 8 MB board whose
+        # largest free block was 1.7 MB when the half-res rung wanted 1.9 MB.
+        let contiguous = availableRenderBytes()
+        if contiguous > 0 and tempWidth * tempHeight * 4 > contiguous:
+          continue
       var temp: Image
       try:
-        temp = newImage(max(1, target.width div divisor),
-                        max(1, target.height div divisor))
+        temp = newImage(tempWidth, tempHeight)
       except CatchableError:
         continue
       # The temp allocation itself changed the heap; re-plan against it.
@@ -714,8 +723,15 @@ proc embeddedSizedRemoteImageUrl*(url: string, target: Image): string =
     parsed.query = upsertQueryParam(parsed.query, "w", $requestedWidth)
     parsed.query = upsertQueryParam(parsed.query, "h", $requestedHeight)
     parsed.query = upsertQueryParam(parsed.query, "fit", "crop")
-    if parsed.query.find("auto=") < 0:
-      parsed.query = upsertQueryParam(parsed.query, "auto", "format")
+    # PNG, not `auto=format`: to a non-browser User-Agent imgix answers
+    # auto=format with a PROGRESSIVE JPEG (fm=jpg too), and a progressive
+    # JPEG is the one format that cannot stream into the canvas — it needs
+    # the whole RGBA intermediate, which an 8 MB board cannot hold next to
+    # a 1200x1600 canvas (measured: OOM abort). PNG rows stream off the
+    # socket through a fixed inflate window. WebP would be 8x fewer bytes
+    # but its decode wants ~1.4 MB of contiguous buffers at panel size,
+    # over what that board has left (measured: budget refusal).
+    parsed.query = upsertQueryParam(parsed.query, "fm", "png")
     return $parsed
   else:
     return url
@@ -874,10 +890,106 @@ when defined(frameosEmbedded):
         return decodeImageWithFallback(data, len, target, fitStretch)
     decodeImageWithFallback(data, len)
 
+  proc downloadImageStreamingInto(url: string, maxBytes: int, target: Image,
+      headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit): bool =
+    ## Decodes a remote JPEG/PNG (BMP/PPM too) straight off the socket into
+    ## `target` — no copy of the compressed body ever lives in PSRAM or on
+    ## flash. Returns false when this fetch should go through the buffered
+    ## path instead (error status, unknown length, format without a stream
+    ## decoder, or a decoder refusal such as a progressive JPEG), which then
+    ## re-requests the URL and produces the same errors it always did.
+    ##
+    ## Why: the buffered fetch holds the whole body before decoding. On a
+    ## board whose canvas already owns most of its PSRAM (8 MB reTerminal
+    ## E1004, 1200x1600) that meant every 1-2 MB gallery image spilled to a
+    ## /state partition with a few hundred KB free and failed. Budget
+    ## refusals still degrade to a reduced-resolution decode; the ladder's
+    ## retries rewind the stream, which reopens the request.
+    if target.isNil or target.width <= 0 or target.height <= 0:
+      return false
+    var stream: HttpBodyStream
+    try:
+      stream = openHttpBodyStream(url, headers = headers)
+    except IOError:
+      # Transport failure: let the buffered path report it the usual way.
+      return false
+    defer: stream.closeHttpBodyStream()
+    if stream.code >= 400:
+      return false
+    if stream.contentLength > 0 and maxBytes > 0 and stream.contentLength > maxBytes:
+      return false
+    let header = stream.peekHttpBodyStream(64)
+    let format = embeddedImageFormat(header.cstring, header.len)
+    let totalLen = if stream.contentLength > 0: stream.contentLength.int else: 0
+    let source = stream.httpBodyStreamSource()
+    refreshDecodeBudgetInto()
+    try:
+      case format
+      of "JPEG":
+        # The JPEG stream reader needs the exact input length.
+        if totalLen <= 0:
+          return false
+        when compiles(decodeJpegStreamScaledInto(source, totalLen, target, fit)):
+          discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+            stream.rewindHttpBodyStream()
+            GC_fullCollect()
+            decodeJpegStreamScaledInto(source, totalLen, dst, fit))
+        else:
+          return false
+      of "PNG":
+        when compiles(decodePngStreamScaledInto(source, totalLen, target, fit)):
+          discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+            stream.rewindHttpBodyStream()
+            GC_fullCollect()
+            decodePngStreamScaledInto(source, totalLen, dst, fit))
+        else:
+          return false
+      of "BMP":
+        when compiles(decodeBmpStreamScaledInto(source, totalLen, target, fit)):
+          GC_fullCollect()
+          decodeBmpStreamScaledInto(source, totalLen, target, fit)
+        else:
+          return false
+      of "PPM":
+        when compiles(decodePpmStreamScaledInto(source, totalLen, target, fit)):
+          GC_fullCollect()
+          decodePpmStreamScaledInto(source, totalLen, target, fit)
+        else:
+          return false
+      of "WEBP":
+        # Holds the compressed body (budget-checked, refusing catchably) but
+        # never a full-size RGBA intermediate — which is what the buffered
+        # path would build, so there is nothing to fall back to.
+        when compiles(decodeWebpStreamScaledInto(source, totalLen, target, fit)):
+          discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+            stream.rewindHttpBodyStream()
+            GC_fullCollect()
+            decodeWebpStreamScaledInto(source, totalLen, dst, fit))
+        else:
+          return false
+      else:
+        return false
+    except PixieError as e:
+      if e.msg.contains("memory budget") or format == "WEBP":
+        # The degrade ladder already ran out of rungs; buffering the body
+        # would only add to the pressure that refused the decode.
+        raise
+      # Progressive JPEG, interlaced/16-bit PNG, truncated body, ...: the
+      # buffered decoders handle more shapes, so hand over to them.
+      log(%*{"event": "image:stream:fallback", "format": format,
+             "bytes": totalLen, "reason": e.msg})
+      return false
+    log(%*{"event": "image:streamed", "format": format, "bytes": totalLen,
+           "width": target.width, "height": target.height})
+    true
+
   proc downloadImageFromResolvedBuffer(url: string, maxBytes: int, target: Image = nil,
       headers: seq[SimpleHttpHeader] = @[], fit = fitCover,
       boundWidth = 0, boundHeight = 0):
       tuple[image: Image, data: string] =
+    if boundWidth <= 0 and boundHeight <= 0 and
+        downloadImageStreamingInto(url, maxBytes, target, headers, fit):
+      return (target, "")
     var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
     # The budget must reflect the heap the decode is about to run on, not the
     # one some earlier render saw. This path never went through the

@@ -187,6 +187,22 @@ void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes);
  * on frames that would otherwise never hit real memory pressure. */
 void fos_nim_http_set_spill_force_bytes(size_t threshold);
 
+/* Streaming GET: the caller pulls the body off the socket in pieces, so no
+ * copy of it is ever buffered in PSRAM or spilled to flash. Same policy,
+ * redirect and error handling as the buffering fetch. Returns NULL with a
+ * diagnostic in err_buf on transport failure; an HTTP error status comes
+ * back as an open stream with *out_status >= 400 (read the body for the
+ * detail, or just close it). *out_content_length is -1 when the response
+ * has no Content-Length. */
+typedef struct fos_nim_http_stream fos_nim_http_stream;
+fos_nim_http_stream *fos_nim_http_stream_open(
+    const char *url, const char *headers, size_t headers_len,
+    int timeout_ms, int *out_status, int64_t *out_content_length,
+    char *err_buf, size_t err_buf_len);
+/* > 0 bytes read, 0 at end of body, < 0 on a transport error. */
+int fos_nim_http_stream_read(fos_nim_http_stream *stream, void *buf, size_t len);
+void fos_nim_http_stream_close(fos_nim_http_stream *stream);
+
 #ifdef __cplusplus
 }
 #endif
