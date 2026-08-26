@@ -164,6 +164,11 @@ void app_main(void)
      * free but no block that size. No-op on PSRAM boards. */
     if (fos_display_present()) {
         fos_framebuffer_reserve(fos_display_buffer_size());
+        /* The Nim renderer packs into the same reservation (fos_framebuffer.h).
+         * The hooks take/return the buffer through the acquire/release pair
+         * that fos_client.c already uses to hand it back after the blit. */
+        frameos_nim_set_render_buffer_hooks((void *(*)(size_t))fos_framebuffer_acquire,
+                                            (void (*)(void *))fos_framebuffer_release);
     }
 
     /* fos_assets_sd_mount emits its own structured "assets:sd" line into the

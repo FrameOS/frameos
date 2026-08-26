@@ -46,6 +46,11 @@ int frameos_nim_render_1bpp(uint8_t *buf, size_t len);
 /* Free-form info string (Nim/runtime versions, render counter). */
 const char *frameos_nim_info(void);
 /* JSON with current interpreted-scene state and selectable scenes. */
+/* Packed-framebuffer allocator hooks. main/ installs fos_framebuffer_acquire
+ * and fos_framebuffer_release so every render packs into the buffer reserved
+ * at boot; the render task releases it through the same pair. */
+void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len),
+                                         void (*release)(void *ptr));
 const char *frameos_nim_scene_info_json(void);
 /* Same, but gives up after timeout_ms (-1 = wait forever) and returns NULL
  * when the runtime is busy rendering. For tasks that must stay responsive

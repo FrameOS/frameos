@@ -167,10 +167,39 @@ size_t frameos_nim_canvas_reserved(void)
  * calls are serialized by s_nim_lock) and free it if the render aborts. */
 static void *s_pending_render_buffer = NULL;
 
+/* main/ owns the panel-sized buffer (fos_framebuffer.c reserves it at boot);
+ * it hands the acquire/release pair down here so the packed buffer the Nim
+ * render fills is that reservation, not a fresh PSRAM allocation that a
+ * fragmented heap can refuse. Without the hooks the old malloc path runs. */
+static void *(*s_render_buffer_acquire)(size_t len) = NULL;
+static void (*s_render_buffer_release)(void *ptr) = NULL;
+
+void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len),
+                                         void (*release)(void *ptr))
+{
+    s_render_buffer_acquire = acquire;
+    s_render_buffer_release = release;
+}
+
+static void render_buffer_dispose(void *ptr)
+{
+    if (ptr == NULL) return;
+    if (s_render_buffer_release) {
+        s_render_buffer_release(ptr);
+    } else {
+        free(ptr);
+    }
+}
+
 void *frameos_nim_alloc_render_buffer(size_t len)
 {
-    void *ptr = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!ptr) ptr = malloc(len);
+    void *ptr = NULL;
+    if (s_render_buffer_acquire) {
+        ptr = s_render_buffer_acquire(len);
+    } else {
+        ptr = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!ptr) ptr = malloc(len);
+    }
     s_pending_render_buffer = ptr;
     return ptr;
 }
@@ -180,7 +209,7 @@ void frameos_nim_free_render_buffer(void *ptr)
     if (ptr != NULL && ptr == s_pending_render_buffer) {
         s_pending_render_buffer = NULL;
     }
-    free(ptr);
+    render_buffer_dispose(ptr);
 }
 
 /* ---------------------------------------------------------- Nim heap
@@ -503,7 +532,7 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     } else {
         nim_oom_abort_note("render");
         if (s_pending_render_buffer != NULL) {
-            free(s_pending_render_buffer);
+            render_buffer_dispose(s_pending_render_buffer);
         }
         *buf = NULL;
         *len = 0;

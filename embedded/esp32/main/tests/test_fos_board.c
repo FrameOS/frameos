@@ -93,10 +93,13 @@ static void test_reservation_policy(void)
     CHECK(fos_framebuffer_should_reserve(PANEL_4IN26_BYTES, 0, C3_BOOT_FREE),
           "a C3 with a whole heap must reserve the 4.26in panel buffer");
 
-    /* PSRAM boards keep the old per-render path: PSRAM is where these buffers
-     * belong and a malloc there has never been the failing step. */
-    CHECK(!fos_framebuffer_should_reserve(PANEL_4IN26_BYTES, 8u * 1024 * 1024, C3_BOOT_FREE),
-          "a PSRAM board must not reserve internal RAM");
+    /* PSRAM boards reserve too (out of PSRAM): the E1004's 960 KB packed
+     * buffer lost to PSRAM fragmentation after a scene switch. The internal
+     * heap floor does not apply to them. */
+    CHECK(fos_framebuffer_should_reserve(PANEL_4IN26_BYTES, 8u * 1024 * 1024, C3_BOOT_FREE),
+          "a PSRAM board must reserve its panel buffer");
+    CHECK(fos_framebuffer_should_reserve(960000, 8u * 1024 * 1024, 1024),
+          "a PSRAM board reserves regardless of internal heap");
 
     /* Reserving must never cost the frame its network stack: a frame that
      * renders but cannot fetch is not better than one that retries. */
