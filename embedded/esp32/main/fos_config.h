@@ -118,6 +118,9 @@ typedef struct {
                                     * control plane for commands (0 = only wake to render) */
     int8_t battery_pin;            /* ADC1 GPIO for battery voltage, -1 = none */
     float battery_divider;         /* Vbat = Vpin * divider (default 2.0) */
+    int8_t battery_enable_pin;     /* GPIO driven high to enable the battery
+                                    * divider (Seeed reTerminal E10xx: GPIO21),
+                                    * -1 = always-on divider */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;

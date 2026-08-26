@@ -61,6 +61,7 @@ static void load_defaults(void)
     s_config.wake_check_sec = FRAMEOS_DEFAULT_WAKE_CHECK_SEC;
     s_config.battery_pin = FRAMEOS_DEFAULT_BATTERY_PIN;
     s_config.battery_divider = FRAMEOS_DEFAULT_BATTERY_DIVIDER;
+    s_config.battery_enable_pin = FRAMEOS_DEFAULT_BATTERY_ENABLE_PIN;
     fos_config_parse_gpio_buttons(FRAMEOS_DEFAULT_GPIO_BUTTONS, &s_config);
     s_config.pins.rst = FRAMEOS_DEFAULT_PIN_RST;
     s_config.pins.dc = FRAMEOS_DEFAULT_PIN_DC;
@@ -178,6 +179,7 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u32(nvs, "wake_check", &u32) == ESP_OK) s_config.wake_check_sec = u32;
     if (nvs_get_i8(nvs, "batt_pin", &i8) == ESP_OK) s_config.battery_pin = i8;
     if (nvs_get_u32(nvs, "batt_div_m", &u32) == ESP_OK) s_config.battery_divider = (float)u32 / 1000.0f;
+    if (nvs_get_i8(nvs, "batt_en", &i8) == ESP_OK) s_config.battery_enable_pin = i8;
     char pins[FOS_STR_LEN] = "";
     nvs_get_string(nvs, "pins", pins, sizeof(pins));
     if (pins[0]) fos_config_parse_pins(pins, &s_config.pins);
@@ -254,6 +256,7 @@ esp_err_t fos_config_save(void)
     nvs_set_u32(nvs, "wake_check", s_config.wake_check_sec);
     nvs_set_i8(nvs, "batt_pin", s_config.battery_pin);
     nvs_set_u32(nvs, "batt_div_m", (uint32_t)(s_config.battery_divider * 1000.0f));
+    nvs_set_i8(nvs, "batt_en", s_config.battery_enable_pin);
     char gpio_buttons[FOS_GPIO_BUTTONS_SPEC_LEN];
     fos_config_format_gpio_buttons(&s_config, gpio_buttons, sizeof(gpio_buttons));
     nvs_set_str(nvs, "gpio_buttons", gpio_buttons);

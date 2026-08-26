@@ -14,8 +14,11 @@
 
 /* Set up the ADC on `gpio` (an ADC1-capable pin) with the given divider ratio
  * (Vpin = Vbat / divider, so 2.0 for a classic 100k/100k tap). gpio < 0
- * disables battery sensing. Safe to call once at boot. */
-void fos_battery_init(int8_t gpio, float divider);
+ * disables battery sensing. `enable_gpio` >= 0 names the pin that switches
+ * the divider on (boards like the Seeed reTerminal E10xx gate it through a
+ * transistor so it does not drain the cell): driven high around each read,
+ * low otherwise. Safe to call once at boot. */
+void fos_battery_init(int8_t gpio, float divider, int8_t enable_gpio);
 
 /* True when a battery pin is configured and the ADC came up. */
 bool fos_battery_present(void);

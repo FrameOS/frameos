@@ -135,12 +135,15 @@ void app_main(void)
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
 
-    fos_battery_init(config->battery_pin, config->battery_divider);
+    fos_battery_init(config->battery_pin, config->battery_divider, config->battery_enable_pin);
     if (fos_battery_present()) {
         ESP_LOGI(TAG, "battery: %d mV (%d%%)", fos_battery_millivolts(), fos_battery_percent());
     }
 
-    if (HEARTBEAT_GPIO >= 0) {
+    /* Not when the battery divider's enable switch sits on the LED pin: the
+     * reTerminal E10xx boards switch their divider through GPIO21, and a
+     * blinking enable line reads as an empty cell (0 mV, seen on the E1004). */
+    if (HEARTBEAT_GPIO >= 0 && config->battery_enable_pin != HEARTBEAT_GPIO) {
         xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
     }
 

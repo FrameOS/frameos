@@ -29,11 +29,29 @@ const metricLabels: Record<string, string> = {
   'runtime.sequence': 'Render sequence index (keeps incrementing)',
   'runtime.lastCompletedAgoMs': 'Seconds since last render',
   wifiRssi: 'WiFi signal (RSSI)',
+  batteryPercent: 'Battery charge (%)',
+  batteryMillivolts: 'Battery voltage (mV)',
 }
 
 // Shown behind an (i) next to the card title; the number alone reads as
 // "negative, therefore bad" to anyone who has not met dBm before.
 const metricHelp: Record<string, JSX.Element> = {
+  batteryPercent: (
+    <div className="space-y-1">
+      <div>
+        Charge estimated from the cell voltage with a generic Li-ion discharge curve — a coarse figure, not a fuel
+        gauge. Reported only by frames with a battery pin configured (board presets set it; otherwise `battery_pin` and
+        `battery_divider` in the frame settings).
+      </div>
+      <div>Around 100% with the charger plugged in; the curve flattens between 50% and 20%, then drops quickly.</div>
+    </div>
+  ),
+  batteryMillivolts: (
+    <div>
+      Cell voltage in millivolts after the divider correction. A single Li-ion cell sits near 4200 mV full and 3300 mV
+      empty; below 3000 mV the frame stops refreshing to protect the cell.
+    </div>
+  ),
   wifiRssi: (
     <div className="space-y-1">
       <div>

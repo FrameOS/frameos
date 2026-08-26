@@ -4,6 +4,9 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "fos_battery";
 
@@ -11,11 +14,12 @@ static const char *TAG = "fos_battery";
 
 static bool s_present = false;
 static float s_divider = 2.0f;
+static int8_t s_enable_gpio = -1;
 static adc_oneshot_unit_handle_t s_adc = NULL;
 static adc_channel_t s_channel;
 static adc_cali_handle_t s_cali = NULL; /* NULL = fall back to linear estimate */
 
-void fos_battery_init(int8_t gpio, float divider)
+void fos_battery_init(int8_t gpio, float divider, int8_t enable_gpio)
 {
     s_present = false;
     s_cali = NULL;
@@ -25,6 +29,14 @@ void fos_battery_init(int8_t gpio, float divider)
         return;
     }
     s_divider = divider > 0.1f ? divider : 2.0f;
+    s_enable_gpio = enable_gpio;
+    if (enable_gpio >= 0) {
+        /* Off between reads, the way Seeed's Battery_Monitor example does it:
+         * the divider only draws from the cell while a sample is taken. */
+        gpio_reset_pin(enable_gpio);
+        gpio_set_direction(enable_gpio, GPIO_MODE_OUTPUT);
+        gpio_set_level(enable_gpio, 0);
+    }
 
     adc_unit_t unit;
     adc_channel_t channel;
@@ -69,8 +81,8 @@ void fos_battery_init(int8_t gpio, float divider)
 #endif
 
     s_present = true;
-    ESP_LOGI(TAG, "battery sensing on GPIO %d (ADC1 ch %d, divider %.2f, cali %s)",
-             gpio, (int)s_channel, s_divider, s_cali ? "yes" : "no");
+    ESP_LOGI(TAG, "battery sensing on GPIO %d (ADC1 ch %d, divider %.2f, cali %s, enable GPIO %d)",
+             gpio, (int)s_channel, s_divider, s_cali ? "yes" : "no", (int)enable_gpio);
 }
 
 bool fos_battery_present(void) { return s_present; }
@@ -78,6 +90,11 @@ bool fos_battery_present(void) { return s_present; }
 int fos_battery_millivolts(void)
 {
     if (!s_present || !s_adc) return 0;
+    if (s_enable_gpio >= 0) {
+        /* Seeed: enable, wait ~10 ms for the divider to settle, read. */
+        gpio_set_level(s_enable_gpio, 1);
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
     int raw_sum = 0, samples = 0;
     for (int i = 0; i < BATTERY_SAMPLES; i++) {
         int raw = 0;
@@ -86,6 +103,7 @@ int fos_battery_millivolts(void)
             samples++;
         }
     }
+    if (s_enable_gpio >= 0) gpio_set_level(s_enable_gpio, 0);
     if (samples == 0) return 0;
     int raw = raw_sum / samples;
 

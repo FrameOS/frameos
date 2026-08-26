@@ -921,7 +921,19 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
         "rst": 38, "dc": 11, "cs": 10, "cs2": 2,
         "busy": 13, "sck": 7, "mosi": 9, "pwr": 12,
     }
-    assert not frame.gpio_buttons  # none published for this board yet
+    # The E-series trio (Seeed's ESPHome cookbook), same as the E1001/E1002.
+    assert frame.gpio_buttons == [
+        {"pin": 3, "label": "REFRESH"},
+        {"pin": 4, "label": "LEFT"},
+        {"pin": 5, "label": "RIGHT"},
+    ]
+    # Battery behind a switched 2:1 divider, and a battery power policy: the
+    # board ships sleeping between renders on battery, checking in every 15 min.
+    assert frame.device_config["batteryPin"] == 1
+    assert frame.device_config["batteryDivider"] == 2.0
+    assert frame.device_config["batteryEnablePin"] == 21
+    assert frame.device_config["deepSleepOnBattery"] is True
+    assert frame.device_config["wakeCheckSeconds"] == 900
     assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
     plan = embedded_provisioning_plan(frame)
     settings = _provisioned(plan)
