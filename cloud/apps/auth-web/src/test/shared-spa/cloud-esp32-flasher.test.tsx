@@ -3,7 +3,7 @@
 // The ESP32 browser flasher inside the workspace's "Add frame" panel. It lives
 // in cloud-frontend/, which has no test runner, so it is tested from auth-web's
 // vitest across the package boundary (see the other shared-spa tests).
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   browserTimeZone,
@@ -207,10 +207,6 @@ function mockCloudApi(
     }
     if (url === "/api/frames") {
       return Promise.resolve(Response.json({ frames: frames() }));
-    }
-    if (/^\/api\/frames\/[^/]+\/settings$/.test(url)) {
-      // The zone seeding after enrollment (see the handoff test).
-      return Promise.resolve(Response.json({ status: "queued" }));
     }
     return Promise.reject(new Error(`unexpected fetch: ${url}`));
   });
@@ -428,14 +424,25 @@ describe("Esp32CloudFlasher", () => {
       ...timeZoneWrites(),
       'wifi "My Home WiFi" "pa ss\\"word"',
     ]);
+    // The claim token carries the browser's zone: enrollment seeds the
+    // frame's time zone from it, so a new frame does not come up on UTC.
+    const zone = browserTimeZone();
+    const mintCall = fetchMock.mock.calls.find(
+      ([input]) => String(input) === "/api/frames/claim-tokens",
+    );
+    const mintBody = JSON.parse(String(mintCall?.[1]?.body)) as Record<string, unknown>;
+    expect(mintBody.timezone).toBe(zone);
     // The claim token is minted once, and only after the flash succeeded.
     const mintCalls = fetchMock.mock.calls.filter(
       ([input]) => String(input) === "/api/frames/claim-tokens",
     );
     expect(mintCalls).toHaveLength(1);
     // The name typed into the flasher's own field rides along with the mint.
+    // (Plus the browser's zone, when the runtime reports one: enrollment
+    // seeds the frame's time zone from the token.)
     expect(JSON.parse(String(mintCalls[0]![1]?.body))).toEqual({
       name: "Kitchen",
+      ...(zone ? { timezone: zone } : {}),
     });
   });
 
@@ -473,22 +480,6 @@ describe("Esp32CloudFlasher", () => {
     expect(open.getAttribute("href")).toBe("/frames/abc-123");
     expect(done.textContent).toContain("Kitchen");
     expect(done.textContent).toContain("waiting for your confirmation");
-
-    // The browser's zone lands in the new frame's cloud settings too, so the
-    // cloud pushes the tzdata slice and the workspace shows what was set.
-    const zone = browserTimeZone();
-    if (zone) {
-      await waitFor(() => {
-        expect(fetchedUrls()).toContain("/api/frames/abc-123/settings");
-      });
-      const seed = fetchMock.mock.calls.find(
-        ([input]) => String(input) === "/api/frames/abc-123/settings",
-      );
-      expect(seed?.[1]?.method).toBe("PATCH");
-      expect(JSON.parse(String(seed?.[1]?.body))).toEqual({
-        settings: { timezone: zone },
-      });
-    }
   });
 
   it("keeps Done quiet when the fleet snapshot was unavailable", async () => {

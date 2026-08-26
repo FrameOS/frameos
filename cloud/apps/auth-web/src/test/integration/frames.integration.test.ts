@@ -332,6 +332,62 @@ async function publishSceneVersion(
     .where(eq(storeScenes.id, sceneId));
 }
 
+describe("claim token time zone", () => {
+  // A frame cannot know where it is; the browser that adds it can. The zone
+  // rides the claim token, enrollment stores it as the frame's `timezone`
+  // setting and queues the same set_settings push the settings panel makes —
+  // frames used to come up on UTC and show the wrong time.
+  it("seeds the enrolled frame's time zone from the token", async () => {
+    await signIn();
+    const keys = deviceKeypair();
+    const mint = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { name: "Hall clock", timezone: "Europe/Brussels" },
+        { origin: baseUrl },
+      ),
+    );
+    expect(mint.status).toBe(200);
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const response = await enroll(claim_token, keys.publicKeyBase64);
+    expect(response.status).toBe(200);
+    const { frame_id } = (await response.json()) as { frame_id: string };
+
+    const [frame] = await db.select().from(frames).where(eq(frames.id, frame_id));
+    expect(frame?.settings).toEqual({ timezone: "Europe/Brussels" });
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    const push = commands.find((command) => command.type === "set_settings");
+    expect(push?.payload).toEqual({ settings: { timezone: "Europe/Brussels" } });
+  });
+
+  it("drops a malformed zone rather than refusing the token", async () => {
+    await signIn();
+    const keys = deviceKeypair();
+    const mint = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { timezone: "not a zone; drop table" },
+        { origin: baseUrl },
+      ),
+    );
+    expect(mint.status).toBe(200);
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const response = await enroll(claim_token, keys.publicKeyBase64);
+    expect(response.status).toBe(200);
+    const { frame_id } = (await response.json()) as { frame_id: string };
+    const [frame] = await db.select().from(frames).where(eq(frames.id, frame_id));
+    expect(frame?.settings ?? null).toBeNull();
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands.some((command) => command.type === "set_settings")).toBe(false);
+  });
+});
+
 describe("cloud-managed frame enrollment", () => {
   it("enrolls with a single-use claim token, born active (auto-confirmed)", async () => {
     const accountId = await signIn();

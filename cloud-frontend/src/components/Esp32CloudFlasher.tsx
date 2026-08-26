@@ -9,6 +9,7 @@ import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '..
 import { esp32Panels } from '../lib/generated-devices'
 import { cloudFrameUrl } from '../routes'
 import { fetchFrameList, useEnrollmentWatch } from './enrollmentWatch'
+import { browserTimeZone, claimTokenTimeZoneFields } from '../lib/browser-time-zone'
 
 // Browser flasher for cloud-managed ESP32 frames (docs/cloud-frames.md,
 // "ESP32 browser flashing"): WebSerial + esptool-js writes the prebuilt
@@ -454,20 +455,7 @@ async function provisionOverSerial(
 const controlClassName =
   'frameos-control block w-full rounded-lg border px-2.5 py-1.5 text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50'
 
-// The IANA zone of the browser doing the flashing — the best available guess
-// for where the frame will hang, and the one thing a fresh board cannot know
-// on its own. A frame left on UTC shows clocks and fires schedules two hours
-// off in Belgium and nobody finds out until they debug it. Validated to the
-// shape the console's `set time_zone` and the cloud setting accept.
-export function browserTimeZone(): string | undefined {
-  try {
-    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    if (typeof zone !== 'string' || zone.length === 0 || zone.length > 64) return undefined
-    return /^[A-Za-z][A-Za-z0-9_+\-]*(\/[A-Za-z0-9_+\-]+)*$/.test(zone) ? zone : undefined
-  } catch {
-    return undefined
-  }
-}
+export { browserTimeZone }
 
 export function Esp32CloudFlasher({
   cloudOrigin,
@@ -551,36 +539,6 @@ export function Esp32CloudFlasher({
     knownFrameIds,
   })
 
-  // The cloud copy of that zone: once the enrolled frame shows up, record the
-  // same zone in its settings so the workspace shows it and the cloud pushes
-  // the tzdata slice on top of the NVS value the serial `set` left. One
-  // attempt per frame; a failure only costs a log line (a frame still
-  // pending confirmation answers 409 — the settings panel takes it later).
-  const timeZoneSeededFor = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    if (!enrolledFrame || reenrollFrame || timeZoneSeededFor.current === enrolledFrame.id) return
-    const timeZone = browserTimeZone()
-    if (!timeZone) return
-    timeZoneSeededFor.current = enrolledFrame.id
-    void fetch(`/api/frames/${enrolledFrame.id}/settings`, {
-      body: JSON.stringify({ settings: { timezone: timeZone } }),
-      headers: { 'content-type': 'application/json' },
-      method: 'PATCH',
-    })
-      .then((response) => {
-        log(
-          response.ok
-            ? `Time zone ${timeZone} saved to the frame's cloud settings.`
-            : `Could not save time zone ${timeZone} to the cloud (HTTP ${response.status}); set it in the frame's settings.`
-        )
-      })
-      .catch(() => {
-        log(`Could not save time zone ${timeZone} to the cloud; set it in the frame's settings.`)
-      })
-    // log is a stable setState wrapper; enrolledFrame is the trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enrolledFrame, reenrollFrame])
-
   // WebSerial support cannot change while the page is open, so probe it once.
   // (The Next.js version deferred this to an effect purely to keep SSR and
   // hydration rendering the same fallback; there is no SSR here.)
@@ -619,6 +577,8 @@ export function Esp32CloudFlasher({
           : {
               name: frameName.trim(),
               ...(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
+              // Enrollment seeds the frame's time zone from this.
+              ...claimTokenTimeZoneFields(),
             }
       ),
       headers: { 'content-type': 'application/json' },
@@ -839,11 +799,11 @@ export function Esp32CloudFlasher({
       }
       const timeZone = browserTimeZone()
       if (timeZone) {
-        // Clocks and schedules run in frame-local time, and the board cannot
-        // know where it is; the browser flashing it is the best guess. Written
-        // to NVS so it holds even before (or without) the cloud settings push.
-        // Optional: firmware that predates the key answers with an error and
-        // the flash carries on.
+        // Clocks and schedules run in frame-local time. The claim token
+        // carries the same zone (enrollment seeds the cloud setting and
+        // pushes it), but this NVS copy holds before that push and without
+        // the cloud at all. Optional: firmware that predates the key answers
+        // with an error and the flash carries on.
         commands.push({
           display: `set time_zone ${timeZone}`,
           expect: consolePrompt,

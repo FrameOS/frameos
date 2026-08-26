@@ -555,6 +555,18 @@ export const esp32MaxGpioButtons = 8;
 export const esp32TimeZoneFrameSettingsMinVersion = "2026.8.34";
 export const esp32TimeZoneFrameSettingKeys = new Set(["timezone"]);
 
+// An IANA zone name as the device console and fos_tz accept it
+// ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata
+// slice lookup is what rejects unknown-but-well-formed names later.
+export function isValidTimeZoneName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 64 &&
+    /^[A-Za-z][A-Za-z0-9_+\-]*(\/[A-Za-z0-9_+\-]+)*$/.test(value)
+  );
+}
+
 // The settings frames.settings mirrors, in the device's spelling. `name` is
 // excluded on purpose: frames.name is the authoritative display name, and a
 // second copy here could disagree with it.

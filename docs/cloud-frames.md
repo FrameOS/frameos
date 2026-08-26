@@ -919,7 +919,7 @@ These are the endpoints the management UI uses; they are provider-internal
 but documented so the shared frontend's cloud adapter is reimplementable:
 
 ```http
-POST {provider}/api/frames/claim-tokens        # mint a claim token ("Add frame"); {"frame_id": …} binds it to an existing frame (re-enrollment); {"scene_source_frame_id": …} starts every frame it enrolls with that frame's scenes
+POST {provider}/api/frames/claim-tokens        # mint a claim token ("Add frame"); {"frame_id": …} binds it to an existing frame (re-enrollment); {"scene_source_frame_id": …} starts every frame it enrolls with that frame's scenes; {"timezone": "Europe/Brussels"} seeds the enrolled frame's time zone (and queues the set_settings push)
 GET  {provider}/api/frames                     # list the account's frames
 GET  {provider}/api/frames/{id}                # one frame, state + sync status
 GET  {provider}/api/frames/{id}/metrics        # retained metrics + `reboots` markers (telemetry:metrics)
