@@ -23,7 +23,7 @@ main/                     boot orchestration + platform modules
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
   fos_ota.c               OTA manifest check + esp_https_ota when an OTA partition exists
   fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
-  fos_console.c           USB-serial REPL: status / set / wifi / render / ota / ...
+  fos_console.c           serial REPL (UART0 + USB-Serial/JTAG): status / set / wifi / render / ota / ...
   fos_defaults.h          compile-time defaults; generated_config.h (from the
                           backend's per-frame build) overrides them
 components/
@@ -102,7 +102,7 @@ untouched binary. After every flash, check the boot log for
 `esp_image: image at 0x10000 has invalid magic byte` means the write went to
 the wrong offset.
 
-**Serial drops output during CPU-bound bursts.** The USB-Serial-JTAG console
+**Serial drops output during CPU-bound bursts.** The USB-Serial/JTAG console
 loses lines while `fos_client` holds the CPU — a cold boot's transpile
 window comes back as a multi-second gap with corrupted joins
 (`MEMMEMPROBE`, `MEMrender`). Absence of a probe line is not evidence the
@@ -117,8 +117,8 @@ FRAMEOS_ESP32_QEMU=1 bash embedded/esp32/ci_build_image.sh
 ```
 
 With `FRAMEOS_ESP32_QEMU=1`, the script adds `sdkconfig.qemu.defaults` to route
-logs to UART0 and avoid QEMU's PSRAM path; the default build profile remains
-USB Serial/JTAG with octal PSRAM enabled. The QEMU smoke verifies that the
+logs to UART0 only and avoid QEMU's PSRAM path; the default build profile
+keeps octal PSRAM and both consoles. The QEMU smoke verifies that the
 bootloader selects `ota_0` and ESP-IDF starts the `frameos_esp32` app image;
 when QEMU reaches `app_main`, the script reports that stronger signal too.
 
@@ -185,7 +185,15 @@ panel, render mode). Backend-built images arrive fully provisioned via
 settings (the same place the Pi flows keep it) and optional native HTTPS using
 the same per-frame certificate material as Raspberry Pi Caddy proxies.
 
-The USB serial console (115200) is always available and quicker for development:
+The serial console (115200) is always available and quicker for development.
+It answers on whichever USB port the board brings out: the chip's own
+USB-Serial/JTAG device ("USB JTAG/serial debug unit" — XIAO ESP32-S3) and
+UART0 behind an on-board USB-UART bridge ("USB Single Serial" — the Seeed
+reTerminal E10xx wire USB-C to a CH340 on UART0 and leave the chip's USB pins
+unconnected; the PhotoPainter 13.3" has both). `sdkconfig.defaults` makes
+UART0 the primary console and USB-Serial/JTAG the secondary: stdout reaches
+both, and `fos_console.c` reads commands from both drivers. GPIO 43/44 (U0TXD/
+U0RXD) are therefore off-limits for panel or button pins.
 
 ```
 frameos> status

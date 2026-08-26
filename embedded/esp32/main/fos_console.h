@@ -1,5 +1,6 @@
 /*
- * Serial console (USB Serial/JTAG) for dev + headless provisioning:
+ * Serial console for dev + headless provisioning, answering on UART0 (a
+ * board's USB-UART bridge) and on the chip's USB-Serial/JTAG port alike:
  *   status | show | set <key> <value> | wifi <ssid> [pass] | render | ota
  *   restart | factory-reset
  */

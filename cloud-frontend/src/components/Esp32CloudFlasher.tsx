@@ -117,33 +117,31 @@ export function pinsSpecError(spec: string): string | undefined {
 const flashBaudrate = 460800
 const consoleBaudrate = 115200
 
-// The firmware's console REPL lives only on the ESP32-S3's built-in
-// USB-Serial/JTAG device (CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG in
-// embedded/esp32/sdkconfig.defaults) — the port the OS names
-// "USB JTAG/serial debug unit". Some boards (Waveshare PhotoPainter 13.3")
-// additionally expose an on-board USB-UART bridge on UART0, which shows up
-// as a second port ("USB Single Serial" for its CH343). The ROM bootloader
-// flashes fine through the bridge, but the console prompt can never appear
-// there, so provisioning would always time out after a successful-looking
-// flash. Known bridge vendors are refused before anything is written.
+// The firmware's console answers on both places a board can bring its USB-C
+// connector to: the chip's built-in USB-Serial/JTAG device (the port the OS
+// names "USB JTAG/serial debug unit" — XIAO ESP32-S3) and UART0 behind an
+// on-board USB-UART bridge (Seeed reTerminal E10xx: CH340, the chip's own USB
+// pins are not wired at all; the PhotoPainter 13.3" shows both ports over one
+// cable). embedded/esp32/sdkconfig.defaults makes UART0 the primary console
+// and USB-Serial/JTAG the secondary; fos_console.c reads commands from both.
+// The vendor table only names the port kind in the log — nothing is refused.
 const uartBridgeVendors: Record<number, string> = {
   0x0403: 'FTDI',
   0x067b: 'Prolific',
   0x10c4: 'Silicon Labs CP210x',
   0x1a86: 'WCH ("USB Single Serial")',
 }
+const espressifUsbVendorId = 0x303a
 
-export function portSelectionError(info: { usbVendorId?: number } | undefined): string | undefined {
-  const bridge = info?.usbVendorId !== undefined ? uartBridgeVendors[info.usbVendorId] : undefined
-  if (!bridge) {
-    return undefined
+export function describeSerialPort(info: { usbVendorId?: number } | undefined): string {
+  if (info?.usbVendorId === espressifUsbVendorId) {
+    return "the chip's built-in USB-Serial/JTAG port"
   }
-  return (
-    `The selected port is a ${bridge} USB-UART bridge. Flashing would work through it, ` +
-    'but the FrameOS console only answers on the chip\'s built-in USB port, so the frame could ' +
-    'never be provisioned. Click flash again and pick the port named "USB JTAG/serial debug unit" ' +
-    '(boards like the PhotoPainter 13.3" show both ports over one cable).'
-  )
+  const bridge = info?.usbVendorId !== undefined ? uartBridgeVendors[info.usbVendorId] : undefined
+  if (bridge) {
+    return `a ${bridge} USB-UART bridge — the console answers on UART0 at ${consoleBaudrate} baud`
+  }
+  return 'a serial port'
 }
 
 // The console prompt has no trailing space (fos_console.c: `printf("frameos>")`).
@@ -399,9 +397,8 @@ async function provisionOverSerial(
     if (!(await readUntil(consolePrompt, bootPromptTimeoutMs))) {
       throw new Error(
         'The flashed firmware never showed its FrameOS console prompt, so nothing was provisioned. ' +
-          'If the board offers more than one serial port, the console only answers on ' +
-          '"USB JTAG/serial debug unit" — not on a "USB Single Serial" UART bridge. ' +
-          'Unplug the board, plug it back in and try again with that port.'
+          'Unplug the board, plug it back in and try again; if the port picker lists several ports, ' +
+          'try the other one ("USB JTAG/serial debug unit" or "USB Single Serial" — the console answers on both).'
       )
     }
     for (const command of commands) {
@@ -647,15 +644,10 @@ export function Esp32CloudFlasher({
       const firmware = await fetchGenericFirmware(firmwarePlatform, log)
 
       setPhase('connecting')
-      log('Pick the USB serial port of your ESP32 — if several are listed, choose "USB JTAG/serial debug unit"…')
+      log('Pick the USB serial port of your ESP32 — if several are listed, "USB JTAG/serial debug unit" is the faster one…')
       const serial = (navigator as unknown as { serial: WebSerialLike }).serial
       const port = await serial.requestPort()
-      // Refuse a USB-UART bridge port before writing anything: the flash
-      // would succeed but provisioning could never find the console.
-      const portError = portSelectionError(port.getInfo?.())
-      if (portError) {
-        throw new Error(portError)
-      }
+      log(`Selected ${describeSerialPort(port.getInfo?.())}.`)
 
       setPhase('flashing')
       const { ESPLoader, Transport } = await loadEsptool()
@@ -863,8 +855,8 @@ export function Esp32CloudFlasher({
         {reenrollFrame
           ? `Plug the board in over USB and click flash — it writes the generic FrameOS firmware and links the board back to "${reenrollFrame.name}", keeping that frame's scenes, assets and logs.`
           : 'Plug the board in over USB and click flash — it writes the generic FrameOS firmware and links the frame to this account automatically.'}{' '}
-        If the port picker lists several ports, choose &ldquo;USB JTAG/serial debug unit&rdquo; (a &ldquo;USB Single
-        Serial&rdquo; port can flash but not provision).
+        If the port picker lists several ports, either works &mdash; &ldquo;USB JTAG/serial debug unit&rdquo; is the
+        faster one; &ldquo;USB Single Serial&rdquo; is the board&rsquo;s USB-UART bridge at 115200 baud.
       </p>
       <div className="grid gap-2">
         {reenrollFrame ? null : (

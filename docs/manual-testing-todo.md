@@ -113,6 +113,15 @@ flow (changes first-boot behavior for every new user).
   says to take first.
 - [ ] **Scheduled reboot on ESP32 (#376):** same schedule-entry test as the
   Pi, on a board.
+- [ ] **Dual console — reTerminal E1002 over its CH340:** the cloud flasher
+  on the "USB Single Serial" port must flash, see `frameos>` and provision
+  (this board has no USB-Serial/JTAG port at all). Then on a XIAO ESP32-S3
+  confirm the "USB JTAG/serial debug unit" path still provisions and that
+  `usb_api` uploads/previews work there. Partial pass 2026-08-26: frame 59
+  (13.3E6) answered `frameos>` + `status` over its CH343 "USB Single Serial"
+  port with a local build; opening that port through pyserial/WebSerial
+  resets the chip (DTR/RTS auto-reset circuit), so open once with DTR/RTS
+  low and keep the port open while waiting for the prompt.
 
 ## 5. Older pending hardware item
 

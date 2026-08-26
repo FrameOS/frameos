@@ -1,7 +1,16 @@
 CONFIG_IDF_TARGET="esp32s3"
 
-# USB Serial/JTAG console (the S3 devkit's built-in USB port)
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# Console: UART0 primary, the chip's USB-Serial/JTAG device secondary. Boards
+# bring USB-C to different places — the S3's own USB pins (XIAO ESP32-S3:
+# "USB JTAG/serial debug unit"), a USB-UART bridge on UART0 (Seeed reTerminal
+# E10xx: CH340, the USB pins are not wired at all), or both over one cable
+# (PhotoPainter 13.3") — and one image has to answer on whichever port the
+# host can see. stdout reaches both (the console VFS mirrors writes to the
+# secondary); fos_console.c reads commands from both drivers.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
 
 # Smaller, quieter image
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y

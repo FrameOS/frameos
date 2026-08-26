@@ -821,13 +821,16 @@ keeps its prompts); every prompt can be pre-answered with the script's
 
 The provider's flasher page uses WebSerial + esptool-js to write a prebuilt
 firmware image, then provisions `cloud_url` + `claim_token` (+ optional
-WiFi) into the device's NVS config partition. The port must be the chip's
-built-in USB-Serial/JTAG device ("USB JTAG/serial debug unit"): the console
-REPL only exists there (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG`), and boards
-that also expose an on-board USB-UART bridge (PhotoPainter 13.3", CH343 →
-"USB Single Serial") can flash through the bridge but never provision, so
-the flasher refuses known bridge vendor ids before writing anything. Same enrollment flow A over the
-device's own network connection afterwards. The firmware binaries come from
+WiFi) into the device's NVS config partition. Either USB port a board
+offers works: the console answers on the chip's built-in USB-Serial/JTAG
+device ("USB JTAG/serial debug unit") and on UART0 behind an on-board
+USB-UART bridge ("USB Single Serial" — Seeed's reTerminal E10xx wire USB-C
+to a CH340 on UART0 and nothing to the chip's own USB pins; the PhotoPainter
+13.3" shows both ports over one cable). `sdkconfig.defaults` makes UART0
+the primary console and USB-Serial/JTAG the secondary; `fos_console.c`
+reads commands from both. The flasher used to refuse bridge vendor ids,
+which locked the reTerminal boards out entirely. Same enrollment flow A over
+the device's own network connection afterwards. The firmware binaries come from
 the release archive; the flasher never receives per-user builds.
 
 **"Generic" means credential- and panel-generic.** A published image carries

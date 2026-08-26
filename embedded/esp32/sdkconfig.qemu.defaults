@@ -1,6 +1,9 @@
-# QEMU captures UART0 with `idf.py qemu -serial mon:stdio`; the production
-# XIAO ESP32-S3 default remains USB Serial/JTAG in sdkconfig.defaults.
+# QEMU captures UART0 with `idf.py qemu -serial mon:stdio`. The production
+# profile (sdkconfig.defaults) is UART0 + USB-Serial/JTAG secondary; QEMU does
+# not emulate the USB-Serial/JTAG device, so the secondary console stays off.
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+# CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG is not set
 # CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
 
 # Keep the normal firmware quiet, but make the QEMU smoke observable enough to

@@ -2068,11 +2068,11 @@ function EmbeddedFirmwareSection({
               build of a chip target can take an hour on a small machine.
               {showUsbJtagPortGuidance ? (
                 <span className="mt-2 block">
-                  The 13.3&quot; ESP32 board can appear as two serial ports. Choose
-                  <span className="font-semibold text-[color:var(--tool-strong)]"> USB JTAG/serial debug unit</span> for
-                  browser flashing when you want scenes uploaded after flashing. Use
-                  <span className="font-semibold text-[color:var(--tool-strong)]"> USB single serial</span> only for
-                  manual/recovery flashing; it does not carry FrameOS logs, previews, or scene uploads.
+                  The 13.3&quot; ESP32 board can appear as two serial ports and either works.
+                  <span className="font-semibold text-[color:var(--tool-strong)]"> USB JTAG/serial debug unit</span> is
+                  the fast one (logs, previews and scene uploads at USB speed);
+                  <span className="font-semibold text-[color:var(--tool-strong)]"> USB Single Serial</span> is the
+                  board&apos;s USB-UART bridge at 115200 baud, so uploads take longer there.
                 </span>
               ) : null}
             </div>
@@ -2727,10 +2727,10 @@ function CloudUsbDeployView({ frame, onBack }: { frame: FrameType; onBack?: () =
           </div>
           {showUsbJtagPortGuidance ? (
             <div className="frame-tool-muted text-xs leading-4">
-              This board can appear as two serial ports. Choose{' '}
-              <span className="font-semibold text-[color:var(--tool-strong)]">USB JTAG/serial debug unit</span>; a{' '}
-              <span className="font-semibold text-[color:var(--tool-strong)]">USB Single Serial</span> port can flash
-              but not provision.
+              This board can appear as two serial ports and either works.{' '}
+              <span className="font-semibold text-[color:var(--tool-strong)]">USB JTAG/serial debug unit</span> is the
+              fast one; <span className="font-semibold text-[color:var(--tool-strong)]">USB Single Serial</span> is the
+              board&apos;s USB-UART bridge at 115200 baud.
             </div>
           ) : null}
         </div>

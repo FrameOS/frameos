@@ -8,8 +8,6 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "driver/usb_serial_jtag.h"
-#include "driver/usb_serial_jtag_vfs.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "esp_console.h"
@@ -41,6 +39,67 @@
 #include "frameos_nim.h"
 
 static const char *TAG = "fos_console";
+
+/* Console channels. Boards bring the USB-C connector to different places:
+ * the chip's own USB-Serial/JTAG device (XIAO ESP32-S3: "USB JTAG/serial
+ * debug unit"), a USB-UART bridge on UART0 (Seeed reTerminal E10xx: CH340,
+ * the S3's USB pins are not wired at all), or both over one cable (Waveshare
+ * PhotoPainter 13.3": CH343 + JTAG). One image has to answer on whichever
+ * port the host can see, so sdkconfig.defaults makes UART0 the primary
+ * console with USB-Serial/JTAG as the secondary. Output needs no routing:
+ * stdout is ESP-IDF's console VFS, which writes every byte to the primary
+ * and mirrors it to the secondary, so the prompt, command replies and logs
+ * reach both ports. Input is read straight from each driver — never stdin —
+ * so a raw usb_api payload arrives untranslated on the channel that sent
+ * the command. Older single-console configs (the QEMU profile: UART only)
+ * still build; the channel list just shrinks. */
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG || CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG
+#define FOS_CONSOLE_HAS_USB_SERIAL_JTAG 1
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
+#else
+#define FOS_CONSOLE_HAS_USB_SERIAL_JTAG 0
+#endif
+#if CONFIG_ESP_CONSOLE_UART
+#define FOS_CONSOLE_HAS_UART 1
+#define FOS_CONSOLE_UART_NUM CONFIG_ESP_CONSOLE_UART_NUM
+#include "driver/uart.h"
+#include "driver/uart_vfs.h"
+#include "soc/uart_pins.h"
+#else
+#define FOS_CONSOLE_HAS_UART 0
+#endif
+#if !FOS_CONSOLE_HAS_USB_SERIAL_JTAG && !FOS_CONSOLE_HAS_UART
+#error "fos_console needs a UART or USB-Serial/JTAG console (CONFIG_ESP_CONSOLE_*)"
+#endif
+
+typedef enum {
+    FOS_CONSOLE_CHANNEL_NONE = 0,
+    FOS_CONSOLE_CHANNEL_UART,
+    FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG,
+} fos_console_channel_t;
+
+/* The channel whose command is executing right now (commands run on the
+ * console task, one at a time), so usb_api payload reads follow it. */
+static fos_console_channel_t s_active_channel = FOS_CONSOLE_CHANNEL_NONE;
+
+/* Up to len bytes from one channel, waiting at most ticks for the first;
+ * returns the count, 0 on timeout, -1 for a channel this build lacks. */
+static int console_channel_read(fos_console_channel_t channel, uint8_t *buf, size_t len, TickType_t ticks)
+{
+    switch (channel) {
+#if FOS_CONSOLE_HAS_UART
+    case FOS_CONSOLE_CHANNEL_UART:
+        return uart_read_bytes(FOS_CONSOLE_UART_NUM, buf, (uint32_t)len, ticks);
+#endif
+#if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
+    case FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG:
+        return usb_serial_jtag_read_bytes(buf, (uint32_t)len, ticks);
+#endif
+    default:
+        return -1;
+    }
+}
 
 #if CONFIG_ESPTOOLPY_FLASHSIZE_32MB
 #define FOS_USB_API_MAX_UPLOAD (4 * 1024 * 1024)
@@ -235,7 +294,10 @@ static bool console_pin_in_use(const fos_config_t *config, int pin)
         config->pins.busy, config->pins.sck, config->pins.mosi, config->pins.pwr,
         config->assets_sd.cs, config->assets_sd.sck,
         config->assets_sd.miso, config->assets_sd.mosi,
-        19, 20, /* USB D-/D+ (the console itself) */
+        19, 20, /* USB D-/D+ (the USB-Serial/JTAG console) */
+#if FOS_CONSOLE_HAS_UART
+        U0TXD_GPIO_NUM, U0RXD_GPIO_NUM, /* UART0 console (a board's USB-UART bridge) */
+#endif
         /* 26-32 SPI flash, 33-37 octal PSRAM. On an S3 module with octal
          * PSRAM (CONFIG_SPIRAM_MODE_OCT) 33-37 carry the memory bus, and
          * reconfiguring them as inputs takes the running system's RAM away
@@ -903,27 +965,18 @@ static bool usb_api_read_exact(uint8_t *buf, size_t len, TickType_t timeout_tick
     TickType_t start = xTaskGetTickCount();
     if (bytes_read) *bytes_read = 0;
     while (off < len) {
-#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+        /* The payload follows the command on the same channel. */
         size_t remaining = len - off;
         uint32_t chunk = remaining > FOS_USB_API_PAYLOAD_READ_CHUNK
                              ? FOS_USB_API_PAYLOAD_READ_CHUNK
                              : (uint32_t)remaining;
-        int count = usb_serial_jtag_read_bytes(buf + off, chunk, pdMS_TO_TICKS(20));
+        int count = console_channel_read(s_active_channel, buf + off, chunk, pdMS_TO_TICKS(20));
         if (count > 0) {
             off += (size_t)count;
             if (bytes_read) *bytes_read = off;
             taskYIELD();
             continue;
         }
-#else
-        int ch = fgetc(stdin);
-        if (ch != EOF) {
-            buf[off++] = (uint8_t)ch;
-            if (bytes_read) *bytes_read = off;
-            if ((off & 0x3ff) == 0) taskYIELD();
-            continue;
-        }
-#endif
         if ((xTaskGetTickCount() - start) >= timeout_ticks) {
             return false;
         }
@@ -1500,7 +1553,6 @@ static esp_err_t register_frameos_console_commands(void)
     return ESP_OK;
 }
 
-#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 static void console_prompt(void)
 {
     printf("frameos>");
@@ -1528,110 +1580,162 @@ static void run_console_line(char *line)
     fflush(stdout);
 }
 
-static void fos_console_usb_task(void *arg)
+/* One reader task serves every console channel the build has. A command
+ * runs on the task that read it; the channel it came from is remembered in
+ * s_active_channel for the duration so usb_api payload reads follow it. */
+typedef struct {
+    fos_console_channel_t channel;
+    char line[FOS_CONSOLE_MAX_CMDLINE_LENGTH];
+    size_t len;
+} console_line_state_t;
+
+static void console_feed_byte(console_line_state_t *state, uint8_t ch)
+{
+    if (ch == '\r' || ch == '\n') {
+        state->line[state->len] = '\0';
+        s_active_channel = state->channel;
+        run_console_line(state->line);
+        s_active_channel = FOS_CONSOLE_CHANNEL_NONE;
+        state->len = 0;
+        console_prompt();
+        return;
+    }
+
+    if (ch == 0x08 || ch == 0x7f) {
+        if (state->len > 0) state->len--;
+        return;
+    }
+
+    if (state->len < sizeof(state->line) - 1) {
+        state->line[state->len++] = (char)ch;
+        return;
+    }
+    state->line[sizeof(state->line) - 1] = '\0';
+    printf("command too long\n");
+    state->len = 0;
+    console_prompt();
+}
+
+static void fos_console_task(void *arg)
 {
     (void)arg;
-    char line[FOS_CONSOLE_MAX_CMDLINE_LENGTH];
-    size_t len = 0;
+    static console_line_state_t states[] = {
+#if FOS_CONSOLE_HAS_UART
+        {.channel = FOS_CONSOLE_CHANNEL_UART},
+#endif
+#if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
+        {.channel = FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG},
+#endif
+    };
+    const size_t count = sizeof(states) / sizeof(states[0]);
 
     console_prompt();
     while (true) {
-        int ch = fgetc(stdin);
-        if (ch == EOF) {
-            /* stdin is non-blocking; sleep at least one full tick. At
-             * CONFIG_FREERTOS_HZ=100, pdMS_TO_TICKS(1) rounds to 0 ticks and
-             * this loop busy-spins, starving IDLE0 (task_wdt warnings). */
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
-
-        if (ch == '\r' || ch == '\n') {
-            line[len] = '\0';
-            run_console_line(line);
-            len = 0;
-            console_prompt();
-            continue;
-        }
-
-        if (ch == 0x08 || ch == 0x7f) {
-            if (len > 0) len--;
-            continue;
-        }
-
-        if (len < sizeof(line) - 1) {
-            line[len++] = (char)ch;
-        } else {
-            line[sizeof(line) - 1] = '\0';
-            printf("command too long\n");
-            len = 0;
-            console_prompt();
+        for (size_t i = 0; i < count; i++) {
+            /* One byte at a time: whatever follows a command's newline may be
+             * a raw usb_api payload, which has to stay in the driver's buffer
+             * for usb_api_read_exact. The blocking read is what paces the
+             * loop (no vTaskDelay: at CONFIG_FREERTOS_HZ=100 anything under
+             * 10ms rounds to 0 ticks and starves IDLE0); a channel with bytes
+             * queued is drained before the other channel gets its turn, so a
+             * busy port never waits one timeout per byte. */
+            uint8_t ch;
+            int n = console_channel_read(states[i].channel, &ch, 1, pdMS_TO_TICKS(10));
+            while (n > 0) {
+                console_feed_byte(&states[i], ch);
+                n = console_channel_read(states[i].channel, &ch, 1, 0);
+            }
         }
     }
 }
 
-static esp_err_t fos_console_start_usb_serial_jtag(void)
+#if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
+static esp_err_t console_init_usb_serial_jtag(void)
 {
     /* Commands are LF-delimited; raw usb_api payload bytes must not be CRLF-normalized. */
     usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_LF);
     usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
-
-    fcntl(fileno(stdout), F_SETFL, 0);
-    fcntl(fileno(stdin), F_SETFL, O_NONBLOCK);
 
     usb_serial_jtag_driver_config_t usb_serial_jtag_config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     usb_serial_jtag_config.rx_buffer_size = 8192;
     usb_serial_jtag_config.tx_buffer_size = 2048;
     esp_err_t err = usb_serial_jtag_driver_install(&usb_serial_jtag_config);
     if (err != ESP_OK) return err;
+    /* Also covers the secondary-console writes: stdout's mirror to this port
+     * goes through the same VFS, and with the driver installed it is
+     * interrupt-driven instead of a polled FIFO. With no host attached (or
+     * no USB pins wired, reTerminal E10xx) the VFS drops the bytes. */
     usb_serial_jtag_vfs_use_driver();
+    return ESP_OK;
+}
+#endif
 
-    esp_console_config_t console_config = ESP_CONSOLE_CONFIG_DEFAULT();
-    console_config.max_cmdline_length = FOS_CONSOLE_MAX_CMDLINE_LENGTH;
-    err = esp_console_init(&console_config);
+#if FOS_CONSOLE_HAS_UART
+static esp_err_t console_init_uart(void)
+{
+    uart_vfs_dev_port_set_rx_line_endings(FOS_CONSOLE_UART_NUM, ESP_LINE_ENDINGS_LF);
+    uart_vfs_dev_port_set_tx_line_endings(FOS_CONSOLE_UART_NUM, ESP_LINE_ENDINGS_CRLF);
+
+    /* Same rate the ROM and the bootloader already use on this port, so a
+     * terminal opened for the boot log keeps working into the prompt. The
+     * crystal clock keeps the baud rate stable across APB frequency changes. */
+    const uart_config_t uart_config = {
+        .baud_rate = CONFIG_ESP_CONSOLE_UART_BAUDRATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+#if SOC_UART_SUPPORT_XTAL_CLK
+        .source_clk = UART_SCLK_XTAL,
+#else
+        .source_clk = UART_SCLK_DEFAULT,
+#endif
+    };
+    esp_err_t err = uart_param_config(FOS_CONSOLE_UART_NUM, &uart_config);
     if (err != ESP_OK) return err;
-    ESP_ERROR_CHECK(esp_console_register_help_command());
-    ESP_ERROR_CHECK(register_frameos_console_commands());
-
-    if (xTaskCreate(fos_console_usb_task, "console_usb", FOS_CONSOLE_TASK_STACK_SIZE, NULL, 2, NULL) != pdTRUE) {
-        return ESP_FAIL;
-    }
+    /* Pins stay where the ROM routed them (U0TXD/U0RXD): that is where a
+     * board's USB-UART bridge sits, or it could not have flashed the chip. */
+    err = uart_driver_install(FOS_CONSOLE_UART_NUM, 8192, 2048, 0, NULL, 0);
+    if (err != ESP_OK) return err;
+    /* Interrupt-driven stdout: a polled FIFO write would spin the CPU for the
+     * whole of a base64 preview at 115200 baud. */
+    uart_vfs_dev_use_driver(FOS_CONSOLE_UART_NUM);
     return ESP_OK;
 }
 #endif
 
 esp_err_t fos_console_start(void)
 {
-#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-    esp_err_t err = fos_console_start_usb_serial_jtag();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "console init failed: %s", esp_err_to_name(err));
-    }
-    return err;
-#else
-    esp_console_repl_t *repl = NULL;
-    esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
-    repl_config.prompt = "frameos>";
-    repl_config.max_cmdline_length = FOS_CONSOLE_MAX_CMDLINE_LENGTH;
-    repl_config.task_stack_size = FOS_CONSOLE_TASK_STACK_SIZE;
-
     esp_err_t err = ESP_OK;
-#if CONFIG_ESP_CONSOLE_UART
-    esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
-    err = esp_console_new_repl_uart(&hw_config, &repl_config, &repl);
-#elif CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-    esp_console_dev_usb_serial_jtag_config_t hw_config =
-        ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
-    err = esp_console_new_repl_usb_serial_jtag(&hw_config, &repl_config, &repl);
-#else
-    err = ESP_ERR_NOT_SUPPORTED;
+    fcntl(fileno(stdout), F_SETFL, 0);
+
+#if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
+    err = console_init_usb_serial_jtag();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "usb-serial-jtag console init failed: %s", esp_err_to_name(err));
+        return err;
+    }
 #endif
+#if FOS_CONSOLE_HAS_UART
+    err = console_init_uart();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "uart console init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+#endif
+
+    esp_console_config_t console_config = ESP_CONSOLE_CONFIG_DEFAULT();
+    console_config.max_cmdline_length = FOS_CONSOLE_MAX_CMDLINE_LENGTH;
+    err = esp_console_init(&console_config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "console init failed: %s", esp_err_to_name(err));
         return err;
     }
-
+    ESP_ERROR_CHECK(esp_console_register_help_command());
     ESP_ERROR_CHECK(register_frameos_console_commands());
-    ESP_ERROR_CHECK(esp_console_start_repl(repl));
+
+    if (xTaskCreate(fos_console_task, "console", FOS_CONSOLE_TASK_STACK_SIZE, NULL, 2, NULL) != pdTRUE) {
+        return ESP_FAIL;
+    }
     return ESP_OK;
-#endif
 }

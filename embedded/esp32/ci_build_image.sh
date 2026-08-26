@@ -162,6 +162,12 @@ file_size() {
 }
 
 require_line '^CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192$' "$SDKCONFIG_PATH"
+# The console must answer on UART0 (boards whose USB-C is a USB-UART bridge,
+# e.g. Seeed reTerminal E10xx) as well as on the chip's USB-Serial/JTAG port.
+require_line '^CONFIG_ESP_CONSOLE_UART_DEFAULT=y$' "$SDKCONFIG_PATH"
+if [[ "$QEMU_SMOKE" != "1" ]]; then
+    require_line '^CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y$' "$SDKCONFIG_PATH"
+fi
 if [[ "$PLATFORM" == "esp32-c3" ]]; then
     require_line '^CONFIG_IDF_TARGET="esp32c3"$' "$SDKCONFIG_PATH"
     require_line '^CONFIG_ESPTOOLPY_FLASHSIZE="4MB"$' "$SDKCONFIG_PATH"
