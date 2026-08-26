@@ -373,7 +373,7 @@ jobs:
             default_author: github_actions
 
   frontend-visual-regression:
-    name: Frontend E2E + Visual Regression Tests (${{ matrix.shard }}/4)
+    name: Frontend E2E + Visual Regression Tests (${{ matrix.shard }}/8)
     # Chromium screenshots depend on the fonts and libraries of the machine
     # that rendered them, which used to pin this job to GitHub's ubuntu-latest
     # image. The official Playwright container (tag = the @playwright/test
@@ -388,7 +388,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -460,7 +460,7 @@ jobs:
           REDIS_URL: redis://localhost:6379/15
         run: |
           source backend/.venv/bin/activate
-          pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --shard=${{ matrix.shard }}/4
+          pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --shard=${{ matrix.shard }}/8
 
       - name: Update frontend visual snapshots
         shell: bash
@@ -472,14 +472,14 @@ jobs:
           REDIS_URL: redis://localhost:6379/15
         run: |
           source backend/.venv/bin/activate
-          pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --update-snapshots --shard=${{ matrix.shard }}/4
+          pnpm exec playwright test -c e2e/frontend-visual/playwright.config.ts --update-snapshots --shard=${{ matrix.shard }}/8
           git status --short e2e/frontend-visual/snapshots
 
       - name: Collect frontend visual snapshot changes
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           mkdir -p .tmp/frontend-visual-snapshot-artifact
-          printf 'frontend visual snapshot shard %s/4\n' '${{ matrix.shard }}' > ".tmp/frontend-visual-snapshot-artifact/SHARD-${{ matrix.shard }}.txt"
+          printf 'frontend visual snapshot shard %s/8\n' '${{ matrix.shard }}' > ".tmp/frontend-visual-snapshot-artifact/SHARD-${{ matrix.shard }}.txt"
           git diff --name-only -- e2e/frontend-visual/snapshots > .tmp/frontend-visual-snapshot-files.txt
           git ls-files --others --exclude-standard -- e2e/frontend-visual/snapshots >> .tmp/frontend-visual-snapshot-files.txt
           sort -u .tmp/frontend-visual-snapshot-files.txt -o .tmp/frontend-visual-snapshot-files.txt
@@ -503,7 +503,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-visual-report-${{ matrix.shard }}-of-4
+          name: frontend-visual-report-${{ matrix.shard }}-of-8
           path: |
             e2e/frontend-visual/playwright-report
             e2e/frontend-visual/test-results

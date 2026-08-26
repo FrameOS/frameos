@@ -5,10 +5,11 @@ import { describe, expect, it } from "vitest";
 import {
   CLOUD_CONFIG_MAGIC,
   CLOUD_CONFIG_REGION_SIZE,
+  SdImagePatchError,
+  cloudConfigContentLength,
   patchCloudConfig,
   renderCloudConfig,
   sanitizeConfigValue,
-  SdImagePatchError,
   verifyPlaceholderRegion,
 } from "../../../../../../cloud-frontend/src/lib/sd-image-patch";
 
@@ -143,6 +144,42 @@ describe("sanitizeConfigValue", () => {
 });
 
 describe("renderCloudConfig", () => {
+  it("writes one authorized_key line per SSH public key, and counts them into the budget", () => {
+    const ed25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ4ZmFrZWtleWZha2VrZXlmYWtla2V5ZmFrZWtleQ marius@laptop";
+    const rsa = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC0fakekey";
+    const input = {
+      claimToken: "FRCT_abc",
+      cloudUrl: "https://cloud.example.com",
+      sshPublicKeys: [ed25519, rsa],
+    };
+    const text = new TextDecoder().decode(renderCloudConfig(input));
+    const lines = text.split("\n").filter((line) => !line.startsWith("#"));
+    expect(lines).toEqual([
+      "cloud_url=https://cloud.example.com",
+      "claim_token=FRCT_abc",
+      `authorized_key=${ed25519}`,
+      `authorized_key=${rsa}`,
+      "",
+    ]);
+    expect(cloudConfigContentLength(input)).toBe(
+      new TextEncoder().encode(`${CLOUD_CONFIG_MAGIC}\n${lines.join("\n")}`).length,
+    );
+    expect(cloudConfigContentLength({ ...input, sshPublicKeys: [] })).toBeLessThan(
+      cloudConfigContentLength(input),
+    );
+  });
+
+  it("refuses a configuration whose SSH keys overflow the region, without throwing from the size readout", () => {
+    const rsa = "ssh-rsa " + "A".repeat(560);
+    const input = {
+      claimToken: "FRCT_abc",
+      cloudUrl: "https://cloud.example.com",
+      sshPublicKeys: Array.from({ length: 8 }, () => rsa),
+    };
+    expect(cloudConfigContentLength(input)).toBeGreaterThan(CLOUD_CONFIG_REGION_SIZE);
+    expect(() => renderCloudConfig(input)).toThrow(/fewer SSH keys/);
+  });
+
   it("renders exactly 4096 bytes starting with the magic line", () => {
     expect(config.length).toBe(CLOUD_CONFIG_REGION_SIZE);
     const text = decoder.decode(config);

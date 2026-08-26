@@ -24,6 +24,7 @@ import { FrameConnectionDot } from '../../components/FrameConnectionDot'
 import { PartialRefreshSettingsFields } from '../../components/PartialRefreshSettingsFields'
 import { Spinner } from '../../components/Spinner'
 import { Switch } from '../../components/Switch'
+import { SshKeysSection } from '../../components/sshKeys/SshKeysSection'
 import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
 import { formatFrameRelativeTime, frameHasActivityLog, frameHost } from '../../decorators/frame'
@@ -1216,7 +1217,6 @@ function BuildrootSdCardSection({
   const platform = normalizeBuildrootPlatform(buildroot.platform)
   const compilationMode = String(buildroot.compilationMode ?? '')
   const rootPassword = frameForm.ssh_pass ?? frame.ssh_pass ?? ''
-  const sshKeyOptions = normalizeSshKeys(savedSettings.ssh_keys).keys
   const selectedSshKeys = new Set(effectiveSshKeyIds(frame, frameForm, savedSettings))
   const updateFrameValue = <K extends keyof FrameType>(field: K, value: FrameType[K]): void => {
     setFrameFormValues({ [field]: value } as Partial<FrameType>)
@@ -1431,29 +1431,13 @@ function BuildrootSdCardSection({
           </label>
           <div className="space-y-2">
             <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">SSH keys</div>
-            {sshKeyOptions.length === 0 ? (
-              <div className="text-sm text-slate-500">No SSH keys configured in settings.</div>
-            ) : (
-              <div className="space-y-2 frame-tool-panel">
-                {sshKeyOptions.map((key) => (
-                  <div key={key.id} className="flex min-w-0 items-center gap-2">
-                    <Switch
-                      value={selectedSshKeys.has(key.id)}
-                      onChange={(value) => {
-                        const next = new Set(selectedSshKeys)
-                        if (value) {
-                          next.add(key.id)
-                        } else {
-                          next.delete(key.id)
-                        }
-                        updateFrameValue('ssh_keys', Array.from(next))
-                      }}
-                    />
-                    <div className="min-w-0 flex-1 truncate text-sm text-slate-700">{key.name || key.id}</div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <SshKeysSection
+              compact
+              hideRemove
+              selectedIds={Array.from(selectedSshKeys)}
+              onSelectionChange={(ids) => updateFrameValue('ssh_keys', ids)}
+              description="Installed on the card as root's authorized keys."
+            />
           </div>
 
           <label className="block space-y-1">

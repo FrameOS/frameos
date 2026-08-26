@@ -3,6 +3,7 @@
 import { LayoutGrid, List } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { SceneCard } from "./SceneCard";
+import { StoreSceneMenu } from "./StoreSceneActions";
 
 export type MyScenesViewMode = "grid" | "list";
 
@@ -24,28 +25,7 @@ export type MyScenesRow = {
   visibility: string;
 };
 
-// The visibility groups of the unfiltered list, in display order: what the
-// world sees first, then what only the owner sees. Groups without scenes
-// are skipped.
-export const myScenesGroups = [
-  { key: "public", title: "Public scenes" },
-  { key: "private", title: "Private scenes" },
-] as const;
-
-export type MyScenesGroupKey = (typeof myScenesGroups)[number]["key"];
-
-export function groupMyScenes<T extends { visibility: string }>(scenes: T[]) {
-  return myScenesGroups
-    .map((group) => ({
-      ...group,
-      scenes: scenes.filter((scene) =>
-        group.key === "public"
-          ? scene.visibility === "public"
-          : scene.visibility !== "public",
-      ),
-    }))
-    .filter((group) => group.scenes.length > 0);
-}
+import { groupMyScenes } from "../lib/my-scenes-groups";
 
 // The heading over one visibility group, shared by the grid and the table
 // so both views read the same.
@@ -84,8 +64,9 @@ function storeView(view: MyScenesViewMode) {
 }
 
 // The grid / list switch on "My scenes". The grid reuses the store
-// front's cards; the list is the server-rendered table handed in as
-// `children` (with its owner actions), so it stays exactly as it was. The
+// front's cards, each with a "..." menu carrying the owner actions; the
+// list is the server-rendered table handed in as `children` (with the same
+// actions as a button row), so it stays exactly as it was. The
 // server always renders the grid; a remembered "list" choice takes over after
 // mount, which avoids a hydration mismatch at the cost of one repaint.
 export function MyScenesView({
@@ -171,6 +152,14 @@ function SceneGrid({ scenes }: { scenes: MyScenesRow[] }) {
       {scenes.map((scene) => (
         <SceneCard
           key={scene.id}
+          menu={
+            <StoreSceneMenu
+              name={scene.name}
+              sceneId={scene.id}
+              status={scene.status}
+              visibility={scene.visibility}
+            />
+          }
           scene={{ ...scene, updatedAt: new Date(scene.updatedAt) }}
         />
       ))}

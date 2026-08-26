@@ -40,6 +40,23 @@ export type StreamedResponse = {
   usage: ResponseUsage;
 };
 
+// Progress of a function call the model is still writing: how many bytes of
+// its JSON arguments have arrived so far. A whole-scene update_scene is tens
+// of kilobytes that stream for minutes with no visible text, so this is the
+// only sign of life the client gets while it happens.
+export type FunctionCallProgress = { name: string; bytes: number };
+
+// A non-2xx answer from OpenAI, with the status for telemetry.
+export class OpenAiRequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "OpenAiRequestError";
+    this.status = status;
+  }
+}
+
 export function emptyUsage(): ResponseUsage {
   return { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
 }
@@ -67,9 +84,13 @@ function usageFrom(raw: unknown): ResponseUsage {
 }
 
 export const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-// Per-call budget. The whole route runs under maxDuration below OpenAI's own
-// per-request ceiling; a single stalled call must not eat the entire budget.
-export const OPENAI_CALL_TIMEOUT_MS = 240 * 1000;
+// Idle budget: abort when OpenAI sends nothing for this long. Deliberately
+// an idle timeout rather than a per-call ceiling — a legitimate call that
+// streams a 70 KB scene for five minutes keeps producing bytes throughout,
+// while a stalled connection produces none. (The old 240 s total budget cut
+// off exactly those long-but-healthy generations.) A whole-turn ceiling
+// lives in the turn runner.
+export const OPENAI_IDLE_TIMEOUT_MS = 120 * 1000;
 
 export const DEFAULT_CHAT_MODEL = "gpt-5.5";
 export const DEFAULT_REASONING_EFFORT = "low";
@@ -137,7 +158,9 @@ export async function streamResponse({
   tools,
   reasoningEffort,
   onTextDelta,
+  onFunctionCallProgress,
   signal,
+  idleTimeoutMs = OPENAI_IDLE_TIMEOUT_MS,
 }: {
   apiKey: string;
   model: string;
@@ -146,7 +169,9 @@ export async function streamResponse({
   tools: ResponsesToolDefinition[];
   reasoningEffort?: string;
   onTextDelta: (delta: string) => void;
+  onFunctionCallProgress?: (progress: FunctionCallProgress) => void;
   signal?: AbortSignal;
+  idleTimeoutMs?: number;
 }): Promise<StreamedResponse> {
   const useReasoning = modelSupportsReasoning(model);
   const body: Record<string, unknown> = {
@@ -164,20 +189,51 @@ export async function streamResponse({
     body.include = ["reasoning.encrypted_content"];
   }
 
-  const timeoutSignal = AbortSignal.timeout(OPENAI_CALL_TIMEOUT_MS);
+  // Idle watchdog: re-armed on every chunk OpenAI sends (headers included).
+  const idle = new AbortController();
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const armIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idle.abort(
+        new Error(
+          `OpenAI sent nothing for ${Math.round(idleTimeoutMs / 1000)}s; the connection was dropped.`,
+        ),
+      );
+    }, idleTimeoutMs);
+  };
   const combinedSignal = signal
-    ? AbortSignal.any([signal, timeoutSignal])
-    : timeoutSignal;
+    ? AbortSignal.any([signal, idle.signal])
+    : idle.signal;
+  // Whatever undici throws on abort ("This operation was aborted"), surface
+  // the reason we (or the caller) attached — it says what actually happened.
+  const abortReason = (error: unknown): unknown => {
+    if (idle.signal.aborted) {
+      return idle.signal.reason;
+    }
+    if (signal?.aborted) {
+      return signal.reason instanceof Error ? signal.reason : new Error("The request was stopped.");
+    }
+    return error;
+  };
 
-  const response = await fetch(OPENAI_RESPONSES_URL, {
-    body: JSON.stringify(body),
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    method: "POST",
-    signal: combinedSignal,
-  });
+  armIdle();
+  let response: Response;
+  try {
+    response = await fetch(OPENAI_RESPONSES_URL, {
+      body: JSON.stringify(body),
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      signal: combinedSignal,
+    });
+  } catch (error) {
+    clearTimeout(idleTimer);
+    throw abortReason(error);
+  }
+  armIdle();
 
   if (!response.ok || !response.body) {
     let detail = `OpenAI request failed with status ${response.status}`;
@@ -194,7 +250,8 @@ export async function streamResponse({
     if (response.status === 404) {
       detail = `Model "${model}" was not found by OpenAI. Check the model name in Settings -> OpenAI.`;
     }
-    throw new Error(detail);
+    clearTimeout(idleTimer);
+    throw new OpenAiRequestError(detail, response.status);
   }
 
   const reader = response.body.getReader();
@@ -203,6 +260,8 @@ export async function streamResponse({
   let completed: StreamedResponse | undefined;
   let failure: string | undefined;
   let outputText = "";
+  // Function calls in flight, by output item id, with the argument bytes seen.
+  const callsInProgress = new Map<string, FunctionCallProgress>();
 
   const handleEvent = (payload: unknown) => {
     if (!payload || typeof payload !== "object") {
@@ -215,6 +274,28 @@ export async function streamResponse({
       if (typeof delta === "string" && delta) {
         outputText += delta;
         onTextDelta(delta);
+      }
+      return;
+    }
+    if (type === "response.output_item.added") {
+      const item = event.item as { type?: unknown; id?: unknown; name?: unknown } | undefined;
+      if (
+        item?.type === "function_call" &&
+        typeof item.id === "string" &&
+        typeof item.name === "string"
+      ) {
+        const progress = { bytes: 0, name: item.name };
+        callsInProgress.set(item.id, progress);
+        onFunctionCallProgress?.({ ...progress });
+      }
+      return;
+    }
+    if (type === "response.function_call_arguments.delta") {
+      const progress =
+        typeof event.item_id === "string" ? callsInProgress.get(event.item_id) : undefined;
+      if (progress && typeof event.delta === "string") {
+        progress.bytes += event.delta.length;
+        onFunctionCallProgress?.({ ...progress });
       }
       return;
     }
@@ -253,17 +334,38 @@ export async function streamResponse({
     }
   };
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
+  // Not every fetch implementation errors the body stream when the signal
+  // aborts (undici does; mocks and some polyfills do not), so race each read
+  // against the signal ourselves.
+  const aborted = new Promise<never>((_resolve, reject) => {
+    if (combinedSignal.aborted) {
+      reject(combinedSignal.reason);
+      return;
     }
-    buffer += decoder.decode(value, { stream: true });
-    const { events, rest } = parseSseChunks(buffer);
-    buffer = rest;
-    for (const rawEvent of events) {
-      handleEvent(dataPayload(rawEvent));
+    combinedSignal.addEventListener("abort", () => reject(combinedSignal.reason), { once: true });
+  });
+  aborted.catch(() => {
+    // observed through Promise.race below; this only silences the unhandled-rejection warning
+  });
+  try {
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), aborted]);
+      if (done) {
+        break;
+      }
+      armIdle();
+      buffer += decoder.decode(value, { stream: true });
+      const { events, rest } = parseSseChunks(buffer);
+      buffer = rest;
+      for (const rawEvent of events) {
+        handleEvent(dataPayload(rawEvent));
+      }
     }
+  } catch (error) {
+    reader.cancel().catch(() => {});
+    throw abortReason(error);
+  } finally {
+    clearTimeout(idleTimer);
   }
   // Flush a possibly complete trailing event without a final blank line.
   if (buffer.trim()) {

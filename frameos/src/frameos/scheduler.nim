@@ -5,6 +5,7 @@ import times
 import strformat, strutils
 import frameos/types
 import frameos/channels
+import frameos/utils/local_time
 import sequtils
 
 var thread: Thread[FrameOS]
@@ -34,32 +35,6 @@ proc weekdayMatches(eventWeekday: int, dt: DateTime): bool =
   else:
     # If for some reason out of range, just ignore
     return false
-
-proc frameLocalTime*(timeZone: string, epoch: float): DateTime =
-  ## The wall clock a schedule entry is written against: `epoch` expressed in
-  ## the frame's configured zone, not the process's. The two used to be
-  ## assumed equal — but `frameos setup` is what writes /etc/localtime, and a
-  ## cloud-provisioned or cloud-retimed frame changes frame.json without it,
-  ## so the process stayed on UTC and a "01:02" entry fired at 03:02 CEST.
-  ## Only the calendar fields matter downstream (hour, minute, weekday); the
-  ## DateTime carries them in whatever zone `dateTime` picks.
-  let zone = timeZone.strip()
-  if zone.len == 0 or zone == "UTC":
-    return if zone == "UTC": epoch.fromUnixFloat().utc() else: epoch.fromUnixFloat().local()
-  try:
-    # chrono reads the loaded tz tables (lib/tz, loaded once at startup and
-    # only ever replaced under its own lock), hence the cast.
-    {.cast(gcsafe).}:
-      let cal = epoch.Timestamp.calendar(zone)
-      if findTimeZone(zone).valid:
-        return dateTime(cal.year, times.Month(cal.month), cal.day, cal.hour, cal.minute, cal.second, zone = utc())
-  except CatchableError:
-    discard
-  # Unknown zone (or no tz data, as on the embedded build): the process clock.
-  epoch.fromUnixFloat().local()
-
-proc frameLocalNow*(timeZone: string): DateTime =
-  frameLocalTime(timeZone, epochTime())
 
 proc nextDueDescription*(schedule: FrameSchedule, dt: DateTime): string =
   ## "Mon 01:02 reboot" for the entry that fires soonest after `dt`; "" when

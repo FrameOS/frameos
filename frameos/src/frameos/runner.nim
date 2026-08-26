@@ -11,6 +11,7 @@ import frameos/config
 import frameos/device_setup
 import frameos/display_detect
 import frameos/driver_render_hint
+import frameos/render_stats
 import frameos/local_access
 import frameos/cloud/device_flow
 import frameos/cloud/link_state
@@ -392,6 +393,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if detectedDisplayChanged(self.frameConfig):
           discard persistDetectedDisplaySize(self.frameConfig, self.logger)
         let driverElapsedMs = round(durationToMilliseconds(getMonoTime() - driverTimer), 3)
+        noteDriverRenderSeconds(driverElapsedMs / 1000)
         self.logger.log(%*{"event": "render:driver",
           "device": self.frameConfig.device, "ms": driverElapsedMs})
         if self.frameConfig.device.startsWith("pimoroni.inky") and driverElapsedMs < INKY_FAST_RENDER_THRESHOLD_MS:

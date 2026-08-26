@@ -4,23 +4,40 @@ import { Sparkles } from "lucide-react";
 // describe a scene, land in the new-scene editor with the AI already working
 // on it (/my-scenes/new?prompt=…; that page asks for sign-in first if
 // needed). A plain GET form — no client JavaScript involved.
-export function CreateSceneWithAiBox({ action }: { action: string }) {
+export function CreateSceneWithAiBox({
+  action,
+  autoFocus = false,
+  compact = false,
+}: {
+  action: string;
+  /** Focus the prompt on mount (when opened from an action card). */
+  autoFocus?: boolean;
+  /** Just the prompt row — the card that opened it already says what it is. */
+  compact?: boolean;
+}) {
   return (
-    <form action={action} className="card ai-create-box" method="get">
-      <div className="ai-create-box__text">
-        <h3>
-          <Sparkles aria-hidden size={16} />
-          Create a scene with AI
-        </h3>
-        <p>
-          Describe what you want on the display. The assistant builds it in the
-          editor; you tweak it and save it to your scenes.
-        </p>
-      </div>
+    <form
+      action={action}
+      className={compact ? "card ai-create-box ai-create-box--compact" : "card ai-create-box"}
+      method="get"
+    >
+      {compact ? null : (
+        <div className="ai-create-box__text">
+          <h3>
+            <Sparkles aria-hidden size={16} />
+            Create a scene with AI
+          </h3>
+          <p>
+            Describe what you want on the display. The assistant builds it in the
+            editor; you tweak it and save it to your scenes.
+          </p>
+        </div>
+      )}
       <div className="ai-create-box__row">
         <input
           aria-label="Describe the scene you want"
           autoComplete="off"
+          autoFocus={autoFocus}
           className="input"
           maxLength={2000}
           name="prompt"

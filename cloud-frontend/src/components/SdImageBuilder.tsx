@@ -3,7 +3,17 @@ import { browserTimeZone } from '../lib/browser-time-zone'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
-import { renderCloudConfig, sanitizeConfigValue, SdImagePatchError, patchCloudConfig } from '../lib/sd-image-patch'
+import {
+  CLOUD_CONFIG_REGION_SIZE,
+  cloudConfigContentLength,
+  renderCloudConfig,
+  sanitizeConfigValue,
+  SdImagePatchError,
+  patchCloudConfig,
+} from '../lib/sd-image-patch'
+import { useValues } from 'kea'
+import { SshKeysSection } from '../../../frontend/src/components/sshKeys/SshKeysSection'
+import { sshKeysLogic } from '../../../frontend/src/components/sshKeys/sshKeysLogic'
 
 // The zone the card's frame should keep its clock in: the browser's, since
 // the person making the card is almost always where the frame will hang.
@@ -141,6 +151,45 @@ function slugify(value: string): string {
 const controlClassName =
   'frameos-control block w-full rounded-lg border px-2.5 py-1.5 text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50'
 
+// A titled group of the builder form. The form used to be one flat column of
+// placeholder-only inputs; each group now says what it is for.
+function FormGroup({
+  title,
+  hint,
+  children,
+}: {
+  title: string
+  hint?: string | undefined
+  children: ReactElement | ReactElement[] | null | false | (ReactElement | null | false)[]
+}): ReactElement {
+  return (
+    <fieldset className="frameos-card grid gap-2 rounded-xl border border-white/80 p-3">
+      <legend className="frameos-strong px-1 text-xs font-semibold uppercase tracking-wide">{title}</legend>
+      {hint ? <p className="frameos-muted -mt-1 text-xs">{hint}</p> : null}
+      {children}
+    </fieldset>
+  )
+}
+
+function FormRow({
+  label,
+  children,
+}: {
+  label: string
+  children: ReactElement | ReactElement[]
+}): ReactElement {
+  return (
+    <label className="grid gap-1">
+      <span className="frameos-muted text-xs font-semibold">{label}</span>
+      {children}
+    </label>
+  )
+}
+
+// A placeholder claim code of the length the provider mints, so the byte
+// budget shown while editing matches what the real render will need.
+const claimTokenSizePlaceholder = 'FRCT_' + 'x'.repeat(43)
+
 export function SdImageBuilder({
   claimToken,
   claimTokenExpiresAt,
@@ -217,6 +266,18 @@ export function SdImageBuilder({
   )
   const [vcom, setVcom] = useState('')
   const [uploadUrl, setUploadUrl] = useState('')
+  // SSH public keys for root's authorized_keys: the account's keys, the
+  // "default on new frames" ones pre-selected (all of them when none is).
+  // null = the user has not touched the selection yet.
+  const { keys: sshKeys } = useValues(sshKeysLogic)
+  const [chosenSshKeyIds, setChosenSshKeyIds] = useState<string[] | null>(null)
+  const defaultSshKeyIds = sshKeys.some((key) => key.use_for_new_frames)
+    ? sshKeys.filter((key) => key.use_for_new_frames).map((key) => key.id)
+    : sshKeys.map((key) => key.id)
+  const selectedSshKeyIds = (chosenSshKeyIds ?? defaultSshKeyIds).filter((id) => sshKeys.some((key) => key.id === id))
+  const sshPublicKeys = sshKeys
+    .filter((key) => selectedSshKeyIds.includes(key.id) && key.public)
+    .map((key) => key.public as string)
   const [limitClaimValidity, setLimitClaimValidity] = useState(false)
   const [claimValidity, setClaimValidity] = useState<string>(defaultClaimValidity)
   const [phase, setPhase] = useState<BuildPhase>('idle')
@@ -226,6 +287,32 @@ export function SdImageBuilder({
   const busyRef = useRef(false)
 
   const origin = cloudOrigin
+  // Live readout of the 4096-byte region: SSH keys are the one input that can
+  // blow it (an RSA key is ~570 bytes), so the form says so before the build.
+  let configBytes = 0
+  try {
+    configBytes = cloudConfigContentLength({
+      claimToken: claimTokenSizePlaceholder,
+      cloudUrl: cloudOrigin,
+      device: displayChoice || undefined,
+      height: height ? Number(height) : undefined,
+      name: frameName,
+      rotate: displayChoice ? Number(rotate) : undefined,
+      uploadUrl: uploadUrl.trim() || undefined,
+      vcom: vcom || undefined,
+      width: width ? Number(width) : undefined,
+      wifiPassword,
+      wifiSsid,
+      rootPassword: rootPassword || undefined,
+      timeZone: browserTimeZone(),
+      sshPublicKeys,
+    })
+  } catch {
+    // A value the region cannot hold (quotes, control characters): the
+    // build's own validation reports it; the budget just shows nothing.
+    configBytes = 0
+  }
+  const configOverBudget = configBytes > CLOUD_CONFIG_REGION_SIZE
   // In the Next.js version these two were decided in an effect after mount:
   // read during render they made the server emit one branch and the hydrating
   // client another, which is a hydration error. This bundle is client-only
@@ -376,6 +463,9 @@ export function SdImageBuilder({
       sanitizeConfigValue(device, 'Display device')
       sanitizeConfigValue(uploadUrl.trim(), 'Upload URL')
       sanitizeConfigValue(rootPassword, 'Root password')
+      for (const key of sshPublicKeys) {
+        sanitizeConfigValue(key, 'SSH public key')
+      }
       if (!rootPassword && !passwordlessRoot) {
         failWith('Set a root password for the device, or tick "Enable passwordless root login" to accept the default.')
         busyRef.current = false
@@ -465,6 +555,7 @@ export function SdImageBuilder({
         wifiSsid,
         rootPassword: rootPassword || undefined,
         timeZone: browserTimeZone(),
+        sshPublicKeys,
       })
 
       setStatus(`Downloading ${board.asset.name}…`)
@@ -639,7 +730,9 @@ export function SdImageBuilder({
         </p>
       ) : null}
       {release.status === 'ready' ? (
-        <div className="grid gap-2">
+        <div className="grid gap-3">
+          <FormGroup title="Board and name">
+          <FormRow label="Board">
           <select
             aria-label="Board"
             className={controlClassName}
@@ -656,6 +749,8 @@ export function SdImageBuilder({
               </option>
             ))}
           </select>
+          </FormRow>
+          <FormRow label="Frame name">
           <input
             aria-label="Frame name"
             className={controlClassName}
@@ -668,6 +763,10 @@ export function SdImageBuilder({
             required
             value={frameName}
           />
+          </FormRow>
+          </FormGroup>
+          <FormGroup title="Display" hint="Every driver ships in the image; this only picks the one to start with.">
+          <FormRow label="Display">
           <select
             aria-label="Display"
             className={controlClassName}
@@ -686,6 +785,7 @@ export function SdImageBuilder({
               </optgroup>
             ))}
           </select>
+          </FormRow>
           {showDisplayDetails ? (
             <div className="grid grid-cols-3 gap-2">
               <input
@@ -754,6 +854,9 @@ export function SdImageBuilder({
               value={uploadUrl}
             />
           ) : null}
+          </FormGroup>
+          <FormGroup title="WiFi" hint="Optional — without it the frame opens the FrameOS-Setup portal to be configured.">
+          <FormRow label="Network name">
           <input
             aria-label="WiFi network name (optional)"
             className={controlClassName}
@@ -763,6 +866,8 @@ export function SdImageBuilder({
             placeholder="WiFi network (optional — the FrameOS-Setup portal works too)"
             value={wifiSsid}
           />
+          </FormRow>
+          <FormRow label="Password">
           <input
             aria-label="WiFi password"
             className={controlClassName}
@@ -773,6 +878,7 @@ export function SdImageBuilder({
             type="password"
             value={wifiPassword}
           />
+          </FormRow>
           <label className="frameos-muted flex items-center gap-2 text-xs">
             <input
               checked={rememberWifi}
@@ -787,6 +893,12 @@ export function SdImageBuilder({
             />
             Remember WiFi credentials in this browser (never sent to the cloud)
           </label>
+          </FormGroup>
+          <FormGroup
+            title="Root access"
+            hint="How you log in to the frame. Everything here is written into the image in your browser; the cloud keeps only the public keys."
+          >
+          <FormRow label="Root password">
           <input
             aria-label="Root password"
             className={controlClassName}
@@ -797,6 +909,7 @@ export function SdImageBuilder({
             type="password"
             value={rootPassword}
           />
+          </FormRow>
           <label className="frameos-muted flex items-center gap-2 text-xs">
             <input
               checked={passwordlessRoot}
@@ -807,6 +920,27 @@ export function SdImageBuilder({
             Enable passwordless root login on this device (console only — needs physical access; SSH password login
             stays disabled)
           </label>
+          <div className="grid gap-1">
+            <span className="frameos-muted text-xs font-semibold">SSH keys</span>
+            <SshKeysSection
+              compact
+              hideRemove
+              selectedIds={selectedSshKeyIds}
+              onSelectionChange={setChosenSshKeyIds}
+              description="Selected keys become root's authorized keys on the card, so you can ssh in without a password."
+            />
+          </div>
+          <p
+            className={configOverBudget ? 'frameos-warning-button rounded-lg border px-2 py-1 text-xs' : 'frameos-muted text-xs'}
+            data-testid="sd-image-config-budget"
+            role={configOverBudget ? 'alert' : undefined}
+          >
+            {configOverBudget
+              ? `This configuration needs ${configBytes} bytes but the card's config area holds ${CLOUD_CONFIG_REGION_SIZE} — pick fewer SSH keys (an RSA key is ~570 bytes, ed25519 ~100).`
+              : `Config area: ${configBytes} of ${CLOUD_CONFIG_REGION_SIZE} bytes used.`}
+          </p>
+          </FormGroup>
+          <FormGroup title="Claim code">
           {reenrollFrame ? (
             // Bound codes are single-use and expire in an hour (the
             // claim-tokens route enforces both), so there is nothing to pick:
@@ -851,6 +985,7 @@ export function SdImageBuilder({
               )}
             </div>
           )}
+          </FormGroup>
           {!canStreamToDisk ? (
             <p className="frameos-muted flex items-start gap-1.5 text-xs">
               <CircleStackIcon aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />

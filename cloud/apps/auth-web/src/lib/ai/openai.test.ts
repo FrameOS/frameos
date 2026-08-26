@@ -173,4 +173,103 @@ describe("streamResponse", () => {
       }),
     ).rejects.toThrow(/gpt-nope/);
   });
+
+  it("reports function-call argument progress as the arguments stream in", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      sseResponse([
+        {
+          data: {
+            item: { id: "fc_1", name: "update_scene", type: "function_call" },
+            type: "response.output_item.added",
+          },
+        },
+        { data: { delta: '{"scene":', item_id: "fc_1", type: "response.function_call_arguments.delta" } },
+        { data: { delta: '{"id":"s1"}}', item_id: "fc_1", type: "response.function_call_arguments.delta" } },
+        {
+          data: {
+            response: {
+              output: [
+                {
+                  arguments: '{"scene":{"id":"s1"}}',
+                  call_id: "call_1",
+                  name: "update_scene",
+                  type: "function_call",
+                },
+              ],
+              status: "completed",
+            },
+            type: "response.completed",
+          },
+        },
+      ]),
+    );
+    const progress: { name: string; bytes: number }[] = [];
+    await streamResponse({
+      apiKey: "sk-test",
+      input: [],
+      instructions: "test",
+      model: "gpt-5.5",
+      onFunctionCallProgress: (event) => progress.push(event),
+      onTextDelta: () => {},
+      tools: [],
+    });
+    expect(progress).toEqual([
+      { bytes: 0, name: "update_scene" },
+      { bytes: 9, name: "update_scene" },
+      { bytes: 21, name: "update_scene" },
+    ]);
+  });
+
+  it("aborts with a clear message when OpenAI goes silent, but not while bytes flow", async () => {
+    const encoder = new TextEncoder();
+    // Two chunks 30 ms apart (under the 50 ms idle budget), then silence.
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"response.created"}\n\n'));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        controller.enqueue(encoder.encode('data: {"type":"response.output_text.delta","delta":"a"}\n\n'));
+        // never closes
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(body, { headers: { "content-type": "text/event-stream" }, status: 200 }),
+    );
+    const deltas: string[] = [];
+    const failure = await streamResponse({
+      apiKey: "sk-test",
+      idleTimeoutMs: 50,
+      input: [],
+      instructions: "test",
+      model: "gpt-5.5",
+      onTextDelta: (delta) => deltas.push(delta),
+      tools: [],
+    }).catch((error: unknown) => error);
+    expect(deltas).toEqual(["a"]);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/OpenAI sent nothing for 0s/);
+  });
+
+  it("surfaces the caller's abort reason instead of undici's generic message", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start() {
+        // never produces anything
+      },
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(body, { headers: { "content-type": "text/event-stream" }, status: 200 }),
+    );
+    const controller = new AbortController();
+    const pending = streamResponse({
+      apiKey: "sk-test",
+      input: [],
+      instructions: "test",
+      model: "gpt-5.5",
+      onTextDelta: () => {},
+      signal: controller.signal,
+      tools: [],
+    }).catch((error: unknown) => error);
+    controller.abort(new Error("The turn was stopped."));
+    const failure = await pending;
+    expect((failure as Error).message).toBe("The turn was stopped.");
+  });
 });

@@ -219,6 +219,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-error-behavior',
     'frame-settings-qr',
     'frame-settings-power',
+    // The account's SSH keys, written into SD cards built for this frame
+    // (cloud Linux frames only; FrameSettings skips it on an ESP32).
+    'frame-settings-ssh',
   ],
 }
 
@@ -241,6 +244,8 @@ export const allowedGlobalSettingsSections: Record<WorkspaceMode, readonly strin
     'settings-github',
     'settings-immich',
     'settings-unsplash',
+    // Public keys for the SD card builder (the cloud stores no private keys).
+    'settings-ssh',
   ],
 }
 

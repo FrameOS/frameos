@@ -12,9 +12,15 @@ import {
   historyForModel,
 } from "../../../../src/lib/ai/chat-store";
 import { resolveAiCredentials } from "../../../../src/lib/ai/api-key";
-import { buildInitialInput, runAgentLoop, type ChatStreamEvent } from "../../../../src/lib/ai/loop";
+import { buildInitialInput, runAgentLoop } from "../../../../src/lib/ai/loop";
 import { formatAiException, type JsonObject } from "../../../../src/lib/ai/scene-utils";
-import type { ToolContext } from "../../../../src/lib/ai/tools";
+import { captureAiGeneration, captureAiTurn } from "../../../../src/lib/ai/telemetry";
+import type { ScenesEvent, ToolContext } from "../../../../src/lib/ai/tools";
+import {
+  activeTurnForChat,
+  startTurn,
+  turnStream,
+} from "../../../../src/lib/ai/turn-runner";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import {
   jsonError,
@@ -22,18 +28,25 @@ import {
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import { frameForAccount } from "../../../../src/lib/frames";
+import { logInfo, logWarn, reportError } from "../../../../src/lib/log";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
-// One streaming agent loop; generous ceiling for multi-tool scene builds.
+// The relay stream of one turn; the turn itself has its own ceiling
+// (TURN_MAX_MS) and outlives this response if the client drops.
 export const maxDuration = 600;
 
 // AI chat v2: a single streaming agentic loop over the OpenAI Responses API,
 // replacing the old /api/ai/scenes/chat pipeline (router → plan → generate →
 // review → repair as sequential blocking calls). The response is NDJSON —
 // one JSON event per line (see ChatStreamEvent) — consumed by the shared
-// SPA's chatLogic in cloud mode. Chats persist in ai_chats/ai_chat_messages.
+// SPA's chatLogic in cloud mode and the store's SceneAiPanel. Chats persist
+// in ai_chats/ai_chat_messages.
+//
+// The turn runs detached (turn-runner.ts): this response only relays its
+// events. A dropped connection does not abort the model; the client resumes
+// at GET /api/ai/chat/turns/[turnId]?after=N.
 
 function objectOrNull(value: unknown): JsonObject | null {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -281,46 +294,86 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (activeTurnForChat(chat.id)) {
+    return jsonError("turn_in_progress", 409, {
+      detail: "The assistant is still working on the previous message in this chat.",
+    });
+  }
+
   await appendChatMessage(db, chat.id, { content: prompt, role: "user" });
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      let closed = false;
-      const emit = (event: ChatStreamEvent) => {
-        if (closed) {
-          return;
-        }
-        try {
-          controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
-        } catch {
-          closed = true;
-        }
-      };
-      emit({ chatId: chat.id, type: "chat" });
+  const surface =
+    typeof body.surface === "string" && body.surface ? body.surface : frameId ? "frame" : "editor";
+  const scenesDelivered: { tool: string; title?: string; count: number }[] = [];
+  const deliveredScenes: unknown[] = [];
+  const roundToolCalls: string[] = [];
 
-      const scenesDelivered: { tool: string; title?: string; count: number }[] = [];
-      const toolContext: ToolContext = {
+  const turnId = crypto.randomUUID();
+  let roundsSeen = 0;
+  let usageSeen = { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
+  // The turn's emit, once it is running; emitScenes forwards through it.
+  let turnEmit: (event: ScenesEvent) => void = () => {};
+  const toolContext: ToolContext = {
+    accountId,
+    currentScene: scenePayload,
+    currentSceneId: sceneId ?? (stringOrNull(scenePayload?.id) || null),
+    db,
+    editorScenes,
+    emitScenes: (event) => {
+      scenesDelivered.push({
+        count: event.scenes.length,
+        ...(event.title ? { title: event.title } : {}),
+        tool: event.tool,
+      });
+      // The persisted copy lets a client that lost the stream for good
+      // recover the delivered scene from the chat history.
+      deliveredScenes.splice(0, deliveredScenes.length, ...event.scenes);
+      turnEmit(event);
+    },
+    frameId,
+    prompt,
+    // Audit actor for save_scene's store write.
+    providerSubject: session.providerSubject,
+    storeSceneId,
+  };
+
+  const turn = startTurn({
+    accountId,
+    chatId: chat.id,
+    id: turnId,
+    onFinish: (finished, outcome, failure) => {
+      const durationMs = Date.now() - finished.startedAt;
+      captureAiTurn({
         accountId,
-        currentScene: scenePayload,
-        currentSceneId: sceneId ?? (stringOrNull(scenePayload?.id) || null),
-        db,
-        emitScenes: (event) => {
-          scenesDelivered.push({
-            count: event.scenes.length,
-            ...(event.title ? { title: event.title } : {}),
-            tool: event.tool,
-          });
-          emit(event);
-        },
-        editorScenes,
-        frameId,
-        prompt,
-        // Audit actor for save_scene's store write.
-        providerSubject: session.providerSubject,
-        storeSceneId,
-      };
-
+        chatId: chat.id,
+        deliveredTool: toolContext.deliveredTool ?? "reply",
+        disconnects: finished.disconnects,
+        durationMs,
+        error: failure instanceof Error ? failure.message : failure ? String(failure) : undefined,
+        model,
+        outcome,
+        resumes: finished.resumes,
+        rounds: roundsSeen,
+        surface,
+        toolCalls: roundToolCalls,
+        turnId: finished.id,
+        usage: usageSeen,
+      });
+      logInfo("ai.chat.turn_finished", {
+        accountId,
+        chatId: chat.id,
+        disconnects: finished.disconnects,
+        durationMs,
+        outcome,
+        resumes: finished.resumes,
+        rounds: roundsSeen,
+        toolCalls: roundToolCalls.join(","),
+        turnId: finished.id,
+      });
+    },
+    run: async (emit, signal) => {
+      turnEmit = emit;
+      emit({ chatId: chat.id, turnId, type: "chat" });
       try {
         const { reply, tool } = await runAgentLoop({
           apiKey: apiKey.trim(),
@@ -331,8 +384,34 @@ export async function POST(request: NextRequest) {
             prompt,
           }),
           model,
+          onRound: (report) => {
+            roundsSeen = report.round;
+            roundToolCalls.push(...report.toolCalls);
+            if (report.usage) {
+              usageSeen = {
+                cachedInputTokens: usageSeen.cachedInputTokens + report.usage.cachedInputTokens,
+                inputTokens: usageSeen.inputTokens + report.usage.inputTokens,
+                outputTokens: usageSeen.outputTokens + report.usage.outputTokens,
+                reasoningTokens: usageSeen.reasoningTokens + report.usage.reasoningTokens,
+              };
+            }
+            captureAiGeneration({
+              accountId,
+              chatId: chat.id,
+              error: report.error,
+              httpStatus: report.httpStatus,
+              latencyMs: report.latencyMs,
+              model,
+              reasoningEffort,
+              round: report.round,
+              status: report.status,
+              toolCalls: report.toolCalls,
+              turnId,
+              usage: report.usage,
+            });
+          },
           reasoningEffort,
-          signal: request.signal,
+          signal,
           toolContext,
         });
         const content =
@@ -344,7 +423,10 @@ export async function POST(request: NextRequest) {
               : "Done.");
         await appendChatMessage(db, chat.id, {
           content,
-          payload: scenesDelivered.length > 0 ? { scenes: scenesDelivered } : null,
+          payload:
+            scenesDelivered.length > 0
+              ? { delivered: deliveredScenes, scenes: scenesDelivered }
+              : null,
           role: "assistant",
           tool,
         });
@@ -352,6 +434,21 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         const detail = `AI chat failed: ${formatAiException(error)}`;
         emit({ detail, type: "error" });
+        if (signal.aborted) {
+          logWarn("ai.chat.turn_aborted", {
+            accountId,
+            chatId: chat.id,
+            reason: formatAiException(signal.reason),
+            turnId,
+          });
+        } else {
+          reportError("ai.chat.turn_failed", error, {
+            accountId,
+            chatId: chat.id,
+            model,
+            turnId,
+          });
+        }
         try {
           await appendChatMessage(db, chat.id, {
             content: detail,
@@ -362,9 +459,18 @@ export async function POST(request: NextRequest) {
           // persisting the failure is best-effort
         }
       }
-      if (!closed) {
-        controller.close();
-      }
+    },
+  });
+
+  const stream = turnStream(turn, 0, {
+    onDisconnect: (delivered) => {
+      logWarn("ai.chat.client_disconnected", {
+        accountId,
+        afterEvents: delivered,
+        chatId: chat.id,
+        elapsedMs: Date.now() - turn.startedAt,
+        turnId: turn.id,
+      });
     },
   });
 

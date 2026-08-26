@@ -1185,10 +1185,12 @@ export interface CloudBackupItem {
 
 export interface SSHKeyEntry {
   id: string
-  name?: string
-  private?: string
-  public?: string
-  use_for_new_frames?: boolean
+  // `| undefined` spelled out: the cloud's strict type program
+  // (exactOptionalPropertyTypes) checks the shared sshKeys utils.
+  name?: string | undefined
+  private?: string | undefined
+  public?: string | undefined
+  use_for_new_frames?: boolean | undefined
 }
 
 export interface FrameStateCacheInfo {

@@ -18,6 +18,7 @@ import {
 } from "../../../../../../cloud-frontend/src/lib/sd-image-patch";
 import { SdImageBuilder } from "../../../../../../cloud-frontend/src/components/SdImageBuilder";
 import { resetReleaseListingCacheForTests } from "../../../../../../cloud-frontend/src/lib/release-lookup";
+import { initKea } from "../../../../../../frontend/src/initKea";
 
 const fetchMock = vi.fn<typeof fetch>();
 const encoder = new TextEncoder();
@@ -84,9 +85,23 @@ const firmwarePayload = {
 // The image itself comes from the provider's same-origin route (GitHub's
 // release redirect sends no CORS headers), so that is what the build path
 // fetches; the board listing comes from the firmware route.
+// The account's settings the builder reads its SSH keys from (the shared
+// settingsLogic fetches them on mount).
+let accountSettings: Record<string, unknown> = {};
+
+const ed25519Key =
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ4ZmFrZWtleWZha2VrZXlmYWtla2V5ZmFrZWtleQ marius@laptop";
+const rsaKey = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC0fakekeyfakekeyfakekey";
+
 function mockReleaseAndImage() {
   fetchMock.mockImplementation((input) => {
     const url = String(input);
+    if (url.startsWith("/api/settings")) {
+      return Promise.resolve(Response.json(accountSettings));
+    }
+    if (url.startsWith("/api/fonts") || url.startsWith("/api/frames?")) {
+      return Promise.resolve(Response.json({}));
+    }
     if (url.startsWith("/api/frames/firmware")) {
       return Promise.resolve(Response.json(firmwarePayload));
     }
@@ -201,13 +216,19 @@ function nameFrame(value = "Kitchen Frame") {
 beforeEach(() => {
   // The listing is memoised in the browser; each test mocks its own release.
   resetReleaseListingCacheForTests();
+  accountSettings = {};
   vi.stubGlobal("fetch", fetchMock);
+  // The SSH key list is a kea logic shared with the rest of the workspace,
+  // and its /api/settings fetch goes through the cloud's apiFetch branch.
+  (window as { FRAMEOS_APP_CONFIG?: { cloudMode: boolean } }).FRAMEOS_APP_CONFIG = { cloudMode: true };
+  initKea();
 });
 
 afterEach(() => {
   cleanup();
   fetchMock.mockReset();
   vi.unstubAllGlobals();
+  delete (window as { FRAMEOS_APP_CONFIG?: unknown }).FRAMEOS_APP_CONFIG;
   delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
   // jsdom has no object URLs; the Blob-fallback test installs its own.
   delete (URL as unknown as { createObjectURL?: unknown }).createObjectURL;
@@ -328,7 +349,15 @@ describe("SdImageBuilder", () => {
   });
 
   it("reports a failed release lookup instead of silently offering nothing", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 500 }));
+    // Only the release lookup fails; the SSH key list's own settings fetch
+    // (kea, on mount) must not eat the one-shot 500.
+    fetchMock.mockImplementation((input) =>
+      Promise.resolve(
+        String(input).startsWith("/api/frames/firmware")
+          ? new Response("{}", { status: 500 })
+          : Response.json({}),
+      ),
+    );
     render(
       <SdImageBuilder
         cloudOrigin={window.location.origin}
@@ -527,6 +556,74 @@ describe("SdImageBuilder", () => {
 
     const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
     expect(regionText).toContain("root_password=hunter2root\n");
+  });
+
+  it("writes the account's default SSH keys into the card, and any other key the user ticks", async () => {
+    accountSettings = {
+      ssh_keys: {
+        keys: [
+          { id: "k-laptop", name: "Laptop", public: ed25519Key, use_for_new_frames: true },
+          { id: "k-desk", name: "Desk", public: rsaKey, use_for_new_frames: false },
+        ],
+      },
+    };
+    mockReleaseAndImage();
+    const saved = stubSaveFilePicker();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_multi")}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+    });
+    // Both keys are listed; only the "default on new frames" one is ticked.
+    // (components/Switch: the aria-label sits on the inner button, the
+    // switch role and its state on the headlessui wrapper.)
+    const checked = (element: HTMLElement) =>
+      element.closest('[role="switch"]')?.getAttribute("aria-checked");
+    const laptop = await screen.findByLabelText("Install Laptop");
+    const desk = screen.getByLabelText("Install Desk");
+    expect(checked(laptop)).toBe("true");
+    expect(checked(desk)).toBe("false");
+    const budgetBefore = screen.getByTestId("sd-image-config-budget").textContent ?? "";
+    fireEvent.click(desk);
+    expect(checked(desk)).toBe("true");
+    // Ticking a key grows the live byte readout of the 4096-byte region.
+    const bytes = (text: string) => Number(/(\d+) of 4096/.exec(text)?.[1]);
+    expect(bytes(screen.getByTestId("sd-image-config-budget").textContent ?? "")).toBeGreaterThan(
+      bytes(budgetBefore),
+    );
+    expect(screen.getByRole("button", { name: "Add SSH key" })).toBeTruthy();
+
+    nameFrame();
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
+    await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+
+    const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
+    expect(regionText).toContain(`authorized_key=${ed25519Key}\n`);
+    expect(regionText).toContain(`authorized_key=${rsaKey}\n`);
+  });
+
+  it("writes no authorized_key line for an account without SSH keys", async () => {
+    mockReleaseAndImage();
+    const saved = stubSaveFilePicker();
+    render(
+      <SdImageBuilder
+        cloudOrigin={window.location.origin}
+        mintClaimToken={() => Promise.resolve("FRCT_multi")}
+      />,
+    );
+    await screen.findByRole("option", {
+      name: "Raspberry Pi Zero 2 W / 3 / 4 (64-bit) (v1.2.3)",
+    });
+    expect(screen.getByText(/No SSH keys yet/)).toBeTruthy();
+    nameFrame();
+    fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
+    await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
+    const regionText = new TextDecoder().decode(gunzip(savedBytes(saved)));
+    expect(regionText).not.toContain("authorized_key=");
   });
 
   it("omits the root_password key on an explicit passwordless opt-in", async () => {

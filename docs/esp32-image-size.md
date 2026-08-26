@@ -18,6 +18,28 @@ executed/read in place from memory-mapped flash. Roughly a third is the
 Nim/QuickJS application layer, a third is ESP-IDF + networking, and a third is
 data blobs (font, certs, string literals, unicode tables).
 
+## Automated tracking (CI)
+
+Every PR build (`.github/workflows/e2e-docker.yml`, job `esp32_firmware_image`)
+runs `embedded/esp32/tools/firmware_size.py measure` from `ci_build_image.sh`,
+which writes `firmware-size.json` next to the binaries: totals, OTA-slot
+headroom and the per-subsystem breakdown below (with the ROT13 nimcache names
+decoded). The `esp32_firmware_size_report` job then posts ONE sticky
+"ESP32 firmware size" comment on the PR — edited in place on every push, never
+a commit — comparing the build with the latest GitHub release. Releases publish
+their own document as `frameos-<version>-esp32-{s3,c3}-generic-size.json`, so
+the comparison is per subsystem and per object once the baseline release
+carries one, and totals-only (from the release asset byte counts) before that.
+
+```bash
+# The same report locally, against the latest release:
+cd embedded/esp32 && source ~/esp/esp-idf/export.sh
+python tools/firmware_size.py measure --build-dir build --platform esp32-s3 \
+  --app-slot-bytes $((3520*1024)) --flash-bytes $((8*1024*1024)) --out build/firmware-size.json
+gh release download --repo FrameOS/frameos --pattern '*-esp32-s3-generic-size.json' --dir /tmp/base
+python tools/firmware_size.py render --current build/firmware-size.json --baseline /tmp/base/*.json
+```
+
 ## How to reproduce this breakdown
 
 ```bash

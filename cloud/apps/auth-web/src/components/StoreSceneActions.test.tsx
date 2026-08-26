@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StoreSceneActions } from "./StoreSceneActions";
+import { StoreSceneActions, StoreSceneMenu } from "./StoreSceneActions";
 
 const { captureMock, fetchMock, refreshMock, replaceMock } = vi.hoisted(() => ({
   captureMock: vi.fn(),
@@ -60,5 +60,36 @@ describe("StoreSceneActions", () => {
     expect(captureMock).toHaveBeenCalledWith("scene_deleted", {
       scene_id: "scene-1",
     });
+  });
+
+  it("keeps the menu open with the error when an action is refused", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { categories: ["violence"], error: "content_rejected" },
+        { status: 422 },
+      ),
+    );
+    render(
+      <StoreSceneMenu
+        name="Private scene"
+        sceneId="scene-1"
+        status="active"
+        visibility="private"
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "More actions for Private scene" }),
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make public" }));
+
+    await vi.waitFor(() => {
+      expect(
+        screen.getByText("Rejected by content moderation (violence)"),
+      ).toBeTruthy();
+    });
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(refreshMock).not.toHaveBeenCalled();
+    expect(captureMock).not.toHaveBeenCalled();
   });
 });

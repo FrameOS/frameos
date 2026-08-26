@@ -1,10 +1,11 @@
+import type { ReactElement } from 'react'
 import { Dialog } from '@headlessui/react'
 import clsx from 'clsx'
 
 export interface ModalProps {
-  children: JSX.Element[] | JSX.Element
-  title?: JSX.Element | string
-  footer?: JSX.Element | string
+  children: ReactElement[] | ReactElement
+  title?: ReactElement | string
+  footer?: ReactElement | string
   open?: boolean
   onClose: () => void
   initialFocus?: React.RefObject<HTMLElement | null>
@@ -30,10 +31,10 @@ export function Modal({
   panelClassName,
   bodyClassName,
   align,
-}: ModalProps): JSX.Element {
+}: ModalProps): ReactElement {
   const isOpen = open === undefined || open
   return (
-    <Dialog open={isOpen} onClose={onClose} initialFocus={initialFocus} className="relative z-[120]">
+    <Dialog open={isOpen} onClose={onClose} {...(initialFocus ? { initialFocus } : {})} className="relative z-[120]">
       <div className="fixed inset-0 z-[120] bg-slate-950/35 backdrop-blur-sm" />
       <div
         className={clsx(

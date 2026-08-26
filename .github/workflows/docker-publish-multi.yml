@@ -433,6 +433,10 @@ jobs:
               # makes (backend/app/api/embedded_device.py).
               cp embedded/esp32/build-ci/frameos_esp32.bin \
                 "/release-assets/frameos-$DOCKER_VERSION-esp32-s3-generic-app.bin"
+              # Size document (totals + per-subsystem linker-map breakdown):
+              # the baseline the PR size-report job diffs against.
+              cp embedded/esp32/build-ci/firmware-size.json \
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-s3-generic-size.json"
               # ESP32-C3 thin-client firmware (TRMNL OG/BWRY, XTEINK X4):
               # 4MB no-OTA layout, no on-device Nim renderer.
               FRAMEOS_ESP32_PLATFORM=esp32-c3 \
@@ -444,6 +448,8 @@ jobs:
               # published for symmetry/debugging only — nothing consumes it.
               cp embedded/esp32/build-ci-c3/frameos_esp32.bin \
                 "/release-assets/frameos-$DOCKER_VERSION-esp32-c3-generic-app.bin"
+              cp embedded/esp32/build-ci-c3/firmware-size.json \
+                "/release-assets/frameos-$DOCKER_VERSION-esp32-c3-generic-size.json"
             '
           ls -lh release-assets/
 
@@ -501,6 +507,8 @@ jobs:
             release-assets/*-esp32-c3-generic.bin.minisig
             release-assets/*-esp32-c3-generic-app.bin
             release-assets/*-esp32-c3-generic-app.bin.minisig
+            release-assets/*-esp32-s3-generic-size.json
+            release-assets/*-esp32-c3-generic-size.json
           if-no-files-found: error
 
   # Prebuilt thin-client firmware for Raspberry Pi Pico W / Pico 2 W (the

@@ -19,7 +19,7 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
   const switchTag = (
     <HeadlessSwitch
       checked={!!value}
-      onChange={onChange}
+      {...(onChange ? { onChange } : {})}
       as="div"
       className={clsx('frameos-switch inline-flex items-center gap-2', className)}
       ref={ref}

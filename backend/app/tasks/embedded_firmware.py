@@ -112,7 +112,7 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
 EMBEDDED_PLATFORM_ALIASES = EMBEDDED_PLATFORMS[SUPPORTED_EMBEDDED_PLATFORM]["aliases"]
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 50  # battery enable pin (reTerminal E10xx divider switch), E1004 battery preset
+EMBEDDED_FIRMWARE_VERSION = 51  # battery wiring in the console presets: E1001/E1002, TRMNL OG/BWRY, XIAO DIY kits, X4
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -200,6 +200,25 @@ EMBEDDED_TRMNL_OG_PINS = {
     "mosi": 8,
     "pwr": -1,
 }
+# Every ADC-sensed board in usetrmnl/trmnl-firmware reads VBAT through a 2:1
+# divider (src/battery/adc_battery.cpp: pin millivolts x 2); include/config.h
+# names the pin per board — PIN_BATTERY 3 on the OG/BWRY, 1 (behind a load
+# switch on GPIO6, active high) on the XIAO ePaper Driver Board, 0 on the
+# XTEINK X4. Hardware-unverified in FrameOS; the pins are free in each board's
+# EPD/button map, so a wrong guess reads as "no battery", not a conflict.
+EMBEDDED_TRMNL_OG_BATTERY = {
+    "batteryPin": 3,
+    "batteryDivider": 2.0,
+}
+EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_BATTERY = {
+    "batteryPin": 1,
+    "batteryDivider": 2.0,
+    "batteryEnablePin": 6,
+}
+EMBEDDED_XTEINK_X4_BATTERY = {
+    "batteryPin": 0,
+    "batteryDivider": 2.0,
+}
 # XTEINK X4 (ESP32-C3): SSD1677-driven 4.26" 800x480 (GDEQ0426T82). Pins from
 # the open X4 firmware community (usetrmnl/trmnl-firmware BOARD_XTEINK_X4).
 # The TF socket shares the display SPI bus (SCK8/MOSI10, CS12/MISO7) and the
@@ -260,7 +279,8 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS = [
 ]
 # Battery through a 2:1 divider on GPIO1 (ADC1_CH0), switched on by GPIO21
 # (Seeed's ESPHome cookbook: adc GPIO1, multiply 2.0, output GPIO21 "battery
-# enable"). Verified on the E1004; the E1001/E1002 wire it the same way per
+# enable"; trmnl-firmware PIN_BATTERY 1 / PIN_VBAT_SWITCH 21 for the
+# E1001/E1002). Verified on the E1004; the E1001/E1002 wire it the same way per
 # Seeed's schematic, hardware-unverified on those two.
 EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY = {
     "batteryPin": 1,
@@ -368,6 +388,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 0,
         "pins": EMBEDDED_TRMNL_OG_PINS,
         "gpioButtons": [{"pin": 2, "label": "BUTTON"}],
+        **EMBEDDED_TRMNL_OG_BATTERY,
     },
     "trmnl_bwry": {
         "device": "waveshare.EPD_7in5yr",
@@ -376,6 +397,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 0,
         "pins": EMBEDDED_TRMNL_OG_PINS,
         "gpioButtons": [{"pin": 2, "label": "BUTTON"}],
+        **EMBEDDED_TRMNL_OG_BATTERY,
     },
     "trmnl_og_diy_kit": {
         "device": "waveshare.EPD_7in5_V2",
@@ -383,6 +405,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_PINS,
         "gpioButtons": [{"pin": 0, "label": "BOOT"}, {"pin": 5, "label": "KEY3"}],
+        **EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_BATTERY,
     },
     "trmnl_4in26_diy_kit": {
         "device": "waveshare.EPD_4in26",
@@ -390,6 +413,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_PINS,
         "gpioButtons": [{"pin": 0, "label": "BOOT"}, {"pin": 2, "label": "KEY1"}],
+        **EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_BATTERY,
     },
     "xteink_x4": {
         "device": "waveshare.EPD_4in26",
@@ -398,6 +422,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 0,
         "pins": EMBEDDED_XTEINK_X4_PINS,
         "gpioButtons": [{"pin": 3, "label": "POWER"}],
+        **EMBEDDED_XTEINK_X4_BATTERY,
     },
     "seeed_reterminal_sticky": {
         "device": "waveshare.EPD_3in97",

@@ -1,5 +1,6 @@
 import std/[os, json, algorithm, strutils, times, sequtils, unittest]
 import pixie
+import lib/tz
 import ../../../frameos/types
 import ../scene as index_scene
 
@@ -80,6 +81,7 @@ suite "system/index scene":
       check "Name: Kitchen Frame" in text
       check "Device: waveshare · 800×480 · rotated 90°" in text
       check "Time zone: Europe/Brussels" in text
+      check "Time: " in text
       check "Network: " in text
       check "Managed via: self-hosted backend (frameos.local:8989)" in text
       check "Frame: http://192.168.1.50:8787" in text
@@ -168,3 +170,59 @@ suite "system/index scene":
     finally:
       setCurrentDir(previousDir)
       removeDir(tempDir)
+
+  test "the clock row shows the frame's local time, with seconds only when animating":
+    initTimeZone()
+    # 2026-08-26 12:32:05 UTC = 14:32:05 CEST.
+    let epoch = dateTime(2026, mAug, 26, 12, 32, 5, zone = utc()).toTime().toUnixFloat()
+    withScenesJson("[]") do (_: string):
+      var config = testConfig()
+      let eink = makeIndexScene(config).buildStatusScreen(epoch)
+      check eink.rows.anyIt(it[0] == "Time" and it[1] == "14:32 · Wednesday, 26 August 2026")
+      check eink.rows.anyIt(it[0] == "Time zone" and it[1] == "Europe/Brussels")
+      check eink.markPhase == 0.0
+
+      config.device = "framebuffer"
+      let hdmi = makeIndexScene(config).buildStatusScreen(epoch)
+      check hdmi.rows.anyIt(it[0] == "Time" and it[1] == "14:32:05 · Wednesday, 26 August 2026")
+      check hdmi.markPhase > 0.0 and hdmi.markPhase <= 1.0
+
+  test "a GPIO button press lands in the bottom bar and asks for a redraw":
+    initTimeZone()
+    withScenesJson("[]") do (_: string):
+      let scene = makeIndexScene(testConfig())
+      check scene.lastButtonLine() == ""
+      check scene.buildStatusScreen().bar == ""
+      let context = ExecutionContext(scene: scene, event: "button",
+        payload: %*{"pin": 5, "label": "Next", "level": 0}, hasImage: false, loopIndex: 0, loopKey: ".")
+      index_scene.runEvent(scene, context)
+      let line = scene.lastButtonLine()
+      check line.startsWith("Last button: Next (GPIO 5) at ")
+      check scene.buildStatusScreen().bar == line
+      check line in scene.buildSceneListText()
+      # An unlabelled pin still says which one.
+      index_scene.runEvent(scene, ExecutionContext(scene: scene, event: "button",
+        payload: %*{"pin": 27}, hasImage: false, loopIndex: 0, loopKey: "."))
+      check scene.lastButtonLine().startsWith("Last button: button (GPIO 27) at ")
+
+  test "the refresh cadence follows the device: paced animation, minute clock, or 5 minutes":
+    withScenesJson("[]") do (_: string):
+      var config = testConfig()
+      let eink = makeIndexScene(config)
+      eink.paceRefresh(0.05, epoch = 90.0)
+      check eink.refreshInterval == 300.0
+
+      config.device = "inkyHyperPixel2r"
+      let lcd = makeIndexScene(config)
+      lcd.paceRefresh(0.05, epoch = 90.0)   # 30 s past the minute -> wake at the next one
+      check abs(lcd.refreshInterval - 30.0) < 1e-6
+
+      config.device = "framebuffer"
+      let hdmi = makeIndexScene(config)
+      check index_scene.animatesMark(config)
+      hdmi.paceRefresh(0.05)
+      check hdmi.refreshInterval >= 0.1 and hdmi.refreshInterval <= 3.0
+      # Time-based phase: a slow board steps through the same cycle.
+      check index_scene.markPhaseAt(0.0) > 0.0
+      check index_scene.markPhaseAt(1.5) == index_scene.markPhaseAt(7.5)
+      check index_scene.markPhaseAt(1.5) != index_scene.markPhaseAt(3.0)

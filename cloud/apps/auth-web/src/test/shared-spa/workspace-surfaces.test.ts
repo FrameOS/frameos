@@ -95,15 +95,15 @@ describe("cloud mode hides everything the protocol cannot do", () => {
     expect(frameMenuActionDisabledReason("cloud", "deploy", { hardware: { platform: "esp32" } })).toBeNull();
   });
 
-  it("links to no SSH, Remote-agent or backend-access settings section", () => {
-    for (const section of [
-      "frame-settings-ssh",
-      "frame-settings-agent",
-      "frame-settings-backend",
-    ]) {
+  it("links to no Remote-agent or backend-access settings section", () => {
+    for (const section of ["frame-settings-agent", "frame-settings-backend"]) {
       expect(frameSettingsSectionIsAllowed("cloud", section)).toBe(false);
       expect(allowedFrameSettingsSections.cloud).not.toContain(section);
     }
+    // SSH keys ARE a cloud section — not the backend's ssh host/port/user
+    // (the cloud never logs in to a frame), but the account's public keys
+    // the SD card builder writes onto a card for this frame.
+    expect(frameSettingsSectionIsAllowed("cloud", "frame-settings-ssh")).toBe(true);
   });
 
   it("renders no settings section the cloud cannot save", () => {
@@ -162,11 +162,12 @@ describe("cloud mode hides everything the protocol cannot do", () => {
     ).toBe(false);
   });
 
-  it("keeps only the service-key sections of the GLOBAL settings page", () => {
+  it("keeps only the service-key sections of the GLOBAL settings page, plus SSH public keys", () => {
     // The cloud's /frames/settings page persists service API keys
-    // (account_settings via /api/settings) and nothing else: no local
-    // account, deploy defaults, SSH keys, build environment, font store,
-    // backend PostHog or backend system info.
+    // (account_settings via /api/settings) and the account's SSH public
+    // keys for the SD card builder, and nothing else: no local account,
+    // deploy defaults, build environment, font store, backend PostHog or
+    // backend system info.
     expect(allowedGlobalSettingsSections.cloud).toEqual([
       "settings-gallery",
       "settings-openai",
@@ -174,12 +175,12 @@ describe("cloud mode hides everything the protocol cannot do", () => {
       "settings-github",
       "settings-immich",
       "settings-unsplash",
+      "settings-ssh",
     ]);
     for (const section of [
       "settings-account",
       "settings-cloud",
       "settings-defaults",
-      "settings-ssh",
       "settings-build-environment",
       "settings-fonts",
       "settings-posthog",

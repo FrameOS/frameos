@@ -1,6 +1,7 @@
 {.warning[UnusedImport]: off.}
 import pixie, json, strformat, strutils, sequtils, options, os, tables, algorithm
 import std/monotimes
+import std/times
 import std/uri
 import zippy
 
@@ -10,7 +11,9 @@ import frameos/channels
 import frameos/cloud/link_state
 import frameos/utils/url
 import frameos/utils/time
+import frameos/utils/local_time
 import frameos/utils/status_screen
+import frameos/render_stats
 import frameos/version
 import scenes/scenes as compiledScenes
 import system/options as sceneOptions
@@ -23,6 +26,18 @@ when not defined(frameosWasm) and not defined(frameosEmbedded):
 const DEBUG = true
 let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
 let PERSISTED_STATE_KEYS*: seq[string] = @[]
+
+const
+  # HDMI: the mark's three squares cycle the brand colours while this screen
+  # is up — the frame is alive, it just has nothing to show. Paced by how long
+  # a frame takes on this board (render_stats), never by a fixed frame rate.
+  animatedMarkDevices = ["framebuffer"]
+  # Plain framebuffer / LCD writes: cheap enough to redraw once a minute for
+  # the clock. Everything else (e-ink) keeps the 5-minute refresh and shows
+  # the time without seconds — a panel flash a minute is not worth a clock.
+  cheapRedrawDevices = ["framebuffer", "inkyHyperPixel2r", "inkyHyperPixel2rLegacyFb"]
+  markCycleSeconds = 6.0
+  staticRefreshSeconds = 300.0
 
 type Scene* = ref object of FrameScene
 
@@ -159,11 +174,51 @@ proc remoteControlSecurityLine*(frameConfig: FrameConfig): string =
     return &"  over an UNENCRYPTED connection to {serverHost}:{port} — commands are signed, but traffic is readable on the network"
   ""
 
-proc buildStatusScreen*(self: Scene): StatusScreen =
+proc animatesMark*(frameConfig: FrameConfig): bool =
+  ## Whether the mark animates here: HDMI on a device build. The browser
+  ## preview and the ESP32 (e-ink, hashed refreshes) draw the static logo.
+  when defined(frameosWasm) or defined(frameosEmbedded):
+    false
+  else:
+    frameConfig.device in animatedMarkDevices
+
+proc redrawsCheaply*(frameConfig: FrameConfig): bool =
+  frameConfig.device in cheapRedrawDevices
+
+proc markPhaseAt*(epoch: float): float =
+  ## Animation phase for wall-clock `epoch`: time-based, so a slow board that
+  ## only manages a frame every 2 s steps through the same cycle a fast one
+  ## glides through. Never exactly 0 while animating (0 = the static logo).
+  let phase = (epoch mod markCycleSeconds) / markCycleSeconds
+  if phase <= 0: 1.0 / markPhaseSteps.float else: phase
+
+proc clockLine*(frameConfig: FrameConfig, epoch: float, withSeconds: bool): string =
+  ## "14:32:05 · Tuesday, 26 August 2026" in the frame's configured zone.
+  let local = frameLocalTime(frameConfig.timeZone, epoch)
+  let clock = if withSeconds: local.format("HH:mm:ss") else: local.format("HH:mm")
+  clock & " · " & local.format("dddd, d MMMM yyyy")
+
+proc lastButtonLine*(self: Scene): string =
+  ## "Last button: Next (GPIO 5) at 14:32:05" from the most recent GPIO press
+  ## this scene saw; empty until one arrives.
+  let last = self.state{"lastButton"}
+  if last.isNil or last.kind != JObject:
+    return ""
+  let label = last{"label"}.getStr("")
+  let pin = last{"pin"}.getInt(-1)
+  let at = last{"at"}.getFloat(0)
+  var what = if label.len > 0: label else: "button"
+  if pin >= 0:
+    what.add(&" (GPIO {pin})")
+  let pressedAt = if at > 0: " at " & frameLocalTime(self.frameConfig.timeZone, at).format("HH:mm:ss") else: ""
+  &"Last button: {what}{pressedAt}"
+
+proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
   ## The facts on the panel, as rows for frameos/utils/status_screen — the
   ## same screen the Pi boot sequence and the ESP32 fallback scene draw.
   let entries = self.buildSceneList()
   let frameConfig = self.frameConfig
+  let animating = animatesMark(frameConfig)
   let deviceName = if frameConfig.name.len > 0: frameConfig.name else: "Unnamed frame"
   let deviceType = if frameConfig.device.len > 0: frameConfig.device else: "unknown device"
   var deviceLine = &"{deviceType} · {frameConfig.width}×{frameConfig.height}"
@@ -200,9 +255,14 @@ proc buildStatusScreen*(self: Scene): StatusScreen =
   let managedVia = management[("Managed via: ".len) .. ^1]
 
   result.dark = true
+  result.markPhase = if animating: markPhaseAt(epoch) else: 0.0
+  result.bar = self.lastButtonLine()
   result.rows = @[
     ("Name", deviceName),
     ("Device", deviceLine),
+    # Seconds only where the screen is redrawn often enough for them to be
+    # true (the animated HDMI screen); a minute clock elsewhere.
+    ("Time", clockLine(frameConfig, epoch, withSeconds = animating)),
     ("Time zone", frameConfig.timeZone),
     ("Network", networkLine),
     ("Managed via", managedVia),
@@ -231,15 +291,31 @@ proc buildSceneListText*(self: Scene): string =
   ## The screen as text — what the tests and the admin API see.
   statusScreenText(self.buildStatusScreen())
 
+proc paceRefresh*(self: Scene, drawSeconds: float, epoch = epochTime()) =
+  ## Decides when this screen renders next. Animating: as often as the
+  ## board affords at a ~20% duty cycle (drawing + the driver's push, the
+  ## latter measured by the runner) — a Pi 5 glides, a Pi Zero steps, neither
+  ## pegs a core showing a logo. Cheap redraw without animation: the top of
+  ## the next minute, for the clock. E-ink: the plain 5-minute refresh.
+  if animatesMark(self.frameConfig):
+    self.refreshInterval = pacedRenderInterval(drawSeconds, lastDriverRenderSeconds())
+  elif redrawsCheaply(self.frameConfig):
+    self.refreshInterval = max(60.0 - (epoch mod 60.0), 1.0)
+  else:
+    self.refreshInterval = staticRefreshSeconds
+
 proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
   let timer = getMonoTime()
   case nodeId:
   of 1.NodeId:
     if context.hasImage and not context.image.isNil:
       drawStatusScreen(context.image, self.buildStatusScreen())
+      self.paceRefresh(durationToSeconds(getMonoTime() - timer))
   else:
     discard
-  if DEBUG:
+  # The animated screen renders several times a second; its per-frame debug
+  # line would drown the frame log.
+  if DEBUG and self.refreshInterval >= 1:
     let elapsedMs = durationToMilliseconds(getMonoTime() - timer)
     self.logger.log(%*{"event": "debug:scene", "node": nodeId, "ms": elapsedMs})
 
@@ -267,6 +343,16 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
         let key = field.name
         if payload.hasKey(key) and payload[key] != self.state{key}:
           self.state[key] = copy(payload[key])
+  of "button":
+    # A GPIO press (drivers/gpioButton, or the ESP32's fos_buttons): remember
+    # it for the bottom bar and redraw now rather than at the next interval.
+    self.state["lastButton"] = %*{
+      "pin": context.payload{"pin"}.getInt(-1),
+      "label": context.payload{"label"}.getStr(""),
+      "level": context.payload{"level"}.getInt(-1),
+      "at": epochTime(),
+    }
+    sendEvent("render", %*{})
   else:
     discard
 
@@ -289,7 +375,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     frameConfig: frameConfig,
     state: state,
     logger: logger,
-    refreshInterval: 300.0,
+    refreshInterval: staticRefreshSeconds,
     backgroundColor: parseHtmlColor("#000000")
   )
   let self = scene

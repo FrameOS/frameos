@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { getStoreCategory } from "../lib/categories";
 import { formatDate } from "../lib/format";
 
@@ -25,12 +26,21 @@ export type SceneCardScene = {
   visibility?: string | undefined;
 };
 
-export function SceneCard({ scene }: { scene: SceneCardScene }) {
+export function SceneCard({
+  menu,
+  scene,
+}: {
+  // Controls pinned to the card's top-right corner (the owner's "..." menu).
+  // The card itself is one link, so anything interactive has to sit beside
+  // it rather than inside it.
+  menu?: ReactNode | undefined;
+  scene: SceneCardScene;
+}) {
   const category = scene.category
     ? (getStoreCategory(scene.category)?.title ?? scene.category)
     : null;
   const tags = scene.tags ?? [];
-  return (
+  const card = (
     <Link className="scene-card" href={`/s/${scene.slug}`}>
       {scene.hasPreview ? (
         // Served by our own image route with a fixed content type. Owners
@@ -105,5 +115,14 @@ export function SceneCard({ scene }: { scene: SceneCardScene }) {
         ) : null}
       </div>
     </Link>
+  );
+  if (!menu) {
+    return card;
+  }
+  return (
+    <div className="scene-card-wrap">
+      {card}
+      <div className="scene-card__menu">{menu}</div>
+    </div>
   );
 }

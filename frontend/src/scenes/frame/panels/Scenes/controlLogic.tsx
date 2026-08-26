@@ -140,6 +140,17 @@ export interface controlLogicMeta {
 export type controlLogicType = MakeLogicType<controlLogicValues, controlLogicActions, ControlLogicProps> &
   controlLogicMeta
 
+/** The activate event's response body, when the server sent JSON with a `type`
+ * (cloud); the backend answers with whatever it likes, so parse leniently. */
+export function activationWasRedeploy(body: string): boolean {
+  try {
+    const parsed = JSON.parse(body) as { type?: unknown } | null
+    return parsed?.type === 'set_scenes'
+  } catch {
+    return false
+  }
+}
+
 export const controlLogic = kea<controlLogicType>([
   path(['src', 'scenes', 'frame', 'panels', 'Scenes', 'controlLogic']),
   props({} as ControlLogicProps),
@@ -298,6 +309,7 @@ export const controlLogic = kea<controlLogicType>([
             // frame — fall through to the HTTP event below.
           }
         }
+        let detail = scene?.name || sceneId
         if (!usbSucceeded) {
           const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
             method: 'POST',
@@ -307,7 +319,12 @@ export const controlLogic = kea<controlLogicType>([
           if (!response.ok) {
             throw new Error('Failed to send scene activation event')
           }
-          await response.text()
+          // The cloud answers `type: "set_scenes"` when the frame did not hold
+          // the scene and got the assigned set re-pushed instead of a plain
+          // select — a deploy, so say so rather than "activated".
+          if (activationWasRedeploy(await response.text())) {
+            detail = `${detail} — deployed, the frame shows it as soon as it syncs`
+          }
         }
         actions.currentSceneChanged(sceneId)
         socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: sceneId } as FrameType)
@@ -316,7 +333,7 @@ export const controlLogic = kea<controlLogicType>([
           kind: 'activate',
           sceneId,
           status: 'success',
-          detail: scene?.name || sceneId,
+          detail,
         })
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({

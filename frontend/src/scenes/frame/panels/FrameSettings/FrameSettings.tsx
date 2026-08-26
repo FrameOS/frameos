@@ -4,6 +4,7 @@ import { useState } from 'react'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import equal from 'fast-deep-equal'
+import { Box } from '../../../../components/Box'
 import { Button } from '../../../../components/Button'
 import { framesModel } from '../../../../models/framesModel'
 import { Form, Group } from 'kea-forms'
@@ -65,6 +66,7 @@ import { ArrowDownTrayIcon, ArrowPathIcon, ArrowUpTrayIcon } from '@heroicons/re
 import { ExclamationTriangleIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { Switch } from '../../../../components/Switch'
+import { SshKeysSection } from '../../../../components/sshKeys/SshKeysSection'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import {
   FrameEmbeddedFlashSize,
@@ -1343,7 +1345,6 @@ export function FrameSettings({
 
   const paletteDevice = cloudProfile ? cloudDevice : frame.device || ''
   const palette = withCustomPalette[paletteDevice]
-  const sshKeyOptions = normalizeSshKeys(savedSettings?.ssh_keys).keys
   const normalizeKeyIds = (keys: string[]) => Array.from(new Set(keys)).sort()
   const deployedSshKeyIds = normalizeKeyIds(
     (frame.last_successful_deploy?.ssh_keys as string[]) ?? frame.ssh_keys ?? []
@@ -3117,6 +3118,20 @@ export function FrameSettings({
           </>
         ) : null}
 
+        {hideForCloud && !esp32CloudProfile ? (
+          <>
+            <H6 id="frame-settings-ssh" className="mt-2">
+              SSH keys
+            </H6>
+            <Box className="p-2 space-y-2">
+              <p className="text-sm leading-relaxed">
+                The cloud never logs in to a frame itself. These keys go on the SD card when you write one for this
+                frame (&ldquo;Write another SD card&rdquo; in the deploy panel), as root&apos;s authorized keys.
+              </p>
+              <SshKeysSection />
+            </Box>
+          </>
+        ) : null}
         {!inFrameAdminMode && !hideForCloud ? (
           <>
             <H6 id="frame-settings-ssh" className="mt-2">
@@ -3185,35 +3200,10 @@ export function FrameSettings({
                   <div className="@md:flex @md:gap-2">
                     <Label className="@md:w-1/3">SSH Keys</Label>
                     <div className="w-full space-y-2">
-                      {sshKeyOptions.length === 0 ? (
-                        <div className="text-sm text-gray-500">No SSH keys configured in settings.</div>
-                      ) : (
-                        <div className="space-y-2">
-                          {sshKeyOptions.map((key) => {
-                            const selectedKeys = new Set(frameForm.ssh_keys ?? frame.ssh_keys ?? [])
-                            return (
-                              <div key={key.id} className="flex flex-row gap-2">
-                                <Switch
-                                  value={selectedKeys.has(key.id)}
-                                  onChange={(value) => {
-                                    const next = new Set(selectedKeys)
-                                    if (value) {
-                                      next.add(key.id)
-                                    } else {
-                                      next.delete(key.id)
-                                    }
-                                    setFrameFormValues({ ssh_keys: Array.from(next) })
-                                  }}
-                                />
-                                <div className="text-sm">{key.name || key.id}</div>
-                                {key.use_for_new_frames ? (
-                                  <div className="text-xs text-gray-500">Default for new frames</div>
-                                ) : null}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
+                      <SshKeysSection
+                        selectedIds={frameForm.ssh_keys ?? frame.ssh_keys ?? []}
+                        onSelectionChange={(ids) => setFrameFormValues({ ssh_keys: ids })}
+                      />
                       {mode === 'rpios' ? (
                         <div className="flex gap-2">
                           <Button

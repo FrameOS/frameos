@@ -7,8 +7,10 @@ import { ImageLightbox } from "./ImageLightbox";
 
 // The scene's images (the Info panel): the zip's preview plus any
 // owner-uploaded gallery images, as one grid of equal thumbnails — each
-// opens the lightbox full size. Owners add images (moderated server-side)
-// and remove any of them, the primary preview included.
+// opens the lightbox full size. Owners add images (moderated server-side),
+// remove any of them, the primary preview included, and drag the gallery
+// images into the order the page should show them (the zip's own preview
+// always leads and stays put).
 export function SceneImageGallery({
   canEdit,
   hasPreview,
@@ -29,12 +31,20 @@ export function SceneImageGallery({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The order shown while a reorder is in flight (and until the server
+  // re-renders with it). Keyed by the server's list so a refresh that brings
+  // a different set of images wins over a stale override.
+  const [reordered, setReordered] = useState<{ base: string; order: string[] } | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const serverKey = imageIds.join(",");
+  const order = reordered && reordered.base === serverKey ? reordered.order : imageIds;
 
   const shareSuffix = share ? `?share=${encodeURIComponent(share)}` : "";
   const previewUrl = `/api/store/scenes/${sceneId}/image${shareSuffix}`;
   const urls: { id: string | null; url: string }[] = [
     ...(hasPreview ? [{ id: null, url: previewUrl }] : []),
-    ...imageIds.map((id) => ({
+    ...order.map((id) => ({
       id,
       url: `/api/store/scenes/${sceneId}/images/${id}${shareSuffix}`,
     })),
@@ -94,6 +104,38 @@ export function SceneImageGallery({
     }
   }
 
+  async function moveImage(fromId: string, toId: string) {
+    if (fromId === toId) {
+      return;
+    }
+    const next = order.filter((id) => id !== fromId);
+    const at = next.indexOf(toId);
+    if (at < 0) {
+      return;
+    }
+    // Dropping on a later image lands after it, on an earlier one before it:
+    // the dragged thumbnail takes the slot it was dropped on.
+    next.splice(order.indexOf(fromId) < order.indexOf(toId) ? at + 1 : at, 0, fromId);
+    setReordered({ base: serverKey, order: next });
+    setBusy(true);
+    setError(null);
+    const response = await fetch(`/api/account/scenes/${sceneId}/images`, {
+      body: JSON.stringify({ order: next }),
+      headers: { "content-type": "application/json" },
+      method: "PATCH",
+    });
+    setBusy(false);
+    if (response.ok) {
+      router.refresh();
+    } else {
+      setReordered(null);
+      const payload = await response.json().catch(() => ({}));
+      setError(`Reordering failed: ${payload.error ?? response.status}`);
+    }
+  }
+
+  const canDrag = canEdit && order.length > 1;
+
   return (
     // ph-no-capture travels with the gallery rather than being left to each
     // page that mounts it: the scene's own images and name are never
@@ -102,12 +144,56 @@ export function SceneImageGallery({
       {urls.length > 0 || canEdit ? (
         <div className="scene-gallery__thumbs">
           {urls.map((image, index) => (
-            <div className="scene-gallery__thumb-wrap" key={image.id ?? "preview"}>
+            <div
+              className={[
+                "scene-gallery__thumb-wrap",
+                canDrag && image.id ? "scene-gallery__thumb-wrap--draggable" : "",
+                dragging && dragging === image.id ? "scene-gallery__thumb-wrap--dragging" : "",
+                dropTarget && dropTarget === image.id && dragging !== image.id
+                  ? "scene-gallery__thumb-wrap--drop-target"
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              data-image-id={image.id ?? undefined}
+              draggable={canDrag && image.id ? true : undefined}
+              key={image.id ?? "preview"}
+              onDragEnd={() => {
+                setDragging(null);
+                setDropTarget(null);
+              }}
+              onDragOver={(event) => {
+                if (dragging && image.id) {
+                  event.preventDefault();
+                  if (dropTarget !== image.id) {
+                    setDropTarget(image.id);
+                  }
+                }
+              }}
+              onDragStart={(event) => {
+                if (!canDrag || !image.id) {
+                  return;
+                }
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", image.id);
+                setDragging(image.id);
+              }}
+              onDrop={(event) => {
+                if (!dragging || !image.id) {
+                  return;
+                }
+                event.preventDefault();
+                const from = dragging;
+                setDragging(null);
+                setDropTarget(null);
+                void moveImage(from, image.id);
+              }}
+            >
               <button
                 aria-label={`View image ${index + 1} full size`}
                 className="scene-gallery__thumb"
                 onClick={() => setZoomed(image.url)}
-                title="View full size"
+                title={canDrag && image.id ? "View full size · drag to reorder" : "View full size"}
                 type="button"
               >
                 <img alt="" src={image.url} />

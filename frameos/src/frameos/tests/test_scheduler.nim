@@ -3,6 +3,7 @@ import options
 import std/times
 import std/json
 import ../scheduler
+import ../utils/local_time
 import ../types
 import ../logger
 import ../channels

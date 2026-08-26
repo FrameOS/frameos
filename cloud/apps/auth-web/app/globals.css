@@ -823,6 +823,20 @@ html.theme-dark .button-primary {
   background: var(--bg-soft);
 }
 
+.row-menu__item--danger {
+  color: var(--danger);
+}
+
+.row-menu__item:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.row-menu__error {
+  display: block;
+  margin: 4px 6px 2px;
+}
+
 /* Filter row above account tables. */
 .filter-bar {
   display: flex;
@@ -861,6 +875,12 @@ html.theme-dark .button-primary {
 
 .scene-zip-upload__controls .input {
   min-width: 0;
+  border: 0;
+}
+
+.scene-zip-upload__controls .button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .scene-zip-upload > .notice {
@@ -924,6 +944,44 @@ a.tag-pill--active:hover {
 }
 
 .scene-card:hover {
+  border-color: var(--accent, #888);
+}
+
+/* A card with owner controls: the link fills the wrapper and the menu
+   button floats over the preview's top-right corner. */
+.scene-card-wrap {
+  position: relative;
+  display: flex;
+}
+
+.scene-card-wrap > .scene-card {
+  flex: 1;
+  min-width: 0;
+}
+
+.scene-card__menu {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.scene-card__menu-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  backdrop-filter: blur(4px);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.scene-card__menu-button:hover,
+.scene-card__menu-button[aria-expanded="true"] {
+  background: var(--surface);
   border-color: var(--accent, #888);
 }
 
@@ -2765,6 +2823,19 @@ a.stat-tile:hover {
   position: relative;
 }
 
+.scene-gallery__thumb-wrap--draggable {
+  cursor: grab;
+}
+
+.scene-gallery__thumb-wrap--dragging {
+  opacity: 0.4;
+}
+
+.scene-gallery__thumb-wrap--drop-target .scene-gallery__thumb {
+  border-color: var(--accent, #888);
+  outline: 2px solid var(--accent, #888);
+}
+
 .scene-gallery__thumb-remove {
   position: absolute;
   top: -6px;
@@ -3264,6 +3335,207 @@ html.theme-dark .ai-panel__render {
 }
 
 /* "Create a scene with AI" on the store front and in My scenes. */
+/* The "Create a scene with AI" / "Upload a scene ZIP" cards (StoreActionCards):
+   the card buttons frameos.net draws for its setup choices. A tinted
+   gradient over the surface, a fractal-noise grain overlay, a blurred glow
+   in the top-right, the icon ghosted large in the bottom-right and again as a
+   small badge. --card-tint / --card-ink come from the tint modifier. */
+.action-cards {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.action-cards__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 400px));
+  gap: 12px;
+}
+
+.action-card {
+  --card-tint: var(--primary);
+  --card-ink: var(--primary-strong);
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  height: 100%;
+  padding: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--card-tint) 30%, transparent),
+      color-mix(in srgb, var(--card-tint) 10%, transparent) 50%,
+      var(--surface)
+    );
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.action-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--card-ink) 50%, var(--line));
+  box-shadow: 0 10px 28px rgb(17 20 24 / 12%);
+}
+
+.action-card:focus-visible {
+  outline: 2px solid var(--card-ink);
+  outline-offset: 2px;
+}
+
+.action-card[aria-pressed="true"] {
+  border-color: var(--card-ink);
+  box-shadow:
+    0 0 0 1px var(--card-ink),
+    0 10px 28px rgb(17 20 24 / 12%);
+}
+
+.action-card--gold {
+  --card-tint: #c8a247;
+  --card-ink: #8a6c1e;
+}
+
+.action-card--teal {
+  --card-tint: #1c7c66;
+  --card-ink: #155e4e;
+}
+
+html.theme-dark .action-card--gold {
+  --card-ink: #e2c468;
+}
+
+html.theme-dark .action-card--teal {
+  --card-ink: #6fbfa9;
+}
+
+html.theme-dark .action-card {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--card-tint) 25%, transparent),
+      color-mix(in srgb, var(--card-tint) 10%, transparent) 50%,
+      var(--surface)
+    );
+}
+
+.action-card__grain {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.5;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.45 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+html.theme-dark .action-card__grain {
+  opacity: 0.3;
+}
+
+.action-card__glow {
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  z-index: -1;
+  width: 160px;
+  height: 160px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card-tint) 50%, transparent);
+  filter: blur(40px);
+  opacity: 0.7;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+html.theme-dark .action-card__glow {
+  background: color-mix(in srgb, var(--card-tint) 30%, transparent);
+}
+
+.action-card:hover .action-card__glow {
+  opacity: 1;
+}
+
+.action-card__ghost {
+  position: absolute;
+  right: -24px;
+  bottom: -24px;
+  z-index: -1;
+  color: var(--card-ink);
+  opacity: 0.08;
+  pointer-events: none;
+  transition: transform 300ms ease, opacity 300ms ease;
+}
+
+.action-card__ghost svg {
+  width: 128px;
+  height: 128px;
+  stroke-width: 1;
+}
+
+html.theme-dark .action-card__ghost {
+  opacity: 0.1;
+}
+
+.action-card:hover .action-card__ghost {
+  transform: scale(1.1);
+  opacity: 0.12;
+}
+
+.action-card__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  backdrop-filter: blur(4px);
+  color: var(--card-ink);
+}
+
+.action-card__badge svg {
+  width: 16px;
+  height: 16px;
+}
+
+.action-card__text {
+  display: block;
+  min-width: 0;
+}
+
+.action-card__title {
+  display: block;
+  font-weight: 600;
+}
+
+.action-card__description {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.9rem;
+  color: color-mix(in srgb, var(--text) 80%, transparent);
+}
+
+.action-cards__form > .card {
+  margin-top: 0;
+}
+
+.ai-create-box--compact,
+.scene-zip-upload--compact {
+  grid-template-columns: 1fr;
+}
+
 .ai-create-box {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(320px, 1fr);

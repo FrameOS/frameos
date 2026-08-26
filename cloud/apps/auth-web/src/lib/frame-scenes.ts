@@ -62,6 +62,73 @@ class PayloadBuildError extends Error {}
 
 /** The frame's current assignments, in render order — the starting point for
  *  any change that is a delta rather than a wholesale replacement. */
+// Whether the device holds the scene set the assignments describe. The hub
+// stores the checksum the device reports on hello / scene_ack; the workspace
+// shows "out of sync" on exactly this compare. Anything else — a push that
+// was never acked, a preview (uploadScenes) that replaced the set on the
+// device, a frame that has not connected since the assignment — means a
+// set_current_scene naming an assigned scene lands `apply-failed` on the
+// device, which the queue reports as delivered.
+export function frameHoldsAssignedScenes(frame: {
+  assignedChecksum: string | null;
+  scenesChecksum: string | null;
+}): boolean {
+  return (
+    frame.assignedChecksum !== null &&
+    frame.assignedChecksum === frame.scenesChecksum
+  );
+}
+
+export type RedeployOutcome =
+  | { ok: true; checksum: string; commandId: string | undefined }
+  | { ok: false; error: string };
+
+// Push the frame's CURRENT assignments again, with `activeSceneId` (a runtime
+// id from the deployed scenes.json) as the payload's active scene: what
+// "Activate" means for a scene the device does not hold yet. Same payload,
+// checksum and ledger bookkeeping as assignScenesToFrame, minus the
+// assignment rewrite; the hub promotes assigned_scene_state on ack as usual.
+export async function redeployAssignedScenesToFrame(
+  db: Database,
+  {
+    accountId,
+    activeSceneId,
+    frame,
+    state,
+  }: {
+    accountId: string;
+    activeSceneId: string;
+    frame: FrameRow;
+    state?: Record<string, unknown> | undefined;
+  },
+): Promise<RedeployOutcome> {
+  const built = await buildScenesPayloadForFrame(db, frame.id);
+  if ("error" in built) {
+    return { ok: false, error: built.error };
+  }
+  await db
+    .update(frames)
+    .set({
+      assignedChecksum: built.checksum,
+      assignedSceneState: built.sceneStates,
+      updatedAt: new Date(),
+    })
+    .where(eq(frames.id, frame.id));
+  await supersedePendingCommands(db, frame.id, "set_scenes");
+  const command = await enqueueFrameCommand(db, {
+    createdByAccountId: accountId,
+    frameId: frame.id,
+    payload: {
+      checksum: built.checksum,
+      scenes: built.scenes,
+      scene_id: activeSceneId,
+      ...(state ? { state } : {}),
+    },
+    type: "set_scenes",
+  });
+  return { ok: true, checksum: built.checksum, commandId: command?.id };
+}
+
 export async function currentSceneAssignments(
   db: Database,
   frameId: string,

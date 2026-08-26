@@ -19,7 +19,9 @@ const captureTimeoutMs = 5000;
 // inventing an identity per crash.
 const serverDistinctId = "frameos-cloud-server";
 
-function posthogConfig() {
+// Shared with the AI telemetry module (ai/telemetry.ts), which posts to the
+// same /capture endpoint with the same key.
+export function posthogConfig() {
   // Same public project key the browser SDK uses (PostHogProvider.tsx);
   // /capture only needs the public key, so there is no server-only secret.
   const apiKey = process.env.NEXT_PUBLIC_POSTHOG_KEY?.trim();

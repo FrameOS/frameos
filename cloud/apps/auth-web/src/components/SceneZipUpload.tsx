@@ -23,7 +23,12 @@ const uploadErrors: Record<string, string> = {
   store_banned: "This account cannot publish scenes",
 };
 
-export function SceneZipUpload() {
+export function SceneZipUpload({
+  compact = false,
+}: {
+  /** Just the file row — the card that opened it already says what it is. */
+  compact?: boolean;
+} = {}) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -88,16 +93,22 @@ export function SceneZipUpload() {
 
   return (
     <form
-      className="card scene-zip-upload"
+      className={
+        compact
+          ? "card scene-zip-upload scene-zip-upload--compact"
+          : "card scene-zip-upload"
+      }
       onSubmit={(event) => void submit(event)}
     >
-      <div>
-        <h3>Upload a scene ZIP</h3>
-        <p>
-          Upload a scene export. New uploads are private; uploading the
-          same scene name again creates a new version.
-        </p>
-      </div>
+      {compact ? null : (
+        <div>
+          <h3>Upload a scene ZIP</h3>
+          <p>
+            Upload a scene export. New uploads are private; uploading the
+            same scene name again creates a new version.
+          </p>
+        </div>
+      )}
       <div className="scene-zip-upload__controls">
         <input
           accept=".zip,application/zip,application/x-zip-compressed"

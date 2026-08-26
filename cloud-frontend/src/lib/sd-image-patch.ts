@@ -98,11 +98,15 @@ export interface CloudConfigInput {
   // writes it into frame.json, so the frame keeps the clock of the browser
   // that made the card instead of the image's UTC.
   timeZone?: string | undefined;
+  // OpenSSH public keys for /root/.ssh/authorized_keys, one `authorized_key=`
+  // line each (the first-boot script accepts the key repeatedly). Together
+  // with everything else they must fit the 4096-byte region: an ed25519 key
+  // is ~100 bytes, an RSA-3072 one ~570.
+  sshPublicKeys?: string[] | undefined;
 }
 
-// Render the personalized frameos-cloud.txt region: magic line, KEY=value
-// lines, then `#` comment padding to exactly CLOUD_CONFIG_REGION_SIZE bytes.
-export function renderCloudConfig(input: CloudConfigInput): Uint8Array {
+// The KEY=value lines of a personalized frameos-cloud.txt, without padding.
+export function renderCloudConfigLines(input: CloudConfigInput): string[] {
   const lines = [CLOUD_CONFIG_MAGIC];
   const push = (key: string, raw: string | undefined, label: string) => {
     if (!raw) {
@@ -142,12 +146,27 @@ export function renderCloudConfig(input: CloudConfigInput): Uint8Array {
   push("upload_url", input.uploadUrl, "Upload URL");
   push("root_password", input.rootPassword, "Root password");
   push("time_zone", input.timeZone, "Time zone");
+  for (const key of input.sshPublicKeys ?? []) {
+    push("authorized_key", key.trim(), "SSH public key");
+  }
+  return lines;
+}
 
+// How many of the region's bytes a configuration would use — for the
+// builder's live budget readout; never throws on an oversized config.
+export function cloudConfigContentLength(input: CloudConfigInput): number {
+  return new TextEncoder().encode(renderCloudConfigLines(input).join("\n") + "\n").length;
+}
+
+// Render the personalized frameos-cloud.txt region: magic line, KEY=value
+// lines, then `#` comment padding to exactly CLOUD_CONFIG_REGION_SIZE bytes.
+export function renderCloudConfig(input: CloudConfigInput): Uint8Array {
+  const lines = renderCloudConfigLines(input);
   const content = new TextEncoder().encode(lines.join("\n") + "\n");
   if (content.length > CLOUD_CONFIG_REGION_SIZE) {
     throw new SdImagePatchError(
       "config_too_large",
-      `Configuration does not fit in the ${CLOUD_CONFIG_REGION_SIZE}-byte placeholder — shorten the frame name or WiFi values.`,
+      `Configuration does not fit in the ${CLOUD_CONFIG_REGION_SIZE}-byte placeholder — pick fewer SSH keys, or shorten the frame name or WiFi values.`,
     );
   }
   const region = new Uint8Array(CLOUD_CONFIG_REGION_SIZE);

@@ -487,6 +487,101 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
     },
     type: "function",
   },
+  {
+    description:
+      "Change PART of the user's CURRENT scene without resending the rest. Send only what changes: nodes to " +
+      "add/replace (matched by id), node ids to remove (their edges go too), edges to add/replace/remove, " +
+      "the scene's fields, settings to merge, and per-app source files to replace (apps.<keyword>.sources.<file>; " +
+      "null removes a file or an app). Everything not mentioned stays exactly as it is. The merged scene is " +
+      "validated like update_scene and delivered to the editor. Prefer this over update_scene for any edit that " +
+      "leaves most of the scene alone — it costs a fraction of the tokens.",
+    name: "patch_scene",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        apps: {
+          additionalProperties: true,
+          description:
+            'Per-app changes keyed by app keyword: { "weatherPanel": { "sources": { "app.ts": "<full new file>", "old.ts": null } } }. ' +
+            "Other keys of the app entry are shallow-merged; a null app entry removes the app.",
+          type: "object",
+        },
+        fields: {
+          description: "Replacement for the scene's whole `fields` array (omit to keep it).",
+          items: { type: "object" },
+          type: "array",
+        },
+        name: { description: "New scene name (omit to keep it).", type: "string" },
+        remove_edges: {
+          description:
+            "Edges to remove: edge ids, or { source, target, sourceHandle?, targetHandle? } matchers for edges without ids.",
+          items: { anyOf: [{ type: "string" }, { type: "object" }] },
+          type: "array",
+        },
+        remove_nodes: {
+          description: "Ids of nodes to remove. Edges touching them are removed as well.",
+          items: { type: "string" },
+          type: "array",
+        },
+        set_edges: {
+          description: "Complete edge objects to add, or to replace when an edge with the same id exists.",
+          items: { type: "object" },
+          type: "array",
+        },
+        set_nodes: {
+          description:
+            "Complete node objects to add, or to replace when a node with the same id exists. Send the whole node, not a diff of it.",
+          items: { type: "object" },
+          type: "array",
+        },
+        settings: {
+          additionalProperties: true,
+          description: "Keys to merge into the scene's settings.",
+          type: "object",
+        },
+      },
+      type: "object",
+    },
+    type: "function",
+  },
+  {
+    description:
+      "Edit source code inside the user's CURRENT scene with exact find/replace, without resending the file. " +
+      "Targets an app's source file (app + file, e.g. weatherPanel / app.ts), a node's inline sources " +
+      "(node_id + file), or a code node's snippet (node_id alone). Each `find` must match exactly once " +
+      "(set all: true to replace every occurrence); a miss reports the problem and changes nothing. The " +
+      "edited scene is validated and delivered to the editor. Cheapest way to change a few lines; for a " +
+      "rewrite of most of a file use patch_scene with the full new source instead.",
+    name: "edit_app_source",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        app: { description: "App keyword in the scene's `apps` map (for app sources).", type: "string" },
+        edits: {
+          description: "Ordered edits; applied in sequence, each against the result of the previous.",
+          items: {
+            additionalProperties: false,
+            properties: {
+              all: { description: "Replace every occurrence instead of requiring exactly one.", type: "boolean" },
+              find: { description: "Exact text to find (whitespace included).", type: "string" },
+              replace: { description: "Replacement text (empty string deletes).", type: "string" },
+            },
+            required: ["find", "replace"],
+            type: "object",
+          },
+          type: "array",
+        },
+        file: {
+          description: 'File name inside the app\'s sources, e.g. "app.ts" or "config.json". Omit for a code node.',
+          type: "string",
+        },
+        node_id: { description: "Node id (for node-level sources or a code node).", type: "string" },
+      },
+      required: ["edits"],
+      type: "object",
+    },
+    type: "function",
+  },
 ];
 
 // Short human labels the SPA shows in the activity log while a tool runs.
@@ -510,6 +605,8 @@ export const toolLabels: Record<string, string> = {
   search_examples: "Searching examples",
   search_store_scenes: "Searching the store",
   update_scene: "Updating scene",
+  patch_scene: "Patching scene",
+  edit_app_source: "Editing app source",
 };
 
 function clampInt(value: unknown, fallback: number, max: number): number {
@@ -593,8 +690,10 @@ function partialSceneIssue(current: JsonObject, delivered: JsonObject): string |
   }
   return (
     `This looks like a partial update: the current scene has ${before.size} nodes and only ${kept} of their ids are in the delivered scene ` +
-    `(${after.size} nodes). update_scene replaces the WHOLE scene, so send the complete scene — every existing node, edge, field and the "apps" map — ` +
-    `with your changes applied and the original node ids kept. If the user really asked to replace most of the scene, call again with rewrite: true.`
+    `(${after.size} nodes). update_scene replaces the WHOLE scene. Either call patch_scene / edit_app_source with just the parts that change ` +
+    `(nodes by id, app source files, find/replace edits — cheapest, preferred), or send the complete scene — every existing node, edge, field ` +
+    `and the "apps" map — with your changes applied and the original node ids kept. If the user really asked to replace most of the scene, ` +
+    `call update_scene again with rewrite: true. Do this now, in this turn; do not ask the user whether to retry.`
   );
 }
 
@@ -698,6 +797,389 @@ function deliverScenes(
         }
       : {}),
   });
+}
+
+
+// ---------------------------------------------------------------------------
+// Partial edits: patch_scene / edit_app_source.
+//
+// Before these existed the only way to change one line of a bundled app was
+// to resend the entire scene (74 KB for the store's Weather scene), which
+// took minutes of silent generation, hit timeouts, and tempted the model
+// into "partial" update_scene calls that the guard above then refused. Both
+// tools merge onto the scene the chat is holding and run the exact same
+// validation + lint + delivery as update_scene.
+
+// The scene a partial edit applies to: what this turn already delivered, or
+// the editor's current scene.
+export function workingScene(ctx: ToolContext): JsonObject | null {
+  const delivered = ctx.deliveredScenes?.[0];
+  if (ctx.deliveredTool === "modify_scene" && delivered && typeof delivered === "object") {
+    return delivered as JsonObject;
+  }
+  return ctx.currentScene ?? null;
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function objectList(value: unknown): JsonObject[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is JsonObject => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+    : [];
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+type EdgeMatcher = { source?: unknown; target?: unknown; sourceHandle?: unknown; targetHandle?: unknown };
+
+function edgeMatches(edge: JsonObject, matcher: EdgeMatcher): boolean {
+  if (matcher.source !== undefined && edge.source !== matcher.source) {
+    return false;
+  }
+  if (matcher.target !== undefined && edge.target !== matcher.target) {
+    return false;
+  }
+  if (matcher.sourceHandle !== undefined && edge.sourceHandle !== matcher.sourceHandle) {
+    return false;
+  }
+  if (matcher.targetHandle !== undefined && edge.targetHandle !== matcher.targetHandle) {
+    return false;
+  }
+  return true;
+}
+
+export type ScenePatchResult = { scene: JsonObject; changes: string[]; issues: string[] };
+
+// Pure merge of a patch_scene payload onto a scene. `issues` lists what could
+// not be applied (unknown ids, malformed entries); the caller refuses the
+// whole patch when there are any, so a typo never silently half-applies.
+export function applyScenePatch(base: JsonObject, args: JsonObject): ScenePatchResult {
+  const scene = cloneJson(base);
+  const changes: string[] = [];
+  const issues: string[] = [];
+  const nodes = objectList(scene.nodes);
+  let edges = objectList(scene.edges);
+
+  if (typeof args.name === "string" && args.name.trim()) {
+    scene.name = args.name.trim();
+    changes.push(`renamed scene to "${scene.name}"`);
+  }
+
+  const removeNodes = new Set(stringList(args.remove_nodes));
+  for (const id of removeNodes) {
+    if (!nodes.some((node) => node.id === id)) {
+      issues.push(`remove_nodes: no node with id "${id}".`);
+    }
+  }
+  if (removeNodes.size > 0 && issues.length === 0) {
+    const before = edges.length;
+    edges = edges.filter(
+      (edge) => !removeNodes.has(edge.source as string) && !removeNodes.has(edge.target as string),
+    );
+    changes.push(
+      `removed ${removeNodes.size} node(s)` + (before !== edges.length ? ` and ${before - edges.length} attached edge(s)` : ""),
+    );
+  }
+  let nextNodes = nodes.filter((node) => !removeNodes.has(node.id as string));
+
+  const setNodes = objectList(args.set_nodes);
+  let added = 0;
+  let replaced = 0;
+  for (const node of setNodes) {
+    if (typeof node.id !== "string" || !node.id) {
+      issues.push("set_nodes: every node needs a string id.");
+      continue;
+    }
+    if (typeof node.type !== "string" || !node.type) {
+      issues.push(`set_nodes: node "${node.id}" needs a type.`);
+      continue;
+    }
+    const index = nextNodes.findIndex((existing) => existing.id === node.id);
+    if (index === -1) {
+      nextNodes = [...nextNodes, node];
+      added += 1;
+    } else {
+      nextNodes[index] = node;
+      replaced += 1;
+    }
+  }
+  if (added || replaced) {
+    changes.push(`nodes: ${replaced} replaced, ${added} added`);
+  }
+
+  const removeEdges = Array.isArray(args.remove_edges) ? args.remove_edges : [];
+  let removedEdges = 0;
+  for (const matcher of removeEdges) {
+    const before = edges.length;
+    if (typeof matcher === "string") {
+      edges = edges.filter((edge) => edge.id !== matcher);
+    } else if (matcher && typeof matcher === "object") {
+      edges = edges.filter((edge) => !edgeMatches(edge, matcher as EdgeMatcher));
+    } else {
+      issues.push("remove_edges: entries must be edge ids or {source,target} matchers.");
+      continue;
+    }
+    if (edges.length === before) {
+      issues.push(`remove_edges: nothing matched ${JSON.stringify(matcher)}.`);
+    }
+    removedEdges += before - edges.length;
+  }
+  if (removedEdges) {
+    changes.push(`removed ${removedEdges} edge(s)`);
+  }
+
+  const setEdges = objectList(args.set_edges);
+  let edgesAdded = 0;
+  let edgesReplaced = 0;
+  for (const edge of setEdges) {
+    if (typeof edge.source !== "string" || typeof edge.target !== "string") {
+      issues.push("set_edges: every edge needs string source and target node ids.");
+      continue;
+    }
+    const index = typeof edge.id === "string" ? edges.findIndex((existing) => existing.id === edge.id) : -1;
+    if (index === -1) {
+      edges = [...edges, edge];
+      edgesAdded += 1;
+    } else {
+      edges[index] = edge;
+      edgesReplaced += 1;
+    }
+  }
+  if (edgesAdded || edgesReplaced) {
+    changes.push(`edges: ${edgesReplaced} replaced, ${edgesAdded} added`);
+  }
+
+  if (Array.isArray(args.fields)) {
+    scene.fields = args.fields;
+    changes.push(`fields replaced (${args.fields.length})`);
+  }
+  if (args.settings && typeof args.settings === "object" && !Array.isArray(args.settings)) {
+    scene.settings = { ...((scene.settings as JsonObject) ?? {}), ...(args.settings as JsonObject) };
+    changes.push(`settings merged (${Object.keys(args.settings as JsonObject).join(", ")})`);
+  }
+
+  if (args.apps && typeof args.apps === "object" && !Array.isArray(args.apps)) {
+    const apps = { ...((scene.apps as JsonObject) ?? {}) };
+    for (const [keyword, patch] of Object.entries(args.apps as JsonObject)) {
+      if (patch === null) {
+        if (!(keyword in apps)) {
+          issues.push(`apps: no app "${keyword}" to remove.`);
+          continue;
+        }
+        delete apps[keyword];
+        changes.push(`removed app ${keyword}`);
+        continue;
+      }
+      if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+        issues.push(`apps.${keyword}: must be an object or null.`);
+        continue;
+      }
+      const existing = (apps[keyword] as JsonObject | undefined) ?? {};
+      const { sources: sourcePatch, ...rest } = patch as JsonObject;
+      const merged: JsonObject = { ...existing, ...rest };
+      if (sourcePatch !== undefined) {
+        if (!sourcePatch || typeof sourcePatch !== "object" || Array.isArray(sourcePatch)) {
+          issues.push(`apps.${keyword}.sources: must be a { file: content } object.`);
+          continue;
+        }
+        const sources = { ...((existing.sources as JsonObject) ?? {}) };
+        const touched: string[] = [];
+        for (const [file, content] of Object.entries(sourcePatch as JsonObject)) {
+          if (content === null) {
+            if (!(file in sources)) {
+              issues.push(`apps.${keyword}.sources: no file "${file}" to remove.`);
+              continue;
+            }
+            delete sources[file];
+            touched.push(`-${file}`);
+          } else if (typeof content === "string") {
+            touched.push(file in sources ? file : `+${file}`);
+            sources[file] = content;
+          } else {
+            issues.push(`apps.${keyword}.sources.${file}: content must be a string (or null to remove).`);
+          }
+        }
+        merged.sources = sources;
+        if (touched.length > 0) {
+          changes.push(`app ${keyword} sources: ${touched.join(", ")}`);
+        }
+      } else if (Object.keys(rest).length > 0) {
+        changes.push(`app ${keyword}: ${Object.keys(rest).join(", ")} updated`);
+      }
+      apps[keyword] = merged;
+    }
+    scene.apps = apps;
+  }
+
+  scene.nodes = nextNodes;
+  scene.edges = edges;
+  return { changes, issues, scene };
+}
+
+export type SourceEditResult = { scene: JsonObject; issues: string[]; summary: string };
+
+// Pure find/replace inside one source string of a scene. Refuses (issues)
+// when a find is ambiguous or missing, so the model gets a precise reason
+// instead of a silently unchanged file.
+export function applySourceEdits(base: JsonObject, args: JsonObject): SourceEditResult {
+  const scene = cloneJson(base);
+  const issues: string[] = [];
+  const edits = objectList(args.edits);
+  const app = typeof args.app === "string" ? args.app : undefined;
+  const nodeId = typeof args.node_id === "string" ? args.node_id : undefined;
+  const file = typeof args.file === "string" ? args.file : undefined;
+  if (edits.length === 0) {
+    return { issues: ["edits: send at least one { find, replace }."], scene, summary: "" };
+  }
+  if (!app && !nodeId) {
+    return { issues: ["Name the target: `app` (+ `file`) for a bundled app, or `node_id` for a node."], scene, summary: "" };
+  }
+
+  // Locate the string and a setter for it.
+  let current: string | undefined;
+  let setter: ((value: string) => void) | undefined;
+  let where = "";
+  if (app) {
+    const apps = (scene.apps as JsonObject | undefined) ?? {};
+    const entry = apps[app] as JsonObject | undefined;
+    if (!entry) {
+      issues.push(`No app "${app}" in this scene's apps map (have: ${Object.keys(apps).join(", ") || "none"}).`);
+    } else {
+      const sources = (entry.sources as JsonObject | undefined) ?? {};
+      const target = file ?? (Object.keys(sources).length === 1 ? Object.keys(sources)[0] : undefined);
+      if (!target) {
+        issues.push(`Which file? App "${app}" has: ${Object.keys(sources).join(", ") || "no sources"}.`);
+      } else if (typeof sources[target] !== "string") {
+        issues.push(`App "${app}" has no file "${target}" (have: ${Object.keys(sources).join(", ") || "none"}).`);
+      } else {
+        current = sources[target] as string;
+        setter = (value) => {
+          sources[target] = value;
+          entry.sources = sources;
+        };
+        where = `${app}/${target}`;
+      }
+    }
+  } else if (nodeId) {
+    const node = objectList(scene.nodes).find((candidate) => candidate.id === nodeId);
+    if (!node) {
+      issues.push(`No node with id "${nodeId}".`);
+    } else {
+      const data = ((node.data as JsonObject | undefined) ?? {}) as JsonObject;
+      node.data = data;
+      const sources = data.sources as JsonObject | undefined;
+      if (file && sources && typeof sources[file] === "string") {
+        current = sources[file] as string;
+        setter = (value) => {
+          sources[file] = value;
+        };
+        where = `node ${nodeId}/${file}`;
+      } else if (!file && node.type === "code" && typeof data.codeJS === "string") {
+        current = data.codeJS;
+        setter = (value) => {
+          data.codeJS = value;
+        };
+        where = `code node ${nodeId}`;
+      } else if (!file && sources && Object.keys(sources).length === 1) {
+        const only = Object.keys(sources)[0]!;
+        current = sources[only] as string;
+        setter = (value) => {
+          sources[only] = value;
+        };
+        where = `node ${nodeId}/${only}`;
+      } else {
+        issues.push(
+          `Node "${nodeId}" has no editable source${file ? ` "${file}"` : ""} (` +
+            (sources ? `files: ${Object.keys(sources).join(", ")}` : node.type === "code" ? "no codeJS" : "not a code node and no sources") +
+            ").",
+        );
+      }
+    }
+  }
+  if (current === undefined || !setter) {
+    return { issues, scene, summary: "" };
+  }
+
+  let working = current;
+  let replacements = 0;
+  edits.forEach((edit, index) => {
+    const find = edit.find;
+    const replace = typeof edit.replace === "string" ? edit.replace : "";
+    if (typeof find !== "string" || !find) {
+      issues.push(`edits[${index}]: find must be a non-empty string.`);
+      return;
+    }
+    const count = working.split(find).length - 1;
+    if (count === 0) {
+      const firstLine = find.split("\n")[0] ?? find;
+      issues.push(
+        `edits[${index}]: not found in ${where}: ${JSON.stringify(firstLine.slice(0, 80))}${find.includes("\n") ? " (first line shown)" : ""}. Check whitespace and quote the text exactly as it appears.`,
+      );
+      return;
+    }
+    if (count > 1 && edit.all !== true) {
+      issues.push(`edits[${index}]: matches ${count} times in ${where}; include more surrounding text or set all: true.`);
+      return;
+    }
+    working = edit.all === true ? working.split(find).join(replace) : working.replace(find, () => replace);
+    replacements += count;
+  });
+  if (issues.length > 0) {
+    return { issues, scene: cloneJson(base), summary: "" };
+  }
+  setter(working);
+  return { issues, scene, summary: `${where}: ${replacements} replacement(s), ${current.length} → ${working.length} chars` };
+}
+
+function noWorkingScene(): string {
+  return JSON.stringify({
+    error:
+      "There is no current scene in this chat to edit. Ask the user to open a scene, or build one with create_scenes.",
+  });
+}
+
+async function patchScene(ctx: ToolContext, args: JsonObject): Promise<string> {
+  const base = workingScene(ctx);
+  if (!base) {
+    return noWorkingScene();
+  }
+  const { changes, issues, scene } = applyScenePatch(base, args);
+  if (issues.length > 0) {
+    return JSON.stringify({ issues, note: "Nothing was applied. Fix the patch and call again.", ok: false });
+  }
+  if (changes.length === 0) {
+    return JSON.stringify({ issues: ["The patch changes nothing."], ok: false });
+  }
+  const delivered = deliverScenes(ctx, [scene], "modify_scene", undefined, { rewrite: true });
+  return withChanges(delivered, changes);
+}
+
+async function editAppSource(ctx: ToolContext, args: JsonObject): Promise<string> {
+  const base = workingScene(ctx);
+  if (!base) {
+    return noWorkingScene();
+  }
+  const { issues, scene, summary } = applySourceEdits(base, args);
+  if (issues.length > 0) {
+    return JSON.stringify({ issues, note: "Nothing was changed. Fix the edits and call again.", ok: false });
+  }
+  const delivered = deliverScenes(ctx, [scene], "modify_scene", undefined, { rewrite: true });
+  return withChanges(delivered, [summary]);
+}
+
+// Prefix the delivery result with what the merge did, so the model can see
+// its patch landed as intended.
+function withChanges(delivered: string, changes: string[]): string {
+  try {
+    const parsed = JSON.parse(delivered) as JsonObject;
+    return JSON.stringify({ applied: changes, ...parsed });
+  } catch {
+    return delivered;
+  }
 }
 
 // Save whatever the chat is holding into the user's account as a NEW private
@@ -1166,6 +1648,12 @@ export async function executeTool(
       return deliverScenes(ctx, args.scene ? [args.scene] : [], "modify_scene", undefined, {
         rewrite: args.rewrite === true,
       });
+    }
+    case "patch_scene": {
+      return patchScene(ctx, args);
+    }
+    case "edit_app_source": {
+      return editAppSource(ctx, args);
     }
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });

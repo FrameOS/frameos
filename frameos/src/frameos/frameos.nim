@@ -1,5 +1,6 @@
-import json, asyncdispatch, pixie, strutils, strformat, options
+import json, asyncdispatch, pixie, strutils, strformat, options, times
 import std/oserrors
+import std/monotimes
 import drivers/drivers as drivers
 import frameos/apps
 import frameos/config
@@ -21,6 +22,8 @@ import frameos/setup_proxy
 import frameos/boot_guard
 import frameos/utils/image
 import frameos/utils/status_screen
+import frameos/utils/time
+import frameos/render_stats
 import frameos/version
 import frameos/watchdog
 import lib/tz
@@ -133,7 +136,16 @@ proc describeFatalStartupError*(err: ref CatchableError): FatalStartupError =
 # as they happen. Every other display keeps the deliberate late init below.
 
 const bootScreenDevices = ["framebuffer"]
+const bootMarkCycleSeconds = 6.0
 var driversInitialized = false
+# The last status drawn, redrawn by bootScreenTick with the next animation
+# frame while the network check waits; and how long that draw took, which
+# paces the ticks (with the driver's own time from render_stats).
+var lastBootStatus = ""
+var lastBootDrawSeconds = 0.0
+# One canvas for the whole boot: a 1080p RGBA image is 8 MB, and the
+# animation would otherwise allocate one per frame.
+var bootCanvas: Image = nil
 
 proc bootScreenSupported*(frameConfig: FrameConfig): bool =
   frameConfig.device in bootScreenDevices
@@ -148,7 +160,14 @@ proc initDriversOnce(self: FrameOS) =
   # say the same thing.
   discard persistDetectedDisplaySize(self.frameConfig, self.logger)
 
-proc bootScreen*(frameConfig: FrameConfig, status: string): StatusScreen =
+proc bootMarkPhase*(epoch: float): float =
+  ## Time-based animation phase (same cycle as system/index): a slow board
+  ## steps through the cycle a fast one glides through. Never exactly 0
+  ## while animating — 0 is the static logo.
+  let phase = (epoch mod bootMarkCycleSeconds) / bootMarkCycleSeconds
+  if phase <= 0: 1.0 / markPhaseSteps.float else: phase
+
+proc bootScreen*(frameConfig: FrameConfig, status: string, markPhase = 0.0): StatusScreen =
   ## The boot variant of the shared status screen: the facts known before
   ## the network is up, and what the frame is doing right now.
   let deviceName = if frameConfig.name.len > 0: frameConfig.name else: "Unnamed frame"
@@ -163,29 +182,58 @@ proc bootScreen*(frameConfig: FrameConfig, status: string): StatusScreen =
     ],
     footer: if version.len == 0 or version == "unknown": "FrameOS" else: "FrameOS v" & version,
     dark: true,
+    markPhase: markPhase,
   )
 
-proc renderBootScreen*(self: FrameOS, status: string) =
+proc renderBootScreen*(self: FrameOS, status: string, log = true) =
   ## Draws `status` on the panel now. Best effort: a failure here is logged
   ## and boot carries on — the screen is a courtesy, not a step.
   if not bootScreenSupported(self.frameConfig):
     return
+  lastBootStatus = status
   try:
     self.initDriversOnce()
     let config = self.frameConfig
-    let image = newImage(config.renderWidth(), config.renderHeight())
-    drawStatusScreen(image, bootScreen(config, status))
+    let width = config.renderWidth()
+    let height = config.renderHeight()
+    if bootCanvas.isNil or bootCanvas.width != width or bootCanvas.height != height:
+      bootCanvas = newImage(width, height)
+    let drawTimer = getMonoTime()
+    drawStatusScreen(bootCanvas, bootScreen(config, status, bootMarkPhase(epochTime())))
+    # rotateDegrees/flip copy, so the canvas itself is never rotated twice.
+    var image = bootCanvas
     case config.flip:
-    of "horizontal": image.flipHorizontal()
-    of "vertical": image.flipVertical()
+    of "horizontal":
+      image = image.copy()
+      image.flipHorizontal()
+    of "vertical":
+      image = image.copy()
+      image.flipVertical()
     of "both":
+      image = image.copy()
       image.flipHorizontal()
       image.flipVertical()
     else: discard
-    drivers.render(image.rotateDegrees(config.rotate))
-    self.logger.log(%*{"event": "boot:screen", "status": status})
+    let rotated = if config.rotate == 0: image else: image.rotateDegrees(config.rotate)
+    lastBootDrawSeconds = durationToSeconds(getMonoTime() - drawTimer)
+    let driverTimer = getMonoTime()
+    drivers.render(rotated)
+    noteDriverRenderSeconds(durationToSeconds(getMonoTime() - driverTimer))
+    if log:
+      self.logger.log(%*{"event": "boot:screen", "status": status})
   except CatchableError as e:
     self.logger.log(%*{"event": "boot:screen:error", "status": status, "error": e.msg})
+
+proc bootScreenTick*(self: FrameOS): float =
+  ## One animation frame of the boot screen: redraws the last status with
+  ## the mark's next colours and returns how long to wait before the next
+  ## one — paced so drawing plus the framebuffer push stays around a fifth
+  ## of the time on this board (render_stats.pacedRenderInterval). 0 when
+  ## there is nothing to animate.
+  if not bootScreenSupported(self.frameConfig) or lastBootStatus.len == 0:
+    return 0.0
+  self.renderBootScreen(lastBootStatus, log = false)
+  pacedRenderInterval(lastBootDrawSeconds, lastDriverRenderSeconds())
 
 proc newFrameOS*(): FrameOS =
   var frameConfig = loadConfig()
@@ -256,6 +304,9 @@ proc start*(self: FrameOS) {.async.} =
     netportal.networkCheckProgressHook = proc(status: string) {.gcsafe.} =
       {.gcsafe.}:
         frameOS.renderBootScreen(status)
+    netportal.networkCheckTickHook = proc(): float {.gcsafe.} =
+      {.gcsafe.}:
+        frameOS.bootScreenTick()
   # Decide (and log) NetworkManager vs wpa_supplicant before anything touches
   # the radio, and let the supplicant backend rejoin its saved network.
   netportal.ensureNetworkBackendReady(self)
@@ -267,6 +318,7 @@ proc start*(self: FrameOS) {.async.} =
   if self.frameConfig.network.networkCheck or hotspotBootOnly:
     let connected = checkNetwork(self)
     netportal.networkCheckProgressHook = nil
+    netportal.networkCheckTickHook = nil
     if connected:
       self.renderBootScreen("Network connected. Loading scenes…")
     elif hotspotBootOnly:
@@ -299,6 +351,8 @@ proc start*(self: FrameOS) {.async.} =
   self.initDriversOnce()
 
   self.runner.start(firstSceneId)
+  # The runner owns the panel from here; the boot canvas is dead weight.
+  bootCanvas = nil
 
   # Cloud-managed frames (docs/cloud-frames.md): a background thread completes
   # any pending claim-token enrollment from provisioning and, once the frame is

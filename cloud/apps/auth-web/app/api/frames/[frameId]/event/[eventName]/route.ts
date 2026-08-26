@@ -14,6 +14,11 @@ import {
   maxScenesPayloadBytes,
   supersedePendingCommands,
 } from "../../../../../../src/lib/frames";
+import {
+  currentSceneAssignments,
+  frameHoldsAssignedScenes,
+  redeployAssignedScenesToFrame,
+} from "../../../../../../src/lib/frame-scenes";
 import { deviceSceneIdForFrame } from "../../../../../../src/lib/scene-images";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../../src/lib/session";
@@ -105,10 +110,56 @@ export async function POST(
       if (!sceneId || sceneId.length > maxSceneIdChars) {
         return jsonError("invalid_scene_id", 400);
       }
-      type = "set_current_scene";
       // The workspace names scenes by store uuid; the device by the ids in
       // the deployed scenes.json (deviceSceneIdForFrame).
       const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, sceneId);
+      // A scene the device does not hold (assignment never acked, a preview
+      // replaced the set, …) cannot be selected: the device answers
+      // set_current_scene with `apply-failed` while the queue says
+      // "delivered" and the panel keeps showing the old scene. Activating an
+      // ASSIGNED scene on such a frame re-pushes the assigned set with this
+      // scene active — one durable set_scenes, the same push the assignment
+      // route makes. Unassigned ids (a previewed scene, a runtime id typed
+      // by hand) keep the plain select: nothing to deploy for them.
+      const lowered = sceneId.toLowerCase();
+      if (
+        !frameHoldsAssignedScenes(frame) &&
+        (await currentSceneAssignments(db, frame.id)).some(
+          (assignment) => assignment.sceneId.toLowerCase() === lowered,
+        )
+      ) {
+        const redeploy = await redeployAssignedScenesToFrame(db, {
+          accountId: session.accountId,
+          activeSceneId: deviceSceneId,
+          frame,
+          state,
+        });
+        if (redeploy.ok) {
+          await recordAuditEvent(db, {
+            accountId: session.accountId,
+            actor: {
+              accountId: session.accountId,
+              providerSubject: session.providerSubject,
+            },
+            eventType: "frame.command_sent",
+            metadata: {
+              event: eventName,
+              reason: "scene_not_on_device",
+              type: "set_scenes",
+            },
+            target: { commandId: redeploy.commandId, frameId: frame.id },
+          });
+          return NextResponse.json({
+            command_id: redeploy.commandId,
+            status: "queued",
+            type: "set_scenes",
+          });
+        }
+        // The assigned set cannot be assembled (a pulled scene, a yanked
+        // version): fall through to the plain select, which is what the
+        // route always did — the device's own log then says why.
+      }
+      type = "set_current_scene";
       payload = { scene_id: deviceSceneId, ...(state ? { state } : {}) };
       break;
     }
@@ -168,5 +219,9 @@ export async function POST(
     target: { commandId: command?.id, frameId: frame.id },
   });
 
-  return NextResponse.json({ command_id: command?.id, status: "queued" });
+  return NextResponse.json({
+    command_id: command?.id,
+    status: "queued",
+    type,
+  });
 }

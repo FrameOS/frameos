@@ -1,9 +1,9 @@
-import { eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { storeSceneImages } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { decodeBackupContent } from "../../../../../../src/lib/backups";
-import { blobNamespaces, storeBlob } from "../../../../../../src/lib/blobs";
+import { blobNamespaces, readBlob, storeBlob } from "../../../../../../src/lib/blobs";
 import { jsonError, readJsonObject } from "../../../../../../src/lib/device-flow";
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import {
@@ -169,4 +169,107 @@ function syncError(error: string) {
     return jsonError(error, 413, { max_bytes: maxSceneZipBytes });
   }
   return jsonError(error, 500);
+}
+
+// Owner reordering of the gallery: `order` is the complete list of the
+// scene's gallery image ids in their new sequence. Positions are rewritten
+// 1..n in one transaction, and — as with removal — when the scene has no
+// publish-time primary image and a different image now leads, a new ZIP
+// version carrying that lead is appended so the store tile, the ZIP and the
+// gallery keep agreeing.
+export async function PATCH(request: NextRequest, context: RouteContext) {
+  const { db, errorResponse, scene, session } = await loadOwnedScene(
+    request,
+    context,
+  );
+  if (!scene || !db || !session) {
+    return errorResponse;
+  }
+  if (scene.status === "pulled") {
+    return jsonError("scene_pulled", 403);
+  }
+
+  const body = await readJsonObject(request);
+  const order = Array.isArray(body.order) ? body.order : null;
+  if (
+    !order ||
+    order.length === 0 ||
+    order.length > maxImagesPerScene ||
+    !order.every(
+      (id): id is string => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id),
+    ) ||
+    new Set(order).size !== order.length
+  ) {
+    return jsonError("invalid_order", 400);
+  }
+
+  const existing = await db
+    .select({
+      content: storeSceneImages.content,
+      id: storeSceneImages.id,
+      objectKey: storeSceneImages.objectKey,
+    })
+    .from(storeSceneImages)
+    .where(eq(storeSceneImages.sceneId, scene.id))
+    .orderBy(asc(storeSceneImages.position), asc(storeSceneImages.createdAt));
+  const existingIds = new Set(existing.map((image) => image.id));
+  if (
+    existing.length !== order.length ||
+    order.some((id) => !existingIds.has(id))
+  ) {
+    return jsonError("invalid_order", 400);
+  }
+
+  const previousLead = existing[0]?.id;
+  const nextLead = order[0];
+  let version: number | undefined;
+  if (
+    previousLead !== nextLead &&
+    !scene.previewImage &&
+    !scene.previewObjectKey
+  ) {
+    const lead = existing.find((image) => image.id === nextLead);
+    const leadContent = await readBlob(lead);
+    const synced = await syncLatestSceneZipPreview(
+      db,
+      scene,
+      leadContent ? Buffer.from(leadContent) : undefined,
+    );
+    if (!synced.ok) {
+      return syncError(synced.error);
+    }
+    version = synced.version;
+  }
+
+  await db.transaction(async (tx) => {
+    for (const [index, id] of order.entries()) {
+      await tx
+        .update(storeSceneImages)
+        .set({ position: index + 1 })
+        .where(
+          and(
+            eq(storeSceneImages.id, id),
+            eq(storeSceneImages.sceneId, scene.id),
+            inArray(storeSceneImages.id, order),
+          ),
+        );
+    }
+  });
+
+  await recordAuditEvent(db, {
+    accountId: session.accountId,
+    actor: {
+      accountId: session.accountId,
+      providerSubject: session.providerSubject,
+    },
+    eventType: "store.images_reordered",
+    metadata: { order, version },
+    target: { sceneId: scene.id },
+  });
+
+  return NextResponse.json({
+    order,
+    status: "reordered",
+    ...(version ? { version } : {}),
+  });
 }

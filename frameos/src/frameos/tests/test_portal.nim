@@ -733,3 +733,43 @@ suite "portal setup control mode":
     let logged = loggableSetupParams(params)
     check logged{"ssid"}.getStr() == "home"
     check not ($logged).contains("FRCT-very-secret")
+
+suite "portal boot-screen ticks":
+  var slices {.global.}: seq[int]
+  var ticks {.global.} = 0
+  proc recordingSleep(ms: int) {.gcsafe, nimcall.} =
+    {.gcsafe.}:
+      slices.add(ms)
+
+  test "without a tick hook the wait is one sleep":
+    slices = @[]
+    setPortalHooksForTest(sleepHook = recordingSleep)
+    networkCheckTickHook = nil
+    waitBetweenNetworkAttempts(3000)
+    check slices == @[3000]
+    resetPortalHooksForTest()
+
+  test "a tick hook slices the wait at the interval it asks for":
+    slices = @[]
+    ticks = 0
+    setPortalHooksForTest(sleepHook = recordingSleep)
+    networkCheckTickHook = proc(): float {.gcsafe.} =
+      inc ticks
+      0.25
+    waitBetweenNetworkAttempts(1000)
+    check slices == @[250, 250, 250, 250]
+    check ticks == 4
+    resetPortalHooksForTest()
+    check networkCheckTickHook.isNil
+
+  test "a hook that stops animating falls back to one sleep, and a tiny interval is floored":
+    slices = @[]
+    setPortalHooksForTest(sleepHook = recordingSleep)
+    networkCheckTickHook = proc(): float {.gcsafe.} = 0.0
+    waitBetweenNetworkAttempts(2000)
+    check slices == @[2000]
+    slices = @[]
+    networkCheckTickHook = proc(): float {.gcsafe.} = 0.001
+    waitBetweenNetworkAttempts(120)
+    check slices == @[50, 50, 20]
+    resetPortalHooksForTest()

@@ -2,17 +2,16 @@ import { and, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createDb, storeScenes } from "@frameos-cloud/db";
-import { CreateSceneWithAiBox } from "../../src/components/CreateSceneWithAiBox";
 import {
   MyScenesGroupHeading,
   MyScenesView,
-  groupMyScenes,
   type MyScenesRow,
 } from "../../src/components/MyScenesView";
+import { groupMyScenes } from "../../src/lib/my-scenes-groups";
 import { PublicShell } from "../../src/components/PublicShell";
 import { StoreSceneActions } from "../../src/components/StoreSceneActions";
 import { StoreTabs } from "../../src/components/StoreTabs";
-import { SceneZipUpload } from "../../src/components/SceneZipUpload";
+import { StoreActionCards } from "../../src/components/StoreActionCards";
 import {
   getCloudBaseUrl,
   getMyScenesUrl,
@@ -141,9 +140,8 @@ export default async function MyScenesPage({
           </div>
         </div>
         {accountId ? (
-          <CreateSceneWithAiBox action={`${myScenesUrl}/new`} />
+          <StoreActionCards aiAction={`${myScenesUrl}/new`} showUpload />
         ) : null}
-        {accountId ? <SceneZipUpload /> : null}
         <MyScenesView
           grouped={grouped}
           filters={

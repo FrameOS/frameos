@@ -15,6 +15,7 @@ import { sceneLogic } from '../sceneLogic'
 import { PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { NumberTextInput } from '../../components/NumberTextInput'
 import { Switch } from '../../components/Switch'
+import { SshKeysSection } from '../../components/sshKeys/SshKeysSection'
 import { Select } from '../../components/Select'
 import { SystemInfo } from './SystemInfo'
 import { normalizeSshKeys, getDefaultSshKeyIds } from '../../utils/sshKeys'
@@ -413,9 +414,10 @@ export function Settings() {
   const showBackendOnlyFields = mode !== 'cloud'
   // The "Settings" group is all-or-nothing per mode today (the cloud hides
   // every section in it), so the whole block shares one gate.
-  const showSettingsGroup = ['settings-defaults', 'settings-ssh', 'settings-build-environment', 'settings-fonts'].some(
-    showSection
-  )
+  // The full key editor (private keys, generate) is backend-only; the cloud
+  // draws its own public-key list further down.
+  const showSettingsGroup = ['settings-defaults', 'settings-build-environment', 'settings-fonts'].some(showSection)
+  const showCloudSshKeys = mode === 'cloud' && showSection('settings-ssh')
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
   const buildEnvironmentProvider = settings?.buildEnvironment?.provider || (inHassioAddon() ? 'none' : 'docker')
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>(settingsNavItems[0][1])
@@ -574,6 +576,20 @@ export function Settings() {
             <Spinner />
           ) : (
             <>
+              {showCloudSshKeys ? (
+                <>
+                  <H6 id="settings-ssh" className="pt-4">
+                    SSH Keys
+                  </H6>
+                  <Box className="p-2 space-y-2">
+                    <p className="text-sm leading-loose">
+                      Public keys the SD card builder can install on new frames, so you can log in as root over SSH. The
+                      cloud stores public keys only.
+                    </p>
+                    <SshKeysSection />
+                  </Box>
+                </>
+              ) : null}
               {showSettingsGroup ? (
                 <>
                   <SettingsGroupDivider label="Settings" />

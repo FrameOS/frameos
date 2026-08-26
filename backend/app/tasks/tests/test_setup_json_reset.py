@@ -89,6 +89,7 @@ class Sandbox:
                 "FRAMEOS_BOOT_DIR": str(self.boot),
                 "FRAMEOS_SRV_DIR": str(self.srv),
                 "FRAMEOS_ETC_DIR": str(self.etc),
+                "FRAMEOS_ROOT_SSH_DIR": str(self.root / "root-ssh"),
                 "TMPDIR": str(self.tmp),
             }
         )
@@ -831,3 +832,37 @@ def test_setup_blob_without_optional_members_installs_only_what_it_has(tmp_path)
     assert not (sandbox.etc / "hostname").exists()
     assert not sandbox.wifi_file.exists()
     assert not blob.exists()
+
+
+def test_cloud_config_authorized_keys_land_in_roots_authorized_keys(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    ed25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ4ZmFrZWtleWZha2VrZXlmYWtla2V5ZmFrZWtleQ marius@laptop"
+    rsa = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC0fakekeyfakekeyfakekey"
+    sandbox.write_cloud_file(
+        "claim_token=FRCT-abc123\n"
+        f"authorized_key={ed25519}\n"
+        "authorized_key=\n"
+        f"authorized_key = {rsa}\n"
+    )
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    authorized_keys = sandbox.root / "root-ssh" / "authorized_keys"
+    assert authorized_keys.read_text(encoding="utf-8") == f"{ed25519}\n{rsa}\n"
+    assert _mode(authorized_keys) == 0o600
+    assert _mode(authorized_keys.parent) == 0o700
+    assert "Installing authorized keys from cloud personalization" in result.stdout
+    # Still enrolls, and the key lines count as recognized personalization.
+    pending = json.loads(sandbox.pending_file.read_text(encoding="utf-8"))
+    assert pending["claim_token"] == "FRCT-abc123"
+
+
+def test_cloud_config_without_authorized_keys_writes_no_authorized_keys_file(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    sandbox.write_cloud_file("claim_token=FRCT-abc123\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (sandbox.root / "root-ssh").exists()

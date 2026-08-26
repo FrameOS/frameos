@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
@@ -2527,7 +2527,10 @@ describe("frame management API", () => {
     expect(assigned?.assignedSceneState).toMatchObject({ [scene.id]: { version: 1 } });
     await db
       .update(frames)
-      .set({ deployedSceneState: assigned?.assignedSceneState })
+      .set({
+        deployedSceneState: assigned?.assignedSceneState,
+        scenesChecksum: assigned?.assignedChecksum ?? null,
+      })
       .where(eq(frames.id, frame_id));
     // … and v2 was published since, so the latest non-yanked version (what
     // the next push would ship) no longer matches what the device holds.
@@ -2565,6 +2568,114 @@ describe("frame management API", () => {
       await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame_id))
     ).find((command) => command.type === "set_current_scene");
     expect(sceneCommand?.payload).toEqual({ scene_id: scene.id });
+  });
+
+  // A scene the device does not hold cannot be selected: it answers
+  // set_current_scene with `apply-failed` while the queue says delivered
+  // (seen on an E1002 on 2026-08-27: a preview had replaced the device's
+  // set with one scene, and every Activate of another assigned scene was
+  // silently lost). The device's reported checksum is the truth of what it
+  // holds; when it differs from the assignment, Activate re-pushes the
+  // assigned set with the wanted scene active instead.
+  it("re-pushes the assigned set when activating a scene the device does not hold", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const stars = await createStoreScene(accountId, { name: "GitHub stars" });
+    const clock = await createStoreScene(accountId, { name: "Word clock" });
+    const assign = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: stars.id }, { scene_id: clock.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(assign.status).toBe(200);
+    const [assigned] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frame_id));
+    expect(assigned?.assignedChecksum).toBeTruthy();
+    const activateEvent = (body: Record<string, unknown>) =>
+      postFrameEvent(
+        postJson(`/api/frames/${frame_id}/event/setCurrentScene`, body, {
+          origin: baseUrl,
+        }),
+        {
+          params: Promise.resolve({
+            eventName: "setCurrentScene",
+            frameId: frame_id,
+          }),
+        },
+      );
+    const commandsInOrder = () =>
+      db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id))
+        .orderBy(asc(frameCommands.createdAt));
+
+    // The device reported some other set (a preview's checksum, or nothing
+    // yet): activating an assigned scene must deploy, not select.
+    await db
+      .update(frames)
+      .set({ scenesChecksum: "preview-of-one-scene" })
+      .where(eq(frames.id, frame_id));
+    const activate = await activateEvent({ sceneId: stars.id, state: { a: 1 } });
+    expect(activate.status).toBe(200);
+    expect(await activate.json()).toMatchObject({
+      status: "queued",
+      type: "set_scenes",
+    });
+    let commands = await commandsInOrder();
+    expect(commands.map((command) => [command.type, command.status])).toEqual([
+      // The assignment's own push, superseded by the redeploy.
+      ["set_scenes", "expired"],
+      ["set_scenes", "pending"],
+    ]);
+    const redeploy = commands[1]?.payload as {
+      checksum: string;
+      scene_id: string;
+      scenes: unknown[];
+      state: unknown;
+    };
+    expect(redeploy.checksum).toBe(assigned?.assignedChecksum);
+    expect(redeploy.scenes).toHaveLength(2);
+    // createStoreScene's scenes.json carries the store id as its runtime id.
+    expect(redeploy.scene_id).toBe(stars.id);
+    expect(redeploy.state).toEqual({ a: 1 });
+
+    // Once the device acks the assigned set, Activate is a plain select again.
+    await db
+      .update(frames)
+      .set({ scenesChecksum: assigned?.assignedChecksum ?? null })
+      .where(eq(frames.id, frame_id));
+    const select = await activateEvent({ sceneId: clock.id });
+    expect(select.status).toBe(200);
+    expect(await select.json()).toMatchObject({
+      status: "queued",
+      type: "set_current_scene",
+    });
+    commands = await commandsInOrder();
+    expect(commands.at(-1)?.type).toBe("set_current_scene");
+    expect(commands.at(-1)?.payload).toEqual({ scene_id: clock.id });
+
+    // An id that is not assigned at all (a previewed scene's runtime id)
+    // keeps the plain select even while out of sync — nothing to deploy.
+    await db
+      .update(frames)
+      .set({ scenesChecksum: "preview-of-one-scene" })
+      .where(eq(frames.id, frame_id));
+    const unassigned = await activateEvent({ sceneId: "adhoc-runtime-id" });
+    expect(await unassigned.json()).toMatchObject({
+      type: "set_current_scene",
+    });
+    expect((await commandsInOrder()).at(-1)?.payload).toEqual({
+      scene_id: "adhoc-runtime-id",
+    });
   });
 
   it("persists the schedule, round-trips it, and enqueues a durable set_schedule", async () => {
