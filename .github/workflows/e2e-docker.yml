@@ -163,7 +163,10 @@ jobs:
         with:
           name: esp32-firmware-size
           path: .firmware-size/*.json
-          if-no-files-found: warn
+          # The directory starts with a dot; without this the action skips it
+          # ("No files were found") and the report job fails on download.
+          include-hidden-files: true
+          if-no-files-found: error
 
   # Sticky "ESP32 firmware size" comment on the PR: one comment, edited in
   # place on every push, never a commit. Compares this build with the latest
