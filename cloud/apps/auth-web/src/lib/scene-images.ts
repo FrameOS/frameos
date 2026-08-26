@@ -148,6 +148,52 @@ async function runtimeIdsForVersion(
   return ids;
 }
 
+// The opposite direction: the id a device knows for an assigned store scene.
+// The workspace lists a cloud frame's scenes by store scene uuid (the
+// assignment), but the payload set_scenes ships is the pinned version's
+// scenes.json, whose scenes carry their own ids — so "activate scene" sent
+// the store uuid and the device answered `scenes:select … apply-failed`
+// (seen on an E1004; only "preview on frame", which ships the payload with
+// its own id, worked). Returns the first runtime id of the pinned version
+// when `sceneId` is an assigned store scene, otherwise `sceneId` unchanged
+// (it is presumably already a runtime id, or unknown — the device will say).
+export async function deviceSceneIdForFrame(
+  db: FramesDatabase,
+  frameId: string,
+  sceneId: string,
+): Promise<string> {
+  if (!sceneId) {
+    return sceneId;
+  }
+  const lowered = sceneId.toLowerCase();
+  const assignments = await db
+    .select({
+      sceneId: frameSceneAssignments.sceneId,
+      sceneVersion: frameSceneAssignments.sceneVersion,
+    })
+    .from(frameSceneAssignments)
+    .where(eq(frameSceneAssignments.frameId, frameId));
+  const assignment = assignments.find(
+    (row) => row.sceneId.toLowerCase() === lowered,
+  );
+  if (!assignment) {
+    return sceneId;
+  }
+  const version = await pinnedVersionNumber(
+    db,
+    assignment.sceneId,
+    assignment.sceneVersion,
+  );
+  if (version === undefined) {
+    return sceneId;
+  }
+  const ids = await runtimeIdsForVersion(db, assignment.sceneId, version);
+  for (const runtimeId of ids) {
+    return runtimeId;
+  }
+  return sceneId;
+}
+
 // Resolve the store scene that owns `sceneId` on this frame. Accepts either
 // a runtime scene id (matched against each assigned version's scenes.json)
 // or the store scene uuid itself (matched against the assignment directly).

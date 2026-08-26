@@ -7,12 +7,16 @@ import { generateKeyPairSync } from "node:crypto";
 import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
+import { zipSync } from "fflate";
 import {
   createDb,
   frameAssetFiles,
   frameCommands,
+  frameSceneAssignments,
   frames,
   linkedClients,
+  storeScenes,
+  storeSceneVersions,
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -390,6 +394,67 @@ describe("POST /api/frames/{id}/event/{event}", () => {
     );
     expect(render.status).toBe(200);
     expect(await commandsOfType(frame.id, "render")).toHaveLength(1);
+  });
+
+  // The workspace lists a cloud frame's scenes by store scene uuid, but the
+  // payload set_scenes ships is the pinned version's scenes.json, whose scenes
+  // carry their own ids. An E1004 answered "activate scene" with
+  // `scenes:select … apply-failed` because the uuid never reached its catalog.
+  it("translates a store scene uuid into the deployed runtime scene id", async () => {
+    const { accountId, frame } = await activeFrame();
+    const [scene] = await db
+      .insert(storeScenes)
+      .values({
+        accountId,
+        latestVersion: 1,
+        name: "Word clock",
+        riskFlags: [],
+        slug: "word-clock",
+        status: "active",
+        visibility: "private",
+      })
+      .returning();
+    const runtimeSceneId = "1e9d05df-30e9-44c2-9a24-6de2b5d3127a";
+    const scenesJson = JSON.stringify([
+      { edges: [], id: runtimeSceneId, name: "Word clock", nodes: [] },
+    ]);
+    await db.insert(storeSceneVersions).values({
+      content: Buffer.from(
+        zipSync({ "scene/scenes.json": new TextEncoder().encode(scenesJson) }),
+      ),
+      contentType: "application/zip",
+      riskFlags: [],
+      sceneId: scene!.id,
+      sha256: "test",
+      sizeBytes: 1000,
+      version: 1,
+    });
+    await db.insert(frameSceneAssignments).values({
+      frameId: frame.id,
+      position: 0,
+      sceneId: scene!.id,
+    });
+
+    const activate = await postFrameEvent(
+      postJson(`/api/frames/${frame.id}/event/setCurrentScene`, {
+        sceneId: scene!.id,
+      }),
+      eventParams(frame.id, "setCurrentScene"),
+    );
+    expect(activate.status).toBe(200);
+    const [sceneCommand] = await commandsOfType(frame.id, "set_current_scene");
+    expect(sceneCommand!.payload).toEqual({ scene_id: runtimeSceneId });
+
+    // A runtime id (what "preview on frame" sends) passes through untouched.
+    const direct = await postFrameEvent(
+      postJson(`/api/frames/${frame.id}/event/setCurrentScene`, {
+        sceneId: runtimeSceneId,
+      }),
+      eventParams(frame.id, "setCurrentScene"),
+    );
+    expect(direct.status).toBe(200);
+    const commands = await commandsOfType(frame.id, "set_current_scene");
+    expect(commands.at(-1)!.payload).toEqual({ scene_id: runtimeSceneId });
   });
 
   it("maps the metrics event to get_metrics", async () => {

@@ -2299,6 +2299,60 @@ describe("frame management API", () => {
     ...overrides,
   });
 
+  // Schedules name scenes the way the workspace does — by store scene uuid.
+  // The device only knows the ids inside the deployed scenes.json, so the
+  // push translates them; the stored schedule keeps the uuid for the panel.
+  it("sends the device runtime scene ids in the schedule, keeps store uuids in the stored copy", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const scene = await createStoreScene(accountId, { name: "Agenda" });
+    // v2's scenes.json carries `${scene.id}-v2` as its runtime id.
+    await publishSceneVersion(scene.id, 2);
+    const assign = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(assign.status).toBe(200);
+
+    const onEvent = scheduleEvent({ payload: { sceneId: scene.id, state: {} } });
+    const response = await pushFrameSchedule(
+      postJson(
+        `/api/frames/${frame_id}/schedule`,
+        { schedule: { events: [onEvent] } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(response.status).toBe(200);
+
+    const detail = await getFrameDetail(
+      getRequest(`/api/frames/${frame_id}`),
+      routeParams(frame_id),
+    );
+    const { frame } = (await detail.json()) as {
+      frame: { schedule?: unknown };
+    };
+    expect(frame.schedule).toEqual({ events: [onEvent] });
+
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    const push = commands.find((command) => command.type === "set_schedule");
+    expect(push?.payload).toEqual({
+      schedule: {
+        events: [{ ...onEvent, payload: { sceneId: `${scene.id}-v2`, state: {} } }],
+      },
+    });
+  });
+
   it("persists the schedule, round-trips it, and enqueues a durable set_schedule", async () => {
     const { frame_id } = await enrolledFrame();
     await confirmFrame(

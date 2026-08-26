@@ -9,6 +9,7 @@ import {
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
 import {
+  type FrameSchedule,
   enqueueFrameCommand,
   frameForAccount,
   maxScheduleUtcOffsetMinutes,
@@ -17,6 +18,7 @@ import {
   supersedePendingCommands,
   validateFrameSchedule,
 } from "../../../../../src/lib/frames";
+import { deviceSceneIdForFrame } from "../../../../../src/lib/scene-images";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 
@@ -97,11 +99,27 @@ export async function POST(
   // — the shape both the Nim handler (hub_client.nim handleSetSchedule) and
   // the ESP32 handler (fos_cloud.c) read.
   await supersedePendingCommands(db, frame.id, "set_schedule");
+  // The stored schedule keeps the workspace's store scene uuids (it
+  // round-trips them); the device gets the runtime ids its scenes.json
+  // carries, same translation as the setCurrentScene event route.
+  const deviceSchedule: FrameSchedule = {
+    ...schedule,
+    events: await Promise.all(
+      schedule.events.map(async (event) => {
+        const sceneId = event.payload?.sceneId;
+        if (typeof sceneId !== "string" || !sceneId) {
+          return event;
+        }
+        const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, sceneId);
+        return { ...event, payload: { ...event.payload, sceneId: deviceSceneId } };
+      }),
+    ),
+  };
   const command = await enqueueFrameCommand(db, {
     createdByAccountId: session.accountId,
     frameId: frame.id,
     payload: {
-      schedule: scheduleDevicePayload(schedule),
+      schedule: scheduleDevicePayload(deviceSchedule),
       ...(utcOffsetMinutes === undefined ? {} : { utcOffsetMinutes }),
     },
     type: "set_schedule",

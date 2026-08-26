@@ -14,6 +14,7 @@ import {
   maxScenesPayloadBytes,
   supersedePendingCommands,
 } from "../../../../../../src/lib/frames";
+import { deviceSceneIdForFrame } from "../../../../../../src/lib/scene-images";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../../src/lib/session";
 
@@ -105,7 +106,10 @@ export async function POST(
         return jsonError("invalid_scene_id", 400);
       }
       type = "set_current_scene";
-      payload = { scene_id: sceneId, ...(state ? { state } : {}) };
+      // The workspace names scenes by store uuid; the device by the ids in
+      // the deployed scenes.json (deviceSceneIdForFrame).
+      const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, sceneId);
+      payload = { scene_id: deviceSceneId, ...(state ? { state } : {}) };
       break;
     }
     case "uploadScenes": {
