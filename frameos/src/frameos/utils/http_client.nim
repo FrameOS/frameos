@@ -137,24 +137,45 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     proc fos_nim_http_stream_close(stream: pointer)
                                   {.importc: "fos_nim_http_stream_close", cdecl.}
 
+    const HttpBodyStreamReplayBytes = 16 * 1024
+      ## How much of the body's start is kept so a rewind can replay it
+      ## instead of re-issuing the GET. The streaming decoders check their
+      ## memory plan as soon as they have parsed the image header — a
+      ## PNG's IHDR and first IDAT header, a JPEG's SOF (past the DQT/DHT
+      ## tables, or past a camera's EXIF block) — so a budget refusal on
+      ## the full-resolution rung usually lands inside the first few KB.
+      ## 16K covers imgix/Unsplash output with room to spare; a JPEG with
+      ## a large embedded EXIF thumbnail still reopens. Half the JPEG
+      ## decoder's own 32K window, transient, and freed with the stream.
+
     type
+      HttpStreamReopenError* = object of IOError
+        ## `rewindHttpBodyStream` could not restart the body from byte 0:
+        ## the re-issued GET failed to connect, answered an error status
+        ## (a 429 or 503 page must not be fed to an image decoder as if it
+        ## were the picture), or came back with a different length than
+        ## the decoder was told. Callers fall back to the buffered fetch,
+        ## which surfaces the failure the way it always did.
+
       HttpBodyStream* = ref object
         ## A GET whose body is pulled straight off the socket, for decoders
         ## that read their input sequentially (pixie's windowed JPEG/PNG
-        ## paths). Nothing of the body is buffered beyond the few bytes
-        ## peeked to sniff the format, so the download costs no PSRAM and
-        ## never needs the flash spill. `rewind` reopens the request: the
-        ## decode-with-degrade ladder restarts the decode from byte 0.
+        ## paths). Only the first `HttpBodyStreamReplayBytes` of the body
+        ## are retained (the format-sniff peek lives in the same buffer),
+        ## so the download costs no PSRAM and never needs the flash spill.
+        ## `rewind` replays that buffer when nothing past it was read and
+        ## reopens the request otherwise: the decode-with-degrade ladder
+        ## restarts the decode from byte 0 on every rung.
         handle: pointer
         url: string
         headerBlock: string
         timeoutMs: int
         code*: int
         contentLength*: int64 ## -1 when the response carries no Content-Length
-        prefix: string        ## bytes peeked for format sniffing, served first
+        prefix: string        ## the retained start of the body, served first
         prefixPos: int
-        consumed: int64       ## bytes handed out past the prefix
-        opened: bool
+        consumed: int64       ## bytes handed out past the retained prefix;
+                              ## once > 0 a rewind must reopen the request
 
     proc closeHttpBodyStream*(stream: HttpBodyStream) =
       if stream.isNil or stream.handle == nil:
@@ -180,12 +201,18 @@ when defined(frameosEmbedded) or defined(frameosWasm):
           (if detail.len > 0: " (" & detail & ")" else: ""))
       stream.code = status.int
       stream.contentLength = contentLength
-      stream.opened = true
+
+    proc httpBodyStreamFailed*(stream: HttpBodyStream): bool =
+      ## The one status rule for both the first open and every reopen: the
+      ## C glue follows redirects itself, so anything 4xx/5xx (or a 3xx it
+      ## gave up on) is an error page, not an image body.
+      stream.code >= 300
 
     proc openHttpBodyStream*(url: string, headers: seq[SimpleHttpHeader] = @[],
         timeoutMs = DefaultFetchTimeoutMs): HttpBodyStream =
       ## Opens the request; raises IOError when no response arrives at all.
-      ## An HTTP error status is not an exception — check `code`.
+      ## An HTTP error status is not an exception — check
+      ## `httpBodyStreamFailed` / `code`.
       if url.strip().len == 0:
         raise newException(ValueError, "Invalid HTTP URL: empty")
       if not (url.startsWith("http://") or url.startsWith("https://")):
@@ -202,24 +229,40 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         return 0
       got.int
 
+    proc retainFromSocket(stream: HttpBodyStream, bytes: int): int =
+      ## Pulls up to `bytes` more of the body into the retained prefix
+      ## (fewer at EOF or when the socket hands over less); 0 at EOF.
+      let room = min(bytes, HttpBodyStreamReplayBytes - stream.prefix.len)
+      if room <= 0:
+        return 0
+      let start = stream.prefix.len
+      stream.prefix.setLen(start + room)
+      let got = stream.readRaw(addr stream.prefix[start], room)
+      stream.prefix.setLen(start + got)
+      got
+
     proc peekHttpBodyStream*(stream: HttpBodyStream, bytes: int): string =
       ## The first `bytes` of the body (fewer at EOF), kept so the reads that
-      ## follow still see the body from byte 0.
+      ## follow still see the body from byte 0. `bytes` is capped by the
+      ## replay buffer.
       if stream.consumed > 0:
         raise newException(IOError, "cannot peek an HTTP body stream after reading it")
-      while stream.prefix.len < bytes:
-        var chunk = newString(bytes - stream.prefix.len)
-        let got = stream.readRaw(addr chunk[0], chunk.len)
-        if got <= 0:
+      while stream.prefix.len < min(bytes, HttpBodyStreamReplayBytes):
+        if stream.retainFromSocket(bytes - stream.prefix.len) <= 0:
           break
-        chunk.setLen(got)
-        stream.prefix.add(chunk)
-      stream.prefix
+      stream.prefix[0 ..< min(bytes, stream.prefix.len)]
 
     proc readHttpBodyStream*(stream: HttpBodyStream, dst: pointer, maxBytes: int): int =
-      ## Sequential read: the peeked prefix first, then the socket.
+      ## Sequential read: the retained prefix first, then the socket. Socket
+      ## bytes are added to the prefix while it has room, so a rewind that
+      ## comes early (a decoder's plan check refusing on its header) costs
+      ## nothing; past that the bytes are gone and a rewind reopens.
       if maxBytes <= 0 or dst == nil:
         return 0
+      if stream.prefixPos >= stream.prefix.len and stream.consumed == 0 and
+          stream.prefix.len < HttpBodyStreamReplayBytes:
+        if stream.retainFromSocket(maxBytes) <= 0:
+          return 0 # EOF (or a read timeout: do not block on it twice)
       if stream.prefixPos < stream.prefix.len:
         let n = min(maxBytes, stream.prefix.len - stream.prefixPos)
         copyMem(dst, unsafeAddr stream.prefix[stream.prefixPos], n)
@@ -231,13 +274,29 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       got
 
     proc rewindHttpBodyStream*(stream: HttpBodyStream) =
-      ## Back to byte 0. Free while only the peeked prefix was consumed;
-      ## otherwise the request is reopened (a second GET).
+      ## Back to byte 0. Free while only the retained prefix was consumed;
+      ## otherwise the request is reopened (a second GET) and checked the
+      ## way the first open was — raising HttpStreamReopenError when the
+      ## reopened response is not the same body the decoder started on.
       if stream.consumed == 0:
         stream.prefixPos = 0
         return
+      let expectedCode = stream.code
+      let expectedLength = stream.contentLength
       stream.closeHttpBodyStream()
-      stream.openStreamHandle()
+      try:
+        stream.openStreamHandle()
+      except IOError as e:
+        raise newException(HttpStreamReopenError,
+          "reopen for rewind failed: " & e.msg)
+      if stream.httpBodyStreamFailed:
+        raise newException(HttpStreamReopenError,
+          "reopen for rewind answered HTTP " & $stream.code &
+          " (first response was HTTP " & $expectedCode & "): " & stream.url)
+      if stream.contentLength != expectedLength:
+        raise newException(HttpStreamReopenError,
+          "reopen for rewind changed Content-Length from " & $expectedLength &
+          " to " & $stream.contentLength & ": " & stream.url)
 
     proc httpBodyStreamSource*(stream: HttpBodyStream):
         proc(dst: pointer, maxBytes: int): int {.gcsafe, raises: [].} =

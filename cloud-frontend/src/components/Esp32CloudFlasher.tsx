@@ -797,13 +797,17 @@ export function Esp32CloudFlasher({
           text: `set pins ${quoteConsoleArgument(pinsSpec.trim())}`,
         })
       }
-      const timeZone = browserTimeZone()
+      const timeZone = reenrollFrame ? undefined : browserTimeZone()
       if (timeZone) {
         // Clocks and schedules run in frame-local time. The claim token
         // carries the same zone (enrollment seeds the cloud setting and
         // pushes it), but this NVS copy holds before that push and without
         // the cloud at all. Optional: firmware that predates the key answers
-        // with an error and the flash carries on.
+        // with an error and the flash carries on. Not on a re-enrollment:
+        // that frame already has a cloud `timezone` setting, re-enrollment
+        // pushes nothing (rebindEnrollment keeps settings as they are), and
+        // writing this browser's zone here would leave the board on a zone
+        // the workspace does not show.
         commands.push({
           display: `set time_zone ${timeZone}`,
           expect: consolePrompt,

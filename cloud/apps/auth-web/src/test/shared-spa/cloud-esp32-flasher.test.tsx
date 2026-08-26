@@ -446,6 +446,62 @@ describe("Esp32CloudFlasher", () => {
     });
   });
 
+  it("leaves the time zone alone when re-enrolling an existing frame", async () => {
+    // A re-flashed board links back to a frame that already has a cloud
+    // `timezone` setting, and re-enrollment pushes nothing (rebindEnrollment
+    // keeps settings as they are). Writing this browser's zone over serial
+    // would put the board on a zone the workspace does not show — and the
+    // mint carries no zone either, only the frame binding.
+    mockCloudApi();
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === "/api/frames/firmware") {
+        return Promise.resolve(Response.json(metadataPayload));
+      }
+      if (url.startsWith("/api/frames/firmware?")) {
+        return Promise.resolve(
+          new Response(firmwareBytes.slice(), {
+            headers: { "content-type": "application/octet-stream" },
+          }),
+        );
+      }
+      if (url === "/api/frames/claim-tokens") {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Promise.resolve(
+          Response.json({ claim_token: "FRCT_rebind", frame_id: body.frame_id }),
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(
+      <Esp32CloudFlasher
+        cloudOrigin={window.location.origin}
+        reenrollFrame={{ id: "abc-123", name: "Kitchen" }}
+      />,
+    );
+    // No name field in this mode; only the hardware is asked for.
+    expect(screen.queryByLabelText("Frame name")).toBeNull();
+    fireEvent.change(await screen.findByLabelText("Frame hardware"), {
+      target: { value: "panel:EPD_7in5_V2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /connect & re-enroll/i }));
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    expect(port.writes).toEqual([
+      `set cloud_url "${window.location.origin}"`,
+      'set claim_token "FRCT_rebind"',
+      'set panel "EPD_7in5_V2"',
+      "restart",
+    ]);
+    expect(port.writes.some((line) => line.startsWith("set time_zone"))).toBe(false);
+    const mintCall = fetchMock.mock.calls.find(
+      ([input]) => String(input) === "/api/frames/claim-tokens",
+    );
+    expect(JSON.parse(String(mintCall?.[1]?.body))).toEqual({ frame_id: "abc-123" });
+  });
+
   it("hands off to the enrolled frame once it appears in the account", async () => {
     // The fleet is snapshotted before the claim token is minted; whatever
     // frame appears beyond that set is the one this flash enrolled. The

@@ -137,7 +137,9 @@ void app_main(void)
 
     fos_battery_init(config->battery_pin, config->battery_divider, config->battery_enable_pin);
     if (fos_battery_present()) {
-        ESP_LOGI(TAG, "battery: %d mV (%d%%)", fos_battery_millivolts(), fos_battery_percent());
+        int battery_mv = 0, battery_pct = -1;
+        fos_battery_read(&battery_mv, &battery_pct);
+        ESP_LOGI(TAG, "battery: %d mV (%d%%)", battery_mv, battery_pct);
     }
 
     /* Not when the battery divider's enable switch sits on the LED pin: the

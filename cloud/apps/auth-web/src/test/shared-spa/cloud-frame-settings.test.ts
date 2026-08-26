@@ -17,6 +17,10 @@ import {
   esp32TimeZoneCloudFrameSettingKeys,
   esp32TimeZoneCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32TimeZone,
+  esp32BatteryEnablePinCloudFrameSettingKeys,
+  esp32BatteryEnablePinCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32BatteryEnablePin,
+  esp32PowerSettingKeys,
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
   hardwareCloudFrameSettingKeys,
@@ -25,12 +29,15 @@ import {
 import {
   allowedFrameCommandTypes,
   allowedFrameSettings,
+  esp32BatteryEnablePinFrameSettingKeys,
+  esp32BatteryEnablePinFrameSettingsMinVersion,
   esp32ExtendedFrameSettingKeys,
   esp32ExtendedFrameSettingsMinVersion,
   esp32OnlySettableKeys,
   esp32SettableKeys,
   esp32TimeZoneFrameSettingKeys,
   esp32TimeZoneFrameSettingsMinVersion,
+  isValidTimeZoneName,
   extendedFrameSettingKeys,
   extendedFrameSettingsMinVersion,
   frameSupportsExtendedSettings,
@@ -89,7 +96,10 @@ describe("cloud settings push", () => {
   it("agrees with the control plane on what the esp32 firmware applies, and its gated tail", () => {
     // Ungated: exactly the control plane's esp32 subset minus the tails.
     const ungated = [...esp32SettableKeys].filter(
-      (key) => !esp32ExtendedFrameSettingKeys.has(key) && !esp32TimeZoneFrameSettingKeys.has(key),
+      (key) =>
+        !esp32ExtendedFrameSettingKeys.has(key) &&
+        !esp32TimeZoneFrameSettingKeys.has(key) &&
+        !esp32BatteryEnablePinFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
@@ -119,12 +129,61 @@ describe("cloud settings push", () => {
       ...esp32ExtendedCloudFrameSettingKeys,
       ...esp32TimeZoneCloudFrameSettingKeys,
     ]);
+    // The 2026.8.39 battery enable pin tail, same contract. It is a power
+    // key (the form binds and diffs it with the rest — esp32PowerSettingKeys)
+    // but never rides an ungated push.
+    expect(new Set(esp32BatteryEnablePinCloudFrameSettingKeys)).toEqual(esp32BatteryEnablePinFrameSettingKeys);
+    expect(esp32BatteryEnablePinCloudFrameSettingsMinVersion).toBe(esp32BatteryEnablePinFrameSettingsMinVersion);
+    for (const key of esp32BatteryEnablePinCloudFrameSettingKeys) {
+      expect(esp32SettableKeys.has(key)).toBe(true);
+      expect(esp32OnlySettableKeys.has(key)).toBe(true);
+      expect(allowedFrameSettings.has(key)).toBe(true);
+      expect((esp32PowerSettingKeys as readonly string[]).includes(key)).toBe(true);
+      expect((esp32CloudFrameSettingKeys as readonly string[]).includes(key)).toBe(false);
+    }
+    expect(cloudFrameSupportsEsp32BatteryEnablePin("2026.8.38")).toBe(false);
+    expect(cloudFrameSupportsEsp32BatteryEnablePin("2026.8.39")).toBe(true);
+    expect(esp32CloudFrameSettingKeysForVersion("2026.8.38")).toEqual([
+      ...esp32CloudFrameSettingKeys,
+      ...esp32ExtendedCloudFrameSettingKeys,
+      ...esp32TimeZoneCloudFrameSettingKeys,
+    ]);
+    expect(esp32CloudFrameSettingKeysForVersion("2026.8.39")).toEqual([
+      ...esp32CloudFrameSettingKeys,
+      ...esp32ExtendedCloudFrameSettingKeys,
+      ...esp32TimeZoneCloudFrameSettingKeys,
+      ...esp32BatteryEnablePinCloudFrameSettingKeys,
+    ]);
     // Never a Pi-only key toward the chip: the route (and the firmware)
     // refuse the whole push on them. (timezone moved to the gated tail.)
     for (const key of [...esp32CloudFrameSettingKeys, ...esp32ExtendedCloudFrameSettingKeys]) {
       expect(key).not.toBe("timezone");
       expect(key).not.toBe("palette");
       expect(key).not.toBe("device_config");
+    }
+  });
+
+  it("validates the time zone as an IANA name, not just a short string", () => {
+    // PATCH /settings used to take any string up to 64 chars; the device
+    // console and fos_tz only accept the Area/Location shape.
+    for (const zone of ["Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires", "Etc/GMT+2"]) {
+      expect(isValidTimeZoneName(zone), zone).toBe(true);
+      expect(allowedFrameSettings.get("timezone")?.(zone), zone).toBe(true);
+    }
+    for (const zone of ["", " ", "not a zone; drop table", "Europe/", "/Brussels", "Europe//Brussels", 42, null]) {
+      expect(isValidTimeZoneName(zone), JSON.stringify(zone)).toBe(false);
+      expect(allowedFrameSettings.get("timezone")?.(zone), JSON.stringify(zone)).toBe(false);
+    }
+    expect(allowedFrameSettings.get("timezone")?.(`Europe/${"x".repeat(64)}`)).toBe(false);
+  });
+
+  it("validates the battery enable pin like the battery pin: a GPIO or -1", () => {
+    const check = allowedFrameSettings.get("battery_enable_pin");
+    for (const value of [-1, 0, 21, 48]) {
+      expect(check?.(value), String(value)).toBe(true);
+    }
+    for (const value of [-2, 49, 1.5, "21", null, true]) {
+      expect(check?.(value), JSON.stringify(value)).toBe(false);
     }
   });
 

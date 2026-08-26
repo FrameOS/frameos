@@ -223,8 +223,10 @@ static int cmd_status(int argc, char **argv)
            (int)config->deep_sleep_on_battery, (unsigned long)config->wake_check_sec,
            (int)config->wake_schedule);
     if (fos_battery_present()) {
+        int battery_mv = 0, battery_pct = -1;
+        fos_battery_read(&battery_mv, &battery_pct);
         printf("battery:     %d mV (%d%%) on GPIO %d, divider %.2f, enable GPIO %d\n",
-               fos_battery_millivolts(), fos_battery_percent(),
+               battery_mv, battery_pct,
                (int)config->battery_pin, config->battery_divider,
                (int)config->battery_enable_pin);
     } else {

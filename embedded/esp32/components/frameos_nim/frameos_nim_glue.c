@@ -589,6 +589,26 @@ const char *frameos_nim_scene_state_json(void)
     return json ? json : "{\"busy\":true}";
 }
 
+bool frameos_nim_scene_snapshot_wait(int timeout_ms, const char **info_json,
+                                     const char **state_json)
+{
+    if (info_json) *info_json = NULL;
+    if (state_json) *state_json = NULL;
+    if (!s_nim_ready) {
+        if (info_json) *info_json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
+        if (state_json) *state_json = "{}";
+        return true;
+    }
+    /* One acquisition for both: the two Nim procs write separate static
+     * buffers (sceneInfoBuffer / sceneStateBuffer), so both stay valid after
+     * the lock is released, until the next call of either. */
+    if (!nim_lock_take_for(timeout_ms)) return false;
+    if (info_json) *info_json = fos_nim_scene_info_json_impl();
+    if (state_json) *state_json = fos_nim_scene_state_json_impl();
+    nim_lock_give();
+    return true;
+}
+
 bool frameos_nim_set_scene(const char *scene_id)
 {
     if (!s_nim_ready || scene_id == NULL) return false;

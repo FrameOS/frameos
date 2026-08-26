@@ -9,17 +9,18 @@ import { Tooltip } from './Tooltip'
 /**
  * ESP32 power management, in one place for both control planes.
  *
- * The same five knobs reach the firmware by two different routes, which is
+ * The same six knobs reach the firmware by two different routes, which is
  * exactly why this is one component rather than two forms that drift:
  *
  *  - CLOUD: pushed live over `set_settings` (deep_sleep, deep_sleep_on_battery,
- *    wake_check_seconds, battery_pin, battery_divider — the esp32 subset of
- *    allowedFrameSettings), applied by ws_handle_set_settings.
+ *    wake_check_seconds, battery_pin, battery_divider, battery_enable_pin —
+ *    the esp32 subset of allowedFrameSettings), applied by
+ *    ws_handle_set_settings.
  *  - BACKEND: stored in the frame's `device_config` and handed to the device
  *    by its settings poll (embedded_frame_settings in
  *    backend/app/api/embedded_device.py sends deepSleepOnBattery /
- *    wakeCheckSeconds / batteryPin / batteryDivider from there), plus baked
- *    into the firmware build as compile-time defaults.
+ *    wakeCheckSeconds / batteryPin / batteryDivider / batteryEnablePin from
+ *    there), plus baked into the firmware build as compile-time defaults.
  *
  * Values are plain props, not form bindings: the cloud reads them from
  * top-level frame settings and the backend from `device_config`, so the
@@ -31,6 +32,8 @@ export interface PowerSettingsValues {
   wakeCheckSeconds: number | undefined
   batteryPin: number | undefined
   batteryDivider: number | undefined
+  /** GPIO held high to switch the divider on while sampling; -1 = none (always on). */
+  batteryEnablePin: number | undefined
 }
 
 export interface PowerSettingsFieldsProps {
@@ -38,6 +41,12 @@ export interface PowerSettingsFieldsProps {
   onChange: (patch: Partial<PowerSettingsValues>) => void
   /** Control-plane-specific note under the fields (how the values travel). */
   footnote?: ReactNode
+  /**
+   * Why the enable pin cannot be edited on this plane right now (cloud: the
+   * frame's firmware predates the key, 2026.8.39). The field renders disabled
+   * with this as its tooltip — never hidden, so the value is still visible.
+   */
+  batteryEnablePinDisabledReason?: string
   className?: string
 }
 
@@ -52,7 +61,13 @@ const wakeCheckChoices = [
   { value: '86400', label: 'Once a day' },
 ]
 
-export function PowerSettingsFields({ value, onChange, footnote, className }: PowerSettingsFieldsProps): JSX.Element {
+export function PowerSettingsFields({
+  value,
+  onChange,
+  footnote,
+  batteryEnablePinDisabledReason,
+  className,
+}: PowerSettingsFieldsProps): JSX.Element {
   const wakeCheckValue = String(value.wakeCheckSeconds ?? 0)
   const sleeps = value.deepSleep || value.deepSleepOnBattery
 
@@ -130,6 +145,26 @@ export function PowerSettingsFields({ value, onChange, footnote, className }: Po
           onChange={(divider) => onChange({ batteryDivider: divider })}
           placeholder="2.0"
         />
+      </PowerField>
+      <PowerField
+        label="Battery enable GPIO"
+        tooltip={
+          batteryEnablePinDisabledReason ?? (
+            <>
+              GPIO the firmware drives high to switch the battery divider on while it samples — boards that gate the
+              divider to save power (the Seeed reTerminal E1004 uses GPIO 21). Set -1 (or leave empty) when the divider
+              is always connected. Read at boot next to the battery pin, so saving a change reboots the frame.
+            </>
+          )
+        }
+      >
+        <fieldset disabled={batteryEnablePinDisabledReason !== undefined} className="min-w-0">
+          <NumberTextInput
+            value={value.batteryEnablePin}
+            onChange={(pin) => onChange({ batteryEnablePin: pin })}
+            placeholder="-1 = always on"
+          />
+        </fieldset>
       </PowerField>
       {footnote ? <p className="frameos-muted text-sm">{footnote}</p> : null}
     </div>

@@ -706,6 +706,9 @@ char *fos_http_status_json(void)
     size_t psram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
     const char *scene_json = frameos_nim_scene_info_json();
     if (!scene_json || !scene_json[0]) scene_json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
+    int battery_mv = 0, battery_pct = -1; /* one sample for both fields */
+    bool battery_present = fos_battery_present();
+    if (battery_present) fos_battery_read(&battery_mv, &battery_pct);
     fos_storage_info_t storage;
     fos_http_collect_storage_info(&storage);
 
@@ -761,7 +764,8 @@ char *fos_http_status_json(void)
         "\"resumable\":true,\"bootRequestSupported\":true,"
         "\"partialRequestBytes\":524288,\"wifiSettleMs\":3000},"
         "\"wifi\":{\"state\":%d,\"ip\":\"%s\",\"rssi\":%d,\"timeSynced\":%s},"
-        "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d},"
+        "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d,"
+        "\"pin\":%d,\"divider\":%.3f,\"enablePin\":%d},"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
         "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u,"
         "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\","
@@ -795,8 +799,9 @@ char *fos_http_status_json(void)
         storage.ota_slots > 0 ? "true" : "false", (unsigned)storage.ota_slot_bytes,
         (int)fos_wifi_state(), ip, fos_wifi_rssi(),
         fos_wifi_time_synced() ? "true" : "false",
-        fos_battery_present() ? "true" : "false",
-        fos_battery_millivolts(), fos_battery_percent(),
+        battery_present ? "true" : "false", battery_mv, battery_pct,
+        (int)config->battery_pin, (double)config->battery_divider,
+        (int)config->battery_enable_pin,
         (unsigned long)render_count, render_ms, preview_ready ? "true" : "false",
         (unsigned long)preview_render_count,
         preview_width, preview_height, (int)preview_format, (unsigned)preview_len,

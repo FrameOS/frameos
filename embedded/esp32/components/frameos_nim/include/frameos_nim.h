@@ -52,14 +52,25 @@ const char *frameos_nim_info(void);
 void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len),
                                          void (*release)(void *ptr));
 const char *frameos_nim_scene_info_json(void);
-/* Same, but gives up after timeout_ms (-1 = wait forever) and returns NULL
- * when the runtime is busy rendering. For tasks that must stay responsive
- * (the cloud WebSocket task's hello/get_state): a render holds the runtime
- * lock for its whole duration, over a minute on a 13.3" panel. */
+/* Same, but gives up after timeout_ms (-1 = wait forever, 0 = try once).
+ * NULL means exactly one thing: the wait timed out because the runtime is
+ * busy (a render holds the runtime lock for its whole duration, over a
+ * minute on a 13.3" panel). Every other outcome — including "no runtime
+ * compiled in" and "no scene selected yet" — is a non-NULL JSON string, so
+ * a caller can tell "unknown right now" from "genuinely nothing" and leave
+ * a field out rather than report an empty one as the truth. */
 const char *frameos_nim_scene_info_json_wait(int timeout_ms);
 /* JSON state for the active interpreted scene. */
 const char *frameos_nim_scene_state_json(void);
 const char *frameos_nim_scene_state_json_wait(int timeout_ms);
+/* Both of the above from ONE acquisition of the runtime lock, for callers
+ * that build a hello/state message (the cloud WebSocket task must not queue
+ * behind a render three times over). Returns false, and sets both out
+ * pointers to NULL, when the wait timed out; true otherwise, with both
+ * strings valid until the next scene-info/state call. Either out pointer
+ * may be NULL. */
+bool frameos_nim_scene_snapshot_wait(int timeout_ms, const char **info_json,
+                                     const char **state_json);
 /* Select an interpreted scene by id; the next render initializes it. */
 bool frameos_nim_set_scene(const char *scene_id);
 

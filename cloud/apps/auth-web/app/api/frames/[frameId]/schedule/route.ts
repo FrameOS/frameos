@@ -18,7 +18,7 @@ import {
   supersedePendingCommands,
   validateFrameSchedule,
 } from "../../../../../src/lib/frames";
-import { deviceSceneIdForFrame } from "../../../../../src/lib/scene-images";
+import { deviceSceneIdsForFrame } from "../../../../../src/lib/scene-images";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 
@@ -101,19 +101,23 @@ export async function POST(
   await supersedePendingCommands(db, frame.id, "set_schedule");
   // The stored schedule keeps the workspace's store scene uuids (it
   // round-trips them); the device gets the runtime ids its scenes.json
-  // carries, same translation as the setCurrentScene event route.
+  // carries, same translation as the setCurrentScene event route — resolved
+  // once for every scene the schedule names, not per event.
+  const sceneIds = schedule.events.flatMap((event) => {
+    const sceneId = event.payload?.sceneId;
+    return typeof sceneId === "string" && sceneId ? [sceneId] : [];
+  });
+  const deviceSceneIds = await deviceSceneIdsForFrame(db, frame.id, sceneIds);
   const deviceSchedule: FrameSchedule = {
     ...schedule,
-    events: await Promise.all(
-      schedule.events.map(async (event) => {
-        const sceneId = event.payload?.sceneId;
-        if (typeof sceneId !== "string" || !sceneId) {
-          return event;
-        }
-        const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, sceneId);
-        return { ...event, payload: { ...event.payload, sceneId: deviceSceneId } };
-      }),
-    ),
+    events: schedule.events.map((event) => {
+      const sceneId = event.payload?.sceneId;
+      const deviceSceneId =
+        typeof sceneId === "string" ? deviceSceneIds.get(sceneId) : undefined;
+      return deviceSceneId === undefined
+        ? event
+        : { ...event, payload: { ...event.payload, sceneId: deviceSceneId } };
+    }),
   };
   const command = await enqueueFrameCommand(db, {
     createdByAccountId: session.accountId,

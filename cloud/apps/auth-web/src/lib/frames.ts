@@ -31,6 +31,7 @@ import { deviceDeliverableFields } from "./frame-service-settings";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
 import { frameosVersionSatisfies } from "./store-versions";
+import { fetchTzSlice } from "./tz-slice";
 import { logWarn, reportError } from "./log";
 // usage.ts only type-imports from this module, so no runtime cycle.
 import {
@@ -143,7 +144,9 @@ export const allowedFrameSettings = new Map<
     (v) =>
       v === "contain" || v === "cover" || v === "stretch" || v === "center",
   ],
-  ["timezone", (v) => typeof v === "string" && v.length <= 64],
+  // An IANA name in the shape the device console and fos_tz accept; the
+  // length cap alone let "not a zone; drop table" through to the device.
+  ["timezone", isValidTimeZoneName],
   // Power management (ESP32 profile — the Nim runtime has no consumer, so
   // the SPA only sends these for esp32 frames; see esp32PowerSettingKeys in
   // frontend/src/utils/cloudFrameSettings.ts).
@@ -156,14 +159,15 @@ export const allowedFrameSettings = new Map<
       Number.isInteger(v) &&
       (v === 0 || (v >= 60 && v <= 86400)),
   ],
-  [
-    "battery_pin",
-    (v) => typeof v === "number" && Number.isInteger(v) && v >= -1 && v <= 48,
-  ],
+  ["battery_pin", isValidGpioPinOrNone],
   [
     "battery_divider",
     (v) => typeof v === "number" && v >= 0.5 && v <= 20,
   ],
+  // GPIO driven high to switch the battery divider on while sampling
+  // (reTerminal E1004: GPIO 21); -1 = always on. Same -1..48 range the
+  // firmware's fos_settings.c / console accept.
+  ["battery_enable_pin", isValidGpioPinOrNone],
   // The 2026.8.30 batch (Pi/Linux runtime only). Gated per frame on its
   // reported frameos_version — see extendedFrameSettingKeys — because a frame
   // on older firmware refuses the WHOLE push on any of them. Value rules
@@ -279,6 +283,13 @@ export function frameSupportsSettingsFrom(
 
 const positiveNumber = (v: unknown, max: number) =>
   typeof v === "number" && v > 0 && v <= max;
+
+// An ESP32 GPIO number, or -1 for "none" (the firmware's int8 pin fields:
+// battery_pin, battery_enable_pin). A function declaration so the
+// allowedFrameSettings Map above can name it before this line runs.
+function isValidGpioPinOrNone(v: unknown): boolean {
+  return typeof v === "number" && Number.isInteger(v) && v >= -1 && v <= 48;
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -514,6 +525,7 @@ export const esp32OnlySettableKeys = new Set([
   "wake_check_seconds",
   "battery_pin",
   "battery_divider",
+  "battery_enable_pin",
 ]);
 
 export const esp32SettableKeys = new Set([
@@ -536,6 +548,9 @@ export const esp32SettableKeys = new Set([
   "gpio_buttons",
   // 2026.8.34 (esp32TimeZoneFrameSettingKeys): applied live.
   "timezone",
+  // 2026.8.39 (esp32BatteryEnablePinFrameSettingKeys): the divider's enable
+  // GPIO, read at boot next to battery_pin → deferred reboot.
+  "battery_enable_pin",
 ]);
 
 // The ESP32 firmware learned these in 2026.8.31; older firmware refuses the
@@ -555,6 +570,14 @@ export const esp32MaxGpioButtons = 8;
 export const esp32TimeZoneFrameSettingsMinVersion = "2026.8.34";
 export const esp32TimeZoneFrameSettingKeys = new Set(["timezone"]);
 
+// 2026.8.39: the battery divider's enable GPIO (reTerminal E1004) joined the
+// firmware's set_settings allowlist next to battery_pin. Older firmware
+// refuses the whole verb on it — its own floor, like the two tails above.
+export const esp32BatteryEnablePinFrameSettingsMinVersion = "2026.8.39";
+export const esp32BatteryEnablePinFrameSettingKeys = new Set([
+  "battery_enable_pin",
+]);
+
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata
 // slice lookup is what rejects unknown-but-well-formed names later.
@@ -565,6 +588,74 @@ export function isValidTimeZoneName(value: unknown): value is string {
     value.length <= 64 &&
     /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(value)
   );
+}
+
+/**
+ * Can this frame be sent the `timezone` setting? Every Pi/Linux runtime
+ * takes it (base six); an ESP32 only from 2026.8.34 (fos_tz.c), and one
+ * that never reported a version is refused like the other gated tails —
+ * firmware below the floor refuses the WHOLE set_settings push on it.
+ */
+export function frameSupportsTimeZoneSetting(frame: {
+  frameosVersion: string | null | undefined;
+  hardware: unknown;
+}): boolean {
+  return (
+    !frameHardwareIsEsp32(frame) ||
+    frameSupportsSettingsFrom(
+      esp32TimeZoneFrameSettingsMinVersion,
+      frame.frameosVersion,
+    )
+  );
+}
+
+/**
+ * The set_settings payload the device receives for a validated push. An
+ * ESP32 has no tz database, so its zone rides with the tzdata slice
+ * (`timezone_data`, fos_tz.h) — command payload only, never mirrored into
+ * frames.settings. A slice lookup that fails just omits the key; the device
+ * then fetches the slice itself, at the cost of one round trip.
+ */
+export async function frameSettingsDevicePayload(
+  frame: { hardware: unknown },
+  settings: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (
+    frameHardwareIsEsp32(frame) &&
+    typeof settings.timezone === "string" &&
+    settings.timezone.trim()
+  ) {
+    const slice = await fetchTzSlice(settings.timezone);
+    if (slice) {
+      return { ...settings, timezone_data: slice };
+    }
+  }
+  return settings;
+}
+
+/**
+ * Queue a validated settings push toward the device, superseding any
+ * undelivered one (a newer set_settings makes the older pointless). The one
+ * path for PATCH /api/frames/{id}/settings and the enrollment time-zone
+ * seed, so both build the same device payload. Callers gate the keys on the
+ * frame's firmware first (frameSupportsTimeZoneSetting and friends).
+ */
+export async function enqueueFrameSettingsPush(
+  db: Database,
+  frame: { hardware: unknown; id: string },
+  settings: Record<string, unknown>,
+  options: { createdByAccountId?: string } = {},
+) {
+  const payload = await frameSettingsDevicePayload(frame, settings);
+  await supersedePendingCommands(db, frame.id, "set_settings");
+  return enqueueFrameCommand(db, {
+    ...(options.createdByAccountId
+      ? { createdByAccountId: options.createdByAccountId }
+      : {}),
+    frameId: frame.id,
+    payload: { settings: payload },
+    type: "set_settings",
+  });
 }
 
 // The settings frames.settings mirrors, in the device's spelling. `name` is

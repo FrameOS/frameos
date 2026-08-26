@@ -547,6 +547,78 @@ proc decodeIntoTargetWithDegrade*(target: Image, fit: ScaledDecodeFit,
         continue
     raise newException(PixieError, refusalMsg)
 
+proc streamDecodeInto*(format: string, source: JpegSourceProc, totalLen: int,
+    target: Image, fit: ScaledDecodeFit, rewind: proc(),
+    collectBeforeDecode = false): bool =
+  ## The format dispatch shared by every sequential-source decode into a
+  ## target: an SD-card file (readImageIntoTarget), a download spilled to
+  ## storage (decodeSpilledImageInto) and the HTTP socket itself
+  ## (downloadImageStreamingInto). `format` is the sniffed name — "JPEG",
+  ## "PNG", "BMP", "PPM" or "WEBP". JPEG, PNG and WebP run under the degrade
+  ## ladder, with `rewind` putting the source back at byte 0 before every
+  ## rung; BMP and PPM decode once. `collectBeforeDecode` runs a GC cycle
+  ## right before each decode so the plan check sees the heap it will
+  ## allocate from (the download paths want that; the SD path never did).
+  ##
+  ## Returns false when the format has no streaming decoder in this build,
+  ## or when a JPEG's length is unknown (its reader needs the exact count):
+  ## the caller picks its own fallback. Decoder errors propagate as
+  ## PixieError untouched, and each caller applies its own policy — the SD
+  ## and socket paths retry buffered, the spilled path lets them surface.
+  if target.isNil or target.width <= 0 or target.height <= 0:
+    return false
+  proc restart() =
+    rewind()
+    if collectBeforeDecode:
+      GC_fullCollect()
+  case format
+  of "JPEG":
+    if totalLen <= 0:
+      return false
+    when compiles(decodeJpegStreamScaledInto(source, totalLen, target, fit)):
+      # Progressive JPEGs raise here (non-budget); budget refusals degrade
+      # to a reduced-resolution decode inside the ladder.
+      discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+        restart()
+        decodeJpegStreamScaledInto(source, totalLen, dst, fit))
+      return true
+  of "PNG":
+    when compiles(decodePngStreamScaledInto(source, totalLen, target, fit)):
+      # Row-streamed: the compressed body is read incrementally and never
+      # held whole, so this needs a fixed inflate window plus a row, not a
+      # block the size of the file. Interlaced and 16-bit PNGs raise here.
+      discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+        restart()
+        decodePngStreamScaledInto(source, totalLen, dst, fit))
+      return true
+  of "BMP":
+    when compiles(decodeBmpStreamScaledInto(source, totalLen, target, fit)):
+      # Uncompressed fixed-stride rows: one source row in RAM at a time, and
+      # rows outside the fitted rect are skipped without being converted.
+      # RLE bitmaps raise.
+      restart()
+      decodeBmpStreamScaledInto(source, totalLen, target, fit)
+      return true
+  of "PPM":
+    when compiles(decodePpmStreamScaledInto(source, totalLen, target, fit)):
+      # P6 only — ASCII P3 raises.
+      restart()
+      decodePpmStreamScaledInto(source, totalLen, target, fit)
+      return true
+  of "WEBP":
+    when compiles(decodeWebpStreamScaledInto(source, totalLen, target, fit)):
+      # A WebP bitstream cannot be windowed (VP8 partitions interleave
+      # macroblock rows; VP8L's LZ77 window is the whole image), so pixie
+      # holds the compressed body — budget-checked, refusing catchably —
+      # while the full-size RGBA intermediate still never exists.
+      discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+        restart()
+        decodeWebpStreamScaledInto(source, totalLen, dst, fit))
+      return true
+  else:
+    discard
+  false
+
 proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): bool =
   ## Decodes an image file directly into an existing target image (usually
   ## the render canvas) with aspect-correct fit, keeping peak memory at the
@@ -598,7 +670,13 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
     streamableBmp = not jpeg and bmpIsProvablyOpaque(header)
     # PPM P6 has no alpha channel at all, so there is nothing to prove.
     streamablePpm = not jpeg and isPpmHeader(header)
-  if not jpeg and not streamablePng and not streamableBmp and not streamablePpm:
+  let format =
+    if jpeg: "JPEG"
+    elif streamablePng: "PNG"
+    elif streamableBmp: "BMP"
+    elif streamablePpm: "PPM"
+    else: ""
+  if format.len == 0:
     return false
   header = ""
 
@@ -606,33 +684,11 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
   if not file.open(path):
     raise newException(PixieError, "Cannot open image file: " & path)
   try:
-    if jpeg:
-      # A budget refusal degrades to a reduced-resolution decode inside the
-      # helper; only non-budget errors (progressive JPEGs) reach the buffered
-      # retry below.
-      discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
-        file.setFilePos(0)
-        decodeJpegStreamScaledInto(fileJpegSource(file), fileSize.int, dst, fit))
+    # A budget refusal degrades to a reduced-resolution decode inside the
+    # ladder; only non-budget errors reach the buffered retry below.
+    if streamDecodeInto(format, fileJpegSource(file), fileSize.int, target, fit,
+        proc() = file.setFilePos(0)):
       return true
-    if streamablePng:
-      when compiles(decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
-        # Row-streamed: the compressed body is read incrementally and never held
-        # whole, so this needs a fixed inflate window plus a row, not a block the
-        # size of the file. Interlaced and 16-bit PNGs raise here and fall back.
-        discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
-          file.setFilePos(0)
-          decodePngStreamScaledInto(fileJpegSource(file), fileSize.int, dst, fit))
-        return true
-    if streamableBmp:
-      when compiles(decodeBmpStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
-        # Uncompressed fixed-stride rows: one source row in RAM at a time, and
-        # rows outside the fitted rect are skipped without being converted.
-        decodeBmpStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
-        return true
-    if streamablePpm:
-      when compiles(decodePpmStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)):
-        decodePpmStreamScaledInto(fileJpegSource(file), fileSize.int, target, fit)
-        return true
   except PixieError:
     # Progressive JPEGs, interlaced/16-bit PNGs and RLE BMPs cannot stream;
     # retry buffered below.
@@ -697,6 +753,47 @@ proc upsertQueryParam(query, key, value: string): string =
     parts.add(encodeUrl(key) & "=" & encodeUrl(value))
   parts.join("&")
 
+proc hasQueryParam(query, key: string): bool =
+  for part in query.split('&'):
+    let equals = part.find('=')
+    let partKey = if equals >= 0: part[0 ..< equals] else: part
+    if partKey == key:
+      return true
+  false
+
+proc progressiveJpegBufferedDecodeBytes*(width, height: int):
+    tuple[total, largest: int64] =
+  ## What decoding a progressive JPEG of this size into the canvas costs on
+  ## the buffered path, as pixie plans it (decodeSOF in the fork's jpeg.nim):
+  ## a progressive scan cannot stream its blocks, so every component's DCT
+  ## coefficients stay resident — 64 int16 per 8x8 block, 3 bytes per pixel
+  ## with the 4:2:0 chroma imgix emits; the target-sized channel planes come
+  ## on top (1.5 bytes per pixel, the source being no larger than the
+  ## canvas here); and the compressed body itself is buffered first — half a
+  ## byte per pixel is a generous bound for quality-80 output. The largest
+  ## single allocation is the luma coefficient plane.
+  let pixels = width.int64 * height.int64
+  let lumaCoefficients = pixels * 2
+  let coefficients = lumaCoefficients + pixels # two 4:2:0 chroma planes
+  let channels = pixels + pixels div 2
+  let body = pixels div 2
+  (coefficients + channels + body, lumaCoefficients)
+
+proc progressiveJpegFitsBufferedDecode*(width, height: int): bool =
+  ## Whether this board, right now, can decode a progressive JPEG of this
+  ## size the buffered way — the same two questions the decoder's plan
+  ## check asks (refreshDecodeBudgetInto: the whole headroom for the plan,
+  ## the largest free block for its biggest buffer). Unknown memory counts
+  ## as plenty, which is what every host answers.
+  let plan = progressiveJpegBufferedDecodeBytes(width, height)
+  let headroom = availableRenderHeadroomBytes()
+  if headroom > 0 and plan.total > headroom.int64:
+    return false
+  let contiguous = availableRenderBytes()
+  if contiguous > 0 and plan.largest > contiguous.int64:
+    return false
+  true
+
 # RULE: NEVER route frame image downloads through a backend/image proxy, and
 # don't reach for host-side resize params as the fix either. Frames render
 # independently, from the original source. When a source serves images too
@@ -723,15 +820,22 @@ proc embeddedSizedRemoteImageUrl*(url: string, target: Image): string =
     parsed.query = upsertQueryParam(parsed.query, "w", $requestedWidth)
     parsed.query = upsertQueryParam(parsed.query, "h", $requestedHeight)
     parsed.query = upsertQueryParam(parsed.query, "fit", "crop")
-    # PNG, not `auto=format`: to a non-browser User-Agent imgix answers
-    # auto=format with a PROGRESSIVE JPEG (fm=jpg too), and a progressive
-    # JPEG is the one format that cannot stream into the canvas — it needs
-    # the whole RGBA intermediate, which an 8 MB board cannot hold next to
-    # a 1200x1600 canvas (measured: OOM abort). PNG rows stream off the
-    # socket through a fixed inflate window. WebP would be 8x fewer bytes
-    # but its decode wants ~1.4 MB of contiguous buffers at panel size,
-    # over what that board has left (measured: budget refusal).
-    parsed.query = upsertQueryParam(parsed.query, "fm", "png")
+    # An author's explicit format choice stands.
+    if not hasQueryParam(parsed.query, "fm") and not hasQueryParam(parsed.query, "auto"):
+      # To a non-browser User-Agent imgix answers auto=format with a
+      # PROGRESSIVE JPEG (fm=jpg too), and a progressive JPEG is the one
+      # format that cannot stream into the canvas: its coefficients must
+      # all be resident, so it decodes buffered. Boards with the headroom
+      # for that keep the small JPEG body; a board that cannot hold it next
+      # to its canvas (the 8 MB E1004 at 1200x1600: measured OOM abort)
+      # asks for PNG, whose rows stream off the socket through a fixed
+      # inflate window. WebP would be 8x fewer bytes than PNG but its decode
+      # wants ~1.4 MB of contiguous buffers at panel size, over what that
+      # board has left (measured: budget refusal).
+      if progressiveJpegFitsBufferedDecode(requestedWidth, requestedHeight):
+        parsed.query = upsertQueryParam(parsed.query, "auto", "format")
+      else:
+        parsed.query = upsertQueryParam(parsed.query, "fm", "png")
     return $parsed
   else:
     return url
@@ -795,51 +899,14 @@ when defined(frameosEmbedded):
     let got = file.readBuffer(addr header[0], header.len)
     header.setLen(max(0, got))
     let format = embeddedImageFormat(header.cstring, header.len)
-    if format == "JPEG" and not target.isNil and target.width > 0 and target.height > 0:
-      when compiles(decodeJpegStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
-        # Progressive JPEGs raise here; the buffered retry other paths use is
-        # exactly the allocation that could not be made, so let it surface.
-        # Budget refusals degrade to a reduced-resolution decode instead.
-        return decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
-          file.setFilePos(0)
-          GC_fullCollect()
-          decodeJpegStreamScaledInto(fileJpegSource(file), totalLen, dst, fit))
-    if format == "PNG" and not target.isNil and target.width > 0 and target.height > 0:
-      when compiles(decodePngStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
-        # Row-streamed chunk walk over the spilled file: a small read buffer
-        # plus pixie's fixed inflate window, never the whole compressed body.
-        # Interlaced/16-bit PNGs raise here — decoding those would need the
-        # buffered copy the spill exists to avoid, so let it surface.
-        return decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
-          file.setFilePos(0)
-          GC_fullCollect()
-          decodePngStreamScaledInto(fileJpegSource(file), totalLen, dst, fit))
-    if format == "BMP" and not target.isNil and target.width > 0 and target.height > 0:
-      file.setFilePos(0)
-      GC_fullCollect()
-      when compiles(decodeBmpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
-        # Uncompressed fixed-stride rows: one source row in RAM at a time,
-        # rows outside the fitted rect are skipped without conversion.
-        decodeBmpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
-        return target
-    if format == "PPM" and not target.isNil and target.width > 0 and target.height > 0:
-      file.setFilePos(0)
-      GC_fullCollect()
-      when compiles(decodePpmStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
-        # P6 only — ASCII P3 raises rather than buffering the file back.
-        decodePpmStreamScaledInto(fileJpegSource(file), totalLen, target, fit)
-        return target
-    if format == "WEBP" and not target.isNil and target.width > 0 and target.height > 0:
-      when compiles(decodeWebpStreamScaledInto(fileJpegSource(file), totalLen, target, fit)):
-        # A WebP bitstream cannot be windowed (VP8 partitions interleave
-        # macroblock rows; VP8L's LZ77 window is the whole image), so pixie
-        # holds the compressed body — budget-checked, refusing catchably —
-        # while the full-size RGBA intermediate still never exists. Budget
-        # refusals degrade to a reduced-resolution decode.
-        return decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
-          file.setFilePos(0)
-          GC_fullCollect()
-          decodeWebpStreamScaledInto(fileJpegSource(file), totalLen, dst, fit))
+    # Errors surface rather than retrying buffered: progressive JPEGs,
+    # interlaced/16-bit PNGs, RLE BMPs and ASCII PPMs all raise out of the
+    # streaming decoders, and the buffered retry other paths use is exactly
+    # the allocation that could not be made. Budget refusals degrade to a
+    # reduced-resolution decode instead.
+    if streamDecodeInto(format, fileJpegSource(file), totalLen, target, fit,
+        proc() = file.setFilePos(0), collectBeforeDecode = true):
+      return target
     raise newException(PixieError,
       &"Spilled {format} download ({totalLen div 1024}K) has no file-backed streaming decoder")
 
@@ -892,19 +959,24 @@ when defined(frameosEmbedded):
 
   proc downloadImageStreamingInto(url: string, maxBytes: int, target: Image,
       headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit): bool =
-    ## Decodes a remote JPEG/PNG (BMP/PPM too) straight off the socket into
-    ## `target` — no copy of the compressed body ever lives in PSRAM or on
-    ## flash. Returns false when this fetch should go through the buffered
-    ## path instead (error status, unknown length, format without a stream
-    ## decoder, or a decoder refusal such as a progressive JPEG), which then
-    ## re-requests the URL and produces the same errors it always did.
+    ## Decodes a remote JPEG/PNG (BMP/PPM/WebP too) straight off the socket
+    ## into `target` — no copy of the compressed body ever lives in PSRAM or
+    ## on flash. Returns false when this fetch should go through the
+    ## buffered path instead (error status, unknown length, format without
+    ## a stream decoder, a decoder refusal such as a progressive JPEG, or a
+    ## transport/status failure while re-reading the body), which then
+    ## re-requests the URL and produces the same errors it always did. No
+    ## IOError leaves here: a transport problem is the buffered path's to
+    ## report, exactly as it was before streaming existed.
     ##
     ## Why: the buffered fetch holds the whole body before decoding. On a
     ## board whose canvas already owns most of its PSRAM (8 MB reTerminal
     ## E1004, 1200x1600) that meant every 1-2 MB gallery image spilled to a
     ## /state partition with a few hundred KB free and failed. Budget
     ## refusals still degrade to a reduced-resolution decode; the ladder's
-    ## retries rewind the stream, which reopens the request.
+    ## retries rewind the stream, which replays the retained start of the
+    ## body when the refusal came from the header (the usual case) and
+    ## reopens the request otherwise.
     if target.isNil or target.width <= 0 or target.height <= 0:
       return false
     var stream: HttpBodyStream
@@ -914,70 +986,46 @@ when defined(frameosEmbedded):
       # Transport failure: let the buffered path report it the usual way.
       return false
     defer: stream.closeHttpBodyStream()
-    if stream.code >= 400:
+    if stream.httpBodyStreamFailed:
       return false
     if stream.contentLength > 0 and maxBytes > 0 and stream.contentLength > maxBytes:
       return false
-    let header = stream.peekHttpBodyStream(64)
-    let format = embeddedImageFormat(header.cstring, header.len)
-    let totalLen = if stream.contentLength > 0: stream.contentLength.int else: 0
-    let source = stream.httpBodyStreamSource()
-    refreshDecodeBudgetInto()
+    var format = "unknown"
+    var totalLen = 0
     try:
-      case format
-      of "JPEG":
-        # The JPEG stream reader needs the exact input length.
-        if totalLen <= 0:
-          return false
-        when compiles(decodeJpegStreamScaledInto(source, totalLen, target, fit)):
-          discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
-            stream.rewindHttpBodyStream()
-            GC_fullCollect()
-            decodeJpegStreamScaledInto(source, totalLen, dst, fit))
-        else:
-          return false
-      of "PNG":
-        when compiles(decodePngStreamScaledInto(source, totalLen, target, fit)):
-          discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
-            stream.rewindHttpBodyStream()
-            GC_fullCollect()
-            decodePngStreamScaledInto(source, totalLen, dst, fit))
-        else:
-          return false
-      of "BMP":
-        when compiles(decodeBmpStreamScaledInto(source, totalLen, target, fit)):
-          GC_fullCollect()
-          decodeBmpStreamScaledInto(source, totalLen, target, fit)
-        else:
-          return false
-      of "PPM":
-        when compiles(decodePpmStreamScaledInto(source, totalLen, target, fit)):
-          GC_fullCollect()
-          decodePpmStreamScaledInto(source, totalLen, target, fit)
-        else:
-          return false
-      of "WEBP":
-        # Holds the compressed body (budget-checked, refusing catchably) but
-        # never a full-size RGBA intermediate — which is what the buffered
-        # path would build, so there is nothing to fall back to.
-        when compiles(decodeWebpStreamScaledInto(source, totalLen, target, fit)):
-          discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
-            stream.rewindHttpBodyStream()
-            GC_fullCollect()
-            decodeWebpStreamScaledInto(source, totalLen, dst, fit))
-        else:
-          return false
-      else:
+      let header = stream.peekHttpBodyStream(64)
+      format = embeddedImageFormat(header.cstring, header.len)
+      totalLen = if stream.contentLength > 0: stream.contentLength.int else: 0
+      refreshDecodeBudgetInto()
+      if not streamDecodeInto(format, stream.httpBodyStreamSource(), totalLen,
+          target, fit, proc() = stream.rewindHttpBodyStream(),
+          collectBeforeDecode = true):
         return false
+    except HttpStreamReopenError as e:
+      # A degrade rung needed the body again and the re-issued GET did not
+      # give it back (rate limited, server error, transport). The buffered
+      # path's own request surfaces that status the way it always did.
+      log(%*{"event": "image:stream:fallback", "format": format,
+             "bytes": totalLen, "reason": e.msg})
+      return false
     except PixieError as e:
       if e.msg.contains("memory budget") or format == "WEBP":
         # The degrade ladder already ran out of rungs; buffering the body
-        # would only add to the pressure that refused the decode.
+        # would only add to the pressure that refused the decode. WebP has
+        # nothing to fall back to either: the buffered path would build the
+        # full-size RGBA intermediate this decoder exists to avoid.
         raise
       # Progressive JPEG, interlaced/16-bit PNG, truncated body, ...: the
       # buffered decoders handle more shapes, so hand over to them.
       log(%*{"event": "image:stream:fallback", "format": format,
              "bytes": totalLen, "reason": e.msg})
+      return false
+    except IOError, OSError:
+      # Nothing on the streaming path is expected to raise these past the
+      # reopen error above; if something does, the buffered fetch still
+      # owns the error reporting rather than an app's error frame.
+      log(%*{"event": "image:stream:fallback", "format": format,
+             "bytes": totalLen, "reason": getCurrentExceptionMsg()})
       return false
     log(%*{"event": "image:streamed", "format": format, "bytes": totalLen,
            "width": target.width, "height": target.height})

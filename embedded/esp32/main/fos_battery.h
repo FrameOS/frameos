@@ -23,9 +23,17 @@ void fos_battery_init(int8_t gpio, float divider, int8_t enable_gpio);
 /* True when a battery pin is configured and the ADC came up. */
 bool fos_battery_present(void);
 
-/* Cell voltage in millivolts (after divider correction), or 0 if unavailable.
- * Averages a handful of samples; safe to call from the render task. */
-int fos_battery_millivolts(void);
+/* One sampled read: the cell voltage in millivolts (after divider
+ * correction; 0 when unavailable) and the charge estimate 0..100 from a
+ * Li-ion discharge curve (-1 when unavailable), both from the SAME ADC
+ * sample. Either out pointer may be NULL. Averages a handful of samples and
+ * takes ~10 ms more on boards with an enable pin. Serialized by a mutex:
+ * the render task, the HTTP server (/status), the console and the cloud
+ * client all read it, and an unserialized caller switching the divider off
+ * mid-sample turned a full cell into a ~1.9 V reading. Prefer one call per
+ * pass over millivolts() + percent() back to back. */
+void fos_battery_read(int *millivolts, int *percent);
 
-/* Charge estimate 0..100 from a Li-ion discharge curve, or -1 if unavailable. */
+/* Convenience wrappers around fos_battery_read(); each one samples. */
+int fos_battery_millivolts(void);
 int fos_battery_percent(void);
