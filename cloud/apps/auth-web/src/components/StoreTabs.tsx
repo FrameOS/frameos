@@ -8,7 +8,7 @@ export function StoreTabs({ active }: { active: "store" | "mine" }) {
   const storeUrl = getStoreUrl();
   const tabs = [
     { href: storeUrl, key: "store", label: "Public scene store" },
-    { href: getMyScenesUrl(), key: "mine", label: "My private scenes" },
+    { href: getMyScenesUrl(), key: "mine", label: "My scenes" },
   ] as const;
   return (
     <nav aria-label="Scene store sections" className="subnav subnav--store">

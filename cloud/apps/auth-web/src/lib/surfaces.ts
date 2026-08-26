@@ -18,7 +18,12 @@ const authPagePrefixes = [
 // "/frames" is the cloud frames SPA (app/frames/[[...path]]), an account
 // surface; "/frames-app" holds its static assets and is treated as an
 // asset path below.
-const accountPagePrefixes = ["/account", "/admin", "/device", "/frames"] as const;
+const accountPagePrefixes = [
+  "/account",
+  "/admin",
+  "/device",
+  "/frames",
+] as const;
 const accountSectionRewrites = new Map([
   ["/backends", "/account/installs"],
   ["/backups", "/account/backups"],
@@ -63,7 +68,7 @@ export function isPublicScenePath(pathname: string) {
 }
 
 // Everything the scenes host serves besides its store front: public scene
-// pages plus the signed-in "My private scenes" tab.
+// pages plus the signed-in "My scenes" tab.
 function isScenesHostPath(pathname: string) {
   return isPublicScenePath(pathname) || pathname === myScenesPath;
 }

@@ -1,6 +1,6 @@
 import { Sparkles } from "lucide-react";
 
-// A quiet one-line prompt box for the store front and "My private scenes":
+// A quiet one-line prompt box for the store front and "My scenes":
 // describe a scene, land in the new-scene editor with the AI already working
 // on it (/my-scenes/new?prompt=…; that page asks for sign-in first if
 // needed). A plain GET form — no client JavaScript involved.

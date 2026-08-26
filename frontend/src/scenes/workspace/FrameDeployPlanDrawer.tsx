@@ -2574,7 +2574,7 @@ function CloudOtaDeployView({
                 type="button"
                 title={
                   firmwareDisabledReason ??
-                  (alsoPushScenes
+                  (alsoPushScenes && !scenesInSync
                     ? 'Queue a firmware update and resend this frame’s scenes & settings'
                     : 'Queue a firmware update notification')
                 }
@@ -2600,12 +2600,16 @@ function CloudOtaDeployView({
                     everything" only made the two disagree about what it does. */}
                 Upgrade firmware
               </button>
-              <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
-              {alsoPushScenes && scenesInSync ? (
+              {/* Nothing to resend when the device already acked everything:
+                  a tick that sends nothing only invites the question of why
+                  it is there, so the sentence stands alone. */}
+              {scenesInSync ? (
                 <div className="frame-tool-muted text-xs leading-4">
                   Scenes &amp; settings are already in sync — nothing extra is sent.
                 </div>
-              ) : null}
+              ) : (
+                <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+              )}
             </>
           ) : (
             <div className="frame-tool-muted text-sm leading-5">
@@ -3000,17 +3004,18 @@ function CloudPiUpdateCard({
             The device already runs the latest release ({releaseInfo.release}); asking it to update is a no-op.
           </div>
         ) : null}
-        <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
-        {alsoPushScenes && scenesInSync ? (
+        {scenesInSync ? (
           <div className="frame-tool-muted text-xs leading-4">
             Scenes &amp; settings are already in sync — nothing extra is sent.
           </div>
-        ) : null}
+        ) : (
+          <Checkbox label="Resend scenes & settings" value={alsoPushScenes} onChange={setAlsoPushScenes} />
+        )}
         <button
           type="button"
           title={
             disabledReason ??
-            (alsoPushScenes
+            (alsoPushScenes && !scenesInSync
               ? 'Queue a FrameOS update and push this frame’s scenes & settings'
               : 'Queue a FrameOS update notification')
           }

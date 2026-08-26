@@ -41,7 +41,7 @@ import { createSession, sessionCookieName } from "../../lib/session";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 
-// The "My private scenes" page renders client components (zip upload, row
+// The "My scenes" page renders client components (zip upload, row
 // actions) that read the app router; renderToStaticMarkup has none mounted.
 vi.mock("next/navigation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/navigation")>()),
@@ -480,14 +480,14 @@ describe("store publish and distribution", () => {
     expect(forkedPreview?.previewImage).toEqual(sourcePreview?.previewImage);
   });
 
-  it("offers the signed-in owner a 'My private scenes' tab that lists their scenes", async () => {
+  it("offers the signed-in owner a 'My scenes' tab that lists their scenes", async () => {
     const { accessToken } = await linkClient(publishScopes);
     await publish(accessToken);
 
     const signedInMarkup = renderToStaticMarkup(
       await HomePage({ searchParams: Promise.resolve({}) }),
     );
-    expect(signedInMarkup).toContain("My private scenes");
+    expect(signedInMarkup).toContain("My scenes");
     expect(signedInMarkup).toContain("Public scene store");
     // Private scenes are not on the store front itself any more.
     expect(signedInMarkup).not.toContain("Sunrise Clock");
@@ -501,7 +501,7 @@ describe("store publish and distribution", () => {
     const anonymousMarkup = renderToStaticMarkup(
       await HomePage({ searchParams: Promise.resolve({}) }),
     );
-    expect(anonymousMarkup).not.toContain("My private scenes");
+    expect(anonymousMarkup).not.toContain("My scenes");
   });
 
   it("requires the store:publish scope and a structurally valid zip", async () => {
@@ -839,9 +839,7 @@ describe("store publish and distribution", () => {
     expect(metadata.openGraph?.images).toEqual([
       expect.objectContaining({ url: expectedImageUrl }),
     ]);
-    expect(metadata.openGraph?.url).toBe(
-      `${baseUrl}/s/${slug}?share=${share}`,
-    );
+    expect(metadata.openGraph?.url).toBe(`${baseUrl}/s/${slug}?share=${share}`);
     expect(metadata.twitter).toMatchObject({
       card: "summary_large_image",
       images: [expectedImageUrl],
@@ -865,7 +863,9 @@ describe("store publish and distribution", () => {
 
     // Nothing to show yet: the tiles say so and the image route is a 404.
     expect(
-      renderToStaticMarkup(await HomePage({ searchParams: Promise.resolve({}) })),
+      renderToStaticMarkup(
+        await HomePage({ searchParams: Promise.resolve({}) }),
+      ),
     ).toContain("No preview");
     expect(
       renderToStaticMarkup(
@@ -1098,12 +1098,40 @@ describe("store publish and distribution", () => {
     );
     expect(repo.templates).toHaveLength(0);
 
+    // The owner's (here also a moderator's) own session still gets the
+    // scene's reads — the page they can open has to render — while every
+    // other path stays a 410.
+    const ownerDownload = await downloadScene(
+      request(`/api/store/scenes/${sceneId}/download`, "GET"),
+      ctx(sceneId),
+    );
+    expect(ownerDownload.status).toBe(200);
+    const ownerScenesJson = await getScenesJson(
+      request(`/api/store/scenes/${sceneId}/scenes.json`, "GET"),
+      ctx(sceneId),
+    );
+    expect(ownerScenesJson.status).toBe(200);
+
     cookieJar.clear();
     const download = await downloadScene(
       request(`/api/store/scenes/${sceneId}/download`, "GET"),
       ctx(sceneId),
     );
     expect(download.status).toBe(410);
+    const scenesJson = await getScenesJson(
+      request(`/api/store/scenes/${sceneId}/scenes.json`, "GET"),
+      ctx(sceneId),
+    );
+    expect(scenesJson.status).toBe(410);
+    // Nor does the owner's linked frameos backend: frames never install a
+    // pulled scene.
+    const linkedDownload = await downloadScene(
+      request(`/api/store/scenes/${sceneId}/download`, "GET", {
+        headers: { authorization: `Bearer ${accessToken}` },
+      }),
+      ctx(sceneId),
+    );
+    expect(linkedDownload.status).toBe(410);
 
     const republish = await publish(accessToken);
     expect(republish.status).toBe(403);
@@ -1360,8 +1388,12 @@ describe("store publish and distribution", () => {
 
   it("serves a requested scenes.json version, yanked or not, defaulting to the newest live one", async () => {
     const { accessToken } = await linkClient(publishScopes);
-    const scenesV1 = [{ fields: [], id: "scene-1", nodes: [{ data: { keyword: "v1" } }] }];
-    const scenesV2 = [{ fields: [], id: "scene-1", nodes: [{ data: { keyword: "v2" } }] }];
+    const scenesV1 = [
+      { fields: [], id: "scene-1", nodes: [{ data: { keyword: "v1" } }] },
+    ];
+    const scenesV2 = [
+      { fields: [], id: "scene-1", nodes: [{ data: { keyword: "v2" } }] },
+    ];
     const scene = (
       await readJson(
         await publish(accessToken, {

@@ -150,6 +150,26 @@ describe("the deploy dialog in cloud mode", () => {
     ).toBeNull();
   });
 
+  it("drops the resend tick when the device already has this exact scene set", () => {
+    // assigned == acked and nothing unsaved: a resend would send nothing, so
+    // the checkbox goes and only the "already in sync" sentence stays. Same
+    // rule on both platforms' cards.
+    const inSync = { assigned_checksum: "abc123", scenes_checksum: "abc123" };
+    for (const platform of ["esp32", "pi-zero2w"] as const) {
+      cleanup();
+      render(<FrameDeployPlanDrawer frame={cloudFrame(platform, inSync)} />);
+      if (platform === "esp32") {
+        fireEvent.click(screen.getByRole("button", { name: /Over the air/ }));
+      }
+      expect(
+        screen.queryByRole("checkbox", { name: /Resend scenes & settings/ }),
+      ).toBeNull();
+      expect(
+        screen.getByText(/already in sync — nothing extra is sent/),
+      ).toBeTruthy();
+    }
+  });
+
   it("orders the USB path firmware, scene push, then Wi-Fi repair", () => {
     render(<FrameDeployPlanDrawer frame={cloudFrame("esp32")} />);
     fireEvent.click(screen.getByRole("button", { name: /Over USB/ }));
