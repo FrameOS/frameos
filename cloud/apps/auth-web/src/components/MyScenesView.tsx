@@ -3,6 +3,7 @@
 import { LayoutGrid, List } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { SceneCard } from "./SceneCard";
+import { StoreSceneMenu } from "./StoreSceneActions";
 
 export type MyScenesViewMode = "grid" | "list";
 
@@ -63,8 +64,9 @@ function storeView(view: MyScenesViewMode) {
 }
 
 // The grid / list switch on "My scenes". The grid reuses the store
-// front's cards; the list is the server-rendered table handed in as
-// `children` (with its owner actions), so it stays exactly as it was. The
+// front's cards, each with a "..." menu carrying the owner actions; the
+// list is the server-rendered table handed in as `children` (with the same
+// actions as a button row), so it stays exactly as it was. The
 // server always renders the grid; a remembered "list" choice takes over after
 // mount, which avoids a hydration mismatch at the cost of one repaint.
 export function MyScenesView({
@@ -150,6 +152,14 @@ function SceneGrid({ scenes }: { scenes: MyScenesRow[] }) {
       {scenes.map((scene) => (
         <SceneCard
           key={scene.id}
+          menu={
+            <StoreSceneMenu
+              name={scene.name}
+              sceneId={scene.id}
+              status={scene.status}
+              visibility={scene.visibility}
+            />
+          }
           scene={{ ...scene, updatedAt: new Date(scene.updatedAt) }}
         />
       ))}

@@ -823,6 +823,20 @@ html.theme-dark .button-primary {
   background: var(--bg-soft);
 }
 
+.row-menu__item--danger {
+  color: var(--danger);
+}
+
+.row-menu__item:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.row-menu__error {
+  display: block;
+  margin: 4px 6px 2px;
+}
+
 /* Filter row above account tables. */
 .filter-bar {
   display: flex;
@@ -861,6 +875,12 @@ html.theme-dark .button-primary {
 
 .scene-zip-upload__controls .input {
   min-width: 0;
+  border: 0;
+}
+
+.scene-zip-upload__controls .button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .scene-zip-upload > .notice {
@@ -924,6 +944,44 @@ a.tag-pill--active:hover {
 }
 
 .scene-card:hover {
+  border-color: var(--accent, #888);
+}
+
+/* A card with owner controls: the link fills the wrapper and the menu
+   button floats over the preview's top-right corner. */
+.scene-card-wrap {
+  position: relative;
+  display: flex;
+}
+
+.scene-card-wrap > .scene-card {
+  flex: 1;
+  min-width: 0;
+}
+
+.scene-card__menu {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.scene-card__menu-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  backdrop-filter: blur(4px);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.scene-card__menu-button:hover,
+.scene-card__menu-button[aria-expanded="true"] {
+  background: var(--surface);
   border-color: var(--accent, #888);
 }
 
@@ -3290,7 +3348,7 @@ html.theme-dark .ai-panel__render {
 
 .action-cards__row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 400px));
   gap: 12px;
 }
 
@@ -3300,9 +3358,8 @@ html.theme-dark .ai-panel__render {
   position: relative;
   isolation: isolate;
   display: flex;
-  flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
   height: 100%;
   padding: 16px;
   overflow: hidden;
@@ -3455,6 +3512,7 @@ html.theme-dark .action-card__ghost {
 
 .action-card__text {
   display: block;
+  min-width: 0;
 }
 
 .action-card__title {
