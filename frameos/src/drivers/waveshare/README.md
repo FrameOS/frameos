@@ -2,7 +2,10 @@
 
 `ePaper/` is the Waveshare reference tree
 (https://github.com/waveshareteam/e-Paper/blob/master/RaspberryPi_JetsonNano/c/lib/e-Paper/)
-plus a handful of FrameOS-maintained forks. **The C files are the one
+plus a handful of FrameOS-maintained forks. Last synced with upstream commit
+`a794fbc` (2026-08). Every vendor driver additionally carries the FrameOS
+busy-wait timeout (`EPD_BUSY_TIMEOUT_MS`, added in #230) — re-apply it to a
+freshly copied file, or the panel can hang the render thread forever. **The C files are the one
 implementation of every panel, on every target:**
 
 - Raspberry Pi / Linux: each `EPD_*.nim` is a c2nim-generated binding whose
@@ -36,7 +39,9 @@ header `include/DEV_Config.h` must declare the same API.
 | `EPD_13in3e.c/.h` | dual chip select, bounded busy waits, debug events, `EPD_13IN3E_SetVariant` for the Seeed reTerminal E1004's T133A01 panel tuning, `DisplayPart` |
 | `EPD_7in3e.c/.h` | bounded busy waits, debug events, bulk SPI framebuffer write, `EPD_7IN3E_SetPhotoPainterMode` (Waveshare PhotoPainter PMIC board) |
 | `EPD_4in0e.c`, `EPD_4in01f.c` | bounded busy waits |
-| `EPD_13in3k.c`, `EPD_2in7_V2.c`, `EPD_4in26.c`, `EPD_5in79.c` | `LUT_DATA_4Gray` globals marked `static`: the ESP32 firmware links every driver into one binary and the vendor names collide |
+| `EPD_13in3k.c`, `EPD_2in7_V2.c`, `EPD_4in26.c`, `EPD_5in79.c`, `EPD_7in5b_V2.c` | `LUT_DATA_4Gray` / `partFlag` globals marked `static`: the ESP32 firmware links every driver into one binary and the vendor names collide |
+| `EPD_7in5_V2.c/.h` | vendor `EPD_7in5_V2_old` (the pre-V3 panel) plus FrameOS partial refresh (`Init_Partial`, `Display_PartialBase`, `Display_Partial`); `EPD_7in5_V2_gray` is the vendor's current `EPD_7in5_V2` |
+| `EPD_13in3b.c/.h` | FrameOS partial refresh (`Display_Base`, `Display_PartialBase`, `Display_Partial`) |
 | `DEV_Config.c/.h`, `DEV_Debug.c`, `Debug.h` | FrameOS hardware layer (see above); not vendor code. `DEV_Debug.c` is platform-neutral (command/data/preview events, `DEV_Busy_Wait`) and is compiled on the Pi and the ESP32 alike |
 
 Other driver families: `it8951/` (10.3" IT8951 controller, native Nim, Pi

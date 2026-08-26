@@ -286,7 +286,7 @@ def convert_waveshare_source(variant_key: Optional[str]) -> WaveshareVariant:
                     variant.init_function = proc_name
                     variant.init_args = get_default_proc_arguments(line)
                     variant.init_returns_zero = "): UBYTE" in line
-                if proc_name.lower() == f"{variant.prefix}_4Gray_Init".lower():
+                if proc_name.lower() == f"{variant.prefix}_4Gray_Init".lower() or proc_name.lower() == f"{variant.prefix}_Gray4_Init".lower():
                     variant.init_function = proc_name
                     variant.init_args = get_default_proc_arguments(line)
                     variant.init_returns_zero = "): UBYTE" in line

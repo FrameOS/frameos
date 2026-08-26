@@ -87,6 +87,7 @@ export const devices: OptionGroup<Option>[] = [
       { value: 'waveshare.EPD_2in9', label: 'Waveshare 2.9" 296x128 Black/White' },
       { value: 'waveshare.EPD_2in9_DES', label: 'Waveshare 2.9" (DES) 296x128 Black/White' },
       { value: 'waveshare.EPD_2in9_V2', label: 'Waveshare 2.9" (V2) 296x128 4 Grayscale' },
+      { value: 'waveshare.EPD_2in9_V3', label: 'Waveshare 2.9" (V3) 296x128 4 Grayscale' },
       { value: 'waveshare.EPD_2in9b', label: 'Waveshare 2.9" (B) 296x128 Black/White/Red' },
       { value: 'waveshare.EPD_2in9b_V3', label: 'Waveshare 2.9" (B V3) 296x128 Black/White/Red' },
       { value: 'waveshare.EPD_2in9b_V4', label: 'Waveshare 2.9" (B V4) 296x128 Black/White/Red' },
