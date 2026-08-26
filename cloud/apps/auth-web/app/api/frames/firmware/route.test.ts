@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetReleaseCacheForTests } from "../../../../src/lib/firmware-release";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
 import { GET } from "./route";
@@ -59,6 +60,7 @@ function request(query = "") {
 }
 
 beforeEach(() => {
+  resetReleaseCacheForTests();
   vi.stubGlobal("fetch", fetchMock);
 });
 

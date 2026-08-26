@@ -555,6 +555,20 @@ and the two install-script paths on the legacy account host). So there is one
 line to change and the installer looks in `snippets/` as well as
 `sites-enabled/` and `conf.d/`.
 
+Per-client rate limits (firmware downloads, login attempts, hub upgrades)
+key on the client IP that `RATE_LIMIT_TRUSTED_PROXY_COUNT` picks out of the
+`X-Forwarded-For` chain, counted from the right. That must equal the number of
+proxy hops in front of auth-web: `1` for bare nginx, `2` when Cloudflare (or
+any other CDN) sits in front of it — with `1` every visitor keys on the
+Cloudflare edge address and the whole site shares one budget, which surfaces
+as "Too many firmware downloads from your network" for a user who has
+downloaded nothing.
+
+Release lookups against api.github.com are cached in-process (fresh for five
+minutes, stale copy served while GitHub is down or rate limiting) and sent
+with `GITHUB_TOKEN` when one is set in the environment — set it if the host
+shares its egress IP with anything else that talks to GitHub.
+
 After deployment, verify that `https://cloud.frameos.net/` redirects to
 `/backends` (which lands on login when signed out), that
 `https://cloud.frameos.net/scenes` opens “My scenes,” that public scenes stay

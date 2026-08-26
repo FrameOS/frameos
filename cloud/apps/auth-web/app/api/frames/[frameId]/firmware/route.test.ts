@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authenticateFrameDevice } from "../../../../../src/lib/frame-device-auth";
-import { devFirmwareOverride } from "../../../../../src/lib/firmware-release";
+import {
+  devFirmwareOverride,
+  resetReleaseCacheForTests,
+} from "../../../../../src/lib/firmware-release";
 import { jsonError } from "../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { GET as getManifest } from "./manifest/route";
@@ -120,6 +123,7 @@ function request(path: string) {
 const routeParams = (id: string) => ({ params: Promise.resolve({ frameId: id }) });
 
 beforeEach(() => {
+  resetReleaseCacheForTests();
   vi.stubGlobal("fetch", fetchMock);
   authMock.mockResolvedValue({
     frame: { id: frameId } as never,

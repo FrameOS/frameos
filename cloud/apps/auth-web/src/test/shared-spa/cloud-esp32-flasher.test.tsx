@@ -11,6 +11,7 @@ import {
   pinsSpecError,
   wifiInputError,
 } from "../../../../../../cloud-frontend/src/components/Esp32CloudFlasher";
+import { resetReleaseListingCacheForTests } from "../../../../../../cloud-frontend/src/lib/release-lookup";
 
 // esptool-js drives real USB hardware; the tests only care that the flasher
 // calls it, hands the port back, and provisions afterwards.
@@ -230,6 +231,8 @@ async function fillRequiredFields(hardware = "panel:EPD_7in5_V2") {
 }
 
 beforeEach(() => {
+  // The listing is memoised in the browser; each test mocks its own release.
+  resetReleaseListingCacheForTests();
   vi.stubGlobal("fetch", fetchMock);
 });
 

@@ -18,6 +18,7 @@ import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/
 import { POST as revokeFrameRoute } from "../../../app/api/frames/[frameId]/revoke/route";
 import { GET as getFirmwareManifest } from "../../../app/api/frames/[frameId]/firmware/manifest/route";
 import { GET as getFirmwareDownload } from "../../../app/api/frames/[frameId]/firmware/download/route";
+import { resetReleaseCacheForTests } from "../../lib/firmware-release";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
 
@@ -120,6 +121,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  resetReleaseCacheForTests();
   resetRateLimitForTests();
   cookieJar.clear();
   vi.stubGlobal("fetch", fetchMock);

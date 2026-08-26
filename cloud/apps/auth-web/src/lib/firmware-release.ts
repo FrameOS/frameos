@@ -96,17 +96,119 @@ export function findAsset(release: Release, suffix: string) {
   );
 }
 
-/** The latest release's metadata, or undefined when GitHub says no. */
-export async function fetchLatestRelease(): Promise<Release | undefined> {
-  const response = await fetch(releaseApiUrl, {
-    headers: { accept: "application/vnd.github+json" },
-    // Releases change rarely; caching keeps us far from GitHub's rate limit.
-    next: { revalidate: 300 },
-  });
-  if (!response.ok) {
+// In-process release cache. Every browser flasher probe, SD-image listing
+// and device OTA poll lands here, and they must not each cost a GitHub API
+// call: unauthenticated api.github.com allows 60 requests/hour per IP, and a
+// cloud host shares ONE egress IP across all of its users and frames, so an
+// afternoon of flashing was enough to get the whole deployment 403'd. Next's
+// own fetch cache (`next: { revalidate }`) is kept as a second layer but is
+// not relied on — it caches nothing on failure and is opaque to tests.
+//
+// Fresh for `releaseFreshMs`; concurrent callers share one in-flight fetch;
+// and when GitHub errors (rate limit, outage, network) the last good release
+// is served instead — a slightly stale release beats "try again in a minute"
+// for someone holding a board in boot mode. Stale-on-error is unbounded on
+// purpose: a release list that is hours old is still correct (releases are
+// immutable and only ever added to), and the retry keeps running behind it.
+export const releaseFreshMs = 5 * 60 * 1000;
+// After a failure, back off before asking GitHub again so a 403/429 does not
+// turn every request into another counted attempt.
+export const releaseRetryMs = 60 * 1000;
+
+type ReleaseCache = {
+  release: Release | undefined;
+  fetchedAt: number;
+  lastAttemptAt: number;
+  inFlight: Promise<Release | undefined> | undefined;
+};
+
+const releaseCache: ReleaseCache = {
+  release: undefined,
+  fetchedAt: 0,
+  lastAttemptAt: 0,
+  inFlight: undefined,
+};
+
+function githubReleaseHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    accept: "application/vnd.github+json",
+    "user-agent": "frameos-cloud",
+  };
+  // Optional: a token lifts the API budget from 60/hour/IP to 5000/hour.
+  // Read-only public data, so any fine-grained token with no scopes works.
+  const token = process.env.GITHUB_TOKEN?.trim();
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+async function fetchLatestReleaseUncached(): Promise<Release | undefined> {
+  try {
+    const response = await fetch(releaseApiUrl, {
+      headers: githubReleaseHeaders(),
+      next: { revalidate: 300 },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      return undefined;
+    }
+    const release = (await response.json()) as Release;
+    return release && typeof release === "object" ? release : undefined;
+  } catch {
     return undefined;
   }
-  return (await response.json()) as Release;
+}
+
+/**
+ * The latest release's metadata: from the in-process cache when fresh, else
+ * re-fetched from GitHub, falling back to the last good copy when GitHub
+ * fails. Undefined only when there has never been a successful lookup.
+ */
+export async function fetchLatestRelease(
+  now: number = Date.now(),
+): Promise<Release | undefined> {
+  const cached = releaseCache.release;
+  if (cached && now - releaseCache.fetchedAt < releaseFreshMs) {
+    return cached;
+  }
+  if (releaseCache.inFlight) {
+    return releaseCache.inFlight;
+  }
+  // Recently failed with a stale copy in hand: serve that without another
+  // counted attempt. With nothing cached at all there is nothing to lose by
+  // retrying, so a fresh process behind a hiccup is not stuck for a minute.
+  if (
+    cached &&
+    now - releaseCache.lastAttemptAt < releaseRetryMs &&
+    releaseCache.lastAttemptAt > releaseCache.fetchedAt
+  ) {
+    return cached;
+  }
+
+  releaseCache.lastAttemptAt = now;
+  const attempt = fetchLatestReleaseUncached().then((release) => {
+    if (release) {
+      releaseCache.release = release;
+      releaseCache.fetchedAt = now;
+      return release;
+    }
+    return releaseCache.release;
+  });
+  releaseCache.inFlight = attempt;
+  try {
+    return await attempt;
+  } finally {
+    releaseCache.inFlight = undefined;
+  }
+}
+
+/** Forget the cached release (tests only — every suite mocks its own GitHub). */
+export function resetReleaseCacheForTests() {
+  releaseCache.release = undefined;
+  releaseCache.fetchedAt = 0;
+  releaseCache.lastAttemptAt = 0;
+  releaseCache.inFlight = undefined;
 }
 
 // Belt and braces: asset URLs come from the GitHub API, but pin the host

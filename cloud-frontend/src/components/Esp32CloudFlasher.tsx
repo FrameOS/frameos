@@ -4,7 +4,7 @@ import type { ReactElement } from 'react'
 
 import { watchdogResetAfterFlash } from '../../../frontend/src/scenes/workspace/esp32WatchdogReset'
 import { loadEsptool } from '../lib/esptool'
-import { fetchReleaseListing, releaseLookupErrorMessage } from '../lib/release-lookup'
+import { fetchReleaseListing, releaseLookupErrorFromResponse } from '../lib/release-lookup'
 import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '../lib/remembered-wifi'
 import { esp32Panels } from '../lib/generated-devices'
 import { cloudFrameUrl } from '../routes'
@@ -326,8 +326,7 @@ async function fetchGenericFirmware(platform: string, log: (line: string) => voi
   log(`Downloading ${asset.name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)…`)
   const firmwareResponse = await fetch(`${firmwareApiUrl}?platform=${encodeURIComponent(asset.platform)}`)
   if (!firmwareResponse.ok) {
-    const detail = (await firmwareResponse.json().catch(() => ({}))) as { error?: string }
-    throw new Error(releaseLookupErrorMessage(firmwareResponse.status, detail.error))
+    throw await releaseLookupErrorFromResponse(firmwareResponse, 'firmware download')
   }
   return new Uint8Array(await firmwareResponse.arrayBuffer())
 }

@@ -69,15 +69,18 @@ export async function GET(request: NextRequest) {
   const platform = request.nextUrl.searchParams.get("platform");
   const listing = platform === null;
 
-  // The listing is cheap JSON and every page load wants it; the binary is a
-  // multi-megabyte download, so keep that budget tight per client.
+  // The listing is served from the in-process release cache (no GitHub call
+  // per request — src/lib/firmware-release.ts), so its budget only needs to
+  // fend off abuse. The binary is a multi-megabyte stream through this host,
+  // so that one stays bounded — but a debugging session re-flashes a board
+  // many times an hour, and every retry after a failed flash counts.
   const limited = listing
     ? await rateLimitResponse(request, "frames:firmware-meta", {
-        limit: 60,
+        limit: 300,
         windowMs: 15 * 60 * 1000,
       })
     : await rateLimitResponse(request, "frames:firmware", {
-        limit: 10,
+        limit: 30,
         windowMs: 60 * 60 * 1000,
       });
   if (limited) {
