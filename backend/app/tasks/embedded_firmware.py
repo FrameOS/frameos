@@ -536,10 +536,7 @@ EMBEDDED_PANEL_FORMATS = {
     key: EMBEDDED_PIXEL_FORMAT_BY_COLOR[convert_waveshare_source(key).color_option]
     for key in get_variant_keys()
     if key not in EMBEDDED_UNSUPPORTED_PANELS
-    and (
-        get_variant_folder(key) == "ePaper"
-        or key == "EPD_13in3e"
-    )
+    and get_variant_folder(key) == "ePaper"
     and convert_waveshare_source(key).color_option in EMBEDDED_PIXEL_FORMAT_BY_COLOR
 }
 # Must mirror components/frameos_display/generate_panel_table.py.

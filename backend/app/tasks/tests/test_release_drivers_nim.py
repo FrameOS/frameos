@@ -107,6 +107,31 @@ def test_release_waveshare_variant_setup_lives_in_generated_driver():
     )
 
 
+def test_waveshare_epaper_drivers_are_c_with_nim_bindings():
+    # Every ePaper panel is the vendor/FrameOS C driver compiled through its
+    # c2nim binding; the generated driver wires the shared DEV_Config HAL.
+    for variant_key in ("EPD_7in3e", "EPD_4in0e", "EPD_4in01f", "EPD_13in3e"):
+        binding = (
+            Path(__file__).resolve().parents[4]
+            / "frameos" / "src" / "drivers" / "waveshare" / "ePaper" / f"{variant_key}.nim"
+        )
+        assert binding.read_text(encoding="utf-8").startswith(f'{{.compile: "{variant_key}.c".}}')
+        source = write_waveshare_driver_nim({"waveshare": replace(DRIVERS["waveshare"], variant=variant_key)})
+        assert "import ePaper/DEV_Config as waveshareConfig" in source
+        assert f"import ePaper/{variant_key} as waveshareDisplay" in source
+        assert "waveshareConfig.installDriverDebugLog()" in source
+        assert source.count("waveshareConfig.raiseIfDriverError()") == 4
+        assert "let color_option* = ColorOption.SpectraSixColor" in source or variant_key == "EPD_4in01f"
+
+    epd13_source = write_waveshare_driver_nim({"waveshare": replace(DRIVERS["waveshare"], variant="EPD_13in3e")})
+    epd7_source = write_waveshare_driver_nim({"waveshare": replace(DRIVERS["waveshare"], variant="EPD_7in3e")})
+    # The 13.3" E's second controller sits on CE1 (GPIO 7); single-controller panels pass -1.
+    assert "waveshareConfig.DEV_SetPinConfig(pins.rst.cint, pins.dc.cint, pins.cs.cint, 7.cint" in epd13_source
+    assert "waveshareConfig.DEV_SetPinConfig(pins.rst.cint, pins.dc.cint, pins.cs.cint, (-1).cint" in epd7_source
+    assert "waveshareDisplay.EPD_13IN3E_Display(addr image[0])" in epd13_source
+    assert "waveshareDisplay.EPD_7IN3E_Display(addr image[0])" in epd7_source
+
+
 def test_waveshare_epd13in3b_generates_partial_refresh_hooks():
     epd13in3b = replace(DRIVERS["waveshare"], variant="EPD_13in3b")
 

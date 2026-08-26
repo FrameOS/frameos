@@ -380,9 +380,13 @@ proc init*(frameOS: DriverContext): Driver =
 
   setDriverDebugLogger(logger)
   logger.log(%*{"event": "driver:waveshare", "width": width, "height": height, "init": "starting"})
+  # Always runs: besides user remaps this is how a driver learns its fixed
+  # extras (the 13.3" E panel's second chip select). -1 = driver default.
   if not frameOS.frameConfig.deviceConfig.isNil and
       not frameOS.frameConfig.deviceConfig.pins.isNil:
     waveshareDriver.setPinOverrides(frameOS.frameConfig.deviceConfig.pins)
+  else:
+    waveshareDriver.setPinOverrides(PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1))
   waveshareDriver.init()
 
   try:

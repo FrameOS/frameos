@@ -47,17 +47,6 @@ UNSUPPORTED_PANELS = {
     "EPD_7in5b_V2_old",
 }
 
-# These variants have native Nim wrappers in the root tree; the ESP32 C display
-# component still uses the root C fallback until the hardware DEV_Config layer is
-# shared by the Nim driver path too.
-SOURCE_OVERRIDES = {
-    "EPD_4in01f": ("ePaper/migrated", "EPD_4in01f.c"),
-    "EPD_4in0e": ("ePaper/migrated", "EPD_4in0e.c"),
-    "EPD_7in3e": ("ePaper/migrated", "EPD_7in3e.c"),
-    "EPD_13in3e": ("epd13in3e", "EPD_13in3e.c"),
-}
-
-
 def c_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -88,19 +77,13 @@ def compile_source_from_nim(nim_path: Path) -> str | None:
 
 def panel_source(repo_root: Path, key: str, get_variant_folder) -> Path:
     waveshare_root = repo_root / "frameos" / "src" / "drivers" / "waveshare"
-    if key in SOURCE_OVERRIDES:
-        folder, source = SOURCE_OVERRIDES[key]
-        path = waveshare_root / folder / source
-        if path.is_file():
-            return path
-        raise FileNotFoundError(f"Root Waveshare source missing for {key}: {path}")
-
     folder = get_variant_folder(key)
     source_dir = waveshare_root / folder
     nim_path = source_dir / f"{key}.nim"
+    # The Nim wrapper's {.compile.} pragma names the C unit (b/bc/c keys share one).
     compile_source = compile_source_from_nim(nim_path)
     if compile_source:
-        candidates = [source_dir / compile_source, source_dir / "migrated" / compile_source]
+        candidates = [source_dir / compile_source]
     else:
         candidates = [source_dir / f"{key}.c"]
     for path in candidates:
@@ -185,13 +168,17 @@ def generate(repo_root: Path, out_dir: Path) -> None:
         key
         for key in get_variant_keys()
         if key not in UNSUPPORTED_PANELS
-        and (get_variant_folder(key) == "ePaper" or key == "EPD_13in3e")
+        and get_variant_folder(key) == "ePaper"
     ]
     # Sorted by physical size then name, so the portal <select> reads naturally.
     keys.sort(key=lambda key: (key_to_float(key)[0] or 0.0, key))
 
     variants = {}
-    sources: dict[Path, None] = {}
+    # Shared driver diagnostics (DEV_Debug.c) are built with the panels, on
+    # top of this component's DEV_Config_esp.c.
+    sources: dict[Path, None] = {
+        repo_root / "frameos" / "src" / "drivers" / "waveshare" / "ePaper" / "DEV_Debug.c": None
+    }
     headers: dict[Path, None] = {}
     for key in keys:
         variant = convert_waveshare_source(key)

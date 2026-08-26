@@ -115,6 +115,8 @@ jobs:
             device: framebuffer
           - label: waveshare-7.3e
             device: waveshare.EPD_7in3e
+          - label: waveshare-13.3e
+            device: waveshare.EPD_13in3e
           - label: pimoroni-13.3
             device: pimoroni.inky_impression_13
     steps:

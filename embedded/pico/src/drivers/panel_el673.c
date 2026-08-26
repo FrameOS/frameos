@@ -1,6 +1,6 @@
 // EL673-class 800x480 Spectra 6 — Inky Frame 7.3" (2025 refresh) /
 // Waveshare 7.3" E (EPD_7in3e). Init ported from the FrameOS Waveshare
-// reference driver (frameos/src/drivers/waveshare/ePaper/migrated/EPD_7in3e.c).
+// reference driver (frameos/src/drivers/waveshare/ePaper/EPD_7in3e.c).
 #include "panel_seq.h"
 
 static const pk_pins_t *s_pins;

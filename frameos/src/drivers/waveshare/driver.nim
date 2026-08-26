@@ -15,35 +15,43 @@ let supportsPartialRefresh* = false
 let maxPartialRefreshesBeforeFull* = 5
 let maxPartialRefreshAreaPercent* = 100.0
 
+
 proc setup*(frameOS: DriverContext = nil): SetupResult =
   discard frameOS
   addSetupResult(result, runSetupStep("spi", proc(): SetupResult = spiSetupDriver.setup()))
 
 proc setPinOverrides*(pins: PinOverrides) =
-  waveshareConfig.DEV_SetPinConfig(pins.rst.cint, pins.dc.cint, pins.cs.cint,
+  # cs2 = -1: single-controller panel
+  waveshareConfig.DEV_SetPinConfig(pins.rst.cint, pins.dc.cint, pins.cs.cint, (-1).cint,
     pins.busy.cint, pins.sclk.cint, pins.mosi.cint, pins.pwr.cint)
 
 proc init*() =
+  waveshareConfig.installDriverDebugLog()
   let resp = waveshareConfig.DEV_Module_Init()
   if resp != 0: raise newException(Exception, "Failed to initialize waveshare display")
 
 proc start*(self: Driver) =
   waveshareDisplay.EPD_7IN3E_Init()
+  waveshareConfig.raiseIfDriverError()
 
 proc startPartial*(self: Driver) =
   start(self)
 
 proc clear*() =
   waveshareDisplay.EPD_7IN3E_Clear(1.uint8)
+  waveshareConfig.raiseIfDriverError()
 
 proc sleep*() =
   waveshareDisplay.EPD_7IN3E_Sleep()
 
 proc renderImage*(image: seq[uint8]) =
   waveshareDisplay.EPD_7IN3E_Display(addr image[0])
+  waveshareConfig.raiseIfDriverError()
 
 proc renderImageBlackWhiteRed*(image1: seq[uint8], image2: seq[uint8]) =
   discard
+  waveshareConfig.raiseIfDriverError()
+
 
 proc renderImageBlackWhiteRedBase*(image1: seq[uint8], image2: seq[uint8]) =
   discard image1
@@ -58,3 +66,4 @@ proc renderImagePartial*(image: seq[uint8], xStart: int, yStart: int, xEnd: int,
   discard yStart
   discard xEnd
   discard yEnd
+

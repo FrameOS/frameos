@@ -149,6 +149,8 @@ static void EPD_13IN3E_CS_ALL(UBYTE Value)
 
 static void EPD_13IN3E_SPI_Sand(UBYTE Cmd, const UBYTE *buf, UDOUBLE Len)
 {
+    DEV_Debug_Command(Cmd);
+    DEV_Debug_DataBulk(buf, Len);
     DEV_SPI_WriteByte(Cmd);
     DEV_SPI_Write_nByte((UBYTE *)buf,Len);
 }
@@ -215,6 +217,7 @@ parameter:
 
 static void EPD_13IN3E_SendCommand(UBYTE Reg)
 {
+    DEV_Debug_Command(Reg);
     DEV_SPI_WriteByte(Reg);
 }
 
@@ -225,10 +228,12 @@ parameter:
 ******************************************************************************/
 static void EPD_13IN3E_SendData(UBYTE Reg)
 {
+    DEV_Debug_Data(Reg);
     DEV_SPI_WriteByte(Reg);
 }
 static void EPD_13IN3E_SendData2(const UBYTE *buf, uint32_t Len)
 {
+    DEV_Debug_DataBulk(buf, Len);
     DEV_SPI_Write_nByte((UBYTE *)buf,Len);
 }
 
@@ -238,21 +243,10 @@ parameter:
 ******************************************************************************/
 static int EPD_13IN3E_ReadBusyH(const char *stage)
 {
-    Debug("e-Paper busy\r\n");
-    UDOUBLE busy_wait_ms = 0;
-	while(!DEV_Digital_Read(EPD_BUSY_PIN)) {      //LOW: busy, HIGH: idle
-        if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
-            Debug("e-Paper busy timeout\r\n");
-            printf("EPD_13IN3E busy timeout during %s after %lu ms\r\n",
-                stage ? stage : "wait",
-                (unsigned long)busy_wait_ms);
-            return 1;
-        }
-        DEV_Delay_ms(10);
-        busy_wait_ms += 10;
+    if (DEV_Busy_Wait(stage, 0, 10) < 0) {
+        return 1;
     }
-	DEV_Delay_ms(20);
-    Debug("e-Paper busy release\r\n");
+    DEV_Delay_ms(20);
     return 0;
 }
 
@@ -263,7 +257,7 @@ parameter:
 ******************************************************************************/
 static void EPD_13IN3E_TurnOnDisplay(void)
 {
-    printf("Write PON \r\n");
+    DEV_Debug_Log("turnOnDisplay:powerOn", NULL);
     EPD_13IN3E_CS_ALL(0);
     EPD_13IN3E_SendCommand(0x04); // POWER_ON
     EPD_13IN3E_CS_ALL(1);
@@ -271,7 +265,7 @@ static void EPD_13IN3E_TurnOnDisplay(void)
         return;
     }
 
-    printf("Write DRF \r\n");
+    DEV_Debug_Log("turnOnDisplay:refresh", NULL);
     DEV_Delay_ms(50);
     EPD_13IN3E_CS_ALL(0);
     if (s_variant == EPD_13IN3E_VARIANT_T133A01) {
@@ -284,7 +278,7 @@ static void EPD_13IN3E_TurnOnDisplay(void)
         return;
     }
 
-    printf("Write POF \r\n");
+    DEV_Debug_Log("turnOnDisplay:powerOff", NULL);
     EPD_13IN3E_Settle();
     EPD_13IN3E_CS_ALL(0);
     EPD_13IN3E_SPI_Sand(POF, POF_V, sizeof(POF_V));
@@ -294,7 +288,7 @@ static void EPD_13IN3E_TurnOnDisplay(void)
          * the Waveshare one does not. */
         EPD_13IN3E_ReadBusyH("turnOnDisplay:powerOff");
     }
-    printf("Display Done!! \r\n");
+    DEV_Debug_Log("turnOnDisplay:done", NULL);
 }
 
 /******************************************************************************
@@ -303,6 +297,7 @@ parameter:
 ******************************************************************************/
 void EPD_13IN3E_Init(void)
 {
+    DEV_Debug_Log("init:start", s_variant == EPD_13IN3E_VARIANT_T133A01 ? "\"variant\":\"T133A01\"" : "\"variant\":\"waveshare\"");
 	EPD_13IN3E_Reset();
     if (EPD_13IN3E_ReadBusyH("init:reset") != 0) {
         return;
@@ -312,6 +307,7 @@ void EPD_13IN3E_Init(void)
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
     if (t133a01) {
+        DEV_Debug_Log("init:analogTiming", NULL);
         EPD_13IN3E_SPI_Sand(AN_TM, AN_TM_V_T133A01, sizeof(AN_TM_V_T133A01));
     } else {
         EPD_13IN3E_SPI_Sand(AN_TM, AN_TM_V, sizeof(AN_TM_V));
@@ -320,11 +316,13 @@ void EPD_13IN3E_Init(void)
     EPD_13IN3E_Settle();
 
     EPD_13IN3E_CS_ALL(0);
+	DEV_Debug_Log("init:cmd66", NULL);
 	EPD_13IN3E_SPI_Sand(CMD66, CMD66_V, sizeof(CMD66_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
 
     EPD_13IN3E_CS_ALL(0);
+	DEV_Debug_Log("init:panelSetting", NULL);
 	EPD_13IN3E_SPI_Sand(PSR, PSR_V, sizeof(PSR_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
@@ -332,6 +330,7 @@ void EPD_13IN3E_Init(void)
     if (t133a01) {
         /* DC/DC setting, master only — the T133A01 sequence's one extra step. */
         DEV_Digital_Write(EPD_CS_M_PIN, 0);
+        DEV_Debug_Log("init:dcdc", NULL);
         EPD_13IN3E_SPI_Sand(DCDC_T133A01, DCDC_V_T133A01, sizeof(DCDC_V_T133A01));
         EPD_13IN3E_CS_ALL(1);
         EPD_13IN3E_Settle();
@@ -339,6 +338,7 @@ void EPD_13IN3E_Init(void)
 
     EPD_13IN3E_CS_ALL(0);
     if (t133a01) {
+        DEV_Debug_Log("init:vcomAndDataInterval", NULL);
         EPD_13IN3E_SPI_Sand(CDI, CDI_V_T133A01, sizeof(CDI_V_T133A01));
     } else {
         EPD_13IN3E_SPI_Sand(CDI, CDI_V, sizeof(CDI_V));
@@ -347,16 +347,19 @@ void EPD_13IN3E_Init(void)
     EPD_13IN3E_Settle();
 
     EPD_13IN3E_CS_ALL(0);
+	DEV_Debug_Log("init:tcon", NULL);
 	EPD_13IN3E_SPI_Sand(TCON, TCON_V, sizeof(TCON_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
 
     EPD_13IN3E_CS_ALL(0);
+	DEV_Debug_Log("init:agid", NULL);
 	EPD_13IN3E_SPI_Sand(AGID, AGID_V, sizeof(AGID_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
 
     EPD_13IN3E_CS_ALL(0);
+	DEV_Debug_Log("init:powerSaving", NULL);
 	EPD_13IN3E_SPI_Sand(PWS, PWS_V, sizeof(PWS_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
@@ -365,27 +368,32 @@ void EPD_13IN3E_Init(void)
         /* The T133A01 vendor sequence programs CCSET right before each pixel
          * transfer instead (EPD_13IN3E_PrepareData), not here at init. */
         EPD_13IN3E_CS_ALL(0);
+        DEV_Debug_Log("init:ccset", NULL);
         EPD_13IN3E_SPI_Sand(CCSET, CCSET_V, sizeof(CCSET_V));
         EPD_13IN3E_CS_ALL(1);
     }
 
     EPD_13IN3E_CS_ALL(0);
+	DEV_Debug_Log("init:resolution", NULL);
 	EPD_13IN3E_SPI_Sand(TRES, TRES_V, sizeof(TRES_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
+	DEV_Debug_Log("init:power", NULL);
 	EPD_13IN3E_SPI_Sand(PWR_epd, PWR_V, sizeof(PWR_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
+	DEV_Debug_Log("init:enableBuffer", NULL);
 	EPD_13IN3E_SPI_Sand(EN_BUF, EN_BUF_V, sizeof(EN_BUF_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
     if (t133a01) {
+        DEV_Debug_Log("init:boosterPositive", NULL);
         EPD_13IN3E_SPI_Sand(BTST_P, BTST_P_V_T133A01, sizeof(BTST_P_V_T133A01));
     } else {
         EPD_13IN3E_SPI_Sand(BTST_P, BTST_P_V, sizeof(BTST_P_V));
@@ -394,12 +402,14 @@ void EPD_13IN3E_Init(void)
     EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
+	DEV_Debug_Log("init:boostVddp", NULL);
 	EPD_13IN3E_SPI_Sand(BOOST_VDDP_EN, BOOST_VDDP_EN_V, sizeof(BOOST_VDDP_EN_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
     if (t133a01) {
+        DEV_Debug_Log("init:boosterNegative", NULL);
         EPD_13IN3E_SPI_Sand(BTST_N, BTST_N_V_T133A01, sizeof(BTST_N_V_T133A01));
     } else {
         EPD_13IN3E_SPI_Sand(BTST_N, BTST_N_V, sizeof(BTST_N_V));
@@ -408,15 +418,17 @@ void EPD_13IN3E_Init(void)
     EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
+	DEV_Debug_Log("init:buckBoostVddn", NULL);
 	EPD_13IN3E_SPI_Sand(BUCK_BOOST_VDDN, BUCK_BOOST_VDDN_V, sizeof(BUCK_BOOST_VDDN_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
+	DEV_Debug_Log("init:tftVcomPower", NULL);
 	EPD_13IN3E_SPI_Sand(TFT_VCOM_POWER, TFT_VCOM_POWER_V, sizeof(TFT_VCOM_POWER_V));
     EPD_13IN3E_CS_ALL(1);
     EPD_13IN3E_Settle();
-
+    DEV_Debug_Log("init:done", NULL);
 }
 
 /******************************************************************************
@@ -425,6 +437,7 @@ parameter:
 ******************************************************************************/
 void EPD_13IN3E_Clear(UBYTE color)
 {
+    DEV_Debug_Log("clear:start", NULL);
     UDOUBLE Width, Height;
     UBYTE Color;
     Width = (EPD_13IN3E_WIDTH % 2 == 0)? (EPD_13IN3E_WIDTH / 2 ): (EPD_13IN3E_WIDTH / 2 + 1);
@@ -464,6 +477,13 @@ void EPD_13IN3E_Display(const UBYTE *Image)
     Width = (EPD_13IN3E_WIDTH % 2 == 0)? (EPD_13IN3E_WIDTH / 2 ): (EPD_13IN3E_WIDTH / 2 + 1);
     Width1 = (Width % 2 == 0)? (Width / 2 ): (Width / 2 + 1);
     Height = EPD_13IN3E_HEIGHT;
+    if (DEV_Debug_Enabled()) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "\"widthBytes\":%lu,\"halfWidthBytes\":%lu,\"height\":%lu,\"totalBytes\":%lu",
+                 (unsigned long)Width, (unsigned long)Width1, (unsigned long)Height, (unsigned long)Width * Height);
+        DEV_Debug_Log("display:start", buf);
+        DEV_Debug_Preview(Image, (unsigned long)Width * Height);
+    }
 
     EPD_13IN3E_PrepareData();
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
@@ -485,6 +505,7 @@ void EPD_13IN3E_Display(const UBYTE *Image)
 
     EPD_13IN3E_CS_ALL(1);
 
+    DEV_Debug_LogBytes("display:dataWritten", (unsigned long)Width * Height);
     EPD_13IN3E_TurnOnDisplay();
 }
 
@@ -640,6 +661,7 @@ parameter:
 ******************************************************************************/
 void EPD_13IN3E_Sleep(void)
 {
+    DEV_Debug_Log("sleep", NULL);
     EPD_13IN3E_CS_ALL(0);
     EPD_13IN3E_SendCommand(0x07); // DEEP_SLEEP
     EPD_13IN3E_SendData(0XA5);
