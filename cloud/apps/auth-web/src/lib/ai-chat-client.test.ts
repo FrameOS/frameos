@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AiChatRequestError,
+  AiChatTransportError,
   parseAiChatLine,
   streamAiChat,
   type AiChatEvent,
@@ -99,5 +100,153 @@ describe("parseAiChatLine", () => {
     expect(parseAiChatLine("not json")).toBeNull();
     expect(parseAiChatLine('{"type":"unknown"}')).toBeNull();
     expect(parseAiChatLine("[1,2]")).toBeNull();
+  });
+
+  it("ignores pings and resumes from the last seen event when the stream drops mid-turn", async () => {
+    const encoder = new TextEncoder();
+    // One chunk, then the connection dies (what Chrome reports as "network error").
+    let pulls = 0;
+    const broken = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          controller.enqueue(
+            encoder.encode('{"type":"chat","chatId":"c1","turnId":"t1"}\n{"type":"ping"}\n{"type":"delta","text":"Hel"}\n'),
+          );
+        } else {
+          controller.error(new TypeError("network error"));
+        }
+      },
+    });
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url === "/api/ai/chat") {
+        return new Response(broken, { headers: { "content-type": "application/x-ndjson" }, status: 200 });
+      }
+      return ndjsonResponse(['{"type":"delta","text":"lo"}\n{"type":"done","tool":"reply","reply":"Hello"}\n']);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const events: AiChatEvent[] = [];
+    const resumes: number[] = [];
+    await streamAiChat(
+      { chatId: "c1", prompt: "hi" },
+      {
+        onEvent: (event) => void events.push(event),
+        onResume: ({ attempt }) => resumes.push(attempt),
+        sleep: async () => {},
+      },
+    );
+    expect(events.map((event) => event.type)).toEqual(["chat", "delta", "delta", "done"]);
+    expect(calls).toEqual(["/api/ai/chat", "/api/ai/chat/turns/t1?after=2"]);
+    expect(resumes).toEqual([1]);
+  });
+
+  it("treats a stream that closes without a terminal event as dropped", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/ai/chat") {
+        return ndjsonResponse(['{"type":"chat","chatId":"c1","turnId":"t1"}\n{"type":"delta","text":"Hel"}\n']);
+      }
+      return ndjsonResponse(['{"type":"done","tool":"reply","reply":"Hel"}\n']);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const events: AiChatEvent[] = [];
+    await streamAiChat({ prompt: "hi" }, { onEvent: (event) => void events.push(event), sleep: async () => {} });
+    expect(events.map((event) => event.type)).toEqual(["chat", "delta", "done"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up with a readable message once the turn is gone", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/ai/chat") {
+        return ndjsonResponse(['{"type":"chat","chatId":"c1","turnId":"t1"}\n']);
+      }
+      return Response.json({ error: "turn_not_found" }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const failure = await streamAiChat({ prompt: "hi" }, { onEvent: () => {}, sleep: async () => {} }).catch(
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(AiChatTransportError);
+    expect((failure as AiChatTransportError).turnId).toBe("t1");
+    expect((failure as Error).message).toMatch(
+      /^Connection to the assistant dropped after \d+s and could not be re-established\. The assistant may still finish/,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries resumes with backoff and fails after the attempt budget", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/ai/chat") {
+        return ndjsonResponse(['{"type":"chat","chatId":"c1","turnId":"t1"}\n']);
+      }
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const slept: number[] = [];
+    const failure = await streamAiChat(
+      { prompt: "hi" },
+      {
+        onEvent: () => {},
+        resumeAttempts: 3,
+        sleep: async (ms) => {
+          slept.push(ms);
+        },
+      },
+    ).catch((error: unknown) => error);
+    expect(slept).toEqual([500, 1500, 3000]);
+    expect((failure as AiChatTransportError).attempts).toBe(3);
+  });
+
+  it("does not resume when the stream dropped before a turn id arrived", async () => {
+    const encoder = new TextEncoder();
+    let pulls = 0;
+    const broken = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          controller.enqueue(encoder.encode('{"type":"delta","text":"x"}\n'));
+        } else {
+          controller.error(new TypeError("network error"));
+        }
+      },
+    });
+    const fetchMock = vi.fn(async () => new Response(broken, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const failure = await streamAiChat({ prompt: "hi" }, { onEvent: () => {}, sleep: async () => {} }).catch(
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(AiChatTransportError);
+    expect((failure as Error).message).toMatch(/before it started working/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rethrows the caller's abort instead of resuming", async () => {
+    const controller = new AbortController();
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        streamController = ctrl;
+        ctrl.enqueue(encoder.encode('{"type":"chat","chatId":"c1","turnId":"t1"}\n'));
+        // stays open until aborted
+      },
+    });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const response = new Response(body, { status: 200 });
+      // What a real fetch does on abort: the body errors with an AbortError.
+      init?.signal?.addEventListener("abort", () => {
+        streamController.error(new DOMException("The operation was aborted.", "AbortError"));
+      });
+      return response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = streamAiChat({ prompt: "hi" }, { onEvent: () => {}, signal: controller.signal, sleep: async () => {} });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+    const failure = await pending.catch((error: unknown) => error);
+    expect((failure as Error).name).toBe("AbortError");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

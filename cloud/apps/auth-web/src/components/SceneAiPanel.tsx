@@ -17,10 +17,14 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
+import posthog from "posthog-js";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   AiChatRequestError,
+  AiChatTransportError,
+  formatElapsed,
+  stopAiChatTurn,
   streamAiChat,
   type AiChatHistoryItem,
 } from "../lib/ai-chat-client";
@@ -52,9 +56,17 @@ type ToolLine = {
   key: string;
   name: string;
   label: string;
-  status: "start" | "done" | "error";
+  // progress = the model is still writing the call; start = it is running.
+  status: "progress" | "start" | "done" | "error";
   detail?: string | undefined;
 };
+
+const isOpen = (line: ToolLine) => line.status === "start" || line.status === "progress";
+
+// History recovery after a lost stream: how often and how long to look for
+// the persisted reply of a turn that kept running server-side.
+const RECOVERY_POLL_MS = 20 * 1000;
+const RECOVERY_POLL_ATTEMPTS = 12;
 
 /** The frame the render check drew, ready for an <img>. */
 type RenderPreview = { src: string; width: number; height: number };
@@ -133,6 +145,79 @@ function formatCheckFeedback(errors: string[], rendered: boolean): string {
 
 // Attaches the preview to `id` and drops previews from older messages past
 // MAX_RENDER_PREVIEWS, keeping their status text.
+type RecoveredTurn = {
+  content: string;
+  tool: string | null;
+  scenes: SceneJson[] | null;
+};
+
+// Poll the chat history for the assistant reply of a turn whose stream was
+// lost for good. Resolves through `apply` at most once; `cancel` stops it.
+function recoverFromHistory({
+  chatId,
+  since,
+  apply,
+  pollMs = RECOVERY_POLL_MS,
+  attempts = RECOVERY_POLL_ATTEMPTS,
+}: {
+  chatId: string;
+  since: number;
+  apply: (recovered: RecoveredTurn) => void;
+  pollMs?: number;
+  attempts?: number;
+}): { cancel: () => void } {
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const attempt = async (remaining: number) => {
+    if (cancelled) {
+      return;
+    }
+    try {
+      const response = await fetch(`/api/ai/chats/${encodeURIComponent(chatId)}`);
+      if (response.ok) {
+        const payload = (await response.json()) as {
+          messages?: {
+            role: string;
+            content: string;
+            createdAt: string;
+            tool?: string | null;
+            payload?: { delivered?: unknown } | null;
+          }[];
+        };
+        const reply = [...(payload.messages ?? [])]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === "assistant" &&
+              message.tool !== "error" &&
+              Date.parse(message.createdAt) >= since - 60 * 1000,
+          );
+        if (reply && !cancelled) {
+          const delivered = reply.payload?.delivered;
+          apply({
+            content: reply.content,
+            scenes: Array.isArray(delivered) && delivered.length > 0 ? (delivered as SceneJson[]) : null,
+            tool: reply.tool ?? null,
+          });
+          return;
+        }
+      }
+    } catch {
+      // try again below
+    }
+    if (remaining > 1 && !cancelled) {
+      timer = setTimeout(() => void attempt(remaining - 1), pollMs);
+    }
+  };
+  timer = setTimeout(() => void attempt(attempts), pollMs);
+  return {
+    cancel: () => {
+      cancelled = true;
+      clearTimeout(timer);
+    },
+  };
+}
+
 function withPreview(messages: ChatMessage[], id: string, preview: RenderPreview | null): ChatMessage[] {
   const next = messages.map((message) => (message.id === id ? { ...message, preview } : message));
   let kept = 0;
@@ -229,13 +314,13 @@ function ToolActivity({ tools, streaming }: { tools: ToolLine[]; streaming: bool
   }
   const last = tools[tools.length - 1]!;
   const summary =
-    streaming && last.status === "start"
-      ? `${last.label}…`
+    streaming && isOpen(last)
+      ? `${last.label}${last.status === "progress" && last.detail ? ` (${last.detail})` : ""}…`
       : `${tools.length} step${tools.length === 1 ? "" : "s"}`;
   return (
     <details className="ai-panel__tools">
       <summary className="ai-panel__tools-summary">
-        {streaming && last.status === "start" ? (
+        {streaming && isOpen(last) ? (
           <Loader2 aria-hidden className="ai-panel__spin" size={13} />
         ) : null}
         {summary}
@@ -250,7 +335,7 @@ function ToolActivity({ tools, streaming }: { tools: ToolLine[]; streaming: bool
             }
             key={tool.key}
           >
-            {tool.status === "start" ? (
+            {isOpen(tool) ? (
               <Loader2 aria-hidden className="ai-panel__spin" size={12} />
             ) : tool.status === "error" ? (
               <AlertTriangle aria-hidden size={12} />
@@ -259,7 +344,9 @@ function ToolActivity({ tools, streaming }: { tools: ToolLine[]; streaming: bool
             )}
             <span>
               {tool.label}
-              {tool.status === "error" && tool.detail ? ` — ${tool.detail}` : ""}
+              {(tool.status === "error" || tool.status === "progress") && tool.detail
+                ? ` — ${tool.detail}`
+                : ""}
             </span>
           </li>
         ))}
@@ -294,6 +381,9 @@ export function SceneAiPanel({
   const [chatId, setChatId] = useState<string>(() => newId());
   const [returnTo, setReturnTo] = useState<string>("");
   const abortRef = useRef<AbortController | null>(null);
+  // The server-side turn behind the in-flight request (for Stop + recovery).
+  const turnIdRef = useRef<string | null>(null);
+  const recoveryRef = useRef<{ cancel: () => void } | null>(null);
   const busyRef = useRef(false);
   const messagesRef = useRef<ChatMessage[]>([]);
   const chatIdRef = useRef(chatId);
@@ -337,6 +427,10 @@ export function SceneAiPanel({
       setBusy(true);
       setFatal(null);
       setStatus(null);
+      turnIdRef.current = null;
+      recoveryRef.current?.cancel();
+      recoveryRef.current = null;
+      const turnStartedAt = Date.now();
 
       const history = historyFromMessages(messagesRef.current);
       const userMessage: ChatMessage = {
@@ -383,6 +477,12 @@ export function SceneAiPanel({
                     chatIdRef.current = event.chatId;
                     setChatId(event.chatId);
                   }
+                  if (event.turnId) {
+                    turnIdRef.current = event.turnId;
+                  }
+                  setStatus(null);
+                  break;
+                case "ping":
                   break;
                 case "delta":
                   content += event.text;
@@ -391,22 +491,42 @@ export function SceneAiPanel({
                 case "tool":
                   updateMessage(assistantId, (message) => {
                     const tools = [...(message.tools ?? [])];
-                    if (event.status === "start") {
-                      tools.push({
-                        key: `${tools.length}-${event.name}`,
-                        label: event.label || event.name,
-                        name: event.name,
-                        status: "start",
-                      });
-                    } else {
-                      // Close the most recent open line for this tool.
-                      for (let index = tools.length - 1; index >= 0; index -= 1) {
-                        const line = tools[index]!;
-                        if (line.name === event.name && line.status === "start") {
-                          tools[index] = { ...line, detail: event.detail, status: event.status };
-                          break;
-                        }
+                    // The most recent open line for this tool, if any.
+                    let openIndex = -1;
+                    for (let index = tools.length - 1; index >= 0; index -= 1) {
+                      const line = tools[index]!;
+                      if (line.name === event.name && isOpen(line)) {
+                        openIndex = index;
+                        break;
                       }
+                    }
+                    if (event.status === "progress") {
+                      // The model is writing this call's arguments: keep one
+                      // line per call and update its byte count.
+                      if (openIndex !== -1 && tools[openIndex]!.status === "progress") {
+                        tools[openIndex] = { ...tools[openIndex]!, detail: event.detail };
+                      } else {
+                        tools.push({
+                          detail: event.detail,
+                          key: `${tools.length}-${event.name}`,
+                          label: event.label || event.name,
+                          name: event.name,
+                          status: "progress",
+                        });
+                      }
+                    } else if (event.status === "start") {
+                      if (openIndex !== -1 && tools[openIndex]!.status === "progress") {
+                        tools[openIndex] = { ...tools[openIndex]!, detail: undefined, status: "start" };
+                      } else {
+                        tools.push({
+                          key: `${tools.length}-${event.name}`,
+                          label: event.label || event.name,
+                          name: event.name,
+                          status: "start",
+                        });
+                      }
+                    } else if (openIndex !== -1) {
+                      tools[openIndex] = { ...tools[openIndex]!, detail: event.detail, status: event.status };
                     }
                     return { tools };
                   });
@@ -427,12 +547,28 @@ export function SceneAiPanel({
                   break;
               }
             },
+            onResume: ({ attempt, elapsedMs }) => {
+              setStatus(
+                `Connection dropped after ${formatElapsed(elapsedMs)} — reconnecting (attempt ${attempt})…`,
+              );
+            },
             signal: controller.signal,
           },
         );
+        setStatus(null);
       } catch (error) {
+        setStatus(null);
         if (controller.signal.aborted) {
           aborted = true;
+        } else if (error instanceof AiChatTransportError) {
+          streamError = error.message;
+          posthog.capture("ai_chat_stream_lost", {
+            attempts: error.attempts,
+            chat_id: chatIdRef.current,
+            elapsed_ms: error.elapsedMs,
+            had_turn: Boolean(error.turnId),
+            turn_id: error.turnId ?? null,
+          });
         } else if (error instanceof AiChatRequestError) {
           if (error.code === "login_required") {
             setFatal({ kind: "login_required" });
@@ -461,6 +597,28 @@ export function SceneAiPanel({
         stopped: aborted,
         streaming: false,
       });
+
+      if (streamError && turnIdRef.current && !aborted) {
+        // The turn kept running server-side; when its reply lands in the
+        // chat history, swap it in (scene included) so nothing is lost.
+        recoveryRef.current = recoverFromHistory({
+          apply: (recovered) => {
+            updateMessage(assistantId, {
+              content: recovered.content,
+              error: null,
+            });
+            if (recovered.scenes) {
+              propsRef.current.onScenes({
+                scenes: recovered.scenes,
+                tool: recovered.tool === "build_scene" ? "build_scene" : "modify_scene",
+                type: "scenes",
+              });
+            }
+          },
+          chatId: chatIdRef.current,
+          since: turnStartedAt,
+        });
+      }
 
       if (deliveredSceneId && !streamError && !aborted) {
         // Render the delivered scene once in the wasm preview runtime and
@@ -535,10 +693,21 @@ export function SceneAiPanel({
     // Runs once on mount by design: the prompt is a one-off hand-over.
   }, []);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      recoveryRef.current?.cancel();
+    },
+    [],
+  );
 
   function stop() {
     abortRef.current?.abort();
+    // The turn runs detached on the server; closing our stream no longer
+    // stops it, so say so explicitly.
+    if (turnIdRef.current) {
+      void stopAiChatTurn(turnIdRef.current);
+    }
   }
 
   function send() {

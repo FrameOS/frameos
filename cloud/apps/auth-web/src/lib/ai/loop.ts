@@ -6,6 +6,7 @@
 import {
   addUsage,
   emptyUsage,
+  OpenAiRequestError,
   streamResponse,
   type FunctionCallItem,
   type ResponseInputItem,
@@ -22,14 +23,47 @@ import {
 import type { JsonObject } from "./scene-utils";
 
 export type ChatStreamEvent =
-  | { type: "chat"; chatId: string }
+  // turnId identifies the detached server-side turn; the client resumes the
+  // stream with it after a dropped connection (see turn-runner.ts).
+  | { type: "chat"; chatId: string; turnId?: string }
   | { type: "delta"; text: string }
-  | { type: "tool"; name: string; label: string; status: "start" | "done" | "error"; detail?: string }
+  // "progress" = the model is still writing this call's arguments (bytes so
+  // far); "start" = it is executing; "done"/"error" = it finished.
+  | {
+      type: "tool";
+      name: string;
+      label: string;
+      status: "progress" | "start" | "done" | "error";
+      detail?: string;
+    }
   | ScenesEvent
   | { type: "done"; tool: string; reply: string }
-  | { type: "error"; detail: string };
+  | { type: "error"; detail: string }
+  // Keepalive from the relay while nothing else is flowing; never buffered,
+  // never counted, ignored by clients.
+  | { type: "ping" };
 
 export const MAX_TOOL_ROUNDS = 12;
+
+// What one model round looked like, for telemetry. Reported after every
+// streamResponse call, failed ones included (then `error` is set and usage
+// is absent).
+export type RoundReport = {
+  round: number;
+  latencyMs: number;
+  usage?: ResponseUsage;
+  status: string;
+  httpStatus?: number;
+  error?: string;
+  toolCalls: string[];
+};
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+}
 
 export type AgentLoopResult = {
   reply: string;
@@ -89,6 +123,7 @@ export async function runAgentLoop({
   toolContext,
   emit,
   signal,
+  onRound,
 }: {
   apiKey: string;
   model: string;
@@ -97,6 +132,7 @@ export async function runAgentLoop({
   toolContext: ToolContext;
   emit: (event: ChatStreamEvent) => void;
   signal?: AbortSignal;
+  onRound?: (report: RoundReport) => void;
 }): Promise<AgentLoopResult> {
   const instructions = buildSystemPrompt();
   let reply = "";
@@ -106,18 +142,56 @@ export async function runAgentLoop({
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     rounds += 1;
-    const response = await streamResponse({
-      apiKey,
-      input,
-      instructions,
-      model,
-      onTextDelta: (delta) => {
-        reply += delta;
-        emit({ text: delta, type: "delta" });
-      },
-      reasoningEffort,
-      ...(signal ? { signal } : {}),
-      tools: toolDefinitions,
+    const startedAt = Date.now();
+    // Progress lines are throttled per call: one per ~4 KB of arguments, so
+    // a 70 KB scene shows a steadily rising number instead of a firehose.
+    const progressReported = new Map<string, number>();
+    let response;
+    try {
+      response = await streamResponse({
+        apiKey,
+        input,
+        instructions,
+        model,
+        onFunctionCallProgress: ({ bytes, name }) => {
+          const last = progressReported.get(name) ?? -1;
+          if (bytes !== 0 && bytes - last < 4096) {
+            return;
+          }
+          progressReported.set(name, bytes);
+          emit({
+            detail: bytes === 0 ? "writing…" : `${formatBytes(bytes)} written`,
+            label: toolLabels[name] ?? name,
+            name,
+            status: "progress",
+            type: "tool",
+          });
+        },
+        onTextDelta: (delta) => {
+          reply += delta;
+          emit({ text: delta, type: "delta" });
+        },
+        reasoningEffort,
+        ...(signal ? { signal } : {}),
+        tools: toolDefinitions,
+      });
+    } catch (error) {
+      onRound?.({
+        error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof OpenAiRequestError ? { httpStatus: error.status } : {}),
+        latencyMs: Date.now() - startedAt,
+        round: rounds,
+        status: "failed",
+        toolCalls: [],
+      });
+      throw error;
+    }
+    onRound?.({
+      latencyMs: Date.now() - startedAt,
+      round: rounds,
+      status: response.status,
+      toolCalls: response.functionCalls.map((call) => call.name),
+      usage: response.usage,
     });
 
     usage = addUsage(usage, response.usage);

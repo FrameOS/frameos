@@ -21,7 +21,7 @@ import { socketLogic } from '../../../socketLogic'
 import { editAppLogic } from '../EditApp/editAppLogic'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
 import { isCloudMode } from '../../../../utils/cloudMode'
-import { streamCloudAiChat, type CloudAiChatEvent } from '../../../../utils/cloudAiChat'
+import { formatElapsed, streamCloudAiChat, type CloudAiChatEvent } from '../../../../utils/cloudAiChat'
 import { renderSceneCheck } from '../../../../utils/wasmSceneRenderCheck'
 import { projectApiPathForProject } from '../../../../utils/projectApi'
 
@@ -1244,6 +1244,7 @@ export const chatLogic = kea<chatLogicType>([
           // and generated scenes are applied the moment they validate.
           let streamedContent = ''
           let logContent = ''
+          let progressLineIndex: number | null = null
           let finalTool: string | undefined
           let streamError: string | null = null
           let deliveredSceneId: string | null = null
@@ -1296,19 +1297,38 @@ export const chatLogic = kea<chatLogicType>([
                     isStreaming: true,
                   })
                   break
-                case 'tool':
-                  if (event.status === 'start') {
-                    logContent = logContent ? `${logContent}\n${event.label}…` : `${event.label}…`
+                case 'tool': {
+                  const lines = logContent ? logContent.split('\n') : []
+                  if (event.status === 'progress') {
+                    // The model is still writing this call (e.g. a large
+                    // scene): one line per call, its byte count updated.
+                    const line = `${event.label} (${event.detail || 'writing…'})…`
+                    if (progressLineIndex !== null) {
+                      lines[progressLineIndex] = line
+                    } else {
+                      progressLineIndex = lines.length
+                      lines.push(line)
+                    }
+                  } else if (event.status === 'start') {
+                    if (progressLineIndex !== null) {
+                      lines[progressLineIndex] = `${event.label}…`
+                      progressLineIndex = null
+                    } else {
+                      lines.push(`${event.label}…`)
+                    }
                   } else if (event.status === 'error') {
-                    logContent = `${logContent ? `${logContent}\n` : ''}Failed: ${event.detail || event.label}`
+                    progressLineIndex = null
+                    lines.push(`Failed: ${event.detail || event.label}`)
                   } else {
                     break
                   }
+                  logContent = lines.join('\n')
                   actions.updateMessage(chatId, assistantMessageId, {
                     logContent,
                     isPlaceholder: false,
                   })
                   break
+                }
                 case 'scenes':
                   if (event.tool === 'build_scene') {
                     deliveredSceneId = (await applyBuildScenes(event.scenes ?? [], event.title)) ?? deliveredSceneId
@@ -1328,6 +1348,14 @@ export const chatLogic = kea<chatLogicType>([
                   streamError = event.detail
                   break
               }
+            },
+            {
+              onResume: ({ attempt, elapsedMs }) => {
+                const lines = logContent ? logContent.split('\n') : []
+                lines.push(`Connection dropped after ${formatElapsed(elapsedMs)} — reconnecting (attempt ${attempt})…`)
+                logContent = lines.join('\n')
+                actions.updateMessage(chatId, assistantMessageId, { logContent, isPlaceholder: false })
+              },
             }
           )
           if (streamError) {

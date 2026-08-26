@@ -174,6 +174,9 @@ export async function chatMessages(db: Database, chatId: string) {
     content: row.content,
     createdAt: row.createdAt.toISOString(),
     id: String(row.id),
+    // Structured extras of the turn (delivered scenes), so a client that lost
+    // the live stream can still pick up what the assistant made.
+    payload: row.payload ?? null,
     role: row.role as "user" | "assistant",
     tool: row.tool,
   }));
