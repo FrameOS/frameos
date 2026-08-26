@@ -202,6 +202,9 @@ export interface FrameType {
     battery_pin?: number
     batteryDivider?: number
     battery_divider?: number
+    /** GPIO held high to switch the battery divider on while sampling; -1 = none. */
+    batteryEnablePin?: number
+    battery_enable_pin?: number
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
     /** Virtual frames only: how the backend quantizes the rendered image.
@@ -252,6 +255,7 @@ export interface FrameType {
   wake_check_seconds?: number
   battery_pin?: number
   battery_divider?: number
+  battery_enable_pin?: number
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]

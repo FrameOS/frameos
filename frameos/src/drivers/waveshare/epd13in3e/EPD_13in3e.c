@@ -116,6 +116,15 @@ const UBYTE BTST_N_V_T133A01[2] = {
 const UBYTE DCDC_V_T133A01[3] = {
 	0x44, 0x54, 0x00
 };
+/* The T133A01 vendor sequence (Seeed_GFX EPD_UPDATE, mirrored by ESPHome's
+ * epaper_spi_t133a01 and Seeed's GxEPD2 port) refreshes with DRF 0x01, not
+ * the Waveshare 0x00, and programs the cascade setting (CCSET 0x01, both
+ * chips) right before every pixel-data transfer instead of once at init.
+ * Without CCSET the refresh never completes: BUSY stays low until the
+ * 120 s timeout and the second controller's half shows garbage. */
+const UBYTE DRF_V_T133A01[1] = {
+	0x01
+};
 
 static int s_variant = EPD_13IN3E_VARIANT_WAVESHARE;
 
@@ -142,6 +151,41 @@ static void EPD_13IN3E_SPI_Sand(UBYTE Cmd, const UBYTE *buf, UDOUBLE Len)
 {
     DEV_SPI_WriteByte(Cmd);
     DEV_SPI_Write_nByte((UBYTE *)buf,Len);
+}
+
+/* The vendor T133A01 sequence leaves 10 ms between init commands. */
+static void EPD_13IN3E_Settle(void)
+{
+    if (s_variant == EPD_13IN3E_VARIANT_T133A01) {
+        DEV_Delay_ms(10);
+    }
+}
+
+/* Vendor pacing between rows of pixel data. Waveshare's reference sleeps
+ * 1 ms per row, which on FreeRTOS at 100 Hz rounds up to a full 10 ms tick:
+ * 3200 half-rows = 32 s per refresh. The T133A01 references send the rows
+ * back to back and only yield now and then, so do the same there. */
+static void EPD_13IN3E_RowPace(UDOUBLE row)
+{
+    if (s_variant == EPD_13IN3E_VARIANT_T133A01) {
+        if ((row & 0x3F) == 0) DEV_Delay_ms(1);
+        return;
+    }
+    DEV_Delay_ms(1);
+}
+
+static int EPD_13IN3E_ReadBusyH(const char *stage);
+
+/* Runs before every pixel-data transfer (DTM). T133A01 only: CCSET 0x01 to
+ * both chips, then wait for BUSY — Seeed_GFX EPD_PUSH_NEW_COLORS. */
+static void EPD_13IN3E_PrepareData(void)
+{
+    if (s_variant != EPD_13IN3E_VARIANT_T133A01) return;
+    EPD_13IN3E_CS_ALL(0);
+    EPD_13IN3E_SPI_Sand(CCSET, CCSET_V, sizeof(CCSET_V));
+    EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_ReadBusyH("prepareData:ccset");
+    DEV_Delay_ms(10);
 }
 
 
@@ -230,17 +274,26 @@ static void EPD_13IN3E_TurnOnDisplay(void)
     printf("Write DRF \r\n");
     DEV_Delay_ms(50);
     EPD_13IN3E_CS_ALL(0);
-    EPD_13IN3E_SPI_Sand(DRF, DRF_V, sizeof(DRF_V));
+    if (s_variant == EPD_13IN3E_VARIANT_T133A01) {
+        EPD_13IN3E_SPI_Sand(DRF, DRF_V_T133A01, sizeof(DRF_V_T133A01));
+    } else {
+        EPD_13IN3E_SPI_Sand(DRF, DRF_V, sizeof(DRF_V));
+    }
     EPD_13IN3E_CS_ALL(1);
     if (EPD_13IN3E_ReadBusyH("turnOnDisplay:refresh") != 0) {
         return;
     }
 
     printf("Write POF \r\n");
+    EPD_13IN3E_Settle();
     EPD_13IN3E_CS_ALL(0);
     EPD_13IN3E_SPI_Sand(POF, POF_V, sizeof(POF_V));
     EPD_13IN3E_CS_ALL(1);
-    // EPD_13IN3E_ReadBusyH();
+    if (s_variant == EPD_13IN3E_VARIANT_T133A01) {
+        /* The vendor sequence waits for power-off to finish (5 s budget);
+         * the Waveshare one does not. */
+        EPD_13IN3E_ReadBusyH("turnOnDisplay:powerOff");
+    }
     printf("Display Done!! \r\n");
 }
 
@@ -264,20 +317,24 @@ void EPD_13IN3E_Init(void)
         EPD_13IN3E_SPI_Sand(AN_TM, AN_TM_V, sizeof(AN_TM_V));
     }
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     EPD_13IN3E_CS_ALL(0);
 	EPD_13IN3E_SPI_Sand(CMD66, CMD66_V, sizeof(CMD66_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     EPD_13IN3E_CS_ALL(0);
 	EPD_13IN3E_SPI_Sand(PSR, PSR_V, sizeof(PSR_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     if (t133a01) {
         /* DC/DC setting, master only — the T133A01 sequence's one extra step. */
         DEV_Digital_Write(EPD_CS_M_PIN, 0);
         EPD_13IN3E_SPI_Sand(DCDC_T133A01, DCDC_V_T133A01, sizeof(DCDC_V_T133A01));
         EPD_13IN3E_CS_ALL(1);
+        EPD_13IN3E_Settle();
     }
 
     EPD_13IN3E_CS_ALL(0);
@@ -287,21 +344,26 @@ void EPD_13IN3E_Init(void)
         EPD_13IN3E_SPI_Sand(CDI, CDI_V, sizeof(CDI_V));
     }
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     EPD_13IN3E_CS_ALL(0);
 	EPD_13IN3E_SPI_Sand(TCON, TCON_V, sizeof(TCON_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     EPD_13IN3E_CS_ALL(0);
 	EPD_13IN3E_SPI_Sand(AGID, AGID_V, sizeof(AGID_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     EPD_13IN3E_CS_ALL(0);
 	EPD_13IN3E_SPI_Sand(PWS, PWS_V, sizeof(PWS_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     if (!t133a01) {
-        /* The T133A01 vendor sequence does not program CCSET. */
+        /* The T133A01 vendor sequence programs CCSET right before each pixel
+         * transfer instead (EPD_13IN3E_PrepareData), not here at init. */
         EPD_13IN3E_CS_ALL(0);
         EPD_13IN3E_SPI_Sand(CCSET, CCSET_V, sizeof(CCSET_V));
         EPD_13IN3E_CS_ALL(1);
@@ -310,14 +372,17 @@ void EPD_13IN3E_Init(void)
     EPD_13IN3E_CS_ALL(0);
 	EPD_13IN3E_SPI_Sand(TRES, TRES_V, sizeof(TRES_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
 	EPD_13IN3E_SPI_Sand(PWR_epd, PWR_V, sizeof(PWR_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
 	EPD_13IN3E_SPI_Sand(EN_BUF, EN_BUF_V, sizeof(EN_BUF_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
     if (t133a01) {
@@ -326,10 +391,12 @@ void EPD_13IN3E_Init(void)
         EPD_13IN3E_SPI_Sand(BTST_P, BTST_P_V, sizeof(BTST_P_V));
     }
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
 	EPD_13IN3E_SPI_Sand(BOOST_VDDP_EN, BOOST_VDDP_EN_V, sizeof(BOOST_VDDP_EN_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
     if (t133a01) {
@@ -338,14 +405,17 @@ void EPD_13IN3E_Init(void)
         EPD_13IN3E_SPI_Sand(BTST_N, BTST_N_V, sizeof(BTST_N_V));
     }
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
 	EPD_13IN3E_SPI_Sand(BUCK_BOOST_VDDN, BUCK_BOOST_VDDN_V, sizeof(BUCK_BOOST_VDDN_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
 	EPD_13IN3E_SPI_Sand(TFT_VCOM_POWER, TFT_VCOM_POWER_V, sizeof(TFT_VCOM_POWER_V));
     EPD_13IN3E_CS_ALL(1);
+    EPD_13IN3E_Settle();
 
 }
 
@@ -367,11 +437,12 @@ void EPD_13IN3E_Clear(UBYTE color)
         buf[j] = Color;
     }
 
+    EPD_13IN3E_PrepareData();
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
     EPD_13IN3E_SendCommand(0x10);
     for (UDOUBLE j = 0; j < EPD_13IN3E_HEIGHT; j++) {
         EPD_13IN3E_SendData2(buf, Width/2);
-        DEV_Delay_ms(1);
+        EPD_13IN3E_RowPace(j);
     }
     EPD_13IN3E_CS_ALL(1);
 
@@ -379,7 +450,7 @@ void EPD_13IN3E_Clear(UBYTE color)
     EPD_13IN3E_SendCommand(0x10);
     for (UDOUBLE j = 0; j < EPD_13IN3E_HEIGHT; j++) {
         EPD_13IN3E_SendData2(buf, Width/2);
-        DEV_Delay_ms(1);
+        EPD_13IN3E_RowPace(j);
     }
     EPD_13IN3E_CS_ALL(1);
 
@@ -394,12 +465,13 @@ void EPD_13IN3E_Display(const UBYTE *Image)
     Width1 = (Width % 2 == 0)? (Width / 2 ): (Width / 2 + 1);
     Height = EPD_13IN3E_HEIGHT;
 
+    EPD_13IN3E_PrepareData();
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
     EPD_13IN3E_SendCommand(0x10);
     for(UDOUBLE i=0; i<Height; i++ )
     {
         EPD_13IN3E_SendData2(Image + i*Width,Width1);
-        DEV_Delay_ms(1);
+        EPD_13IN3E_RowPace(i);
     }
     EPD_13IN3E_CS_ALL(1);
 
@@ -408,7 +480,7 @@ void EPD_13IN3E_Display(const UBYTE *Image)
     for(UDOUBLE i=0; i<Height; i++ )
     {
         EPD_13IN3E_SendData2(Image + i*Width + Width1,Width1);
-        DEV_Delay_ms(1);
+        EPD_13IN3E_RowPace(i);
     }
 
     EPD_13IN3E_CS_ALL(1);
@@ -426,6 +498,8 @@ void EPD_13IN3E_DisplayPart(const UBYTE *Image, UWORD xstart, UWORD ystart, UWOR
 
     UWORD Xend = ((xstart + image_width)%2 == 0)?((xstart + image_width) / 2 - 1): ((xstart + image_width) / 2 );
     UWORD Yend = ystart + image_heigh-1;
+
+    EPD_13IN3E_PrepareData();
     xstart = xstart / 2;
 
     if(xstart > 300 )
@@ -438,7 +512,7 @@ void EPD_13IN3E_DisplayPart(const UBYTE *Image, UWORD xstart, UWORD ystart, UWOR
             for (UDOUBLE j = 0; j < Width1; j++) {
                 EPD_13IN3E_SendData(0x11);
             }
-            DEV_Delay_ms(1);
+            EPD_13IN3E_RowPace(i);
         }
         EPD_13IN3E_CS_ALL(1);
 
@@ -453,7 +527,7 @@ void EPD_13IN3E_DisplayPart(const UBYTE *Image, UWORD xstart, UWORD ystart, UWOR
                 else
                     EPD_13IN3E_SendData(0x11);
             }
-            DEV_Delay_ms(1);
+            EPD_13IN3E_RowPace(i);
         }
         EPD_13IN3E_CS_ALL(1);
     }
@@ -469,7 +543,7 @@ void EPD_13IN3E_DisplayPart(const UBYTE *Image, UWORD xstart, UWORD ystart, UWOR
                 else
                     EPD_13IN3E_SendData(0x11);
             }
-            DEV_Delay_ms(1);
+            EPD_13IN3E_RowPace(i);
         }
         EPD_13IN3E_CS_ALL(1);
 
@@ -480,7 +554,7 @@ void EPD_13IN3E_DisplayPart(const UBYTE *Image, UWORD xstart, UWORD ystart, UWOR
             for (UDOUBLE j = 0; j < Width1; j++) {
                 EPD_13IN3E_SendData(0x11);
             }
-            DEV_Delay_ms(1);
+            EPD_13IN3E_RowPace(i);
         }
         EPD_13IN3E_CS_ALL(1);
     }
@@ -496,7 +570,7 @@ void EPD_13IN3E_DisplayPart(const UBYTE *Image, UWORD xstart, UWORD ystart, UWOR
                 else
                     EPD_13IN3E_SendData(0x11);
             }
-            DEV_Delay_ms(1);
+            EPD_13IN3E_RowPace(i);
         }
         EPD_13IN3E_CS_ALL(1);
 
@@ -511,7 +585,7 @@ void EPD_13IN3E_DisplayPart(const UBYTE *Image, UWORD xstart, UWORD ystart, UWOR
                 else
                     EPD_13IN3E_SendData(0x11);
             }
-            DEV_Delay_ms(1);
+            EPD_13IN3E_RowPace(i);
         }
         EPD_13IN3E_CS_ALL(1);
     }
@@ -531,6 +605,7 @@ void EPD_13IN3E_Show6Block(void)
     {EPD_13IN3E_BLACK, EPD_13IN3E_BLUE, EPD_13IN3E_GREEN,
     EPD_13IN3E_RED, EPD_13IN3E_YELLOW, EPD_13IN3E_WHITE};
 
+    EPD_13IN3E_PrepareData();
     DEV_Digital_Write(EPD_CS_M_PIN, 0);
     EPD_13IN3E_SendCommand(0x10);
     for (k = 0; k < 6; k++) {
@@ -539,7 +614,7 @@ void EPD_13IN3E_Show6Block(void)
                 EPD_13IN3E_SendData(Color_seven[k]|(Color_seven[k]<<4));
             }
         }
-        DEV_Delay_ms(1);
+        EPD_13IN3E_RowPace(j);
     }
     EPD_13IN3E_CS_ALL(1);
 
@@ -551,7 +626,7 @@ void EPD_13IN3E_Show6Block(void)
                 EPD_13IN3E_SendData(Color_seven[k]|(Color_seven[k]<<4));
             }
         }
-        DEV_Delay_ms(1);
+        EPD_13IN3E_RowPace(j);
     }
     EPD_13IN3E_CS_ALL(1);
 

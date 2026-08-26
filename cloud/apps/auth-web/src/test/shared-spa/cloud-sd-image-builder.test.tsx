@@ -17,6 +17,7 @@ import {
   CLOUD_CONFIG_REGION_SIZE,
 } from "../../../../../../cloud-frontend/src/lib/sd-image-patch";
 import { SdImageBuilder } from "../../../../../../cloud-frontend/src/components/SdImageBuilder";
+import { resetReleaseListingCacheForTests } from "../../../../../../cloud-frontend/src/lib/release-lookup";
 
 const fetchMock = vi.fn<typeof fetch>();
 const encoder = new TextEncoder();
@@ -198,6 +199,8 @@ function nameFrame(value = "Kitchen Frame") {
 }
 
 beforeEach(() => {
+  // The listing is memoised in the browser; each test mocks its own release.
+  resetReleaseListingCacheForTests();
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -333,7 +336,7 @@ describe("SdImageBuilder", () => {
       />,
     );
 
-    await screen.findByText(/Could not look up the latest FrameOS release/);
+    await screen.findByText(/Could not complete the release lookup \(HTTP 500/);
   });
 
   it("refuses WiFi values with double quotes before downloading anything", async () => {

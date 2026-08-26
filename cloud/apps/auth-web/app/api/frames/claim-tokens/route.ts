@@ -9,6 +9,7 @@ import {
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import {
+  isValidTimeZoneName,
   boundClaimTokenTtlMs,
   claimTokenExpiry,
   claimTokenPrefix,
@@ -63,6 +64,14 @@ export async function POST(request: NextRequest) {
 
   const body = await readJsonObject(request);
   const name = parseOptionalString(body.name)?.slice(0, 256);
+  // The minting browser's zone, seeded into the frame at enrollment. Same
+  // shape the frame settings accept; anything else is dropped, not refused —
+  // a bad zone must not block adding a frame.
+  const timezoneCandidate = parseOptionalString(body.timezone);
+  const timezone =
+    timezoneCandidate && isValidTimeZoneName(timezoneCandidate)
+      ? timezoneCandidate
+      : null;
 
   // Re-enrollment: bind the token to one of the account's own frames.
   // frameForAccount IS the ownership check (and screens the uuid shape), so
@@ -208,6 +217,7 @@ export async function POST(request: NextRequest) {
       maxUses,
       name: name ?? null,
       sceneSourceFrameId: sceneSourceFrame?.id ?? null,
+      timezone,
       tokenHash: hashSecret(token),
     })
     .returning({ id: frameEnrollmentTokens.id });

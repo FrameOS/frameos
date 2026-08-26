@@ -38,7 +38,12 @@ import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
 import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
-import { cloudFrameSettingKeys, extendedCloudFrameSettingKeys } from '../../utils/cloudFrameSettings'
+import {
+  cloudFrameSettingKeys,
+  extendedCloudFrameSettingKeys,
+  esp32PowerSettingKeys,
+  numericCloudFrameSettingKeys,
+} from '../../utils/cloudFrameSettings'
 import { persistAndPushCloudFrameScenes, type CloudScenePersistOptions } from '../../utils/cloudFrameScenesSave'
 import { clearCloudSceneJsonCache } from '../../models/framesModel'
 import { getBasePath } from '../../utils/getBasePath'
@@ -359,6 +364,12 @@ const FRAME_KEYS: (keyof FrameType)[] = [
   'control_code',
   'schedule',
   'gpio_buttons',
+  // Cloud-managed ESP32 frames keep the power settings top-level (set_settings
+  // keys); without them here the "is the form untouched?" diff ignored every
+  // edit in the Power section and each sync poll reset it to the server copy.
+  // One list, spread from the exported source so a new power key lands here
+  // (and in frameDiffKeys below) without a second hand-copy.
+  ...esp32PowerSettingKeys,
   'network',
   'agent',
   'mountpoints',
@@ -385,16 +396,15 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
 // These fields are edited through text inputs, so frameForm may hold strings like
 // "1080" while the backend returns numbers. Normalize before comparing or submitting,
 // otherwise a saved frame still counts as having unsaved changes.
+// The cloud settings half (interval, rotate, the ESP32 power numbers, …) is
+// the same list the cloud payload builder coerces, so the two cannot drift.
 const NUMERIC_FRAME_KEYS = new Set<keyof FrameType>([
+  ...numericCloudFrameSettingKeys,
   'frame_port',
   'ssh_port',
   'server_port',
   'width',
   'height',
-  'interval',
-  'metrics_interval',
-  'max_http_response_bytes',
-  'rotate',
 ])
 
 function normalizeNumericFrameValue(value: unknown): number | null {
@@ -475,6 +485,12 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   control_code: 'Control code',
   schedule: 'Schedule',
   gpio_buttons: 'GPIO buttons',
+  deep_sleep: 'Deep sleep between renders',
+  deep_sleep_on_battery: 'Deep sleep on battery',
+  wake_check_seconds: 'Wake-up check interval',
+  battery_pin: 'Battery sense GPIO',
+  battery_divider: 'Battery voltage divider',
+  battery_enable_pin: 'Battery enable GPIO',
   network: 'Network settings',
   agent: 'Remote settings',
   mountpoints: 'Mountpoints',
@@ -669,6 +685,11 @@ function frameDiffKeys(): (keyof FrameType)[] {
     return [
       ...(cloudFrameSettingKeys as readonly (keyof FrameType)[]),
       ...(extendedCloudFrameSettingKeys as readonly (keyof FrameType)[]),
+      // ESP32 power keys (top-level on cloud frames). Left out, the "is the
+      // form untouched?" check ignored every Power-section edit and each
+      // sync-status poll reset the form to the server copy mid-typing. On a
+      // Pi frame they are undefined on both sides and diff to nothing.
+      ...(esp32PowerSettingKeys as readonly (keyof FrameType)[]),
       'scenes',
       'schedule',
     ]

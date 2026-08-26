@@ -112,7 +112,7 @@ EMBEDDED_PLATFORMS: dict[str, dict[str, Any]] = {
 EMBEDDED_PLATFORM_ALIASES = EMBEDDED_PLATFORMS[SUPPORTED_EMBEDDED_PLATFORM]["aliases"]
 EMBEDDED_PROJECT_DIR = REPO_ROOT / "embedded" / "esp32"
 # Bump when the firmware project changes so existing "ready" images rebuild on next request
-EMBEDDED_FIRMWARE_VERSION = 49  # RGBX canvas where it fits, dithered 565 stores, contiguous decode budget, OOM-leak restart
+EMBEDDED_FIRMWARE_VERSION = 50  # battery enable pin (reTerminal E10xx divider switch), E1004 battery preset
 EMBEDDED_DEFAULT_PANEL = "EPD_7in5_V2"
 EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES = 4 * 1024 * 1024
 EMBEDDED_PIN_KEYS = ("rst", "dc", "cs", "cs2", "busy", "sck", "mosi", "pwr")
@@ -258,13 +258,21 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS = [
     {"pin": 4, "label": "LEFT"},
     {"pin": 5, "label": "RIGHT"},
 ]
+# Battery through a 2:1 divider on GPIO1 (ADC1_CH0), switched on by GPIO21
+# (Seeed's ESPHome cookbook: adc GPIO1, multiply 2.0, output GPIO21 "battery
+# enable"). Verified on the E1004; the E1001/E1002 wire it the same way per
+# Seeed's schematic, hardware-unverified on those two.
+EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY = {
+    "batteryPin": 1,
+    "batteryDivider": 2.0,
+    "batteryEnablePin": 21,
+}
 # Seeed reTerminal E1004 (ESP32-S3, 32MB flash, 8MB PSRAM): 13.3" 1200x1600
 # Spectra 6 (T133A01) on the E-series SPI bus — SCK7/MOSI9, CS10, DC11,
 # BUSY13 as the E1001/E1002 — but with the panel's second chip-select on
 # GPIO2, reset on GPIO38 and a panel power enable on GPIO12 (the pins
-# ESPHome's integrated-board definition for this model bakes in). Buttons
-# and the microSD slot are not published; they stay unset until read off
-# the schematic. The panel is driven as EPD_13in3e with the T133A01 tuning
+# ESPHome's integrated-board definition for this model bakes in). Buttons are
+# the E-series trio (GPIO3/4/5); the microSD slot's pins are still unpublished. The panel is driven as EPD_13in3e with the T133A01 tuning
 # the firmware selects from this preset (components/frameos_display).
 EMBEDDED_SEEED_RETERMINAL_E1004_PINS = {
     "rst": 38,
@@ -404,6 +412,9 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+        # Same switched 2:1 divider as the E1004 (GPIO1 ADC, GPIO21 enable),
+        # per Seeed schematic, hardware-unverified on E1001/E1002.
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
     },
     "seeed_reterminal_e1002": {
         "device": "waveshare.EPD_7in3e",
@@ -411,6 +422,9 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+        # Same switched 2:1 divider as the E1004 (GPIO1 ADC, GPIO21 enable),
+        # per Seeed schematic, hardware-unverified on E1001/E1002.
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
     },
     "seeed_reterminal_e1004": {
         # 1200x1600 on an 8MB module: the 16-bit render canvas is what makes
@@ -419,6 +433,15 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "flashSize": "32MB",
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E1004_PINS,
+        # Same three keys as the E1001/E1002 (Seeed's ESPHome cookbook: GPIO3
+        # green, GPIO4/5 white, active low).
+        "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+        # 5000 mAh cell through the E-series divider (verified on hardware).
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
+        # A 5000 mAh frame: deep sleep between renders while on battery, waking
+        # every 15 min for control-plane commands; stays connected on USB.
+        "deepSleepOnBattery": True,
+        "wakeCheckSeconds": 900,
     },
     "elecrow_crowpanel_5in79": {
         "device": "waveshare.EPD_5in79",
@@ -1050,6 +1073,19 @@ def embedded_hardware_preset_for_frame(frame: Frame) -> str:
     return ""
 
 
+# Preset keys that are user-editable afterwards (the frame's Power section):
+# apply_embedded_hardware_preset fills them in only while they are unset under
+# either spelling (device_config carries camelCase or snake_case, see
+# _embedded_device_config_value).
+EMBEDDED_PRESET_SEED_ONLY_KEYS = (
+    ("batteryPin", "battery_pin"),
+    ("batteryDivider", "battery_divider"),
+    ("batteryEnablePin", "battery_enable_pin"),
+    ("deepSleepOnBattery", "deep_sleep_on_battery"),
+    ("wakeCheckSeconds", "wake_check_seconds"),
+)
+
+
 def apply_embedded_hardware_preset(frame: Frame) -> str:
     preset_key = embedded_hardware_preset_for_frame(frame)
     if not preset_key:
@@ -1081,12 +1117,13 @@ def apply_embedded_hardware_preset(frame: Frame) -> str:
         }
     else:
         device_config.pop("sdCardAssets", None)
-    # Battery sensing defaults, same policy as pins: the preset knows the
-    # board's divider, and the device can still override via console/NVS.
-    if "batteryPin" in preset:
-        device_config["batteryPin"] = preset["batteryPin"]
-    if "batteryDivider" in preset:
-        device_config["batteryDivider"] = preset["batteryDivider"]
+    # Battery wiring and the power policy the board ships with are seeds, not
+    # overrides: the Power section (SPA and cloud) edits these keys, and this
+    # runs again on every PATCH and before every build, so a value the user
+    # already set has to survive — the same rule as gpio_buttons above.
+    for key, snake_key in EMBEDDED_PRESET_SEED_ONLY_KEYS:
+        if key in preset and device_config.get(key) is None and device_config.get(snake_key) is None:
+            device_config[key] = preset[key]
     frame.device_config = device_config
     return preset_key
 
@@ -1610,6 +1647,9 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
     battery_divider = _config_value("batteryDivider", "battery_divider")
     if isinstance(battery_divider, (int, float)) and not isinstance(battery_divider, bool):
         lines.append(f"#define FRAMEOS_DEFAULT_BATTERY_DIVIDER {float(battery_divider)}f")
+    battery_enable_pin = _config_value("batteryEnablePin", "battery_enable_pin")
+    if isinstance(battery_enable_pin, int) and not isinstance(battery_enable_pin, bool):
+        lines.append(f"#define FRAMEOS_DEFAULT_BATTERY_ENABLE_PIN {battery_enable_pin}")
     return "\n".join(lines) + "\n"
 
 
@@ -1729,6 +1769,9 @@ def embedded_provisioning_plan(frame: Frame) -> dict[str, Any]:
     battery_divider = _embedded_device_config_value(frame, "batteryDivider", "battery_divider")
     if isinstance(battery_divider, (int, float)) and not isinstance(battery_divider, bool):
         settings.append(_provisioning_setting("battery_divider", float(battery_divider)))
+    battery_enable_pin = _embedded_device_config_value(frame, "batteryEnablePin", "battery_enable_pin")
+    if isinstance(battery_enable_pin, int) and not isinstance(battery_enable_pin, bool):
+        settings.append(_provisioning_setting("battery_enable_pin", battery_enable_pin))
 
     # Compile-time only: the console has no key for any of these, so a frame
     # that needs them would come up quietly missing them.

@@ -1120,36 +1120,64 @@ static void ws_handle_get_metrics(const cJSON *id)
     for (size_t i = 0; i < count; i++) free(samples[i].json);
 }
 
-/* The scene the render task is currently on, "" until one is selected
- * (selection happens on the first render pass, minutes after boot). */
-static void current_scene_id(char *out, size_t out_len)
+/* How long WS-task and cloud-task callers wait for the Nim runtime. A render
+ * holds it for its whole duration (90 s+ on a 13.3" panel); the hub closes
+ * an unauthenticated socket after 15 s, so a hello must never queue behind
+ * one. When busy, the fields are simply left out and ws_poll_active_scene
+ * reports the scene once the render is done. */
+#define FOS_CLOUD_NIM_WAIT_MS 250
+
+/* One look at the interpreted runtime — the scene the render task is
+ * currently on ("" until one is selected, which happens on the first render
+ * pass, minutes after boot) and its state — from a single bounded
+ * acquisition of the runtime lock. `ok` false means the runtime was busy
+ * past the wait and NOTHING below is known: callers leave the fields out
+ * instead of sending "" / {}, because the hub folds hello.states,
+ * scene_ack.active_scene and state.states into last_state, and an empty
+ * default sent mid-render would erase the last known scene. */
+typedef struct {
+    bool ok;
+    char scene_id[128];
+    cJSON *states; /* caller owns (nim_snapshot_release); NULL = none given */
+} nim_snapshot_t;
+
+static void nim_snapshot_take(nim_snapshot_t *snap)
 {
-    out[0] = '\0';
-    const char *info = frameos_nim_scene_info_json();
+    memset(snap, 0, sizeof(*snap));
+    const char *info = NULL;
+    const char *state = NULL;
+    if (!frameos_nim_scene_snapshot_wait(FOS_CLOUD_NIM_WAIT_MS, &info, &state)) return;
+    snap->ok = true;
     cJSON *info_json = info && info[0] ? cJSON_Parse(info) : NULL;
     if (info_json) {
-        json_field_str(info_json, "currentSceneId", out, out_len);
+        json_field_str(info_json, "currentSceneId", snap->scene_id, sizeof(snap->scene_id));
         cJSON_Delete(info_json);
     }
+    if (state && state[0]) snap->states = cJSON_Parse(state);
 }
 
-/* Attach the hello-shaped state fields to msg. */
-static void add_state_fields(cJSON *msg)
+static void nim_snapshot_release(nim_snapshot_t *snap)
+{
+    cJSON_Delete(snap->states);
+    snap->states = NULL;
+}
+
+/* Attach the hello-shaped state fields to msg. `snap->states` moves into
+ * msg; the scene fields are omitted entirely when the snapshot timed out. */
+static void add_state_fields(cJSON *msg, nim_snapshot_t *snap)
 {
     cJSON_AddStringToObject(msg, "frameos_version", esp_app_get_description()->version);
     add_hardware_json(msg);
-    cJSON *states = NULL;
-    const char *state_json = frameos_nim_scene_state_json();
-    if (state_json && state_json[0]) states = cJSON_Parse(state_json);
-    if (!states) states = cJSON_CreateObject();
-    cJSON_AddItemToObject(msg, "states", states);
-    /* Same top-level spot the Linux client puts it (helloStatePayload); the
-     * hub folds it into last_state, which is where the workspace reads the
-     * frame's active scene from. */
-    char scene_id[128] = "";
-    current_scene_id(scene_id, sizeof(scene_id));
-    if (scene_id[0]) {
-        cJSON_AddStringToObject(msg, "active_scene", scene_id);
+    if (snap->ok) {
+        cJSON *states = snap->states ? snap->states : cJSON_CreateObject();
+        snap->states = NULL;
+        if (states) cJSON_AddItemToObject(msg, "states", states);
+        /* Same top-level spot the Linux client puts it (helloStatePayload);
+         * the hub folds it into last_state, which is where the workspace
+         * reads the frame's active scene from. */
+        if (snap->scene_id[0]) {
+            cJSON_AddStringToObject(msg, "active_scene", snap->scene_id);
+        }
     }
     /* Cloud-installed scenes: report the checksum of the payload the render
      * task last applied, not the store's etag (which is the literal "local"
@@ -1175,29 +1203,40 @@ static char s_active_scene_reported[128] = "";
 static void ws_poll_active_scene(void)
 {
     if (!s_ws_client || !s_ws_ready) return;
-    char scene_id[128] = "";
-    current_scene_id(scene_id, sizeof(scene_id));
-    if (!scene_id[0] || strcmp(scene_id, s_active_scene_reported) == 0) return;
-    cJSON *msg = cJSON_CreateObject();
-    if (!msg) return;
-    cJSON_AddStringToObject(msg, "type", "state");
-    add_state_fields(msg);
-    ws_send_json(msg);
-    cJSON_Delete(msg);
-    strlcpy(s_active_scene_reported, scene_id, sizeof(s_active_scene_reported));
+    nim_snapshot_t snap;
+    nim_snapshot_take(&snap);
+    if (snap.ok && snap.scene_id[0] && strcmp(snap.scene_id, s_active_scene_reported) != 0) {
+        cJSON *msg = cJSON_CreateObject();
+        if (msg) {
+            cJSON_AddStringToObject(msg, "type", "state");
+            add_state_fields(msg, &snap);
+            ws_send_json(msg);
+            cJSON_Delete(msg);
+            strlcpy(s_active_scene_reported, snap.scene_id, sizeof(s_active_scene_reported));
+        }
+    }
+    nim_snapshot_release(&snap);
 }
 
 static void ws_send_hello(void)
 {
+    /* One lock acquisition for the whole hello (states + active scene). */
+    nim_snapshot_t snap;
+    nim_snapshot_take(&snap);
     cJSON *msg = cJSON_CreateObject();
-    if (!msg) return;
-    cJSON_AddStringToObject(msg, "type", "hello");
-    add_state_fields(msg);
-    ws_send_json(msg);
-    cJSON_Delete(msg);
+    if (msg) {
+        cJSON_AddStringToObject(msg, "type", "hello");
+        add_state_fields(msg, &snap);
+        ws_send_json(msg);
+        cJSON_Delete(msg);
+    }
     /* The hello just carried whatever scene is current (possibly none yet);
-     * the poll only needs to speak up when that changes. */
-    current_scene_id(s_active_scene_reported, sizeof(s_active_scene_reported));
+     * the poll only needs to speak up when that changes. A hello that had to
+     * leave the scene out (runtime busy) remembers "" so the poll reports it
+     * as soon as the render lets go. */
+    strlcpy(s_active_scene_reported, snap.ok ? snap.scene_id : "",
+            sizeof(s_active_scene_reported));
+    nim_snapshot_release(&snap);
 }
 
 /* challenge → auth: sign the base64-decoded nonce bytes with the enrolled
@@ -1253,15 +1292,25 @@ static void ws_ack(const cJSON *id, bool ok, const char *error)
     cJSON_Delete(msg);
 }
 
-static void ws_send_state(const cJSON *id)
+/* get_state reply. The hub takes a `state` message without `states` as the
+ * whole payload being the state, so a snapshot that timed out sends nothing
+ * and the verb is refused instead (runtime_busy); the provider retries. */
+static bool ws_send_state(const cJSON *id)
 {
-    cJSON *msg = cJSON_CreateObject();
-    if (!msg) return;
-    if (id) cJSON_AddItemToObject(msg, "id", cJSON_Duplicate(id, 1));
-    cJSON_AddStringToObject(msg, "type", "state");
-    add_state_fields(msg);
-    ws_send_json(msg);
-    cJSON_Delete(msg);
+    nim_snapshot_t snap;
+    nim_snapshot_take(&snap);
+    bool sent = false;
+    cJSON *msg = snap.ok ? cJSON_CreateObject() : NULL;
+    if (msg) {
+        if (id) cJSON_AddItemToObject(msg, "id", cJSON_Duplicate(id, 1));
+        cJSON_AddStringToObject(msg, "type", "state");
+        add_state_fields(msg, &snap);
+        ws_send_json(msg);
+        cJSON_Delete(msg);
+        sent = true;
+    }
+    nim_snapshot_release(&snap);
+    return sent;
 }
 
 static void ws_reboot_task(void *arg)
@@ -1321,9 +1370,14 @@ static void ws_poll_scene_ack(void)
     if (s_scene_ack_checksum[0]) {
         cJSON_AddStringToObject(msg, "checksum", s_scene_ack_checksum);
     }
-    char scene_id[128] = "";
-    current_scene_id(scene_id, sizeof(scene_id));
-    cJSON_AddStringToObject(msg, "active_scene", scene_id);
+    /* The render task is often still on the first render of the new payload
+     * (holding the runtime lock) when this runs: then active_scene is left
+     * out — the hub keeps its last known scene and ws_poll_active_scene
+     * reports the new one once the render is done. */
+    nim_snapshot_t snap;
+    nim_snapshot_take(&snap);
+    if (snap.ok) cJSON_AddStringToObject(msg, "active_scene", snap.scene_id);
+    nim_snapshot_release(&snap);
     ws_send_json(msg);
     cJSON_Delete(msg);
 }
@@ -1981,8 +2035,9 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * once at init, so this one costs a reboot) and `scaling_mode` (a per-decode
  * fallback fit, applied live on the next render pass). The power keys —
  * `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up
- * by the render loop's next pass) and `battery_pin` / `battery_divider`
- * (deferred reboot: the ADC is set up once at boot) — round out the profile.
+ * by the render loop's next pass) and `battery_pin` / `battery_divider` /
+ * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
+ * round out the profile.
  * Any other key refuses the WHOLE verb with setting_not_allowed, mirroring
  * the Nim runtime, so the provider never half-applies a settings push. */
 static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
@@ -1999,7 +2054,7 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         "timezone",
         "timezone_data",
         "deep_sleep", "deep_sleep_on_battery", "wake_check_seconds",
-        "battery_pin", "battery_divider",
+        "battery_pin", "battery_divider", "battery_enable_pin",
         /* 2026.8.31: what the local admin API and the console already set. */
         "debug", "max_http_response_bytes", "gpio_buttons",
     };
@@ -2147,6 +2202,21 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         battery_changed = battery_changed || config->battery_divider != divider;
         config->battery_divider = divider;
     }
+    /* The GPIO that switches the divider on around each read (Seeed
+     * reTerminal E10xx: 21); -1 = always-on divider. Same NVS key the
+     * console's `set battery_enable_pin` and the backend settings poll's
+     * batteryEnablePin write. */
+    const cJSON *battery_enable_pin = cJSON_GetObjectItem(settings, "battery_enable_pin");
+    if (battery_enable_pin != NULL) {
+        if (!cJSON_IsNumber(battery_enable_pin) || battery_enable_pin->valuedouble < -1 ||
+            battery_enable_pin->valuedouble > 48) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        int8_t pin = (int8_t)battery_enable_pin->valuedouble;
+        battery_changed = battery_changed || config->battery_enable_pin != pin;
+        config->battery_enable_pin = pin;
+    }
     /* Debug logging: the render loop pushes config->debug_logging into the
      * Nim runtime every pass (fos_client.c), so this applies live. */
     const cJSON *debug = cJSON_GetObjectItem(settings, "debug");
@@ -2226,8 +2296,10 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         ws_schedule_reboot();
     }
     if (battery_changed && !rotate_changed) {
-        ESP_LOGW(TAG, "ws: battery sensing changed (pin %d, divider %.2f); restarting to re-init the ADC",
-                 (int)config->battery_pin, (double)config->battery_divider);
+        ESP_LOGW(TAG, "ws: battery sensing changed (pin %d, divider %.2f, enable pin %d); "
+                 "restarting to re-init the ADC",
+                 (int)config->battery_pin, (double)config->battery_divider,
+                 (int)config->battery_enable_pin);
         ws_schedule_reboot();
     }
     if (rotate_changed) {
@@ -2357,8 +2429,8 @@ static void ws_handle_message(const char *data, size_t len)
                  running_part ? running_part->label : "?");
         frameos_nim_log_hook(event);
     } else if (strcmp(type, "get_state") == 0) {
-        ws_ack(id, true, NULL);
-        ws_send_state(id);
+        if (!ws_send_state(id)) ws_ack(id, false, "runtime_busy");
+        else ws_ack(id, true, NULL);
     } else if (strcmp(type, "render") == 0) {
         fos_client_render_now();
         ws_ack(id, true, NULL);
@@ -2459,19 +2531,29 @@ static void ws_handle_message(const char *data, size_t len)
 }
 
 /* Jittered exponential backoff for the redial, as promised by
- * docs/cloud-frames.md. esp_websocket_client owns the retry loop, so the
- * schedule is applied by rewriting its reconnect timeout from the
- * disconnect/error events — the place the component documents for it.
+ * docs/cloud-frames.md. The cloud task is the ONLY redialer: the client is
+ * created with auto-reconnect off (ws_start), so every failed dial, lost
+ * session and clean server close ends that client, and the cloud task
+ * recreates it once s_ws_redial_due_us passes. The backoff state lives
+ * across those clients — ws_start deliberately does not touch it — and only
+ * a completed handshake (`ready`) or a fresh link (boot, re-enrollment)
+ * resets it to the minimum; otherwise a hub that closes every attempt (4401
+ * on a revoked token, 4408 during a long render, a restart loop) would be
+ * redialed at the minimum delay forever.
  * The delay is drawn uniformly from [next/2, next], so a fleet that lost the
  * provider at the same moment does not come back in lockstep. */
 static void ws_backoff_reset(void)
 {
     s_ws_backoff_ms = FOS_CLOUD_WS_BACKOFF_MIN_MS;
     s_ws_backoff_advanced = false;
-    if (s_ws_client) {
-        esp_websocket_client_set_reconnect_timeout(s_ws_client, (int)s_ws_backoff_ms);
-    }
 }
+
+/* Set from the event handler when the socket went away without a session
+ * (or lost one): the cloud task recreates the client once this deadline
+ * passes. esp_websocket_client never redialed after a clean server close —
+ * the hub's 4408 (challenge unanswered within its 15 s) is exactly that — so
+ * before this the link stayed dead until the 120 s stall watchdog. */
+static volatile int64_t s_ws_redial_due_us = 0;
 
 /* One failed attempt can raise both ERROR and DISCONNECTED (and a clean close
  * raises CLOSED), so the advance is made idempotent per attempt instead of
@@ -2482,7 +2564,7 @@ static void ws_backoff_advance(void)
     s_ws_backoff_advanced = true;
     uint32_t half = s_ws_backoff_ms / 2;
     uint32_t delay_ms = half + (esp_random() % (half + 1));
-    esp_websocket_client_set_reconnect_timeout(s_ws_client, (int)delay_ms);
+    s_ws_redial_due_us = esp_timer_get_time() + (int64_t)delay_ms * 1000;
     ESP_LOGI(TAG, "ws: reconnecting in %lu ms", (unsigned long)delay_ms);
     if (s_ws_backoff_ms < FOS_CLOUD_WS_BACKOFF_MAX_MS) {
         s_ws_backoff_ms *= 2;
@@ -2513,6 +2595,9 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
     (void)arg;
     (void)base;
     esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
+    /* ws_stop() detaches the handle before tearing the client down; whatever
+     * that client still emits must not schedule redials for its successor. */
+    if (data && data->client != s_ws_client) return;
     switch (event_id) {
         case WEBSOCKET_EVENT_CONNECTED:
             s_ws_ready = false;
@@ -2520,6 +2605,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
             s_metrics_granted = false;
             s_ws_backoff_advanced = false; /* a new attempt got this far */
             ESP_LOGI(TAG, "ws: connected, sending hello");
+            printf("ws: connected, sending hello\n");
             FOS_MEM_LOG_MILESTONE(TAG, "cloud-connected");
             ws_send_hello();
             break;
@@ -2530,10 +2616,28 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
                          data->error_handle.esp_ws_handshake_status_code == 403)) {
                 ws_note_auth_rejected("handshake 401/403");
             }
+            /* The transport logs are silenced (see ws_start) and INFO is
+             * compiled out, so this WARN is the only trace of WHY a dial
+             * failed — one line per attempt, paced by the backoff. */
+            if (data) {
+                ESP_LOGW(TAG, "ws: dial failed: type=%d tls_err=0x%x tls_stack=0x%x errno=%d http=%d "
+                              "(clock %s)",
+                         (int)data->error_handle.error_type,
+                         (unsigned)data->error_handle.esp_tls_last_esp_err,
+                         (unsigned)data->error_handle.esp_tls_stack_err,
+                         (int)data->error_handle.esp_transport_sock_errno,
+                         (int)data->error_handle.esp_ws_handshake_status_code,
+                         fos_wifi_time_synced() ? "synced" : "not synced");
+            }
             ws_backoff_advance();
             break;
         case WEBSOCKET_EVENT_DISCONNECTED:
         case WEBSOCKET_EVENT_CLOSED:
+            /* printf, not ESP_LOGI (compiled out): a close code on the console
+             * is what distinguishes the hub's 4408 auth timeout from Wi-Fi. */
+            printf("ws: %s (close code %d)\n",
+                   event_id == WEBSOCKET_EVENT_CLOSED ? "closed" : "disconnected",
+                   data ? (int)data->close_status_code : -1);
             s_ws_ready = false;
             s_logs_granted = false;
             s_metrics_granted = false;
@@ -2721,14 +2825,19 @@ static void ws_start(void)
     snprintf(s_ws_headers, sizeof(s_ws_headers), "Authorization: Bearer %s\r\n",
              s_access_token);
 
-    s_ws_backoff_ms = FOS_CLOUD_WS_BACKOFF_MIN_MS;
+    /* s_ws_backoff_ms is NOT reset here: this is also the redial path, and
+     * the whole point of the backoff is to outlive the client it was
+     * advanced on (ws_backoff_reset). */
+    s_ws_redial_due_us = 0;
     esp_websocket_client_config_t config = {
         .uri = s_ws_uri,
         .headers = s_ws_headers,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        /* Starting point only: ws_backoff_advance() rewrites this after every
-         * failed attempt (jittered exponential, 5 s → 5 min). */
-        .reconnect_timeout_ms = FOS_CLOUD_WS_BACKOFF_MIN_MS,
+        /* No component-side retry loop: it never redialed after a clean
+         * server close anyway, and two redialers (its fixed timer plus the
+         * cloud task's jittered backoff) would dial twice per attempt. The
+         * cloud task recreates the client at s_ws_redial_due_us. */
+        .disable_auto_reconnect = true,
         .network_timeout_ms = 10000,
         .buffer_size = 4096,
         .task_stack = 10240,
@@ -2770,9 +2879,10 @@ static void ws_start(void)
 static void ws_stop(void)
 {
     if (!s_ws_client) return;
-    esp_websocket_client_stop(s_ws_client);
-    esp_websocket_client_destroy(s_ws_client);
-    s_ws_client = NULL;
+    esp_websocket_client_handle_t client = s_ws_client;
+    s_ws_client = NULL; /* detach first: late events from it are ignored */
+    esp_websocket_client_stop(client);
+    esp_websocket_client_destroy(client);
     s_ws_ready = false;
     s_logs_granted = false;
     s_metrics_granted = false;
@@ -2805,6 +2915,7 @@ static void ws_start(void)
 }
 
 static void ws_stop(void) {}
+static void ws_backoff_reset(void) {}
 static void ws_poll_scene_ack(void) {}
 static void ws_poll_logs(void) {}
 static bool ws_process_asset_jobs(void) { return false; }
@@ -2893,6 +3004,7 @@ static void cloud_task(void *arg)
                 continue;
             }
             if (!ws_started) {
+                ws_backoff_reset(); /* a fresh link starts from the minimum */
                 ws_start();
                 ws_started = true;
                 ws_stall_since_us = 0;
@@ -2904,9 +3016,25 @@ static void cloud_task(void *arg)
              * IS the cloud task — and cheap at this cadence. */
             if (fos_cloud_ws_connected()) {
                 ws_stall_since_us = 0;
+                s_ws_redial_due_us = 0;
             } else {
                 int64_t now_us = esp_timer_get_time();
-                if (ws_stall_since_us == 0) {
+                if (s_ws_redial_due_us != 0) {
+                    /* A close/error scheduled a redial (jittered backoff):
+                     * the dead client is expected, not a stall, so the
+                     * watchdog stays quiet until the redial has been placed
+                     * — otherwise it would recreate the client every 120 s
+                     * on the same fault, under a backoff meant to reach
+                     * 5 min. Recreate it here, the one task allowed to. */
+                    if (now_us >= s_ws_redial_due_us) {
+                        s_ws_redial_due_us = 0;
+                        printf("ws: redialing (next backoff %lu ms)\n",
+                               (unsigned long)s_ws_backoff_ms);
+                        ws_stop();
+                        ws_start();
+                        ws_stall_since_us = now_us;
+                    }
+                } else if (ws_stall_since_us == 0) {
                     ws_stall_since_us = now_us;
                 } else if (now_us - ws_stall_since_us > FOS_CLOUD_WS_STALL_RESTART_US) {
                     ESP_LOGW(TAG, "ws: no session for %d s; recreating the client",

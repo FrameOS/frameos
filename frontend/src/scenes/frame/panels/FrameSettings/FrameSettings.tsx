@@ -43,8 +43,10 @@ import {
 } from '../../../../devices'
 import { secureToken } from '../../../../utils/secureToken'
 import {
+  cloudFrameSupportsEsp32BatteryEnablePin,
   cloudFrameSupportsEsp32ExtendedSettings,
   cloudFrameSupportsEsp32TimeZone,
+  esp32BatteryEnablePinCloudFrameSettingsMinVersion,
   cloudFrameSupportsExtendedSettings,
   cloudFrameSupportsHardwareSettings,
   esp32ExtendedCloudFrameSettingsMinVersion,
@@ -1273,6 +1275,16 @@ export function FrameSettings({
     esp32CloudProfile && cloudFrameSupportsEsp32ExtendedSettings(frame.frameos_version)
   // 2026.8.34: the chip maps an IANA name onto a POSIX TZ rule (fos_tz.c).
   const cloudEsp32TimeZoneSupported = esp32CloudProfile && cloudFrameSupportsEsp32TimeZone(frame.frameos_version)
+  // 2026.8.39: the battery divider's enable GPIO joined the power keys. Below
+  // the floor the field renders disabled with the reason (the push would be
+  // refused whole), same as the tails above.
+  const cloudEsp32BatteryEnablePinSupported =
+    esp32CloudProfile && cloudFrameSupportsEsp32BatteryEnablePin(frame.frameos_version)
+  const cloudBatteryEnablePinDisabledReason = cloudEsp32BatteryEnablePinSupported
+    ? undefined
+    : frame.frameos_version
+    ? `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+    : `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
   const cloudDevice = cloudProfile ? frame.hardware?.device ?? '' : ''
   const showBackendSection = frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-backend')
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
@@ -1366,6 +1378,7 @@ export function FrameSettings({
   const powerDeviceConfig = frameForm.device_config ?? frame.device_config ?? {}
   const cloudPowerSettings: PowerSettingsValues = {
     batteryDivider: frameForm.battery_divider,
+    batteryEnablePin: frameForm.battery_enable_pin,
     batteryPin: frameForm.battery_pin,
     deepSleep: frameForm.deep_sleep === true,
     deepSleepOnBattery: frameForm.deep_sleep_on_battery === true,
@@ -1374,6 +1387,7 @@ export function FrameSettings({
   const setCloudPowerSettings = (patch: Partial<PowerSettingsValues>): void => {
     setFrameFormValues({
       ...('batteryDivider' in patch ? { battery_divider: patch.batteryDivider } : {}),
+      ...('batteryEnablePin' in patch ? { battery_enable_pin: patch.batteryEnablePin } : {}),
       ...('batteryPin' in patch ? { battery_pin: patch.batteryPin } : {}),
       ...('deepSleep' in patch ? { deep_sleep: patch.deepSleep } : {}),
       ...('deepSleepOnBattery' in patch ? { deep_sleep_on_battery: patch.deepSleepOnBattery } : {}),
@@ -1382,6 +1396,7 @@ export function FrameSettings({
   }
   const embeddedPowerSettings: PowerSettingsValues = {
     batteryDivider: powerDeviceConfig.batteryDivider ?? powerDeviceConfig.battery_divider,
+    batteryEnablePin: powerDeviceConfig.batteryEnablePin ?? powerDeviceConfig.battery_enable_pin,
     batteryPin: powerDeviceConfig.batteryPin ?? powerDeviceConfig.battery_pin,
     deepSleep: (powerDeviceConfig.deepSleep ?? powerDeviceConfig.deep_sleep) === true,
     deepSleepOnBattery: (powerDeviceConfig.deepSleepOnBattery ?? powerDeviceConfig.deep_sleep_on_battery) === true,
@@ -1390,8 +1405,20 @@ export function FrameSettings({
   const setEmbeddedPowerSettings = (patch: Partial<PowerSettingsValues>): void => {
     const next: NonNullable<FrameType['device_config']> = { ...powerDeviceConfig }
     const write = (
-      key: 'deepSleep' | 'deepSleepOnBattery' | 'wakeCheckSeconds' | 'batteryPin' | 'batteryDivider',
-      snakeKey: 'deep_sleep' | 'deep_sleep_on_battery' | 'wake_check_seconds' | 'battery_pin' | 'battery_divider'
+      key:
+        | 'deepSleep'
+        | 'deepSleepOnBattery'
+        | 'wakeCheckSeconds'
+        | 'batteryPin'
+        | 'batteryDivider'
+        | 'batteryEnablePin',
+      snakeKey:
+        | 'deep_sleep'
+        | 'deep_sleep_on_battery'
+        | 'wake_check_seconds'
+        | 'battery_pin'
+        | 'battery_divider'
+        | 'battery_enable_pin'
     ): void => {
       if (!(key in patch)) {
         return
@@ -1412,6 +1439,7 @@ export function FrameSettings({
     write('wakeCheckSeconds', 'wake_check_seconds')
     write('batteryPin', 'battery_pin')
     write('batteryDivider', 'battery_divider')
+    write('batteryEnablePin', 'battery_enable_pin')
     setFrameFormValues({ device_config: next })
   }
   // Backend/on-device planes: real ESP32 hardware only. A virtual frame has
@@ -2313,6 +2341,7 @@ export function FrameSettings({
                   <PowerSettingsFields
                     value={cloudPowerSettings}
                     onChange={setCloudPowerSettings}
+                    batteryEnablePinDisabledReason={cloudBatteryEnablePinDisabledReason}
                     footnote="Power settings need a FrameOS firmware from 2026.8.21 on — older firmware refuses the whole settings push. Update the frame first if saving fails."
                   />
                 </div>

@@ -46,9 +46,31 @@ int frameos_nim_render_1bpp(uint8_t *buf, size_t len);
 /* Free-form info string (Nim/runtime versions, render counter). */
 const char *frameos_nim_info(void);
 /* JSON with current interpreted-scene state and selectable scenes. */
+/* Packed-framebuffer allocator hooks. main/ installs fos_framebuffer_acquire
+ * and fos_framebuffer_release so every render packs into the buffer reserved
+ * at boot; the render task releases it through the same pair. */
+void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len),
+                                         void (*release)(void *ptr));
 const char *frameos_nim_scene_info_json(void);
+/* Same, but gives up after timeout_ms (-1 = wait forever, 0 = try once).
+ * NULL means exactly one thing: the wait timed out because the runtime is
+ * busy (a render holds the runtime lock for its whole duration, over a
+ * minute on a 13.3" panel). Every other outcome — including "no runtime
+ * compiled in" and "no scene selected yet" — is a non-NULL JSON string, so
+ * a caller can tell "unknown right now" from "genuinely nothing" and leave
+ * a field out rather than report an empty one as the truth. */
+const char *frameos_nim_scene_info_json_wait(int timeout_ms);
 /* JSON state for the active interpreted scene. */
 const char *frameos_nim_scene_state_json(void);
+const char *frameos_nim_scene_state_json_wait(int timeout_ms);
+/* Both of the above from ONE acquisition of the runtime lock, for callers
+ * that build a hello/state message (the cloud WebSocket task must not queue
+ * behind a render three times over). Returns false, and sets both out
+ * pointers to NULL, when the wait timed out; true otherwise, with both
+ * strings valid until the next scene-info/state call. Either out pointer
+ * may be NULL. */
+bool frameos_nim_scene_snapshot_wait(int timeout_ms, const char **info_json,
+                                     const char **state_json);
 /* Select an interpreted scene by id; the next render initializes it. */
 bool frameos_nim_set_scene(const char *scene_id);
 
@@ -186,6 +208,22 @@ void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes);
  * even with PSRAM free (0 = off). Lets the spill decode path be validated
  * on frames that would otherwise never hit real memory pressure. */
 void fos_nim_http_set_spill_force_bytes(size_t threshold);
+
+/* Streaming GET: the caller pulls the body off the socket in pieces, so no
+ * copy of it is ever buffered in PSRAM or spilled to flash. Same policy,
+ * redirect and error handling as the buffering fetch. Returns NULL with a
+ * diagnostic in err_buf on transport failure; an HTTP error status comes
+ * back as an open stream with *out_status >= 400 (read the body for the
+ * detail, or just close it). *out_content_length is -1 when the response
+ * has no Content-Length. */
+typedef struct fos_nim_http_stream fos_nim_http_stream;
+fos_nim_http_stream *fos_nim_http_stream_open(
+    const char *url, const char *headers, size_t headers_len,
+    int timeout_ms, int *out_status, int64_t *out_content_length,
+    char *err_buf, size_t err_buf_len);
+/* > 0 bytes read, 0 at end of body, < 0 on a transport error. */
+int fos_nim_http_stream_read(fos_nim_http_stream *stream, void *buf, size_t len);
+void fos_nim_http_stream_close(fos_nim_http_stream *stream);
 
 #ifdef __cplusplus
 }

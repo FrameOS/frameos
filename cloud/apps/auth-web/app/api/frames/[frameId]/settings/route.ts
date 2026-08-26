@@ -3,10 +3,11 @@ import { frames } from '@frameos-cloud/db'
 import { recordAuditEvent } from '../../../../../src/lib/audit'
 import { NextRequest, NextResponse } from 'next/server'
 import { csrfResponse } from '../../../../../src/lib/csrf'
-import { fetchTzSlice } from '../../../../../src/lib/tz-slice'
 import { jsonError, readJsonObject, requireDatabase } from '../../../../../src/lib/device-flow'
 import {
-  enqueueFrameCommand,
+  enqueueFrameSettingsPush,
+  esp32BatteryEnablePinFrameSettingKeys,
+  esp32BatteryEnablePinFrameSettingsMinVersion,
   esp32ExtendedFrameSettingKeys,
   esp32ExtendedFrameSettingsMinVersion,
   esp32MaxGpioButtons,
@@ -21,10 +22,10 @@ import {
   frameSupportsExtendedSettings,
   frameSupportsHardwareSettings,
   frameSupportsSettingsFrom,
+  frameSupportsTimeZoneSetting,
   hardwareFrameSettingKeys,
   hardwareFrameSettingsMinVersion,
   mergeFrameSettings,
-  supersedePendingCommands,
   validateFrameSettings,
 } from '../../../../../src/lib/frames'
 import { rateLimitResponse } from '../../../../../src/lib/rate-limit'
@@ -93,14 +94,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       min_frameos_version: esp32ExtendedFrameSettingsMinVersion,
     })
   }
-  // Same shape for the 2026.8.34 time zone key.
+  // Same shape for the 2026.8.34 time zone key (frameSupportsTimeZoneSetting
+  // is the gate the enrollment seed shares).
   if (
-    isEsp32 &&
-    !frameSupportsSettingsFrom(esp32TimeZoneFrameSettingsMinVersion, frame.frameosVersion) &&
+    !frameSupportsTimeZoneSetting(frame) &&
     Object.keys(settings).some((key) => esp32TimeZoneFrameSettingKeys.has(key))
   ) {
     return jsonError('settings_need_newer_firmware', 400, {
       min_frameos_version: esp32TimeZoneFrameSettingsMinVersion,
+    })
+  }
+  // And for the 2026.8.39 battery enable pin.
+  if (
+    isEsp32 &&
+    !frameSupportsSettingsFrom(esp32BatteryEnablePinFrameSettingsMinVersion, frame.frameosVersion) &&
+    Object.keys(settings).some((key) => esp32BatteryEnablePinFrameSettingKeys.has(key))
+  ) {
+    return jsonError('settings_need_newer_firmware', 400, {
+      min_frameos_version: esp32BatteryEnablePinFrameSettingsMinVersion,
     })
   }
   if (isEsp32 && Array.isArray(settings.gpio_buttons) && settings.gpio_buttons.length > esp32MaxGpioButtons) {
@@ -161,22 +172,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // the command: the display name is provider data, and older firmware
   // without the set_settings verb would refuse the push for nothing.
   const needsDevicePush = !isEsp32 || Object.keys(settings).some((key) => key !== 'name')
-  let command: Awaited<ReturnType<typeof enqueueFrameCommand>> | undefined
+  let command: Awaited<ReturnType<typeof enqueueFrameSettingsPush>> | undefined
   if (needsDevicePush) {
-    // An ESP32 has no tz database: the zone's tzdata slice rides with the
-    // name (fos_tz.h). Command payload only — never stored in frames.settings.
-    let devicePayload: Record<string, unknown> = settings
-    if (isEsp32 && typeof settings.timezone === 'string' && settings.timezone.trim()) {
-      const slice = await fetchTzSlice(settings.timezone)
-      if (slice) devicePayload = { ...settings, timezone_data: slice }
-    }
-    await supersedePendingCommands(db, frame.id, 'set_settings')
-    command = await enqueueFrameCommand(db, {
-      createdByAccountId: session.accountId,
-      frameId: frame.id,
-      payload: { settings: devicePayload },
-      type: 'set_settings',
-    })
+    // Builds the device payload (an ESP32 gets its tzdata slice next to the
+    // zone name) and supersedes any undelivered set_settings first.
+    command = await enqueueFrameSettingsPush(db, frame, settings, { createdByAccountId: session.accountId })
   }
 
   await recordAuditEvent(db, {

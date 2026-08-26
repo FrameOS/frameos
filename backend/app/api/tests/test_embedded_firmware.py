@@ -901,6 +901,13 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
             {"pin": 4, "label": "LEFT"},
             {"pin": 5, "label": "RIGHT"},
         ]
+        # Same switched 2:1 divider as the E1004 per Seeed's schematic
+        # (hardware-unverified on these two); no shipped power policy.
+        assert frame.device_config["batteryPin"] == 1
+        assert frame.device_config["batteryDivider"] == 2.0
+        assert frame.device_config["batteryEnablePin"] == 21
+        assert "deepSleepOnBattery" not in frame.device_config
+        assert "wakeCheckSeconds" not in frame.device_config
         assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
 
 
@@ -921,7 +928,19 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
         "rst": 38, "dc": 11, "cs": 10, "cs2": 2,
         "busy": 13, "sck": 7, "mosi": 9, "pwr": 12,
     }
-    assert not frame.gpio_buttons  # none published for this board yet
+    # The E-series trio (Seeed's ESPHome cookbook), same as the E1001/E1002.
+    assert frame.gpio_buttons == [
+        {"pin": 3, "label": "REFRESH"},
+        {"pin": 4, "label": "LEFT"},
+        {"pin": 5, "label": "RIGHT"},
+    ]
+    # Battery behind a switched 2:1 divider, and a battery power policy: the
+    # board ships sleeping between renders on battery, checking in every 15 min.
+    assert frame.device_config["batteryPin"] == 1
+    assert frame.device_config["batteryDivider"] == 2.0
+    assert frame.device_config["batteryEnablePin"] == 21
+    assert frame.device_config["deepSleepOnBattery"] is True
+    assert frame.device_config["wakeCheckSeconds"] == 900
     assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
     plan = embedded_provisioning_plan(frame)
     settings = _provisioned(plan)
@@ -930,9 +949,62 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert settings["panel"] == "EPD_13in3e"
     assert settings["pins"] == "rst=38,dc=11,cs=10,cs2=2,busy=13,sck=7,mosi=9,pwr=12"
     assert settings["render_mode"] == "local"
+    # The console has a `set` key for every battery/power value the image
+    # would bake in, so the generic-image path provisions the same frame.
+    assert settings["battery_pin"] == "1"
+    assert settings["battery_divider"] == "2.0"
+    assert settings["battery_enable_pin"] == "21"
+    assert settings["deep_sleep_on_battery"] == "1"
+    assert settings["wake_check"] == "900"
     assert embedded_sdkconfig_defaults_for_frame(frame) == (
         "sdkconfig.defaults;sdkconfig.defaults.32mb-ota"
     )
+
+
+def test_embedded_hardware_preset_only_seeds_user_editable_power_settings():
+    """The preset runs again on every PATCH and before every build
+    (ensure_embedded_frame_defaults), so the battery wiring and power policy
+    it ships are seeds: a value the user set in the Power section survives."""
+    frame = Frame(id=9, embedded={"hardwarePreset": "seeed_reterminal_e1004"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device_config["deepSleepOnBattery"] is True
+    assert frame.device_config["wakeCheckSeconds"] == 900
+
+    # The user unchecks "Deep sleep on battery", shortens the wake check and
+    # rewires the battery sense; the next save re-applies the preset.
+    frame.device_config = {
+        **frame.device_config,
+        "deepSleepOnBattery": False,
+        "wakeCheckSeconds": 300,
+        "batteryPin": -1,
+        "batteryDivider": 3.0,
+        "batteryEnablePin": -1,
+    }
+    ensure_embedded_frame_defaults(frame)
+
+    assert frame.device_config["deepSleepOnBattery"] is False
+    assert frame.device_config["wakeCheckSeconds"] == 300
+    assert frame.device_config["batteryPin"] == -1
+    assert frame.device_config["batteryDivider"] == 3.0
+    assert frame.device_config["batteryEnablePin"] == -1
+    # Board-fixed values still come from the preset.
+    assert frame.device_config["pins"]["cs2"] == 2
+    assert frame.device_config["psramMB"] == 8
+
+    # Clearing a key hands it back to the preset on the next apply, while a
+    # snake_case spelling of it (older SPA saves) still counts as set.
+    frame.device_config = {
+        **{
+            key: value for key, value in frame.device_config.items()
+            if key not in ("deepSleepOnBattery", "wakeCheckSeconds")
+        },
+        "wake_check_seconds": 120,
+    }
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device_config["deepSleepOnBattery"] is True
+    assert "wakeCheckSeconds" not in frame.device_config
+    assert frame.device_config["wake_check_seconds"] == 120
+    assert frame.device_config["batteryPin"] == -1
 
 
 def test_embedded_hardware_preset_for_elecrow_crowpanel_5in79():
@@ -1053,6 +1125,7 @@ def test_generated_config_bakes_power_settings():
             "wakeSchedule": True,
             "batteryPin": 2,
             "batteryDivider": 2.0,
+            "batteryEnablePin": 21,
             "pins": {"cs2": 8},
         },
     )
@@ -1062,6 +1135,7 @@ def test_generated_config_bakes_power_settings():
     assert "#define FRAMEOS_DEFAULT_WAKE_SCHEDULE 1" in header
     assert "#define FRAMEOS_DEFAULT_BATTERY_PIN 2" in header
     assert "#define FRAMEOS_DEFAULT_BATTERY_DIVIDER 2.0f" in header
+    assert "#define FRAMEOS_DEFAULT_BATTERY_ENABLE_PIN 21" in header
     assert "#define FRAMEOS_DEFAULT_PIN_CS2 8" in header
     assert f"#define FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES {EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES}" in header
     assert "#define FRAMEOS_DEFAULT_SERVER_SEND_LOGS 1" in header

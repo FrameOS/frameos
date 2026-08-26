@@ -24,9 +24,10 @@
  * what changes is that the allocation can no longer fail later. */
 
 /* Reserve the buffer. Call once at boot, after the panel is known and before
- * the network stack starts. No-op on boards with PSRAM, and a no-op (with a
- * log line saying so) when the reservation would not leave enough internal
- * heap for Wi-Fi and TLS. */
+ * the network stack starts. Boards with PSRAM reserve it there (a fragmented
+ * PSRAM heap lost the 960 KB packed buffer on the 8 MB E1004); PSRAM-less
+ * boards reserve internal RAM, or skip (with a log line saying so) when the
+ * reservation would not leave enough heap for Wi-Fi and TLS. */
 void fos_framebuffer_reserve(size_t len);
 
 /* Borrow a panel-sized buffer: the reservation when it fits and is not
@@ -42,9 +43,9 @@ void fos_framebuffer_release(uint8_t *buf);
  * the status JSON so "why did this render fail" is answerable from a log. */
 size_t fos_framebuffer_reserved_bytes(void);
 
-/* Reservation policy, split out so the host tests can pin it: reserve only on
- * PSRAM-less boards, only when the buffer fits, and only when enough internal
- * heap survives it for the network stack. */
+/* Reservation policy, split out so the host tests can pin it: always on
+ * PSRAM boards; on PSRAM-less boards only when the buffer fits and enough
+ * internal heap survives it for the network stack. */
 bool fos_framebuffer_should_reserve(size_t len, size_t psram_total, size_t internal_free);
 
 /* Internal heap that must remain after the reservation. Wi-Fi plus lwIP plus

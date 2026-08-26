@@ -22,6 +22,7 @@ import { POST as sendCommand } from "../../../app/api/frames/[frameId]/command/r
 import { GET as listPendingCommands } from "../../../app/api/frames/[frameId]/commands/route";
 import { DELETE as cancelPendingCommand } from "../../../app/api/frames/[frameId]/commands/[commandId]/route";
 import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/route";
+import { POST as postFrameEvent } from "../../../app/api/frames/[frameId]/event/[eventName]/route";
 import { GET as getFrameLogs } from "../../../app/api/frames/[frameId]/logs/route";
 import { GET as getFrameLogsFull } from "../../../app/api/frames/[frameId]/logs/full/route";
 import { POST as revokeFrameRoute } from "../../../app/api/frames/[frameId]/revoke/route";
@@ -331,6 +332,121 @@ async function publishSceneVersion(
     .set({ latestVersion: version, riskFlags })
     .where(eq(storeScenes.id, sceneId));
 }
+
+describe("claim token time zone", () => {
+  // A frame cannot know where it is; the browser that adds it can. The zone
+  // rides the claim token, enrollment stores it as the frame's `timezone`
+  // setting and queues the same set_settings push the settings panel makes —
+  // frames used to come up on UTC and show the wrong time.
+  it("seeds the enrolled frame's time zone from the token", async () => {
+    await signIn();
+    const keys = deviceKeypair();
+    const mint = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { name: "Hall clock", timezone: "Europe/Brussels" },
+        { origin: baseUrl },
+      ),
+    );
+    expect(mint.status).toBe(200);
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const response = await enroll(claim_token, keys.publicKeyBase64);
+    expect(response.status).toBe(200);
+    const { frame_id } = (await response.json()) as { frame_id: string };
+
+    const [frame] = await db.select().from(frames).where(eq(frames.id, frame_id));
+    expect(frame?.settings).toEqual({ timezone: "Europe/Brussels" });
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    const push = commands.find((command) => command.type === "set_settings");
+    expect(push?.payload).toEqual({ settings: { timezone: "Europe/Brussels" } });
+  });
+
+  it("drops a malformed zone rather than refusing the token", async () => {
+    await signIn();
+    const keys = deviceKeypair();
+    const mint = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { timezone: "not a zone; drop table" },
+        { origin: baseUrl },
+      ),
+    );
+    expect(mint.status).toBe(200);
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const response = await enroll(claim_token, keys.publicKeyBase64);
+    expect(response.status).toBe(200);
+    const { frame_id } = (await response.json()) as { frame_id: string };
+    const [frame] = await db.select().from(frames).where(eq(frames.id, frame_id));
+    expect(frame?.settings ?? null).toBeNull();
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands.some((command) => command.type === "set_settings")).toBe(false);
+  });
+
+  // The enrollment seed shares the settings route's firmware gate: ESP32
+  // firmware before 2026.8.34 refuses the WHOLE set_settings verb on
+  // `timezone`, so an early board keeps the stored setting and gets no push
+  // (the seed used to skip the gate and queue a push the device then refused).
+  it("stores but does not push the zone to an esp32 below the 2026.8.34 floor", async () => {
+    await signIn();
+    const keys = deviceKeypair();
+    const mint = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { name: "Early esp32", timezone: "Europe/Brussels" },
+        { origin: baseUrl },
+      ),
+    );
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const response = await enroll(claim_token, keys.publicKeyBase64, {
+      frameos_version: "2026.8.33",
+      hardware: { height: 480, platform: "ESP32-S3", width: 800 },
+    });
+    expect(response.status).toBe(200);
+    const { frame_id } = (await response.json()) as { frame_id: string };
+    const [frame] = await db.select().from(frames).where(eq(frames.id, frame_id));
+    expect(frame?.settings).toEqual({ timezone: "Europe/Brussels" });
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    expect(commands.some((command) => command.type === "set_settings")).toBe(false);
+  });
+
+  it("pushes the zone to an esp32 that reports 2026.8.34 or newer", async () => {
+    await signIn();
+    const keys = deviceKeypair();
+    const mint = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { name: "Current esp32", timezone: "Europe/Brussels" },
+        { origin: baseUrl },
+      ),
+    );
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const response = await enroll(claim_token, keys.publicKeyBase64, {
+      frameos_version: "2026.8.34",
+      hardware: { height: 480, platform: "ESP32-S3", width: 800 },
+    });
+    expect(response.status).toBe(200);
+    const { frame_id } = (await response.json()) as { frame_id: string };
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    const push = commands.find((command) => command.type === "set_settings");
+    // The tzdata slice rides along when the lookup succeeds (network); the
+    // zone name itself is what the test pins.
+    expect((push?.payload as { settings: Record<string, unknown> }).settings.timezone).toBe(
+      "Europe/Brussels",
+    );
+  });
+});
 
 describe("cloud-managed frame enrollment", () => {
   it("enrolls with a single-use claim token, born active (auto-confirmed)", async () => {
@@ -1794,6 +1910,7 @@ describe("frame management API", () => {
         "wake_check_seconds",
         "battery_pin",
         "battery_divider",
+        "battery_enable_pin",
       ].sort(),
     );
     // The ESP32 profile: exactly what ws_handle_set_settings applies.
@@ -1808,6 +1925,7 @@ describe("frame management API", () => {
         "wake_check_seconds",
         "battery_pin",
         "battery_divider",
+        "battery_enable_pin",
         "debug",
         "max_http_response_bytes",
         "gpio_buttons",
@@ -2114,6 +2232,19 @@ describe("frame management API", () => {
       error: "settings_need_newer_firmware",
       min_frameos_version: "2026.8.34",
     });
+    // Past the floor, the value still has to be an IANA name: the length
+    // cap alone used to let anything through to the device.
+    await db.update(frames).set({ frameosVersion: "2026.8.34" }).where(eq(frames.id, frame_id));
+    const junkZone = await pushFrameSettings(
+      postJson(
+        `/api/frames/${frame_id}/settings`,
+        { settings: { timezone: "not a zone; drop table" } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(junkZone.status).toBe(400);
+    expect(((await junkZone.json()) as { error: string }).error).toBe("setting_not_allowed");
   });
 
   it("refuses a mixed esp32 settings payload without applying the name", async () => {
@@ -2199,6 +2330,23 @@ describe("frame management API", () => {
     });
     expect(tooMany.status).toBe(400);
     expect(((await tooMany.json()) as { error: string }).error).toBe("invalid_settings");
+
+    // The 2026.8.39 battery enable pin: its own floor, refused whole below it
+    // (the firmware would refuse the entire push, battery_pin included).
+    const enableTooEarly = await push({ battery_pin: 1, battery_enable_pin: 21 });
+    expect(enableTooEarly.status).toBe(400);
+    expect((await enableTooEarly.json()) as { error: string; min_frameos_version?: string }).toMatchObject({
+      error: "settings_need_newer_firmware",
+      min_frameos_version: "2026.8.39",
+    });
+    await db.update(frames).set({ frameosVersion: "2026.8.39" }).where(eq(frames.id, frame_id));
+    const enableAccepted = await push({ battery_pin: 1, battery_enable_pin: 21 });
+    expect(enableAccepted.status).toBe(200);
+    const [withEnablePin] = await db.select().from(frames).where(eq(frames.id, frame_id));
+    expect(withEnablePin?.settings).toMatchObject({ battery_enable_pin: 21, battery_pin: 1 });
+    // -1 = always on; anything past the chip's GPIO range is not a pin.
+    expect((await push({ battery_enable_pin: -1 })).status).toBe(200);
+    expect((await push({ battery_enable_pin: 49 })).status).toBe(400);
   });
 
   it("renames a non-esp32 frame in the DB AND pushes set_settings to the device", async () => {
@@ -2297,6 +2445,126 @@ describe("frame management API", () => {
     payload: { sceneId: "scene-1", state: {} },
     weekday: 0,
     ...overrides,
+  });
+
+  // Schedules name scenes the way the workspace does — by store scene uuid.
+  // The device only knows the ids inside the deployed scenes.json, so the
+  // push translates them; the stored schedule keeps the uuid for the panel.
+  it("sends the device runtime scene ids in the schedule, keeps store uuids in the stored copy", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const scene = await createStoreScene(accountId, { name: "Agenda" });
+    // v2's scenes.json carries `${scene.id}-v2` as its runtime id.
+    await publishSceneVersion(scene.id, 2);
+    const assign = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(assign.status).toBe(200);
+
+    const onEvent = scheduleEvent({ payload: { sceneId: scene.id, state: {} } });
+    const response = await pushFrameSchedule(
+      postJson(
+        `/api/frames/${frame_id}/schedule`,
+        { schedule: { events: [onEvent] } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(response.status).toBe(200);
+
+    const detail = await getFrameDetail(
+      getRequest(`/api/frames/${frame_id}`),
+      routeParams(frame_id),
+    );
+    const { frame } = (await detail.json()) as {
+      frame: { schedule?: unknown };
+    };
+    expect(frame.schedule).toEqual({ events: [onEvent] });
+
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    const push = commands.find((command) => command.type === "set_schedule");
+    expect(push?.payload).toEqual({
+      schedule: {
+        events: [{ ...onEvent, payload: { sceneId: `${scene.id}-v2`, state: {} } }],
+      },
+    });
+  });
+
+  // The device holds the scenes.json of the version it ACKED, not the one
+  // the assignment now points at: a schedule (or activate) naming the newer
+  // version's runtime id lands `apply-failed` until the next set_scenes push
+  // is acked. The per-frame deploy ledger (frames.deployed_scene_state,
+  // promoted by the hub on checksum ack) is what says which version that is.
+  it("names the scene ids of the version the device acked, not the newer assignment", async () => {
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const scene = await createStoreScene(accountId, { name: "Agenda" });
+    const assign = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(assign.status).toBe(200);
+    // The device acked v1 (what the hub writes on a matching checksum) …
+    const [assigned] = await db.select().from(frames).where(eq(frames.id, frame_id));
+    expect(assigned?.assignedSceneState).toMatchObject({ [scene.id]: { version: 1 } });
+    await db
+      .update(frames)
+      .set({ deployedSceneState: assigned?.assignedSceneState })
+      .where(eq(frames.id, frame_id));
+    // … and v2 was published since, so the latest non-yanked version (what
+    // the next push would ship) no longer matches what the device holds.
+    await publishSceneVersion(scene.id, 2);
+
+    const onEvent = scheduleEvent({ payload: { sceneId: scene.id, state: {} } });
+    const response = await pushFrameSchedule(
+      postJson(
+        `/api/frames/${frame_id}/schedule`,
+        { schedule: { events: [onEvent] } },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(response.status).toBe(200);
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+    const push = commands.find((command) => command.type === "set_schedule");
+    // createStoreScene's v1 scenes.json carries the store id as its runtime id.
+    expect(push?.payload).toEqual({
+      schedule: {
+        events: [{ ...onEvent, payload: { sceneId: scene.id, state: {} } }],
+      },
+    });
+
+    // Activate goes through the same lookup.
+    const activate = await postFrameEvent(
+      postJson(`/api/frames/${frame_id}/event/setCurrentScene`, { sceneId: scene.id }, { origin: baseUrl }),
+      { params: Promise.resolve({ eventName: "setCurrentScene", frameId: frame_id }) },
+    );
+    expect(activate.status).toBe(200);
+    const sceneCommand = (
+      await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame_id))
+    ).find((command) => command.type === "set_current_scene");
+    expect(sceneCommand?.payload).toEqual({ scene_id: scene.id });
   });
 
   it("persists the schedule, round-trips it, and enqueues a durable set_schedule", async () => {

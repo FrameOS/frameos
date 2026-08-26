@@ -803,6 +803,9 @@ export const frameEnrollmentTokens = pgTable(
       .references(() => accounts.id, { onDelete: "cascade" }),
     tokenHash: text("token_hash").notNull(),
     name: text("name"),
+    // IANA zone of the browser that minted the token; enrollment seeds the
+    // frame's `timezone` setting from it so a new frame shows local time.
+    timezone: text("timezone"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     usedAt: timestamp("used_at", { withTimezone: true }),
     maxUses: integer("max_uses").default(1).notNull(),

@@ -18,6 +18,7 @@ file(STRINGS "${QUICKJS_DIR}/VERSION" QUICKJS_VERSION LIMIT_COUNT 1)
 idf_component_register(
     SRCS
         "${QUICKJS_DIR}/quickjs.c"
+        "fos_quickjs_tz.c"
         "${QUICKJS_DIR}/dtoa.c"
         "${QUICKJS_DIR}/libregexp.c"
         "${QUICKJS_DIR}/libunicode.c"
@@ -33,9 +34,25 @@ idf_component_register(
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     _GNU_SOURCE
     CONFIG_VERSION="${QUICKJS_VERSION}"
-    # newlib's struct tm has no tm_gmtoff; the device runs UTC (SNTP), so the
-    # local-time offset is genuinely 0. tm_isdst exists and is 0 in UTC.
-    "tm_gmtoff=tm_isdst")
+    # newlib's struct tm has no tm_gmtoff. quickjs.c reads it exactly once,
+    # in getTimezoneOffset(): `res = -tm.tm_gmtoff / 60;`, where `ti` is the
+    # time_t it just converted. This expansion turns that line into the same
+    # value derived from mktime() (fos_quickjs_tz.c). The earlier
+    # `tm_gmtoff=tm_isdst` here — "the device runs UTC" — made every JS Date
+    # in every interpreted scene run on UTC once frames got real zones.
+    "tm_gmtoff=tm_isdst * 0 + fos_quickjs_neg_gmtoff_seconds(&ti)")
+# The expansion above depends on that one line's spelling; refuse a QuickJS
+# whose source moved rather than silently ship UTC clocks again.
+file(READ "${QUICKJS_DIR}/quickjs.c" FOS_QUICKJS_SOURCE)
+string(FIND "${FOS_QUICKJS_SOURCE}" "res = -tm.tm_gmtoff / 60;" FOS_QUICKJS_GMTOFF_LINE)
+if(FOS_QUICKJS_GMTOFF_LINE EQUAL -1)
+    message(FATAL_ERROR "frameos_quickjs: getTimezoneOffset() in quickjs.c no longer reads "
+                        "`res = -tm.tm_gmtoff / 60;` — update the tm_gmtoff expansion and "
+                        "fos_quickjs_tz.h to match, or JS Date loses its time zone on the device")
+endif()
+unset(FOS_QUICKJS_SOURCE)
+set_source_files_properties("${QUICKJS_DIR}/quickjs.c" PROPERTIES
+    COMPILE_OPTIONS "-include;${CMAKE_CURRENT_LIST_DIR}/include/fos_quickjs_tz.h")
 
 # newlib has no malloc_usable_size; quickjs.c only uses it in the default
 # allocator's accounting, which fos_js_new_runtime replaces. Upstream's own

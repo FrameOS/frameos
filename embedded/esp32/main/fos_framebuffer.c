@@ -16,9 +16,13 @@ static const char *TAG = "fos_fb";
 bool fos_framebuffer_should_reserve(size_t len, size_t psram_total, size_t internal_free)
 {
     if (len == 0) return false;
-    /* PSRAM boards allocate these buffers from PSRAM, where a per-render
-     * malloc has never been the failing step. Leave that path alone. */
-    if (psram_total > 0) return false;
+    /* PSRAM boards reserve too, out of PSRAM. "A malloc there never fails"
+     * held until the 8 MB reTerminal E1004 with its 1200x1600 canvas: after
+     * a scene switch the 960 KB packed buffer lost to fragmentation
+     * ("render failed: out of memory for 960000 byte packed framebuffer",
+     * largest free block 813 KB) and every render errored until a reboot.
+     * The buffer is needed every cycle anyway; holding it costs nothing. */
+    if (psram_total > 0) return true;
     if (internal_free < len) return false;
     return internal_free - len >= FOS_FRAMEBUFFER_MIN_HEAP_AFTER_RESERVE;
 }
@@ -52,23 +56,29 @@ void fos_framebuffer_reserve(size_t len)
         return;
     }
 
-    uint8_t *buf = heap_caps_malloc(len, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint8_t *buf = psram_total > 0
+        ? heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+        : heap_caps_malloc(len, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!buf) {
         /* should_reserve() said it fits, so this means the largest free block
          * is already smaller than the total — i.e. we are being called later
          * than intended. Say so; the fix is the call site, not the size. */
         ESP_LOGW(TAG, "framebuffer not reserved: %u bytes free but no block that big "
                       "(largest=%u) — reserve earlier in boot",
-                 (unsigned)internal_free,
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+                 (unsigned)(psram_total > 0
+                                ? heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+                                : internal_free),
+                 (unsigned)heap_caps_get_largest_free_block(
+                     psram_total > 0 ? (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+                                     : (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
         return;
     }
 
     s_reserved = buf;
     s_reserved_len = len;
-    ESP_LOGI(TAG, "framebuffer reserved: %u bytes held for the panel (no PSRAM on this "
-                  "module), %u internal bytes left for the rest of the system",
-             (unsigned)len,
+    ESP_LOGI(TAG, "framebuffer reserved: %u bytes held for the panel in %s, "
+                  "%u internal bytes left for the rest of the system",
+             (unsigned)len, psram_total > 0 ? "PSRAM" : "internal RAM",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 

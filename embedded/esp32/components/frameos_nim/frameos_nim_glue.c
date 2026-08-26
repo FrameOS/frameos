@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <setjmp.h>
 #include <string.h>
+#include <limits.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -103,6 +104,17 @@ static bool nim_lock_take(void)
     return xSemaphoreTake(s_nim_lock, portMAX_DELAY) == pdTRUE;
 }
 
+/* Bounded variant for callers that must not park behind a render: the
+ * cloud WebSocket task builds its hello from the scene state, and a hello
+ * that waits 90 s for a 13.3" render to release the lock arrives long after
+ * the hub's 15 s auth timeout closed the socket (seen on the E1004). */
+static bool nim_lock_take_for(int timeout_ms)
+{
+    if (s_nim_lock == NULL) return true;
+    if (timeout_ms < 0) return xSemaphoreTake(s_nim_lock, portMAX_DELAY) == pdTRUE;
+    return xSemaphoreTake(s_nim_lock, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+}
+
 static void nim_lock_give(void)
 {
     if (s_nim_lock != NULL) xSemaphoreGive(s_nim_lock);
@@ -155,10 +167,39 @@ size_t frameos_nim_canvas_reserved(void)
  * calls are serialized by s_nim_lock) and free it if the render aborts. */
 static void *s_pending_render_buffer = NULL;
 
+/* main/ owns the panel-sized buffer (fos_framebuffer.c reserves it at boot);
+ * it hands the acquire/release pair down here so the packed buffer the Nim
+ * render fills is that reservation, not a fresh PSRAM allocation that a
+ * fragmented heap can refuse. Without the hooks the old malloc path runs. */
+static void *(*s_render_buffer_acquire)(size_t len) = NULL;
+static void (*s_render_buffer_release)(void *ptr) = NULL;
+
+void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len),
+                                         void (*release)(void *ptr))
+{
+    s_render_buffer_acquire = acquire;
+    s_render_buffer_release = release;
+}
+
+static void render_buffer_dispose(void *ptr)
+{
+    if (ptr == NULL) return;
+    if (s_render_buffer_release) {
+        s_render_buffer_release(ptr);
+    } else {
+        free(ptr);
+    }
+}
+
 void *frameos_nim_alloc_render_buffer(size_t len)
 {
-    void *ptr = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!ptr) ptr = malloc(len);
+    void *ptr = NULL;
+    if (s_render_buffer_acquire) {
+        ptr = s_render_buffer_acquire(len);
+    } else {
+        ptr = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!ptr) ptr = malloc(len);
+    }
     s_pending_render_buffer = ptr;
     return ptr;
 }
@@ -168,7 +209,7 @@ void frameos_nim_free_render_buffer(void *ptr)
     if (ptr != NULL && ptr == s_pending_render_buffer) {
         s_pending_render_buffer = NULL;
     }
-    free(ptr);
+    render_buffer_dispose(ptr);
 }
 
 /* ---------------------------------------------------------- Nim heap
@@ -491,7 +532,7 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     } else {
         nim_oom_abort_note("render");
         if (s_pending_render_buffer != NULL) {
-            free(s_pending_render_buffer);
+            render_buffer_dispose(s_pending_render_buffer);
         }
         *buf = NULL;
         *len = 0;
@@ -518,22 +559,54 @@ const char *frameos_nim_info(void)
     return info;
 }
 
-const char *frameos_nim_scene_info_json(void)
+const char *frameos_nim_scene_info_json_wait(int timeout_ms)
 {
     if (!s_nim_ready) return "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
-    if (!nim_lock_take()) return "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"busy\":true,\"scenes\":[]}";
+    if (!nim_lock_take_for(timeout_ms)) return NULL;
     const char *json = fos_nim_scene_info_json_impl();
+    nim_lock_give();
+    return json;
+}
+
+const char *frameos_nim_scene_info_json(void)
+{
+    const char *json = frameos_nim_scene_info_json_wait(-1);
+    return json ? json : "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"busy\":true,\"scenes\":[]}";
+}
+
+const char *frameos_nim_scene_state_json_wait(int timeout_ms)
+{
+    if (!s_nim_ready) return "{}";
+    if (!nim_lock_take_for(timeout_ms)) return NULL;
+    const char *json = fos_nim_scene_state_json_impl();
     nim_lock_give();
     return json;
 }
 
 const char *frameos_nim_scene_state_json(void)
 {
-    if (!s_nim_ready) return "{}";
-    if (!nim_lock_take()) return "{\"busy\":true}";
-    const char *json = fos_nim_scene_state_json_impl();
+    const char *json = frameos_nim_scene_state_json_wait(-1);
+    return json ? json : "{\"busy\":true}";
+}
+
+bool frameos_nim_scene_snapshot_wait(int timeout_ms, const char **info_json,
+                                     const char **state_json)
+{
+    if (info_json) *info_json = NULL;
+    if (state_json) *state_json = NULL;
+    if (!s_nim_ready) {
+        if (info_json) *info_json = "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}";
+        if (state_json) *state_json = "{}";
+        return true;
+    }
+    /* One acquisition for both: the two Nim procs write separate static
+     * buffers (sceneInfoBuffer / sceneStateBuffer), so both stay valid after
+     * the lock is released, until the next call of either. */
+    if (!nim_lock_take_for(timeout_ms)) return false;
+    if (info_json) *info_json = fos_nim_scene_info_json_impl();
+    if (state_json) *state_json = fos_nim_scene_state_json_impl();
     nim_lock_give();
-    return json;
+    return true;
 }
 
 bool frameos_nim_set_scene(const char *scene_id)
@@ -1144,6 +1217,64 @@ void fos_nim_http_set_spill_force_bytes(size_t threshold)
     s_http_spill_force_bytes = threshold;
 }
 
+/* ------------------------------------------------------------------------
+ * Streaming fetch: the body is pulled straight off the socket by the caller
+ * (pixie's windowed JPEG/PNG decoders on the Nim side) instead of being
+ * buffered in PSRAM or spilled to flash first. This is what lets a board
+ * whose canvas already owns most of its PSRAM (8 MB reTerminal E1004 with a
+ * 1200x1600 panel) show a 2 MB gallery image at all: the buffering path had
+ * ~1.5 MB free and a /state partition too small to spill into. */
+struct fos_nim_http_stream {
+    esp_http_client_handle_t client;
+};
+
+static esp_http_client_handle_t http_open_request(
+    const char *method, const char *url,
+    const void *body, size_t body_len,
+    const char *headers, size_t headers_len,
+    int timeout_ms, int *out_status, int64_t *out_content_length,
+    char *err_buf, size_t err_buf_len);
+
+fos_nim_http_stream *fos_nim_http_stream_open(
+    const char *url, const char *headers, size_t headers_len,
+    int timeout_ms, int *out_status, int64_t *out_content_length,
+    char *err_buf, size_t err_buf_len)
+{
+    int64_t content_length = -1;
+    esp_http_client_handle_t client = http_open_request(
+        "GET", url, NULL, 0, headers, headers_len, timeout_ms,
+        out_status, &content_length, err_buf, err_buf_len);
+    *out_content_length = content_length;
+    if (client == NULL) return NULL;
+    fos_nim_http_stream *stream = calloc(1, sizeof(*stream));
+    if (stream == NULL) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        if (err_buf != NULL && err_buf_len > 0) snprintf(err_buf, err_buf_len, "out of memory");
+        return NULL;
+    }
+    stream->client = client;
+    return stream;
+}
+
+int fos_nim_http_stream_read(fos_nim_http_stream *stream, void *buf, size_t len)
+{
+    if (stream == NULL || stream->client == NULL || buf == NULL) return -1;
+    if (len > (size_t)INT_MAX) len = INT_MAX;
+    return esp_http_client_read(stream->client, (char *)buf, (int)len);
+}
+
+void fos_nim_http_stream_close(fos_nim_http_stream *stream)
+{
+    if (stream == NULL) return;
+    if (stream->client != NULL) {
+        esp_http_client_close(stream->client);
+        esp_http_client_cleanup(stream->client);
+        stream->client = NULL;
+    }
+    free(stream);
+}
+
 typedef enum {
     FOS_NIM_BODY_OK,
     FOS_NIM_BODY_OOM,
@@ -1270,15 +1401,20 @@ static fos_nim_body_status_t http_spill_remaining(
     esp_http_client_handle_t client, const char *url,
     fos_nim_http_chunk *chunks, size_t chunk_count,
     size_t buffered, size_t limit,
-    char **out_path, size_t *out_total)
+    char **out_path, size_t *out_total, size_t *out_limit)
 {
     *out_path = NULL;
     *out_total = 0;
 
+    /* The storage cap (free /state space on SPIFFS, none on an SD card) can
+     * be far below the frame's max_http_response_bytes. Report the cap that
+     * actually cut the body, or the "response exceeded 6291456 bytes" error
+     * blames a 6 MB limit for a 2 MB image that hit a 400 KB /state cap. */
     size_t spill_limit = limit;
     if (s_http_spill_max_bytes > 0 && s_http_spill_max_bytes < spill_limit) {
         spill_limit = s_http_spill_max_bytes;
     }
+    *out_limit = spill_limit;
     if (buffered > spill_limit) {
         fos_nim_http_free_chunks(chunks, chunk_count);
         return FOS_NIM_BODY_TOO_BIG;
@@ -1362,21 +1498,30 @@ static fos_nim_body_status_t http_spill_remaining(
     return FOS_NIM_BODY_OK;
 }
 
-fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
-                              const char *method, const char *url,
-                              const void *body, size_t body_len,
-                              const char *headers, size_t headers_len,
-                              int timeout_ms, size_t max_bytes,
-                              int *out_status, size_t *out_count,
-                              char **out_spill_path, size_t *out_spill_len)
+/* Everything up to a readable response body, shared by the buffering fetch
+ * (fos_nim_http_request_chunked_spill) and the streaming one
+ * (fos_nim_http_stream_open): the private-network policy check, client
+ * setup, connect, request body, and the manual redirect walk that re-checks
+ * the policy on every hop. Returns the open client with the final status in
+ * *out_status and the body length in *out_content_length (-1 when unknown).
+ * On failure returns NULL with a short diagnostic in err_buf; the client is
+ * already cleaned up. */
+#define HTTP_OPEN_FAIL(...) \
+    do { \
+        if (err_buf != NULL && err_buf_len > 0) snprintf(err_buf, err_buf_len, __VA_ARGS__); \
+        return NULL; \
+    } while (0)
+
+static esp_http_client_handle_t http_open_request(
+    const char *method, const char *url,
+    const void *body, size_t body_len,
+    const char *headers, size_t headers_len,
+    int timeout_ms, int *out_status, int64_t *out_content_length,
+    char *err_buf, size_t err_buf_len)
 {
     *out_status = 0;
-    *out_count = 0;
-    if (out_spill_path != NULL) *out_spill_path = NULL;
-    if (out_spill_len != NULL) *out_spill_len = 0;
-    const bool spill_allowed = out_spill_path != NULL && out_spill_len != NULL &&
-                               s_http_spill_dir[0] != '\0';
-
+    *out_content_length = -1;
+    if (err_buf != NULL && err_buf_len > 0) err_buf[0] = '\0';
     /* Private-network policy (fos_netguard.h). This is the one funnel every
      * scene HTTP request goes through, and on a cloud-managed frame a scene is
      * something a provider installed — so it does not get to reach the owner's
@@ -1386,8 +1531,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
     if (!fos_netguard_url_allowed(url, netguard_reason, sizeof(netguard_reason))) {
         ESP_LOGW(TAG, "%s %s: blocked by the local-network policy: %s",
                  method ? method : "GET", url ? url : "(null)", netguard_reason);
-        return chunked_error(out_status, out_count,
-                             "local network access is blocked on cloud-managed frames (%s)",
+        HTTP_OPEN_FAIL("local network access is blocked on cloud-managed frames (%s)",
                              netguard_reason);
     }
 
@@ -1410,7 +1554,9 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
         .max_redirection_count = 5,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) return NULL;
+    if (client == NULL) {
+        HTTP_OPEN_FAIL("http client init failed");
+    }
     esp_http_client_set_header(client, "Accept-Encoding", "identity");
     esp_http_client_set_header(client, "User-Agent", "FrameOS-ESP32/1");
     bool has_content_type = set_extra_headers(client, headers, headers_len);
@@ -1428,13 +1574,13 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
         ESP_LOGW(TAG, "%s %s: connect failed: %s", method ? method : "GET", url,
                  esp_err_to_name(err));
         esp_http_client_cleanup(client);
-        return chunked_error(out_status, out_count, "connect failed: %s", esp_err_to_name(err));
+        HTTP_OPEN_FAIL("connect failed: %s", esp_err_to_name(err));
     }
     if (body != NULL && body_len > 0) {
         if (esp_http_client_write(client, body, body_len) < 0) {
             ESP_LOGW(TAG, "%s %s: body write failed", method, url);
             esp_http_client_cleanup(client);
-            return chunked_error(out_status, out_count, "request body write failed");
+            HTTP_OPEN_FAIL("request body write failed");
         }
     }
 
@@ -1477,8 +1623,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                          method ? method : "GET", url, netguard_reason);
                 esp_http_client_close(client);
                 esp_http_client_cleanup(client);
-                return chunked_error(out_status, out_count,
-                                     "local network access is blocked on cloud-managed frames "
+                HTTP_OPEN_FAIL("local network access is blocked on cloud-managed frames "
                                      "(redirect target: %s)", netguard_reason);
             }
         }
@@ -1487,19 +1632,47 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
             ESP_LOGW(TAG, "%s %s: redirect connect failed: %s", method ? method : "GET", url,
                      esp_err_to_name(err));
             esp_http_client_cleanup(client);
-            return chunked_error(out_status, out_count, "redirect connect failed: %s",
+            HTTP_OPEN_FAIL("redirect connect failed: %s",
                                  esp_err_to_name(err));
         }
         if (body != NULL && body_len > 0) {
             if (esp_http_client_write(client, body, body_len) < 0) {
                 ESP_LOGW(TAG, "%s %s: redirect body write failed", method ? method : "GET", url);
                 esp_http_client_cleanup(client);
-                return chunked_error(out_status, out_count, "request body write failed");
+                HTTP_OPEN_FAIL("request body write failed");
             }
         }
         content_length = esp_http_client_fetch_headers(client);
         *out_status = esp_http_client_get_status_code(client);
         redirects++;
+    }
+    *out_content_length = content_length;
+    return client;
+}
+#undef HTTP_OPEN_FAIL
+
+fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
+                              const char *method, const char *url,
+                              const void *body, size_t body_len,
+                              const char *headers, size_t headers_len,
+                              int timeout_ms, size_t max_bytes,
+                              int *out_status, size_t *out_count,
+                              char **out_spill_path, size_t *out_spill_len)
+{
+    *out_status = 0;
+    *out_count = 0;
+    if (out_spill_path != NULL) *out_spill_path = NULL;
+    if (out_spill_len != NULL) *out_spill_len = 0;
+    const bool spill_allowed = out_spill_path != NULL && out_spill_len != NULL &&
+                               s_http_spill_dir[0] != '\0';
+
+    char open_err[192];
+    int64_t content_length = -1;
+    esp_http_client_handle_t client = http_open_request(
+        method, url, body, body_len, headers, headers_len, timeout_ms,
+        out_status, &content_length, open_err, sizeof(open_err));
+    if (client == NULL) {
+        return chunked_error(out_status, out_count, "%s", open_err);
     }
 
     size_t limit = max_bytes ? max_bytes : 10u * 1024u * 1024u;
@@ -1521,6 +1694,9 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
     size_t cur_cap = 0, cur_len = 0;
     uint8_t *cur = NULL;
     fos_nim_body_status_t body_status = FOS_NIM_BODY_OK;
+    /* Whichever bound stopped the body: max_bytes while buffering in PSRAM,
+     * or the (possibly much smaller) storage cap once it spilled. */
+    size_t effective_limit = limit;
 
     while (true) {
         if (cur == NULL || cur_len == cur_cap) {
@@ -1575,7 +1751,8 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                     size_t spill_total = 0;
                     body_status = http_spill_remaining(client, url, chunks,
                                                        chunk_count, total, limit,
-                                                       &spill_path, &spill_total);
+                                                       &spill_path, &spill_total,
+                                                       &effective_limit);
                     chunks = NULL;
                     chunk_count = 0;
                     chunk_capacity = 0;
@@ -1621,6 +1798,16 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
         fos_nim_http_free_chunks(chunks, chunk_count);
         switch (body_status) {
         case FOS_NIM_BODY_TOO_BIG:
+            if (effective_limit < limit) {
+                ESP_LOGW(TAG, "%s: response exceeded the %u byte storage spill cap "
+                         "(%s, max_http_response_bytes %u; PSRAM was too full to buffer it)",
+                         url, (unsigned)effective_limit, s_http_spill_dir, (unsigned)limit);
+                return chunked_error(out_status, out_count,
+                                     "response exceeded %u bytes: the image did not fit in "
+                                     "free PSRAM and %s has only %u bytes to spare for it",
+                                     (unsigned)effective_limit, s_http_spill_dir,
+                                     (unsigned)effective_limit);
+            }
             ESP_LOGW(TAG, "%s: response exceeded %u bytes", url, (unsigned)limit);
             return chunked_error(out_status, out_count, "response exceeded %u bytes",
                                  (unsigned)limit);

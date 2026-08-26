@@ -15,6 +15,8 @@ import {
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import {
+  enqueueFrameSettingsPush,
+  frameSupportsTimeZoneSetting,
   countFramesForAccount,
   frameCommandsNotifyChannel,
   frameManagedScope,
@@ -120,6 +122,7 @@ function parseHardware(value: unknown): Record<string, unknown> | null {
 // Flow B — Bearer token from the RFC 8628 device flow (client_kind "frame").
 //   The consent screen was the ownership proof, so the frame is born
 //   `active`; this call registers the device public key.
+
 export async function POST(request: NextRequest) {
   const limited = await rateLimitResponse(request, "frames:enroll", {
     limit: 30,
@@ -228,6 +231,7 @@ async function enrollWithClaimToken(
     | {
         accessTokenValue: string;
         frame: typeof frames.$inferSelect;
+        timezone: string | null;
         tokenId: string;
       }
     | undefined;
@@ -286,6 +290,9 @@ async function enrollWithClaimToken(
           linkedClientId: linkedClient.id,
           name,
           publicKey: input.publicKey,
+          // The zone the minting browser was in (claim-tokens route): the
+          // workspace shows it, and the push below hands it to the device.
+          ...(token.timezone ? { settings: { timezone: token.timezone } } : {}),
           // Carried, not acted on: the owner's confirmation is what copies
           // these scenes over (app/api/frames/{id}/confirm). A multi-use SD
           // card enrolls many frames, and the token's own frame_id records
@@ -306,6 +313,7 @@ async function enrollWithClaimToken(
       return {
         accessTokenValue: accessToken.token,
         frame: insertedFrame,
+        timezone: token.timezone,
         tokenId: token.id,
       };
     });
@@ -320,6 +328,18 @@ async function enrollWithClaimToken(
 
   if (!result) {
     return jsonError("invalid_claim_token", 400);
+  }
+
+  if (result.timezone && frameSupportsTimeZoneSetting(result.frame)) {
+    // Same push (and same firmware gate) as PATCH /api/frames/{id}/settings:
+    // an ESP32 below 2026.8.34 refuses the whole set_settings verb on
+    // `timezone`, so it only gets the stored setting, not the push. The
+    // device fetches its own tzdata slice when the lookup here fails, so a
+    // missing slice only costs it a round trip. Queued now, delivered when
+    // the frame opens its session.
+    await enqueueFrameSettingsPush(db, result.frame, {
+      timezone: result.timezone,
+    });
   }
 
   await recordAuditEvent(db, {

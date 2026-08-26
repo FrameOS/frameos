@@ -1176,6 +1176,7 @@ export type EmbeddedUsbConfigKey =
   | 'wake_check'
   | 'battery_pin'
   | 'battery_divider'
+  | 'battery_enable_pin'
   | 'pins'
   | 'gpio_buttons'
 

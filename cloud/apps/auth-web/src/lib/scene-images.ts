@@ -14,6 +14,7 @@
 
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import {
+  frames,
   frameSceneAssignments,
   storeSceneImages,
   storeScenes,
@@ -146,6 +147,116 @@ async function runtimeIdsForVersion(
   const ids = content ? runtimeIdsFromZip(content) : new Set<string>();
   rememberRuntimeIds(key, ids);
   return ids;
+}
+
+// The per-scene deploy ledger frames.deployed_scene_state holds
+// ({storeSceneId: {version, checksum}}, promoted from assigned_scene_state
+// by the hub when the device acks the set checksum). The version the device
+// RECEIVED for a store scene, when the ledger knows it; undefined on frames
+// that predate the columns or never acked a push.
+function deployedVersionFor(
+  deployedSceneState: unknown,
+  storeSceneId: string,
+): number | undefined {
+  if (
+    !deployedSceneState ||
+    typeof deployedSceneState !== "object" ||
+    Array.isArray(deployedSceneState)
+  ) {
+    return undefined;
+  }
+  const ledger = deployedSceneState as Record<string, unknown>;
+  const lowered = storeSceneId.toLowerCase();
+  const key =
+    storeSceneId in ledger
+      ? storeSceneId
+      : Object.keys(ledger).find((id) => id.toLowerCase() === lowered);
+  const entry = key === undefined ? undefined : ledger[key];
+  const version = (entry as { version?: unknown } | null)?.version;
+  return typeof version === "number" && Number.isInteger(version) && version > 0
+    ? version
+    : undefined;
+}
+
+// The opposite direction: the ids a device knows for assigned store scenes.
+// The workspace lists a cloud frame's scenes by store scene uuid (the
+// assignment), but the payload set_scenes ships is a version's scenes.json,
+// whose scenes carry their own ids — so "activate scene" sent the store uuid
+// and the device answered `scenes:select … apply-failed` (seen on an E1004;
+// only "preview on frame", which ships the payload with its own id, worked).
+//
+// Which version's ids: the one the deploy ledger says the device ACKED
+// (deployed_scene_state), because that is the scenes.json it actually holds;
+// a newer assignment it has not received yet would name ids it cannot
+// select. Only when the ledger has nothing for the scene (pre-ledger frames,
+// never acked) does the pinned/latest non-yanked version stand in.
+//
+// One assignments + ledger read for the whole batch (a schedule names many
+// scenes). Each entry maps to the first runtime id of that version when the
+// id is an assigned store scene, otherwise to itself unchanged (presumably
+// already a runtime id, or unknown — the device will say).
+export async function deviceSceneIdsForFrame(
+  db: FramesDatabase,
+  frameId: string,
+  sceneIds: readonly string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const wanted = [...new Set(sceneIds.filter((id) => id.length > 0))];
+  if (wanted.length === 0) {
+    return out;
+  }
+  const [assignments, [frame]] = await Promise.all([
+    db
+      .select({
+        sceneId: frameSceneAssignments.sceneId,
+        sceneVersion: frameSceneAssignments.sceneVersion,
+      })
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, frameId)),
+    db
+      .select({ deployedSceneState: frames.deployedSceneState })
+      .from(frames)
+      .where(eq(frames.id, frameId))
+      .limit(1),
+  ]);
+  for (const sceneId of wanted) {
+    const lowered = sceneId.toLowerCase();
+    const assignment = assignments.find(
+      (row) => row.sceneId.toLowerCase() === lowered,
+    );
+    if (!assignment) {
+      out.set(sceneId, sceneId);
+      continue;
+    }
+    const version =
+      deployedVersionFor(frame?.deployedSceneState, assignment.sceneId) ??
+      (await pinnedVersionNumber(
+        db,
+        assignment.sceneId,
+        assignment.sceneVersion,
+      ));
+    if (version === undefined) {
+      out.set(sceneId, sceneId);
+      continue;
+    }
+    const ids = await runtimeIdsForVersion(db, assignment.sceneId, version);
+    const [runtimeId] = ids;
+    out.set(sceneId, runtimeId ?? sceneId);
+  }
+  return out;
+}
+
+// Single-id form of deviceSceneIdsForFrame (the setCurrentScene event).
+export async function deviceSceneIdForFrame(
+  db: FramesDatabase,
+  frameId: string,
+  sceneId: string,
+): Promise<string> {
+  if (!sceneId) {
+    return sceneId;
+  }
+  const ids = await deviceSceneIdsForFrame(db, frameId, [sceneId]);
+  return ids.get(sceneId) ?? sceneId;
 }
 
 // Resolve the store scene that owns `sceneId` on this frame. Accepts either

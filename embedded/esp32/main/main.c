@@ -135,12 +135,17 @@ void app_main(void)
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
 
-    fos_battery_init(config->battery_pin, config->battery_divider);
+    fos_battery_init(config->battery_pin, config->battery_divider, config->battery_enable_pin);
     if (fos_battery_present()) {
-        ESP_LOGI(TAG, "battery: %d mV (%d%%)", fos_battery_millivolts(), fos_battery_percent());
+        int battery_mv = 0, battery_pct = -1;
+        fos_battery_read(&battery_mv, &battery_pct);
+        ESP_LOGI(TAG, "battery: %d mV (%d%%)", battery_mv, battery_pct);
     }
 
-    if (HEARTBEAT_GPIO >= 0) {
+    /* Not when the battery divider's enable switch sits on the LED pin: the
+     * reTerminal E10xx boards switch their divider through GPIO21, and a
+     * blinking enable line reads as an empty cell (0 mV, seen on the E1004). */
+    if (HEARTBEAT_GPIO >= 0 && config->battery_enable_pin != HEARTBEAT_GPIO) {
         xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
     }
 
@@ -164,6 +169,11 @@ void app_main(void)
      * free but no block that size. No-op on PSRAM boards. */
     if (fos_display_present()) {
         fos_framebuffer_reserve(fos_display_buffer_size());
+        /* The Nim renderer packs into the same reservation (fos_framebuffer.h).
+         * The hooks take/return the buffer through the acquire/release pair
+         * that fos_client.c already uses to hand it back after the blit. */
+        frameos_nim_set_render_buffer_hooks((void *(*)(size_t))fos_framebuffer_acquire,
+                                            (void (*)(void *))fos_framebuffer_release);
     }
 
     /* fos_assets_sd_mount emits its own structured "assets:sd" line into the

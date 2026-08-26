@@ -409,6 +409,7 @@ def embedded_frame_settings(frame: Frame) -> dict:
             ("wakeCheckSeconds", ("wakeCheckSeconds", "wake_check_seconds"), "int"),
             ("batteryPin", ("batteryPin", "battery_pin"), "int"),
             ("batteryDivider", ("batteryDivider", "battery_divider"), "float"),
+            ("batteryEnablePin", ("batteryEnablePin", "battery_enable_pin"), "int"),
         ):
             for key in keys:
                 value = device_config.get(key)

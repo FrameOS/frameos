@@ -56,7 +56,7 @@ export const hardwareCloudFrameSettingsMinVersion = '2026.8.31'
  * drops the whole verb — callers must include them only for esp32 frames
  * (frameLogic gates on isEsp32CloudFrame).
  */
-export const esp32PowerSettingKeys = [
+const esp32BasePowerSettingKeys = [
   'deep_sleep',
   'deep_sleep_on_battery',
   'wake_check_seconds',
@@ -65,17 +65,42 @@ export const esp32PowerSettingKeys = [
 ] as const
 
 /**
+ * 2026.8.39: the battery divider's enable GPIO (reTerminal E1004 switches
+ * its divider on through GPIO 21 while sampling). Read at boot next to
+ * battery_pin. Older firmware refuses the whole push on it — its own floor,
+ * like the two tails below. Mirrors esp32BatteryEnablePinFrameSettingKeys
+ * on the control plane.
+ */
+export const esp32BatteryEnablePinCloudFrameSettingKeys = ['battery_enable_pin'] as const
+export const esp32BatteryEnablePinCloudFrameSettingsMinVersion = '2026.8.39'
+
+export function cloudFrameSupportsEsp32BatteryEnablePin(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32BatteryEnablePinCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/**
+ * Every power key the Power section binds — the ones every cloud-linked
+ * firmware applies plus the gated enable pin. This is the list the frame
+ * form keys, diffs and normalizes on (frameLogic FRAME_KEYS / frameDiffKeys);
+ * what is actually SENT is esp32CloudFrameSettingKeysForVersion.
+ */
+export const esp32PowerSettingKeys = [
+  ...esp32BasePowerSettingKeys,
+  ...esp32BatteryEnablePinCloudFrameSettingKeys,
+] as const
+
+/**
  * What every ESP32 firmware with the cloud link applies: four of the base
  * six (no timezone before 2026.8.34 — see esp32TimeZoneCloudFrameSettingKeys
- * — and no debug before 2026.8.31) plus the power keys. Mirrors esp32SettableKeys on the control
- * plane minus its version-gated tail.
+ * — and no debug before 2026.8.31) plus the ungated power keys. Mirrors
+ * esp32SettableKeys on the control plane minus its version-gated tails.
  */
 export const esp32CloudFrameSettingKeys = [
   'interval',
   'name',
   'rotate',
   'scaling_mode',
-  ...esp32PowerSettingKeys,
+  ...esp32BasePowerSettingKeys,
 ] as const
 
 /**
@@ -117,6 +142,9 @@ export function esp32CloudFrameSettingKeysForVersion(
   }
   if (cloudFrameSupportsEsp32TimeZone(frameosVersion)) {
     keys.push(...esp32TimeZoneCloudFrameSettingKeys)
+  }
+  if (cloudFrameSupportsEsp32BatteryEnablePin(frameosVersion)) {
+    keys.push(...esp32BatteryEnablePinCloudFrameSettingKeys)
   }
   return keys
 }
@@ -198,15 +226,22 @@ function frameosVersionKey(value: string): number[] | undefined {
   return key
 }
 
-const numericSettingKeys: readonly CloudFrameSettingKey[] = [
+/**
+ * The cloud settings edited through text inputs, so the form may hold "300"
+ * where the wire wants 300. The payload builder coerces them, and frameLogic's
+ * NUMERIC_FRAME_KEYS normalizes the same set before diffing the form.
+ */
+export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'interval',
   'rotate',
   'wake_check_seconds',
   'battery_pin',
   'battery_divider',
+  'battery_enable_pin',
   'metrics_interval',
   'max_http_response_bytes',
 ]
+const numericSettingKeys = numericCloudFrameSettingKeys
 
 /** Keys where the empty string is itself a value ("no flip"), not "unset". */
 const emptyStringIsValue: readonly CloudFrameSettingKey[] = ['flip']

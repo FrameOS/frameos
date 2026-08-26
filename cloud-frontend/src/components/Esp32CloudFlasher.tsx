@@ -9,6 +9,7 @@ import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '..
 import { esp32Panels } from '../lib/generated-devices'
 import { cloudFrameUrl } from '../routes'
 import { fetchFrameList, useEnrollmentWatch } from './enrollmentWatch'
+import { browserTimeZone, claimTokenTimeZoneFields } from '../lib/browser-time-zone'
 
 // Browser flasher for cloud-managed ESP32 frames (docs/cloud-frames.md,
 // "ESP32 browser flashing"): WebSerial + esptool-js writes the prebuilt
@@ -454,6 +455,8 @@ async function provisionOverSerial(
 const controlClassName =
   'frameos-control block w-full rounded-lg border px-2.5 py-1.5 text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50'
 
+export { browserTimeZone }
+
 export function Esp32CloudFlasher({
   cloudOrigin,
   reenrollFrame,
@@ -574,6 +577,8 @@ export function Esp32CloudFlasher({
           : {
               name: frameName.trim(),
               ...(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
+              // Enrollment seeds the frame's time zone from this.
+              ...claimTokenTimeZoneFields(),
             }
       ),
       headers: { 'content-type': 'application/json' },
@@ -790,6 +795,24 @@ export function Esp32CloudFlasher({
           expect: consolePrompt,
           required: true,
           text: `set pins ${quoteConsoleArgument(pinsSpec.trim())}`,
+        })
+      }
+      const timeZone = reenrollFrame ? undefined : browserTimeZone()
+      if (timeZone) {
+        // Clocks and schedules run in frame-local time. The claim token
+        // carries the same zone (enrollment seeds the cloud setting and
+        // pushes it), but this NVS copy holds before that push and without
+        // the cloud at all. Optional: firmware that predates the key answers
+        // with an error and the flash carries on. Not on a re-enrollment:
+        // that frame already has a cloud `timezone` setting, re-enrollment
+        // pushes nothing (rebindEnrollment keeps settings as they are), and
+        // writing this browser's zone here would leave the board on a zone
+        // the workspace does not show.
+        commands.push({
+          display: `set time_zone ${timeZone}`,
+          expect: consolePrompt,
+          required: false,
+          text: `set time_zone ${quoteConsoleArgument(timeZone)}`,
         })
       }
       if (wifiSsid) {

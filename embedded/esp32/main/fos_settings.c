@@ -291,6 +291,15 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
+    const cJSON *battery_enable_pin = cJSON_GetObjectItem(frame, "batteryEnablePin");
+    if (cJSON_IsNumber(battery_enable_pin) && battery_enable_pin->valuedouble >= -1 &&
+        battery_enable_pin->valuedouble <= 48 &&
+        config->battery_enable_pin != (int8_t)battery_enable_pin->valuedouble) {
+        config->battery_enable_pin = (int8_t)battery_enable_pin->valuedouble;
+        s_restart_after_apply = true;
+        changed = true;
+    }
+
     const cJSON *rotate = cJSON_GetObjectItem(frame, "rotate");
     uint16_t normalized_rotate = 0;
     if (cJSON_IsNumber(rotate) &&

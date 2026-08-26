@@ -218,13 +218,17 @@ static int cmd_status(int argc, char **argv)
     if (fos_assets_sd_last_error()[0]) {
         printf("sd_error:    %s\n", fos_assets_sd_last_error());
     }
-    printf("interval:    %lu s, deep_sleep=%d, wake_schedule=%d\n",
+    printf("interval:    %lu s, deep_sleep=%d, deep_sleep_on_battery=%d, wake_check=%lu s, wake_schedule=%d\n",
            (unsigned long)config->interval_sec, (int)config->deep_sleep,
+           (int)config->deep_sleep_on_battery, (unsigned long)config->wake_check_sec,
            (int)config->wake_schedule);
     if (fos_battery_present()) {
-        printf("battery:     %d mV (%d%%) on GPIO %d, divider %.2f\n",
-               fos_battery_millivolts(), fos_battery_percent(),
-               (int)config->battery_pin, config->battery_divider);
+        int battery_mv = 0, battery_pct = -1;
+        fos_battery_read(&battery_mv, &battery_pct);
+        printf("battery:     %d mV (%d%%) on GPIO %d, divider %.2f, enable GPIO %d\n",
+               battery_mv, battery_pct,
+               (int)config->battery_pin, config->battery_divider,
+               (int)config->battery_enable_pin);
     } else {
         printf("battery:     not configured\n");
     }
@@ -390,7 +394,7 @@ static int cmd_set(int argc, char **argv)
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
-               "battery_pin|battery_divider|pins|gpio_buttons> <value...>\n");
+               "battery_pin|battery_divider|battery_enable_pin|pins|gpio_buttons> <value...>\n");
         return 1;
     }
     fos_config_t *config = fos_config();
@@ -453,67 +457,81 @@ static int cmd_set(int argc, char **argv)
             const char *assets_sd_pins; /* empty = board has no usable TF socket */
             int8_t battery_pin;         /* ADC1 GPIO for battery sensing, -1 = none */
             float battery_divider;
+            int8_t battery_enable_pin;  /* GPIO held high to switch the divider on, -1 = none */
+            /* Power policy for battery boards: deep sleep while on battery,
+             * waking every wake_check_sec to check the control plane. 0 = the
+             * preset leaves the power settings alone. */
+            uint8_t deep_sleep_on_battery;
+            uint32_t wake_check_sec;
         } presets[] = {
             { "waveshare_esp32_s3_photopainter", "EPD_7in3e",
               "rst=12,dc=8,cs=9,cs2=-1,busy=13,sck=10,mosi=11,pwr=-1",
               "0:BOOT\n4:KEY1",
-              "cs=38,sck=39,miso=40,mosi=41", -1, 2.0f },
+              "cs=38,sck=39,miso=40,mosi=41", -1, 2.0f, -1, 0, 0 },
             { "waveshare_esp32_s3_epaper_13_3e6", "EPD_13in3e",
               "rst=2,dc=11,cs=10,cs2=3,busy=12,sck=9,mosi=46,pwr=1",
               "",
-              "cs=15,sck=6,miso=5,mosi=7", 8, 3.0f },
+              "cs=15,sck=6,miso=5,mosi=7", 8, 3.0f, -1, 0, 0 },
             /* TRMNL OG / BWRY (ESP32-C3 firmware). */
             { "trmnl_og", "EPD_7in5_V2",
               "rst=10,dc=5,cs=6,cs2=-1,busy=4,sck=7,mosi=8,pwr=-1",
               "2:BUTTON",
-              "", -1, 2.0f },
+              "", -1, 2.0f, -1, 0, 0 },
             { "trmnl_bwry", "EPD_7in5yr",
               "rst=10,dc=5,cs=6,cs2=-1,busy=4,sck=7,mosi=8,pwr=-1",
               "2:BUTTON",
-              "", -1, 2.0f },
+              "", -1, 2.0f, -1, 0, 0 },
             /* Seeed XIAO ePaper Driver Board (TRMNL DIY kits, XIAO ESP32-S3). */
             { "trmnl_og_diy_kit", "EPD_7in5_V2",
               "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=-1",
               "0:BOOT\n5:KEY3",
-              "", -1, 2.0f },
+              "", -1, 2.0f, -1, 0, 0 },
             { "trmnl_4in26_diy_kit", "EPD_4in26",
               "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=-1",
               "0:BOOT\n2:KEY1",
-              "", -1, 2.0f },
+              "", -1, 2.0f, -1, 0, 0 },
             /* XTEINK X4 (ESP32-C3 firmware). TF socket shares the EPD SPI bus,
              * so SD assets stay off. */
             { "xteink_x4", "EPD_4in26",
               "rst=5,dc=4,cs=21,cs2=-1,busy=6,sck=8,mosi=10,pwr=-1",
               "3:POWER",
-              "", -1, 2.0f },
+              "", -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash). */
             { "seeed_reterminal_sticky", "EPD_3in97",
               "rst=17,dc=16,cs=15,cs2=-1,busy=18,sck=13,mosi=14,pwr=-1",
               "4:POWER",
-              "", -1, 2.0f },
+              "", -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal E1001 (7.5" mono) / E1002 (7.3" Spectra 6):
              * same EPD wiring on both. SD pins unconfirmed, assets off. */
             { "seeed_reterminal_e1001", "EPD_7in5_V2",
               "rst=12,dc=11,cs=10,cs2=-1,busy=13,sck=7,mosi=9,pwr=-1",
               "3:REFRESH\n4:LEFT\n5:RIGHT",
-              "", -1, 2.0f },
+              "", -1, 2.0f, -1, 0, 0 },
             { "seeed_reterminal_e1002", "EPD_7in3e",
               "rst=12,dc=11,cs=10,cs2=-1,busy=13,sck=7,mosi=9,pwr=-1",
               "3:REFRESH\n4:LEFT\n5:RIGHT",
-              "", -1, 2.0f },
+              "", -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal E1004: 13.3" 1200x1600 Spectra 6 (T133A01) on
              * the E-series bus, second CS on GPIO2, reset 38, panel power 12.
              * The display component selects the T133A01 init tuning from this
              * preset name. Buttons/SD not published yet. */
+            /* Battery: cell through a 2:1 divider on GPIO1 (ADC1_CH0), switched
+             * on by GPIO21 — Seeed's ESPHome cookbook for the E-series. */
             { "seeed_reterminal_e1004", "EPD_13in3e",
               "rst=38,dc=11,cs=10,cs2=2,busy=13,sck=7,mosi=9,pwr=12",
-              "",
-              "", -1, 2.0f },
+              /* Same three keys as the E1001/E1002 (Seeed's ESPHome cookbook:
+               * GPIO3 green, GPIO4/5 white, active low). */
+              "3:REFRESH\n4:LEFT\n5:RIGHT",
+              "", 1, 2.0f, 21,
+              /* A 5000 mAh frame: sleep between renders while on battery and
+               * wake every 15 min for cloud commands (renders still follow the
+               * scene's own interval). On USB power it stays connected. */
+              1, 900 },
             /* Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8). */
             { "elecrow_crowpanel_5in79", "EPD_5in79",
               "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=-1",
               "2:HOME\n1:EXIT\n4:NEXT\n5:OK\n6:PREV",
-              "", -1, 2.0f },
+              "", -1, 2.0f, -1, 0, 0 },
         };
         strlcpy(config->hardware_preset, value, sizeof(config->hardware_preset));
         for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
@@ -528,6 +546,11 @@ static int cmd_set(int argc, char **argv)
             config->assets_sd.enabled = presets[i].assets_sd_pins[0] != '\0';
             config->battery_pin = presets[i].battery_pin;
             config->battery_divider = presets[i].battery_divider;
+            config->battery_enable_pin = presets[i].battery_enable_pin;
+            if (presets[i].deep_sleep_on_battery) {
+                config->deep_sleep_on_battery = true;
+                config->wake_check_sec = presets[i].wake_check_sec;
+            }
             printf("applied %s: panel=%s pins=%s buttons=%u sd_pins=%s battery_pin=%d\n",
                    presets[i].name, presets[i].panel, presets[i].pins,
                    (unsigned)config->gpio_button_count,
@@ -648,6 +671,7 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "wake_schedule") == 0) config->wake_schedule = atoi(value) != 0;
     else if (strcmp(key, "battery_pin") == 0) config->battery_pin = (int8_t)atoi(value);
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
+    else if (strcmp(key, "battery_enable_pin") == 0) config->battery_enable_pin = (int8_t)atoi(value);
     else if (strcmp(key, "pins") == 0) {
         if (fos_config_parse_pins(value, &config->pins) != ESP_OK) {
             printf("bad pin spec, want e.g. rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1\n");

@@ -8,6 +8,7 @@ import {
   QrCodeIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
+import { claimTokenTimeZoneFields } from '../lib/browser-time-zone'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
@@ -251,7 +252,10 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
     abortRef.current = controller
     try {
       const response = await fetch('/api/frames/claim-tokens', {
-        body: JSON.stringify(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
+        body: JSON.stringify({
+          ...(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
+          ...claimTokenTimeZoneFields(),
+        }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
         signal: controller.signal,
@@ -304,8 +308,8 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
     const response = await fetch('/api/frames/claim-tokens', {
       body: JSON.stringify(
         multiUse
-          ? { multi_use: true, ...(ttlDays ? { ttl_days: ttlDays } : {}), ...sceneSource }
-          : { ...sceneSource }
+          ? { multi_use: true, ...(ttlDays ? { ttl_days: ttlDays } : {}), ...sceneSource, ...claimTokenTimeZoneFields() }
+          : { ...sceneSource, ...claimTokenTimeZoneFields() }
       ),
       headers: { 'content-type': 'application/json' },
       method: 'POST',

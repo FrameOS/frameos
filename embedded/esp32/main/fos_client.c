@@ -126,7 +126,8 @@ static size_t s_metrics_count = 0;
 static void log_metrics_sample(void)
 {
     char json[512];
-    int battery_pct = fos_battery_present() ? fos_battery_percent() : -1;
+    int battery_pct = -1, battery_mv = 0;
+    if (fos_battery_present()) fos_battery_read(&battery_mv, &battery_pct);
     size_t used = (size_t)snprintf(
         json, sizeof(json),
         "{\"event\":\"metrics\",\"source\":\"esp32\","
@@ -148,7 +149,7 @@ static void log_metrics_sample(void)
     if (battery_pct >= 0 && used < sizeof(json) - 96) {
         used += (size_t)snprintf(json + used, sizeof(json) - used,
                                  ",\"batteryPercent\":%d,\"batteryMillivolts\":%d",
-                                 battery_pct, fos_battery_millivolts());
+                                 battery_pct, battery_mv);
     }
     if (used < sizeof(json) - 2) {
         snprintf(json + used, sizeof(json) - used, "}");
@@ -1041,10 +1042,10 @@ static void client_task(void *arg)
         /* Battery guardrail: when the cell is nearly empty, skip the (costly)
          * render + panel refresh and sleep long so a low battery can't keep
          * cycling the display down to a damaging voltage. */
-        int battery_pct = fos_battery_present() ? fos_battery_percent() : -1;
+        int battery_pct = -1, battery_mv = 0; /* one sample decides the whole pass */
+        if (fos_battery_present()) fos_battery_read(&battery_mv, &battery_pct);
         bool battery_critical = battery_pct >= 0 && battery_pct <= FOS_BATTERY_CRITICAL_PCT;
-        bool on_battery = fos_battery_present() &&
-                          fos_battery_millivolts() >= FOS_BATTERY_PRESENT_MV;
+        bool on_battery = battery_mv >= FOS_BATTERY_PRESENT_MV;
         bool deep_sleep_now =
             config->deep_sleep || (config->deep_sleep_on_battery && on_battery);
         /* A wake-check pass: this deep-sleeping frame woke early (or is held

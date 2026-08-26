@@ -327,10 +327,10 @@
         "id": "eea7d0b7-1079-4a97-bd38-33cf44837635",
         "position": { "x": 339.60365289787103, "y": -364.4132359429624 },
         "data": {
-          "code": "(state[\"xkcdJson\"][\"root\"][\"children\"][0][\"children\"].elems.filterIt(it[\"name\"].getStr == \"item\")[0][\"children\"].elems.filterIt(it[\"name\"].getStr == \"description\")[0][\"children\"].elems.mapIt(it[\"text\"].getStr).join(\"\"))",
+          "code": "(state[\"xkcdJson\"][\"root\"][\"children\"][0][\"children\"].elems.filterIt(it[\"name\"].getStr == \"item\").mapIt(it[\"children\"].elems.filterIt(it[\"name\"].getStr == \"description\")[0][\"children\"].elems.mapIt(it[\"text\"].getStr).join(\"\")).filterIt(it.contains(\"<img\") and not it.contains(\"<a \")) & @[\"\"])[0]",
           "codeArgs": [],
           "codeOutputs": [{ "name": "imgTag", "type": "string" }],
-          "codeJS": "state.xkcdJson?.root.children[0]?.children.find(e => e.name === 'item')?.children.find(c => c.name === 'description')?.children.map(c => c.text).join('') || ''"
+          "codeJS": "(state.xkcdJson?.root.children[0]?.children.filter(e => e.name === 'item').map(i => i.children.find(c => c.name === 'description')?.children.map(c => c.text).join('') || '').find(d => d.includes('<img') && !d.includes('<a ')) || '')"
         },
         "type": "code",
         "style": { "width": 690, "height": 175 },

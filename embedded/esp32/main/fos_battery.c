@@ -4,6 +4,10 @@
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
 static const char *TAG = "fos_battery";
 
@@ -11,11 +15,16 @@ static const char *TAG = "fos_battery";
 
 static bool s_present = false;
 static float s_divider = 2.0f;
+static int8_t s_enable_gpio = -1;
 static adc_oneshot_unit_handle_t s_adc = NULL;
 static adc_channel_t s_channel;
 static adc_cali_handle_t s_cali = NULL; /* NULL = fall back to linear estimate */
+/* Enable → settle → sample → disable is one critical section: a second
+ * caller's trailing "divider off" landing mid-sample averages zeros into a
+ * full cell (read as ~1.9 V, i.e. "critical"). */
+static SemaphoreHandle_t s_lock = NULL;
 
-void fos_battery_init(int8_t gpio, float divider)
+void fos_battery_init(int8_t gpio, float divider, int8_t enable_gpio)
 {
     s_present = false;
     s_cali = NULL;
@@ -25,6 +34,15 @@ void fos_battery_init(int8_t gpio, float divider)
         return;
     }
     s_divider = divider > 0.1f ? divider : 2.0f;
+    s_enable_gpio = enable_gpio;
+    if (s_lock == NULL) s_lock = xSemaphoreCreateMutex();
+    if (enable_gpio >= 0) {
+        /* Off between reads, the way Seeed's Battery_Monitor example does it:
+         * the divider only draws from the cell while a sample is taken. */
+        gpio_reset_pin(enable_gpio);
+        gpio_set_direction(enable_gpio, GPIO_MODE_OUTPUT);
+        gpio_set_level(enable_gpio, 0);
+    }
 
     adc_unit_t unit;
     adc_channel_t channel;
@@ -69,15 +87,21 @@ void fos_battery_init(int8_t gpio, float divider)
 #endif
 
     s_present = true;
-    ESP_LOGI(TAG, "battery sensing on GPIO %d (ADC1 ch %d, divider %.2f, cali %s)",
-             gpio, (int)s_channel, s_divider, s_cali ? "yes" : "no");
+    ESP_LOGI(TAG, "battery sensing on GPIO %d (ADC1 ch %d, divider %.2f, cali %s, enable GPIO %d)",
+             gpio, (int)s_channel, s_divider, s_cali ? "yes" : "no", (int)enable_gpio);
 }
 
 bool fos_battery_present(void) { return s_present; }
 
-int fos_battery_millivolts(void)
+/* The averaged raw ADC reading with the divider switched on; -1 when no
+ * sample came back. Caller holds s_lock. */
+static int sample_raw_locked(void)
 {
-    if (!s_present || !s_adc) return 0;
+    if (s_enable_gpio >= 0) {
+        /* Seeed: enable, wait ~10 ms for the divider to settle, read. */
+        gpio_set_level(s_enable_gpio, 1);
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
     int raw_sum = 0, samples = 0;
     for (int i = 0; i < BATTERY_SAMPLES; i++) {
         int raw = 0;
@@ -86,9 +110,13 @@ int fos_battery_millivolts(void)
             samples++;
         }
     }
-    if (samples == 0) return 0;
-    int raw = raw_sum / samples;
+    if (s_enable_gpio >= 0) gpio_set_level(s_enable_gpio, 0);
+    return samples == 0 ? -1 : raw_sum / samples;
+}
 
+static int millivolts_from_raw(int raw)
+{
+    if (raw < 0) return 0;
     int pin_mv;
     if (s_cali) {
         if (adc_cali_raw_to_voltage(s_cali, raw, &pin_mv) != ESP_OK) return 0;
@@ -99,9 +127,8 @@ int fos_battery_millivolts(void)
     return (int)((float)pin_mv * s_divider);
 }
 
-int fos_battery_percent(void)
+static int percent_from_millivolts(int mv)
 {
-    int mv = fos_battery_millivolts();
     if (mv <= 0) return -1;
     /* Coarse Li-ion discharge curve (resting voltage → state of charge). */
     static const struct { int mv; int pct; } CURVE[] = {
@@ -119,4 +146,30 @@ int fos_battery_percent(void)
         }
     }
     return -1;
+}
+
+void fos_battery_read(int *millivolts, int *percent)
+{
+    int mv = 0;
+    if (s_present && s_adc) {
+        bool locked = s_lock != NULL && xSemaphoreTake(s_lock, portMAX_DELAY) == pdTRUE;
+        mv = millivolts_from_raw(sample_raw_locked());
+        if (locked) xSemaphoreGive(s_lock);
+    }
+    if (millivolts) *millivolts = mv;
+    if (percent) *percent = percent_from_millivolts(mv);
+}
+
+int fos_battery_millivolts(void)
+{
+    int mv = 0;
+    fos_battery_read(&mv, NULL);
+    return mv;
+}
+
+int fos_battery_percent(void)
+{
+    int pct = -1;
+    fos_battery_read(NULL, &pct);
+    return pct;
 }
