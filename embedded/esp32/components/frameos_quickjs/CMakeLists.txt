@@ -32,10 +32,10 @@ idf_component_register(
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     _GNU_SOURCE
-    CONFIG_VERSION="${QUICKJS_VERSION}"
-    # newlib's struct tm has no tm_gmtoff; the device runs UTC (SNTP), so the
-    # local-time offset is genuinely 0. tm_isdst exists and is 0 in UTC.
-    "tm_gmtoff=tm_isdst")
+    CONFIG_VERSION="${QUICKJS_VERSION}")
+# (tm_gmtoff: newlib's struct tm has none; quickjs.c's getTimezoneOffset has
+# an ESP_PLATFORM branch that derives the offset from mktime() instead. The
+# old `tm_gmtoff=tm_isdst` define here pinned every JS Date to UTC.)
 
 # newlib has no malloc_usable_size; quickjs.c only uses it in the default
 # allocator's accounting, which fos_js_new_runtime replaces. Upstream's own
