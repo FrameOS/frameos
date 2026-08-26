@@ -93,6 +93,19 @@ function sceneName(scene: Partial<FrameScene>): string {
   return (scene.name ?? '').trim() || 'Untitled scene'
 }
 
+// The new private scene's preview: whatever the frame's snapshot cache holds
+// for the first runtime scene — the cover an uploaded zip left there, or the
+// device's own render. Without this a scene uploaded from a zip kept its
+// tile only until the cache evicted it and never showed a cover in "my cloud
+// scenes" at all.
+function coverHint(
+  frameId: FrameId,
+  scenes: readonly Partial<FrameScene>[]
+): { frameId: FrameId; sceneId: string } | undefined {
+  const sceneId = scenes.find((scene) => typeof scene?.id === 'string' && scene.id)?.id
+  return sceneId ? { frameId, sceneId } : undefined
+}
+
 function rawSceneUnchanged(stored: FrameScene, form: FrameScene): boolean {
   return JSON.stringify(stored) === JSON.stringify(form)
 }
@@ -213,7 +226,7 @@ async function persistAndPushCloudFrameScenesNow(
       // edited content into a new private scene and swap the assignment.
       try {
         const name = row.name || sceneName(updated[0] ?? {})
-        const newSceneId = await createCloudAccountScene(name, updated)
+        const newSceneId = await createCloudAccountScene(name, updated, undefined, coverHint(frameId, updated))
         changedStoreSceneIds.push(newSceneId)
         assignments.push({ scene_id: newSceneId })
         notes.push(`Saved the edited "${name}" as a new private cloud scene`)
@@ -233,7 +246,10 @@ async function persistAndPushCloudFrameScenesNow(
       continue
     }
     const name = sceneName(scene)
-    const newSceneId = await createCloudAccountScene(name, [withoutSceneOrigin(scene)])
+    const newSceneId = await createCloudAccountScene(name, [withoutSceneOrigin(scene)], undefined, {
+      frameId,
+      sceneId: scene.id,
+    })
     changedStoreSceneIds.push(newSceneId)
     assignments.push({ scene_id: newSceneId })
   }

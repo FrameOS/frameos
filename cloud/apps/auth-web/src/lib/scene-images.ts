@@ -23,10 +23,15 @@ import { readBlob } from "./blobs";
 import { cachedAssetFile, sceneSnapshotAssetPath } from "./frame-asset-cache";
 import {
   extractScenesJson,
+  frameForAccount,
   storeFrameAssetFile,
   type FramesDatabase,
 } from "./frames";
-import { detectImageContentType, isProvablyFullyTransparentImage } from "./store";
+import {
+  detectImageContentType,
+  isProvablyFullyTransparentImage,
+  maxPreviewImageBytes,
+} from "./store";
 
 // (storeSceneId, version) → runtime scene ids in that version's scenes.json.
 // Bounded so a pathological fleet cannot grow it without limit; eviction is
@@ -302,6 +307,46 @@ export async function copySceneCoversIntoFrameCache(
       }
     }
   }
+}
+
+// The reverse direction of copySceneCoversIntoFrameCache: when the workspace
+// save turns a frame's runtime scene into a NEW private cloud scene, the
+// frame's snapshot cache is the only place its cover exists — the image.jpg
+// an uploaded zip left there (POST scene_images), or the device's own
+// render. Returns bytes fit for the zip's image.jpg, or undefined when there
+// is nothing usable: a foreign or unknown frame, an empty cache, bytes that
+// are not a raster, too large, or provably transparent (any of which would
+// make validateSceneZip refuse the whole publish).
+export async function framePreviewForNewScene(
+  db: Parameters<typeof frameForAccount>[0],
+  accountId: string,
+  frameId: unknown,
+  sceneId: unknown,
+): Promise<Buffer | undefined> {
+  if (typeof frameId !== "string" || typeof sceneId !== "string" || !sceneId) {
+    return undefined;
+  }
+  const frame = await frameForAccount(db, accountId, frameId);
+  if (!frame) {
+    return undefined;
+  }
+  const row = await cachedAssetFile(
+    db,
+    frame.id,
+    sceneSnapshotAssetPath(sceneId),
+    false,
+  );
+  const content = await readBlob(row);
+  if (
+    !content ||
+    content.length === 0 ||
+    content.length > maxPreviewImageBytes ||
+    !detectImageContentType(content) ||
+    isTransparentCover(`frame:${frame.id}:${sceneId}`, content)
+  ) {
+    return undefined;
+  }
+  return content;
 }
 
 export function resetSceneImageCacheForTests() {

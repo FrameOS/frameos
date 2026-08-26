@@ -123,9 +123,12 @@ export async function assignSceneImages(
     return
   }
   // On the cloud control plane the scene tiles are served from the store
-  // scene the assignment installed (there is no per-frame snapshot to write),
-  // so copying a cover is neither possible nor needed.
-  if (isCloudMode()) {
+  // scene the assignment installed, so copying a cover from a template or
+  // another scene is neither possible nor needed. Bytes we already hold (a
+  // zip's cover, a split-screen render) are the exception: the cloud's
+  // scene_images route writes them into the frame's snapshot cache, which is
+  // where the tile looks first.
+  if (isCloudMode() && !('blob' in source)) {
     return
   }
 

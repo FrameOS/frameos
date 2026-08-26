@@ -1267,11 +1267,12 @@ async function saveTemplateSceneImages(
     return
   }
 
-  // The cloud keeps no per-frame cover snapshot (assignSceneImages is a
-  // no-op there), so resolving the source would only fetch bytes to throw
-  // away — and a store cover 307s to the CDN, which answers without CORS
-  // headers, so that fetch failed and raised a "failed to copy" toast.
-  if (isCloudMode()) {
+  // The cloud resolves store covers itself (assignSceneImages skips every
+  // source but raw bytes there), so resolving a URL source would only fetch
+  // bytes to throw away — and a store cover 307s to the CDN, which answers
+  // without CORS headers, so that fetch failed and raised a "failed to copy"
+  // toast. Bytes we already hold (an uploaded zip's cover) do go through.
+  if (isCloudMode() && !(template.image instanceof Blob)) {
     return
   }
 

@@ -682,13 +682,14 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
             aria-label="All logs"
             onClick={() => dismissTask(task.id)}
             className={clsx(
-              'flex h-8 w-8 items-center justify-center rounded-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              'flex h-8 items-center justify-center gap-1 rounded-lg px-2 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
               theme === 'dark'
                 ? 'text-slate-400 hover:bg-white/10 hover:text-blue-200'
                 : 'text-slate-500 hover:bg-slate-100 hover:text-blue-700'
             )}
           >
             <DocumentTextIcon className="h-4 w-4" />
+            <span>Logs</span>
           </A>
           <button
             type="button"

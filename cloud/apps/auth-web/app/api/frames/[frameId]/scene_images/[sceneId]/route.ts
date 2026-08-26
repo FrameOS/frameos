@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../../../src/lib/blobs";
+import { csrfResponse } from "../../../../../../src/lib/csrf";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
 import {
   cachedAssetFile,
@@ -10,6 +11,8 @@ import {
 import {
   frameForAccount,
   markFramePreviewWatched,
+  maxAssetFileBytes,
+  storeFrameAssetFile,
 } from "../../../../../../src/lib/frames";
 import {
   resolveStoreSceneForFrameScene,
@@ -17,6 +20,7 @@ import {
 } from "../../../../../../src/lib/scene-images";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../../src/lib/session";
+import { detectImageContentType } from "../../../../../../src/lib/store";
 
 export const runtime = "nodejs";
 
@@ -166,6 +170,85 @@ export async function GET(
     }
   }
   return jsonError("no_image", 404);
+}
+
+// Give a scene a cover from bytes the browser already holds — the image.jpg
+// of an uploaded template zip, a split-screen render. The same call the
+// self-hosted backend and the on-device admin answer, so the shared SPA's
+// "Upload scene" needs no cloud branch. The bytes land in the frame's
+// snapshot cache under the exact (path, thumb) rows the device's own render
+// will later overwrite through the asset_get chunk stream: the tile serves
+// them from the next request, and a real snapshot still wins when it
+// arrives. Explicit and unconditional, unlike copySceneCoversIntoFrameCache:
+// the user chose this image for this scene. The private cloud scene the next
+// save creates picks it up from here (preview_from_frame on
+// POST /api/account/scenes), so it outlives the cache's LRU pruning.
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ frameId: string; sceneId: string }> },
+) {
+  const csrf = csrfResponse(request);
+  if (csrf) {
+    return csrf;
+  }
+  const limited = await rateLimitResponse(request, "frames:scene_image_write", {
+    limit: 120,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (limited) {
+    return limited;
+  }
+  const session = await readSession();
+  if (!session?.accountId) {
+    return jsonError("login_required", 401);
+  }
+  const { db, response } = requireDatabase();
+  if (!db) {
+    return response;
+  }
+  const { frameId, sceneId } = await params;
+  const frame = await frameForAccount(db, session.accountId, frameId);
+  if (!frame) {
+    return jsonError("invalid_frame", 404);
+  }
+  if (!sceneId || sceneId.length > 200) {
+    return jsonError("invalid_scene", 400);
+  }
+  const declaredLength = Number(request.headers.get("content-length") ?? "0");
+  if (declaredLength > maxAssetFileBytes) {
+    return jsonError("image_too_large", 413, { max_bytes: maxAssetFileBytes });
+  }
+  const content = Buffer.from(await request.arrayBuffer());
+  if (content.length === 0) {
+    return jsonError("missing_image", 400);
+  }
+  if (content.length > maxAssetFileBytes) {
+    return jsonError("image_too_large", 413, { max_bytes: maxAssetFileBytes });
+  }
+  // Sniffed, never trusted: the SPA labels a zip's image.jpg by convention,
+  // and the tile route serves whatever content type the row says.
+  const contentType = detectImageContentType(content);
+  if (!contentType) {
+    return jsonError("invalid_image", 400);
+  }
+  const path = sceneSnapshotAssetPath(sceneId);
+  // The thumb row gets the full bytes too (as the install-time cover copy
+  // does); the device's 320px thumbnail replaces it on the first render.
+  for (const thumb of [false, true]) {
+    const stored = await storeFrameAssetFile(db, frame.id, {
+      content,
+      contentType,
+      path,
+      thumb,
+    });
+    if (!stored) {
+      return jsonError("image_too_large", 413, { max_bytes: maxAssetFileBytes });
+    }
+  }
+  return NextResponse.json(
+    { content_type: contentType, scene_id: sceneId, size_bytes: content.length },
+    { status: 201 },
+  );
 }
 
 type Db = NonNullable<ReturnType<typeof requireDatabase>["db"]>;

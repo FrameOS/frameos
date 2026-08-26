@@ -322,12 +322,26 @@ export async function fetchStoreSceneScenesJson(storeSceneId: string): Promise<F
 export async function createCloudAccountScene(
   name: string,
   scenes: readonly Partial<FrameScene>[],
-  description?: string
+  description?: string,
+  /**
+   * Take the new scene's preview from this frame's snapshot cache — the
+   * cover an uploaded zip left there, or the device's own render. Resolved
+   * server-side; the image never travels through the browser. Best effort:
+   * a frame with nothing cached simply yields a scene without a preview.
+   */
+  previewFromFrame?: { frameId: FrameId; sceneId: string }
 ): Promise<string> {
   const response = await apiFetch(`/api/account/scenes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, scenes, ...(description ? { description } : {}) }),
+    body: JSON.stringify({
+      name,
+      scenes,
+      ...(description ? { description } : {}),
+      ...(previewFromFrame
+        ? { preview_from_frame: { frame_id: String(previewFromFrame.frameId), scene_id: previewFromFrame.sceneId } }
+        : {}),
+    }),
   })
   await assertOk(response, `Failed to save "${name}" to your cloud scenes`)
   const data = (await response.json()) as { scene?: { id?: string } }

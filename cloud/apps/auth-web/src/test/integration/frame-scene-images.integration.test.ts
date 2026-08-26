@@ -20,8 +20,13 @@ import {
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { GET as getSceneImage } from "../../../app/api/frames/[frameId]/scene_images/[sceneId]/route";
+import { POST as createAccountScene } from "../../../app/api/account/scenes/route";
+import {
+  GET as getSceneImage,
+  POST as postSceneImage,
+} from "../../../app/api/frames/[frameId]/scene_images/[sceneId]/route";
 import { POST as assignFrameScenes } from "../../../app/api/frames/[frameId]/scenes/route";
+import { validateSceneZip } from "../../lib/store";
 import { readBlob } from "../../lib/blobs";
 import { sceneSnapshotAssetPath } from "../../lib/frame-asset-cache";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
@@ -68,6 +73,31 @@ beforeEach(async () => {
 
 function getRequest(path: string) {
   return new NextRequest(new URL(path, baseUrl), { method: "GET" });
+}
+
+function postBytesRequest(
+  path: string,
+  body: Buffer,
+  headers: Record<string, string> = {},
+) {
+  return new NextRequest(new URL(path, baseUrl), {
+    body: new Uint8Array(body),
+    headers: {
+      "content-length": String(body.length),
+      "content-type": "application/octet-stream",
+      origin: baseUrl,
+      ...headers,
+    },
+    method: "POST",
+  });
+}
+
+function postJsonRequest(path: string, body: unknown) {
+  return new NextRequest(new URL(path, baseUrl), {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json", origin: baseUrl },
+    method: "POST",
+  });
 }
 
 const routeParams = (frameId: string, sceneId: string) => ({
@@ -191,7 +221,26 @@ async function assignScene(frameId: string, sceneId: string, position = 0) {
 // broken live-preview screenshot legacy rows can still hold. Chunk CRCs stay
 // zeroed: the transparency detector proves via pixel data, not checksums.
 function transparentPng(width = 4, height = 4) {
-  const raw = new Uint8Array(height * (1 + width * 4)); // filter 0, all zero
+  return rgbaPng(width, height, 0);
+}
+
+// The same PNG with opaque pixels: what an uploaded zip's cover looks like to
+// the sniffers (a raster, not transparent).
+function opaquePng(width = 4, height = 4) {
+  return rgbaPng(width, height, 0xff);
+}
+
+function rgbaPng(width: number, height: number, alpha: number) {
+  const raw = new Uint8Array(height * (1 + width * 4)); // filter 0 per row
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const at = y * (1 + width * 4) + 1 + x * 4;
+      raw[at] = 0x12;
+      raw[at + 1] = 0x34;
+      raw[at + 2] = 0x56;
+      raw[at + 3] = alpha;
+    }
+  }
   const ihdr = new Uint8Array(13);
   const ihdrView = new DataView(ihdr.buffer);
   ihdrView.setUint32(0, width);
@@ -676,5 +725,249 @@ describe("POST /api/frames/{id}/scenes cover copy", () => {
     const response = await postScenes(frame.id, [scene.id]);
     expect(response.status).toBe(200);
     expect(await assetRows(frame.id)).toEqual([]);
+  });
+});
+
+// POST /api/frames/{id}/scene_images/{sceneId} — the cover of an uploaded
+// template zip (the shared SPA's "Upload scene"), written straight into the
+// frame's snapshot cache so the tile has something to show before the
+// device renders, and so the next save can attach it to the new private
+// cloud scene (preview_from_frame below). An ESP32 never answers asset_get
+// for a snapshot, so without this the tile stayed blank forever.
+describe("POST /api/frames/{id}/scene_images/{sceneId}", () => {
+  it("stores the bytes under the device snapshot path and serves them from the tile route", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const cover = opaquePng();
+
+    const response = await postSceneImage(
+      postBytesRequest(
+        `/api/frames/${frame.id}/scene_images/uploaded-clock`,
+        cover,
+      ),
+      routeParams(frame.id, "uploaded-clock"),
+    );
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({
+      content_type: "image/png",
+      scene_id: "uploaded-clock",
+      size_bytes: cover.length,
+    });
+
+    const path = sceneSnapshotAssetPath("uploaded-clock");
+    const rows = await db
+      .select()
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frame.id));
+    expect(rows.map((row) => [row.path, row.thumb]).sort()).toEqual([
+      [path, false],
+      [path, true],
+    ]);
+    for (const row of rows) {
+      expect(row.contentType).toBe("image/png");
+      expect((await readBlob(row))?.equals(cover)).toBe(true);
+    }
+
+    // No assignment, no store scene: the tile still resolves, from the
+    // cache, without queueing an asset_get the device would refuse.
+    for (const thumb of ["", "?thumb=1"]) {
+      const tile = await getSceneImage(
+        getRequest(`/api/frames/${frame.id}/scene_images/uploaded-clock${thumb}`),
+        routeParams(frame.id, "uploaded-clock"),
+      );
+      expect(tile.status).toBe(200);
+      expect(tile.headers.get("content-type")).toBe("image/png");
+      expect(Buffer.from(await tile.arrayBuffer()).equals(cover)).toBe(true);
+    }
+    const commands = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame.id));
+    expect(commands).toEqual([]);
+  });
+
+  it("refuses bytes that are not an image, an empty body, and a missing origin", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const params = routeParams(frame.id, "uploaded-clock");
+    const path = `/api/frames/${frame.id}/scene_images/uploaded-clock`;
+
+    const notImage = await postSceneImage(
+      postBytesRequest(path, Buffer.from("just text")),
+      params,
+    );
+    expect(notImage.status).toBe(400);
+    expect(await notImage.json()).toEqual({ error: "invalid_image" });
+
+    const empty = await postSceneImage(
+      postBytesRequest(path, Buffer.alloc(0)),
+      params,
+    );
+    expect(empty.status).toBe(400);
+    expect(await empty.json()).toEqual({ error: "missing_image" });
+
+    const noOrigin = await postSceneImage(
+      new NextRequest(new URL(path, baseUrl), {
+        body: new Uint8Array(opaquePng()),
+        method: "POST",
+      }),
+      params,
+    );
+    expect(noOrigin.status).toBe(403);
+
+    const rows = await db
+      .select()
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frame.id));
+    expect(rows).toEqual([]);
+  });
+
+  it("is scoped to the account's own frames", async () => {
+    const ownerId = await signIn();
+    const frame = await activeFrame(ownerId);
+    await signIn(); // a different account is now logged in
+    const response = await postSceneImage(
+      postBytesRequest(
+        `/api/frames/${frame.id}/scene_images/uploaded-clock`,
+        opaquePng(),
+      ),
+      routeParams(frame.id, "uploaded-clock"),
+    );
+    expect(response.status).toBe(404);
+  });
+});
+
+// POST /api/account/scenes with preview_from_frame: the workspace save turns
+// the uploaded runtime scene into a new private cloud scene, and the cover
+// the upload left in the frame's cache becomes that scene's preview — the
+// durable copy, since the cache is pruned LRU and "my cloud scenes" only
+// shows store previews.
+describe("POST /api/account/scenes preview_from_frame", () => {
+  const scenes = [
+    { edges: [], id: "uploaded-clock", name: "Uploaded clock", nodes: [] },
+  ];
+
+  it("takes the new scene's preview from the frame's cached cover", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    const cover = opaquePng();
+    const upload = await postSceneImage(
+      postBytesRequest(
+        `/api/frames/${frame.id}/scene_images/uploaded-clock`,
+        cover,
+      ),
+      routeParams(frame.id, "uploaded-clock"),
+    );
+    expect(upload.status).toBe(201);
+
+    const response = await createAccountScene(
+      postJsonRequest("/api/account/scenes", {
+        name: "Uploaded clock",
+        preview_from_frame: { frame_id: frame.id, scene_id: "uploaded-clock" },
+        scenes,
+      }),
+    );
+    expect(response.status).toBe(200);
+    const { scene } = (await response.json()) as { scene: { id: string } };
+
+    const [row] = await db
+      .select({
+        previewImage: storeScenes.previewImage,
+        previewImageType: storeScenes.previewImageType,
+        previewObjectKey: storeScenes.previewObjectKey,
+      })
+      .from(storeScenes)
+      .where(eq(storeScenes.id, scene.id));
+    const preview = await readBlob({
+      content: row?.previewImage ?? null,
+      objectKey: row?.previewObjectKey ?? null,
+    });
+    expect(preview?.equals(cover)).toBe(true);
+    expect(row?.previewImageType).toBe("image/png");
+
+    // The published zip carries it as the interchange format's image.jpg.
+    const [version] = await db
+      .select({
+        content: storeSceneVersions.content,
+        objectKey: storeSceneVersions.objectKey,
+      })
+      .from(storeSceneVersions)
+      .where(eq(storeSceneVersions.sceneId, scene.id));
+    const zip = await readBlob(version);
+    const validated = validateSceneZip(zip!);
+    expect(validated.ok && validated.value.previewImage?.equals(cover)).toBe(
+      true,
+    );
+  });
+
+  it("creates the scene without a preview when the hint is unusable", async () => {
+    const ownerId = await signIn();
+    const frame = await activeFrame(ownerId);
+    const upload = await postSceneImage(
+      postBytesRequest(
+        `/api/frames/${frame.id}/scene_images/uploaded-clock`,
+        opaquePng(),
+      ),
+      routeParams(frame.id, "uploaded-clock"),
+    );
+    expect(upload.status).toBe(201);
+
+    // Another account naming that frame: it is not theirs, so no preview —
+    // and no error either.
+    await signIn();
+    for (const hint of [
+      { frame_id: frame.id, scene_id: "uploaded-clock" },
+      { frame_id: "not-a-frame", scene_id: "uploaded-clock" },
+      "garbage",
+    ]) {
+      const response = await createAccountScene(
+        postJsonRequest("/api/account/scenes", {
+          name: `Scene ${JSON.stringify(hint).length}`,
+          preview_from_frame: hint,
+          scenes,
+        }),
+      );
+      expect(response.status).toBe(200);
+      const { scene } = (await response.json()) as { scene: { id: string } };
+      const [row] = await db
+        .select({
+          previewImage: storeScenes.previewImage,
+          previewObjectKey: storeScenes.previewObjectKey,
+        })
+        .from(storeScenes)
+        .where(eq(storeScenes.id, scene.id));
+      expect(row?.previewImage ?? null).toBeNull();
+      expect(row?.previewObjectKey ?? null).toBeNull();
+    }
+  });
+
+  it("skips a cached cover that is provably transparent instead of failing the save", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId);
+    // Straight into the cache: the upload route would refuse it? No — it
+    // only sniffs the format. A device snapshot captured before the first
+    // paint can be exactly this.
+    await db.insert(frameAssetFiles).values({
+      content: transparentPng(),
+      contentType: "image/png",
+      frameId: frame.id,
+      path: sceneSnapshotAssetPath("uploaded-clock"),
+      sizeBytes: transparentPng().length,
+      thumb: false,
+    });
+    const response = await createAccountScene(
+      postJsonRequest("/api/account/scenes", {
+        name: "Uploaded clock",
+        preview_from_frame: { frame_id: frame.id, scene_id: "uploaded-clock" },
+        scenes,
+      }),
+    );
+    expect(response.status).toBe(200);
+    const { scene } = (await response.json()) as { scene: { id: string } };
+    const [row] = await db
+      .select({ previewObjectKey: storeScenes.previewObjectKey })
+      .from(storeScenes)
+      .where(eq(storeScenes.id, scene.id));
+    expect(row?.previewObjectKey ?? null).toBeNull();
   });
 });

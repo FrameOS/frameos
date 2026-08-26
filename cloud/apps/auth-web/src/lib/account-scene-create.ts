@@ -75,6 +75,10 @@ export async function createAccountScene(
     actor: PublishActor;
     description?: string | undefined;
     name: string;
+    /** Cover bytes for the zip's image.jpg; already vetted by the caller
+     *  (a real raster, within maxPreviewImageBytes, not fully transparent —
+     *  validateSceneZip rejects the whole publish otherwise). */
+    previewImage?: Buffer | undefined;
     scenes: unknown[];
   },
 ) {
@@ -117,6 +121,7 @@ async function createAccountSceneLocked(
     actor: PublishActor;
     description?: string | undefined;
     name: string;
+    previewImage?: Buffer | undefined;
     scenes: unknown[];
   },
 ) {
@@ -129,12 +134,18 @@ async function createAccountSceneLocked(
   const manifest = {
     name: finalName,
     ...(input.description ? { description: input.description } : {}),
+    ...(input.previewImage ? { image: "./image.jpg" } : {}),
     scenes: "./scenes.json",
   };
   const content = Buffer.from(
     zipSync({
       [`${folder}/template.json`]: strToU8(JSON.stringify(manifest, null, 2)),
       [`${folder}/scenes.json`]: strToU8(JSON.stringify(input.scenes, null, 2)),
+      // The interchange format knows one cover path; the real raster format
+      // is sniffed from the bytes wherever it is read.
+      ...(input.previewImage
+        ? { [`${folder}/image.jpg`]: new Uint8Array(input.previewImage) }
+        : {}),
     }),
   );
   if (content.length > maxSceneZipBytes) {

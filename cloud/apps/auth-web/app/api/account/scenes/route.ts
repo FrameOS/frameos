@@ -15,6 +15,7 @@ import {
 } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
 import { maxPublishesPerHour } from "../../../../src/lib/store";
+import { framePreviewForNewScene } from "../../../../src/lib/scene-images";
 
 export const runtime = "nodejs";
 
@@ -62,6 +63,21 @@ export async function POST(request: NextRequest) {
     typeof body.description === "string"
       ? body.description.trim().slice(0, 2000)
       : undefined;
+  // The workspace save's cover hint: "use whatever this frame's snapshot
+  // cache holds for this runtime scene" — the image an uploaded zip left
+  // there, or the device's own render. Resolved here so the bytes never go
+  // through the browser; an unusable hint (foreign frame, nothing cached,
+  // not a raster) yields a scene without a preview, never an error.
+  const hint = body.preview_from_frame;
+  const previewImage =
+    hint && typeof hint === "object" && !Array.isArray(hint)
+      ? await framePreviewForNewScene(
+          db,
+          session.accountId,
+          (hint as Record<string, unknown>).frame_id,
+          (hint as Record<string, unknown>).scene_id,
+        )
+      : undefined;
 
   return createAccountScene(db, {
     accountId: session.accountId,
@@ -71,6 +87,7 @@ export async function POST(request: NextRequest) {
     },
     ...(description ? { description } : {}),
     name: requestedName.length > 0 ? requestedName : "Untitled scene",
+    ...(previewImage ? { previewImage } : {}),
     scenes: body.scenes,
   });
 }

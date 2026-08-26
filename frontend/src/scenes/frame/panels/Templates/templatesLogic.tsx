@@ -915,7 +915,9 @@ export const templatesLogic = kea<templatesLogicType>([
     // same button works on the backend, on-device and cloud control planes —
     // none of them needs a server-side zip parser for this. Applies the
     // scenes the way the AI chat does: sanitized, auto-arranged when the file
-    // carries no node positions, then focused in the scene list.
+    // carries no node positions, then focused in the scene list. The zip's
+    // cover image rides along as a Blob; every control plane accepts a POSTed
+    // cover, so the tile is not blank until the frame renders.
     uploadSceneFile: async ({ file }) => {
       const frameStore = frameLogic({ frameId: props.frameId })
       try {
@@ -932,6 +934,10 @@ export const templatesLogic = kea<templatesLogicType>([
           name: upload.name,
           description: upload.description,
           scenes: scenes as FrameScene[],
+          // The zip's cover becomes the new scene's tile (self-hosted: the
+          // per-frame scene image; cloud: the frame's snapshot cache, then
+          // the private cloud scene's preview on save).
+          ...(upload.image ? { image: upload.image } : {}),
         })
         await new Promise((resolve) => setTimeout(resolve, 0))
         const updatedScenes = frameStore.values.frameForm?.scenes ?? frameStore.values.scenes
