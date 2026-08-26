@@ -78,6 +78,75 @@ describe("SceneImageGallery", () => {
     expect(refreshMock).toHaveBeenCalledTimes(2);
   });
 
+  it("lets the owner drag a gallery image into a new slot and saves the order", async () => {
+    fetchMock.mockResolvedValue(Response.json({ status: "reordered" }));
+    render(
+      <SceneImageGallery
+        canEdit
+        hasPreview
+        imageIds={["img-1", "img-2", "img-3"]}
+        sceneId="scene-1"
+        sceneName="Bird field journal"
+      />,
+    );
+    const wrapOf = (id: string) => document.querySelector(`[data-image-id="${id}"]`) as HTMLElement;
+    // The zip's own preview leads and is not draggable; gallery images are.
+    expect(thumbs()[0]!.parentElement!.getAttribute("draggable")).toBeNull();
+    expect(wrapOf("img-1").getAttribute("draggable")).toBe("true");
+
+    const dataTransfer = { effectAllowed: "", setData: vi.fn() };
+    fireEvent.dragStart(wrapOf("img-1"), { dataTransfer });
+    fireEvent.dragOver(wrapOf("img-3"), { dataTransfer });
+    expect(wrapOf("img-3").className).toContain("scene-gallery__thumb-wrap--drop-target");
+    fireEvent.drop(wrapOf("img-3"), { dataTransfer });
+
+    // Optimistic: the grid already shows the new order.
+    expect(thumbs().map((thumb) => thumb.querySelector("img")?.getAttribute("src"))).toEqual([
+      "/api/store/scenes/scene-1/image",
+      "/api/store/scenes/scene-1/images/img-2",
+      "/api/store/scenes/scene-1/images/img-3",
+      "/api/store/scenes/scene-1/images/img-1",
+    ]);
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/account/scenes/scene-1/images", {
+        body: JSON.stringify({ order: ["img-2", "img-3", "img-1"] }),
+        headers: { "content-type": "application/json" },
+        method: "PATCH",
+      });
+      expect(refreshMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("falls back to the server order when a reorder is rejected", async () => {
+    fetchMock.mockResolvedValue(Response.json({ error: "invalid_order" }, { status: 400 }));
+    render(
+      <SceneImageGallery
+        canEdit
+        hasPreview={false}
+        imageIds={["img-1", "img-2"]}
+        sceneId="scene-1"
+        sceneName="Bird field journal"
+      />,
+    );
+    const wrapOf = (id: string) => document.querySelector(`[data-image-id="${id}"]`) as HTMLElement;
+    const dataTransfer = { effectAllowed: "", setData: vi.fn() };
+    fireEvent.dragStart(wrapOf("img-2"), { dataTransfer });
+    fireEvent.dragOver(wrapOf("img-1"), { dataTransfer });
+    fireEvent.drop(wrapOf("img-1"), { dataTransfer });
+    expect(thumbs().map((thumb) => thumb.querySelector("img")?.getAttribute("src"))).toEqual([
+      "/api/store/scenes/scene-1/images/img-2",
+      "/api/store/scenes/scene-1/images/img-1",
+    ]);
+    await vi.waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe("Reordering failed: invalid_order");
+    });
+    expect(thumbs().map((thumb) => thumb.querySelector("img")?.getAttribute("src"))).toEqual([
+      "/api/store/scenes/scene-1/images/img-1",
+      "/api/store/scenes/scene-1/images/img-2",
+    ]);
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
   it("blows a thumbnail up in the lightbox when it is clicked", () => {
     render(
       <SceneImageGallery

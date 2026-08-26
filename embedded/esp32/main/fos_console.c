@@ -1583,11 +1583,21 @@ static void console_prompt(void)
     fflush(stdout);
 }
 
+/* How long a console command holds off deep sleep. Someone is at the other
+ * end of the cable — the browser flasher probing `status`, then pushing
+ * scenes — and a board that sleeps between two of its commands answers the
+ * second one with silence (the E1004 has no VBUS sense, so deep_sleep_on_battery
+ * fires on USB power too: it went down right after its first render, mid
+ * upload-scenes handshake). Same window as an HTTP mutation. */
+#define FOS_CONSOLE_KEEP_AWAKE_MS (3 * 60 * 1000u)
+
 static void run_console_line(char *line)
 {
     char *start = line;
     while (*start && isspace((unsigned char)*start)) start++;
     if (!*start) return;
+
+    fos_client_keep_awake_ms(FOS_CONSOLE_KEEP_AWAKE_MS);
 
     int cmd_ret = 0;
     esp_err_t err = esp_console_run(start, &cmd_ret);

@@ -6,9 +6,9 @@ import { CreateSceneWithAiBox } from "../../src/components/CreateSceneWithAiBox"
 import {
   MyScenesGroupHeading,
   MyScenesView,
-  groupMyScenes,
   type MyScenesRow,
 } from "../../src/components/MyScenesView";
+import { groupMyScenes } from "../../src/lib/my-scenes-groups";
 import { PublicShell } from "../../src/components/PublicShell";
 import { StoreSceneActions } from "../../src/components/StoreSceneActions";
 import { StoreTabs } from "../../src/components/StoreTabs";

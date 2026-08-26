@@ -22,7 +22,10 @@ import {
 } from "../../../app/api/account/scenes/[sceneId]/route";
 import { PATCH as patchVersion } from "../../../app/api/account/scenes/[sceneId]/versions/[version]/route";
 import { DELETE as deletePrimaryImage } from "../../../app/api/account/scenes/[sceneId]/image/route";
-import { POST as addGalleryImage } from "../../../app/api/account/scenes/[sceneId]/images/route";
+import {
+  PATCH as reorderGalleryImages,
+  POST as addGalleryImage,
+} from "../../../app/api/account/scenes/[sceneId]/images/route";
 import { DELETE as deleteGalleryImage } from "../../../app/api/account/scenes/[sceneId]/images/[imageId]/route";
 import { POST as forkScene } from "../../../app/api/account/scenes/[sceneId]/fork/route";
 import { POST as uploadScene } from "../../../app/api/account/scenes/upload/route";
@@ -743,6 +746,116 @@ describe("store publish and distribution", () => {
     cookieJar.clear();
     const anonymous = await deletePrimaryImage(
       request(`/api/account/scenes/${sceneId}/image`, "DELETE", {
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(anonymous.status).toBe(401);
+  });
+
+  it("reorders gallery images by dragging, and re-leads the ZIP preview when the lead moves", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const scene = (
+      await readJson(await publish(accessToken, { visibility: "public" }))
+    ).scene as Record<string, unknown>;
+    const sceneId = scene.id as string;
+    const add = async (bytes: Buffer) => {
+      const response = await addGalleryImage(
+        request(`/api/account/scenes/${sceneId}/images`, "POST", {
+          body: { content_base64: bytes.toString("base64") },
+          headers: { origin: baseUrl },
+        }),
+        ctx(sceneId),
+      );
+      expect(response.status).toBe(200);
+      return ((await readJson(response)).image as Record<string, unknown>).id as string;
+    };
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 1]);
+    const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const gifBytes = Buffer.from("GIF89a\x01\x00\x01\x00\x00\x00", "latin1");
+    const first = await add(pngBytes);
+    const second = await add(jpegBytes);
+    const third = await add(gifBytes);
+    const positions = async () =>
+      (
+        await db
+          .select({ id: storeSceneImages.id })
+          .from(storeSceneImages)
+          .where(eq(storeSceneImages.sceneId, sceneId))
+          .orderBy(storeSceneImages.position, storeSceneImages.createdAt)
+      ).map((row) => row.id);
+    expect(await positions()).toEqual([first, second, third]);
+
+    // The whole list, or nothing: a partial or foreign list is rejected.
+    for (const order of [[first, second], [first, second, third, first], [first, second, "00000000-0000-4000-8000-000000000000"]]) {
+      const rejected = await reorderGalleryImages(
+        request(`/api/account/scenes/${sceneId}/images`, "PATCH", {
+          body: { order },
+          headers: { origin: baseUrl },
+        }),
+        ctx(sceneId),
+      );
+      expect(rejected.status).toBe(400);
+    }
+    expect(await positions()).toEqual([first, second, third]);
+
+    // With the publish-time primary image in place, reordering the gallery
+    // does not touch the ZIP: no new version.
+    const reordered = await reorderGalleryImages(
+      request(`/api/account/scenes/${sceneId}/images`, "PATCH", {
+        body: { order: [third, first, second] },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(reordered.status).toBe(200);
+    expect(await readJson(reordered)).toEqual({
+      order: [third, first, second],
+      status: "reordered",
+    });
+    expect(await positions()).toEqual([third, first, second]);
+
+    // Without a primary image the gallery lead is the ZIP preview, so moving
+    // a different image to the front appends a version carrying it.
+    const removed = await deletePrimaryImage(
+      request(`/api/account/scenes/${sceneId}/image`, "DELETE", {
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect((await readJson(removed)).version).toBe(2);
+    const releaded = await reorderGalleryImages(
+      request(`/api/account/scenes/${sceneId}/images`, "PATCH", {
+        body: { order: [second, third, first] },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect((await readJson(releaded)).version).toBe(3);
+    expect(await positions()).toEqual([second, third, first]);
+    const download = await downloadScene(
+      request(`/api/store/scenes/${sceneId}/download`, "GET"),
+      ctx(sceneId),
+    );
+    const { unzipSync } = await import("fflate");
+    expect(download.headers.get("x-scene-version")).toBe("3");
+    const files = unzipSync(new Uint8Array(await download.arrayBuffer()));
+    const imagePath = Object.keys(files).find((name) => name.endsWith("image.jpg"))!;
+    expect(Buffer.from(files[imagePath]!)).toEqual(jpegBytes);
+    // Same lead again: nothing to version.
+    const sameLead = await reorderGalleryImages(
+      request(`/api/account/scenes/${sceneId}/images`, "PATCH", {
+        body: { order: [second, first, third] },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect((await readJson(sameLead)).version).toBeUndefined();
+
+    cookieJar.clear();
+    const anonymous = await reorderGalleryImages(
+      request(`/api/account/scenes/${sceneId}/images`, "PATCH", {
+        body: { order: [first, second, third] },
         headers: { origin: baseUrl },
       }),
       ctx(sceneId),

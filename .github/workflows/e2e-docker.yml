@@ -150,10 +150,107 @@ jobs:
               # incremental cost is one IDF configure+link.
               FRAMEOS_ESP32_PLATFORM=esp32-s3-32mb FRAMEOS_ESP32_BUILD_DIR=build-ci-32mb \
                 bash embedded/esp32/ci_build_image.sh
+              cp embedded/esp32/build-ci/firmware-size.json /firmware-size/esp32-s3.json || true
+              cp embedded/esp32/build-ci-32mb/firmware-size.json /firmware-size/esp32-s3-32mb.json || true
               ccache --show-stats || true
             '
           # The container writes as root; actions/cache runs as the runner user.
-          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/.ccache"
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE/.ccache" "$GITHUB_WORKSPACE/.firmware-size"
+
+      - name: Upload firmware size documents
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-firmware-size
+          path: .firmware-size/*.json
+          if-no-files-found: warn
+
+  # Sticky "ESP32 firmware size" comment on the PR: one comment, edited in
+  # place on every push, never a commit. Compares this build with the latest
+  # GitHub release — per subsystem when that release shipped a size document
+  # (releases from this change on do), totals only when it predates one.
+  # Separate job so the build keeps `contents: read`; fork PRs get a
+  # read-only token, so the comment is only attempted for same-repo PRs.
+  esp32_firmware_size_report:
+    name: ESP32 firmware size report
+    runs-on: ubuntu-latest
+    needs: esp32_firmware_image
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: embedded/esp32/tools
+          sparse-checkout-cone-mode: false
+
+      - name: Download firmware size documents
+        uses: actions/download-artifact@v4
+        with:
+          name: esp32-firmware-size
+          path: .firmware-size
+
+      - name: Fetch the latest release as the baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .firmware-size/baseline
+          gh release view --repo "$GITHUB_REPOSITORY" --json tagName,assets > .firmware-size/release.json
+          tag="$(jq -r .tagName .firmware-size/release.json)"
+          echo "BASELINE_TAG=$tag" >> "$GITHUB_ENV"
+          # Size documents published by the release workflow, when present.
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*-esp32-*-generic-size.json' --dir .firmware-size/baseline || true
+          for f in .firmware-size/baseline/*-size.json; do
+            [ -f "$f" ] || continue
+            platform="$(jq -r .platform "$f")"
+            mv "$f" ".firmware-size/baseline/$platform.json"
+          done
+          # Older releases: totals from the asset byte counts.
+          python3 embedded/esp32/tools/firmware_size.py baseline-from-release \
+            --release-json .firmware-size/release.json --out-dir .firmware-size/baseline-totals
+          for f in .firmware-size/baseline-totals/*.json; do
+            [ -f "$f" ] || continue
+            [ -f ".firmware-size/baseline/$(basename "$f")" ] || cp "$f" .firmware-size/baseline/
+          done
+          ls -l .firmware-size .firmware-size/baseline
+
+      - name: Render the report
+        run: |
+          set -euo pipefail
+          args=()
+          for f in .firmware-size/esp32-s3.json .firmware-size/esp32-s3-32mb.json; do
+            [ -f "$f" ] && args+=(--current "$f")
+          done
+          for f in .firmware-size/baseline/*.json; do
+            [ -f "$f" ] && args+=(--baseline "$f")
+          done
+          python3 embedded/esp32/tools/firmware_size.py render "${args[@]}" \
+            --baseline-label "${BASELINE_TAG:-latest release}" \
+            --intro "Built from ${GITHUB_SHA::7} by [this run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}); compared with the latest release **${BASELINE_TAG:-?}**." \
+            --out .firmware-size/comment.md
+          cat .firmware-size/comment.md
+
+      - name: Create or update the PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          marker='<!-- frameos-esp32-firmware-size -->'
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)"
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" \
+              -F body=@.firmware-size/comment.md > /dev/null
+            echo "updated comment $existing"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+              -F body=@.firmware-size/comment.md > /dev/null
+            echo "created comment"
+          fi
 
   build-and-test:
     name: build-and-test

@@ -24,28 +24,7 @@ export type MyScenesRow = {
   visibility: string;
 };
 
-// The visibility groups of the unfiltered list, in display order: what the
-// world sees first, then what only the owner sees. Groups without scenes
-// are skipped.
-export const myScenesGroups = [
-  { key: "public", title: "Public scenes" },
-  { key: "private", title: "Private scenes" },
-] as const;
-
-export type MyScenesGroupKey = (typeof myScenesGroups)[number]["key"];
-
-export function groupMyScenes<T extends { visibility: string }>(scenes: T[]) {
-  return myScenesGroups
-    .map((group) => ({
-      ...group,
-      scenes: scenes.filter((scene) =>
-        group.key === "public"
-          ? scene.visibility === "public"
-          : scene.visibility !== "public",
-      ),
-    }))
-    .filter((group) => group.scenes.length > 0);
-}
+import { groupMyScenes } from "../lib/my-scenes-groups";
 
 // The heading over one visibility group, shared by the grid and the table
 // so both views read the same.

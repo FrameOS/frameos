@@ -131,6 +131,28 @@ var portalPathExistsHook: PortalPathExistsHook = defaultPortalPathExistsHook
 ## ("Checking network… attempt 3, 12 s"); the boot screen (frameos.nim) hooks
 ## it so an HDMI frame shows the wait instead of a black panel. nil = silent.
 var networkCheckProgressHook*: proc(status: string) {.gcsafe.} = nil
+## Called repeatedly while the network check waits between attempts — the
+## boot screen animates its mark from here. Returns the seconds it wants to
+## wait before the next call; <= 0 means "no more ticks during this wait".
+## nil = plain sleep.
+var networkCheckTickHook*: proc(): float {.gcsafe.} = nil
+
+proc waitBetweenNetworkAttempts*(ms: int) =
+  ## `portalSleepHook(ms)`, sliced by the tick hook when one is installed so
+  ## the boot screen keeps moving through a 60 s backoff.
+  var remaining = ms
+  while remaining > 0:
+    var slice = remaining
+    if not networkCheckTickHook.isNil:
+      var tick = 0.0
+      try:
+        tick = networkCheckTickHook()
+      except CatchableError:
+        discard
+      if tick > 0:
+        slice = min(remaining, max(int(tick * 1000), 50))
+    portalSleepHook(slice)
+    remaining -= slice
 
 proc getLastError*(): string =
   {.gcsafe.}:
@@ -1437,7 +1459,7 @@ proc checkNetwork*(self: FrameOS): bool =
         self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg,
             "action": "syncing clock and trying again"})
         syncClock()
-        portalSleepHook(min(max(3, attempt), 60) * 1000)
+        waitBetweenNetworkAttempts(min(max(3, attempt), 60) * 1000)
         continue
       else:
         self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
@@ -1458,7 +1480,7 @@ proc checkNetwork*(self: FrameOS): bool =
         self.network.status = NetworkStatus.connecting
         self.logger.log(%*{"event": "networkCheck", "status": "wifi_connecting"})
 
-    portalSleepHook(min(attempt, 60) * 1000)
+    waitBetweenNetworkAttempts(min(attempt, 60) * 1000)
     attempt += 1
   return false
 
@@ -1492,6 +1514,8 @@ proc setPortalHooksForTest*(
 
 proc resetPortalHooksForTest*() =
   portalRunHook = defaultPortalRunHook
+  networkCheckProgressHook = nil
+  networkCheckTickHook = nil
   portalNmcliConnectHook = defaultPortalNmcliConnectHook
   portalSleepHook = proc(ms: int) {.gcsafe, nimcall.} = sleep(ms)
   portalAutoTimeoutEnabledHook = proc(): bool {.gcsafe, nimcall.} = true

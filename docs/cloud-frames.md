@@ -646,6 +646,7 @@ vcom=-1.48             # optional (IT8951-style panels)
 upload_url=https://…   # optional; required by device=http.upload
 root_password=…        # optional; sets the root password via chpasswd
 time_zone=Europe/Brussels   # optional IANA zone; the builder writes the browser's
+authorized_key=ssh-ed25519 AAAA… you@laptop   # optional, repeatable: root's SSH keys
 ```
 
 Parsing is deliberately forgiving: `KEY=value` lines, `#` comments, blank
@@ -683,6 +684,15 @@ makes this an explicit choice: enter a root password, or tick a
 "passwordless root" checkbox to accept the default. Like the WiFi
 credentials, the password is written into the image in the browser and
 never reaches the provider.
+
+`authorized_key` (repeatable, one OpenSSH public key each) fills
+`/root/.ssh/authorized_keys` on first boot — the cloud counterpart of the
+self-hosted `/boot/frameos-authorized_keys` file. The provider's SD-image
+builder offers the account's SSH keys (public halves only; the cloud never
+stores a private key) with the "default on new frames" ones pre-selected,
+and shows how much of the 4096-byte region the configuration uses — an
+ed25519 key is ~100 bytes, an RSA-3072 key ~570. Images from releases before
+this key existed log "Ignoring unknown key" and boot without the keys.
 
 `name` and `time_zone` are the card's personalization and end up in
 `frame.json`, not just in the enrollment request: first boot forwards

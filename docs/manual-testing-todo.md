@@ -55,6 +55,19 @@ flow (changes first-boot behavior for every new user).
   a Pi 4/5, 1080p on a Zero 2 W) and the cloud workspace shows it; panel
   says the cloud frame name + Europe/Brussels; hostname is the slugified
   name; a scheduled 01:02 reboot logs `scheduler:fire` at 01:02 *local*.
+- [ ] **HDMI status screen, animated (this branch):** on a framebuffer
+  frame the mark's three squares cycle the brand colours during the boot
+  network check and on `system/index` (no scenes); `top` on the Pi should
+  show frameos well under a core — the frame rate is paced to ~20% duty
+  (`render_stats.pacedRenderInterval`), so a Zero 2 W at 1080p steps every
+  second or two while a Pi 5 glides. The index screen shows a live clock
+  (seconds on HDMI, minutes elsewhere) and, after a GPIO press, "Last
+  button: <label> (GPIO n) at hh:mm:ss" in the grey bottom band.
+- [ ] **Cloud SD card with SSH keys (this branch, needs a buildroot release
+  image built from it):** add a key under Settings → SSH Keys on the cloud,
+  tick it in the SD image builder, boot the card → `ssh root@<frame>` works
+  with that key. Older images log "Ignoring unknown key 'authorized_key'"
+  and boot without it.
 - [ ] **ESP32 time zone (needs 2026.8.34 firmware):** set Europe/Brussels
   from the cloud settings panel → weather scene hours match local time,
   schedule entries fire in local time, `config` on the console shows it.
@@ -104,6 +117,15 @@ flow (changes first-boot behavior for every new user).
   `framebuffer reserved: 96000 bytes held for the panel, N internal bytes
   left` — N should land near 190 KB, and a frame that previously OOMed
   should now render.
+- [x] **E1004: scenes over USB after a flash (this branch):** verified on
+  the bench 2026-08-26. The board ships `deep_sleep_on_battery=1` and has
+  no VBUS sense (cell at 4.17 V = "on battery"), so it deep-slept right
+  after its first render — mid `upload-scenes` handshake, which then timed
+  out and the CH340 vanished. Every console line now arms the 3-minute
+  keep-awake HTTP mutations already use (`fos_console.c`); with the fixed
+  build `usb_api upload-scenes` answered `__FRAMEOS_USB_READY__` well after
+  `render:done`. Re-check the full browser flow (flash → push scenes) once
+  a release carries it.
 - [ ] **reTerminal E1004 first light (#375):** a real render on the E1004 —
   the T133A01 init/tuning values came from the vendor driver via ESPHome and
   have never touched hardware; failure mode is ghosting or a failed refresh,

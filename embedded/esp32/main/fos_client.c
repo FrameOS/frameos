@@ -1175,7 +1175,7 @@ static void client_task(void *arg)
             esp_deep_sleep((uint64_t)chunk * 1000000ULL);
         }
         if (deep_sleep_now && fos_display_present() && keep_awake_s > 0) {
-            ESP_LOGI(TAG, "staying awake for %lu s after HTTP activity",
+            ESP_LOGI(TAG, "staying awake for %lu s after HTTP/console activity",
                      (unsigned long)keep_awake_s);
             if (sleep_s > keep_awake_s) sleep_s = keep_awake_s;
         }

@@ -139,6 +139,9 @@ describe("account settings API", () => {
       // backendApiKey is the account's own AI-chat key: storable, but never
       // device-deliverable (frame-service-settings.ts).
       openAI: { apiKey: "sk-frames", backendApiKey: "sk-backend" },
+      // The account's SSH public keys (SD card builder): the one stored
+      // group that is not a service key — an empty list is a valid save.
+      ssh_keys: { keys: [] },
     });
 
     const roundTrip = await getSettings(getRequest());
@@ -154,6 +157,7 @@ describe("account settings API", () => {
       "frameOS",
       "homeAssistant",
       "openAI",
+      "ssh_keys",
     ]);
 
     // The audit trail records WHICH groups changed, never the key values.
@@ -166,7 +170,7 @@ describe("account settings API", () => {
     expect(JSON.stringify(events[0]?.metadata)).not.toContain("sk-frames");
     expect(
       ((events[0]?.metadata as { keys: string[] }).keys ?? []).sort(),
-    ).toEqual(["frameOS", "homeAssistant", "openAI"]);
+    ).toEqual(["frameOS", "homeAssistant", "openAI", "ssh_keys"]);
   });
 
   it("replaces each posted group wholesale (the backend's POST semantics)", async () => {

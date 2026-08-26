@@ -47,6 +47,9 @@ describe("filterAccountSettings", () => {
     expect(error).toBeUndefined();
     expect(settings).toEqual({
       openAI: { apiKey: "sk-test" },
+      // SSH public keys are the one non-service group the cloud keeps (for
+      // the SD card builder); an empty list is a valid "no keys" save.
+      ssh_keys: { keys: [] },
       unsplash: { accessKey: "u-key" },
     });
   });
@@ -90,6 +93,54 @@ describe("filterAccountSettings", () => {
         openAI: { apiKey: "x".repeat(maxAccountSettingValueLength + 1) },
       }).error,
     ).toBe("settings_value_too_large");
+  });
+
+  it("stores the account's SSH public keys, and never a private half", () => {
+    const ed25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGJ4ZmFrZWtleWZha2VrZXlmYWtla2V5ZmFrZWtleQ marius@laptop";
+    const { error, settings } = filterAccountSettings({
+      ssh_keys: {
+        keys: [
+          {
+            id: "k1",
+            name: "Laptop",
+            private: "-----BEGIN OPENSSH PRIVATE KEY----- nope",
+            public: `  ${ed25519}  `,
+            use_for_new_frames: true,
+          },
+          // The shared form's freshly added, not yet filled-in entry.
+          { id: "k2", name: "Key 2", private: "", public: "", use_for_new_frames: false },
+        ],
+        // Legacy single-key fields are not a shape the cloud keeps.
+        default: "x",
+        default_public: "y",
+      },
+    });
+    expect(error).toBeUndefined();
+    expect(settings).toEqual({
+      ssh_keys: {
+        keys: [{ id: "k1", name: "Laptop", public: ed25519, use_for_new_frames: true }],
+      },
+    });
+    expect(JSON.stringify(settings)).not.toContain("PRIVATE");
+  });
+
+  it("refuses SSH keys that are not OpenSSH public key lines", () => {
+    for (const bad of [
+      "-----BEGIN OPENSSH PRIVATE KEY-----",
+      "ssh-ed25519",
+      'ssh-ed25519 AAAA"; rm -rf /',
+      "ssh-ed25519 AAAA marius@laptop with spaces",
+    ]) {
+      expect(
+        filterAccountSettings({ ssh_keys: { keys: [{ id: "k1", public: bad }] } }).error,
+        bad,
+      ).toBe("invalid_ssh_key");
+    }
+    expect(filterAccountSettings({ ssh_keys: { keys: "nope" } }).error).toBe("invalid_settings");
+    expect(filterAccountSettings({ ssh_keys: { keys: [{ id: "bad id!", public: "ssh-ed25519 AAAA" }] } }).error).toBe(
+      "invalid_settings",
+    );
+    expect(filterAccountSettings({ ssh_keys: [] }).error).toBe("invalid_settings");
   });
 
   it("never resolves groups or fields through Object.prototype", () => {

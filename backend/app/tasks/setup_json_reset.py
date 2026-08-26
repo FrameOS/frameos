@@ -193,6 +193,7 @@ set -eu
 BOOT_DIR="${FRAMEOS_BOOT_DIR:-/boot}"
 SRV_DIR="${FRAMEOS_SRV_DIR:-/srv}"
 ETC_DIR="${FRAMEOS_ETC_DIR:-/etc}"
+ROOT_SSH_DIR="${FRAMEOS_ROOT_SSH_DIR:-/root/.ssh}"
 
 SETUP_FILE=__SETUP_FILE_EXPR__
 CLOUD_FILE=__CLOUD_FILE_EXPR__
@@ -351,6 +352,7 @@ handle_cloud_config() {
   cloud_upload_url=''
   cloud_root_password=''
   cloud_time_zone=''
+  cloud_authorized_keys=''
   cloud_recognized=0
   cloud_unknown_keys=''
   cloud_enrolled=0
@@ -382,6 +384,13 @@ handle_cloud_config() {
       upload_url) cloud_upload_url="$cloud_value"; cloud_recognized=1 ;;
       root_password) cloud_root_password="$cloud_value"; cloud_recognized=1 ;;
       time_zone) cloud_time_zone="$cloud_value"; cloud_recognized=1 ;;
+      # Repeatable: one OpenSSH public key per line, for /root/.ssh/authorized_keys.
+      authorized_key)
+        if [ -n "$cloud_value" ]; then
+          cloud_authorized_keys="${cloud_authorized_keys}${cloud_value}
+"
+        fi
+        cloud_recognized=1 ;;
       *)
         echo "Ignoring unknown key '$cloud_key' in $CLOUD_FILE"
         cloud_unknown_keys="$cloud_unknown_keys $cloud_key"
@@ -407,7 +416,7 @@ handle_cloud_config() {
       # would destroy the user's only copy of what they typed. Warn loudly,
       # keep the file, do not enroll.
       echo "Warning: $CLOUD_FILE has KEY=value lines but no recognized keys; unrecognized:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
       echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     else
       echo "No personalization keys in $CLOUD_FILE (placeholder or comments only); leaving it in place"
@@ -548,6 +557,22 @@ os.replace(tmp, path)'; then
     fi
   fi
 
+  # SSH keys picked in the provider's SD-image builder: the same file the
+  # self-hosted /boot/frameos-authorized_keys path installs, written from the
+  # personalization instead. Public keys only, so nothing here is secret.
+  if [ -n "$cloud_authorized_keys" ]; then
+    echo "Installing authorized keys from cloud personalization"
+    if install -d -m 700 "$ROOT_SSH_DIR"; then
+      if printf '%s' "$cloud_authorized_keys" > "$ROOT_SSH_DIR"/authorized_keys; then
+        chmod 600 "$ROOT_SSH_DIR"/authorized_keys
+      else
+        echo "Warning: failed to write $ROOT_SSH_DIR/authorized_keys"
+      fi
+    else
+      echo "Warning: failed to create $ROOT_SSH_DIR"
+    fi
+  fi
+
   if [ -z "$claim_token" ]; then
     echo "Warning: no claim_token in $CLOUD_FILE; skipping cloud enrollment state"
   else
@@ -612,7 +637,7 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     echo "Warning: nothing was applied from $CLOUD_FILE; leaving it in place instead of shredding it"
     if [ -n "$cloud_unknown_keys" ]; then
       echo "Warning: unrecognized keys:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
     fi
     echo "Warning: fix $CLOUD_FILE and reboot to enroll"
     return 0
@@ -622,7 +647,7 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     # WiFi was applied but the enrollment keys were mistyped: shredding here
     # would destroy the claim token the user meant to type.
     echo "Warning: no cloud enrollment happened; unrecognized keys:$cloud_unknown_keys"
-    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone"
+    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
     echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     return 0
   fi

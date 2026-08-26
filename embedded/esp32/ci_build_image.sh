@@ -244,6 +244,22 @@ echo "ESP32 merged image: $MERGED_BYTES bytes"
 echo "ESP32 bootloader: $BOOTLOADER_BYTES bytes"
 echo "ESP32 partition table: $PARTITION_BYTES bytes"
 
+# One JSON size document per build: totals, OTA-slot headroom and a
+# per-subsystem breakdown of the linker map. CI diffs it against the latest
+# release in a sticky PR comment and the release workflow publishes it as a
+# release asset (the next PR's baseline). Best effort by design — a size
+# report must never fail a build that produced a valid image.
+SIZE_JSON="$BUILD_DIR/firmware-size.json"
+if ! python "$SCRIPT_DIR/tools/firmware_size.py" measure \
+    --build-dir "$BUILD_DIR" \
+    --platform "$PLATFORM" \
+    --version "$FRAMEOS_VERSION" \
+    --app-slot-bytes "$APP_SLOT_BYTES" \
+    --flash-bytes "$FLASH_BYTES" \
+    --out "$SIZE_JSON"; then
+    echo "warning: firmware size report failed; continuing without $SIZE_JSON" >&2
+fi
+
 if [[ "$QEMU_SMOKE" != "1" ]]; then
     exit 0
 fi

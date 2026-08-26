@@ -15,7 +15,13 @@
 ##
 ##   Installed scenes                         ← `notes`
 ##   1. Default Scene
-##                                     v2026.8.33 ← `footer`
+##
+##   Last button: Next (GPIO 5) 14:32:05  v2026.8.33 ← `bar` (left) + `footer`
+##
+## The bottom band holds `bar` on the left and `footer` on the right; on dark
+## panels it is a grey strip, on light ones just the text. `markPhase` ≥ 0
+## cycles the brand colours through the mark's three squares — the "alive"
+## signal an HDMI frame shows while booting and while it has no scenes.
 ##
 ## Colours: `dark` (white on black) is the HDMI / LCD look; `light` (black
 ## on white) is the e-ink look. The mark is drawn from the embedded SVG so it
@@ -35,7 +41,9 @@ type
     rows*: seq[StatusRow]  ## Label / value facts, drawn in two columns.
     notes*: seq[string]    ## Free lines after the rows (scene list, hints).
     footer*: string        ## Bottom-right, small (version).
+    bar*: string           ## Bottom-left, in the same band as the footer (last button press).
     dark*: bool            ## White on black (true) or black on white.
+    markPhase*: float      ## 0 (the default): static brand colours; 0..1: animation phase (markSquareColorsAt).
 
 const
   frameosMarkSvg = staticRead("status_screen/frameos_mark.svg")
@@ -43,6 +51,28 @@ const
   wordmark = "FrameOS"
   # The three squares' fills in frameos_mark.svg (same as logo-white-colors.svg).
   markSquareColors = ["#1c7c66", "#8baa3a", "#c8a247"]
+  # Animation frames per colour cycle. The phase is quantized to this many
+  # steps so the rasterized-mark cache below stays bounded (one entry per
+  # step per size) instead of growing with every distinct timestamp.
+  markPhaseSteps* = 36
+
+proc markSquareColorsAt*(phase: float): array[3, string] =
+  ## The three squares' colours at animation `phase` (0..1, wrapping): the
+  ## brand colours walk one square along per third of the cycle, blending
+  ## between neighbours on the way, so the colours flow diagonally through
+  ## the mark and every full cycle lands back on the static logo. Phase 0
+  ## (and any negative phase) is the static logo itself.
+  if phase <= 0:
+    return markSquareColors
+  let p = phase - floor(phase)
+  let quantized = floor(p * markPhaseSteps.float) / markPhaseSteps.float
+  let travel = quantized * 3.0
+  let step = int(floor(travel)) mod 3
+  let blend = (travel - floor(travel)).float32
+  for i in 0 ..< 3:
+    let fromColor = parseHtmlColor(markSquareColors[(i + step) mod 3])
+    let toColor = parseHtmlColor(markSquareColors[(i + step + 1) mod 3])
+    result[i] = mix(fromColor, toColor, blend).toHtmlHex().toLowerAscii()
 
 var markLock: Lock
 initLock(markLock)
@@ -51,14 +81,17 @@ initLock(markLock)
 # re-parsing the SVG on every render of a scene that refreshes every minute.
 var markCache: Table[string, Image] = initTable[string, Image]()
 
-proc frameosMark*(height: int, color: Color, coloredSquares = true): Image =
+proc frameosMark*(height: int, color: Color, coloredSquares = true, phase = -1.0): Image =
   ## The FrameOS mark rasterized to `height` pixels: the frame filled with
   ## `color`, the three squares in the brand colours — or, with
   ## `coloredSquares = false` (1-bit e-ink, where colour would dither into
-  ## noise), also in `color`.
+  ## noise), also in `color`. `phase` ≥ 0 picks the animation frame
+  ## (markSquareColorsAt); the raster is cached per (size, colour, frame).
   let h = max(height, 8)
   let w = max(int(round(h.float * markAspect)), 8)
-  let key = $w & "x" & $h & "/" & color.toHtmlHex() & (if coloredSquares: "/c" else: "/m")
+  let squares = if coloredSquares: markSquareColorsAt(phase) else: markSquareColors
+  let key = $w & "x" & $h & "/" & color.toHtmlHex() &
+    (if coloredSquares: "/c" & squares.join(",") else: "/m")
   withLock markLock:
     if markCache.hasKey(key):
       return markCache[key]
@@ -66,6 +99,11 @@ proc frameosMark*(height: int, color: Color, coloredSquares = true): Image =
   if not coloredSquares:
     for brand in markSquareColors:
       svg = svg.replace("fill=\"" & brand & "\"", "fill=\"" & color.toHtmlHex() & "\"")
+  elif phase > 0:
+    # Each square's fill is a distinct string, so an ordered replace recolours
+    # them one by one without touching the frame.
+    for i, brand in markSquareColors:
+      svg = svg.replace("fill=\"" & brand & "\"", "fill=\"" & squares[i] & "\"")
   let image = newImage(pixie_svg.parseSvg(svg, w, h))
   withLock markLock:
     markCache[key] = image
@@ -83,8 +121,11 @@ proc statusScreenText*(screen: StatusScreen): string =
     lines.add("")
     for note in screen.notes:
       lines.add(note)
-  if screen.footer.len > 0:
+  if screen.bar.len > 0 or screen.footer.len > 0:
     lines.add("")
+  if screen.bar.len > 0:
+    lines.add(screen.bar)
+  if screen.footer.len > 0:
     lines.add(screen.footer)
   lines.join("\n")
 
@@ -105,6 +146,7 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
   # Labels step back on dark panels; on light (e-ink, often 1-bit) a grey
   # would just dither into noise, so everything stays black there.
   let muted = if screen.dark: color(0.66, 0.66, 0.66, 1) else: fg
+  let band = color(0.14, 0.14, 0.14, 1)
   image.fill(bg)
 
   let typeface = fontUtils.getDefaultTypeface()
@@ -158,7 +200,7 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
       result += rowHeight
     if screen.notes.len > 0:
       result += gap + screen.notes.len.float32 * noteLineHeight
-    if screen.footer.len > 0:
+    if screen.footer.len > 0 or screen.bar.len > 0:
       result += gap + footerFontSize * 1.4
 
   measure()
@@ -174,7 +216,7 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
   # Header: mark, wordmark beside it, status line under the wordmark. The
   # status may wrap (a long cloud hint on a portrait panel); the rows start
   # below whichever is taller, the mark or the text block.
-  let mark = frameosMark(int(round(mh)), fg, coloredSquares = screen.dark)
+  let mark = frameosMark(int(round(mh)), fg, coloredSquares = screen.dark, phase = screen.markPhase)
   let headlineFont = makeFont(typeface, headlineFontSize, fg)
   let statusFont = makeFont(typeface, statusFontSize, muted)
   let textX = padding + mark.width.float32 + mh * 0.3
@@ -195,9 +237,14 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
     image.fillText(statusArrangement, translate(vec2(textX, headerTextY + headlineHeight)))
   y += headerHeight + gap
 
-  # Rows and notes stop above the footer rather than running under it.
-  let footerHeight = if screen.footer.len > 0: footerFontSize * 1.4 else: 0.0'f32
-  let bottomLimit = height.float32 - padding - footerHeight
+  # Rows and notes stop above the bottom band rather than running under it.
+  let hasBand = screen.footer.len > 0 or screen.bar.len > 0
+  let footerHeight = if hasBand: footerFontSize * 1.4 else: 0.0'f32
+  # On dark panels the band is a grey strip flush with the bottom edge, tall
+  # enough to breathe; on light panels the same text sits inside the padding.
+  let bandHeight = if hasBand and screen.dark: footerHeight * 1.7 else: footerHeight
+  let bandTop = if screen.dark: height.float32 - bandHeight else: height.float32 - padding - footerHeight
+  let bottomLimit = if screen.dark and hasBand: bandTop - gap * 0.5 else: height.float32 - padding - footerHeight
 
   # Rows: label column, value column. Label and the value's first line share
   # a baseline; a wrapped value continues below it.
@@ -219,8 +266,22 @@ proc drawStatusScreen*(image: Image, screen: StatusScreen) =
         vAlign = MiddleAlign), translate(vec2(padding, y)))
       y += noteLineHeight
 
-  if screen.footer.len > 0:
+  if hasBand:
+    if screen.dark:
+      var bandPath = newPath()
+      bandPath.rect(0, bandTop, width.float32, bandHeight)
+      image.fillPath(bandPath, band)
     let footerFont = makeFont(typeface, footerFontSize, muted)
-    image.fillText(footerFont.typeset(screen.footer, bounds = vec2(innerWidth, footerHeight),
-      hAlign = RightAlign, vAlign = MiddleAlign),
-      translate(vec2(padding, height.float32 - padding - footerHeight)))
+    var footerWidth = 0.0'f32
+    if screen.footer.len > 0:
+      footerWidth = footerFont.layoutBounds(screen.footer).x
+      image.fillText(footerFont.typeset(screen.footer, bounds = vec2(innerWidth, bandHeight),
+        hAlign = RightAlign, vAlign = MiddleAlign), translate(vec2(padding, bandTop)))
+    if screen.bar.len > 0:
+      # The bar text is a fact (which button, when), so it reads in the
+      # foreground colour; the version stays muted. One line, clipped by
+      # the space left of the footer.
+      let barFont = makeFont(typeface, footerFontSize, fg)
+      let barWidth = max(innerWidth - footerWidth - footerFontSize, 10.0'f32)
+      image.fillText(barFont.typeset(screen.bar, bounds = vec2(barWidth, bandHeight),
+        vAlign = MiddleAlign), translate(vec2(padding, bandTop)))

@@ -2765,6 +2765,19 @@ a.stat-tile:hover {
   position: relative;
 }
 
+.scene-gallery__thumb-wrap--draggable {
+  cursor: grab;
+}
+
+.scene-gallery__thumb-wrap--dragging {
+  opacity: 0.4;
+}
+
+.scene-gallery__thumb-wrap--drop-target .scene-gallery__thumb {
+  border-color: var(--accent, #888);
+  outline: 2px solid var(--accent, #888);
+}
+
 .scene-gallery__thumb-remove {
   position: absolute;
   top: -6px;
