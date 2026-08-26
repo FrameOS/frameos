@@ -9,7 +9,7 @@ export function browserTimeZone(): string | undefined {
   try {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
     if (typeof zone !== 'string' || zone.length === 0 || zone.length > 64) return undefined
-    return /^[A-Za-z][A-Za-z0-9_+\-]*(\/[A-Za-z0-9_+\-]+)*$/.test(zone) ? zone : undefined
+    return /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(zone) ? zone : undefined
   } catch {
     return undefined
   }

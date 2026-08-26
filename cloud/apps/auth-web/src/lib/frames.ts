@@ -563,7 +563,7 @@ export function isValidTimeZoneName(value: unknown): value is string {
     typeof value === "string" &&
     value.length > 0 &&
     value.length <= 64 &&
-    /^[A-Za-z][A-Za-z0-9_+\-]*(\/[A-Za-z0-9_+\-]+)*$/.test(value)
+    /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(value)
   );
 }
 
