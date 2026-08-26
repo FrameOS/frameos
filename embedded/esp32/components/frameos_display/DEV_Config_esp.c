@@ -5,6 +5,8 @@
  */
 #include "DEV_Config.h"
 
+#include <stdarg.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -12,6 +14,7 @@
 #include "driver/spi_master.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
 
 static const char *TAG = "dev_config";
 
@@ -51,6 +54,44 @@ void DEV_SetPinConfig(int rst, int dc, int cs, int cs2, int busy, int sclk, int 
     EPD_PWR_PIN = pwr;
 }
 
+static DEV_DebugLogFn s_debug_log = NULL;
+
+void DEV_SetDebugLog(DEV_DebugLogFn fn)
+{
+    s_debug_log = fn;
+}
+
+int DEV_Debug_Enabled(void)
+{
+    return s_debug_log != NULL || esp_log_level_get(TAG) >= ESP_LOG_DEBUG;
+}
+
+void DEV_Debug_Log(const char *action, const char *extraJson)
+{
+    if (s_debug_log != NULL) {
+        s_debug_log(action, extraJson);
+        return;
+    }
+    ESP_LOGD(TAG, "%s {%s}", action ? action : "", extraJson ? extraJson : "");
+}
+
+void DEV_Error(const char *fmt, ...)
+{
+    char buf[256];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_end(args);
+    ESP_LOGE(TAG, "%s", buf);
+}
+
+int DEV_TakeError(char *buf, size_t len)
+{
+    (void)buf;
+    (void)len;
+    return 0;
+}
+
 void DEV_Digital_Write(UWORD Pin, UBYTE Value)
 {
     gpio_set_level(Pin, Value);
@@ -66,6 +107,11 @@ void DEV_Delay_ms(UDOUBLE xms)
     if (xms == 0) return;
     TickType_t ticks = pdMS_TO_TICKS(xms);
     vTaskDelay(ticks > 0 ? ticks : 1);
+}
+
+UDOUBLE DEV_Millis(void)
+{
+    return (UDOUBLE)(esp_timer_get_time() / 1000);
 }
 
 void DEV_SPI_WriteByte(UBYTE Value)

@@ -33,49 +33,19 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <sys/time.h>
-#include <time.h>
 
-static void log_with_timestamp(const char *category, const char *message)
-{
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    struct tm tm_info;
-    struct tm *tm_ptr = localtime(&tv.tv_sec);
-    if (tm_ptr != NULL) {
-        tm_info = *tm_ptr;
-    } else {
-        memset(&tm_info, 0, sizeof(tm_info));
-    }
-
-    char time_buf[64];
-    strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", &tm_info);
-
-    printf("[%s.%03ld] %s%s%s\n", time_buf, tv.tv_usec / 1000,
-           category != NULL ? category : "",
-           (category != NULL && message != NULL) ? " " : "",
-           message != NULL ? message : "");
-    fflush(stdout);
-}
-
+/* FrameOS divergence: the driver narrates what it does. Events go through the
+ * DEV_Config debug hook (DEV_Config.h): a JSON driver event on FrameOS/Linux,
+ * the console at debug level on ESP32, and nothing at all when unset. */
 static void log_debug_action_extra(const char *action, const char *extra)
 {
-    char buffer[256];
-    if (extra && extra[0] != '\0') {
-        snprintf(buffer, sizeof(buffer), "action=\"%s\" %s", action, extra);
-    } else {
-        snprintf(buffer, sizeof(buffer), "action=\"%s\"", action);
-    }
-    log_with_timestamp("driver:waveshare:debug", buffer);
+    DEV_Debug_Log(action, extra);
 }
 
 static void log_debug_action(const char *action)
 {
-    log_debug_action_extra(action, NULL);
+    DEV_Debug_Log(action, NULL);
 }
-
-static int data_log_counter = 0;
-static int data_bytes_current_command = 0;
 
 /* FrameOS divergence from the Waveshare driver:
  * PhotoPainter uses the same 7.3e controller command set, but its board-level
@@ -90,59 +60,12 @@ static int photo_painter_mode = 0;
  * can wedge the render loop permanently if the board/panel misses the BUSY
  * transition, so cap the wait and log the timeout explicitly.
  */
-#define BUSY_WAIT_TIMEOUT_MS 120000
 
 void EPD_7IN3E_SetPhotoPainterMode(int enabled)
 {
     photo_painter_mode = enabled ? 1 : 0;
 }
 
-static void log_command(UBYTE reg)
-{
-    data_log_counter = 0;
-    data_bytes_current_command = 0;
-
-    char buffer[128];
-    snprintf(buffer, sizeof(buffer), "command=%u commandHex=0x%02X",
-             (unsigned int)reg, (unsigned int)reg);
-    log_with_timestamp("driver:waveshare:command", buffer);
-}
-
-static void log_data(UBYTE data)
-{
-    ++data_bytes_current_command;
-
-    if (data_log_counter < 16) {
-        char buffer[160];
-        snprintf(buffer, sizeof(buffer),
-                 "index=%d data=%u dataHex=0x%02X",
-                 data_bytes_current_command,
-                 (unsigned int)data,
-                 (unsigned int)data);
-        log_with_timestamp("driver:waveshare:data", buffer);
-    } else if (data_log_counter == 16) {
-        char buffer[160];
-        snprintf(buffer, sizeof(buffer),
-                 "message=\"Further data logging suppressed for this command\" bytesSent=%d",
-                 data_bytes_current_command);
-        log_with_timestamp("driver:waveshare:data", buffer);
-    } else if (data_bytes_current_command % 4096 == 0) {
-        char buffer[160];
-        snprintf(buffer, sizeof(buffer),
-                 "message=\"Data transfer progress\" bytesSent=%d",
-                 data_bytes_current_command);
-        log_with_timestamp("driver:waveshare:data", buffer);
-    }
-
-    ++data_log_counter;
-}
-
-static long elapsed_ms(const struct timeval *start, const struct timeval *end)
-{
-    long seconds = (long)(end->tv_sec - start->tv_sec);
-    long useconds = (long)(end->tv_usec - start->tv_usec);
-    return seconds * 1000 + useconds / 1000;
-}
 
 /******************************************************************************
 function :  Software reset
@@ -174,7 +97,7 @@ parameter:
 ******************************************************************************/
 static void EPD_7IN3E_SendCommand(UBYTE Reg)
 {
-    log_command(Reg);
+    DEV_Debug_Command(Reg);
     DEV_Digital_Write(EPD_DC_PIN, 0);
     DEV_Digital_Write(EPD_CS_PIN, 0);
     DEV_SPI_WriteByte(Reg);
@@ -193,7 +116,7 @@ static void EPD_7IN3E_SendData(UBYTE Data)
     DEV_SPI_WriteByte(Data);
     DEV_Digital_Write(EPD_CS_PIN, 1);
 
-    log_data(Data);
+    DEV_Debug_Data(Data);
 }
 
 static void EPD_7IN3E_SendDataBuffer(UBYTE *Data, uint32_t Len)
@@ -212,100 +135,21 @@ static void EPD_7IN3E_SendDataBuffer(UBYTE *Data, uint32_t Len)
     DEV_SPI_Write_nByte(Data, Len);
     DEV_Digital_Write(EPD_CS_PIN, 1);
 
-    data_bytes_current_command += (int)Len;
-    char buffer[160];
-    snprintf(buffer, sizeof(buffer),
-             "message=\"Bulk data transfer\" bytesSent=%lu",
-             (unsigned long)data_bytes_current_command);
-    log_with_timestamp("driver:waveshare:data", buffer);
+    DEV_Debug_DataBulk(Data, Len);
 }
 
 /******************************************************************************
 function :  Wait until the busy_pin goes LOW
 parameter:
 ******************************************************************************/
-static int EPD_7IN3E_ReadBusyH(void)
+static int EPD_7IN3E_ReadBusyH(const char *stage)
 {
     /* FrameOS divergence:
      * Return whether the BUSY line was actually observed LOW before going idle.
      * The caller uses this to detect panels/boards that acknowledge the command
      * too quickly for the sampled BUSY line and need a fixed refresh delay.
-     */
-    struct timeval start_tv;
-    gettimeofday(&start_tv, NULL);
-
-    UBYTE state = DEV_Digital_Read(EPD_BUSY_PIN);
-    char start_buffer[128];
-    snprintf(start_buffer, sizeof(start_buffer), "initialState=%u",
-             (unsigned int)state);
-    log_debug_action_extra("busy:wait:start", start_buffer);
-
-    long loop_count = 0;
-    int observed_low = (state == 0);
-    struct timeval low_start_tv = start_tv;
-    struct timeval last_log_tv = start_tv;
-    int timed_out_waiting_for_high = 0;
-
-    if (!observed_low && state == 0) {
-        observed_low = 1;
-        gettimeofday(&low_start_tv, NULL);
-    }
-
-    while(!DEV_Digital_Read(EPD_BUSY_PIN)) {      //LOW: busy, HIGH: idle
-        if (!observed_low) {
-            observed_low = 1;
-            gettimeofday(&low_start_tv, NULL);
-        }
-
-        DEV_Delay_ms(1);
-        ++loop_count;
-
-        struct timeval now;
-        gettimeofday(&now, NULL);
-        long elapsed = elapsed_ms(&start_tv, &now);
-        if (elapsed >= BUSY_WAIT_TIMEOUT_MS) {
-            timed_out_waiting_for_high = 1;
-            break;
-        }
-
-        if (loop_count % 1000 == 0) {
-            long since_last = elapsed_ms(&last_log_tv, &now);
-            if (since_last >= 1000) {
-                char buffer[160];
-                snprintf(buffer, sizeof(buffer),
-                         "loops=%ld elapsedMs=%ld stage=\"waitForHigh\"",
-                         loop_count, elapsed);
-                log_with_timestamp("driver:waveshare:busy", buffer);
-                last_log_tv = now;
-            }
-        }
-    }
-
-    struct timeval end_tv;
-    gettimeofday(&end_tv, NULL);
-
-    long duration = elapsed_ms(&start_tv, &end_tv);
-    long waited_for_low_ms = 0;
-    long waited_for_high_ms = 0;
-    if (observed_low) {
-        waited_for_low_ms = elapsed_ms(&start_tv, &low_start_tv);
-        waited_for_high_ms = elapsed_ms(&low_start_tv, &end_tv);
-    }
-
-    state = DEV_Digital_Read(EPD_BUSY_PIN);
-
-    char end_buffer[256];
-    snprintf(end_buffer, sizeof(end_buffer),
-             "durationMs=%ld loops=%ld finalState=%u observedLow=%s waitedForLowMs=%ld waitedForHighMs=%ld timedOutWaitingForLow=false timedOutWaitingForHigh=%s",
-             duration,
-             loop_count,
-             (unsigned int)state,
-             observed_low ? "true" : "false",
-             waited_for_low_ms,
-             waited_for_high_ms,
-             timed_out_waiting_for_high ? "true" : "false");
-    log_debug_action_extra("busy:wait:end", end_buffer);
-    return timed_out_waiting_for_high ? -1 : observed_low;
+     * -1 on timeout (reported through DEV_Error). */
+    return DEV_Busy_Wait(stage, 0, 1);
 }
 
 /******************************************************************************
@@ -318,7 +162,7 @@ static void EPD_7IN3E_TurnOnDisplay(void)
 
     log_debug_action("turnOnDisplay:powerOn");
     EPD_7IN3E_SendCommand(0x04); // POWER_ON
-    EPD_7IN3E_ReadBusyH();
+    EPD_7IN3E_ReadBusyH("turnOnDisplay:powerOn");
 
     //Second setting
     log_debug_action("turnOnDisplay:secondSetting");
@@ -340,16 +184,16 @@ static void EPD_7IN3E_TurnOnDisplay(void)
      * LOW.
      */
     DEV_Delay_ms(100);
-    int refresh_busy_observed = EPD_7IN3E_ReadBusyH();
-    if (!refresh_busy_observed) {
-        log_debug_action_extra("turnOnDisplay:refreshFixedWait", "durationMs=25000");
+    int refresh_busy_observed = EPD_7IN3E_ReadBusyH("turnOnDisplay:refresh");
+    if (refresh_busy_observed == 0) {
+        log_debug_action_extra("turnOnDisplay:refreshFixedWait", "\"durationMs\":25000");
         DEV_Delay_ms(25000);
     }
 
     log_debug_action("turnOnDisplay:powerOff");
     EPD_7IN3E_SendCommand(0x02); // POWER_OFF
     EPD_7IN3E_SendData(0X00);
-    EPD_7IN3E_ReadBusyH();
+    EPD_7IN3E_ReadBusyH("turnOnDisplay:powerOff");
 
     log_debug_action("turnOnDisplay:done");
 }
@@ -362,7 +206,7 @@ void EPD_7IN3E_Init(void)
 {
     log_debug_action("init:start");
     EPD_7IN3E_Reset();
-    EPD_7IN3E_ReadBusyH();
+    EPD_7IN3E_ReadBusyH("init:reset");
     DEV_Delay_ms(30);
     log_debug_action("init:afterResetDelay");
 
@@ -441,7 +285,7 @@ void EPD_7IN3E_Init(void)
 
     log_debug_action("init:powerOn");
     EPD_7IN3E_SendCommand(0x04);     //PWR on
-    EPD_7IN3E_ReadBusyH();          //waiting for the electronic paper IC to release the idle signal
+    EPD_7IN3E_ReadBusyH("init:powerOn");          //waiting for the electronic paper IC to release the idle signal
 
     log_debug_action("init:done");
 }
@@ -459,7 +303,7 @@ void EPD_7IN3E_Clear(UBYTE color)
     unsigned long total_bytes = (unsigned long)Width * (unsigned long)Height;
     char start_buffer[160];
     snprintf(start_buffer, sizeof(start_buffer),
-             "color=%u widthBytes=%u height=%u totalBytes=%lu",
+             "\"color\":%u,\"widthBytes\":%u,\"height\":%u,\"totalBytes\":%lu",
              (unsigned int)color, Width, Height, total_bytes);
     log_debug_action_extra("clear:start", start_buffer);
 
@@ -471,7 +315,7 @@ void EPD_7IN3E_Clear(UBYTE color)
     }
 
     char end_buffer[128];
-    snprintf(end_buffer, sizeof(end_buffer), "totalBytes=%lu", total_bytes);
+    snprintf(end_buffer, sizeof(end_buffer), "\"totalBytes\":%lu", total_bytes);
     log_debug_action_extra("clear:dataWritten", end_buffer);
     EPD_7IN3E_TurnOnDisplay();
 }
@@ -486,7 +330,7 @@ void EPD_7IN3E_Show7Block(void)
     unsigned char const Color_seven[6] =
     {EPD_7IN3E_BLACK, EPD_7IN3E_YELLOW, EPD_7IN3E_RED, EPD_7IN3E_BLUE, EPD_7IN3E_GREEN, EPD_7IN3E_WHITE};
 
-    log_debug_action_extra("show7Block:start", "blocks=6 bytesPerBlock=20000");
+    log_debug_action_extra("show7Block:start", "\"blocks\":6,\"bytesPerBlock\":20000");
 
     EPD_7IN3E_SendCommand(0x10);
     for(k = 0 ; k < 6; k ++) {
@@ -494,7 +338,7 @@ void EPD_7IN3E_Show7Block(void)
             EPD_7IN3E_SendData((Color_seven[k]<<4) |Color_seven[k]);
         }
     }
-    log_debug_action_extra("show7Block:dataWritten", "totalBytes=120000");
+    log_debug_action_extra("show7Block:dataWritten", "\"totalBytes\":120000");
     EPD_7IN3E_TurnOnDisplay();
 }
 
@@ -513,7 +357,7 @@ void EPD_7IN3E_Show(void)
     unsigned long total_bytes = (unsigned long)Width * (unsigned long)Height;
     char start_buffer[160];
     snprintf(start_buffer, sizeof(start_buffer),
-             "widthBytes=%u height=%u totalBytes=%lu", Width, Height, total_bytes);
+             "\"widthBytes\":%u,\"height\":%u,\"totalBytes\":%lu", Width, Height, total_bytes);
     log_debug_action_extra("show:start", start_buffer);
 
     EPD_7IN3E_SendCommand(0x10);
@@ -543,7 +387,7 @@ void EPD_7IN3E_Show(void)
             o = 0;
     }
     char data_buffer[128];
-    snprintf(data_buffer, sizeof(data_buffer), "totalBytes=%lu", total_bytes);
+    snprintf(data_buffer, sizeof(data_buffer), "\"totalBytes\":%lu", total_bytes);
     log_debug_action_extra("show:dataWritten", data_buffer);
     EPD_7IN3E_TurnOnDisplay();
 }
@@ -566,34 +410,10 @@ void EPD_7IN3E_Display(UBYTE *Image)
     unsigned long total_bytes = (unsigned long)Width * (unsigned long)Height;
     char start_buffer[160];
     snprintf(start_buffer, sizeof(start_buffer),
-             "widthBytes=%u height=%u totalBytes=%lu", Width, Height, total_bytes);
+             "\"widthBytes\":%u,\"height\":%u,\"totalBytes\":%lu", Width, Height, total_bytes);
     log_debug_action_extra("display:start", start_buffer);
 
-    if (total_bytes > 0) {
-        int preview_count = (total_bytes < 16) ? (int)total_bytes : 16;
-        char bytes_buffer[256];
-        int offset = snprintf(bytes_buffer, sizeof(bytes_buffer), "[");
-        for (int idx = 0; idx < preview_count && offset < (int)sizeof(bytes_buffer); ++idx) {
-            int written = snprintf(bytes_buffer + offset, sizeof(bytes_buffer) - (size_t)offset,
-                                   "%s%u", idx == 0 ? "" : ",",
-                                   (unsigned int)Image[idx]);
-            if (written < 0) {
-                break;
-            }
-            offset += written;
-        }
-        if (offset < (int)sizeof(bytes_buffer) - 2) {
-            snprintf(bytes_buffer + offset, sizeof(bytes_buffer) - (size_t)offset, "]");
-        } else {
-            bytes_buffer[sizeof(bytes_buffer) - 2] = ']';
-            bytes_buffer[sizeof(bytes_buffer) - 1] = '\0';
-        }
-
-        char preview_message[320];
-        snprintf(preview_message, sizeof(preview_message),
-                 "count=%d bytes=%s", preview_count, bytes_buffer);
-        log_with_timestamp("driver:waveshare:dataPreview", preview_message);
-    }
+    DEV_Debug_Preview(Image, total_bytes);
 
     EPD_7IN3E_SendCommand(0x10);
 
@@ -603,7 +423,7 @@ void EPD_7IN3E_Display(UBYTE *Image)
      */
     EPD_7IN3E_SendDataBuffer(Image, (uint32_t)total_bytes);
     char end_buffer[128];
-    snprintf(end_buffer, sizeof(end_buffer), "totalBytes=%lu", total_bytes);
+    snprintf(end_buffer, sizeof(end_buffer), "\"totalBytes\":%lu", total_bytes);
     log_debug_action_extra("display:dataWritten", end_buffer);
     EPD_7IN3E_TurnOnDisplay();
 }
@@ -623,14 +443,14 @@ void EPD_7IN3E_Sleep(void)
      */
     if (photo_painter_mode) {
         log_debug_action_extra("sleep:skipDeepSleep",
-                               "reason=\"turnOnDisplay already powers off the PhotoPainter panel\"");
+                               "\"reason\":\"turnOnDisplay already powers off the PhotoPainter panel\"");
         log_debug_action("sleep:done");
         return;
     }
 
     EPD_7IN3E_SendCommand(0X02); // DEEP_SLEEP
     EPD_7IN3E_SendData(0x00);
-    EPD_7IN3E_ReadBusyH();
+    EPD_7IN3E_ReadBusyH("sleep:powerOff");
 
     EPD_7IN3E_SendCommand(0x07); // DEEP_SLEEP
     EPD_7IN3E_SendData(0XA5);

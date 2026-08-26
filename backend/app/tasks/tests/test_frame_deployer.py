@@ -140,7 +140,7 @@ def test_copy_waveshare_build_files_stages_lgpio_header(tmp_path: Path):
     lib_dir.mkdir(parents=True)
     destination_dir.mkdir()
 
-    for file_name in ("Debug.h", "DEV_Config.c", "DEV_Config.h", "EPD_7in3e.nim"):
+    for file_name in ("Debug.h", "DEV_Config.c", "DEV_Config.h", "DEV_Debug.c", "EPD_7in3e.nim", "EPD_7in3e.c", "EPD_7in3e.h"):
         (waveshare_dir / file_name).write_text(f"{file_name}\n", encoding="utf-8")
     (lib_dir / "lgpio.h").write_text("native lgpio header\n", encoding="utf-8")
 
@@ -156,6 +156,8 @@ def test_copy_waveshare_build_files_stages_lgpio_header(tmp_path: Path):
     deployer._copy_waveshare_driver_build_files(str(source_dir), str(destination_dir), waveshare)
 
     assert (destination_dir / "DEV_Config.h").read_text(encoding="utf-8") == "DEV_Config.h\n"
+    assert (destination_dir / "EPD_7in3e.c").read_text(encoding="utf-8") == "EPD_7in3e.c\n"
+    assert (destination_dir / "DEV_Debug.c").read_text(encoding="utf-8") == "DEV_Debug.c\n"
     assert (destination_dir / "lgpio.h").read_text(encoding="utf-8") == "native lgpio header\n"
 
 

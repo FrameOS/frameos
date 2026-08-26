@@ -31,6 +31,10 @@
 #include "Debug.h"
 #include <time.h>
 
+/* Upstream 06e8344 (2026-07-28): the partial path writes the blank black
+ * plane once per Init_Part instead of before every partial update. */
+static char partFlag = 0;
+
 /******************************************************************************
 function :	Software reset
 parameter:
@@ -197,6 +201,9 @@ UBYTE EPD_7IN5B_V2_Init_Part(void)
 	EPD_7IN5B_V2_SendCommand(0X50);			//VCOM AND DATA INTERVAL SETTING
 	EPD_7IN5B_V2_SendData(0xA9);
 	EPD_7IN5B_V2_SendData(0x07);
+
+    partFlag = 0;
+
     return 0;
 }
 
@@ -340,13 +347,16 @@ void EPD_7IN5B_V2_Display_Partial(const UBYTE *Image, UWORD Xstart, UWORD Ystart
 	EPD_7IN5B_V2_SendData(Yend%256-1);  //y-end
 	EPD_7IN5B_V2_SendData(0x01);		
 
-    EPD_7IN5B_V2_SendCommand(0x10);   //Write Black and White image to RAM
-    for (UDOUBLE j = 0; j < Height; j++) {
-        for (UDOUBLE i = 0; i < Width; i++) {
-            EPD_7IN5B_V2_SendData(0xff);
+    if(partFlag == 0)
+    {
+        partFlag = 1;
+        EPD_7IN5B_V2_SendCommand(0x10);   //Write Black and White image to RAM
+        for (UDOUBLE j = 0; j < Height; j++) {
+            for (UDOUBLE i = 0; i < Width; i++) {
+                EPD_7IN5B_V2_SendData(0xff);
+            }
         }
     }
-
     EPD_7IN5B_V2_SendCommand(0x13);   //Write Black and White image to RAM
     for (UDOUBLE j = 0; j < Height; j++) {
         for (UDOUBLE i = 0; i < Width; i++) {

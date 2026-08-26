@@ -669,12 +669,10 @@ $(OBJECTS): pre-build
             return "", []
         variant_folder = get_variant_folder(waveshare.variant)
 
-        if waveshare.variant in ("EPD_10in3", "EPD_13in3e"):
+        if variant_folder == "it8951":
             util_files: list[str] = []
         else:
-            util_files = ["DEV_Config.c", "DEV_Config.h"]
-        if variant_folder != "it8951" and waveshare.variant != "EPD_13in3e":
-            util_files.insert(0, "Debug.h")
+            util_files = ["Debug.h", "DEV_Config.c", "DEV_Config.h", "DEV_Debug.c"]
 
         if waveshare.variant in [
             "EPD_2in9b", "EPD_2in9c", "EPD_2in13b", "EPD_2in13c",
@@ -685,8 +683,6 @@ $(OBJECTS): pre-build
             variant_files = [f"{waveshare.variant}.nim", f"{c_file}.c", f"{c_file}.h"]
         elif waveshare.variant == "EPD_10in3":
             variant_files = [f"{waveshare.variant}.nim", "IT8951.nim"]
-        elif waveshare.variant in ["EPD_4in0e", "EPD_4in01f", "EPD_7in3e", "EPD_13in3e"]:
-            variant_files = [f"{waveshare.variant}.nim"]
         else:
             variant_files = [f"{waveshare.variant}.nim", f"{waveshare.variant}.c", f"{waveshare.variant}.h"]
 

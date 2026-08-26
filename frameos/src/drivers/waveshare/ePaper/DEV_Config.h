@@ -52,7 +52,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
-#include <stdio.h>
 #include <string.h>
 #include "Debug.h"
 
@@ -60,28 +59,31 @@
 #define LFLAGS 0
 #define NUM_MAXBUF  4
 
-/**
- * data
-**/
 #define UBYTE   uint8_t
 #define UWORD   uint16_t
 #define UDOUBLE uint32_t
 
-/**
- * GPIOI config
-**/
+/*
+ * FrameOS divergence from the Waveshare tree: pins are runtime variables
+ * (remapped through DEV_SetPinConfig) and the HAL knows about a second chip
+ * select for dual-controller panels (EPD_13in3e). This header is the contract
+ * every EPD_*.c driver is written against; the ESP32 firmware ships its own
+ * DEV_Config.h with the same declarations
+ * (embedded/esp32/components/frameos_display/include/DEV_Config.h) — keep
+ * the two in step.
+ */
 extern int EPD_RST_PIN;
 extern int EPD_DC_PIN;
 extern int EPD_CS_PIN;
+extern int EPD_CS_M_PIN;   /* master controller CS; same pin as EPD_CS_PIN */
+extern int EPD_CS_S_PIN;   /* slave controller CS, -1 on single-controller panels */
 extern int EPD_BUSY_PIN;
 extern int EPD_PWR_PIN;
 extern int EPD_MOSI_PIN;
 extern int EPD_SCLK_PIN;
 
-/*------------------------------------------------------------------------------------------------------*/
-/* GPIO remap layer: override the default Raspberry Pi pins before
- * DEV_Module_Init(). -1 keeps the default for that pin. */
-void DEV_SetPinConfig(int rst, int dc, int cs, int busy, int sclk, int mosi, int pwr);
+/* -1 keeps the driver's default for that pin (cs2 and pwr: -1 = not wired). */
+void DEV_SetPinConfig(int rst, int dc, int cs, int cs2, int busy, int sclk, int mosi, int pwr);
 
 void DEV_Digital_Write(UWORD Pin, UBYTE Value);
 UBYTE DEV_Digital_Read(UWORD Pin);
@@ -89,6 +91,8 @@ UBYTE DEV_Digital_Read(UWORD Pin);
 void DEV_SPI_WriteByte(UBYTE Value);
 void DEV_SPI_Write_nByte(uint8_t *pData, uint32_t Len);
 void DEV_Delay_ms(UDOUBLE xms);
+/* Monotonic milliseconds, for busy-wait accounting. */
+UDOUBLE DEV_Millis(void);
 
 // Upper bound for busy-pin waits. A full e-paper refresh takes ~30s;
 // anything past this means a wedged controller, and spinning forever
@@ -101,6 +105,42 @@ UBYTE DEV_SPI_ReadData();
 
 UBYTE DEV_Module_Init(void);
 void DEV_Module_Exit(void);
+
+/*
+ * Structured debug logging for the panel drivers. `action` names the step
+ * ("busy:wait:start", "init:done", ...); `extraJson` is an optional list of
+ * JSON members without the surrounding braces ("\"stage\":\"refresh\",
+ * \"elapsedMs\":12"), or NULL. The host decides where it goes: FrameOS on
+ * Linux forwards it to the frame's driver debug log as one JSON event, the
+ * ESP32 firmware prints it at debug level. Drivers should check
+ * DEV_Debug_Enabled() before formatting anything expensive.
+ */
+typedef void (*DEV_DebugLogFn)(const char *action, const char *extraJson);
+void DEV_SetDebugLog(DEV_DebugLogFn fn);
+int DEV_Debug_Enabled(void);
+void DEV_Debug_Log(const char *action, const char *extraJson);
+
+/*
+ * Errors a driver cannot recover from (busy timeouts). Always printed; on
+ * FrameOS/Linux the message is also kept so the Nim side can turn the render
+ * into a failed one (DEV_TakeError), on ESP32 it goes to the error log.
+ */
+void DEV_Error(const char *fmt, ...);
+int DEV_TakeError(char *buf, size_t len);
+
+/* Shared diagnostics implemented in DEV_Debug.c (built on the target's
+ * DEV_Config). Drivers call these from SendCommand/SendData and around
+ * framebuffer transfers so every panel narrates the same way. */
+void DEV_Debug_PinStates(char *buf, size_t len);
+void DEV_Debug_LogBytes(const char *action, unsigned long totalBytes);
+void DEV_Debug_Command(UBYTE reg);
+void DEV_Debug_Data(UBYTE data);
+void DEV_Debug_DataBulk(const UBYTE *data, uint32_t len);
+void DEV_Debug_Preview(const UBYTE *image, unsigned long totalBytes);
+/* Poll BUSY until it leaves `busy_level`. Returns 1 if the panel was seen
+ * busy and released, 0 if it was never busy, -1 on EPD_BUSY_TIMEOUT_MS
+ * (already reported through DEV_Error). Logs start/progress/end events. */
+int DEV_Busy_Wait(const char *stage, int busy_level, UDOUBLE poll_ms);
 
 
 #endif
