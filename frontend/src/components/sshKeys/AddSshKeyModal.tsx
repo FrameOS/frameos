@@ -1,4 +1,5 @@
 import { useActions, useValues } from 'kea'
+import type { ReactElement } from 'react'
 import { Form } from 'kea-forms'
 
 import { Button } from '../Button'
@@ -13,7 +14,7 @@ import { sshKeysLogic } from './sshKeysLogic'
 // "Add SSH key": a name, the public key (pasted, or — on a self-hosted
 // backend — generated together with its private half), and whether new
 // frames get it by default. Saves straight into the settings' key list.
-export function AddSshKeyModal(): JSX.Element | null {
+export function AddSshKeyModal(): ReactElement | null {
   const { addKeyModalOpen, generating, keepsPrivateKeys, isNewKeySubmitting } = useValues(sshKeysLogic)
   const { closeAddKeyModal, generateKeyPair } = useActions(sshKeysLogic)
 

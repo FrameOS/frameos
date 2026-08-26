@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import { clsx } from 'clsx'
 import { FieldProps as KeaFieldProps, Field as KeaField } from 'kea-forms'
 import { Label } from './Label'
@@ -5,10 +6,10 @@ import { Tooltip } from './Tooltip'
 import { SecretField } from './SecretField'
 
 interface FieldProps extends KeaFieldProps {
-  label?: JSX.Element | string
-  labelRight?: JSX.Element | string
-  hint?: JSX.Element | string
-  tooltip?: JSX.Element | string
+  label?: ReactElement | string
+  labelRight?: ReactElement | string
+  hint?: ReactElement | string
+  tooltip?: ReactElement | string
   className?: string
   secret?: boolean
 }

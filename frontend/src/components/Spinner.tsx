@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import clsx from 'clsx'
 
 interface SpinnerProps {
@@ -5,7 +6,7 @@ interface SpinnerProps {
   color?: 'white'
 }
 
-export function Spinner({ className, color }: SpinnerProps): JSX.Element {
+export function Spinner({ className, color }: SpinnerProps): ReactElement {
   return (
     <div role="status" className={className}>
       <svg

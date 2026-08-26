@@ -3,10 +3,10 @@ import { forms } from 'kea-forms'
 import { loaders } from 'kea-loaders'
 import { v4 as uuidv4 } from 'uuid'
 
-import { settingsLogic } from '../../scenes/settings/settingsLogic'
 import type { SSHKeyEntry } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
+import { notifySettingsChanged } from '../../utils/settingsInvalidation'
 import { normalizeSshKeys, normalizeSshPublicKey } from '../../utils/sshKeys'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 
@@ -140,10 +140,11 @@ export type sshKeysLogicType = MakeLogicType<sshKeysLogicValues, sshKeysLogicAct
 // adding a key in one of them shows up in all of them.
 //
 // The keys are the `ssh_keys` group of /api/settings, but this logic reads
-// and writes that group itself instead of connecting to settingsLogic: the
-// settings page's logic drags the whole backend session stack along
-// (socket, user), which the cloud's SD card builder has no use for. When the
-// settings page IS open, a save here refreshes its form.
+// and writes that group itself instead of connecting to (or even importing)
+// settingsLogic: that logic's graph is the whole legacy workspace (socket,
+// user, frames), which the cloud's SD card builder neither needs nor may
+// pull into its strict type program. When the settings page IS open, a save
+// here refreshes its form through utils/settingsInvalidation.
 export const sshKeysLogic = kea<sshKeysLogicType>([
   path(['src', 'components', 'sshKeys', 'sshKeysLogic']),
   actions({
@@ -176,11 +177,9 @@ export const sshKeysLogic = kea<sshKeysLogicType>([
             throw new Error('Failed to save SSH keys')
           }
           const settings = await response.json()
-          // The settings page keeps its own copy of the form; hand it the
-          // saved state so it does not offer to overwrite the new key.
-          if (settingsLogic.isMounted()) {
-            settingsLogic.actions.loadSettings()
-          }
+          // The settings page keeps its own copy of the form; make it reload
+          // so it does not offer to overwrite the new key.
+          notifySettingsChanged()
           // The cloud strips private halves from its response; the backend
           // echoes everything. Either way the list is what the server holds.
           return normalizeSshKeys(settings?.ssh_keys).keys

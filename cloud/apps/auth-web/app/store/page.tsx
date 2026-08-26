@@ -7,7 +7,7 @@ import { StoreSceneFeed } from "../../src/components/StoreSceneFeed";
 import { StoreTabs } from "../../src/components/StoreTabs";
 import { StoreVersionSelect } from "../../src/components/StoreVersionSelect";
 import { getStoreCategory, storeCategories } from "../../src/lib/categories";
-import { CreateSceneWithAiBox } from "../../src/components/CreateSceneWithAiBox";
+import { StoreActionCards } from "../../src/components/StoreActionCards";
 import {
   getScenesBaseUrl,
   getStorePath,
@@ -220,7 +220,7 @@ export default async function StorePage({
         </button>
       </form>
 
-      <CreateSceneWithAiBox action={newSceneUrl} />
+      <StoreActionCards aiAction={newSceneUrl} showUpload={false} />
 
       {categoryCounts.size > 0 ? (
         <div className="tag-list store-tag-row">

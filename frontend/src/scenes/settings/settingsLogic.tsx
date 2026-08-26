@@ -1,4 +1,15 @@
-import { MakeLogicType, actions, afterMount, connect, kea, listeners, path, reducers, selectors } from 'kea'
+import {
+  MakeLogicType,
+  actions,
+  afterMount,
+  beforeUnmount,
+  connect,
+  kea,
+  listeners,
+  path,
+  reducers,
+  selectors,
+} from 'kea'
 import { inHassioAddon } from '../../utils/inHassioAddon'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../socketLogic'
@@ -6,6 +17,7 @@ import { forms } from 'kea-forms'
 import { FrameOSSettings, SSHKeyEntry } from '../../types'
 import { apiFetch, logApiError } from '../../utils/apiFetch'
 import { normalizeSshKeys } from '../../utils/sshKeys'
+import { onSettingsChanged } from '../../utils/settingsInvalidation'
 import { v4 as uuidv4 } from 'uuid'
 import { showWorkingMessage } from '../../utils/workingMessage'
 import { isFrameControlMode } from '../../utils/frameControlMode'
@@ -505,7 +517,10 @@ export const settingsLogic = kea<settingsLogicType>([
       },
     ],
   }),
-  afterMount(({ actions }) => {
+  afterMount(({ actions, cache }) => {
+    // Logics that write a settings group on their own (sshKeysLogic) say so
+    // here; reload rather than let the form offer stale values back.
+    cache.unsubscribeSettingsChanged = onSettingsChanged(() => actions.loadSettings())
     if (isFrameControlMode() && !isInFrameAdminMode()) {
       return
     }
@@ -513,6 +528,9 @@ export const settingsLogic = kea<settingsLogicType>([
     if (!isFrameControlMode()) {
       actions.loadCustomFonts()
     }
+  }),
+  beforeUnmount(({ cache }) => {
+    cache.unsubscribeSettingsChanged?.()
   }),
   listeners(({ values, actions }) => ({
     loadSettingsSuccess: ({ savedSettings }) => {

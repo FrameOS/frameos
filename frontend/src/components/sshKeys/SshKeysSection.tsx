@@ -2,7 +2,7 @@ import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline'
 import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import { useEffect, useRef } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 
 import { describeSshPublicKey } from '../../utils/sshKeys'
 import { Button } from '../Button'
@@ -38,7 +38,7 @@ export function SshKeysSection({
   compact,
   hideRemove,
   className,
-}: SshKeysSectionProps): JSX.Element {
+}: SshKeysSectionProps): ReactElement {
   const { keys, lastAddedKeyId } = useValues(sshKeysLogic)
   const { openAddKeyModal, removeKey } = useActions(sshKeysLogic)
   const selectable = !!onSelectionChange

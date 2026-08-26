@@ -123,7 +123,7 @@ export function filterAccountSettings(payload: Record<string, unknown>):
   for (const [group, value] of Object.entries(payload)) {
     if (group === "ssh_keys") {
       const filtered = filterAccountSshKeys(value);
-      if (filtered.error) {
+      if (filtered.keys === undefined) {
         return { error: filtered.error };
       }
       settings.ssh_keys = { keys: filtered.keys };

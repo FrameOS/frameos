@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react'
 import { Popover, Transition } from '@headlessui/react'
 import { InformationCircleIcon } from '@heroicons/react/24/solid'
 import ReactDOM from 'react-dom'
@@ -7,7 +8,7 @@ import clsx from 'clsx'
 import { ButtonProps } from './Button'
 
 export interface TooltipProps {
-  title: JSX.Element | string
+  title: ReactElement | string
   titleClassName?: string
   children?: React.ReactNode
   className?: string

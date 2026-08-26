@@ -22,7 +22,10 @@ export function SecretField(props: { children?: React.ReactNode; value?: string 
   }
 
   return (
-    <Reveal className="secret-field-reveal flex w-full items-center px-2.5 py-1.5" style={revealStyle}>
+    <Reveal
+      className="secret-field-reveal flex w-full items-center px-2.5 py-1.5"
+      {...(revealStyle ? { style: revealStyle } : {})}
+    >
       {props.children}
     </Reveal>
   )
