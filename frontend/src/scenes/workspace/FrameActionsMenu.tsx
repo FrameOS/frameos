@@ -68,8 +68,7 @@ export function FrameActionsMenu({
   // hidden because there is no device — see workspaceSurfaces.ts.
   const mode = workspaceMode()
   const allows = (action: FrameMenuAction): boolean => frameMenuActionIsAllowed(mode, action, frame)
-  const disabledReason = (action: FrameMenuAction): string | null =>
-    frameMenuActionDisabledReason(mode, action, frame)
+  const disabledReason = (action: FrameMenuAction): string | null => frameMenuActionDisabledReason(mode, action, frame)
   const renameDisabledReason = disabledReason('rename')
 
   return (
@@ -202,8 +201,10 @@ export function FrameActionsMenu({
         ...(allows('archive')
           ? [
               {
-                label: archived ? 'Restore' : 'Archive',
-                title: archived ? 'Restore frame' : 'Archive frame',
+                label: archived ? 'Restore frame' : 'Archive frame',
+                title: archived
+                  ? 'Move this frame back out of the archive'
+                  : 'Hide this frame from the frames list without deleting anything — restore it any time',
                 onClick: () => setFrameArchived(frame.id, !archived),
                 icon: archived ? <ArrowUturnLeftIcon className="h-5 w-5" /> : <ArchiveBoxIcon className="h-5 w-5" />,
               },
@@ -212,9 +213,9 @@ export function FrameActionsMenu({
         ...(allows('delete')
           ? [
               {
-                label: 'Delete',
-                title: 'Delete frame',
-                confirm: `Delete "${frameName}"? This cannot be undone.`,
+                label: 'Delete frame',
+                title: 'Permanently delete this frame and all of its scenes',
+                confirm: `Delete the frame "${frameName}" and all of its scenes? This cannot be undone. (Archive it instead to hide it without losing anything.)`,
                 onClick: () => deleteFrame(frame.id),
                 icon: <TrashIcon className="h-5 w-5" />,
               },

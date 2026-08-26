@@ -115,19 +115,21 @@ export function Frame({ frame }: FrameProps): JSX.Element {
             },
             frame.archived
               ? {
-                  label: 'Unarchive',
+                  label: 'Restore frame',
                   onClick: () => setFrameArchived(frame.id, false),
                   icon: <ArrowUturnLeftIcon className="w-5 h-5" />,
                 }
               : {
-                  label: 'Archive',
+                  label: 'Archive frame',
                   onClick: () => setFrameArchived(frame.id, true),
                   icon: <ArchiveBoxIcon className="w-5 h-5" />,
                 },
             {
-              label: 'Delete',
+              label: 'Delete frame',
               onClick: () =>
-                window.confirm(`Are you sure you want to delete the frame "${frame.name}"?`) && deleteFrame(frame.id),
+                window.confirm(
+                  `Delete the frame "${frame.name}" and all of its scenes? This cannot be undone. (Archive it instead to hide it without losing anything.)`
+                ) && deleteFrame(frame.id),
               icon: <TrashIcon className="w-5 h-5" />,
             },
           ]}
