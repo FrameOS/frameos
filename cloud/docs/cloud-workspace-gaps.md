@@ -32,6 +32,11 @@ stable. Consolidated tracker: `docs/todo.md` at the repo root.
    uploadScenes push is only the fallback when persistence fails.
 4. **Scene upload events** — `POST /api/frames/{id}/event/{name}` shim
    maps render / setCurrentScene / uploadScenes onto queue verbs.
+   setCurrentScene on a frame whose reported `scenes_checksum` differs from
+   `assigned_checksum` (push never acked, a preview replaced the set) and
+   names an ASSIGNED scene re-pushes the assigned set with that scene
+   active (`type: "set_scenes"` in the response) instead of queuing a
+   `set_current_scene` the device would answer with `apply-failed`.
 5. **`GET /api/cloud/status`** — handled by `cloudEmptyCatalogs`.
 6. **FrameOS updates (OTA), both halves** — `notify_update_available`
    triggers a signed cloud OTA on-device. ESP32: `main/fos_ota.c` (fetch

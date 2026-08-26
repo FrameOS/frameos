@@ -4,7 +4,7 @@ import { forms } from 'kea-forms'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { FrameScene, FrameType, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
-import { controlLogic } from './controlLogic'
+import { activationWasRedeploy, controlLogic } from './controlLogic'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { socketLogic } from '../../../socketLogic'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
@@ -185,7 +185,7 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
           if (!response.ok) {
             throw new Error('Failed to send scene activation event')
           }
-          await response.json()
+          const redeployed = activationWasRedeploy(await response.text())
           controlLogic({ frameId: props.frameId }).actions.currentSceneChanged(props.sceneId)
           socketLogic.actions.updateFrame({ id: props.frameId, active_scene_id: props.sceneId } as FrameType)
           longRunningTasksModel.actions.finishTask({
@@ -193,7 +193,9 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
             kind: 'activate',
             sceneId: props.sceneId,
             status: 'success',
-            detail: values.scene?.name || props.sceneId,
+            detail: redeployed
+              ? `${values.scene?.name || props.sceneId} — deployed, the frame shows it as soon as it syncs`
+              : values.scene?.name || props.sceneId,
           })
         } catch (error) {
           longRunningTasksModel.actions.taskFailed({

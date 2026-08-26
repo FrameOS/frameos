@@ -434,6 +434,13 @@ describe("POST /api/frames/{id}/event/{event}", () => {
       position: 0,
       sceneId: scene!.id,
     });
+    // The device holds the assigned set (its reported checksum matches);
+    // otherwise Activate re-pushes the set instead of selecting — covered in
+    // frames.integration.test.ts.
+    await db
+      .update(frames)
+      .set({ assignedChecksum: "deployed", scenesChecksum: "deployed" })
+      .where(eq(frames.id, frame.id));
 
     const activate = await postFrameEvent(
       postJson(`/api/frames/${frame.id}/event/setCurrentScene`, {

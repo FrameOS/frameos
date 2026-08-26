@@ -149,9 +149,75 @@ export function describeSerialPort(info: { usbVendorId?: number } | undefined): 
 const consolePrompt = 'frameos>'
 // cmd_wifi prints "wifi credentials saved, restarting..." before esp_restart().
 const rebootNotice = 'restarting'
-const bootPromptTimeoutMs = 20000
+// A first boot on a blank board formats the 1 MB /state SPIFFS partition
+// before fos_console_start() runs (main.c: fos_scenes_init precedes the
+// console) — 10-20 s of flash erases on top of the usual ~5 s boot, and a
+// Wi-Fi retry on a re-enrolled board adds its connect timeout. The old 20 s
+// budget lost exactly the first flash of a new board and passed the retry,
+// which reads as "flaky USB". Waiting longer costs nothing when the prompt
+// comes early, because the wait is probed (see bootProbeIntervalMs).
+const bootPromptTimeoutMs = 90000
+// A bare newline makes fos_console.c print a fresh prompt without running
+// anything (console_feed_byte → empty run_console_line → console_prompt).
+// Sending one every couple of seconds means the boot-time prompt does not
+// have to be the one we catch: the USB-UART bridge drops whatever the board
+// printed while the port was closed for the flash → console reopen, and
+// Chrome's open() toggles DTR/RTS, which resets a CH340-wired board once
+// more.
+const bootProbeIntervalMs = 2000
+// After the prompt is seen, let the replies to any extra probes land before
+// the first command clears the buffer — otherwise a late "frameos>" from a
+// probe would be mistaken for the command's acknowledgement.
+const promptSettleMs = 300
+const neverMatches = '\u0000<frameos-flasher-drain>\u0000'
 const commandPromptTimeoutMs = 10000
 const rebootAckTimeoutMs = 5000
+
+// Boot-log markers the ROM and the firmware print on UART0 while we wait for
+// the prompt. Each turns a silent 90 s wait into a specific message.
+const romDownloadModeMarker = 'waiting for download'
+const bootBannerPattern = /FrameOS (\S+) \(idf [^)]*\) booting/
+const storageFormatMarker = 'formatting'
+const crashPattern = /Guru Meditation Error[^\r\n]*|abort\(\) was called[^\r\n]*|assert failed[^\r\n]*/
+// "rst:0x..." opens every ROM boot banner; more than a couple = a boot loop.
+const resetBannerPattern = /rst:0x[0-9a-f]+/gi
+const bootLoopResetCount = 3
+
+export function bootWaitFailureMessage(bootLog: string): string {
+  const retry = 'Unplug the board, plug it back in and try again'
+  if (bootLog.includes(romDownloadModeMarker)) {
+    return (
+      'The board reset into ROM download mode instead of starting the firmware (its log says "waiting for download"), ' +
+      'so nothing was provisioned. Tap its RESET button — or unplug it and plug it back in — without holding BOOT, ' +
+      'then try again.'
+    )
+  }
+  const crash = crashPattern.exec(bootLog)
+  if (crash) {
+    return (
+      `The firmware crashed while booting (${crash[0].trim()}), so nothing was provisioned. ` +
+      'Try again; if it crashes the same way every time, report the line above.'
+    )
+  }
+  const resets = bootLog.match(resetBannerPattern)?.length ?? 0
+  if (resets >= bootLoopResetCount) {
+    return (
+      `The board keeps resetting (${resets} boots seen) and never reached its FrameOS console, so nothing was provisioned. ` +
+      'A weak USB supply does this — try another cable or port, plug it straight into the computer, and try again.'
+    )
+  }
+  if (bootLog.trim().length === 0) {
+    return (
+      'Nothing at all arrived on this serial port after the reset, so nothing was provisioned. ' +
+      'If the port picker lists several ports, try the other one ("USB JTAG/serial debug unit" or "USB Single Serial" — ' +
+      `the console answers on both); otherwise ${retry.toLowerCase()}.`
+    )
+  }
+  return (
+    'The board booted but its FrameOS console prompt never appeared, so nothing was provisioned. ' +
+    `${retry} — the firmware is already on the board, so the retry is quick.`
+  )
+}
 
 // 802.11 limits, and both fit the device's 128-byte config fields.
 const maxSsidLength = 32
@@ -392,15 +458,47 @@ async function provisionOverSerial(
       }
     }
 
-    // Wait for the console to come up after reset (boot logs then prompt).
+    // Wait for the console to come up after reset (boot logs then prompt),
+    // poking it with an empty line every couple of seconds so a prompt the
+    // bridge dropped while the port was closed is not the only chance.
     log('Waiting for the FrameOS console…')
-    if (!(await readUntil(consolePrompt, bootPromptTimeoutMs))) {
-      throw new Error(
-        'The flashed firmware never showed its FrameOS console prompt, so nothing was provisioned. ' +
-          'Unplug the board, plug it back in and try again; if the port picker lists several ports, ' +
-          'try the other one ("USB JTAG/serial debug unit" or "USB Single Serial" — the console answers on both).'
-      )
+    const bootDeadline = Date.now() + bootPromptTimeoutMs
+    const newline = new TextEncoder().encode('\n')
+    let bannerSeen = false
+    let formatSeen = false
+    let promptSeen = false
+    for (;;) {
+      const remaining = bootDeadline - Date.now()
+      if (remaining <= 0) {
+        break
+      }
+      promptSeen = await readUntil(consolePrompt, Math.min(bootProbeIntervalMs, remaining))
+      if (!bannerSeen) {
+        const banner = bootBannerPattern.exec(buffer)
+        if (banner) {
+          bannerSeen = true
+          log(`Board is up: FrameOS ${banner[1]} booting…`)
+        }
+      }
+      if (!formatSeen && buffer.includes(storageFormatMarker)) {
+        formatSeen = true
+        log('First boot: the board is formatting its scene storage — this takes a little while…')
+      }
+      if (promptSeen) {
+        break
+      }
+      if (buffer.includes(romDownloadModeMarker)) {
+        // The ROM will sit there forever; no point in waiting out the budget.
+        break
+      }
+      await writer.write(newline)
     }
+    if (!promptSeen) {
+      throw new Error(bootWaitFailureMessage(buffer))
+    }
+    // Drain the replies to any probes still in flight (readUntil with a
+    // needle that cannot match just consumes bytes until the timer runs out).
+    await readUntil(neverMatches, promptSettleMs)
     for (const command of commands) {
       log(`> ${command.display}`)
       buffer = ''
