@@ -65,6 +65,30 @@ export interface PreviewFrame {
   renderMs: number
 }
 
+/** One entry of the browser asset folder (the runtime's /srv/assets). */
+export interface PreviewAssetEntry {
+  /** Path relative to the folder root, e.g. `photos/beach.jpg`. */
+  path: string
+  /** Bytes; 0 for folders. */
+  size: number
+  /** Last modification, ms since the epoch. */
+  mtime: number
+  isDir: boolean
+}
+
+/** How the runtime's /srv/assets is backed, sent with the worker's `ready` message. */
+export interface PreviewAssetsInfo {
+  /** False when the wasm bundle has no filesystem export at all. */
+  mounted: boolean
+  /** True when the folder is kept in this browser's IndexedDB between
+   * previews; false when it lives in memory for this worker only. */
+  persistent: boolean
+  /** The folder's absolute path inside the runtime (`/srv/assets`). */
+  root: string
+  /** Size ceiling for the folder in bytes. */
+  maxBytes: number
+}
+
 /** An interactive scene event (custom `event` node) usable as a button. */
 export interface SceneEventButton {
   keyword: string

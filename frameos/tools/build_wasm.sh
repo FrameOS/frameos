@@ -104,8 +104,10 @@ FRAMEOS_VERSION="$(python3 tools/frameos_version.py ../versions.json)"
 # startup and that runs NimMain (all Nim module initializers, e.g. the
 # baked-in font asset tables).
 EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error
-# FS lets the render harness preload a virtual frame's assets into MEMFS.
-EXPORTED_RUNTIME_METHODS=cwrap,ccall,UTF8ToString,stringToNewUTF8,lengthBytesUTF8,HEAPU8,FS
+# FS lets the render harness preload a virtual frame's assets into MEMFS;
+# IDBFS (linked below with -lidbfs.js) backs the browser preview's
+# /srv/assets folder with IndexedDB (see tools/wasm/preview-worker.js).
+EXPORTED_RUNTIME_METHODS=cwrap,ccall,UTF8ToString,stringToNewUTF8,lengthBytesUTF8,HEAPU8,FS,IDBFS
 
 mkdir -p "$BUILD_DIR"
 
@@ -148,6 +150,8 @@ nim c \
     --passL:"-sEXPORTED_FUNCTIONS=$EXPORTED_FUNCTIONS" \
     --passL:"-sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS" \
     --passL:"--js-library $FRAMEOS_DIR/tools/wasm/frameos_library.js" \
+    `# IndexedDB-backed filesystem for the preview's browser asset folder.` \
+    --passL:"-lidbfs.js" \
     src/wasm/wasm_main.nim
 
 mkdir -p "$OUT_DIR"

@@ -18,6 +18,8 @@ export {
   type ConfigFieldCondition,
   type ConfigFieldConditionAnd,
   type FrameOSScene,
+  type PreviewAssetEntry,
+  type PreviewAssetsInfo,
   type PreviewFrame,
   type SceneEventButton,
   type SceneInfo,

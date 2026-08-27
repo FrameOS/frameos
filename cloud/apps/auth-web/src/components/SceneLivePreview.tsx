@@ -13,6 +13,7 @@ import {
 import {
   Camera,
   CircleDollarSign,
+  FolderOpen,
   ImageDown,
   KeyRound,
   Play,
@@ -20,6 +21,7 @@ import {
   RectangleVertical,
   RotateCw,
   X,
+  Zap,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
@@ -37,6 +39,7 @@ import {
 } from "../lib/preview-settings";
 import type { PreviewLogLine } from "../lib/preview-log";
 import { ImageLightbox } from "./ImageLightbox";
+import { PreviewAssetsDialog } from "./PreviewAssetsDialog";
 import { PreviewLog } from "./PreviewLog";
 
 type SceneLivePreviewPanelProps = {
@@ -70,8 +73,21 @@ export const NOTICE_HIDE_MS = 4000;
 /** With "Auto apply" on, a burst of typing in the state form becomes one
  * render: this long after the last keystroke. */
 export const AUTO_APPLY_DEBOUNCE_MS = 400;
+/** A scene rendering at full speed reports frames and log lines many times
+ * a second; the panel batches those into one React update per this long.
+ * The first report after a quiet spell goes through at once. */
+export const UI_FLUSH_INTERVAL_MS = 200;
 /** Where "Auto apply" is remembered between editor sessions (this browser). */
 const AUTO_APPLY_STORAGE_KEY = "frameos.preview.autoApply";
+
+/** "every 42 ms (about 24 times a second)" for the fast-render prompt. */
+export function describeRenderRate(intervalMs: number): string {
+  const ms = Math.max(1, Math.round(intervalMs));
+  const perSecond = 1000 / ms;
+  const rate =
+    perSecond >= 10 ? Math.round(perSecond).toString() : perSecond.toFixed(1).replace(/\.0$/, "");
+  return `every ${ms} ms (about ${rate} times a second)`;
+}
 // Runs a scene in the browser through the frameos-wasm runtime: canvas,
 // showIf-aware state fields, event buttons, and logs — no frame needed. The
 // runtime assets are copied into /frameos-wasm by scripts/copy-wasm-assets.mjs.
@@ -142,6 +158,23 @@ export function SceneLivePreviewPanel({
 
   // Bumped by the Restart button; recreates the whole wasm runtime.
   const [restartCount, setRestartCount] = useState(0);
+
+  // Render pacing. The runtime throttles every scene to one render per
+  // second; a scene asking for more (a 24 fps slideshow) gets to ask the
+  // visitor once, and only runs at full speed after "Run at full speed".
+  // The answer survives runtime restarts (editor edits, Restart, Resize).
+  const [fastMode, setFastMode] = useState(false);
+  const [fastRenderRequest, setFastRenderRequest] = useState<{
+    intervalMs: number;
+    answered: boolean;
+  } | null>(null);
+
+  // The browser asset folder dialog, and the running preview it manages
+  // (previewRef is not reactive; this state follows the runtime's life).
+  const [assetsOpen, setAssetsOpen] = useState(false);
+  const [previewInstance, setPreviewInstance] = useState<FrameOSPreview | null>(null);
+  // Bumped when the runtime reports files changed (a scene saved one).
+  const [assetsVersion, setAssetsVersion] = useState(0);
 
   // A screenshot before the runtime's first paint would capture a fully
   // transparent canvas; the button stays disabled until a frame arrives.
@@ -298,14 +331,42 @@ export function SceneLivePreviewPanel({
       Object.fromEntries(Object.entries(values).filter(([key]) => fieldNames.has(key)));
     setEdits(keepKnown);
     appliedStateRef.current = keepKnown(appliedStateRef.current);
+    // Leading-edge throttle: the first line (or frame) after a quiet spell
+    // lands at once, a burst collapses into one trailing update.
+    const flushes: Record<string, { timer: ReturnType<typeof setTimeout> | null; lastAt: number }> = {};
+    const scheduleFlush = (key: string, flush: () => void) => {
+      const entry = (flushes[key] ??= { lastAt: 0, timer: null });
+      if (entry.timer !== null) {
+        return;
+      }
+      const elapsed = Date.now() - entry.lastAt;
+      if (elapsed >= UI_FLUSH_INTERVAL_MS) {
+        entry.lastAt = Date.now();
+        flush();
+        return;
+      }
+      entry.timer = setTimeout(() => {
+        entry.timer = null;
+        entry.lastAt = Date.now();
+        flush();
+      }, UI_FLUSH_INTERVAL_MS - elapsed);
+    };
+    let logQueue: PreviewLogLine[] = [];
     const appendLog = (line: string) => {
       if (cancelled) {
         return;
       }
-      const entry: PreviewLogLine = { id: logIdRef.current++, line, receivedAt: Date.now() };
-      setLogs((previous) => {
-        const next = [...previous, entry];
-        return next.length > maxLogLines ? next.slice(-maxLogLines) : next;
+      logQueue.push({ id: logIdRef.current++, line, receivedAt: Date.now() });
+      scheduleFlush("log", () => {
+        const lines = logQueue;
+        logQueue = [];
+        if (cancelled || lines.length === 0) {
+          return;
+        }
+        setLogs((previous) => {
+          const next = [...previous, ...lines];
+          return next.length > maxLogLines ? next.slice(-maxLogLines) : next;
+        });
       });
     };
     try {
@@ -319,6 +380,22 @@ export function SceneLivePreviewPanel({
         // Fallback only: the runtime fetches URLs client-side first and
         // routes just CORS-blocked hosts through this endpoint.
         proxyUrl: "/api/store/preview-proxy",
+        fastMode,
+        onFastRenderRequest: (intervalMs) => {
+          if (cancelled) {
+            return;
+          }
+          // A restart re-asks; keep the answer already given.
+          setFastRenderRequest((current) => ({
+            intervalMs,
+            answered: current?.answered ?? false,
+          }));
+        },
+        onAssetsChanged: () => {
+          if (!cancelled) {
+            setAssetsVersion((version) => version + 1);
+          }
+        },
         onReady: (info) => {
           if (cancelled || !preview) {
             return;
@@ -345,9 +422,11 @@ export function SceneLivePreviewPanel({
             return;
           }
           setHasPaintedFrame(true);
-          setStatus(
-            `Rendered ${frame.width}×${frame.height} in ${frame.renderMs} ms`,
-          );
+          scheduleFlush("frame", () => {
+            if (!cancelled) {
+              setStatus(`Rendered ${frame.width}×${frame.height} in ${frame.renderMs} ms`);
+            }
+          });
         },
         onState: (state) => {
           if (cancelled) {
@@ -380,17 +459,32 @@ export function SceneLivePreviewPanel({
         },
       });
       previewRef.current = preview;
+      setPreviewInstance(preview);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
     return () => {
       cancelled = true;
+      for (const entry of Object.values(flushes)) {
+        if (entry.timer !== null) {
+          clearTimeout(entry.timer);
+        }
+      }
       preview?.destroy();
       if (previewRef.current === preview) {
         previewRef.current = null;
       }
+      setPreviewInstance((current) => (current === preview ? null : current));
     };
+    // fastMode reaches a running runtime through setFastMode below; only a
+    // fresh runtime reads it from the options, so it is no dependency here.
   }, [scenes, viewport, storedSettings, previewSettings, restartCount, previewGated]);
+
+  function answerFastRender(enabled: boolean) {
+    setFastMode(enabled);
+    setFastRenderRequest((current) => (current ? { ...current, answered: true } : current));
+    previewRef.current?.setFastMode(enabled);
+  }
 
   // The editor switched scenes while the runtime is up: follow it.
   const runtimeReady = sceneInfo !== null;
@@ -672,6 +766,15 @@ export function SceneLivePreviewPanel({
           >
             <ImageDown aria-hidden size={16} />
           </button>
+          <button
+            className="button button--subtle button--small"
+            onClick={() => setAssetsOpen(true)}
+            title="Manage the browser-only asset folder the preview mounts at /srv/assets"
+            type="button"
+          >
+            <FolderOpen aria-hidden size={16} />
+            Browser assets
+          </button>
           {canSaveToGallery && sceneId !== null ? (
             <button
               className="button button--subtle button--small"
@@ -765,6 +868,45 @@ export function SceneLivePreviewPanel({
           </div>
         ) : null}
       </div>
+      {fastRenderRequest && !fastRenderRequest.answered ? (
+        <div className="notice live-preview__fast" role="status">
+          <Zap aria-hidden className="live-preview__fast-icon" size={18} />
+          <span className="live-preview__fast-copy">
+            This scene wants to render {describeRenderRate(fastRenderRequest.intervalMs)}. The
+            preview is holding it to one render per second — let it go at full speed? It keeps your
+            browser busy while the editor is open.
+          </span>
+          <span className="button-row">
+            <button
+              className="button button-primary button--small"
+              onClick={() => answerFastRender(true)}
+              type="button"
+            >
+              Run at full speed
+            </button>
+            <button
+              className="button button--subtle button--small"
+              onClick={() => answerFastRender(false)}
+              type="button"
+            >
+              Keep 1 fps
+            </button>
+          </span>
+        </div>
+      ) : null}
+      {fastRenderRequest?.answered ? (
+        <label
+          className="live-preview-panel__auto-apply live-preview__fast-toggle"
+          title="Let the scene render as often as it asks instead of once per second"
+        >
+          <input
+            checked={fastMode}
+            onChange={(event) => answerFastRender(event.target.checked)}
+            type="checkbox"
+          />
+          Real-time rendering ({describeRenderRate(fastRenderRequest.intervalMs)})
+        </label>
+      ) : null}
       <div className="live-preview">
         {previewGated ? (
           <div className="live-preview__gate" role="status">
@@ -903,6 +1045,13 @@ export function SceneLivePreviewPanel({
           Rotate
         </button>
       </div>
+      {assetsOpen ? (
+        <PreviewAssetsDialog
+          assetsVersion={assetsVersion}
+          onClose={() => setAssetsOpen(false)}
+          preview={previewInstance}
+        />
+      ) : null}
       {lightbox ? (
         <ImageLightbox
           alt="The rendered frame"

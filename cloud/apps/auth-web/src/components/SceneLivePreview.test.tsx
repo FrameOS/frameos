@@ -13,6 +13,9 @@ type PreviewCallbacks = {
   onReady?: (info: unknown) => void;
   onFrame?: (frame: { width: number; height: number; renderMs: number }) => void;
   onState?: (state: Record<string, unknown>) => void;
+  onFastRenderRequest?: (intervalMs: number) => void;
+  onAssetsChanged?: () => void;
+  fastMode?: boolean;
 };
 
 // The wasm runtime is a worker + emscripten bundle — not something jsdom can
@@ -25,8 +28,16 @@ const previews = vi.hoisted(
       destroy: ReturnType<typeof vi.fn>;
       setSceneState: ReturnType<typeof vi.fn>;
       selectScene: ReturnType<typeof vi.fn>;
+      setFastMode: ReturnType<typeof vi.fn>;
+      listAssets: ReturnType<typeof vi.fn>;
+      deleteAsset: ReturnType<typeof vi.fn>;
+      writeAsset: ReturnType<typeof vi.fn>;
     }>,
 );
+// What the fake runtime's browser folder holds; tests replace it.
+const fakeAssets = vi.hoisted(() => ({
+  entries: [] as Array<{ path: string; size: number; mtime: number; isDir: boolean }>,
+}));
 vi.mock("frameos-wasm", async (importOriginal) => ({
   ...(await importOriginal<typeof import("frameos-wasm")>()),
   FrameOSPreview: class {
@@ -40,6 +51,14 @@ vi.mock("frameos-wasm", async (importOriginal) => ({
     setSceneState = vi.fn();
     selectScene = vi.fn();
     attachCanvas = vi.fn();
+    setFastMode = vi.fn();
+    assetsInfo = { mounted: true, persistent: true, root: "/srv/assets", maxBytes: 128 * 1024 * 1024 };
+    listAssets = vi.fn(async () => fakeAssets.entries);
+    readAsset = vi.fn(async () => new ArrayBuffer(4));
+    writeAsset = vi.fn(async () => {});
+    createAssetFolder = vi.fn(async () => {});
+    deleteAsset = vi.fn(async () => {});
+    resetAssets = vi.fn(async () => {});
     constructor(options: PreviewCallbacks & { scenes: unknown[] }) {
       this.options = options;
       previews.push(this);
@@ -86,6 +105,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   previews.length = 0;
+  fakeAssets.entries = [];
   fetchMock.mockClear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -613,5 +633,105 @@ describe("normalizeHexColor", () => {
     expect(normalizeHexColor("white")).toBeNull();
     expect(normalizeHexColor("#12345")).toBeNull();
     expect(normalizeHexColor("")).toBeNull();
+  });
+});
+
+describe("SceneLivePreviewPanel render pacing", () => {
+  it("asks before letting a fast scene render faster than 1 fps, and keeps the answer across restarts", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    // Throttled by default: no prompt, no toggle.
+    expect(previews[0]!.options.fastMode).toBe(false);
+    expect(screen.queryByText(/wants to render/)).toBeNull();
+    expect(screen.queryByLabelText(/Real-time rendering/)).toBeNull();
+
+    act(() => previews[0]!.options.onFastRenderRequest!(42));
+    expect(screen.getByText(/every 42 ms \(about 24 times a second\)/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Run at full speed" }));
+    expect(previews[0]!.setFastMode).toHaveBeenCalledWith(true);
+    // The prompt turns into a toggle.
+    expect(screen.queryByRole("button", { name: "Run at full speed" })).toBeNull();
+    const toggle = screen.getByLabelText(/Real-time rendering/) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+
+    // A restart boots the new runtime unthrottled, and its repeated request
+    // does not bring the prompt back.
+    fireEvent.click(screen.getByRole("button", { name: /Restart/ }));
+    await waitFor(() => expect(previews).toHaveLength(2));
+    expect(previews[1]!.options.fastMode).toBe(true);
+    act(() => previews[1]!.options.onFastRenderRequest!(42));
+    expect(screen.queryByRole("button", { name: "Run at full speed" })).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(previews[1]!.setFastMode).toHaveBeenCalledWith(false);
+    expect((screen.getByLabelText(/Real-time rendering/) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("'Keep 1 fps' dismisses the prompt but leaves the toggle to change one's mind", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() => previews[0]!.options.onFastRenderRequest!(100));
+    fireEvent.click(screen.getByRole("button", { name: "Keep 1 fps" }));
+    expect(previews[0]!.setFastMode).toHaveBeenCalledWith(false);
+    expect(screen.queryByText(/wants to render/)).toBeNull();
+    expect((screen.getByLabelText(/Real-time rendering/) as HTMLInputElement).checked).toBe(false);
+  });
+});
+
+describe("SceneLivePreviewPanel browser assets", () => {
+  it("lists the runtime's browser folder in a dialog, explains where it lives, and deletes on confirmation", async () => {
+    fakeAssets.entries = [
+      { isDir: true, mtime: 0, path: "photos", size: 0 },
+      { isDir: false, mtime: 1_700_000_000_000, path: "photos/beach.jpg", size: 2048 },
+      { isDir: false, mtime: 1_700_000_000_000, path: "sample-sunset.jpg", size: 300 * 1024 },
+    ];
+    Object.assign(URL, { createObjectURL: vi.fn(() => "blob:thumb"), revokeObjectURL: vi.fn() });
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole("button", { name: /Browser assets/ }));
+    const dialog = screen.getByRole("dialog", { name: "Browser assets" });
+    expect(dialog.parentElement).toBe(document.body);
+    expect(dialog.textContent).toContain("only in this browser");
+    expect(dialog.textContent).toContain("/srv/assets");
+    await waitFor(() => expect(previews[0]!.listAssets).toHaveBeenCalled());
+    // Root: the folder and the root file, not the nested one.
+    await waitFor(() => expect(screen.getByText("sample-sunset.jpg")).toBeTruthy());
+    expect(screen.getByText("photos/")).toBeTruthy();
+    expect(screen.queryByText("beach.jpg")).toBeNull();
+    expect(dialog.textContent).toContain("2 files, 302 KB of 128.0 MB");
+
+    // Into the folder, and back via the breadcrumb.
+    fireEvent.click(screen.getByRole("button", { name: "photos/" }));
+    expect(screen.getByText("beach.jpg")).toBeTruthy();
+    expect(screen.queryByText("sample-sunset.jpg")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "/srv/assets" }));
+    expect(screen.getByText("sample-sunset.jpg")).toBeTruthy();
+
+    // Delete asks first, then goes through the runtime.
+    fireEvent.click(screen.getByRole("button", { name: "Delete sample-sunset.jpg" }));
+    expect(previews[0]!.deleteAsset).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(previews[0]!.deleteAsset).toHaveBeenCalledWith("sample-sunset.jpg"));
+    // Reloaded after the change.
+    await waitFor(() => expect(previews[0]!.listAssets).toHaveBeenCalledTimes(2));
+
+    // A scene writing a file while the dialog is open reloads it too.
+    act(() => previews[0]!.options.onAssetsChanged!());
+    await waitFor(() => expect(previews[0]!.listAssets).toHaveBeenCalledTimes(3));
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Browser assets" })).toBeNull();
+  });
+
+  it("uploads picked files into the current folder", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: /Browser assets/ }));
+    const input = screen.getByLabelText("Add files") as HTMLInputElement;
+    const file = new File(["jpeg"], "holiday.jpg", { type: "image/jpeg" });
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => expect(previews[0]!.writeAsset).toHaveBeenCalledWith("holiday.jpg", file));
   });
 });
