@@ -17,6 +17,7 @@ import { FrameImageOverlayControls } from './FrameImageOverlayControls'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
+import { FrameBatteryIndicator } from './FrameBatteryIndicator'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import {
@@ -352,6 +353,7 @@ function FrameSelector({
           </select>
           <FrameMetricAlertIndicator frame={frame} containerClassName="absolute right-7 top-1/2 -translate-y-1/2" />
         </div>
+        <FrameBatteryIndicator frame={frame} className="shrink-0" />
         <FrameActionsMenu
           frame={frame}
           className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"

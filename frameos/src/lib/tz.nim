@@ -199,6 +199,24 @@ proc posixRuleDate(localEpoch: float): string =
     if cal.minute != 0:
       result.add(":" & align($cal.minute, 2, '0'))
 
+proc utcOffsetSeconds*(timeZone: string, epoch: float): int =
+  ## The zone's UTC offset (seconds east, DST folded in) at `epoch` from the
+  ## loaded chrono data; 0 for UTC and for zones that are not loaded. The
+  ## wasm preview routes QuickJS's Date through this so JS clocks follow the
+  ## frame's zone like the Nim side does.
+  let name = canonicalTimeZone(timeZone)
+  if name.len == 0 or name.toLowerAscii() in ["utc", "etc/utc", "uct", "universal", "zulu", "z"]:
+    return 0
+  initTimeZone()
+  let tz = findTimeZone(name)
+  if not tz.valid:
+    return 0
+  result = 0
+  for change in findDstChanges(tz):
+    if change.start > epoch:
+      break
+    result = change.offset.int
+
 proc posixTzRule*(timeZone: string, nowEpoch: float): string =
   ## The POSIX TZ rule matching the loaded chrono data at `nowEpoch`:
   ## "STD-1DST,Mm.w.d,Mm.w.d" when the zone alternates over the coming year,

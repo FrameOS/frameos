@@ -52,6 +52,34 @@ preview.selectScene('sceneId')
 preview.destroy()
 ```
 
+### Render pacing
+
+Renders are throttled to one per second. A scene that asks for more (a 24 fps slideshow with
+`refreshInterval: 0.04`) triggers `onFastRenderRequest(intervalMs)` once per runtime start —
+ask the visitor, then `preview.setFastMode(true)` to let the scene run at its own pace
+(`setFastMode(false)` restores the throttle). Pass `fastMode: true` to start unthrottled.
+
+### Browser asset folder
+
+The runtime's `/srv/assets` — where a real frame keeps its assets — is a folder that lives in
+the visitor's browser (IndexedDB, via emscripten's IDBFS). It is shared by every preview on the
+same origin, survives reloads, and never leaves the browser. A fresh folder gets a few generated
+sample photos so image scenes render something at once. Scenes read from it (`data/localImage`,
+fonts, …) and, with `saveAssets` on (the default here), write into it.
+
+```ts
+const entries = await preview.listAssets() // [{path, size, mtime, isDir}]
+await preview.writeAsset('photos/beach.jpg', file) // File/Blob/ArrayBuffer; parents created
+const bytes = await preview.readAsset('photos/beach.jpg')
+await preview.createAssetFolder('photos/2026')
+await preview.deleteAsset('photos') // recursive
+await preview.resetAssets() // wipe + regenerate the samples
+```
+
+`onAssetsChanged` fires when a scene writes into the folder (or an op completes);
+`onReady(sceneInfo, assets)` reports whether the folder is persistent or in-memory.
+Pass `browserAssets: false` for an empty in-memory folder instead.
+
 Helpers for building your own UI are exported too: `evaluateShowIf`, `visiblePublicStateFields`,
 `coerceStateFieldValue`, `sceneEventButtons`, and the `StateField`/`FrameOSScene` types.
 
@@ -61,7 +89,7 @@ Helpers for building your own UI are exported too: `evaluateShowIf`, `visiblePub
   same-origin endpoint that forwards `{method, url, headers, bodyBase64, timeoutMs}` — see
   FrameOS's `/api/frames/{id}/scene_preview_proxy`).
 - Apps that need host processes are not in the wasm build: `data/chromiumScreenshot`,
-  `data/rstpSnapshot`, `data/localImage`.
+  `data/rstpSnapshot`. `data/localImage` reads the browser asset folder (see above).
 - `index.html` in the package root is a standalone demo page:
   `npx serve node_modules/frameos-wasm` and paste a scenes.json.
 

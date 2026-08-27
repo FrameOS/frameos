@@ -1,7 +1,15 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
-import { useEffect, useRef, useState } from 'react'
-import { CheckIcon, CursorArrowRaysIcon, EyeIcon, FolderPlusIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
+import { memo, useEffect, useRef, useState } from 'react'
+import {
+  BoltIcon,
+  CheckIcon,
+  CursorArrowRaysIcon,
+  EyeIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+  PencilSquareIcon,
+} from '@heroicons/react/24/outline'
 
 import { Button } from '../../../../components/Button'
 import { Checkbox } from '../../../../components/Checkbox'
@@ -12,7 +20,8 @@ import { insertBreaks } from '../../../../utils/insertBreaks'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { frameLogic } from '../../frameLogic'
 import { templatesLogic } from '../Templates/templatesLogic'
-import { livePreviewLogic } from './livePreviewLogic'
+import { BrowserAssetsModal } from './BrowserAssetsModal'
+import { livePreviewLogic, type LivePreviewLogLine } from './livePreviewLogic'
 import { scenesLogic } from './scenesLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 import type { FrameId } from '../../../../types'
@@ -84,6 +93,31 @@ export function renderLogLine(line: string): JSX.Element | string {
   return line
 }
 
+/** "every 42 ms (about 24 times a second)" for the fast-render prompt. */
+export function describeRenderRate(intervalMs: number): string {
+  const ms = Math.max(1, Math.round(intervalMs))
+  return `every ${ms} ms (about ${formatFps(1000 / ms)} times a second)`
+}
+
+/** "24" / "7.5": whole numbers from 10 up, one decimal below. */
+export function formatFps(fps: number): string {
+  return fps >= 10 ? Math.round(fps).toString() : fps.toFixed(1).replace(/\.0$/, '')
+}
+
+// One runtime log line. Memoized with a stable key: a scene rendering at
+// full speed appends lines many times a second, and only the new rows
+// should cost anything.
+const LogRow = memo(function LogRow({ log }: { log: LivePreviewLogLine }): JSX.Element {
+  return (
+    <div className="flex gap-3">
+      <div className="shrink-0 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
+      <div className={clsx('min-w-0 flex-1 break-words', logLineColor(log.line))} style={{ wordBreak: 'break-word' }}>
+        {renderLogLine(log.line)}
+      </div>
+    </div>
+  )
+})
+
 // The preview can be hosted from several components (scene card, diagram
 // toolbar, template row) that may be mounted at the same time. Only ONE of
 // them may render the dialog: two identical stacked dialogs close each other,
@@ -137,10 +171,19 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
     wasmUnsupportedApps,
     lastRenderMs,
     renderCount,
+    fastMode,
+    fastRenderRequest,
+    measuredFps,
   } = useValues(livePreviewLogic({ frameId }))
-  const { closeLivePreview, registerCanvas, dispatchPreviewEvent, forcePreviewRender } = useActions(
-    livePreviewLogic({ frameId })
-  )
+  const {
+    closeLivePreview,
+    registerCanvas,
+    dispatchPreviewEvent,
+    forcePreviewRender,
+    setFastMode,
+    dismissFastRenderRequest,
+    openPreviewAssets,
+  } = useActions(livePreviewLogic({ frameId }))
   const { scenes: frameScenes, previewingSceneId } = useValues(scenesLogic({ frameId }))
   const { previewScene } = useActions(scenesLogic({ frameId }))
   const { applyTemplate } = useActions(frameLogic({ frameId }))
@@ -324,10 +367,54 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
             </div>
           ) : null}
 
+          {fastRenderRequest && !fastRenderRequest.answered ? (
+            <div
+              className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm"
+              data-testid="fast-render-request"
+            >
+              <BoltIcon className="h-5 w-5 shrink-0 text-amber-600" />
+              <span className="min-w-0 flex-1">
+                This scene wants to render {describeRenderRate(fastRenderRequest.intervalMs)}. The preview is holding it
+                to one render per second — let it go at full speed? It will keep your browser busy while this dialog is
+                open.
+              </span>
+              <Button size="small" color="primary" onClick={() => setFastMode(true)}>
+                Run at full speed
+              </Button>
+              <Button size="small" color="secondary" onClick={dismissFastRenderRequest}>
+                Keep 1 fps
+              </Button>
+            </div>
+          ) : null}
+
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button size="small" color="secondary" onClick={forcePreviewRender}>
               Re-render
             </Button>
+            <Button
+              size="small"
+              color="secondary"
+              className="flex items-center gap-1"
+              onClick={openPreviewAssets}
+              title="Manage the browser-only asset folder the preview mounts at /srv/assets"
+            >
+              <FolderOpenIcon className="h-4 w-4" />
+              Browser assets
+            </Button>
+            {fastRenderRequest?.answered ? (
+              <Checkbox
+                value={fastMode}
+                onChange={(checked) => setFastMode(checked)}
+                label={
+                  fastMode && measuredFps !== null
+                    ? `Real-time rendering · ${formatFps(measuredFps)} fps`
+                    : `Real-time rendering (the scene asks for ~${formatFps(
+                        1000 / Math.max(1, fastRenderRequest.intervalMs)
+                      )} fps)`
+                }
+                title="Let the scene render as often as it asks instead of once per second"
+              />
+            ) : null}
             {sceneEventButtons.map((event) => (
               <Button
                 key={`${event.keyword}:${event.label ?? ''}`}
@@ -428,17 +515,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
               className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-white/10 bg-slate-900 p-2 font-mono text-sm leading-5"
             >
               {previewLogs.length > 0 ? (
-                previewLogs.map((log, index) => (
-                  <div key={index} className="flex gap-3">
-                    <div className="shrink-0 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
-                    <div
-                      className={clsx('min-w-0 flex-1 break-words', logLineColor(log.line))}
-                      style={{ wordBreak: 'break-word' }}
-                    >
-                      {renderLogLine(log.line)}
-                    </div>
-                  </div>
-                ))
+                previewLogs.map((log) => <LogRow key={log.id} log={log} />)
               ) : (
                 <div className="flex h-full items-center justify-center text-slate-500">No logs yet</div>
               )}
@@ -447,11 +524,14 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
 
           <div className="frameos-muted shrink-0 text-xs">
             Runs the scene with the FrameOS interpreter compiled to WebAssembly, in your browser. Apps that fetch
-            external URLs are routed through a same-origin proxy to get around browser CORS restrictions, so images
-            and data load — the device itself fetches them directly. Device-only apps (screenshots, camera snapshots)
-            are unavailable.
+            external URLs are routed through a same-origin proxy to get around browser CORS restrictions, so images and
+            data load — the device itself fetches them directly. <code>/srv/assets</code> is a folder that lives only in
+            this browser (“Browser assets” above), not the frame's real assets. Device-only apps (screenshots, camera
+            snapshots) are unavailable.
           </div>
         </div>
+
+        <BrowserAssetsModal frameId={frameId} />
 
         {editStateValues ? (
           <Modal

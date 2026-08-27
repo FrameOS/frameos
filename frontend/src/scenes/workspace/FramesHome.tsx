@@ -22,6 +22,7 @@ import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
+import { FrameSidebarBattery } from './FrameBatteryIndicator'
 import { FrameImage } from '../../components/FrameImage'
 import { Modal } from '../../components/Modal'
 import { Spinner } from '../../components/Spinner'
@@ -298,6 +299,7 @@ function FrameTreeRow({
             <span className="block truncate text-xs text-slate-400">{sidebarFrameActivityDescription(frame)}</span>
           </button>
           <FrameMetricAlertIndicator frame={frame} />
+          <FrameSidebarBattery frame={frame} />
           <SidebarStatusDots frame={frame} inactive={inactive} />
         </div>
       </div>

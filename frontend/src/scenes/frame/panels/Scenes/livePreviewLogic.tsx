@@ -34,6 +34,8 @@ export interface LivePreviewSceneEvent {
 }
 
 export interface LivePreviewLogLine {
+  /** Stable per line, so the log list can skip re-rendering old rows. */
+  id: number
   timestamp: string
   line: string
 }
@@ -45,14 +47,117 @@ export interface LivePreviewSourceTemplate {
 }
 
 const MAX_LOG_LINES = 200
+// A scene rendering at full speed reports frames, state and log lines many
+// times a second; the page batches them so React work stays bounded. The
+// first item after a quiet spell goes through at once (leading edge).
+const UI_FLUSH_INTERVAL_MS = 200
+let nextLogLineId = 1
+/** How many frame arrivals the live fps figure averages over. */
+export const FPS_WINDOW = 6
+
+/** Frames per second over `arrivals` (ms timestamps), or null below two frames. */
+export function measureFps(arrivals: readonly number[]): number | null {
+  if (arrivals.length < 2) {
+    return null
+  }
+  const first = arrivals[0]
+  const last = arrivals[arrivals.length - 1]
+  if (last <= first) {
+    return null
+  }
+  return ((arrivals.length - 1) * 1000) / (last - first)
+}
 
 // Apps that can't work in the browser preview: excluded from the wasm build
-// (see frameos/src/apps/apps.nim — child processes, external binaries) or
-// dependent on the frame's local filesystem.
+// (see frameos/src/apps/apps.nim — child processes, external binaries).
+// data/localImage works: it reads the browser asset folder (see
+// BrowserAssetsModal) mounted at the frame's /srv/assets path.
 const WASM_UNAVAILABLE_APPS: Record<string, string> = {
   'data/chromiumScreenshot': 'requires Playwright/Chromium',
   'data/rstpSnapshot': 'requires FFmpeg',
-  'data/localImage': "reads images from the frame's local storage",
+}
+
+/** One entry of the browser asset folder (the worker's /srv/assets). */
+export interface PreviewAssetEntry {
+  /** Relative to the folder root, e.g. `photos/beach.jpg`. */
+  path: string
+  size: number
+  mtime: number
+  isDir: boolean
+}
+
+/** How the worker backs /srv/assets (from its `ready` / `list` replies). */
+export interface PreviewAssetsInfo {
+  mounted: boolean
+  /** Kept in IndexedDB between previews, or in memory for this worker only. */
+  persistent: boolean
+  root: string
+  maxBytes: number
+}
+
+/** The scene asked to render every `intervalMs` — faster than the 1 fps throttle. */
+export interface FastRenderRequest {
+  intervalMs: number
+  /** The user accepted or declined; the banner is gone, the toggle stays. */
+  answered: boolean
+}
+
+/**
+ * Bytes of one file in the running preview's browser asset folder, for
+ * thumbnails. Rejects when no preview runs for the frame.
+ */
+export function readPreviewAsset(frameId: FrameId, path: string): Promise<ArrayBuffer> {
+  const logic = livePreviewLogic.findMounted({ frameId })
+  const request = logic?.cache.assetRequest as PreviewAssetRequest | undefined
+  if (!request) {
+    return Promise.reject(new Error('preview is not running'))
+  }
+  return request('read', { path }).then((result) => result.data as ArrayBuffer)
+}
+
+type PreviewAssetRequest = (
+  op: string,
+  params?: Record<string, unknown>,
+  transfer?: Transferable[]
+) => Promise<Record<string, any>>
+
+/**
+ * Request/reply plumbing for the worker's browser asset folder ops: every
+ * request carries an id, the worker answers with an `assetsResult` for it.
+ */
+function createAssetRequester(worker: Worker): {
+  request: PreviewAssetRequest
+  resolve: (msg: Record<string, any>) => void
+  rejectAll: () => void
+} {
+  const pending = new Map<number, { resolve: (msg: Record<string, any>) => void; reject: (error: Error) => void }>()
+  let nextId = 1
+  return {
+    request: (op, params = {}, transfer = []) =>
+      new Promise((resolve, reject) => {
+        const requestId = nextId++
+        pending.set(requestId, { resolve, reject })
+        worker.postMessage({ type: 'assets', requestId, op, ...params }, transfer)
+      }),
+    resolve: (msg) => {
+      const entry = pending.get(msg.requestId)
+      if (!entry) {
+        return
+      }
+      pending.delete(msg.requestId)
+      if (msg.ok) {
+        entry.resolve(msg)
+      } else {
+        entry.reject(new Error(String(msg.error ?? 'asset request failed')))
+      }
+    },
+    rejectAll: () => {
+      for (const entry of pending.values()) {
+        entry.reject(new Error('preview stopped'))
+      }
+      pending.clear()
+    },
+  }
 }
 
 export interface WasmUnsupportedApp {
@@ -88,12 +193,20 @@ export interface livePreviewLogicValues {
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
   scenes: FrameScene[] // scenesLogic
+  fastMode: boolean
+  fastRenderRequest: FastRenderRequest | null
   gpioButtons: GPIOButton[]
   lastRenderMs: number | null
   livePreviewScene: FrameScene | null
   livePreviewSceneId: string | null
   livePreviewScenes: FrameScene[] | null
   livePreviewSourceTemplate: LivePreviewSourceTemplate | null
+  measuredFps: number | null
+  previewAssets: PreviewAssetEntry[]
+  previewAssetsError: string | null
+  previewAssetsInfo: PreviewAssetsInfo | null
+  previewAssetsLoading: boolean
+  previewAssetsOpen: boolean
   previewDimensions: {
     height: number
     width: number
@@ -114,7 +227,22 @@ export interface livePreviewLogicActions {
     message: string
     timestamp: string
   }
+  appendPreviewLogs: (lines: LivePreviewLogLine[]) => {
+    lines: LivePreviewLogLine[]
+  }
   closeLivePreview: () => {
+    value: true
+  }
+  closePreviewAssets: () => {
+    value: true
+  }
+  createPreviewAssetFolder: (path: string) => {
+    path: string
+  }
+  deletePreviewAsset: (path: string) => {
+    path: string
+  }
+  dismissFastRenderRequest: () => {
     value: true
   }
   dispatchPreviewEvent: (
@@ -124,7 +252,13 @@ export interface livePreviewLogicActions {
     name: string
     payload: Record<string, any>
   }
+  fastRenderRequested: (intervalMs: number) => {
+    intervalMs: number
+  }
   forcePreviewRender: () => {
+    value: true
+  }
+  loadPreviewAssets: () => {
     value: true
   }
   openLivePreview: (
@@ -138,14 +272,34 @@ export interface livePreviewLogicActions {
     sourceTemplate: LivePreviewSourceTemplate | null
     state: Record<string, any> | null
   }
+  openPreviewAssets: () => {
+    value: true
+  }
+  previewAssetsChanged: () => {
+    value: true
+  }
+  previewAssetsFailed: (error: string) => {
+    error: string
+  }
+  previewAssetsLoaded: (
+    entries: PreviewAssetEntry[],
+    info: PreviewAssetsInfo | null
+  ) => {
+    entries: PreviewAssetEntry[]
+    info: PreviewAssetsInfo | null
+  }
   previewErrored: (message: string) => {
     message: string
   }
   previewFrame: (
     width: number,
     height: number,
-    renderMs: number
+    renderMs: number,
+    count?: number,
+    fps?: number | null
   ) => {
+    count: number
+    fps: number | null
     height: number
     renderMs: number
     width: number
@@ -156,11 +310,27 @@ export interface livePreviewLogicActions {
   registerCanvas: (canvas: HTMLCanvasElement | null) => {
     canvas: HTMLCanvasElement | null
   }
+  resetFastRender: () => {
+    value: true
+  }
+  resetPreviewAssets: () => {
+    value: true
+  }
+  setFastMode: (enabled: boolean) => {
+    enabled: boolean
+  }
   setPreviewSettings: (settings: Record<string, Record<string, any>>) => {
     settings: Record<string, Record<string, any>>
   }
   setPreviewState: (state: Record<string, any>) => {
     state: Record<string, any>
+  }
+  uploadPreviewAssets: (
+    folder: string,
+    files: File[]
+  ) => {
+    files: File[]
+    folder: string
   }
 }
 
@@ -216,13 +386,38 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     closeLivePreview: true,
     registerCanvas: (canvas: HTMLCanvasElement | null) => ({ canvas }),
     previewReady: true,
-    previewFrame: (width: number, height: number, renderMs: number) => ({ width, height, renderMs }),
+    // `count` frames arrived since the last report (the page coalesces);
+    // `fps` is the measured rate over the last few frames.
+    previewFrame: (width: number, height: number, renderMs: number, count: number = 1, fps: number | null = null) => ({
+      width,
+      height,
+      renderMs,
+      count,
+      fps,
+    }),
     previewErrored: (message: string) => ({ message }),
     appendPreviewLog: (message: string) => ({ message, timestamp: new Date().toISOString() }),
+    appendPreviewLogs: (lines: LivePreviewLogLine[]) => ({ lines }),
     setPreviewState: (state: Record<string, any>) => ({ state }),
     dispatchPreviewEvent: (name: string, payload: Record<string, any>) => ({ name, payload }),
     forcePreviewRender: true,
     setPreviewSettings: (settings: Record<string, Record<string, any>>) => ({ settings }),
+    // Render pacing: the worker throttles to 1 fps and asks before going faster.
+    fastRenderRequested: (intervalMs: number) => ({ intervalMs }),
+    dismissFastRenderRequest: true,
+    setFastMode: (enabled: boolean) => ({ enabled }),
+    resetFastRender: true,
+    // The browser asset folder (the worker's /srv/assets, kept in IndexedDB).
+    openPreviewAssets: true,
+    closePreviewAssets: true,
+    loadPreviewAssets: true,
+    previewAssetsLoaded: (entries: PreviewAssetEntry[], info: PreviewAssetsInfo | null) => ({ entries, info }),
+    previewAssetsFailed: (error: string) => ({ error }),
+    previewAssetsChanged: true,
+    uploadPreviewAssets: (folder: string, files: File[]) => ({ folder, files }),
+    createPreviewAssetFolder: (path: string) => ({ path }),
+    deletePreviewAsset: (path: string) => ({ path }),
+    resetPreviewAssets: true,
   }),
   reducers({
     livePreviewSceneId: [
@@ -253,8 +448,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         openLivePreview: () => [],
         appendPreviewLog: (state, { message, timestamp }) => [
           ...state.slice(-(MAX_LOG_LINES - 1)),
-          { timestamp, line: message },
+          { id: nextLogLineId++, timestamp, line: message },
         ],
+        appendPreviewLogs: (state, { lines }) => [...state, ...lines].slice(-MAX_LOG_LINES),
       },
     ],
     // Scenes passed explicitly to openLivePreview (e.g. template previews);
@@ -290,7 +486,15 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       0,
       {
         openLivePreview: () => 0,
-        previewFrame: (state) => state + 1,
+        previewFrame: (state, { count }) => state + count,
+      },
+    ],
+    // Frames per second over the last FPS_WINDOW frames, for the real-time toggle.
+    measuredFps: [
+      null as number | null,
+      {
+        openLivePreview: () => null,
+        previewFrame: (_, { fps }) => fps,
       },
     ],
     // User-entered app settings (API keys etc.) merged over the backend's
@@ -300,6 +504,64 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       {} as Record<string, Record<string, any>>,
       {
         setPreviewSettings: (_, { settings }) => settings,
+      },
+    ],
+    // Whether the worker may render faster than once a second. Survives
+    // restarts of the same scene (state edits, new keys); a different scene
+    // starts throttled again.
+    fastMode: [
+      false,
+      {
+        setFastMode: (_, { enabled }) => enabled,
+        resetFastRender: () => false,
+        closeLivePreview: () => false,
+      },
+    ],
+    fastRenderRequest: [
+      null as FastRenderRequest | null,
+      {
+        fastRenderRequested: (state, { intervalMs }) => ({ intervalMs, answered: state?.answered ?? false }),
+        dismissFastRenderRequest: (state) => (state ? { ...state, answered: true } : state),
+        setFastMode: (state) => (state ? { ...state, answered: true } : state),
+        resetFastRender: () => null,
+        closeLivePreview: () => null,
+      },
+    ],
+    previewAssetsOpen: [
+      false,
+      {
+        openPreviewAssets: () => true,
+        closePreviewAssets: () => false,
+        closeLivePreview: () => false,
+      },
+    ],
+    previewAssets: [
+      [] as PreviewAssetEntry[],
+      {
+        previewAssetsLoaded: (_, { entries }) => entries,
+      },
+    ],
+    previewAssetsInfo: [
+      null as PreviewAssetsInfo | null,
+      {
+        previewAssetsLoaded: (state, { info }) => info ?? state,
+        openLivePreview: () => null,
+      },
+    ],
+    previewAssetsLoading: [
+      false,
+      {
+        loadPreviewAssets: () => true,
+        previewAssetsLoaded: () => false,
+        previewAssetsFailed: () => false,
+      },
+    ],
+    previewAssetsError: [
+      null as string | null,
+      {
+        loadPreviewAssets: () => null,
+        previewAssetsFailed: (_, { error }) => error,
+        openPreviewAssets: () => null,
       },
     ],
   }),
@@ -394,6 +656,16 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       cache.worker?.terminate()
       cache.worker = null
       cache.pendingFrame = null
+      cache.assetRequester?.rejectAll()
+      cache.assetRequester = null
+      cache.assetRequest = null
+      clearUiFlushes(cache)
+      // A different scene starts throttled again; a restart of the same one
+      // (state edits, new keys) keeps the user's fast-mode answer.
+      if (cache.lastOpenedSceneId !== sceneId) {
+        actions.resetFastRender()
+      }
+      cache.lastOpenedSceneId = sceneId
 
       // An explicit `scenes` list lets callers preview scenes that aren't installed
       // on the frame yet (e.g. templates in the "add scene" panel); otherwise fall
@@ -487,6 +759,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         return
       }
       cache.worker = worker
+      const assetRequester = createAssetRequester(worker)
+      cache.assetRequester = assetRequester
+      cache.assetRequest = assetRequester.request
       worker.onerror = (event) => {
         actions.previewErrored(
           event.message ||
@@ -501,22 +776,53 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
             actions.previewReady()
             break
           case 'frame': {
+            // Paint at once; report to the store in batches (see UI_FLUSH_INTERVAL_MS).
             cache.pendingFrame = msg
             drawFrame(cache)
-            actions.previewFrame(msg.width, msg.height, msg.renderMs)
+            const stats = cache.frameStats ?? { width: 0, height: 0, renderMs: 0, count: 0 }
+            cache.frameStats = { width: msg.width, height: msg.height, renderMs: msg.renderMs, count: stats.count + 1 }
+            const arrivals: number[] = (cache.frameArrivals ??= [])
+            arrivals.push(performance.now())
+            if (arrivals.length > FPS_WINDOW) {
+              arrivals.splice(0, arrivals.length - FPS_WINDOW)
+            }
+            scheduleUiFlush(cache, 'frame', () => {
+              const flushed = cache.frameStats
+              cache.frameStats = null
+              if (flushed) {
+                actions.previewFrame(
+                  flushed.width,
+                  flushed.height,
+                  flushed.renderMs,
+                  flushed.count,
+                  measureFps(cache.frameArrivals ?? [])
+                )
+              }
+            })
             break
           }
           case 'state':
             actions.setPreviewState(msg.state ?? {})
             break
           case 'log':
-            actions.appendPreviewLog(String(msg.message ?? ''))
+            queuePreviewLog(cache, String(msg.message ?? ''), (lines) => actions.appendPreviewLogs(lines))
             break
           case 'sceneEvent':
-            actions.appendPreviewLog(`event: ${msg.name} ${JSON.stringify(msg.payload ?? {})}`)
+            queuePreviewLog(cache, `event: ${msg.name} ${JSON.stringify(msg.payload ?? {})}`, (lines) =>
+              actions.appendPreviewLogs(lines)
+            )
             break
           case 'error':
             actions.previewErrored(String(msg.message ?? 'Unknown live preview error'))
+            break
+          case 'fastRenderRequest':
+            actions.fastRenderRequested(Number(msg.intervalMs) || 0)
+            break
+          case 'assetsChanged':
+            actions.previewAssetsChanged()
+            break
+          case 'assetsResult':
+            assetRequester.resolve(msg)
             break
           default:
             break
@@ -537,6 +843,10 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         settingsJson,
         proxyUrl,
         sceneId,
+        fastMode: values.fastMode,
+        // Apps may save into the browser folder; it is the user's own
+        // browser storage, so the frame's saveAssets setting doesn't apply.
+        saveAssets: true,
       })
     },
     closeLivePreview: () => {
@@ -544,7 +854,93 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       cache.worker = null
       cache.pendingFrame = null
       cache.canvas = null
+      clearUiFlushes(cache)
+      cache.assetRequester?.rejectAll()
+      cache.assetRequester = null
+      cache.assetRequest = null
+      cache.lastOpenedSceneId = null
       setLivePreviewHash(null)
+    },
+    setFastMode: ({ enabled }) => {
+      cache.worker?.postMessage({ type: 'setFastMode', enabled })
+    },
+    openPreviewAssets: () => {
+      actions.loadPreviewAssets()
+    },
+    previewAssetsChanged: () => {
+      if (values.previewAssetsOpen) {
+        actions.loadPreviewAssets()
+      }
+    },
+    // No breakpoint: reloads overlap (an upload's reload racing the worker's
+    // assetsChanged), every listing is complete, and the last one wins.
+    loadPreviewAssets: async () => {
+      const request = cache.assetRequest as PreviewAssetRequest | null
+      if (!request) {
+        actions.previewAssetsFailed('The preview is not running — start it to manage its browser assets.')
+        return
+      }
+      try {
+        const result = await request('list')
+        actions.previewAssetsLoaded((result.entries ?? []) as PreviewAssetEntry[], result.info ?? null)
+      } catch (error) {
+        actions.previewAssetsFailed(error instanceof Error ? error.message : String(error))
+      }
+    },
+    uploadPreviewAssets: async ({ folder, files }) => {
+      const request = cache.assetRequest as PreviewAssetRequest | null
+      if (!request) {
+        return
+      }
+      for (const file of files) {
+        const path = folder ? `${folder}/${file.name}` : file.name
+        try {
+          const data = await file.arrayBuffer()
+          await request('write', { path, data }, [data])
+        } catch (error) {
+          actions.previewAssetsFailed(
+            `Could not add ${file.name}: ${error instanceof Error ? error.message : String(error)}`
+          )
+          return
+        }
+      }
+      actions.loadPreviewAssets()
+    },
+    createPreviewAssetFolder: async ({ path }) => {
+      const request = cache.assetRequest as PreviewAssetRequest | null
+      if (!request) {
+        return
+      }
+      try {
+        await request('mkdir', { path })
+        actions.loadPreviewAssets()
+      } catch (error) {
+        actions.previewAssetsFailed(error instanceof Error ? error.message : String(error))
+      }
+    },
+    deletePreviewAsset: async ({ path }) => {
+      const request = cache.assetRequest as PreviewAssetRequest | null
+      if (!request) {
+        return
+      }
+      try {
+        await request('delete', { path })
+        actions.loadPreviewAssets()
+      } catch (error) {
+        actions.previewAssetsFailed(error instanceof Error ? error.message : String(error))
+      }
+    },
+    resetPreviewAssets: async () => {
+      const request = cache.assetRequest as PreviewAssetRequest | null
+      if (!request) {
+        return
+      }
+      try {
+        await request('reset')
+        actions.loadPreviewAssets()
+      } catch (error) {
+        actions.previewAssetsFailed(error instanceof Error ? error.message : String(error))
+      }
     },
     registerCanvas: ({ canvas }) => {
       cache.canvas = canvas
@@ -582,8 +978,68 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
   beforeUnmount(({ cache }) => {
     cache.worker?.terminate()
     cache.worker = null
+    clearUiFlushes(cache)
+    cache.assetRequester?.rejectAll()
+    cache.assetRequester = null
+    cache.assetRequest = null
   }),
 ])
+
+/**
+ * Leading-edge throttle per key: the first call after a quiet spell runs
+ * now, further calls within UI_FLUSH_INTERVAL_MS collapse into one trailing
+ * run. Timers live in the logic's cache so a restart can drop them.
+ */
+function scheduleUiFlush(cache: Record<string, any>, key: string, flush: () => void): void {
+  const flushes: Record<string, { timer: ReturnType<typeof setTimeout> | null; lastAt: number }> = (cache.uiFlushes ??=
+    {})
+  const entry = (flushes[key] ??= { timer: null, lastAt: 0 })
+  if (entry.timer !== null) {
+    return
+  }
+  const elapsed = Date.now() - entry.lastAt
+  if (elapsed >= UI_FLUSH_INTERVAL_MS) {
+    entry.lastAt = Date.now()
+    flush()
+    return
+  }
+  entry.timer = setTimeout(() => {
+    entry.timer = null
+    entry.lastAt = Date.now()
+    flush()
+  }, UI_FLUSH_INTERVAL_MS - elapsed)
+}
+
+function clearUiFlushes(cache: Record<string, any>): void {
+  for (const entry of Object.values(
+    (cache.uiFlushes ?? {}) as Record<string, { timer: ReturnType<typeof setTimeout> | null }>
+  )) {
+    if (entry.timer !== null) {
+      clearTimeout(entry.timer)
+      entry.timer = null
+    }
+  }
+  cache.uiFlushes = {}
+  cache.frameStats = null
+  cache.frameArrivals = []
+  cache.logQueue = []
+}
+
+function queuePreviewLog(
+  cache: Record<string, any>,
+  line: string,
+  append: (lines: LivePreviewLogLine[]) => void
+): void {
+  const queue: LivePreviewLogLine[] = (cache.logQueue ??= [])
+  queue.push({ id: nextLogLineId++, timestamp: new Date().toISOString(), line })
+  scheduleUiFlush(cache, 'log', () => {
+    const lines = cache.logQueue ?? []
+    cache.logQueue = []
+    if (lines.length > 0) {
+      append(lines)
+    }
+  })
+}
 
 /** Paint the latest worker frame onto the registered canvas. */
 function drawFrame(cache: Record<string, any>): void {

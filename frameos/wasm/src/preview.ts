@@ -2,7 +2,7 @@
 // The worker loads the emscripten-built scene runtime (frameos.js/frameos.wasm)
 // and drives renders; this class owns the worker lifecycle, paints frames onto
 // a canvas, and exposes events/state as callbacks.
-import type { FrameOSScene, PreviewFrame, SceneInfo } from './types'
+import type { FrameOSScene, PreviewAssetEntry, PreviewAssetsInfo, PreviewFrame, SceneInfo } from './types'
 
 export interface FrameOSPreviewOptions {
   /** URL of the module worker script: `<assets>/preview-worker.js`. The
@@ -27,12 +27,29 @@ export interface FrameOSPreviewOptions {
   proxyUrl?: string
   /** Canvas to paint frames onto; can also be attached later. */
   canvas?: HTMLCanvasElement | null
-  onReady?: (sceneInfo: SceneInfo) => void
+  /** Renders are throttled to one per second unless this is true (see
+   * `onFastRenderRequest` and `setFastMode`). */
+  fastMode?: boolean
+  /** Whether apps may save files into the browser asset folder — a frame's
+   * `saveAssets` setting: a boolean, or `{nodeName: boolean}`. Defaults to
+   * true (it is the visitor's own browser storage). */
+  saveAssets?: boolean | Record<string, boolean>
+  /** Set to false to run with an empty in-memory /srv/assets instead of the
+   * browser's persistent folder. */
+  browserAssets?: boolean
+  onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null) => void
   onFrame?: (frame: PreviewFrame) => void
   onState?: (state: Record<string, unknown>) => void
   onLog?: (message: string) => void
   onSceneEvent?: (name: string, payload: Record<string, unknown>) => void
   onError?: (message: string) => void
+  /** The scene asked to render every `intervalMs` — faster than the 1 fps
+   * throttle. Fires once per runtime start; call `setFastMode(true)` to let
+   * the scene run at its own pace. */
+  onFastRenderRequest?: (intervalMs: number) => void
+  /** Files in the browser asset folder changed: the scene saved something,
+   * or an asset op completed. */
+  onAssetsChanged?: () => void
 }
 
 interface PendingFrame {
@@ -41,24 +58,36 @@ interface PendingFrame {
   buffer: ArrayBuffer
 }
 
+interface PendingAssetRequest {
+  resolve: (result: Record<string, any>) => void
+  reject: (error: Error) => void
+}
+
 export class FrameOSPreview {
   readonly options: FrameOSPreviewOptions
   private worker: Worker | null = null
   private canvas: HTMLCanvasElement | null = null
   private pendingFrame: PendingFrame | null = null
   private destroyed = false
+  private assetRequests = new Map<number, PendingAssetRequest>()
+  private nextAssetRequestId = 1
 
   /** Latest scene info from the runtime (set once `ready` fires). */
   sceneInfo: SceneInfo | null = null
+  /** How the runtime's /srv/assets is backed (set once `ready` fires). */
+  assetsInfo: PreviewAssetsInfo | null = null
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
   /** The scene currently selected in the runtime. */
   currentSceneId: string | null = null
+  /** Whether renders may run faster than once per second. */
+  fastMode: boolean
 
   constructor(options: FrameOSPreviewOptions) {
     this.options = options
     this.canvas = options.canvas ?? null
     this.currentSceneId = options.sceneId ?? null
+    this.fastMode = Boolean(options.fastMode)
 
     this.worker = new Worker(options.workerUrl, { type: 'module' })
     this.worker.onerror = (event: ErrorEvent) => {
@@ -75,6 +104,9 @@ export class FrameOSPreview {
       settingsJson: JSON.stringify(options.settings ?? {}),
       proxyUrl: options.proxyUrl || '',
       sceneId: options.sceneId || '',
+      fastMode: this.fastMode,
+      saveAssets: options.saveAssets === undefined ? true : options.saveAssets,
+      browserAssets: options.browserAssets === undefined ? true : options.browserAssets,
     })
   }
 
@@ -85,10 +117,11 @@ export class FrameOSPreview {
     switch (msg.type) {
       case 'ready':
         this.sceneInfo = msg.sceneInfo ?? null
+        this.assetsInfo = msg.browserAssets ?? null
         if (this.sceneInfo?.currentSceneId) {
           this.currentSceneId = this.sceneInfo.currentSceneId
         }
-        this.options.onReady?.(msg.sceneInfo)
+        this.options.onReady?.(msg.sceneInfo, this.assetsInfo)
         break
       case 'frame':
         this.pendingFrame = { width: msg.width, height: msg.height, buffer: msg.buffer }
@@ -108,6 +141,25 @@ export class FrameOSPreview {
       case 'error':
         this.options.onError?.(String(msg.message ?? 'Unknown FrameOS preview error'))
         break
+      case 'fastRenderRequest':
+        this.options.onFastRenderRequest?.(Number(msg.intervalMs) || 0)
+        break
+      case 'assetsChanged':
+        this.options.onAssetsChanged?.()
+        break
+      case 'assetsResult': {
+        const pending = this.assetRequests.get(msg.requestId)
+        if (!pending) {
+          break
+        }
+        this.assetRequests.delete(msg.requestId)
+        if (msg.ok) {
+          pending.resolve(msg)
+        } else {
+          pending.reject(new Error(String(msg.error ?? 'asset request failed')))
+        }
+        break
+      }
     }
   }
 
@@ -157,6 +209,68 @@ export class FrameOSPreview {
     this.worker?.postMessage({ type: 'selectScene', sceneId })
   }
 
+  /** Let the scene render as often as it asks (true), or throttle it back
+   * to one render per second (false). */
+  setFastMode(enabled: boolean): void {
+    this.fastMode = enabled
+    this.worker?.postMessage({ type: 'setFastMode', enabled })
+  }
+
+  private assetRequest(op: string, params: Record<string, unknown> = {}, transfer: Transferable[] = []): Promise<Record<string, any>> {
+    return new Promise((resolve, reject) => {
+      if (!this.worker || this.destroyed) {
+        reject(new Error('preview is not running'))
+        return
+      }
+      const requestId = this.nextAssetRequestId++
+      this.assetRequests.set(requestId, { resolve, reject })
+      this.worker.postMessage({ type: 'assets', requestId, op, ...params }, transfer)
+    })
+  }
+
+  /** Every file and folder in the browser asset folder (/srv/assets). */
+  async listAssets(): Promise<PreviewAssetEntry[]> {
+    const result = await this.assetRequest('list')
+    if (result.info) {
+      this.assetsInfo = result.info
+    }
+    return (result.entries ?? []) as PreviewAssetEntry[]
+  }
+
+  /** The bytes of one file in the browser asset folder. */
+  async readAsset(path: string): Promise<ArrayBuffer> {
+    const result = await this.assetRequest('read', { path })
+    return result.data as ArrayBuffer
+  }
+
+  /** Write (create or replace) a file; missing parent folders are created. */
+  async writeAsset(path: string, data: ArrayBuffer | Uint8Array | Blob): Promise<void> {
+    let buffer: ArrayBuffer
+    if (data instanceof Blob) {
+      buffer = await data.arrayBuffer()
+    } else if (data instanceof ArrayBuffer) {
+      buffer = data
+    } else {
+      buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+    }
+    await this.assetRequest('write', { path, data: buffer }, [buffer])
+  }
+
+  /** Create a folder (and its parents). */
+  async createAssetFolder(path: string): Promise<void> {
+    await this.assetRequest('mkdir', { path })
+  }
+
+  /** Delete a file, or a folder with everything in it. */
+  async deleteAsset(path: string): Promise<void> {
+    await this.assetRequest('delete', { path })
+  }
+
+  /** Empty the folder and regenerate the sample images. */
+  async resetAssets(): Promise<void> {
+    await this.assetRequest('reset')
+  }
+
   /** Terminate the worker; the instance cannot be reused afterwards. */
   destroy(): void {
     this.destroyed = true
@@ -164,6 +278,10 @@ export class FrameOSPreview {
     this.worker = null
     this.pendingFrame = null
     this.canvas = null
+    for (const pending of this.assetRequests.values()) {
+      pending.reject(new Error('preview destroyed'))
+    }
+    this.assetRequests.clear()
   }
 }
 

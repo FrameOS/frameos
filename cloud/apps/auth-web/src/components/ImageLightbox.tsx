@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type ImageLightboxProps = {
-  url: string;
+  /** The image to show; ignored when `liveCanvasRef` is given. */
+  url?: string | undefined;
   alt: string;
   /** The dialog's accessible name. */
   label: string;
@@ -13,6 +14,9 @@ type ImageLightboxProps = {
    * the 1:1 view uses). */
   width?: number | undefined;
   height?: number | undefined;
+  /** Live mode: a <canvas> the owner keeps painting (the preview mirrors
+   * every rendered frame into it), instead of a still image. */
+  liveCanvasRef?: ((canvas: HTMLCanvasElement | null) => void) | undefined;
   onClose: () => void;
 };
 
@@ -21,7 +25,7 @@ type ImageLightboxProps = {
 // beside the image, or Esc. Used by the Preview panel (the rendered frame)
 // and the Info panel's gallery. The overlay lives on <body>: the editor
 // frame's transform would otherwise keep a fixed element inside a column.
-export function ImageLightbox({ url, alt, label, width, height, onClose }: ImageLightboxProps) {
+export function ImageLightbox({ url, alt, label, width, height, liveCanvasRef, onClose }: ImageLightboxProps) {
   const [fit, setFit] = useState(true);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -46,17 +50,32 @@ export function ImageLightbox({ url, alt, label, width, height, onClose }: Image
         {fit ? "click the image for 1:1" : "click the image to fit"} · Esc to close
       </div>
       <div className={`lightbox__body${fit ? " lightbox__body--fit" : ""}`}>
-        <img
-          alt={alt}
-          className={`lightbox__image${fit ? " lightbox__image--fit" : ""}`}
-          height={height}
-          onClick={(event) => {
-            event.stopPropagation();
-            setFit((current) => !current);
-          }}
-          src={url}
-          width={width}
-        />
+        {liveCanvasRef ? (
+          <canvas
+            aria-label={alt}
+            className={`lightbox__image${fit ? " lightbox__image--fit" : ""}`}
+            height={height}
+            onClick={(event) => {
+              event.stopPropagation();
+              setFit((current) => !current);
+            }}
+            ref={liveCanvasRef}
+            role="img"
+            width={width}
+          />
+        ) : (
+          <img
+            alt={alt}
+            className={`lightbox__image${fit ? " lightbox__image--fit" : ""}`}
+            height={height}
+            onClick={(event) => {
+              event.stopPropagation();
+              setFit((current) => !current);
+            }}
+            src={url}
+            width={width}
+          />
+        )}
       </div>
     </div>,
     document.body,

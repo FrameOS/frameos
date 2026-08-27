@@ -34,6 +34,16 @@ suite "per-zone tz slices":
     check winter.hour == 1
     check winter.dstName == "CET"
 
+  test "utcOffsetSeconds follows the zone's transitions (what the wasm preview feeds QuickJS's Date)":
+    check loadTimeZoneSlice(brusselsSlice)
+    check utcOffsetSeconds("Europe/Brussels", 1755820800.0) == 7200 # 2025-08-22, CEST
+    check utcOffsetSeconds("Europe/Brussels", 1767225600.0) == 3600 # 2026-01-01, CET
+    check utcOffsetSeconds("UTC", 1755820800.0) == 0
+    check utcOffsetSeconds("Etc/UTC", 1755820800.0) == 0
+    check utcOffsetSeconds("Nowhere/Unknown", 1755820800.0) == 0
+    check loadTimeZoneSlice(stJohnsSlice)
+    check utcOffsetSeconds("America/St_Johns", 1755820800.0) == -9000
+
   test "the POSIX rule for Brussels is the EU rule":
     check loadTimeZoneSlice(brusselsSlice)
     check posixTzRule("Europe/Brussels", 1755820800.0) == "CET-1CEST,M3.5.0,M10.5.0/3"

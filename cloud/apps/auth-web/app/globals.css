@@ -2957,6 +2957,204 @@ a.stat-tile:hover {
   background: var(--bg-soft);
 }
 
+/* A credentials group whose key is saved on the account: one line, with
+   "Use another key" to open the inputs. */
+.preview-settings__group--stored {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preview-settings__stored {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* The preview's "this scene wants to go faster" prompt, and the toggle it
+   turns into once answered. */
+.live-preview__fast {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-color: color-mix(in srgb, var(--warning), transparent 55%);
+  color: var(--text);
+}
+
+.live-preview__fast-icon {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+
+.live-preview__fast-copy {
+  flex: 1 1 16em;
+  font-size: 13px;
+}
+
+.live-preview__fast-toggle {
+  font-size: 13px;
+}
+
+/* The browser asset folder dialog (PreviewAssetsDialog). */
+.assets-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.assets-dialog__intro {
+  font-size: 13px;
+}
+
+.assets-dialog__toolbar {
+  align-items: center;
+  gap: 6px;
+}
+
+.assets-dialog__spacer {
+  flex: 1;
+}
+
+.assets-dialog__confirm {
+  font-size: 13px;
+}
+
+.assets-dialog__file-input {
+  display: none;
+}
+
+.assets-dialog__crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 13px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.assets-dialog__crumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.assets-dialog__crumb {
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+}
+
+.assets-dialog__crumb:hover {
+  text-decoration: underline;
+}
+
+.assets-dialog__crumb--current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.assets-dialog__list {
+  min-height: 8rem;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+
+.assets-dialog__list--dragging {
+  border-color: var(--accent, #3b82f6);
+  background: color-mix(in srgb, var(--accent, #3b82f6), transparent 90%);
+}
+
+.assets-dialog__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border-radius: 6px;
+}
+
+.assets-dialog__row:hover {
+  background: var(--bg-soft);
+}
+
+.assets-dialog__thumb {
+  flex-shrink: 0;
+  width: 64px;
+  height: 48px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.assets-dialog__thumb--blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-soft);
+  color: var(--muted);
+}
+
+.assets-dialog__meta {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.assets-dialog__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.assets-dialog__name--folder {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+}
+
+.assets-dialog__name--folder:hover {
+  text-decoration: underline;
+}
+
+.assets-dialog__details {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.assets-dialog__name-input {
+  flex: 1;
+}
+
+.assets-dialog__empty {
+  margin: 0;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.assets-dialog__footer {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* The new-scene page's display-size picker in the modal bar. */
 .editor-modal__preset {
   display: inline-flex;

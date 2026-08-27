@@ -85,15 +85,33 @@ for src in quickjs.c dtoa.c libregexp.c libunicode.c cutils.c; do
         qjs_needs_build=1
     fi
 done
+# JS `Date` must follow the frame's configured time zone, not the browser's:
+# quickjs.c reads local time exactly once, `localtime_r(&ti, &tm);` in
+# getTimezoneOffset(), and that call is redirected to
+# tools/wasm/fos_quickjs_tz.c, which asks the Nim runtime (lib/tz.nim) for
+# the zone's offset. Fail loudly if a QuickJS update moves that line.
+if ! grep -q 'localtime_r(&ti, &tm);' "$QJS_SRC/quickjs.c"; then
+    echo "build_wasm.sh: quickjs.c no longer calls 'localtime_r(&ti, &tm);' in getTimezoneOffset() —" >&2
+    echo "update the localtime_r redirect in tools/wasm/fos_quickjs_tz.c" >&2
+    exit 1
+fi
+QJS_TZ_SHIM="$FRAMEOS_DIR/tools/wasm/fos_quickjs_tz.c"
+if [[ "$qjs_needs_build" == "0" && ( "$QJS_TZ_SHIM" -nt "$QJS_BUILD/libquickjs.a" || "${QJS_TZ_SHIM%.c}.h" -nt "$QJS_BUILD/libquickjs.a" ) ]]; then
+    qjs_needs_build=1
+fi
 if [[ "$qjs_needs_build" == "1" || ! -f "$QJS_BUILD/libquickjs.a" ]]; then
     echo "building QuickJS $QJS_VERSION with emcc"
     for src in quickjs.c dtoa.c libregexp.c libunicode.c cutils.c; do
         emcc -c -O2 \
             -D_GNU_SOURCE \
             -DCONFIG_VERSION="\"$QJS_VERSION\"" \
+            -Dlocaltime_r=fos_quickjs_localtime_r \
+            -include "${QJS_TZ_SHIM%.c}.h" \
             -funsigned-char -fwrapv -fno-strict-aliasing -w \
             "$QJS_SRC/$src" -o "$QJS_BUILD/${src%.c}.o"
     done
+    emcc -c -O2 -w "$QJS_TZ_SHIM" -o "$QJS_BUILD/fos_quickjs_tz.o"
+    rm -f "$QJS_BUILD/libquickjs.a"
     emar rcs "$QJS_BUILD/libquickjs.a" "$QJS_BUILD"/*.o
 fi
 
@@ -103,9 +121,11 @@ FRAMEOS_VERSION="$(python3 tools/frameos_version.py ../versions.json)"
 # _main keeps Nim's generated main() alive: emscripten calls it on module
 # startup and that runs NimMain (all Nim module initializers, e.g. the
 # baked-in font asset tables).
-EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error
-# FS lets the render harness preload a virtual frame's assets into MEMFS.
-EXPORTED_RUNTIME_METHODS=cwrap,ccall,UTF8ToString,stringToNewUTF8,lengthBytesUTF8,HEAPU8,FS
+EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_tz_offset_seconds
+# FS lets the render harness preload a virtual frame's assets into MEMFS;
+# IDBFS (linked below with -lidbfs.js) backs the browser preview's
+# /srv/assets folder with IndexedDB (see tools/wasm/preview-worker.js).
+EXPORTED_RUNTIME_METHODS=cwrap,ccall,UTF8ToString,stringToNewUTF8,lengthBytesUTF8,HEAPU8,FS,IDBFS
 
 mkdir -p "$BUILD_DIR"
 
@@ -148,6 +168,8 @@ nim c \
     --passL:"-sEXPORTED_FUNCTIONS=$EXPORTED_FUNCTIONS" \
     --passL:"-sEXPORTED_RUNTIME_METHODS=$EXPORTED_RUNTIME_METHODS" \
     --passL:"--js-library $FRAMEOS_DIR/tools/wasm/frameos_library.js" \
+    `# IndexedDB-backed filesystem for the preview's browser asset folder.` \
+    --passL:"-lidbfs.js" \
     src/wasm/wasm_main.nim
 
 mkdir -p "$OUT_DIR"

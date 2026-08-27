@@ -13,6 +13,7 @@ import { metricChartThemes, themeMetricSeries, type MetricChartTheme } from './c
 import { urls } from '../../../../urls'
 import { frameMetricsPreviewLogic } from '../../../workspace/frameMetricsPreviewLogic'
 import type { FrameId } from '../../../../types'
+import { BatteryIndicator, batteryTitle } from '../../../../components/BatteryIndicator'
 
 const chartHeight = 28
 const chartMargin = { top: 3, right: 1, bottom: 3, left: 1 }
@@ -20,6 +21,7 @@ const metricLabels: Record<string, string> = {
   load: 'Load',
   memoryUsage: 'Mem',
   diskUsage: 'Disk',
+  batteryPercent: 'Battery',
 }
 const compactMetricLabels: Record<string, string> = {
   load: 'L',
@@ -108,9 +110,8 @@ function HeaderMetricChart({
 
 export function HeaderMetrics({ frameId }: { frameId: FrameId }) {
   const { theme } = useValues(workspaceLogic)
-  const { headerMetricsByCategory, previewMetricsTimeRange, latestMetricSummariesByCategory } = useValues(
-    frameMetricsPreviewLogic({ frameId })
-  )
+  const { headerMetricsByCategory, previewMetricsTimeRange, latestMetricSummariesByCategory, latestBatteryPercent } =
+    useValues(frameMetricsPreviewLogic({ frameId }))
   const metricEntries = Object.entries(headerMetricsByCategory).filter(([, series]) => series.length > 0)
   const chartTheme = metricChartThemes[theme]
 
@@ -130,39 +131,50 @@ export function HeaderMetrics({ frameId }: { frameId: FrameId }) {
               ? 'border-white/10 bg-white/[0.06] shadow-black/10 hover:bg-white/[0.09]'
               : 'border-slate-200/70 bg-white/70 shadow-slate-950/5 hover:bg-white/90'
           )}
-          title={`${metricLabels[key] ?? key}${
-            latestMetricSummariesByCategory[key] ? ` ${latestMetricSummariesByCategory[key]}` : ''
-          }`}
+          title={
+            key === 'batteryPercent' && latestBatteryPercent !== null
+              ? batteryTitle(latestBatteryPercent)
+              : `${metricLabels[key] ?? key}${
+                  latestMetricSummariesByCategory[key] ? ` ${latestMetricSummariesByCategory[key]}` : ''
+                }`
+          }
         >
-          <span
-            className={clsx(
-              'flex min-w-0 items-baseline gap-1 whitespace-nowrap leading-none',
-              theme === 'dark' ? 'text-gray-300' : 'text-slate-700'
-            )}
-          >
-            <span className="shrink-0 text-[10px] font-semibold uppercase">
-              <span className="@4xl:hidden">{compactMetricLabels[key] ?? metricLabels[key] ?? key}</span>
-              <span className="hidden @4xl:inline">{metricLabels[key] ?? key}</span>
-            </span>
-            {latestMetricSummariesByCategory[key] ? (
+          {key === 'batteryPercent' && latestBatteryPercent !== null ? (
+            // A battery glyph with the charge and a bar, instead of label + sparkline.
+            <BatteryIndicator percent={latestBatteryPercent} withBar className="min-w-[3.25rem]" />
+          ) : (
+            <>
               <span
                 className={clsx(
-                  'min-w-0 truncate text-[11px] font-medium',
-                  theme === 'dark' ? 'text-gray-400' : 'text-slate-500'
+                  'flex min-w-0 items-baseline gap-1 whitespace-nowrap leading-none',
+                  theme === 'dark' ? 'text-gray-300' : 'text-slate-700'
                 )}
               >
-                {latestMetricSummariesByCategory[key]}
+                <span className="shrink-0 text-[10px] font-semibold uppercase">
+                  <span className="@4xl:hidden">{compactMetricLabels[key] ?? metricLabels[key] ?? key}</span>
+                  <span className="hidden @4xl:inline">{metricLabels[key] ?? key}</span>
+                </span>
+                {latestMetricSummariesByCategory[key] ? (
+                  <span
+                    className={clsx(
+                      'min-w-0 truncate text-[11px] font-medium',
+                      theme === 'dark' ? 'text-gray-400' : 'text-slate-500'
+                    )}
+                  >
+                    {latestMetricSummariesByCategory[key]}
+                  </span>
+                ) : null}
               </span>
-            ) : null}
-          </span>
-          {key !== 'diskUsage' ? (
-            <HeaderMetricChart
-              series={themeMetricSeries(series, chartTheme)}
-              timeRange={previewMetricsTimeRange}
-              chartTheme={chartTheme}
-              className="hidden @5xl:block @5xl:w-20 @7xl:w-[104px]"
-            />
-          ) : null}
+              {key !== 'diskUsage' ? (
+                <HeaderMetricChart
+                  series={themeMetricSeries(series, chartTheme)}
+                  timeRange={previewMetricsTimeRange}
+                  chartTheme={chartTheme}
+                  className="hidden @5xl:block @5xl:w-20 @7xl:w-[104px]"
+                />
+              ) : null}
+            </>
+          )}
         </A>
       ))}
     </div>
