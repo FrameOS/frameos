@@ -13,7 +13,7 @@ if (typeof window !== 'undefined') {
   const anyWindow = window as any
   anyWindow.FRAMEOS_EMBEDDED_NO_BACKEND = true
   anyWindow.ESBUILD_LOAD_CHUNKS = anyWindow.ESBUILD_LOAD_CHUNKS || function () {}
-  initKea()
+  initKea({ memoryRouter: true })
 }
 
 export { EmbeddedSceneEditor } from './EmbeddedEditor'

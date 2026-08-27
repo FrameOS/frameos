@@ -104,7 +104,7 @@ export function mountFrameOSEditor(container: HTMLElement, options: FrameOSEdito
   html.style.colorScheme = theme
 
   if (!keaInitialized) {
-    initKea()
+    initKea({ memoryRouter: true })
     keaInitialized = true
   }
 

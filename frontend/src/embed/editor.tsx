@@ -9,6 +9,6 @@ import { EmbeddedEditor } from './EmbeddedEditor'
 // backend, no websocket; scenes arrive and leave over postMessage. See
 // EmbeddedEditor.tsx for the protocol and build.mjs for the alias setup.
 
-initKea()
+initKea({ memoryRouter: true })
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(<EmbeddedEditor />)
