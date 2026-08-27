@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -14,6 +15,7 @@
 
 #include "cJSON.h"
 #include "esp_timer.h"
+#include "nvs.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_mem.h"
@@ -46,8 +48,38 @@ typedef enum {
     SETTINGS_SOURCE_CLOUD,
 } settings_source_t;
 
-/* RAM-only: settings are refetched once per boot, then 304 thereafter. */
+/* The ETag of the copy in RAM; on a cloud-only frame it is seeded from the
+ * NVS cache at boot (fos_settings_boot_apply_cache), otherwise the source
+ * is refetched once per boot, then 304 thereafter. */
 static char s_etag[SETTINGS_ETAG_LEN] = "";
+
+/* NVS cache of the six cloud-owned service-settings groups, so a boot
+ * starts with the settings it had (docs/cloud-frames.md "Service
+ * settings"). Two things this fixes for a deep-sleep frame, whose every
+ * wake is a boot:
+ *
+ *  - It used to render its first (and only) pass with NO service settings:
+ *    the pull is requested by the session's `ready`, which on a battery
+ *    frame lands a couple of seconds after the render pass has already
+ *    started, and the pass that would have pulled never comes — the frame
+ *    sleeps. Any scene needing an API key failed on every wake.
+ *  - Every boot that did pull paid a full TLS handshake to the provider
+ *    (the ETag was RAM-only), ~1-2 s of radio per wake for a body that
+ *    changes a few times a year.
+ *
+ * With the cache, `ready` skips the pull while the copy is younger than the
+ * hub client's 6 h interval; the `refresh_service_settings` nudge (queued by
+ * the provider on every save, delivered on the next connect) still forces a
+ * fetch, as does a revocation's 403. The blob is the same JSON the Nim
+ * runtime is handed — the account's API keys — stored next to the cloud
+ * bearer token and the Wi-Fi password in the same NVS namespace, cleared by
+ * a revocation, a demotion, and `factory-reset`. */
+#define SETTINGS_CACHE_KEY "svc_cache"
+#define SETTINGS_CACHE_ETAG_KEY "svc_etag"
+#define SETTINGS_CACHE_AT_KEY "svc_at"
+static bool s_cache_applied = false;   /* this boot started from the cache */
+static void cache_store(const char *printed, const char *etag);
+static uint32_t s_cache_stored_at = 0; /* unix seconds; 0 = unknown age */
 /* Which source the stored ETag came from: a backend ETag replayed against the
  * cloud (or the reverse) would earn a bogus 304 and freeze a stale copy. */
 static settings_source_t s_etag_source = SETTINGS_SOURCE_NONE;
@@ -74,6 +106,14 @@ void fos_settings_request_sync(void)
     s_sync_requested = true;
 }
 
+static bool cache_is_fresh(void)
+{
+    if (!s_cache_applied || s_cache_stored_at == 0) return false;
+    time_t now = time(NULL);
+    if (now < 1000000000) return false; /* no clock: age unknown */
+    return (uint64_t)now < (uint64_t)s_cache_stored_at + SETTINGS_CLOUD_INTERVAL_US / 1000000;
+}
+
 void fos_settings_cloud_scope_granted(bool granted)
 {
     if (!granted) {
@@ -85,34 +125,14 @@ void fos_settings_cloud_scope_granted(bool granted)
     s_cloud_scope_granted = true;
     s_cloud_scope_blocked = false; /* a fresh grant lifts an earlier 403 */
     s_cloud_next_pull_us = 0;
+    if (cache_is_fresh()) {
+        /* The copy applied at boot is younger than the poll interval, and a
+         * save on the provider's side arrives as a queued nudge anyway. */
+        return;
+    }
     /* One conditional pull per session that reaches `ready`, before the first
      * render this session drives. */
     s_sync_requested = true;
-}
-
-bool fos_settings_cloud_scope(void)
-{
-    return s_cloud_scope_granted;
-}
-
-static esp_err_t collect_etag_handler(esp_http_client_event_t *evt)
-{
-    if (evt->event_id == HTTP_EVENT_ON_HEADER &&
-        strcasecmp(evt->header_key, "ETag") == 0) {
-        char *etag_out = (char *)evt->user_data;
-        snprintf(etag_out, SETTINGS_ETAG_LEN, "%s", evt->header_value);
-    }
-    return ESP_OK;
-}
-
-static void log_settings_event(const char *status, const char *detail)
-{
-    char line[256];
-    snprintf(line, sizeof(line),
-             "{\"event\":\"settings:sync\",\"source\":\"esp32\","
-             "\"status\":\"%s\",\"detail\":\"%s\"}",
-             status, detail ? detail : "");
-    frameos_nim_log_hook(line);
 }
 
 /* Group NAMES only, never a value: device logs are uploaded to the provider
@@ -148,7 +168,7 @@ static const char *const k_service_settings_groups[] = {
  * So: use `settings` when the payload has one, else scan the root for the
  * known group names. Only those names are ever forwarded — `frame`,
  * `schedule` and `groups` never reach the Nim side. */
-static void apply_service_settings(const cJSON *root, const char *origin)
+static void apply_service_settings(const cJSON *root, const char *origin, const char *etag)
 {
     const cJSON *settings = cJSON_GetObjectItem(root, "settings");
     if (!cJSON_IsObject(settings)) settings = root;
@@ -173,10 +193,132 @@ static void apply_service_settings(const cJSON *root, const char *origin)
     cJSON_Delete(out);
     if (printed == NULL) return; /* same: an OOM must not read as a revocation */
     frameos_nim_apply_service_settings(printed);
+    if (strcmp(origin, "cloud") == 0) cache_store(printed, etag);
     /* These are the account's credentials; do not leave them in freed heap. */
     memset(printed, 0, strlen(printed));
     cJSON_free(printed);
     log_service_settings_event(origin, "applied", names);
+}
+
+static void cache_store(const char *printed, const char *etag)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    esp_err_t err = nvs_set_blob(nvs, SETTINGS_CACHE_KEY, printed, strlen(printed) + 1);
+    if (err == ESP_OK) err = nvs_set_str(nvs, SETTINGS_CACHE_ETAG_KEY, etag ? etag : "");
+    time_t now = time(NULL);
+    uint32_t at = now > 1000000000 ? (uint32_t)now : 0;
+    if (err == ESP_OK) err = nvs_set_u32(nvs, SETTINGS_CACHE_AT_KEY, at);
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "service settings cache write failed: %s", esp_err_to_name(err));
+        return;
+    }
+    s_cache_applied = true;
+    s_cache_stored_at = at;
+}
+
+void fos_settings_forget_cache(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    nvs_erase_key(nvs, SETTINGS_CACHE_KEY);
+    nvs_erase_key(nvs, SETTINGS_CACHE_ETAG_KEY);
+    nvs_erase_key(nvs, SETTINGS_CACHE_AT_KEY);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    s_cache_applied = false;
+    s_cache_stored_at = 0;
+}
+
+bool fos_settings_boot_apply_cache(void)
+{
+    /* Cloud-only frames only: a backend-managed frame's settings poll owns
+     * the groups (and its payload carries more than them), so its first
+     * pass fetches as before. */
+    if (fos_config()->backend_url[0] != '\0' || fos_cloud_state() != FOS_CLOUD_ENROLLED) {
+        return false;
+    }
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) != ESP_OK) return false;
+    size_t len = 0;
+    esp_err_t err = nvs_get_blob(nvs, SETTINGS_CACHE_KEY, NULL, &len);
+    if (err != ESP_OK || len == 0 || len > SETTINGS_MAX_BYTES + 1) {
+        nvs_close(nvs);
+        return false;
+    }
+    char *blob = malloc(len);
+    if (blob == NULL) {
+        nvs_close(nvs);
+        return false;
+    }
+    err = nvs_get_blob(nvs, SETTINGS_CACHE_KEY, blob, &len);
+    char etag[SETTINGS_ETAG_LEN] = "";
+    size_t etag_len = sizeof(etag);
+    if (err == ESP_OK && nvs_get_str(nvs, SETTINGS_CACHE_ETAG_KEY, etag, &etag_len) != ESP_OK) {
+        etag[0] = '\0';
+    }
+    uint32_t at = 0;
+    if (err == ESP_OK && nvs_get_u32(nvs, SETTINGS_CACHE_AT_KEY, &at) != ESP_OK) at = 0;
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        free(blob);
+        return false;
+    }
+    blob[len - 1] = '\0';
+    cJSON *root = cJSON_ParseWithLength(blob, strlen(blob));
+    if (root == NULL || !cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        memset(blob, 0, len);
+        free(blob);
+        fos_settings_forget_cache(); /* a corrupt cache is not a copy to keep */
+        return false;
+    }
+    /* Names only in the log, never a value (see apply_service_settings). */
+    char names[160] = "";
+    size_t names_len = 0;
+    for (size_t i = 0; i < sizeof(k_service_settings_groups) / sizeof(k_service_settings_groups[0]); i++) {
+        if (!cJSON_IsObject(cJSON_GetObjectItem(root, k_service_settings_groups[i]))) continue;
+        int written = snprintf(names + names_len, sizeof(names) - names_len, "%s%s",
+                               names_len ? "," : "", k_service_settings_groups[i]);
+        if (written > 0 && (size_t)written < sizeof(names) - names_len) names_len += (size_t)written;
+    }
+    cJSON_Delete(root);
+    frameos_nim_apply_service_settings(blob);
+    memset(blob, 0, len);
+    free(blob);
+    strlcpy(s_etag, etag, sizeof(s_etag));
+    s_etag_source = SETTINGS_SOURCE_CLOUD;
+    s_cache_applied = true;
+    s_cache_stored_at = at;
+    log_service_settings_event("cache", "applied", names);
+    return true;
+}
+
+bool fos_settings_cloud_scope(void)
+{
+    return s_cloud_scope_granted;
+}
+
+static esp_err_t collect_etag_handler(esp_http_client_event_t *evt)
+{
+    if (evt->event_id == HTTP_EVENT_ON_HEADER &&
+        strcasecmp(evt->header_key, "ETag") == 0) {
+        char *etag_out = (char *)evt->user_data;
+        snprintf(etag_out, SETTINGS_ETAG_LEN, "%s", evt->header_value);
+    }
+    return ESP_OK;
+}
+
+static void log_settings_event(const char *status, const char *detail)
+{
+    char line[256];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"settings:sync\",\"source\":\"esp32\","
+             "\"status\":\"%s\",\"detail\":\"%s\"}",
+             status, detail ? detail : "");
+    frameos_nim_log_hook(line);
 }
 
 /* Read at most `limit` bytes of the response body. Returns a NUL-terminated
@@ -500,6 +642,7 @@ esp_err_t fos_settings_sync(bool force)
         esp_http_client_cleanup(client);
         if (revoked) {
             frameos_nim_apply_service_settings("{}");
+            fos_settings_forget_cache();
             s_cloud_scope_blocked = true;
             s_etag[0] = '\0';
             log_service_settings_event(origin, "revoked", "");
@@ -532,7 +675,7 @@ esp_err_t fos_settings_sync(bool force)
     /* Service settings first: the six cloud-owned groups this payload carries
      * (see apply_service_settings for the two shapes) go straight to the Nim
      * runtime, which replaces the ones present and deletes the ones absent. */
-    apply_service_settings(root, origin);
+    apply_service_settings(root, origin, response_etag);
 
     /* The `frame` object and `schedule` are backend-only — the cloud route
      * carries neither (the provider pushes them as set_settings/set_schedule

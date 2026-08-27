@@ -63,11 +63,21 @@ proc panelCoords(x, y, srcW, srcH: int): tuple[px, py: int] {.inline.} =
 
 proc armEmergencyReserve() {.importc: "fos_nim_arm_emergency_reserve", cdecl.}
 proc emergencyReserveUsed(): bool {.importc: "fos_nim_emergency_reserve_used", cdecl.}
+proc emergencyReserveDetail(need, freeBytes, largest: var csize_t) {.
+  importc: "fos_nim_emergency_reserve_detail", cdecl.}
 
 proc recoverEmergencyReserve(where: string) =
   if emergencyReserveUsed():
+    # Name the request: which allocation could not be served, and whether
+    # it was a shortage (free < need) or fragmentation (free > need > largest
+    # block). The 2026-08-27 E1004 logged this line on every Weather render
+    # with 2.3 MB free before the pass — the size is what tells a strip mask
+    # from a JS string from a glyph.
+    var need, freeBytes, largest: csize_t
+    emergencyReserveDetail(need, freeBytes, largest)
     log("memory pressure: emergency heap reserve was needed during " & where &
-        "; collecting and re-arming")
+        " (a " & $need & "-byte request with " & $freeBytes & " bytes free, largest block " &
+        $largest & "); collecting and re-arming")
     GC_fullCollect()
     armEmergencyReserve()
 
@@ -75,8 +85,28 @@ proc recoverEmergencyReserve(where: string) =
 # Floyd–Steinberg to packed 1bpp (white=1, MSB first) — the format the
 # Waveshare EPD_7in5_V2 driver expects. Kept here for the embedded runtime;
 # the Linux build has its own packing in drivers/waveshare.
+#
+# These four procs are where `forEachPaletteDithered` / `forEachGrayDithered`
+# expand, i.e. the per-pixel loop of every render: ~1.92 M iterations on a
+# 13.3" panel, measured at ~22 s per render on the E1004 (2026-08-27 log,
+# "dither+pack 21646 ms") — as long as the scene render itself. The whole
+# firmware is built `--opt:size -d:release`, which keeps every bounds, range
+# and overflow check on and asks GCC for -Os; both are right for a firmware
+# image and wrong for this one loop. So: checks off across the four procs
+# (the loops index through unchecked pointers already, and every value the
+# checks would guard is clipped by construction), and GCC's per-function
+# optimize attribute so the loop is compiled at -O2 while the rest of the
+# image stays small. The output is bit-identical (utils/tests/test_dither.nim
+# pins it against the in-place reference); the gain has to be read off the
+# next "dither+pack" log line, a laptop cannot measure it.
+when defined(frameosEmbedded):
+  {.pragma: hotLoop, codegenDecl: "__attribute__((optimize(\"O2\"))) $# $#$#".}
+else:
+  {.pragma: hotLoop.}
 
-proc packImage1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): bool =
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+
+proc packImage1bpp(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): bool {.hotLoop.} =
   let
     width = image.width
     height = image.height
@@ -131,7 +161,7 @@ proc copyPacked(pixels: seq[uint8]; buf: ptr UncheckedArray[uint8]; bufLen: int)
 # per-render full-frame scratch the old versions needed (an 8-byte float per
 # pixel for grey, a full RGBA copy for the two-plane panels).
 
-proc packImageGray(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int; maxValue: uint8): bool =
+proc packImageGray(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int; maxValue: uint8): bool {.hotLoop.} =
   let
     width = image.width
     height = image.height
@@ -159,7 +189,7 @@ proc packImageDual1bpp(
     buf: ptr UncheckedArray[uint8];
     bufLen: int;
     accentIsRed: bool
-  ): bool =
+  ): bool {.hotLoop.} =
   let
     width = image.width
     height = image.height
@@ -188,7 +218,7 @@ proc packImagePalette(
     buf: ptr UncheckedArray[uint8];
     bufLen: int;
     palette: seq[(int, int, int)]
-  ): bool =
+  ): bool {.hotLoop.} =
   let
     width = image.width
     height = image.height
@@ -223,6 +253,8 @@ proc packImagePalette(
       discard
 
   true
+
+{.pop.}
 
 proc fos_nim_set_status_info_impl(infoJson: cstring) {.exportc, cdecl.} =
   ## The facts the built-in status screen prints when no interpreted scene is

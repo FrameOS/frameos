@@ -363,6 +363,95 @@ panel; an explicit `render` command still repaints immediately. Before any
 deep sleep a cloud-enrolled frame also holds the boot open up to 20 s for the
 management socket, so queued commands are not lost to a race with the sleep.
 
+**Wake on button (2026.8.42).** Right before `esp_deep_sleep` every
+registered `gpio_buttons` pin that sits on a wake-capable pad — an RTC IO
+(GPIO 0-21) on the ESP32-S3, GPIO 0-5 on the ESP32-C3 — is armed as a wake
+source (`ext1` any-low on the S3, `esp_deep_sleep_enable_gpio_wakeup` on the
+C3; the RTC_PERIPH domain stays powered so the internal pull-ups hold), next
+to the timer. A press brings the frame back early: the boot notes which pin
+woke it (`fos_buttons_wake_boot`), replays the press to the scene as the usual
+`button` event (`"wake": true`) on the first render pass, and that pass
+renders instead of counting as a command check-in. A key still held at the
+moment of sleep is skipped for that sleep only (any-low would wake the chip
+instantly). `buttons:listening` lists `"wake"` per pin, the `sleep` line
+lists `wakeButtons`, `status` prints `wake_on_button`, and the `metrics`
+sample carries `wakeCause` (`timer` / `button` / `power_on` / `restart` /
+`panic` / `watchdog` / `brownout`) so a battery graph can be read against
+what actually woke the frame. The pure pin arithmetic is `fos_wake.c`, host
+tested by `main/tests/test_fos_wake.c`.
+
+**What a deep-sleep wake costs, and what 2026.8.42 trimmed.** Measured on a
+reTerminal E1004 (1200×1600 Spectra 6) on battery with a 15-minute weather
+scene: a few seconds of boot + Wi-Fi + cloud session, ~23 s scene render,
+~22 s dither + pack, ~30 s panel refresh, then sleep — roughly 80-90 s awake
+per 900 s, with the radio listening the whole time. Three things changed:
+
+- **Wi-Fi modem sleep** (`WIFI_PS_MIN_MODEM`) is on whenever `deep_sleep` or
+  `deep_sleep_on_battery` is set. The radio used to run with power save
+  disabled for the whole wake (~80-100 mA on an S3); DTIM-paced listening
+  costs a little throughput and a few ms of latency, which a frame that spends
+  its wake dithering and waiting on BUSY never notices. Stay-connected frames
+  keep power save off for their local HTTP API.
+- **No SNTP wait on a deep-sleep wake.** The RTC keeps the clock through the
+  sleep (and the wake timer runs on the same oscillator, so the wake-check
+  bookkeeping agrees with it); SNTP now corrects it in the background instead
+  of holding the boot for a round trip — or the full 10 s timeout on a slow
+  pool.
+- **The log queue drains before the CPU halts.** Everything logged after the
+  panel refresh — `render:done`, the `metrics` sample with the battery
+  reading, the `sleep` forecast — is queued for the cloud task's 1 s batch
+  tick, and `esp_deep_sleep` used to come first: a v2026.8.40 frame shipped
+  not one battery sample in 20 hours of cycles. The sleep now waits up to
+  2.5 s for the log queue to empty **and** the pass's `metrics` sample to be
+  pushed (`fos_cloud_flush_logs`) before announcing the sleep (the hub drops
+  the socket on `sleep`). A deep-sleep frame samples metrics exactly once per
+  wake, at the end of its pass (after the render and the panel refresh, so
+  `renderLastMs` is this wake's); that one sample is now delivered every
+  cycle instead of winning a race with the sleep.
+
+The sleep also **holds for a running OTA** (up to 15 min): the
+`notify_update_available` verb only keeps the frame awake 15 s while the
+download takes minutes, so a battery frame used to halt mid-download every
+wake, boot the old image, be told again, and loop — with nothing in the log
+but `ota:cloud downloading`. The cloud OTA now logs `progress` every 512 KB,
+names its failure (`download-failed:<err>@<bytes>/<expected>`,
+`image-rejected:<err>`, `signature-rejected`), and after 3 consecutive
+failures of one offered version stops re-downloading it (`gave-up`, kept in
+RTC memory: a newer release or a power cycle resets it).
+
+**The follow-ups the same log asked for (2026.8.42).**
+
+- **Dither + pack.** `forEachPaletteDithered` (utils/dither.nim) now copies the
+  palette into flat int arrays and searches it inline, walks its error rows
+  through unchecked pointers, reads a canvas row straight from the buffer
+  (`rgb565ToRgbx` on a 565 canvas), and keeps those rows in internal SRAM
+  (`fos_nim_internal_alloc`, PSRAM seq fallback). The four pack procs in
+  embedded_main.nim compile with bounds/overflow/range checks off and GCC's
+  `optimize("O2")` attribute while the rest of the image stays `-Os`. Output
+  is bit-identical (the reference-equivalence suite in
+  utils/tests/test_dither.nim covers RGBX, 565 and views); the on-device gain
+  is read from the next `dither+pack` log line — a laptop runs the old loop
+  at 40 ns/pixel, so the 11 µs/pixel on the S3 is the build, not the maths.
+- **Service settings survive a reboot.** Cloud-only frames keep the six
+  groups in NVS (`svc_cache` / `svc_etag` / `svc_at`, same namespace as the
+  bearer token) and apply them before the first render
+  (`fos_settings_boot_apply_cache`, `settings:services origin=cache`). A
+  deep-sleep frame used to render its only pass with no service settings —
+  `ready` asks for the pull after the pass has started, and the pass that
+  would pull never comes — and every boot that did pull paid a full TLS
+  handshake for a body that rarely changes. `ready` now skips the pull while
+  the copy is under 6 h old; the queued `refresh_service_settings` nudge, a
+  `403 insufficient_scope`, a demotion and `factory-reset` all clear or
+  refresh it.
+- **`cloud:session_ready` says how the previous session ended**
+  (`previousClose: {how, code}`, plus `session` count and `uptimeSeconds`):
+  the E1004 redialed 17 s into some wakes with nothing logged between, and
+  the close code only ever went to the USB console.
+- **The emergency-reserve line names the request**: `a N-byte request with
+  F bytes free, largest block L` — a shortage and a fragmentation dip look
+  the same without it. The 1200×1600 Weather render dips every pass with
+  2.3 MB free before it; the size is what identifies the allocation.
+
 `battery_pin` enables battery sensing on an **ADC1** GPIO (ADC2 conflicts with
 Wi-Fi). The reading is divider-corrected (`battery_divider`, default 2.0 for a
 100k/100k tap), mapped to a percentage via a Li-ion curve, and reported in

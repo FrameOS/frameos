@@ -64,6 +64,14 @@ bool fos_cloud_ws_connected(void);
  * before esp_deep_sleep. False when there is no live session. */
 bool fos_cloud_announce_sleep(uint32_t wake_in_seconds, int64_t next_render_at,
                               const char *reason, bool wake_check);
+/* Wait (up to timeout_ms) for every log line queued for the live session,
+ * and the newest metrics sample, to be handed to the socket — the cloud task
+ * batches both on a 1 s tick, so a caller about to halt the CPU has to give
+ * that tick a chance. Returns true when everything went out, false on
+ * timeout or with no live session (telemetry queued for a dead session is
+ * not deliverable anyway). Call BEFORE fos_cloud_announce_sleep: the hub
+ * drops the socket on `sleep`. */
+bool fos_cloud_flush_logs(uint32_t timeout_ms);
 /* The enrollment-supplied ws_url override, or "" when the frame dials
  * cloud_url + ws_path (the normal case). Surfaced by `status` because a
  * leftover dev override is otherwise invisible and makes every dial fail

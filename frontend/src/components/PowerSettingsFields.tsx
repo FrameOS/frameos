@@ -78,8 +78,9 @@ export function PowerSettingsFields({
         tooltip={
           <>
             Deep sleep powers the frame almost completely off between renders — best for battery frames. While asleep it
-            is offline: queued actions land on the next wake. "On battery" relies on the battery sense GPIO below;
-            without one the frame cannot tell and stays connected.
+            is offline: queued actions land on the next wake. A press on any configured GPIO button wakes it early
+            (firmware 2026.8.42+): the scene gets the button event and the panel refreshes. "On battery" relies on the
+            battery sense GPIO below; without one the frame cannot tell and stays connected.
           </>
         }
       >
@@ -99,8 +100,8 @@ export function PowerSettingsFields({
           tooltip={
             <>
               Extra wake-ups between renders that connect, fetch queued actions and scene updates, and go back to sleep
-              without refreshing the panel. The scheduled render still happens on time. Each check-in costs battery —
-              pick the longest interval you can live with.
+              without refreshing the panel. The scheduled render still happens on time, and a button press wakes the
+              frame regardless. Each check-in costs battery — pick the longest interval you can live with.
             </>
           }
         >

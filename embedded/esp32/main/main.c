@@ -38,6 +38,7 @@
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
+#include "fos_settings.h"
 #include "fos_status_screen.h"
 #include "fos_tz.h"
 #include "fos_mem.h"
@@ -134,6 +135,9 @@ void app_main(void)
     BOOTMEM("start");
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
+
+    /* Before anything else reads the wake status: was this a button press? */
+    fos_buttons_wake_boot();
 
     fos_battery_init(config->battery_pin, config->battery_divider, config->battery_enable_pin);
     if (fos_battery_present()) {
@@ -357,6 +361,10 @@ void app_main(void)
     if (fos_cloud_start() != ESP_OK) {
         ESP_LOGW(TAG, "cloud client unavailable");
     }
+    /* The service settings the last pull left in NVS, so the first pass —
+     * on a deep-sleep frame the only one — renders with its API keys. After
+     * fos_cloud_start: the enrolled state it gates on is loaded there. */
+    fos_settings_boot_apply_cache();
 
     if (online) {
         frameos_nim_set_log_upload_enabled(true);
@@ -380,11 +388,13 @@ void app_main(void)
         fos_status_screen_show_portal(fos_wifi_ap_ssid(), fos_wifi_ip());
     }
 
-    /* Render loop runs in both cases: local mode works fully offline. */
-    fos_client_resume();
+    /* Buttons before the render loop: a button wake replays its press into
+     * the queue here, and the loop's first pass is what dispatches it. */
     if (fos_buttons_start() != ESP_OK) {
         ESP_LOGW(TAG, "GPIO buttons unavailable");
     }
+    /* Render loop runs in both cases: local mode works fully offline. */
+    fos_client_resume();
 
     ESP_LOGI(TAG, "boot complete: wifi=%s ip=%s portal=%s",
              online ? "connected" : "offline", fos_wifi_ip(),

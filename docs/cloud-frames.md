@@ -440,7 +440,7 @@ lines), nothing retained across disconnects, and error acks are ignored.
 | `state` | `hello`-shaped | sent on scene change / significant events |
 | `log_batch` | `{"logs": [{"timestamp", "scene"?, "payload"}…]}` | only with `telemetry:logs`; batched (device: ≤2 s / ≤100 lines); provider stores with a hard per-frame retention cap and counts retained bytes toward the account's storage usage |
 | `metrics` | `{"metrics": {…}}` | only with `telemetry:metrics` |
-| `sleep` | `{"wake_in_seconds", "next_render_at"?, "reason", "wake_check"}` | ESP32 (firmware **2026.8.41**+), sent synchronously right before `esp_deep_sleep` halts the CPU: back (and redialing) in `wake_in_seconds`; `next_render_at` is the unix time of the next panel refresh (omitted without a synced clock; later than the wake when the wake is only a `wake_check_seconds` command check-in, `wake_check: true`); `reason` is `battery` / `always` / `battery_critical`. The provider stores the forecast (`next_wake_at` / `next_render_at` / `sleep_reason` on the frame row, cleared again on the next connect), **terminates the socket itself** — a halted chip sends no close frame, and waiting for the heartbeat to notice would keep the frame "connected" for up to a minute after it went dark — and records the disconnect as `asleep`. The SPA shows "asleep · wakes in 5 min" (and "overdue" when the wake never comes) instead of "last seen just now"; for firmware without the message it estimates the wake from the pushed power settings. The ESP32 metrics sample carries `onBattery` (the firmware's own cell-present test) for that estimate |
+| `sleep` | `{"wake_in_seconds", "next_render_at"?, "reason", "wake_check"}` | ESP32 (firmware **2026.8.41**+), sent synchronously right before `esp_deep_sleep` halts the CPU: back (and redialing) in `wake_in_seconds`; `next_render_at` is the unix time of the next panel refresh (omitted without a synced clock; later than the wake when the wake is only a `wake_check_seconds` command check-in, `wake_check: true`); `reason` is `battery` / `always` / `battery_critical`. The forecast is an upper bound: a press on a registered GPIO button wakes the frame early (firmware **2026.8.42**+), and the reconnect clears it like any other. The provider stores the forecast (`next_wake_at` / `next_render_at` / `sleep_reason` on the frame row, cleared again on the next connect), **terminates the socket itself** — a halted chip sends no close frame, and waiting for the heartbeat to notice would keep the frame "connected" for up to a minute after it went dark — and records the disconnect as `asleep`. The SPA shows "asleep · wakes in 5 min" (and "overdue" when the wake never comes) instead of "last seen just now"; for firmware without the message it estimates the wake from the pushed power settings. The ESP32 metrics sample carries `onBattery` (the firmware's own cell-present test) for that estimate |
 | `scene_ack` | `{"checksum", "active_scene"}` | after a successful `set_scenes`, drives provider-side sync state. When the acked checksum matches the provider's current assigned set, the provider also promotes its per-scene deploy ledger (`assigned_scene_state` → `deployed_scene_state` on the frame row) so the workspace can name WHICH scene is still pending on later edits |
 | `assets` | `{"id", "assets": […], "truncated"?}` | reply to `assets_list`; the provider caches the latest listing per frame (the reference provider rejects listings over **256 KiB** of JSON rather than truncating them) |
 | `asset_chunk` | `{"id", "seq", "data", "done", …}` | reply stream to `asset_get`; the provider reassembles in order, bounds the total at its per-file cap, and discards the partial file on a chunk carrying `"error"` or on disconnect |
@@ -622,6 +622,15 @@ When to fetch: on every session that reaches `ready`, on a
 its copy may be stale. The nudge is advisory and expires quickly (reference
 provider: 5 minutes), because a frame that was offline when the owner saved a
 key re-fetches at `ready` anyway.
+
+A device may keep its last fetched copy across reboots. The ESP32 firmware
+(**2026.8.42**+) stores the six groups in NVS next to its bearer token and
+applies them before the first render, so a deep-sleeping frame — whose only
+render pass runs before its session's `ready` could ask for a fetch — renders
+with its keys, and skips the fetch at `ready` while the copy is under the 6 h
+interval (the nudge and the 403 still force one; a revocation, a demotion and a
+factory reset delete the copy). The device logs `settings:services` with
+`origin: "cache"` when it started from that copy.
 
 ## Provisioning
 

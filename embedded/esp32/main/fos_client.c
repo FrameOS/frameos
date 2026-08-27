@@ -61,6 +61,24 @@ static const char *TAG = "fos_client";
  * keep-awake hold and cancels this pass's sleep). */
 #define FOS_CLOUD_SLEEP_GRACE_SEC 20
 
+/* A deep sleep must not cut an OTA short. The cloud OTA runs in its own task
+ * for minutes (a 3 MB image over TLS plus flash writes), while the verb that
+ * started it holds the frame awake for 15 s — so a battery frame used to
+ * halt the CPU mid-download every wake, come back on the old image, be told
+ * again, and repeat forever, each cycle costing a couple of minutes of
+ * battery and leaving no trace but "downloading". Hold the sleep while the
+ * OTA is busy, up to this long; a finished OTA reboots, a failed one clears
+ * the busy flag and the sleep proceeds. */
+#define FOS_OTA_SLEEP_HOLD_MAX_SEC (15 * 60)
+
+/* How long to wait for the cloud log queue to reach the wire before the CPU
+ * halts. Everything logged after the panel refresh — render:done, the
+ * metrics sample with the battery reading, the sleep forecast — used to be
+ * lost: the tap queues lines for the cloud task's 1 s tick, and
+ * esp_deep_sleep came first. Observed on a v2026.8.40 E1004: not one battery
+ * sample in 20 hours of deep-sleep cycles. */
+#define FOS_SLEEP_LOG_DRAIN_MS 2500
+
 /* When a deep-sleeping frame wakes only to check for commands
  * (wake_check_seconds), the scheduled render survives the reboot here; the
  * RTC domain keeps both this variable and the system clock through deep
@@ -123,6 +141,32 @@ static fos_metrics_sample_t s_metrics_ring[FOS_METRICS_RING_CAP];
 static size_t s_metrics_next = 0;
 static size_t s_metrics_count = 0;
 
+/* Why this boot happened, for the metrics sample and the wake log line: a
+ * deep-sleep frame's battery story is unreadable without knowing which wakes
+ * were the timer, which a button, and which a crash. */
+static const char *wake_cause_name(void)
+{
+    switch (esp_sleep_get_wakeup_cause()) {
+        case ESP_SLEEP_WAKEUP_TIMER: return "timer";
+        case ESP_SLEEP_WAKEUP_EXT0:
+        case ESP_SLEEP_WAKEUP_EXT1:
+        case ESP_SLEEP_WAKEUP_GPIO: return "button";
+        case ESP_SLEEP_WAKEUP_UNDEFINED: break;
+        default: return "other";
+    }
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON: return "power_on";
+        case ESP_RST_SW: return "restart";
+        case ESP_RST_PANIC: return "panic";
+        case ESP_RST_INT_WDT:
+        case ESP_RST_TASK_WDT:
+        case ESP_RST_WDT: return "watchdog";
+        case ESP_RST_BROWNOUT: return "brownout";
+        case ESP_RST_DEEPSLEEP: return "deep_sleep";
+        default: return "reset";
+    }
+}
+
 static void log_metrics_sample(void)
 {
     char json[512];
@@ -131,11 +175,13 @@ static void log_metrics_sample(void)
     size_t used = (size_t)snprintf(
         json, sizeof(json),
         "{\"event\":\"metrics\",\"source\":\"esp32\","
+        "\"wakeCause\":\"%s\","
         "\"uptimeSeconds\":%lld,"
         "\"freeHeapKB\":%u,\"largestHeapBlockKB\":%u,"
         "\"freePsramKB\":%u,\"largestPsramBlockKB\":%u,"
         "\"wifiRssi\":%d,\"renders\":%lu,\"renderLastMs\":%lld,"
         "\"loadedScenes\":%d",
+        wake_cause_name(),
         (long long)(esp_timer_get_time() / 1000000),
         (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
         /* Internal fragmentation, not just the total: TLS wants a contiguous
@@ -174,6 +220,19 @@ static void log_metrics_sample(void)
     s_metrics_next = (s_metrics_next + 1) % FOS_METRICS_RING_CAP;
     if (s_metrics_count < FOS_METRICS_RING_CAP) s_metrics_count++;
     xSemaphoreGive(s_metrics_lock);
+}
+
+double fos_client_metrics_newest_timestamp(void)
+{
+    if (s_metrics_lock == NULL) return 0;
+    xSemaphoreTake(s_metrics_lock, portMAX_DELAY);
+    double ts = 0;
+    if (s_metrics_count > 0) {
+        size_t newest = (s_metrics_next + FOS_METRICS_RING_CAP - 1) % FOS_METRICS_RING_CAP;
+        ts = s_metrics_ring[newest].timestamp;
+    }
+    xSemaphoreGive(s_metrics_lock);
+    return ts;
 }
 
 size_t fos_client_metrics_recent(fos_metrics_sample_t *out, size_t max)
@@ -1011,6 +1070,31 @@ static void client_task(void *arg)
      * scheduled render is not due yet. */
     bool force_render = false;
     xEventGroupWaitBits(s_events, START_RENDER_LOOP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
+    {
+        /* A button woke the chip: this pass renders, whatever the wake-check
+         * bookkeeping says — the person pressing it wants to see something
+         * happen, and the replayed press (fos_buttons_start) reaches the scene
+         * on this same pass. Say why the frame is up either way: the
+         * `bootup` event fires before the cloud session exists and is lost,
+         * so this is the first line a wake leaves in cloud retention. */
+        int wake_pin = -1;
+        char wake_label[FOS_GPIO_BUTTON_LABEL_LEN] = "";
+        char label_esc[FOS_GPIO_BUTTON_LABEL_LEN * 2];
+        bool button_wake = fos_buttons_woke_by_button(&wake_pin, wake_label, sizeof(wake_label));
+        force_render = button_wake;
+        json_escape_value(wake_label, label_esc, sizeof(label_esc));
+        char line[192];
+        if (button_wake) {
+            snprintf(line, sizeof(line),
+                     "{\"event\":\"wake\",\"source\":\"esp32\",\"cause\":\"button\","
+                     "\"pin\":%d,\"label\":\"%s\"}", wake_pin, label_esc);
+        } else {
+            snprintf(line, sizeof(line),
+                     "{\"event\":\"wake\",\"source\":\"esp32\",\"cause\":\"%s\"}",
+                     wake_cause_name());
+        }
+        frameos_nim_log_hook(line);
+    }
     while (true) {
         int64_t cycle_start = esp_timer_get_time();
 
@@ -1144,6 +1228,23 @@ static void client_task(void *arg)
         ESP_LOGI(TAG, "next render in %lu s (interval %lu s)",
                  (unsigned long)sleep_s, (unsigned long)interval);
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
+        if (deep_sleep_now && fos_display_present() && fos_ota_busy()) {
+            /* See FOS_OTA_SLEEP_HOLD_MAX_SEC. Success reboots from inside the
+             * OTA task; failure clears busy and we fall through to sleep. */
+            int64_t hold_end = esp_timer_get_time() +
+                               (int64_t)FOS_OTA_SLEEP_HOLD_MAX_SEC * 1000000LL;
+            ESP_LOGW(TAG, "OTA in progress; holding deep sleep until it finishes");
+            frameos_nim_log_hook("{\"event\":\"sleep:held\",\"source\":\"esp32\","
+                                 "\"reason\":\"ota\"}");
+            while (fos_ota_busy() && esp_timer_get_time() < hold_end) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+            if (fos_ota_busy()) {
+                ESP_LOGW(TAG, "OTA still busy after %d s; sleeping anyway",
+                         FOS_OTA_SLEEP_HOLD_MAX_SEC);
+            }
+            keep_awake_s = keep_awake_remaining_seconds();
+        }
         if (deep_sleep_now && fos_display_present() && keep_awake_s == 0 &&
             fos_cloud_state() == FOS_CLOUD_ENROLLED && fos_wifi_ip()[0] != '\0' &&
             !fos_cloud_ws_connected()) {
@@ -1183,16 +1284,32 @@ static void client_task(void *arg)
             const char *sleep_reason = battery_critical ? "battery_critical"
                                        : config->deep_sleep ? "always"
                                                             : "battery";
+            /* Any registered button on a wake-capable pad brings the frame
+             * back early (fos_buttons.h); the timer below stays armed too. */
+            uint64_t wake_buttons = 0;
+            fos_buttons_arm_wake(&wake_buttons);
             {
-                char line[192];
+                char pins[96] = "";
+                size_t used = 0;
+                for (int pin = 0; pin < 64 && used + 4 < sizeof(pins); pin++) {
+                    if ((wake_buttons & (1ULL << pin)) == 0) continue;
+                    used += (size_t)snprintf(pins + used, sizeof(pins) - used, "%s%d",
+                                             used ? "," : "", pin);
+                }
+                char line[288];
                 snprintf(line, sizeof(line),
                          "{\"event\":\"sleep\",\"source\":\"esp32\",\"wakeInSeconds\":%lu,"
-                         "\"nextRenderAt\":%lld,\"reason\":\"%s\",\"wakeCheck\":%s}",
+                         "\"nextRenderAt\":%lld,\"reason\":\"%s\",\"wakeCheck\":%s,"
+                         "\"wakeButtons\":[%s]}",
                          (unsigned long)chunk, (long long)s_next_render_due, sleep_reason,
-                         wake_check ? "true" : "false");
+                         wake_check ? "true" : "false", pins);
                 frameos_nim_log_hook(line);
                 frameos_nim_flush_logs();
             }
+            /* Let the cloud task put the queued lines (render:done, metrics,
+             * the sleep line above) on the wire BEFORE the sleep announce:
+             * the hub terminates the socket the moment it sees `sleep`. */
+            fos_cloud_flush_logs(FOS_SLEEP_LOG_DRAIN_MS);
             if (fos_cloud_announce_sleep(chunk, (int64_t)s_next_render_due, sleep_reason,
                                          wake_check)) {
                 /* The send returned once the bytes were handed to lwIP; give

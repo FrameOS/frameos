@@ -11,6 +11,7 @@
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
 #include "lwip/sockets.h"
 
@@ -101,6 +102,31 @@ static void disable_power_save(void)
         ESP_LOGI(TAG, "wifi power save disabled");
     } else {
         ESP_LOGW(TAG, "failed to disable wifi power save: %s", esp_err_to_name(err));
+    }
+}
+
+/* Station power policy. A frame that deep-sleeps between renders is a
+ * battery frame first and a low-latency HTTP server second: with modem
+ * sleep off the radio listens continuously (~80-100 mA on an S3) for the
+ * whole 60-120 s a render + Spectra-6 refresh keeps it awake, which is most
+ * of the energy such a wake costs. WIFI_PS_MIN_MODEM keeps it in the AP's
+ * DTIM cadence instead (~20 mA idle) and costs a little throughput and a
+ * few ms of latency — the right trade while the CPU spends 20 s dithering
+ * and 30 s waiting on BUSY. Stay-connected frames keep the old behaviour:
+ * their local HTTP API and the workspace's live preview want the latency. */
+static void apply_power_save_policy(void)
+{
+    fos_config_t *config = fos_config();
+    bool sleeps = config->deep_sleep || config->deep_sleep_on_battery;
+    if (!sleeps) {
+        disable_power_save();
+        return;
+    }
+    esp_err_t err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "wifi modem sleep enabled (deep-sleep frame)");
+    } else {
+        ESP_LOGW(TAG, "failed to enable wifi modem sleep: %s", esp_err_to_name(err));
     }
 }
 
@@ -199,7 +225,7 @@ esp_err_t fos_wifi_connect(uint32_t timeout_ms)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-    disable_power_save();
+    apply_power_save_policy();
     ESP_LOGI(TAG, "connecting to \"%s\"", config->wifi_ssid);
 
     EventBits_t bits = xEventGroupWaitBits(s_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT,
@@ -321,6 +347,19 @@ esp_err_t fos_wifi_sync_time(uint32_t timeout_ms)
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     esp_err_t err = esp_netif_sntp_init(&config);
     if (err != ESP_OK) return err;
+    /* Back from deep sleep with the RTC still counting: the clock is the
+     * one we set last boot, off by at most the RTC oscillator's drift over
+     * one sleep — and the sleep timer that woke us ran on that same
+     * oscillator, so the wake-check bookkeeping (s_next_render_due) agrees
+     * with it either way. Don't sit on the boot path for a round trip to the
+     * pool (or the full timeout when it is slow); let SNTP correct the clock
+     * in the background while the render already runs. */
+    time_t kept = time(NULL);
+    if (esp_reset_reason() == ESP_RST_DEEPSLEEP && kept > 1000000000) {
+        s_time_synced = true;
+        ESP_LOGI(TAG, "clock kept through deep sleep: %s", ctime(&kept));
+        return ESP_OK;
+    }
     err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(timeout_ms));
     s_time_synced = err == ESP_OK;
     if (s_time_synced) {

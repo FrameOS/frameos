@@ -8,7 +8,7 @@
 # even the retry fails does raiseOutOfMem (log + quit) run as the last
 # resort.
 
-proc fosNimReleaseEmergencyReserve(): bool {.
+proc fosNimReleaseEmergencyReserve(need: csize_t): bool {.
   importc: "fos_nim_release_emergency_reserve", cdecl.}
 proc fosNimFatalOom(size: csize_t) {.
   importc: "fos_nim_fatal_oom", cdecl.}
@@ -33,7 +33,7 @@ proc fosNimHeapRealloc(p: pointer, size: csize_t): pointer {.
 
 proc allocImpl(size: Natural): pointer =
   result = fosNimHeapMalloc(size.csize_t)
-  if result == nil and fosNimReleaseEmergencyReserve():
+  if result == nil and fosNimReleaseEmergencyReserve(size.csize_t):
     result = fosNimHeapMalloc(size.csize_t)
   if result == nil:
     fosNimFatalOom(size.csize_t) # longjmps out of the render when guarded
@@ -41,7 +41,7 @@ proc allocImpl(size: Natural): pointer =
 
 proc alloc0Impl(size: Natural): pointer =
   result = fosNimHeapCalloc(size.csize_t, 1)
-  if result == nil and fosNimReleaseEmergencyReserve():
+  if result == nil and fosNimReleaseEmergencyReserve(size.csize_t):
     result = fosNimHeapCalloc(size.csize_t, 1)
   if result == nil:
     fosNimFatalOom(size.csize_t) # longjmps out of the render when guarded
@@ -49,7 +49,7 @@ proc alloc0Impl(size: Natural): pointer =
 
 proc reallocImpl(p: pointer, newSize: Natural): pointer =
   result = fosNimHeapRealloc(p, newSize.csize_t)
-  if result == nil and fosNimReleaseEmergencyReserve():
+  if result == nil and fosNimReleaseEmergencyReserve(newSize.csize_t):
     result = fosNimHeapRealloc(p, newSize.csize_t)
   if result == nil:
     fosNimFatalOom(newSize.csize_t) # longjmps out of the render when guarded
