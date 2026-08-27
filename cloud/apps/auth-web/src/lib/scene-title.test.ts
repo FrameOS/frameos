@@ -1,6 +1,7 @@
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import {
+  extractManifestNameFromZip,
   extractScenesFromZip,
   sceneDisplayName,
 } from "./scene-title";
@@ -113,5 +114,23 @@ describe("editor rename reaching the listing title", () => {
     expect(validated.ok && validated.value.manifestName).toBe(
       "Ken Burns Slideshow",
     );
+  });
+});
+
+describe("extractManifestNameFromZip", () => {
+  it("reads the listing title the way publishing does", () => {
+    const zip = makeZip({ description: "d", name: "  Ken Burns slideshow  " }, [
+      { id: "a", name: "Slideshow with motion" },
+    ]);
+    expect(extractManifestNameFromZip(zip)).toBe("Ken Burns slideshow");
+    // The scene title inside is a separate thing.
+    expect(sceneDisplayName(extractScenesFromZip(zip))).toBe(
+      "Slideshow with motion",
+    );
+  });
+
+  it("is undefined for a manifest without a usable name", () => {
+    expect(extractManifestNameFromZip(makeZip({ name: "   " }, []))).toBeUndefined();
+    expect(extractManifestNameFromZip(Buffer.from("not a zip"))).toBeUndefined();
   });
 });
