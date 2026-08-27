@@ -27,7 +27,13 @@ import { Switch } from '../../components/Switch'
 import { SshKeysSection } from '../../components/sshKeys/SshKeysSection'
 import { TextInput } from '../../components/TextInput'
 import { Tooltip } from '../../components/Tooltip'
-import { formatFrameRelativeTime, frameHasActivityLog, frameHost } from '../../decorators/frame'
+import {
+  formatFrameRelativeFuture,
+  formatFrameRelativeTime,
+  frameCheckin,
+  frameHasActivityLog,
+  frameHost,
+} from '../../decorators/frame'
 import {
   EMBEDDED_VIRTUAL,
   buildrootPlatforms,
@@ -801,6 +807,22 @@ function PendingActionsSection({ frame, className }: { frame: FrameType; classNa
     return null
   }
 
+  const checkin = frameCheckin(frame)
+  const queueNote =
+    frame.connected === false
+      ? checkin?.kind === 'sleeping'
+        ? `Queued on the account. The frame is asleep and applies these when it wakes ${formatFrameRelativeFuture(
+            checkin.wakeAt,
+            Date.now(),
+            checkin.announced ? '' : '~'
+          )}.`
+        : checkin?.kind === 'overdue'
+        ? `Queued on the account. The frame was expected back ${formatFrameRelativeTime(
+            checkin.wakeAt
+          )} and has not reconnected — these apply when it does.`
+        : 'Queued on the account. The frame applies these the next time it connects.'
+      : 'Queued on the account and being delivered now.'
+
   return (
     <section className={clsx('space-y-2', className)}>
       <DrawerHeading
@@ -817,11 +839,7 @@ function PendingActionsSection({ frame, className }: { frame: FrameType; classNa
         Waiting for the frame
       </DrawerHeading>
       <div className="frame-tool-card space-y-2 rounded-[22px] p-4">
-        <div className="frame-tool-muted text-xs leading-5">
-          {frame.connected === false
-            ? 'Queued on the account. The frame applies these the next time it connects.'
-            : 'Queued on the account and being delivered now.'}
-        </div>
+        <div className="frame-tool-muted text-xs leading-5">{queueNote}</div>
         {pendingCommands.map((command) => {
           const cancelling = cancellingCommandIds.includes(command.id)
           return (
@@ -2270,6 +2288,7 @@ function CloudDeployStatus({
   const offline = frame.connected === false
   const neverEnrolled = frame.status === 'pending'
   const deviceVersion = normalizedFirmwareVersion(frame.frameos_version)
+  const checkin = frameCheckin(frame)
 
   let connection: JSX.Element
   if (neverEnrolled) {
@@ -2278,6 +2297,46 @@ function CloudDeployStatus({
         label="Connection"
         value="No board enrolled"
         detail="No device has claimed this frame yet — only the USB path below can reach it."
+        tone="warn"
+      />
+    )
+  } else if (offline && checkin?.kind === 'sleeping') {
+    // A battery frame between wakes: not a problem, just a schedule. Say
+    // when the push lands rather than "offline".
+    const wakeClock = new Date(checkin.wakeAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    connection = (
+      <CloudStatusRow
+        label="Connection"
+        value="Asleep"
+        detail={
+          (checkin.announced
+            ? `Deep sleeping between renders${
+                checkin.reason === 'battery_critical' ? ' (battery critical — sleeping long to protect the cell)' : ''
+              }. `
+            : 'Deep sleep between renders is on; this firmware does not announce its sleeps, so the wake is estimated. ') +
+          `Wakes ${formatFrameRelativeFuture(
+            checkin.wakeAt,
+            Date.now(),
+            checkin.announced ? '' : '~'
+          )} (${wakeClock})` +
+          (checkin.renderAt
+            ? ` to check for commands; the next panel refresh is ${formatFrameRelativeFuture(checkin.renderAt)}.`
+            : '.') +
+          ' Pushes queue on the account and apply on that wake.'
+        }
+        tone="muted"
+      />
+    )
+  } else if (offline && checkin?.kind === 'overdue') {
+    connection = (
+      <CloudStatusRow
+        label="Connection"
+        value="Overdue"
+        detail={`Expected back ${formatFrameRelativeTime(checkin.wakeAt)}${
+          checkin.announced ? '' : ' (estimated)'
+        } but has not reconnected — last seen ${
+          formatFrameRelativeTime(frame.last_seen_at) ?? 'never'
+        }. Check its battery and Wi-Fi. Pushes stay queued until it reconnects.`}
         tone="warn"
       />
     )
@@ -2447,6 +2506,7 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
   const { unsavedChangeDetails } = useValues(frameLogic({ frameId: frame.id }))
   const { saveAndDeployFrame } = useActions(frameLogic({ frameId: frame.id }))
   const offline = frame.connected === false
+  const checkin = frameCheckin(frame)
   // Nothing to send and the device already acked the last push: the button
   // still works (a re-send is idempotent) but it is not what this screen is
   // asking you to do, so it stops competing with the firmware upgrade next
@@ -2463,7 +2523,17 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
         <div className="frame-tool-muted text-sm leading-5">
           Saves this frame's settings and scenes to your cloud account, then pushes the scene list to the device.{' '}
           {offline
-            ? 'The frame is offline right now — the push is queued and applied when it reconnects.'
+            ? checkin?.kind === 'sleeping'
+              ? `The frame is asleep — the push is queued and applied when it wakes ${formatFrameRelativeFuture(
+                  checkin.wakeAt,
+                  Date.now(),
+                  checkin.announced ? '' : '~'
+                )}.`
+              : checkin?.kind === 'overdue'
+              ? `The frame is overdue (expected back ${formatFrameRelativeTime(
+                  checkin.wakeAt
+                )}) — the push is queued until it reconnects.`
+              : 'The frame is offline right now — the push is queued and applied when it reconnects.'
             : 'The frame applies them as soon as it syncs.'}
         </div>
         <SummaryRows

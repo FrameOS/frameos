@@ -57,6 +57,13 @@ const char *fos_cloud_last_error(void);
 const char *fos_cloud_frame_id(void);
 /* True while the management WebSocket is connected and past `ready`. */
 bool fos_cloud_ws_connected(void);
+/* Tell the provider the frame is about to deep sleep: it wakes (and redials)
+ * in `wake_in_seconds`; `next_render_at` is the unix time of the next panel
+ * refresh (0 = unknown, no synced clock); `wake_check` says this wake is
+ * only a command check-in, not a render. Sent synchronously — call it right
+ * before esp_deep_sleep. False when there is no live session. */
+bool fos_cloud_announce_sleep(uint32_t wake_in_seconds, int64_t next_render_at,
+                              const char *reason, bool wake_check);
 /* The enrollment-supplied ws_url override, or "" when the frame dials
  * cloud_url + ws_path (the normal case). Surfaced by `status` because a
  * leftover dev override is otherwise invisible and makes every dial fail

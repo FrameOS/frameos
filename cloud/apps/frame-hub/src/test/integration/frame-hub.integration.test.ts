@@ -1702,3 +1702,88 @@ describe("browser socket", () => {
     browser.ws.close();
   });
 });
+
+// A deep-sleeping battery frame says when it is back right before the CPU
+// halts (embedded/esp32/main/fos_client.c → `sleep`). The hub keeps the
+// forecast on the row, drops the socket itself (a halted chip never closes
+// it) and records the disconnect as "asleep" rather than "connection_lost".
+describe("deep-sleep forecast", () => {
+  async function frameRow(frameId: string) {
+    const [row] = await db.select().from(frames).where(eq(frames.id, frameId));
+    return row;
+  }
+
+  it("stores the forecast, drops the socket and audits the disconnect as asleep", async () => {
+    const audited = await startExtraHub({ lifecycleAuditDebounceMs: 0 });
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token, audited.port);
+    await handshake(device, privateKey);
+    await waitFor(async () => {
+      const row = await frameRow(frame.id);
+      return row?.connected === true ? row : undefined;
+    }, "frame connected");
+
+    const before = Date.now();
+    const nextRenderAt = Math.floor(before / 1000) + 3600;
+    device.send({
+      next_render_at: nextRenderAt,
+      reason: "battery",
+      type: "sleep",
+      wake_check: true,
+      wake_in_seconds: 300,
+    });
+    // The hub terminates: no close handshake, the client sees 1006.
+    expect(await device.closed).toBe(1006);
+
+    const asleep = await waitFor(async () => {
+      const row = await frameRow(frame.id);
+      return row?.connected === false && row.nextWakeAt ? row : undefined;
+    }, "frame asleep");
+    const wakeInMs = asleep.nextWakeAt!.getTime() - before;
+    expect(wakeInMs).toBeGreaterThan(290_000);
+    expect(wakeInMs).toBeLessThanOrEqual(300_000 + 5_000);
+    expect(asleep.nextRenderAt?.getTime()).toBe(nextRenderAt * 1000);
+    expect(asleep.sleepReason).toBe("battery");
+
+    const disconnected = await waitFor(async () => {
+      const rows = await db
+        .select()
+        .from(auditEvents)
+        .where(sql`${auditEvents.target}->>'frameId' = ${frame.id}`);
+      return rows.find((row) => row.eventType === "frame.disconnected");
+    }, "asleep audit row");
+    expect(disconnected.metadata).toEqual({ reason: "asleep" });
+
+    // The wake clears the forecast; the render due date it carried is still
+    // right (a wake-check session goes back to sleep in seconds).
+    const again = await openDevice(token, audited.port);
+    await handshake(again, privateKey);
+    const awake = await waitFor(async () => {
+      const row = await frameRow(frame.id);
+      return row?.connected === true ? row : undefined;
+    }, "frame awake again");
+    expect(awake.nextWakeAt).toBeNull();
+    expect(awake.sleepReason).toBeNull();
+    expect(awake.nextRenderAt?.getTime()).toBe(nextRenderAt * 1000);
+    again.ws.close();
+  });
+
+  it("ignores a sleep with an impossible duration and keeps the session", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    device.send({ type: "sleep", wake_in_seconds: 0 });
+    device.send({ type: "sleep", wake_in_seconds: 30 * 86_400 });
+    // A well-formed state afterwards proves both were processed (in order)
+    // without dropping the socket.
+    device.send({ id: randomUUID(), states: { active_scene: "clock" }, type: "state" });
+    const row = await waitFor(async () => {
+      const row = await frameRow(frame.id);
+      const state = row?.lastState as Record<string, unknown> | null;
+      return state?.active_scene === "clock" ? row : undefined;
+    }, "state after bad sleeps");
+    expect(row.connected).toBe(true);
+    expect(row.nextWakeAt).toBeNull();
+    device.ws.close();
+  });
+});

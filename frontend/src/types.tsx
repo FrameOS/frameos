@@ -134,6 +134,15 @@ export interface FrameType {
   frameos_version?: string | null
   /** Cloud only: bumped whenever the hub hears from the device. */
   last_seen_at?: string | null
+  /** Cloud only, deep-sleeping (battery) ESP32 frames: the device's own
+   * forecast from just before it went to sleep — when it redials next, when
+   * the panel refreshes next (later than the wake when the wake is only a
+   * command check-in), and why it sleeps. Cleared by the hub on connect;
+   * null on firmware without the `sleep` message, in which case
+   * frameCheckin() estimates from the power settings. */
+  next_wake_at?: string | null
+  next_render_at?: string | null
+  sleep_reason?: 'battery' | 'always' | 'battery_critical' | string | null
   frame_host: string
   frame_port: number
   frame_access_key: string

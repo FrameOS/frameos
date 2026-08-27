@@ -28,11 +28,11 @@ import { Modal } from '../../components/Modal'
 import { Spinner } from '../../components/Spinner'
 import { TextInput } from '../../components/TextInput'
 import {
-  formatFrameRelativeTime,
+  frameActivityDescription,
+  frameCheckin,
   frameHost,
   frameIsHealthy,
   frameIsStale,
-  frameNeedsInitialDeploy,
   frameStatusDescription,
 } from '../../decorators/frame'
 import { urls } from '../../urls'
@@ -85,8 +85,11 @@ function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefi
 
 function SidebarStatusDots({ frame, inactive }: { frame: FrameType; inactive?: boolean }): JSX.Element {
   const stale = frameIsStale(frame)
-  const ready = frame.status === 'ready' && !stale
+  // Backend frames say "ready"; a cloud frame's status is its enrollment
+  // state, and the hub's `connected` flag is the live one.
+  const ready = (frame.status === 'ready' || frame.connected === true) && !stale
   const connected = (frame.active_connections ?? 0) > 0
+  const checkin = frameCheckin(frame)
   const statusDescription = frameStatusDescription(frame)
 
   if (connected) {
@@ -100,7 +103,9 @@ function SidebarStatusDots({ frame, inactive }: { frame: FrameType; inactive?: b
         'h-2.5 w-2.5 shrink-0 rounded-full',
         inactive
           ? 'bg-white shadow-sm ring-1 ring-slate-300/80'
-          : stale
+          : checkin?.kind === 'sleeping'
+          ? 'bg-sky-400'
+          : stale || checkin?.kind === 'overdue'
           ? 'bg-amber-400'
           : ready
           ? 'bg-emerald-400'
@@ -108,20 +113,6 @@ function SidebarStatusDots({ frame, inactive }: { frame: FrameType; inactive?: b
       )}
     />
   )
-}
-
-function sidebarFrameActivityDescription(frame: FrameType): string {
-  if (frameNeedsInitialDeploy(frame)) {
-    return 'waiting for first deploy'
-  }
-
-  // Same fallback as frameStatusDescription: cloud frames have no
-  // last_log_at, only the hub-maintained last_seen_at.
-  const relativeTime = formatFrameRelativeTime(frame.last_log_at ?? frame.last_seen_at)
-  if (!relativeTime) {
-    return 'no logs yet'
-  }
-  return `last seen ${relativeTime}`
 }
 
 function FrameTree(): JSX.Element {
@@ -296,7 +287,7 @@ function FrameTreeRow({
             <span className="flex min-w-0 items-center gap-1.5">
               <span className={clsx('block min-w-0 truncate', !archived && 'text-base font-medium')}>{frameName}</span>
             </span>
-            <span className="block truncate text-xs text-slate-400">{sidebarFrameActivityDescription(frame)}</span>
+            <span className="block truncate text-xs text-slate-400">{frameActivityDescription(frame)}</span>
           </button>
           <FrameMetricAlertIndicator frame={frame} />
           <FrameSidebarBattery frame={frame} />

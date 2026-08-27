@@ -735,6 +735,18 @@ export const frames = pgTable(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     lastState: jsonb("last_state"),
     lastMetrics: jsonb("last_metrics"),
+    // A deep-sleeping (battery) frame's own forecast, from its `sleep`
+    // message just before the CPU halts: when it redials next (next_wake_at),
+    // when the panel refreshes next (next_render_at — later than the wake
+    // when the wake is only a command check-in) and why it sleeps
+    // ("battery" | "always" | "battery_critical"). Cleared on connect, so a
+    // non-null next_wake_at on a disconnected frame means "asleep, back at
+    // …" and a wake that never came shows as overdue. Frames on firmware
+    // without the message leave all three null and the SPA estimates from
+    // the power settings instead.
+    nextWakeAt: timestamp("next_wake_at", { withTimezone: true }),
+    nextRenderAt: timestamp("next_render_at", { withTimezone: true }),
+    sleepReason: text("sleep_reason"),
     // "Someone had this frame's images on screen, roughly now." Stamped by
     // every surface that renders a preview, throttled to one write per frame
     // per 30s, and read by the hub to decide whether a device's "render"

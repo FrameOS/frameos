@@ -3,7 +3,14 @@ import { A, router } from 'kea-router'
 import clsx from 'clsx'
 import { useCallback, useLayoutEffect, useRef, type DragEvent, type MouseEvent } from 'react'
 import { frameToolDefinitions, frameToolDefinitionsForMode, type FrameToolDefinition } from './frameToolDefinitions'
-import { frameHost, frameIsHealthy, frameIsStale, logUpdatesFrameActivity } from '../../decorators/frame'
+import {
+  frameCheckin,
+  frameCheckinDescription,
+  frameHost,
+  frameIsHealthy,
+  frameIsStale,
+  logUpdatesFrameActivity,
+} from '../../decorators/frame'
 import { FrameImage } from '../../components/FrameImage'
 import { FrameScene, FrameType, LogType, MetricsType, ScheduledEvent, FrameId } from '../../types'
 import { scheduledEventTitle } from '../../utils/scheduleEvents'
@@ -1137,7 +1144,18 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
   const stale = frameIsStale(frameWithLatestLog)
   const healthy = frameIsHealthy(frameWithLatestLog)
   const connected = (frame.active_connections ?? 0) > 0
-  const healthTone = healthy ? 'good' : stale ? 'warning' : frame.status === 'error' ? 'danger' : 'neutral'
+  // A deep-sleeping battery frame between wakes is neither healthy nor
+  // stale — it is on schedule, and the card says when it is back.
+  const checkin = frameCheckin(frameWithLatestLog)
+  const healthTone = healthy
+    ? 'good'
+    : checkin?.kind === 'sleeping'
+    ? 'neutral'
+    : stale || checkin?.kind === 'overdue'
+    ? 'warning'
+    : frame.status === 'error'
+    ? 'danger'
+    : 'neutral'
   const frameAspectRatio =
     frame.width && frame.height
       ? frame.rotate === 90 || frame.rotate === 270
@@ -1156,7 +1174,18 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
         <div className="grid gap-4 @md:grid-cols-2 @6xl:grid-cols-4">
           <OverviewStatCard
             label="Health"
-            value={healthy ? 'Healthy' : stale ? 'Stale' : frame.status}
+            value={
+              healthy
+                ? 'Healthy'
+                : checkin?.kind === 'sleeping'
+                ? 'Asleep'
+                : checkin?.kind === 'overdue'
+                ? 'Overdue'
+                : stale
+                ? 'Stale'
+                : frame.status
+            }
+            detail={checkin ? frameCheckinDescription(frameWithLatestLog, checkin) ?? undefined : undefined}
             tone={healthTone}
           />
           <OverviewStatCard

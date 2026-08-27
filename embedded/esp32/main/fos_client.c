@@ -146,10 +146,14 @@ static void log_metrics_sample(void)
         (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
         fos_wifi_rssi(), (unsigned long)s_render_count, s_last_render_ms,
         fos_scenes_loaded());
-    if (battery_pct >= 0 && used < sizeof(json) - 96) {
+    if (battery_pct >= 0 && used < sizeof(json) - 128) {
+        /* onBattery is the same "cell present" test the deep-sleep decision
+         * uses, so a provider can tell whether deep_sleep_on_battery is in
+         * force right now instead of guessing from the percentage. */
         used += (size_t)snprintf(json + used, sizeof(json) - used,
-                                 ",\"batteryPercent\":%d,\"batteryMillivolts\":%d",
-                                 battery_pct, battery_mv);
+                                 ",\"batteryPercent\":%d,\"batteryMillivolts\":%d,\"onBattery\":%s",
+                                 battery_pct, battery_mv,
+                                 battery_mv >= FOS_BATTERY_PRESENT_MV ? "true" : "false");
     }
     if (used < sizeof(json) - 2) {
         snprintf(json + used, sizeof(json) - used, "}");
@@ -1168,9 +1172,33 @@ static void client_task(void *arg)
                 chunk = config->wake_check_sec;
             }
             s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;
+            bool wake_check = chunk < sleep_s;
             ESP_LOGI(TAG, "deep sleeping for %lu s%s%s", (unsigned long)chunk,
                      config->wake_schedule ? " (wake-on-schedule)" : "",
-                     chunk < sleep_s ? " (wake-check)" : "");
+                     wake_check ? " (wake-check)" : "");
+            /* Say when we are back before going dark: a structured log line
+             * for the backend / Logs panel, and the provider's `sleep`
+             * message so the workspace can show "asleep · wakes in 5 min"
+             * instead of "last seen just now" for the next six hours. */
+            const char *sleep_reason = battery_critical ? "battery_critical"
+                                       : config->deep_sleep ? "always"
+                                                            : "battery";
+            {
+                char line[192];
+                snprintf(line, sizeof(line),
+                         "{\"event\":\"sleep\",\"source\":\"esp32\",\"wakeInSeconds\":%lu,"
+                         "\"nextRenderAt\":%lld,\"reason\":\"%s\",\"wakeCheck\":%s}",
+                         (unsigned long)chunk, (long long)s_next_render_due, sleep_reason,
+                         wake_check ? "true" : "false");
+                frameos_nim_log_hook(line);
+                frameos_nim_flush_logs();
+            }
+            if (fos_cloud_announce_sleep(chunk, (int64_t)s_next_render_due, sleep_reason,
+                                         wake_check)) {
+                /* The send returned once the bytes were handed to lwIP; give
+                 * the stack a moment to actually put them on the air. */
+                vTaskDelay(pdMS_TO_TICKS(250));
+            }
             /* USB console drops in deep sleep; that's the point (battery). */
             esp_deep_sleep((uint64_t)chunk * 1000000ULL);
         }
