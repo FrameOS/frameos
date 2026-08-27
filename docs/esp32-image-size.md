@@ -132,10 +132,30 @@ runtime.
 2. ~~**CA bundle → common roots** (−51 KB)~~ — **done**, common bundle covers
    ISRG/Let's Encrypt, DigiCert, Amazon, Google, GlobalSign, Sectigo, GoDaddy,
    IdenTrust etc.; private CAs were never in the full bundle either.
-3. **Silent assertions** (`CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT`):
-   strips assert strings from the 152 KB string pool.
-4. **Config-gate heavy optional apps** (~100–200 KB): calendar+ical is 85 KB;
-   wikicommons/openai/unsplash/chart add up.
-5. **Drop unused pixie decoders** (−60 KB): webp + svg if not needed on-device.
-6. **Move the font to SPIFFS** (−195 KB total): the `state` partition has room
-   on every profile except 4 MB.
+3. ~~**Silent assertions + checks + no esp_err name table**~~ — **done**
+   (`CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT`,
+   `CONFIG_COMPILER_OPTIMIZATION_CHECKS_SILENT`, `ESP_ERR_TO_NAME_LOOKUP=n`).
+   Measured −89.6 KB, far more than the string pool alone: 51.9 KB of it is
+   pool text, the rest is the assert *branches* the compiler can now drop
+   (HAL −7.2 K, lwIP −9.2 K, FreeRTOS −3.3 K, QuickJS −3.4 K, SPI −3.5 K, ...).
+4. ~~**Drop pixie's PPM codec**~~ — **done**, `-d:pixieNoPpm` (FrameOS/pixie#6),
+   −5.7 KB. WebP (38 K), GIF (5.9 K) and BMP (8.2 K) are still in; they at
+   least correspond to formats a URL might serve.
+5. **Subset the embedded font** (~−90 KB of 146 KB): `Ubuntu-Regular.ttf`
+   carries Latin+Greek+Cyrillic; a Latin subset generated in
+   `tools/generate_compressed_asset_nim.py` would cut most of it, at the cost
+   of blank glyphs for scenes that render other scripts.
+6. **Move the font to SPIFFS** (−146 KB per OTA slot): the `state` partition
+   has room on every profile except 4 MB. Bigger job than 5 (provisioning +
+   boot-time load) but takes the weight out of *both* slots.
+7. **Config-gate heavy optional apps** (~100–200 KB): calendar+ical is 97 KB;
+   wikicommons/openai/unsplash/chart add up. Breaks "any scene runs on any
+   frame", so this is a firmware-variant decision, not a flag.
+
+Checked and rejected: `CONFIG_NEWLIB_NANO_FORMAT` (~26 KB in `vfprintf` +
+`svfprintf`) — nano formatting has no 64-bit integer conversions and the
+firmware uses `%lld`/`%llu`/`%llx` 29 times, including cloud JSON timestamps.
+Dropping the last `sscanf` call from FrameOS code does *not* remove newlib's
+float-capable scanf either: ESP-IDF's `console` component calls it from
+`linenoise.c`. mbedTLS' ARIA cipher (3.4 KB) has no Kconfig switch in IDF 5.5.
+IPv6 (≈14 KB in `nd6`/`ip6`/`mld6`) is deliberately kept.

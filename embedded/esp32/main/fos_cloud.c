@@ -224,6 +224,44 @@ static void nvs_erase_key_quiet(const char *key)
 
 /* ------------------------------------------------- provider URL transport */
 
+/* Strict dotted-quad parser: exactly four 1-3 digit decimal groups, each
+ * 0-255, single dots, nothing before or after. Deliberately stricter than the
+ * `sscanf(host, "%u.%u.%u.%u%c", ...)` this replaces, which also accepted
+ * leading whitespace, a `+`/`-` sign and leading zeros ("010.0.0.1"): Python's
+ * `ipaddress.ip_address()` — the backend half of this rule, in
+ * backend/app/utils/cloud_link.py::_is_local_host — rejects all three, so the
+ * strict reading is the one that matches, and every rejection here fails
+ * closed (the host is treated as public, so plain http:// is refused).
+ *
+ * (It was also an attempt to drop newlib's float-capable scanf, ~10 KB: that
+ * failed — ESP-IDF's own console component calls sscanf from linenoise.c, so
+ * the code stays linked either way. The parser is kept for the parity.) */
+static bool parse_ipv4_literal(const char *host, unsigned *a, unsigned *b,
+                               unsigned *c, unsigned *d)
+{
+    unsigned *out[4] = { a, b, c, d };
+    const char *p = host;
+
+    for (int i = 0; i < 4; i++) {
+        if (i > 0) {
+            if (*p != '.') return false;
+            p++;
+        }
+        if (*p < '0' || *p > '9') return false;
+        if (*p == '0' && p[1] >= '0' && p[1] <= '9') return false;  /* no leading zeros */
+        unsigned value = 0;
+        int digits = 0;
+        while (*p >= '0' && *p <= '9') {
+            if (++digits > 3) return false;
+            value = value * 10 + (unsigned)(*p - '0');
+            p++;
+        }
+        if (value > 255) return false;
+        *out[i] = value;
+    }
+    return *p == '\0';
+}
+
 /* Everything this link carries — the single-use claim token, the bearer
  * access token, every scene push — is forgeable by an on-path attacker over
  * plain HTTP, so http:// (and its ws:// downgrade) is accepted only for hosts
@@ -261,9 +299,7 @@ static bool host_is_local(const char *host)
     }
 
     unsigned a = 0, b = 0, c = 0, d = 0;
-    char tail = 0;
-    if (sscanf(host, "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4) return false;
-    if (a > 255 || b > 255 || c > 255 || d > 255) return false;
+    if (!parse_ipv4_literal(host, &a, &b, &c, &d)) return false;
     if (a == 127) return true;                                        /* loopback */
     if (a == 10) return true;                                         /* RFC1918 */
     if (a == 172 && b >= 16 && b <= 31) return true;                  /* RFC1918 */
