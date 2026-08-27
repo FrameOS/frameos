@@ -55,3 +55,36 @@ export function sceneDisplayName(scenes: unknown): string | undefined {
   const name = candidate.name.trim().slice(0, maxSceneNameLength);
   return name || undefined;
 }
+
+/**
+ * The listing title the zip's template.json carries (what publishing read
+ * into storeScenes.name). Same shallowest-file rule and the same trim/slice as
+ * validateSceneZip's manifestName; undefined when the zip has no readable
+ * manifest.
+ */
+export function extractManifestNameFromZip(content: Buffer): string | undefined {
+  try {
+    const files = unzipSync(new Uint8Array(content), {
+      filter: (file) => /(^|\/)template\.json$/.test(file.name),
+    });
+    const path = Object.keys(files).sort(
+      (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
+    )[0];
+    const bytes = path ? files[path] : undefined;
+    if (!bytes) {
+      return undefined;
+    }
+    const parsed: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return undefined;
+    }
+    const name = (parsed as Record<string, unknown>).name;
+    if (typeof name !== "string") {
+      return undefined;
+    }
+    const trimmed = name.trim().slice(0, maxSceneNameLength);
+    return trimmed || undefined;
+  } catch {
+    return undefined;
+  }
+}

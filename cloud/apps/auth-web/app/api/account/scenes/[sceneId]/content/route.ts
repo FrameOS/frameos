@@ -14,6 +14,7 @@ import { jsonError, readJsonObject } from "../../../../../../src/lib/device-flow
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import { identityRateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import {
+  extractManifestNameFromZip,
   extractScenesFromZip,
   sceneDisplayName,
 } from "../../../../../../src/lib/scene-title";
@@ -175,10 +176,20 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
+  // The manifest can also have fallen behind the listing the other way round:
+  // editor saves before 2026-08-26 never carried a scene rename into the
+  // template, and the listings that diverged that way were repaired on the
+  // row by hand — leaving template.json (what a download and a frame's
+  // Templates panel show) with the old title. So every save writes the
+  // listing's current name into the manifest, not only a rename. Never the
+  // reverse: the row is what the owner sees and what publishing resolves
+  // names against.
+  const listingName = renameTo ?? scene.name;
+  const manifestName = extractManifestNameFromZip(Buffer.from(latestContent));
   const content = rebuildZipWithScenes(
     Buffer.from(latestContent),
     JSON.stringify(body.scenes, null, 2),
-    renameTo,
+    manifestName === listingName ? undefined : listingName,
   );
   if (!content) {
     return jsonError("invalid_scene_zip", 500);

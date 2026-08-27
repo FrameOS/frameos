@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from "fflate";
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import {
   createDb,
@@ -9,7 +9,9 @@ import {
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as editSceneContent } from "../../../app/api/account/scenes/[sceneId]/content/route";
+import { readBlob } from "../../lib/blobs";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
+import { extractManifestNameFromZip } from "../../lib/scene-title";
 import { createSession, sessionCookieName } from "../../lib/session";
 
 // Renaming a scene in the web editor (gear → Rename) used to change only the
@@ -89,12 +91,14 @@ async function seedScene(
   name: string,
   scenes: unknown[],
   slug = name.toLowerCase().replaceAll(" ", "-"),
+  // The title inside the zip's template.json; normally the listing's.
+  manifestName = name,
 ) {
   const [scene] = await db
     .insert(storeScenes)
     .values({ accountId, latestVersion: 1, name, slug, visibility: "public" })
     .returning();
-  const content = templateZip(name, scenes);
+  const content = templateZip(manifestName, scenes);
   await db.insert(storeSceneVersions).values({
     content,
     contentType: "application/zip",
@@ -115,6 +119,17 @@ function saveContent(sceneId: string, scenes: unknown[]) {
     }),
     { params: Promise.resolve({ sceneId }) },
   );
+}
+
+async function latestManifestName(sceneId: string) {
+  const [version] = await db
+    .select()
+    .from(storeSceneVersions)
+    .where(eq(storeSceneVersions.sceneId, sceneId))
+    .orderBy(desc(storeSceneVersions.version))
+    .limit(1);
+  const content = await readBlob(version);
+  return content ? extractManifestNameFromZip(content) : undefined;
 }
 
 async function storedName(sceneId: string) {
@@ -169,6 +184,40 @@ describe("renaming a scene in the editor", () => {
     ]);
     expect(response.status).toBe(200);
     expect((await storedName(sceneId)).name).toBe("Comics pack");
+  });
+
+  it("brings a manifest that fell behind the listing back in line", async () => {
+    const accountId = await signIn();
+    // A listing repaired on the row (the pre-2026-08-26 editor never carried
+    // renames into the zip) still ships a template.json with the old title.
+    const sceneId = await seedScene(
+      accountId,
+      "Slideshow with motion",
+      [{ id: "scene-1", name: "Slideshow with motion", nodes: [] }],
+      "ken-burns-slideshow",
+      "Ken Burns slideshow",
+    );
+
+    const response = await saveContent(sceneId, [
+      { id: "scene-1", name: "Slideshow with motion", nodes: [{ id: "n1" }] },
+    ]);
+    expect(response.status).toBe(200);
+    expect((await storedName(sceneId)).name).toBe("Slideshow with motion");
+    expect(await latestManifestName(sceneId)).toBe("Slideshow with motion");
+  });
+
+  it("keeps a deliberately different listing title in the manifest too", async () => {
+    const accountId = await signIn();
+    const sceneId = await seedScene(accountId, "Comics pack", [
+      { id: "scene-1", name: "Main", nodes: [] },
+    ]);
+
+    const response = await saveContent(sceneId, [
+      { id: "scene-1", name: "Main", nodes: [{ id: "n1" }] },
+    ]);
+    expect(response.status).toBe(200);
+    // The manifest already matched the listing: nothing to rewrite.
+    expect(await latestManifestName(sceneId)).toBe("Comics pack");
   });
 
   it("refuses a rename that collides with another of the account's scenes", async () => {
