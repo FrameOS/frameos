@@ -96,9 +96,12 @@ export function renderLogLine(line: string): JSX.Element | string {
 /** "every 42 ms (about 24 times a second)" for the fast-render prompt. */
 export function describeRenderRate(intervalMs: number): string {
   const ms = Math.max(1, Math.round(intervalMs))
-  const perSecond = 1000 / ms
-  const rate = perSecond >= 10 ? Math.round(perSecond).toString() : perSecond.toFixed(1).replace(/\.0$/, '')
-  return `every ${ms} ms (about ${rate} times a second)`
+  return `every ${ms} ms (about ${formatFps(1000 / ms)} times a second)`
+}
+
+/** "24" / "7.5": whole numbers from 10 up, one decimal below. */
+export function formatFps(fps: number): string {
+  return fps >= 10 ? Math.round(fps).toString() : fps.toFixed(1).replace(/\.0$/, '')
 }
 
 // One runtime log line. Memoized with a stable key: a scene rendering at
@@ -170,6 +173,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
     renderCount,
     fastMode,
     fastRenderRequest,
+    measuredFps,
   } = useValues(livePreviewLogic({ frameId }))
   const {
     closeLivePreview,
@@ -401,7 +405,13 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
               <Checkbox
                 value={fastMode}
                 onChange={(checked) => setFastMode(checked)}
-                label={`Real-time rendering (${describeRenderRate(fastRenderRequest.intervalMs)})`}
+                label={
+                  fastMode && measuredFps !== null
+                    ? `Real-time rendering · ${formatFps(measuredFps)} fps`
+                    : `Real-time rendering (the scene asks for ~${formatFps(
+                        1000 / Math.max(1, fastRenderRequest.intervalMs)
+                      )} fps)`
+                }
                 title="Let the scene render as often as it asks instead of once per second"
               />
             ) : null}

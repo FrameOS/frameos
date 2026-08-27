@@ -855,15 +855,28 @@ export function metricsByCategoryFromMetrics(metrics: MetricsType[]): Record<str
   return metricsByCategory
 }
 
+/** The newest finite battery charge (%) in the metrics, or null. */
+export function latestBatteryPercentFromMetrics(metrics: MetricsType[]): number | null {
+  for (let i = metrics.length - 1; i >= 0; i--) {
+    const percent = Number(metrics[i].metrics?.batteryPercent)
+    if (Number.isFinite(percent)) {
+      return Math.max(0, Math.min(100, Math.round(percent)))
+    }
+  }
+  return null
+}
+
 export function latestMetricSummariesByCategoryFromMetrics(metrics: MetricsType[]): Record<string, string> {
   const loadSummary = getLatestLoadSummary(metrics)
   const memoryUsageSummary = getLatestUsageSummary(metrics, 'memoryUsage')
   const diskUsageSummary = getLatestUsageSummary(metrics, 'diskUsage')
+  const batteryPercent = latestBatteryPercentFromMetrics(metrics)
   const runtimeDimensionsSummary = getLatestRuntimeDimensionsSummary(metrics)
   return {
     ...(loadSummary ? { load: loadSummary } : {}),
     ...(memoryUsageSummary ? { memoryUsage: memoryUsageSummary } : {}),
     ...(diskUsageSummary ? { diskUsage: diskUsageSummary } : {}),
+    ...(batteryPercent !== null ? { batteryPercent: `${batteryPercent}%` } : {}),
     ...(runtimeDimensionsSummary ? { runtimeDimensions: runtimeDimensionsSummary } : {}),
   }
 }

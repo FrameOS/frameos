@@ -489,6 +489,12 @@ proc jsChronoParseTs(ctx: ptr JSContext, fmt: JSValue, text: JSValue): JSValue {
   except CatchableError as e:
     raise newException(ValueError, "parseTs failed: " & e.msg)
 
+proc setJsTimeZone*(name: string) =
+  ## The zone `frameos.format` and friends render in. On a device it is
+  ## detected from /etc/localtime; the wasm preview has no such file and
+  ## sets the frame's configured zone here.
+  tzName = name.strip()
+
 proc jsChronoFormat(ctx: ptr JSContext, tsVal: JSValue, fmt: JSValue): JSValue {.nimcall.} =
   let ts = toNimFloat(ctx, tsVal).Timestamp
   let fmtStr = toNimString(ctx, fmt)

@@ -17,6 +17,7 @@ import type { MetricsType, FrameId } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import {
   filterMetricsByCategoryAndTimeRange,
+  latestBatteryPercentFromMetrics,
   latestMetricSummariesByCategoryFromMetrics,
   metricsByCategoryFromMetrics,
   metricTimestamp,
@@ -37,6 +38,7 @@ export interface FrameMetricsPreviewLogicProps {
 export interface frameMetricsPreviewLogicValues {
   currentTime: number
   headerMetricsByCategory: Record<string, MetricSeries[]>
+  latestBatteryPercent: number | null
   latestMetricSummariesByCategory: Record<string, string>
   metricsByCategory: Record<string, MetricSeries[]>
   previewMetricsTimeRange: TimeRange | null
@@ -79,6 +81,7 @@ export interface frameMetricsPreviewLogicMeta {
       previewMetricsTimeRange: TimeRange | null
     ) => Record<string, MetricSeries[]>
     latestMetricSummariesByCategory: (sortedRecentMetrics: MetricsType[]) => Record<string, string>
+    latestBatteryPercent: (sortedRecentMetrics: MetricsType[]) => number | null
   }
 }
 
@@ -166,7 +169,7 @@ export const frameMetricsPreviewLogic = kea<frameMetricsPreviewLogicType>([
       ) =>
         filterMetricsByCategoryAndTimeRange(
           metricsByCategory,
-          ['load', 'memoryUsage', 'diskUsage'],
+          ['load', 'memoryUsage', 'diskUsage', 'batteryPercent'],
           previewMetricsTimeRange
         ),
     ],
@@ -174,6 +177,13 @@ export const frameMetricsPreviewLogic = kea<frameMetricsPreviewLogicType>([
       (s) => [s.sortedRecentMetrics],
       (metrics: frameMetricsPreviewLogicValues['sortedRecentMetrics']): Record<string, string> =>
         latestMetricSummariesByCategoryFromMetrics(metrics),
+    ],
+    // Frames with a battery pin (ESP32 boards) report a charge estimate;
+    // shown as a battery glyph in the header chips and the workspace sidebar.
+    latestBatteryPercent: [
+      (s) => [s.sortedRecentMetrics],
+      (metrics: frameMetricsPreviewLogicValues['sortedRecentMetrics']): number | null =>
+        latestBatteryPercentFromMetrics(metrics),
     ],
   }),
   afterMount(({ actions, cache }) => {

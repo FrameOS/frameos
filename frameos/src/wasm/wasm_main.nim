@@ -19,6 +19,7 @@ import frameos/planner
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/js_runtime/runtime as jsRuntime
+import lib/tz
 
 # ------------------------------------------------------------------ JS hooks
 # Implemented in tools/wasm/frameos_library.js and linked by emcc.
@@ -136,6 +137,17 @@ proc runSceneEvent(event: string, payload: JsonNode) =
 
 # ------------------------------------------------------------------- setup
 
+proc frameos_wasm_tz_offset_seconds(epoch: int64): int64 {.exportc, cdecl.} =
+  ## Seconds east of UTC for the frame's configured zone at `epoch`. Called
+  ## from tools/wasm/fos_quickjs_tz.c, which QuickJS's getTimezoneOffset()
+  ## is redirected to, so JS `Date` follows the frame's zone rather than the
+  ## browser's.
+  try:
+    let zone = if frameConfig.isNil: "UTC" else: frameConfig.timeZone
+    utcOffsetSeconds(zone, epoch.float).int64
+  except CatchableError:
+    0
+
 proc frameos_wasm_init(width, height: cint, name: cstring,
     timeZone: cstring, settingsJson: cstring): bool {.exportc, cdecl.} =
   ## Build the minimal FrameConfig + Logger the interpreter and apps expect.
@@ -205,6 +217,12 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
       log: proc(payload: JsonNode) =
         jsLogHook(($payload).cstring)
     )
+    # Load the baked tz data (a device does this from detectSystemTimeZone;
+    # there is no /etc/localtime here) so chrono knows the configured zone.
+    # JS-side time: `frameos.format` (chrono) and `new Date()` (QuickJS via
+    # frameos_wasm_tz_offset_seconds) both follow it.
+    initTimeZone()
+    jsRuntime.setJsTimeZone(frameConfig.timeZone)
     initLock(logger.lock)
     channels.embeddedLogHook = proc(payload: JsonNode) {.gcsafe.} =
       jsLogHook(($payload).cstring)

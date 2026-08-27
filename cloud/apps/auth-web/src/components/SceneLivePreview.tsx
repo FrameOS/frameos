@@ -83,10 +83,29 @@ const AUTO_APPLY_STORAGE_KEY = "frameos.preview.autoApply";
 /** "every 42 ms (about 24 times a second)" for the fast-render prompt. */
 export function describeRenderRate(intervalMs: number): string {
   const ms = Math.max(1, Math.round(intervalMs));
-  const perSecond = 1000 / ms;
-  const rate =
-    perSecond >= 10 ? Math.round(perSecond).toString() : perSecond.toFixed(1).replace(/\.0$/, "");
-  return `every ${ms} ms (about ${rate} times a second)`;
+  return `every ${ms} ms (about ${formatFps(1000 / ms)} times a second)`;
+}
+
+/** "24" / "7.5": whole numbers from 10 up, one decimal below. */
+export function formatFps(fps: number): string {
+  return fps >= 10 ? Math.round(fps).toString() : fps.toFixed(1).replace(/\.0$/, "");
+}
+
+/** How many frames are averaged for the live fps figure. */
+export const FPS_WINDOW = 6;
+
+/** Frames per second over the last FPS_WINDOW frame arrival times, or null
+ * with fewer than two of them. */
+export function measureFps(arrivals: readonly number[]): number | null {
+  if (arrivals.length < 2) {
+    return null;
+  }
+  const first = arrivals[0]!;
+  const last = arrivals[arrivals.length - 1]!;
+  if (last <= first) {
+    return null;
+  }
+  return ((arrivals.length - 1) * 1000) / (last - first);
 }
 // Runs a scene in the browser through the frameos-wasm runtime: canvas,
 // showIf-aware state fields, event buttons, and logs — no frame needed. The
@@ -107,9 +126,11 @@ export function SceneLivePreviewPanel({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [savingShot, setSavingShot] = useState(false);
-  // The frame blown up over the page (a click on the canvas): the captured
-  // PNG as a data URL (the CSP's img-src allows data:, not blob:).
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  // The frame blown up over the page (a click on the canvas). Live: the
+  // lightbox shows a canvas the runtime's every frame is mirrored into, so a
+  // slideshow or clock keeps moving at full size.
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const lightboxCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // A notice ("Screenshot downloaded.") is transient: it goes away on its
   // own, or sooner with its × button.
@@ -168,6 +189,11 @@ export function SceneLivePreviewPanel({
     intervalMs: number;
     answered: boolean;
   } | null>(null);
+  // The rate the runtime actually renders at (last FPS_WINDOW frames),
+  // shown on the real-time toggle; arrival times live in a ref, the figure
+  // is published with the batched frame status.
+  const frameArrivalsRef = useRef<number[]>([]);
+  const [measuredFps, setMeasuredFps] = useState<number | null>(null);
 
   // The browser asset folder dialog, and the running preview it manages
   // (previewRef is not reactive; this state follows the runtime's life).
@@ -188,6 +214,9 @@ export function SceneLivePreviewPanel({
   const [appliedSettings, setAppliedSettings] = useState<
     Record<string, Record<string, string>>
   >({});
+  // Groups whose keys are saved on the account start collapsed ("using your
+  // account's key"); "Use another key" opens that group's fields.
+  const [credentialsExpanded, setCredentialsExpanded] = useState<Record<string, boolean>>({});
   // Service keys saved in the account's settings (GET /api/settings), used
   // as the base layer so scenes render without retyping them; anything typed
   // above wins per field. null until the (best-effort) fetch settles — the
@@ -321,6 +350,8 @@ export function SceneLivePreviewPanel({
     setSceneInfo(null);
     setRuntimeState({});
     setLogs([]);
+    frameArrivalsRef.current = [];
+    setMeasuredFps(null);
     setStatus("Loading FrameOS runtime…");
     // Overrides for fields the reloaded scenes no longer have are dropped;
     // the rest stay in the form (and, once applied, in the runtime).
@@ -422,9 +453,18 @@ export function SceneLivePreviewPanel({
             return;
           }
           setHasPaintedFrame(true);
+          // Straight through, not batched: the full-size view should move as
+          // soon as the small one does.
+          paintLightbox();
+          const arrivals = frameArrivalsRef.current;
+          arrivals.push(performance.now());
+          if (arrivals.length > FPS_WINDOW) {
+            arrivals.splice(0, arrivals.length - FPS_WINDOW);
+          }
           scheduleFlush("frame", () => {
             if (!cancelled) {
               setStatus(`Rendered ${frame.width}×${frame.height} in ${frame.renderMs} ms`);
+              setMeasuredFps(measureFps(frameArrivalsRef.current));
             }
           });
         },
@@ -613,6 +653,27 @@ export function SceneLivePreviewPanel({
     setAppliedSettings(nested);
   }
 
+  // Mirror the preview canvas into the lightbox canvas (when open), over an
+  // opaque white ground like the screenshots.
+  function paintLightbox() {
+    const source = canvasRef.current;
+    const target = lightboxCanvasRef.current;
+    if (!source || !target) {
+      return;
+    }
+    if (target.width !== source.width || target.height !== source.height) {
+      target.width = source.width;
+      target.height = source.height;
+    }
+    const context = target.getContext("2d");
+    if (!context) {
+      return;
+    }
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, target.width, target.height);
+    context.drawImage(source, 0, 0);
+  }
+
   // The current frame composited over white, or null (with the error set)
   // when there is nothing to capture yet.
   function flattenFrame(): HTMLCanvasElement | null {
@@ -656,18 +717,14 @@ export function SceneLivePreviewPanel({
   }
 
   function closeLightbox() {
-    setLightbox(null);
+    setLightboxOpen(false);
   }
 
   function openLightbox() {
     if (!hasPaintedFrame) {
       return;
     }
-    const flattened = flattenFrame();
-    if (!flattened) {
-      return;
-    }
-    setLightbox(flattened.toDataURL("image/png"));
+    setLightboxOpen(true);
   }
 
   async function downloadScreenshot() {
@@ -722,6 +779,15 @@ export function SceneLivePreviewPanel({
   }
 
   const runtimeScenes = sceneInfo?.scenes ?? [];
+
+  // A settings group whose every field is saved on the account is shown as
+  // "from your account" until "Use another key"; a group with a missing
+  // field, or one typed over, shows its inputs.
+  const credentialsFormShown = (group: PreviewSettingsGroup): boolean =>
+    credentialsExpanded[group.key] === true ||
+    group.fields.some((field) => !storedSettings?.[field.path[0]]?.[field.path[1]]);
+  const anyCredentialsFormShown = requiredSettings.some(credentialsFormShown);
+
   const viewportValid =
     Number.isFinite(viewportForm.width) &&
     Number.isFinite(viewportForm.height) &&
@@ -904,7 +970,10 @@ export function SceneLivePreviewPanel({
             onChange={(event) => answerFastRender(event.target.checked)}
             type="checkbox"
           />
-          Real-time rendering ({describeRenderRate(fastRenderRequest.intervalMs)})
+          Real-time rendering
+          {fastMode && measuredFps !== null
+            ? ` · ${formatFps(measuredFps)} fps`
+            : ` (the scene asks for ~${formatFps(1000 / Math.max(1, fastRenderRequest.intervalMs))} fps)`}
         </label>
       ) : null}
       <div className="live-preview">
@@ -1052,13 +1121,17 @@ export function SceneLivePreviewPanel({
           preview={previewInstance}
         />
       ) : null}
-      {lightbox ? (
+      {lightboxOpen ? (
         <ImageLightbox
           alt="The rendered frame"
           height={viewport.height}
           label="Preview frame"
+          liveCanvasRef={(canvas) => {
+            lightboxCanvasRef.current = canvas;
+            // First paint on mount; every later frame repaints via onFrame.
+            paintLightbox();
+          }}
           onClose={closeLightbox}
-          url={lightbox}
           width={viewport.width}
         />
       ) : null}
@@ -1066,52 +1139,78 @@ export function SceneLivePreviewPanel({
         <div className="card preview-settings">
           <h4 className="preview-settings__title">
             <KeyRound aria-hidden size={16} />
-            This scene uses services that need credentials
+            {anyCredentialsFormShown
+              ? "This scene uses services that need credentials"
+              : "This scene uses keys saved in your account"}
           </h4>
-          <p className="copy preview-settings__hint">
-            Keys saved in your{" "}
-            {settingsUrl ? (
-              <a href={settingsUrl} rel="noreferrer" target="_blank">
-                account settings
-              </a>
+          {anyCredentialsFormShown ? (
+            <p className="copy preview-settings__hint">
+              Keys saved in your{" "}
+              {settingsUrl ? (
+                <a href={settingsUrl} rel="noreferrer" target="_blank">
+                  account settings
+                </a>
+              ) : (
+                "account settings"
+              )}{" "}
+              are applied automatically. Anything typed here stays in this
+              browser tab and is used only by the preview.
+            </p>
+          ) : null}
+          {requiredSettings.map((group) =>
+            credentialsFormShown(group) ? (
+              <div className="preview-settings__group" key={group.key}>
+                <span className="preview-settings__group-title">{group.title}</span>
+                {group.fields.map((field) => {
+                  const formKey = field.path.join(".");
+                  return (
+                    <label className="preview-settings__field" key={formKey}>
+                      <span>{field.label}</span>
+                      <input
+                        autoComplete="off"
+                        className="preview-settings__input"
+                        onChange={(event) =>
+                          setSettingsForm((form) => ({
+                            ...form,
+                            [formKey]: event.target.value,
+                          }))
+                        }
+                        type={field.secret ? "password" : "text"}
+                        value={settingsForm[formKey] ?? ""}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
             ) : (
-              "account settings"
-            )}{" "}
-            are applied automatically. Anything typed here stays in this
-            browser tab and is used only by the preview.
-          </p>
-          {requiredSettings.map((group) => (
-            <div className="preview-settings__group" key={group.key}>
-              <span className="preview-settings__group-title">{group.title}</span>
-              {group.fields.map((field) => {
-                const formKey = field.path.join(".");
-                return (
-                  <label className="preview-settings__field" key={formKey}>
-                    <span>{field.label}</span>
-                    <input
-                      autoComplete="off"
-                      className="preview-settings__input"
-                      onChange={(event) =>
-                        setSettingsForm((form) => ({
-                          ...form,
-                          [formKey]: event.target.value,
-                        }))
-                      }
-                      type={field.secret ? "password" : "text"}
-                      value={settingsForm[formKey] ?? ""}
-                    />
-                  </label>
-                );
-              })}
-            </div>
-          ))}
-          <button
-            className="button button--small"
-            onClick={applySettings}
-            type="button"
-          >
-            Apply &amp; reload preview
-          </button>
+              <div className="preview-settings__group preview-settings__group--stored" key={group.key}>
+                <span className="preview-settings__stored">
+                  <span className="preview-settings__group-title">{group.title}</span>
+                  {" · "}
+                  {joinNames(group.fields.map((field) => field.label))} from your account
+                </span>
+                <button
+                  className="button button--subtle button--small"
+                  onClick={() =>
+                    setCredentialsExpanded((current) => ({ ...current, [group.key]: true }))
+                  }
+                  title={`Type a different ${group.title} key for this preview only`}
+                  type="button"
+                >
+                  Use another key
+                </button>
+              </div>
+            ),
+          )}
+          {anyCredentialsFormShown ? (
+            <button
+              className="button button--small"
+              onClick={applySettings}
+              type="button"
+            >
+              Apply &amp; reload preview
+            </button>
+          ) : null}
         </div>
       ) : null}
       {scenes ? (

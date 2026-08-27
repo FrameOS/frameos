@@ -52,6 +52,21 @@ const MAX_LOG_LINES = 200
 // first item after a quiet spell goes through at once (leading edge).
 const UI_FLUSH_INTERVAL_MS = 200
 let nextLogLineId = 1
+/** How many frame arrivals the live fps figure averages over. */
+export const FPS_WINDOW = 6
+
+/** Frames per second over `arrivals` (ms timestamps), or null below two frames. */
+export function measureFps(arrivals: readonly number[]): number | null {
+  if (arrivals.length < 2) {
+    return null
+  }
+  const first = arrivals[0]
+  const last = arrivals[arrivals.length - 1]
+  if (last <= first) {
+    return null
+  }
+  return ((arrivals.length - 1) * 1000) / (last - first)
+}
 
 // Apps that can't work in the browser preview: excluded from the wasm build
 // (see frameos/src/apps/apps.nim — child processes, external binaries).
@@ -186,6 +201,7 @@ export interface livePreviewLogicValues {
   livePreviewSceneId: string | null
   livePreviewScenes: FrameScene[] | null
   livePreviewSourceTemplate: LivePreviewSourceTemplate | null
+  measuredFps: number | null
   previewAssets: PreviewAssetEntry[]
   previewAssetsError: string | null
   previewAssetsInfo: PreviewAssetsInfo | null
@@ -279,9 +295,11 @@ export interface livePreviewLogicActions {
     width: number,
     height: number,
     renderMs: number,
-    count?: number
+    count?: number,
+    fps?: number | null
   ) => {
     count: number
+    fps: number | null
     height: number
     renderMs: number
     width: number
@@ -368,12 +386,14 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     closeLivePreview: true,
     registerCanvas: (canvas: HTMLCanvasElement | null) => ({ canvas }),
     previewReady: true,
-    // `count` frames arrived since the last report (the page coalesces).
-    previewFrame: (width: number, height: number, renderMs: number, count: number = 1) => ({
+    // `count` frames arrived since the last report (the page coalesces);
+    // `fps` is the measured rate over the last few frames.
+    previewFrame: (width: number, height: number, renderMs: number, count: number = 1, fps: number | null = null) => ({
       width,
       height,
       renderMs,
       count,
+      fps,
     }),
     previewErrored: (message: string) => ({ message }),
     appendPreviewLog: (message: string) => ({ message, timestamp: new Date().toISOString() }),
@@ -467,6 +487,14 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       {
         openLivePreview: () => 0,
         previewFrame: (state, { count }) => state + count,
+      },
+    ],
+    // Frames per second over the last FPS_WINDOW frames, for the real-time toggle.
+    measuredFps: [
+      null as number | null,
+      {
+        openLivePreview: () => null,
+        previewFrame: (_, { fps }) => fps,
       },
     ],
     // User-entered app settings (API keys etc.) merged over the backend's
@@ -753,11 +781,22 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
             drawFrame(cache)
             const stats = cache.frameStats ?? { width: 0, height: 0, renderMs: 0, count: 0 }
             cache.frameStats = { width: msg.width, height: msg.height, renderMs: msg.renderMs, count: stats.count + 1 }
+            const arrivals: number[] = (cache.frameArrivals ??= [])
+            arrivals.push(performance.now())
+            if (arrivals.length > FPS_WINDOW) {
+              arrivals.splice(0, arrivals.length - FPS_WINDOW)
+            }
             scheduleUiFlush(cache, 'frame', () => {
               const flushed = cache.frameStats
               cache.frameStats = null
               if (flushed) {
-                actions.previewFrame(flushed.width, flushed.height, flushed.renderMs, flushed.count)
+                actions.previewFrame(
+                  flushed.width,
+                  flushed.height,
+                  flushed.renderMs,
+                  flushed.count,
+                  measureFps(cache.frameArrivals ?? [])
+                )
               }
             })
             break
@@ -982,6 +1021,7 @@ function clearUiFlushes(cache: Record<string, any>): void {
   }
   cache.uiFlushes = {}
   cache.frameStats = null
+  cache.frameArrivals = []
   cache.logQueue = []
 }
 

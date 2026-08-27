@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AUTO_APPLY_DEBOUNCE_MS,
   EDITOR_RELOAD_DEBOUNCE_MS,
+  measureFps,
   normalizeHexColor,
   NOTICE_HIDE_MS,
   SceneLivePreviewPanel,
@@ -182,9 +183,13 @@ describe("SceneLivePreviewPanel lightbox", () => {
     // On <body>, outside the panel (the editor frame's transform would trap
     // a fixed overlay inside the column).
     expect(dialog.parentElement).toBe(document.body);
-    const image = screen.getByRole("img", { name: "The rendered frame" }) as HTMLImageElement;
-    // A data URL: the page's CSP allows data: images, not blob: ones.
-    expect(image.getAttribute("src")).toBe("data:image/png;base64,QUJD");
+    // Live: a canvas the runtime's frames are mirrored into, not a still.
+    const image = screen.getByRole("img", { name: "The rendered frame" });
+    expect(image.tagName).toBe("CANVAS");
+    const context = HTMLCanvasElement.prototype.getContext("2d") as unknown as { drawImage: ReturnType<typeof vi.fn> };
+    const paintsBefore = context.drawImage.mock.calls.length;
+    act(() => previews[0]!.options.onFrame!({ height: 600, renderMs: 4, width: 800 }));
+    expect(context.drawImage.mock.calls.length).toBeGreaterThan(paintsBefore);
     expect(image.classList.contains("lightbox__image--fit")).toBe(true);
 
     fireEvent.click(image);
@@ -618,6 +623,20 @@ describe("SceneLivePreviewPanel paid scenes", () => {
     expect(link.target).toBe("_blank");
   });
 
+  it("collapses a credentials group whose key is saved on the account, until 'Use another key'", async () => {
+    fetchMock.mockImplementationOnce(async () => Response.json({ openAI: { apiKey: "sk-stored" } }));
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[openAiScene]} />);
+    await screen.findByText("This scene uses keys saved in your account");
+    expect(screen.getByText(/API key from your account/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Apply & reload preview/ })).toBeNull();
+    expect(screen.queryByLabelText("API key")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Use another key" }));
+    expect(screen.getByText("This scene uses services that need credentials")).toBeTruthy();
+    expect(screen.getByLabelText("API key")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Apply & reload preview/ })).toBeTruthy();
+  });
+
   it("offers auto apply for a scene without paid services", async () => {
     render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
     await waitFor(() => expect(previews).toHaveLength(1));
@@ -666,6 +685,33 @@ describe("SceneLivePreviewPanel render pacing", () => {
     fireEvent.click(toggle);
     expect(previews[1]!.setFastMode).toHaveBeenCalledWith(false);
     expect((screen.getByLabelText(/Real-time rendering/) as HTMLInputElement).checked).toBe(false);
+    // Off: what the scene asks for, without doubled brackets.
+    expect(screen.getByText(/Real-time rendering \(the scene asks for ~24 fps\)/)).toBeTruthy();
+  });
+
+  it("shows the measured frame rate on the toggle while rendering at full speed", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() => previews[0]!.options.onFastRenderRequest!(42));
+    fireEvent.click(screen.getByRole("button", { name: "Run at full speed" }));
+    const now = vi.spyOn(performance, "now");
+    let clock = 1000;
+    now.mockImplementation(() => clock);
+    for (let i = 0; i < 6; i++) {
+      act(() => previews[0]!.options.onFrame!({ height: 480, renderMs: 4, width: 800 }));
+      clock += 50; // 20 fps
+    }
+    // The figure is published with the batched status update.
+    await waitFor(() => expect(screen.getByText(/Real-time rendering · 20 fps/)).toBeTruthy());
+    now.mockRestore();
+  });
+
+  it("measureFps averages the last arrivals", () => {
+    expect(measureFps([])).toBeNull();
+    expect(measureFps([10])).toBeNull();
+    expect(measureFps([0, 100])).toBe(10);
+    expect(measureFps([0, 50, 100, 150, 200, 250])).toBe(20);
+    expect(measureFps([5, 5])).toBeNull();
   });
 
   it("'Keep 1 fps' dismisses the prompt but leaves the toggle to change one's mind", async () => {
