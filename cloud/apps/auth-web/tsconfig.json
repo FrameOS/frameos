@@ -41,6 +41,8 @@
     // renders the legacy connection dot/spinner components (bare JSX
     // namespace). Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/frame-status-groups.test.ts",
+    // Same story: the check-in helpers live in decorators/frame.tsx too.
+    "src/test/shared-spa/frame-checkin.test.ts",
     // Same story: importing frameLogic pulls in framesModel and the
     // decorators behind it, so the graph reaches those same legacy
     // components. Vitest still runs it; only tsc leaves it out.

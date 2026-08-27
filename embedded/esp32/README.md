@@ -303,7 +303,12 @@ Write-verb acks are sent after the SD write finishes. Log shipping is
 implemented behind the `telemetry:logs` scope, with `get_logs` replaying the
 on-device ring (last 128 lines); `get_metrics` returns the newest metrics
 sample and the device pushes a `metrics` message after each render pass when
-`telemetry:metrics` is granted. `set_schedule` stores the schedule to
+`telemetry:metrics` is granted (with `onBattery`, the same cell-present test
+the deep-sleep decision uses). A deep-sleeping frame sends a `sleep` message
+(`wake_in_seconds`, `next_render_at`, `reason`, `wake_check`) synchronously
+right before `esp_deep_sleep`, so the provider can show "asleep · wakes in
+5 min" and drop the socket at once instead of waiting for a missed
+heartbeat. `set_schedule` stores the schedule to
 `/state/schedule.json` and `main/fos_schedule.c` evaluates it once per
 wall-clock minute on the render task (same event model as the Pi
 scheduler: minute/hour/weekday 0=daily 1-7 8=weekdays 9=weekends), in

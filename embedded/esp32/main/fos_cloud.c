@@ -1313,6 +1313,31 @@ static bool ws_send_state(const cJSON *id)
     return sent;
 }
 
+/* The last thing a deep-sleeping frame says before the CPU halts. Without
+ * it the provider only learns of the sleep when a heartbeat ping goes
+ * unanswered (up to a minute later) and can say nothing about when the frame
+ * is back — "last seen just now" for a frame that is gone for six hours. The
+ * hub stores next_wake_at / next_render_at and drops the socket itself; the
+ * send is synchronous (esp_websocket_client's own lock makes it safe from the
+ * render task) so the bytes are on the wire when this returns. */
+bool fos_cloud_announce_sleep(uint32_t wake_in_seconds, int64_t next_render_at,
+                              const char *reason, bool wake_check)
+{
+    if (!s_ws_client || !s_ws_ready) return false;
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return false;
+    cJSON_AddStringToObject(msg, "type", "sleep");
+    cJSON_AddNumberToObject(msg, "wake_in_seconds", (double)wake_in_seconds);
+    if (next_render_at > 0) {
+        cJSON_AddNumberToObject(msg, "next_render_at", (double)next_render_at);
+    }
+    cJSON_AddStringToObject(msg, "reason", reason ? reason : "");
+    cJSON_AddBoolToObject(msg, "wake_check", wake_check);
+    ws_send_json(msg);
+    cJSON_Delete(msg);
+    return true;
+}
+
 static void ws_reboot_task(void *arg)
 {
     (void)arg;

@@ -21,7 +21,10 @@ export function frameHost(frame: FrameType): string {
 
 export const frameStatusWithSpinner = ['deploying', 'preparing', 'rendering', 'restarting', 'starting']
 
-function parseFrameTimestamp(timestamp?: string | null): number {
+function parseFrameTimestamp(timestamp?: string | number | null): number {
+  if (typeof timestamp === 'number') {
+    return timestamp
+  }
   if (!timestamp) {
     return NaN
   }
@@ -33,13 +36,13 @@ function pluralize(value: number, unit: string): string {
   return `${value} ${unit}${value === 1 ? '' : 's'} ago`
 }
 
-export function formatFrameRelativeTime(timestamp?: string | null): string | null {
+export function formatFrameRelativeTime(timestamp?: string | number | null, now: number = Date.now()): string | null {
   const time = parseFrameTimestamp(timestamp)
   if (!Number.isFinite(time)) {
     return null
   }
 
-  const seconds = Math.max(0, Math.round((Date.now() - time) / 1000))
+  const seconds = Math.max(0, Math.round((now - time) / 1000))
   if (seconds < 45) {
     return 'just now'
   }
@@ -73,7 +76,160 @@ function frameActivityTimestamp(frame: FrameType): string | null | undefined {
   return frame.last_log_at ?? frame.last_seen_at
 }
 
+// "5 min", "2 h 10 min", "3 d 4 h" — the resolution someone waiting for a
+// frame to come back actually wants (the "ago" formatter's "2 hours" is fine
+// for the past, not for "when can I expect my deploy to land").
+export function formatFrameDuration(ms: number): string {
+  const totalMinutes = Math.round(Math.max(0, ms) / 60000)
+  if (totalMinutes < 1) {
+    return 'under a minute'
+  }
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min`
+  }
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours < 24) {
+    return minutes ? `${hours} h ${minutes} min` : `${hours} h`
+  }
+  const days = Math.floor(hours / 24)
+  const remainingHours = hours % 24
+  return remainingHours ? `${days} d ${remainingHours} h` : `${days} day${days === 1 ? '' : 's'}`
+}
+
+// "in 5 min" / "any moment now"; `approx` prefixes the duration ("in ~5 min")
+// for estimates the device did not announce itself.
+export function formatFrameRelativeFuture(time: number, now: number = Date.now(), approx = ''): string {
+  const ms = time - now
+  if (ms < 45_000) {
+    return 'any moment now'
+  }
+  return `in ${approx}${formatFrameDuration(ms)}`
+}
+
+// How long past its expected wake a sleeping frame is still "asleep" rather
+// than "overdue". A wake is a cold boot — panel init, Wi-Fi (up to 45 s),
+// SNTP, then the dial — so the socket lands a good minute after the timer.
+const checkinGraceMs = 2 * 60 * 1000
+
+/** The firmware's own "a cell is present" threshold (FOS_BATTERY_PRESENT_MV). */
+const batteryPresentMillivolts = 2500
+
+export interface FrameCheckin {
+  /** sleeping: expected back at wakeAt; overdue: wakeAt passed, still not seen. */
+  kind: 'sleeping' | 'overdue'
+  /** Epoch ms when the frame is expected to redial. */
+  wakeAt: number
+  /** Epoch ms of the next panel refresh when it is a separate, later event
+   * (the wake is only a command check-in); null when unknown or the same. */
+  renderAt: number | null
+  /** true: the device announced this itself (next_wake_at, firmware from
+   * 2026.8.41); false: estimated from its power settings and last_seen_at. */
+  announced: boolean
+  reason: string | null
+}
+
+function frameDeviceConfigValue(frame: FrameType, camel: string, snake: string): unknown {
+  const config = (frame.device_config ?? {}) as Record<string, unknown>
+  return config[camel] ?? config[snake]
+}
+
+// Older firmware never announces its sleeps; mirror the render task's own
+// decision (embedded/esp32/main/fos_client.c) from the settings the control
+// plane pushed: the frame sleeps when deep_sleep is on, or deep_sleep_on_battery
+// is on and a cell is present, and it comes back every wake_check_seconds
+// (when set and shorter) or every render interval. An estimate — the scene's
+// own refreshInterval can stretch the real cycle — hence the "~" in the copy.
+function estimatedCheckinPeriodSeconds(frame: FrameType): number | null {
+  const deepSleep = frame.deep_sleep ?? frameDeviceConfigValue(frame, 'deepSleep', 'deep_sleep')
+  const deepSleepOnBattery =
+    frame.deep_sleep_on_battery ?? frameDeviceConfigValue(frame, 'deepSleepOnBattery', 'deep_sleep_on_battery')
+  const metrics = frame.last_metrics ?? {}
+  const onBattery =
+    typeof metrics.onBattery === 'boolean'
+      ? metrics.onBattery
+      : typeof metrics.batteryMillivolts === 'number'
+      ? metrics.batteryMillivolts >= batteryPresentMillivolts
+      : false
+  if (deepSleep !== true && !(deepSleepOnBattery === true && onBattery)) {
+    return null
+  }
+  const wakeCheck = Number(
+    frame.wake_check_seconds ?? frameDeviceConfigValue(frame, 'wakeCheckSeconds', 'wake_check_seconds') ?? 0
+  )
+  const interval = Number(frame.interval) > 0 ? Number(frame.interval) : 300
+  const period = wakeCheck >= 60 && wakeCheck < interval ? wakeCheck : interval
+  return Math.min(Math.max(period, 60), 7 * 86400)
+}
+
+/**
+ * What a disconnected deep-sleeping frame is up to: asleep until `wakeAt`
+ * (a deploy queued now lands then), or overdue — it should have redialed
+ * already and has not. null for a frame that is online, or that is not
+ * known to sleep (a plain offline Pi, a USB-powered board that stays
+ * connected).
+ */
+export function frameCheckin(frame: FrameType, now: number = Date.now()): FrameCheckin | null {
+  if (frame.connected === true || (frame.active_connections ?? 0) > 0) {
+    return null
+  }
+  const announcedWakeAt = parseFrameTimestamp(frame.next_wake_at)
+  if (Number.isFinite(announcedWakeAt)) {
+    const renderAt = parseFrameTimestamp(frame.next_render_at)
+    return {
+      kind: now > announcedWakeAt + checkinGraceMs ? 'overdue' : 'sleeping',
+      wakeAt: announcedWakeAt,
+      renderAt: Number.isFinite(renderAt) && renderAt > announcedWakeAt + 60_000 ? renderAt : null,
+      announced: true,
+      reason: frame.sleep_reason ?? null,
+    }
+  }
+  const period = estimatedCheckinPeriodSeconds(frame)
+  const lastSeenAt = parseFrameTimestamp(frameActivityTimestamp(frame))
+  if (period === null || !Number.isFinite(lastSeenAt)) {
+    return null
+  }
+  const wakeAt = lastSeenAt + period * 1000
+  // An estimate gets half a cycle of extra slack before it is called overdue.
+  const graceMs = checkinGraceMs + (period * 1000) / 2
+  return {
+    kind: now > wakeAt + graceMs ? 'overdue' : 'sleeping',
+    wakeAt,
+    renderAt: null,
+    announced: false,
+    reason: null,
+  }
+}
+
+/** "asleep · wakes in 5 min · renders in 2 h" / "overdue · expected 10 minutes ago · last seen 40 minutes ago". */
+export function frameCheckinDescription(
+  frame: FrameType,
+  checkin: FrameCheckin | null = frameCheckin(frame),
+  now: number = Date.now()
+): string | null {
+  if (!checkin) {
+    return null
+  }
+  const approx = checkin.announced ? '' : '~'
+  if (checkin.kind === 'sleeping') {
+    const parts = [`asleep · wakes ${formatFrameRelativeFuture(checkin.wakeAt, now, approx)}`]
+    if (checkin.renderAt) {
+      parts.push(`renders ${formatFrameRelativeFuture(checkin.renderAt, now)}`)
+    }
+    return parts.join(' · ')
+  }
+  const lastSeen = formatFrameRelativeTime(frameActivityTimestamp(frame), now)
+  return `overdue · expected ${approx}${formatFrameRelativeTime(checkin.wakeAt, now)}${
+    lastSeen ? ` · last seen ${lastSeen}` : ''
+  }`
+}
+
 export function frameIsStale(frame: FrameType): boolean {
+  // A frame asleep on schedule is behaving, however long ago it was last
+  // seen — a 12-hour wake check must not read as "stale" for 11 of them.
+  if (frameCheckin(frame)?.kind === 'sleeping') {
+    return false
+  }
   const activityAt = frameActivityTimestamp(frame)
   if (!activityAt) {
     return false
@@ -121,6 +277,13 @@ function frameSchemeAndPort(frame: FrameType): { scheme: string; port: number } 
 }
 
 export function frameStatusLabel(frame: FrameType): string {
+  // Cloud frames: `status` is the enrollment state (pending/active/revoked),
+  // which says nothing about whether the device is reachable — that is the
+  // hub's `connected` flag. "active - last seen 3 hours ago" read as if the
+  // frame were fine.
+  if (frame.status === 'active' && typeof frame.connected === 'boolean') {
+    return frame.connected ? 'online' : frameIsStale(frame) ? 'stale' : 'offline'
+  }
   let status = frame.status
   if (frameIsStale(frame)) {
     status = 'stale'
@@ -150,19 +313,36 @@ export function frameNeedsInitialDeploy(frame: FrameType): boolean {
   return !frame.last_successful_deploy_at
 }
 
+/**
+ * The one-line "what is it doing" under a frame's name: a sleeping frame
+ * says when it is back ("asleep · wakes in 5 min"), an overdue one says so,
+ * everything else says when it was last heard from.
+ */
+export function frameActivityDescription(frame: FrameType): string {
+  if (frameNeedsInitialDeploy(frame)) {
+    return 'waiting for first deploy'
+  }
+  const checkin = frameCheckinDescription(frame)
+  if (checkin) {
+    return checkin
+  }
+  // last_log_at is a backend column; the cloud's frameSummary never serves
+  // it, but the hub bumps last_seen_at on every log, metric and state the
+  // device sends — without the fallback every cloud frame read "no logs yet".
+  const relativeTime = formatFrameRelativeTime(frameActivityTimestamp(frame))
+  return relativeTime ? `last seen ${relativeTime}` : 'no logs yet'
+}
+
 export function frameStatusDescription(frame: FrameType): string {
   if (frameNeedsInitialDeploy(frame)) {
     return 'waiting for first deploy'
   }
+  const checkin = frameCheckinDescription(frame)
+  if (checkin) {
+    return checkin
+  }
 
-  const status = frameStatusLabel(frame)
-  // last_log_at is a backend column; the cloud's frameSummary never serves
-  // it, but the hub bumps last_seen_at on every log, metric and state the
-  // device sends — without the fallback every cloud frame read "no logs yet".
-  const relativeTime = formatFrameRelativeTime(frame.last_log_at ?? frame.last_seen_at)
-  const logDescription = relativeTime ? `last seen ${relativeTime}` : 'no logs yet'
-
-  return `${status} - ${logDescription}`
+  return `${frameStatusLabel(frame)} - ${frameActivityDescription(frame)}`
 }
 
 export function frameStatus(frame: FrameType): JSX.Element {

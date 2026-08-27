@@ -912,6 +912,13 @@ export function frameSummary(
     id: frame.id,
     deployed_scene_state: frame.deployedSceneState,
     last_seen_at: frame.lastSeenAt,
+    // The device's deep-sleep forecast (hub handleSleep): when it redials
+    // next, when the panel refreshes next, and why it sleeps. null while
+    // connected and on firmware without the `sleep` message — the SPA then
+    // estimates from the power settings above.
+    next_wake_at: frame.nextWakeAt,
+    next_render_at: frame.nextRenderAt,
+    sleep_reason: frame.sleepReason,
     linked_client_id: frame.linkedClientId,
     name: frame.name,
     scenes_checksum: frame.scenesChecksum,

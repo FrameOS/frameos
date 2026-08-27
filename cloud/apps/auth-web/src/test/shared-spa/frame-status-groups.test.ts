@@ -64,3 +64,43 @@ describe("backend frames in the status groups", () => {
     ).toBe("archived");
   });
 });
+
+describe("deep-sleeping frames in the status groups", () => {
+  const inMinutes = (minutes: number) =>
+    new Date(Date.now() + minutes * 60_000).toISOString();
+
+  it("keeps a frame asleep on schedule active, however long it has slept", () => {
+    expect(
+      groupOf({
+        connected: false,
+        last_seen_at: minutesAgo(11 * 60),
+        next_wake_at: inMinutes(50),
+        status: "active",
+      }),
+    ).toBe("active");
+  });
+
+  it("moves a frame whose wake never came to inactive once it is stale", () => {
+    expect(
+      groupOf({
+        connected: false,
+        last_seen_at: minutesAgo(3 * 60),
+        next_wake_at: minutesAgo(2 * 60),
+        status: "active",
+      }),
+    ).toBe("inactive");
+  });
+
+  it("trusts the pushed power settings when the firmware does not announce sleeps", () => {
+    expect(
+      groupOf({
+        connected: false,
+        deep_sleep: true,
+        interval: 6 * 3600,
+        last_seen_at: minutesAgo(4 * 60),
+        status: "active",
+        wake_check_seconds: 0,
+      }),
+    ).toBe("active");
+  });
+});

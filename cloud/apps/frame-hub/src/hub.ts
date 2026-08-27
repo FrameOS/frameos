@@ -130,6 +130,10 @@ function deviceCloseReason(code: number): string | undefined {
   }
 }
 
+// The firmware caps a deep sleep at 7 days (fos_client.c clamps the interval);
+// an hour of slack covers wake-on-schedule alignment.
+const maxSleepSeconds = 7 * 86_400 + 3_600;
+
 const defaultAuthTimeoutMs = 15_000;
 const defaultHeartbeatIntervalMs = 30_000;
 const defaultSweepIntervalMs = 30_000;
@@ -223,6 +227,9 @@ interface DeviceSession {
   nonce: Buffer;
   ready: boolean;
   scopes: string[];
+  // The device announced a deep sleep (handleSleep): the close that follows
+  // is the frame going dark on purpose, not a lost connection.
+  sleeping: boolean;
   ws: WebSocket;
 }
 
@@ -634,6 +641,12 @@ export async function startFrameHub(
         hubSessionId: session.hubSessionId,
         lastSeenAt: now,
         updatedAt: now,
+        // Awake: the sleep forecast is spent. next_render_at is left in
+        // place — a wake-check session goes back to sleep in seconds and
+        // the panel schedule it carried is still right until the next
+        // `sleep` message replaces it.
+        nextWakeAt: null,
+        sleepReason: null,
         ...(typeof hello.frameos_version === "string"
           ? { frameosVersion: hello.frameos_version.slice(0, 64) }
           : {}),
@@ -929,6 +942,72 @@ export async function startFrameHub(
       })
       .where(eq(frames.id, session.frame.id));
     await broadcastFrameUpdate(session.frame.id);
+  }
+
+  // The device's own forecast, sent right before esp_deep_sleep halts the CPU
+  // (embedded/esp32/main/fos_client.c): back in `wake_in_seconds`, next panel
+  // refresh at `next_render_at` (unix seconds; absent without a synced
+  // clock), and why. Persisted so the workspace can say "asleep · wakes in
+  // 5 min" for a battery frame instead of "last seen just now" — and then the
+  // hub drops the socket itself: a halted chip sends no close frame, so the
+  // heartbeat sweep would otherwise keep it "connected" for up to a minute
+  // after it went dark, and every command queued in that window would look
+  // delivered. The close handler records the disconnect as "asleep".
+  async function handleSleep(
+    session: DeviceSession,
+    msg: Record<string, unknown>,
+  ) {
+    const wakeInSeconds = msg.wake_in_seconds;
+    if (
+      typeof wakeInSeconds !== "number" ||
+      !Number.isFinite(wakeInSeconds) ||
+      wakeInSeconds < 1 ||
+      wakeInSeconds > maxSleepSeconds
+    ) {
+      logWarn("device.sleep_invalid", {
+        frameId: session.frame.id,
+        wakeInSeconds,
+      });
+      return;
+    }
+    const now = new Date();
+    const nextWakeAt = new Date(now.getTime() + Math.round(wakeInSeconds) * 1000);
+    const rawRenderAt = msg.next_render_at;
+    const renderAtMs =
+      typeof rawRenderAt === "number" && Number.isFinite(rawRenderAt)
+        ? Math.round(rawRenderAt) * 1000
+        : Number.NaN;
+    // A due date the device could only have got from a broken clock (far in
+    // the past, or past the firmware's 7-day sleep cap) is dropped, not shown.
+    const nextRenderAt =
+      renderAtMs >= now.getTime() - 3_600_000 &&
+      renderAtMs <= now.getTime() + maxSleepSeconds * 1000
+        ? new Date(renderAtMs)
+        : null;
+    const reason =
+      typeof msg.reason === "string" && msg.reason.length > 0
+        ? msg.reason.slice(0, 32)
+        : null;
+    session.sleeping = true;
+    await db
+      .update(frames)
+      .set({
+        lastSeenAt: now,
+        nextRenderAt,
+        nextWakeAt,
+        sleepReason: reason,
+        updatedAt: now,
+      })
+      .where(eq(frames.id, session.frame.id));
+    logInfo("device.sleep", {
+      frameId: session.frame.id,
+      reason,
+      wakeInSeconds,
+    });
+    // terminate, not close: there is nobody left to answer a close handshake.
+    // The close event marks the frame disconnected and broadcasts the row
+    // (now carrying next_wake_at) to the browsers.
+    session.ws.terminate();
   }
 
   // "I wrote a fresh snapshot of the scene I am showing." The device says
@@ -1295,6 +1374,9 @@ export async function startFrameHub(
       case "metrics":
         await handleMetrics(session, msg);
         break;
+      case "sleep":
+        await handleSleep(session, msg);
+        break;
       case "assets":
         await handleAssets(session, msg);
         break;
@@ -1324,6 +1406,7 @@ export async function startFrameHub(
       nonce: randomBytes(32),
       ready: false,
       scopes,
+      sleeping: false,
       ws,
     };
 
@@ -1387,7 +1470,7 @@ export async function startFrameHub(
       }
       logInfo("device.disconnected", { code, frameId: frame.id });
       markDeviceDisconnected(session, {
-        reason: deviceCloseReason(code),
+        reason: session.sleeping ? "asleep" : deviceCloseReason(code),
       }).catch((error: unknown) =>
         logError("device.disconnect_failed", {
           error: errorField(error),

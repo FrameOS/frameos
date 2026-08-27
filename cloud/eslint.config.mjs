@@ -31,6 +31,7 @@ export default tseslint.config(
       // Same exclusion, same reason: frameStatusGroups's import graph
       // reaches decorators/frame.tsx and the legacy components.
       "**/src/test/shared-spa/frame-status-groups.test.ts",
+      "**/src/test/shared-spa/frame-checkin.test.ts",
       // Same exclusion, same reason: importing frameLogic pulls in
       // framesModel and the decorators behind it.
       "**/src/test/shared-spa/cloud-frame-change-details.test.ts",
