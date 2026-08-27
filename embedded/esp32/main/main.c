@@ -135,6 +135,9 @@ void app_main(void)
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
 
+    /* Before anything else reads the wake status: was this a button press? */
+    fos_buttons_wake_boot();
+
     fos_battery_init(config->battery_pin, config->battery_divider, config->battery_enable_pin);
     if (fos_battery_present()) {
         int battery_mv = 0, battery_pct = -1;
@@ -380,11 +383,13 @@ void app_main(void)
         fos_status_screen_show_portal(fos_wifi_ap_ssid(), fos_wifi_ip());
     }
 
-    /* Render loop runs in both cases: local mode works fully offline. */
-    fos_client_resume();
+    /* Buttons before the render loop: a button wake replays its press into
+     * the queue here, and the loop's first pass is what dispatches it. */
     if (fos_buttons_start() != ESP_OK) {
         ESP_LOGW(TAG, "GPIO buttons unavailable");
     }
+    /* Render loop runs in both cases: local mode works fully offline. */
+    fos_client_resume();
 
     ESP_LOGI(TAG, "boot complete: wifi=%s ip=%s portal=%s",
              online ? "connected" : "offline", fos_wifi_ip(),

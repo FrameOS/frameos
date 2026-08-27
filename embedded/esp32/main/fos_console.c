@@ -24,6 +24,7 @@
 #include "fos_assets.h"
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
+#include "fos_buttons.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
@@ -222,6 +223,16 @@ static int cmd_status(int argc, char **argv)
            (unsigned long)config->interval_sec, (int)config->deep_sleep,
            (int)config->deep_sleep_on_battery, (unsigned long)config->wake_check_sec,
            (int)config->wake_schedule);
+    if (config->gpio_button_count > 0) {
+        printf("wake_on_button:");
+        int listed = 0;
+        for (size_t i = 0; i < config->gpio_button_count; i++) {
+            if (!fos_buttons_pin_can_wake(config->gpio_buttons[i].pin)) continue;
+            printf("%s GPIO %d (%s)", listed++ ? "," : "", config->gpio_buttons[i].pin,
+                   config->gpio_buttons[i].label);
+        }
+        printf("%s\n", listed ? "" : " none (no button on a wake-capable pad)");
+    }
     if (fos_battery_present()) {
         int battery_mv = 0, battery_pct = -1;
         fos_battery_read(&battery_mv, &battery_pct);
@@ -325,7 +336,8 @@ static int cmd_buttons(int argc, char **argv)
     printf("configured buttons: %u\n", (unsigned)config->gpio_button_count);
     for (size_t i = 0; i < config->gpio_button_count; i++) {
         const fos_gpio_button_t *b = &config->gpio_buttons[i];
-        printf("  GPIO %-2d %-16s level=%d\n", b->pin, b->label, gpio_get_level(b->pin));
+        printf("  GPIO %-2d %-16s level=%d  wakes from deep sleep: %s\n", b->pin, b->label,
+               gpio_get_level(b->pin), fos_buttons_pin_can_wake(b->pin) ? "yes" : "no");
     }
     if (config->gpio_button_count == 0) {
         printf("  (none — set them with: set gpio_buttons \"0:BOOT\\n4:KEY1\")\n");

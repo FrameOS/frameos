@@ -995,6 +995,17 @@ static void ws_poll_logs(void)
     cJSON_Delete(msg);
 }
 
+bool fos_cloud_flush_logs(uint32_t timeout_ms)
+{
+    if (s_log_queue == NULL || !s_ws_client || !s_ws_ready || !s_logs_granted) return false;
+    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    while (uxQueueMessagesWaiting(s_log_queue) > 0) {
+        if (!s_ws_ready || esp_timer_get_time() >= deadline) return false;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    return true;
+}
+
 /* Parse a log line into the {"timestamp"?, "payload"} entry shape log_batch
  * uses; plain lines get the same wrapping the backend uploader applies. */
 static cJSON *log_line_entry(const char *line, double timestamp)

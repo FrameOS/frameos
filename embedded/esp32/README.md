@@ -363,6 +363,58 @@ panel; an explicit `render` command still repaints immediately. Before any
 deep sleep a cloud-enrolled frame also holds the boot open up to 20 s for the
 management socket, so queued commands are not lost to a race with the sleep.
 
+**Wake on button (2026.8.42).** Right before `esp_deep_sleep` every
+registered `gpio_buttons` pin that sits on a wake-capable pad — an RTC IO
+(GPIO 0-21) on the ESP32-S3, GPIO 0-5 on the ESP32-C3 — is armed as a wake
+source (`ext1` any-low on the S3, `esp_deep_sleep_enable_gpio_wakeup` on the
+C3; the RTC_PERIPH domain stays powered so the internal pull-ups hold), next
+to the timer. A press brings the frame back early: the boot notes which pin
+woke it (`fos_buttons_wake_boot`), replays the press to the scene as the usual
+`button` event (`"wake": true`) on the first render pass, and that pass
+renders instead of counting as a command check-in. A key still held at the
+moment of sleep is skipped for that sleep only (any-low would wake the chip
+instantly). `buttons:listening` lists `"wake"` per pin, the `sleep` line
+lists `wakeButtons`, `status` prints `wake_on_button`, and the `metrics`
+sample carries `wakeCause` (`timer` / `button` / `power_on` / `restart` /
+`panic` / `watchdog` / `brownout`) so a battery graph can be read against
+what actually woke the frame. The pure pin arithmetic is `fos_wake.c`, host
+tested by `main/tests/test_fos_wake.c`.
+
+**What a deep-sleep wake costs, and what 2026.8.42 trimmed.** Measured on a
+reTerminal E1004 (1200×1600 Spectra 6) on battery with a 15-minute weather
+scene: a few seconds of boot + Wi-Fi + cloud session, ~23 s scene render,
+~22 s dither + pack, ~30 s panel refresh, then sleep — roughly 80-90 s awake
+per 900 s, with the radio listening the whole time. Three things changed:
+
+- **Wi-Fi modem sleep** (`WIFI_PS_MIN_MODEM`) is on whenever `deep_sleep` or
+  `deep_sleep_on_battery` is set. The radio used to run with power save
+  disabled for the whole wake (~80-100 mA on an S3); DTIM-paced listening
+  costs a little throughput and a few ms of latency, which a frame that spends
+  its wake dithering and waiting on BUSY never notices. Stay-connected frames
+  keep power save off for their local HTTP API.
+- **No SNTP wait on a deep-sleep wake.** The RTC keeps the clock through the
+  sleep (and the wake timer runs on the same oscillator, so the wake-check
+  bookkeeping agrees with it); SNTP now corrects it in the background instead
+  of holding the boot for a round trip — or the full 10 s timeout on a slow
+  pool.
+- **The log queue drains before the CPU halts.** Everything logged after the
+  panel refresh — `render:done`, the `metrics` sample with the battery
+  reading, the `sleep` forecast — is queued for the cloud task's 1 s batch
+  tick, and `esp_deep_sleep` used to come first: a v2026.8.40 frame shipped
+  not one battery sample in 20 hours of cycles. The sleep now waits up to
+  2.5 s for the queue to empty (`fos_cloud_flush_logs`) before announcing the
+  sleep (the hub drops the socket on `sleep`).
+
+The sleep also **holds for a running OTA** (up to 15 min): the
+`notify_update_available` verb only keeps the frame awake 15 s while the
+download takes minutes, so a battery frame used to halt mid-download every
+wake, boot the old image, be told again, and loop — with nothing in the log
+but `ota:cloud downloading`. The cloud OTA now logs `progress` every 512 KB,
+names its failure (`download-failed:<err>@<bytes>/<expected>`,
+`image-rejected:<err>`, `signature-rejected`), and after 3 consecutive
+failures of one offered version stops re-downloading it (`gave-up`, kept in
+RTC memory: a newer release or a power cycle resets it).
+
 `battery_pin` enables battery sensing on an **ADC1** GPIO (ADC2 conflicts with
 Wi-Fi). The reading is divider-corrected (`battery_divider`, default 2.0 for a
 100k/100k tap), mapped to a percentage via a Li-ion curve, and reported in

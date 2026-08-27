@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_app_desc.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_https_ota.h"
@@ -567,6 +568,32 @@ esp_err_t fos_ota_request_check(void)
 
 static volatile bool s_cloud_ota_running = false;
 
+/* Consecutive cloud OTA failures for one offered version, kept across deep
+ * sleeps and software resets (not a power cycle — unplugging is how a person
+ * says "try again"). A frame that fails the same image this many times in a
+ * row stops re-downloading it on every wake: a battery frame redialing a
+ * 3 MB image each cycle only to fail again is the expensive way to report
+ * one problem. Logged as `ota:cloud` status `gave-up` so the cloud shows
+ * why nothing happens; a newer release, or a power cycle, resets it. */
+#define FOS_CLOUD_OTA_MAX_FAILURES 3
+RTC_DATA_ATTR static char s_cloud_ota_failed_version[32];
+RTC_DATA_ATTR static uint8_t s_cloud_ota_failures;
+
+static void cloud_ota_note_failure(const char *version)
+{
+    if (strncmp(s_cloud_ota_failed_version, version, sizeof(s_cloud_ota_failed_version)) != 0) {
+        strlcpy(s_cloud_ota_failed_version, version, sizeof(s_cloud_ota_failed_version));
+        s_cloud_ota_failures = 0;
+    }
+    if (s_cloud_ota_failures < 0xFF) s_cloud_ota_failures++;
+}
+
+static bool cloud_ota_gave_up(const char *version)
+{
+    return strncmp(s_cloud_ota_failed_version, version, sizeof(s_cloud_ota_failed_version)) == 0 &&
+           s_cloud_ota_failures >= FOS_CLOUD_OTA_MAX_FAILURES;
+}
+
 /* Parse the first signature line of a .minisig: base64(ED + keyid8 + sig64).
  * Trusted-comment lines are ignored (the device trusts only the key). */
 static bool parse_minisig(const char *minisig, uint8_t sig_out[64])
@@ -614,16 +641,40 @@ static void cloud_ota_log(const char *status, const char *detail)
     frameos_nim_flush_logs();
 }
 
+/* Progress every 512 KB, as a structured line the cloud Logs panel shows —
+ * "downloading" followed by silence was indistinguishable from a frame that
+ * died, and on a deep-sleep frame that is exactly what used to happen. */
+static void cloud_ota_log_progress(size_t written, size_t expected)
+{
+    char detail[64];
+    if (expected > 0) {
+        snprintf(detail, sizeof(detail), "%u/%u", (unsigned)written, (unsigned)expected);
+    } else {
+        snprintf(detail, sizeof(detail), "%u", (unsigned)written);
+    }
+    cloud_ota_log("progress", detail);
+}
+
 static esp_err_t cloud_ota_download_verify(const char *download_url,
                                            const char *auth_header,
                                            const uint8_t sig[64],
                                            size_t expected_size)
 {
+    /* Every exit below names itself in the frame log: "downloading" followed
+     * by silence is what a deep-sleep frame used to leave behind, and the
+     * cloud Logs panel is the only place an owner can look. */
     const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
-    if (target == NULL) return ESP_ERR_NOT_FOUND;
+    if (target == NULL) {
+        cloud_ota_log("error", "no-ota-slot");
+        return ESP_ERR_NOT_FOUND;
+    }
     if (expected_size > 0 && expected_size > target->size) {
         ESP_LOGE(TAG, "cloud ota: image (%u) exceeds slot (%u)",
                  (unsigned)expected_size, (unsigned)target->size);
+        char detail[64];
+        snprintf(detail, sizeof(detail), "image-exceeds-slot:%u>%u",
+                 (unsigned)expected_size, (unsigned)target->size);
+        cloud_ota_log("error", detail);
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -634,12 +685,18 @@ static esp_err_t cloud_ota_download_verify(const char *download_url,
         .buffer_size = 4096,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) return ESP_ERR_NO_MEM;
+    if (client == NULL) {
+        cloud_ota_log("error", "no-memory");
+        return ESP_ERR_NO_MEM;
+    }
     esp_http_client_set_header(client, "Authorization", auth_header);
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
         esp_http_client_cleanup(client);
+        char detail[80];
+        snprintf(detail, sizeof(detail), "download-connect-failed:%s", esp_err_to_name(err));
+        cloud_ota_log("error", detail);
         return err;
     }
     int64_t content_length = esp_http_client_fetch_headers(client);
@@ -648,6 +705,9 @@ static esp_err_t cloud_ota_download_verify(const char *download_url,
         ESP_LOGW(TAG, "cloud ota: download HTTP %d", status);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
+        char detail[48];
+        snprintf(detail, sizeof(detail), "download-http-%d", status);
+        cloud_ota_log("error", detail);
         return ESP_FAIL;
     }
 
@@ -657,6 +717,9 @@ static esp_err_t cloud_ota_download_verify(const char *download_url,
     if (err != ESP_OK) {
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
+        char detail[80];
+        snprintf(detail, sizeof(detail), "ota-begin-failed:%s", esp_err_to_name(err));
+        cloud_ota_log("error", detail);
         return err;
     }
 
@@ -666,6 +729,7 @@ static esp_err_t cloud_ota_download_verify(const char *download_url,
         esp_ota_abort(ota);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
+        cloud_ota_log("error", "no-memory");
         return ESP_ERR_NO_MEM;
     }
 
@@ -685,6 +749,7 @@ static esp_err_t cloud_ota_download_verify(const char *download_url,
         total += (size_t)r;
         if ((total % (512 * 1024)) < FOS_CLOUD_OTA_CHUNK) {
             ESP_LOGW(TAG, "cloud ota: %u bytes written", (unsigned)total);
+            cloud_ota_log_progress(total, expected_size);
         }
     }
     free(chunk);
@@ -695,6 +760,11 @@ static esp_err_t cloud_ota_download_verify(const char *download_url,
         (expected_size > 0 && total != expected_size)) {
         ESP_LOGE(TAG, "cloud ota: download failed at %u bytes (%s)",
                  (unsigned)total, esp_err_to_name(err));
+        char detail[96];
+        snprintf(detail, sizeof(detail), "download-failed:%s@%u/%u",
+                 err != ESP_OK ? esp_err_to_name(err) : "short-read",
+                 (unsigned)total, (unsigned)expected_size);
+        cloud_ota_log("error", detail);
         esp_ota_abort(ota);
         return err != ESP_OK ? err : ESP_FAIL;
     }
@@ -704,16 +774,25 @@ static esp_err_t cloud_ota_download_verify(const char *download_url,
     if (crypto_ed25519_check(sig, FOS_OTA_SIGNING_PUBKEY, digest, sizeof(digest)) != 0) {
         ESP_LOGE(TAG, "cloud ota: SIGNATURE VERIFICATION FAILED — image rejected");
         esp_ota_abort(ota);
+        cloud_ota_log("error", "signature-rejected");
         return ESP_ERR_INVALID_CRC;
     }
 
     err = esp_ota_end(ota);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "cloud ota: image validation failed: %s", esp_err_to_name(err));
+        char detail[80];
+        snprintf(detail, sizeof(detail), "image-rejected:%s", esp_err_to_name(err));
+        cloud_ota_log("error", detail);
         return err;
     }
     err = esp_ota_set_boot_partition(target);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) {
+        char detail[80];
+        snprintf(detail, sizeof(detail), "set-boot-failed:%s", esp_err_to_name(err));
+        cloud_ota_log("error", detail);
+        return err;
+    }
     ESP_LOGW(TAG, "cloud ota: %u bytes verified and staged in %s; rebooting",
              (unsigned)total, target->label);
     return ESP_OK;
@@ -810,6 +889,15 @@ static esp_err_t cloud_ota_run(void)
         return ESP_OK;
     }
 
+    if (cloud_ota_gave_up(version->valuestring)) {
+        char detail[64];
+        snprintf(detail, sizeof(detail), "%s:%u-failures", version->valuestring,
+                 (unsigned)s_cloud_ota_failures);
+        cloud_ota_log("gave-up", detail);
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
     uint8_t sig[64];
     if (!parse_minisig(minisig->valuestring, sig)) {
         cJSON_Delete(root);
@@ -825,17 +913,20 @@ static esp_err_t cloud_ota_run(void)
         strlcpy(download_url, download->valuestring, sizeof(download_url));
     }
     size_t expected = cJSON_IsNumber(size_item) ? (size_t)size_item->valuedouble : 0;
+    char offered[32];
+    strlcpy(offered, version->valuestring, sizeof(offered));
     cloud_ota_log("downloading", version->valuestring);
     cJSON_Delete(root);
 
     err = cloud_ota_download_verify(download_url, auth, sig, expected);
     if (err == ESP_OK) {
+        s_cloud_ota_failures = 0;
         cloud_ota_log("verified", "rebooting");
         vTaskDelay(pdMS_TO_TICKS(750)); /* flush the log line */
         esp_restart();
     }
-    cloud_ota_log("error", err == ESP_ERR_INVALID_CRC ? "signature-rejected"
-                                                      : "download-failed");
+    /* download_verify named the failure already; here it only counts. */
+    cloud_ota_note_failure(offered);
     return err;
 }
 
