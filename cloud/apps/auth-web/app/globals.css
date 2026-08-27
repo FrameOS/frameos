@@ -1326,6 +1326,31 @@ a.tag-pill--active:hover {
   font-size: 13px;
 }
 
+/* The "Dither" row under the resolution: a checkbox and the panel to
+   simulate, sized like the number fields beside them. */
+.viewport-controls__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.viewport-controls__select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.viewport-controls__select:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
 .json-editor {
   width: 100%;
   border: 1px solid var(--line);
@@ -2591,12 +2616,6 @@ a.stat-tile:hover {
   gap: 6px;
 }
 
-.live-preview-panel__unapplied {
-  color: var(--warning);
-  font-size: 12px;
-  font-weight: 600;
-}
-
 /* "Auto apply" sits at the end of the action row as a small checkbox. */
 .live-preview-panel__auto-apply {
   display: inline-flex;
@@ -3751,10 +3770,23 @@ html.theme-dark .action-card__ghost {
 .ai-create-box__row {
   display: flex;
   gap: 8px;
+  /* The prompt grows downwards; Create stays on its last line. */
+  align-items: flex-end;
 }
 
 .ai-create-box__row .input {
   min-width: 0;
+}
+
+/* One line tall, growing with the text (CreateSceneWithAiBox sets the
+   height). The padding and line-height are what its row maths counts in,
+   and together they add up to the .input min-height of 44px. */
+.ai-create-box__prompt {
+  font: inherit;
+  line-height: 20px;
+  padding: 11px 12px;
+  resize: none;
+  overflow-y: hidden;
 }
 
 @media (max-width: 720px) {

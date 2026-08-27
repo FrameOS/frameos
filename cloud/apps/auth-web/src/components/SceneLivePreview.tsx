@@ -4,9 +4,11 @@ import {
   coerceStateFieldValue,
   evaluateShowIf,
   FrameOSPreview,
+  panelPalettes,
   sceneEventButtons,
   stateFieldShowIfValues,
   type FrameOSScene,
+  type PanelPaletteKey,
   type SceneInfo,
   type StateField,
 } from "frameos-wasm";
@@ -79,6 +81,12 @@ export const AUTO_APPLY_DEBOUNCE_MS = 400;
 export const UI_FLUSH_INTERVAL_MS = 200;
 /** Where "Auto apply" is remembered between editor sessions (this browser). */
 const AUTO_APPLY_STORAGE_KEY = "frameos.preview.autoApply";
+/** Where the panel simulation is remembered (this browser). Empty means off;
+ * anything else is a panelPalettes key. */
+const PANEL_STORAGE_KEY = "frameos.preview.panel";
+/** Which panel the dither checkbox turns on first — the newest colour e-ink,
+ * and what the 13.3" boards FrameOS ships for use. */
+const DEFAULT_PANEL: PanelPaletteKey = "spectra6";
 
 /** "every 42 ms (about 24 times a second)" for the fast-render prompt. */
 export function describeRenderRate(intervalMs: number): string {
@@ -263,6 +271,37 @@ export function SceneLivePreviewPanel({
     }
   }
 
+  // "Dither": show the rendered frame the way an e-ink panel would — the
+  // device's own Floyd-Steinberg, to that panel's measured inks or greys.
+  // A full-colour preview flatters a scene; six inks is what the frame has.
+  // Null is off. Remembered per browser, like Auto apply.
+  const [panel, setPanel] = useState<PanelPaletteKey | null>(null);
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(PANEL_STORAGE_KEY);
+      if (stored && panelPalettes.some((entry) => entry.key === stored)) {
+        setPanel(stored as PanelPaletteKey);
+      }
+    } catch {
+      // Storage blocked: the controls still work for this session.
+    }
+  }, []);
+  // Read when the runtime is (re)booted — a Restart, a Resize or an editor
+  // edit must come back through the same panel.
+  const panelRef = useRef<PanelPaletteKey | null>(panel);
+  panelRef.current = panel;
+  function choosePanel(next: PanelPaletteKey | null) {
+    setPanel(next);
+    // The frame on screen is repainted through the new palette; no re-render
+    // is needed, it is the same picture.
+    previewRef.current?.setPanelPalette(next);
+    try {
+      window.localStorage.setItem(PANEL_STORAGE_KEY, next ?? "");
+    } catch {
+      // See above.
+    }
+  }
+
   // Runtime plumbing: the canvas the worker paints onto, the live preview
   // handle, and what the runtime has reported so far.
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -412,6 +451,7 @@ export function SceneLivePreviewPanel({
         // routes just CORS-blocked hosts through this endpoint.
         proxyUrl: "/api/store/preview-proxy",
         fastMode,
+        panelPalette: panelRef.current,
         onFastRenderRequest: (intervalMs) => {
           if (cancelled) {
             return;
@@ -866,19 +906,21 @@ export function SceneLivePreviewPanel({
           <div className="button-row live-preview-panel__toolbar">
             {visibleFields.length > 0 ? (
               <>
+                {/* The button IS the "unapplied changes" indicator: it
+                    lights up when the form has moved ahead of the runtime
+                    and drops back to a plain action once it has caught up.
+                    A banner here said the same thing and shoved everything
+                    below it down the page on every keystroke. */}
                 <button
-                  className="button button-primary button--small"
+                  className={`button button--small ${
+                    hasUnappliedEdits ? "button-primary" : "button--subtle"
+                  }`}
                   disabled={!runtimeReady}
                   onClick={applyState}
                   type="button"
                 >
                   Apply &amp; render
                 </button>
-                {hasUnappliedEdits ? (
-                  <span className="live-preview-panel__unapplied" role="status">
-                    unapplied changes
-                  </span>
-                ) : null}
                 <button
                   className="button button--subtle button--small"
                   disabled={!runtimeReady}
@@ -1113,6 +1155,32 @@ export function SceneLivePreviewPanel({
           )}
           Rotate
         </button>
+      </div>
+      {/* What the panel would make of this picture. The preview otherwise
+          shows full colour on a backlit screen — flattering, and nothing
+          like six inks on paper. */}
+      <div className="viewport-controls">
+        <label className="viewport-controls__toggle">
+          <input
+            checked={panel !== null}
+            onChange={(event) => choosePanel(event.target.checked ? DEFAULT_PANEL : null)}
+            type="checkbox"
+          />
+          Dither
+        </label>
+        <select
+          aria-label="Panel to simulate"
+          className="viewport-controls__select"
+          disabled={panel === null}
+          onChange={(event) => choosePanel(event.target.value as PanelPaletteKey)}
+          value={panel ?? DEFAULT_PANEL}
+        >
+          {panelPalettes.map((entry) => (
+            <option key={entry.key} value={entry.key}>
+              {entry.label}
+            </option>
+          ))}
+        </select>
       </div>
       {assetsOpen ? (
         <PreviewAssetsDialog

@@ -17,6 +17,7 @@ type PreviewCallbacks = {
   onFastRenderRequest?: (intervalMs: number) => void;
   onAssetsChanged?: () => void;
   fastMode?: boolean;
+  panelPalette?: string | null;
 };
 
 // The wasm runtime is a worker + emscripten bundle — not something jsdom can
@@ -30,6 +31,8 @@ const previews = vi.hoisted(
       setSceneState: ReturnType<typeof vi.fn>;
       selectScene: ReturnType<typeof vi.fn>;
       setFastMode: ReturnType<typeof vi.fn>;
+      setPanelPalette: ReturnType<typeof vi.fn>;
+      render: ReturnType<typeof vi.fn>;
       listAssets: ReturnType<typeof vi.fn>;
       deleteAsset: ReturnType<typeof vi.fn>;
       writeAsset: ReturnType<typeof vi.fn>;
@@ -53,6 +56,7 @@ vi.mock("frameos-wasm", async (importOriginal) => ({
     selectScene = vi.fn();
     attachCanvas = vi.fn();
     setFastMode = vi.fn();
+    setPanelPalette = vi.fn();
     assetsInfo = { mounted: true, persistent: true, root: "/srv/assets", maxBytes: 128 * 1024 * 1024 };
     listAssets = vi.fn(async () => fakeAssets.entries);
     readAsset = vi.fn(async () => new ArrayBuffer(4));
@@ -435,18 +439,22 @@ describe("SceneLivePreviewPanel state-field form", () => {
     // The toolbar precedes the form in the document (top of the column).
     const form = document.querySelector(".live-preview__form")!;
     expect(toolbar!.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByText("unapplied changes")).toBeNull();
+    // Pending edits show as the button turning primary — nothing appears or
+    // disappears in the layout, so the form below never jumps.
+    expect(apply.className).toContain("button--subtle");
+    expect(apply.className).not.toContain("button-primary");
 
     fireEvent.change(screen.getByLabelText("Clock style"), { target: { value: "minimal" } });
-    expect(screen.getByText("unapplied changes")).toBeTruthy();
+    expect(apply.className).toContain("button-primary");
 
     fireEvent.click(apply);
     // Still pending until the runtime confirms the new state…
-    expect(screen.getByText("unapplied changes")).toBeTruthy();
+    expect(apply.className).toContain("button-primary");
     act(() =>
       previews[0]!.options.onState!({ accent: "#d98a5a", showDate: true, style: "minimal" }),
     );
-    expect(screen.queryByText("unapplied changes")).toBeNull();
+    expect(apply.className).toContain("button--subtle");
+    expect(apply.className).not.toContain("button-primary");
   });
 
   it("renders a colour field as a swatch plus hex text, kept in sync both ways", async () => {
@@ -565,6 +573,66 @@ describe("SceneLivePreviewPanel auto apply", () => {
     act(() => vi.advanceTimersByTime(AUTO_APPLY_DEBOUNCE_MS + 50));
     expect(setSceneState).toHaveBeenCalledTimes(2);
     expect(window.localStorage.getItem("frameos.preview.autoApply")).toBe("1");
+  });
+});
+
+describe("SceneLivePreviewPanel panel dither", () => {
+  async function open() {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() =>
+      previews[0]!.options.onReady!({
+        currentSceneId: "scene-runtime-1",
+        scenes: [{ id: "scene-runtime-1", name: "Clock", refreshInterval: 60 }],
+      }),
+    );
+  }
+
+  it("is off by default, with the panel picker inert until it is on", async () => {
+    await open();
+
+    const dither = screen.getByRole("checkbox", { name: "Dither" }) as HTMLInputElement;
+    const picker = screen.getByRole("combobox", {
+      name: "Panel to simulate",
+    }) as HTMLSelectElement;
+    expect(dither.checked).toBe(false);
+    expect(picker.disabled).toBe(true);
+    expect(previews[0]!.options.panelPalette ?? null).toBeNull();
+  });
+
+  it("shows the frame through a panel, remembers it, and repaints without re-rendering", async () => {
+    await open();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Dither" }));
+    const picker = screen.getByRole("combobox", {
+      name: "Panel to simulate",
+    }) as HTMLSelectElement;
+    expect(picker.disabled).toBe(false);
+    // The checkbox alone picks a panel — the newest colour e-ink.
+    expect(picker.value).toBe("spectra6");
+    expect(previews[0]!.setPanelPalette).toHaveBeenLastCalledWith("spectra6");
+
+    fireEvent.change(picker, { target: { value: "fourGray" } });
+    expect(previews[0]!.setPanelPalette).toHaveBeenLastCalledWith("fourGray");
+    // Repainted from the frame already in hand: no re-render was asked for.
+    expect(previews[0]!.render).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem("frameos.preview.panel")).toBe("fourGray");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Dither" }));
+    expect(previews[0]!.setPanelPalette).toHaveBeenLastCalledWith(null);
+    expect(window.localStorage.getItem("frameos.preview.panel")).toBe("");
+  });
+
+  it("boots a restarted runtime through the panel it was left on", async () => {
+    window.localStorage.setItem("frameos.preview.panel", "blackWhite");
+    await open();
+
+    expect(
+      (screen.getByRole("checkbox", { name: "Dither" }) as HTMLInputElement).checked,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    await waitFor(() => expect(previews).toHaveLength(2));
+    expect(previews[1]!.options.panelPalette).toBe("blackWhite");
   });
 });
 

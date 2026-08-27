@@ -2,6 +2,7 @@
 // The worker loads the emscripten-built scene runtime (frameos.js/frameos.wasm)
 // and drives renders; this class owns the worker lifecycle, paints frames onto
 // a canvas, and exposes events/state as callbacks.
+import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
 import type { FrameOSScene, PreviewAssetEntry, PreviewAssetsInfo, PreviewFrame, SceneInfo } from './types'
 
 export interface FrameOSPreviewOptions {
@@ -37,6 +38,10 @@ export interface FrameOSPreviewOptions {
   /** Set to false to run with an empty in-memory /srv/assets instead of the
    * browser's persistent folder. */
   browserAssets?: boolean
+  /** Show frames the way an e-ink panel would: dithered to that panel's
+   * inks or greys (see ./dither). Display only — the scene renders in full
+   * colour either way. Null (the default) paints the frame as rendered. */
+  panelPalette?: PanelPaletteKey | null
   onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null) => void
   onFrame?: (frame: PreviewFrame) => void
   onState?: (state: Record<string, unknown>) => void
@@ -82,12 +87,15 @@ export class FrameOSPreview {
   currentSceneId: string | null = null
   /** Whether renders may run faster than once per second. */
   fastMode: boolean
+  /** The panel frames are shown through, or null for the true colours. */
+  panelPalette: PanelPaletteKey | null
 
   constructor(options: FrameOSPreviewOptions) {
     this.options = options
     this.canvas = options.canvas ?? null
     this.currentSceneId = options.sceneId ?? null
     this.fastMode = Boolean(options.fastMode)
+    this.panelPalette = options.panelPalette ?? null
 
     this.worker = new Worker(options.workerUrl, { type: 'module' })
     this.worker.onerror = (event: ErrorEvent) => {
@@ -169,6 +177,14 @@ export class FrameOSPreview {
     this.paint()
   }
 
+  /** Show frames through a panel's palette (or null for true colour), and
+   * repaint the frame already on screen — no re-render needed, the picture
+   * is the same one. */
+  setPanelPalette(palette: PanelPaletteKey | null): void {
+    this.panelPalette = palette
+    this.paint()
+  }
+
   private paint(): void {
     const canvas = this.canvas
     const frame = this.pendingFrame
@@ -185,7 +201,17 @@ export class FrameOSPreview {
     if (!context) {
       return
     }
-    context.putImageData(new ImageData(new Uint8ClampedArray(frame.buffer), frame.width, frame.height), 0, 0)
+    const panel = panelPaletteFor(this.panelPalette)
+    // A view over the frame buffer when painting it as rendered; a copy when
+    // dithering, so the kept frame stays full colour and switching panels
+    // (or repainting on attach) never dithers an already dithered picture.
+    const pixels = panel
+      ? new Uint8ClampedArray(frame.buffer).slice()
+      : new Uint8ClampedArray(frame.buffer)
+    if (panel) {
+      ditherFrame(pixels, frame.width, frame.height, panel)
+    }
+    context.putImageData(new ImageData(pixels, frame.width, frame.height), 0, 0)
   }
 
   /** Force a render now. */

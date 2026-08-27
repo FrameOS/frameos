@@ -131,7 +131,7 @@ describe("MyScenesView", () => {
     ).toBe("true");
   });
 
-  it("splits the unfiltered grid into Public and Private sections", () => {
+  it("splits the unfiltered grid into Private and Public sections", () => {
     render(
       <MyScenesView
         grouped
@@ -146,17 +146,17 @@ describe("MyScenesView", () => {
       document.querySelectorAll(".scene-group__heading"),
     );
     expect(headings.map((heading) => heading.textContent)).toEqual([
-      "Public scenes2",
       "Private scenes1",
+      "Public scenes2",
     ]);
-    // Public first, then private; a pulled scene stays in its visibility
-    // group but its pill says "Pulled" rather than a visibility that no
-    // longer applies.
+    // The owner's own drafts first, then what the world sees; a pulled scene
+    // stays in its visibility group but its pill says "Pulled" rather than a
+    // visibility that no longer applies.
     const cards = screen.getAllByRole("link");
     expect(cards.map((card) => card.textContent?.slice(0, 5))).toEqual([
+      "Sunri",
       "Tides",
       "Storm",
-      "Sunri",
     ]);
     expect(screen.getByRole("link", { name: /Storm/ }).textContent).toContain(
       "Pulled",

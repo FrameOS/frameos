@@ -19,7 +19,7 @@ describe("StoreActionCards", () => {
 
     fireEvent.click(ai);
     expect(ai.getAttribute("aria-pressed")).toBe("true");
-    const prompt = screen.getByLabelText("Describe the scene you want") as HTMLInputElement;
+    const prompt = screen.getByLabelText("Describe the scene you want") as HTMLTextAreaElement;
     expect(prompt.form?.getAttribute("action")).toBe("/my-scenes/new");
     // The card already carries the heading; the form is just its row.
     expect(screen.queryByRole("heading", { name: "Create a scene with AI" })).toBeNull();

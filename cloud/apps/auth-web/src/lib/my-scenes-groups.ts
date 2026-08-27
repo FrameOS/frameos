@@ -1,6 +1,7 @@
 // The visibility groups of the unfiltered "My scenes" list, in display
-// order: what the world sees first, then what only the owner sees. Groups
-// without scenes are skipped.
+// order: the owner's own drafts first — this is their page, and a private
+// scene is the one they came back to work on — then what the world sees.
+// Groups without scenes are skipped.
 //
 // A plain module on purpose: the server page (app/my-scenes/page.tsx) groups
 // its table with this, and MyScenesView ("use client") groups its grid.
@@ -9,8 +10,8 @@
 // on the client") and every visit to /my-scenes was a 500 in production —
 // renderToStaticMarkup in the integration test never enforces the boundary.
 export const myScenesGroups = [
-  { key: "public", title: "Public scenes" },
   { key: "private", title: "Private scenes" },
+  { key: "public", title: "Public scenes" },
 ] as const;
 
 export type MyScenesGroupKey = (typeof myScenesGroups)[number]["key"];

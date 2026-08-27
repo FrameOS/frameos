@@ -5,6 +5,7 @@
 // `workerUrl: '<mount>/preview-worker.js'`. Version tracks the FrameOS
 // release the runtime was built from (versions.json in the FrameOS repo).
 export { FrameOSPreview, createFrameOSPreview, type FrameOSPreviewOptions } from './preview'
+export { ditherFrame, panelPalettes, panelPaletteFor, type PanelPaletteKey } from './dither'
 export { mountFrameOSManager, type FrameOSManagerHandle, type FrameOSManagerOptions } from './manager'
 export {
   coerceStateFieldValue,
