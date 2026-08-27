@@ -299,6 +299,25 @@ size_t fos_psram_largest_free_block(void)
 
 static void *s_nim_emergency_reserve = NULL;
 static volatile bool s_nim_emergency_used = false;
+/* The request that consumed the reserve, and the heap it met: read back by
+ * the Nim render loop (recoverEmergencyReserve) for its log line. Recorded
+ * here, not logged here — this runs inside a failed malloc. */
+static size_t s_nim_emergency_need = 0;
+static size_t s_nim_emergency_free_at = 0;
+static size_t s_nim_emergency_largest_at = 0;
+
+/* Internal SRAM for the dither's working rows (utils/dither.nim). NULL when
+ * internal RAM is too fragmented; the caller falls back to PSRAM. */
+void *fos_nim_internal_alloc(size_t size)
+{
+    if (size == 0) return NULL;
+    return heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
+void fos_nim_internal_free(void *p)
+{
+    if (p != NULL) heap_caps_free(p);
+}
 
 void fos_nim_arm_emergency_reserve(void)
 {
@@ -313,18 +332,34 @@ void fos_nim_arm_emergency_reserve(void)
     s_nim_emergency_used = false;
 }
 
-bool fos_nim_release_emergency_reserve(void)
+bool fos_nim_release_emergency_reserve(size_t need)
 {
     void *reserve = s_nim_emergency_reserve;
+    if (!s_nim_emergency_used) {
+        /* First failure of this pass is the one worth naming. */
+        s_nim_emergency_need = need;
+        s_nim_emergency_free_at = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_nim_emergency_largest_at =
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
     s_nim_emergency_used = true;
     if (reserve == NULL) {
         return false;
     }
     s_nim_emergency_reserve = NULL;
     heap_caps_free(reserve);
-    ESP_LOGW("fos_nim", "heap exhausted: released %u byte emergency reserve",
-             (unsigned)FOS_NIM_EMERGENCY_RESERVE_BYTES);
+    ESP_LOGW("fos_nim", "heap exhausted: released %u byte emergency reserve for a %u byte "
+                        "request (psram free=%u largest=%u)",
+             (unsigned)FOS_NIM_EMERGENCY_RESERVE_BYTES, (unsigned)need,
+             (unsigned)s_nim_emergency_free_at, (unsigned)s_nim_emergency_largest_at);
     return true;
+}
+
+void fos_nim_emergency_reserve_detail(size_t *need, size_t *free_at, size_t *largest_at)
+{
+    if (need) *need = s_nim_emergency_need;
+    if (free_at) *free_at = s_nim_emergency_free_at;
+    if (largest_at) *largest_at = s_nim_emergency_largest_at;
 }
 
 bool fos_nim_emergency_reserve_used(void)

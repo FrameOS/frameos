@@ -419,6 +419,39 @@ names its failure (`download-failed:<err>@<bytes>/<expected>`,
 failures of one offered version stops re-downloading it (`gave-up`, kept in
 RTC memory: a newer release or a power cycle resets it).
 
+**The follow-ups the same log asked for (2026.8.42).**
+
+- **Dither + pack.** `forEachPaletteDithered` (utils/dither.nim) now copies the
+  palette into flat int arrays and searches it inline, walks its error rows
+  through unchecked pointers, reads a canvas row straight from the buffer
+  (`rgb565ToRgbx` on a 565 canvas), and keeps those rows in internal SRAM
+  (`fos_nim_internal_alloc`, PSRAM seq fallback). The four pack procs in
+  embedded_main.nim compile with bounds/overflow/range checks off and GCC's
+  `optimize("O2")` attribute while the rest of the image stays `-Os`. Output
+  is bit-identical (the reference-equivalence suite in
+  utils/tests/test_dither.nim covers RGBX, 565 and views); the on-device gain
+  is read from the next `dither+pack` log line — a laptop runs the old loop
+  at 40 ns/pixel, so the 11 µs/pixel on the S3 is the build, not the maths.
+- **Service settings survive a reboot.** Cloud-only frames keep the six
+  groups in NVS (`svc_cache` / `svc_etag` / `svc_at`, same namespace as the
+  bearer token) and apply them before the first render
+  (`fos_settings_boot_apply_cache`, `settings:services origin=cache`). A
+  deep-sleep frame used to render its only pass with no service settings —
+  `ready` asks for the pull after the pass has started, and the pass that
+  would pull never comes — and every boot that did pull paid a full TLS
+  handshake for a body that rarely changes. `ready` now skips the pull while
+  the copy is under 6 h old; the queued `refresh_service_settings` nudge, a
+  `403 insufficient_scope`, a demotion and `factory-reset` all clear or
+  refresh it.
+- **`cloud:session_ready` says how the previous session ended**
+  (`previousClose: {how, code}`, plus `session` count and `uptimeSeconds`):
+  the E1004 redialed 17 s into some wakes with nothing logged between, and
+  the close code only ever went to the USB console.
+- **The emergency-reserve line names the request**: `a N-byte request with
+  F bytes free, largest block L` — a shortage and a fragmentation dip look
+  the same without it. The 1200×1600 Weather render dips every pass with
+  2.3 MB free before it; the size is what identifies the allocation.
+
 `battery_pin` enables battery sensing on an **ADC1** GPIO (ADC2 conflicts with
 Wi-Fi). The reading is divider-corrected (`battery_divider`, default 2.0 for a
 100k/100k tap), mapped to a percentage via a Li-ion curve, and reported in

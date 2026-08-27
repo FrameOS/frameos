@@ -623,6 +623,15 @@ its copy may be stale. The nudge is advisory and expires quickly (reference
 provider: 5 minutes), because a frame that was offline when the owner saved a
 key re-fetches at `ready` anyway.
 
+A device may keep its last fetched copy across reboots. The ESP32 firmware
+(**2026.8.42**+) stores the six groups in NVS next to its bearer token and
+applies them before the first render, so a deep-sleeping frame — whose only
+render pass runs before its session's `ready` could ask for a fetch — renders
+with its keys, and skips the fetch at `ready` while the copy is under the 6 h
+interval (the nudge and the 403 still force one; a revocation, a demotion and a
+factory reset delete the copy). The device logs `settings:services` with
+`origin: "cache"` when it started from that copy.
+
 ## Provisioning
 
 ### SD card image personalization

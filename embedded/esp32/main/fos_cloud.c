@@ -899,6 +899,17 @@ static volatile bool s_logs_granted = false;
 static volatile bool s_metrics_granted = false;
 static QueueHandle_t s_log_queue = NULL;
 
+/* How the previous session of this boot ended, reported on the next
+ * `cloud:session_ready` line. The close code is otherwise a printf on the
+ * USB console — and a battery frame's console is unplugged. The E1004 log
+ * of 2026-08-27 shows two session_ready lines 17 s apart in some wakes with
+ * nothing between them: a redial per wake whose cause (hub 4409
+ * superseded / 1013 slow consumer / 1006 no close frame / a dial that
+ * failed) this field now names. */
+static int s_prev_close_code = 0;
+static const char *s_prev_close_how = NULL;
+static uint32_t s_session_count = 0;
+
 static void ws_backoff_reset(void);
 static void ws_ack(const cJSON *id, bool ok, const char *error);
 static cJSON *log_line_entry(const char *line, double timestamp);
@@ -2463,17 +2474,29 @@ static void ws_handle_message(const char *data, size_t len)
          * fires before the session exists and the tap drops it, so without
          * this an OTA reboot never echoes what it now runs. */
         const esp_partition_t *running_part = esp_ota_get_running_partition();
-        char event[256];
+        s_session_count++;
+        char previous[96] = "";
+        if (s_prev_close_how != NULL) {
+            snprintf(previous, sizeof(previous),
+                     ",\"previousClose\":{\"how\":\"%s\",\"code\":%d}",
+                     s_prev_close_how, s_prev_close_code);
+        }
+        char event[352];
         snprintf(event, sizeof(event),
                  "{\"event\":\"cloud:session_ready\",\"source\":\"esp32\","
                  "\"logs\":%s,\"metrics\":%s,\"serviceSettings\":%s,"
-                 "\"version\":\"%s\",\"bootedFrom\":\"%s\"}",
+                 "\"version\":\"%s\",\"bootedFrom\":\"%s\",\"session\":%lu,"
+                 "\"uptimeSeconds\":%lld%s}",
                  logs_granted ? "true" : "false",
                  metrics_granted ? "true" : "false",
                  service_settings_granted ? "true" : "false",
                  esp_app_get_description()->version,
-                 running_part ? running_part->label : "?");
+                 running_part ? running_part->label : "?",
+                 (unsigned long)s_session_count,
+                 (long long)(esp_timer_get_time() / 1000000), previous);
         frameos_nim_log_hook(event);
+        s_prev_close_how = NULL;
+        s_prev_close_code = 0;
     } else if (strcmp(type, "get_state") == 0) {
         if (!ws_send_state(id)) ws_ack(id, false, "runtime_busy");
         else ws_ack(id, true, NULL);
@@ -2662,6 +2685,10 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
                          data->error_handle.esp_ws_handshake_status_code == 403)) {
                 ws_note_auth_rejected("handshake 401/403");
             }
+            if (s_prev_close_how == NULL) {
+                s_prev_close_code = data ? (int)data->error_handle.esp_ws_handshake_status_code : -1;
+                s_prev_close_how = "dial-failed";
+            }
             /* The transport logs are silenced (see ws_start) and INFO is
              * compiled out, so this WARN is the only trace of WHY a dial
              * failed — one line per attempt, paced by the backoff. */
@@ -2684,6 +2711,8 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
             printf("ws: %s (close code %d)\n",
                    event_id == WEBSOCKET_EVENT_CLOSED ? "closed" : "disconnected",
                    data ? (int)data->close_status_code : -1);
+            s_prev_close_code = data ? (int)data->close_status_code : -1;
+            s_prev_close_how = event_id == WEBSOCKET_EVENT_CLOSED ? "closed" : "disconnected";
             s_ws_ready = false;
             s_logs_granted = false;
             s_metrics_granted = false;
@@ -2989,6 +3018,7 @@ static void cloud_demote(const char *reason)
     nvs_erase_key_quiet("cloud_fid");
     nvs_erase_key_quiet("cloud_ws");
     nvs_erase_key_quiet("cloud_wsurl");
+    fos_settings_forget_cache(); /* the provider's service settings go with the link */
     crypto_wipe(s_access_token, sizeof(s_access_token));
     memset(s_frame_id, 0, sizeof(s_frame_id));
     memset(s_ws_path, 0, sizeof(s_ws_path));

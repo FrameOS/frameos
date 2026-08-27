@@ -38,6 +38,7 @@
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
+#include "fos_settings.h"
 #include "fos_status_screen.h"
 #include "fos_tz.h"
 #include "fos_mem.h"
@@ -360,6 +361,10 @@ void app_main(void)
     if (fos_cloud_start() != ESP_OK) {
         ESP_LOGW(TAG, "cloud client unavailable");
     }
+    /* The service settings the last pull left in NVS, so the first pass —
+     * on a deep-sleep frame the only one — renders with its API keys. After
+     * fos_cloud_start: the enrolled state it gates on is loaded there. */
+    fos_settings_boot_apply_cache();
 
     if (online) {
         frameos_nim_set_log_upload_enabled(true);

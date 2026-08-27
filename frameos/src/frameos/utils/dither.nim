@@ -1,5 +1,14 @@
 import math, pixie
 
+when defined(frameosEmbedded):
+  # The ESP32's internal SRAM, for the few KB of working rows the streamed
+  # dither touches four times per pixel: a seq would land in PSRAM through
+  # the patched allocator, behind the same cache the canvas and the packed
+  # buffer are streaming through. nil when internal RAM has no room — the
+  # seq path below is the fallback, never a failure.
+  proc fosNimInternalAlloc(size: csize_t): pointer {.importc: "fos_nim_internal_alloc", cdecl.}
+  proc fosNimInternalFree(p: pointer) {.importc: "fos_nim_internal_free", cdecl.}
+
 # 4-color screen colors, as presented by the manufacturer
 const desaturated4ColorPalette* = @[
   (0, 0, 0),
@@ -155,24 +164,83 @@ template forEachPaletteDithered*(
 ) =
   ## Runs `body` for every pixel in scan order with `x`, `y` and the
   ## palette `index` the dither chose for it.
+  ##
+  ## This is the hot loop of every ESP32 render (1.92 M pixels on a 13.3"
+  ## panel) and it is compiled there with `--opt:size` and checks on, so
+  ## the shape is deliberately flat: the palette is copied into three plain
+  ## int arrays and searched inline (no tuple returns, no seq-of-tuples
+  ## indexing), the error rows are walked through unchecked pointers, and a
+  ## row is read straight out of the canvas buffer — `rgb565ToRgbx` on a
+  ## 565 canvas, the RGBX word otherwise — instead of one `unsafe[]` call
+  ## (format branch + `dataIndex`) per pixel. The arithmetic is untouched:
+  ## first-minimum Manhattan search, `div 16` error split clipped into the
+  ## neighbour at every step, threshold jitter on the pick only — so the
+  ## packed bytes are the same as before on every panel
+  ## (utils/tests/test_dither.nim checks that against the in-place
+  ## reference, on RGBX, 565 and views). Measured on the 2026-08-27 E1004
+  ## log the old loop cost ~22 s per 1200x1600 render, half the awake time
+  ## of every battery wake.
   block:
     let
       ditherWidth = image.width
       ditherHeight = image.height
     if ditherWidth > 0 and ditherHeight > 0:
+      let paletteLen = palette.len
+      var
+        palRSeq = newSeq[int](paletteLen)
+        palGSeq = newSeq[int](paletteLen)
+        palBSeq = newSeq[int](paletteLen)
+      for i in 0 ..< paletteLen:
+        palRSeq[i] = palette[i][0]
+        palGSeq[i] = palette[i][1]
+        palBSeq[i] = palette[i][2]
+      let
+        palRs = cast[ptr UncheckedArray[int]](palRSeq[0].addr)
+        palGs = cast[ptr UncheckedArray[int]](palGSeq[0].addr)
+        palBs = cast[ptr UncheckedArray[int]](palBSeq[0].addr)
       # Adjusted RGB of the current row and the next: the pixel values after
       # the error already pushed into them, which is what the in-place
       # version stored back into the image.
       var
-        curRow = newSeq[uint8](ditherWidth * 3)
-        nextRow = newSeq[uint8](ditherWidth * 3)
-      template loadRow(row: var seq[uint8], ry: int) =
-        for rx in 0 ..< ditherWidth:
-          let p = image.unsafe[rx, ry]
-          row[rx * 3 + 0] = p.r
-          row[rx * 3 + 1] = p.g
-          row[rx * 3 + 2] = p.b
-      template push(row: var seq[uint8], rx: int, er, eg, eb: int, weight: int) =
+        rowsInternal: pointer = nil
+        curRowSeq: seq[uint8]
+        nextRowSeq: seq[uint8]
+        curRow: ptr UncheckedArray[uint8]
+        nextRow: ptr UncheckedArray[uint8]
+      when defined(frameosEmbedded):
+        rowsInternal = fosNimInternalAlloc(csize_t(ditherWidth * 6))
+      if rowsInternal != nil:
+        curRow = cast[ptr UncheckedArray[uint8]](rowsInternal)
+        nextRow = cast[ptr UncheckedArray[uint8]](cast[uint](rowsInternal) + uint(ditherWidth * 3))
+      else:
+        curRowSeq = newSeq[uint8](ditherWidth * 3)
+        nextRowSeq = newSeq[uint8](ditherWidth * 3)
+        curRow = cast[ptr UncheckedArray[uint8]](curRowSeq[0].addr)
+        nextRow = cast[ptr UncheckedArray[uint8]](nextRowSeq[0].addr)
+      defer:
+        when defined(frameosEmbedded):
+          if rowsInternal != nil: fosNimInternalFree(rowsInternal)
+      let is565 = image.isRgb565
+      template loadRow(row: ptr UncheckedArray[uint8], ry: int) =
+        # Rows are contiguous within themselves for owners and views alike
+        # (`dataIndex` = origin + stride * y + x), so one base index per row
+        # and a plain walk is exactly what `unsafe[rx, ry]` would address.
+        let rowStart = image.dataIndex(0, ry)
+        if is565:
+          let src = image.data16
+          for rx in 0 ..< ditherWidth:
+            let p = rgb565ToRgbx(src[rowStart + rx])
+            row[rx * 3 + 0] = p.r
+            row[rx * 3 + 1] = p.g
+            row[rx * 3 + 2] = p.b
+        else:
+          let src = image.data
+          for rx in 0 ..< ditherWidth:
+            let p = src[rowStart + rx]
+            row[rx * 3 + 0] = p.r
+            row[rx * 3 + 1] = p.g
+            row[rx * 3 + 2] = p.b
+      template push(row: ptr UncheckedArray[uint8], rx: int, er, eg, eb: int, weight: int) =
         row[rx * 3 + 0] = clip8(row[rx * 3 + 0].int + (er * weight div 16))
         row[rx * 3 + 1] = clip8(row[rx * 3 + 1].int + (eg * weight div 16))
         row[rx * 3 + 2] = clip8(row[rx * 3 + 2].int + (eb * weight div 16))
@@ -181,6 +249,7 @@ template forEachPaletteDithered*(
         let hasNext = yy + 1 < ditherHeight
         if hasNext:
           loadRow(nextRow, yy + 1)
+        let rowIndex = yy * ditherWidth
         for xx in 0 ..< ditherWidth:
           let
             imageR = curRow[xx * 3 + 0].int
@@ -191,15 +260,25 @@ template forEachPaletteDithered*(
             # value, so the mean stays exact (threshold modulation).
             jitter =
               if ditherJitterAmp > 0:
-                ditherJitterFor(yy * ditherWidth + xx, ditherJitterAmp)
+                ditherJitterFor(rowIndex + xx, ditherJitterAmp)
               else:
                 0
-            (palIndex, palR, palG, palB) = closestPalette(palette,
-              clip8(imageR + jitter).int, clip8(imageG + jitter).int,
-              clip8(imageB + jitter).int)
-            errorR = imageR - palR
-            errorG = imageG - palG
-            errorB = imageB - palB
+            pickR = clip8(imageR + jitter).int
+            pickG = clip8(imageG + jitter).int
+            pickB = clip8(imageB + jitter).int
+          # closestPalette, inlined: first minimum of the Manhattan distance.
+          var
+            palIndex = 0
+            bestDistance = high(int)
+          for i in 0 ..< paletteLen:
+            let distance = abs(pickR - palRs[i]) + abs(pickG - palGs[i]) + abs(pickB - palBs[i])
+            if distance < bestDistance:
+              bestDistance = distance
+              palIndex = i
+          let
+            errorR = imageR - palRs[palIndex]
+            errorG = imageG - palGs[palIndex]
+            errorB = imageB - palBs[palIndex]
           block:
             let
               x {.inject.} = xx
