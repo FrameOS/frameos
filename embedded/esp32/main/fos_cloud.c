@@ -910,6 +910,16 @@ static int s_prev_close_code = 0;
 static const char *s_prev_close_how = NULL;
 static uint32_t s_session_count = 0;
 
+/* The `,"previousClose":{…}` fragment for session_ready, "" for the first
+ * session of a boot. */
+static void ws_previous_close_json(char *out, size_t out_len)
+{
+    out[0] = '\0';
+    if (s_prev_close_how == NULL) return;
+    snprintf(out, out_len, ",\"previousClose\":{\"how\":\"%s\",\"code\":%d}",
+             s_prev_close_how, s_prev_close_code);
+}
+
 static void ws_backoff_reset(void);
 static void ws_ack(const cJSON *id, bool ok, const char *error);
 static cJSON *log_line_entry(const char *line, double timestamp);
@@ -2475,12 +2485,8 @@ static void ws_handle_message(const char *data, size_t len)
          * this an OTA reboot never echoes what it now runs. */
         const esp_partition_t *running_part = esp_ota_get_running_partition();
         s_session_count++;
-        char previous[96] = "";
-        if (s_prev_close_how != NULL) {
-            snprintf(previous, sizeof(previous),
-                     ",\"previousClose\":{\"how\":\"%s\",\"code\":%d}",
-                     s_prev_close_how, s_prev_close_code);
-        }
+        char previous[96];
+        ws_previous_close_json(previous, sizeof(previous));
         char event[352];
         snprintf(event, sizeof(event),
                  "{\"event\":\"cloud:session_ready\",\"source\":\"esp32\","
