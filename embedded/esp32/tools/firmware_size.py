@@ -4,11 +4,13 @@
 Two subcommands:
 
   measure   Run after `idf.py build`. Reads the linker map through
-            `esp_idf_size` (shipped with ESP-IDF's python env), decodes the
-            ROT13-mangled nimcache object names, buckets every object into a
-            subsystem (Nim apps, Nim core, QuickJS, pixie, Wi-Fi, TLS, ...)
-            and writes one JSON document next to the binaries. Runs from
-            ci_build_image.sh so every CI and release build gets one.
+            `esp_idf_size` (shipped with ESP-IDF's python env), demangles the
+            nimcache object names, buckets every object into a subsystem (Nim
+            apps, Nim core, QuickJS, pixie, Wi-Fi, TLS, ...), drills each
+            subsystem down one level (core by directory, apps by app, packages
+            by package, ESP-IDF by archive) and writes one JSON document next
+            to the binaries. Runs from ci_build_image.sh so every CI and
+            release build gets one.
 
   render    Turn one or more `measure` documents into the Markdown that CI
             posts as the sticky PR comment, diffed against a baseline — the
@@ -32,13 +34,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-SCHEMA = 1
+SCHEMA = 2
 COMMENT_MARKER = "<!-- frameos-esp32-firmware-size -->"
 
 NIM_OBJECT_SUFFIX = ".nim.c.obj"
-# `esp_idf_size --files` keys look like `libframeos_nim.a:@z..@fsenzrbf@fvagrecergre.nim.c.obj`.
-# Nim's mangled module path (`@m..@sframeos@sinterpreter`) is ROT13-encoded in
-# the map — the `.nim.c.obj` suffix is not — so decode only the path part.
+NIM_ARCHIVE = "libframeos_nim.a"
+# `esp_idf_size --files` keys look like `libframeos_nim.a:@m..@sframeos@sinterpreter.nim.c.obj`
+# — or `...:@z..@fsenzrbf@fvagrecergre.nim.c.obj` when the Nim build ROT13s the
+# mangled path (see _decode_name). The `.nim.c.obj` suffix is never mangled.
 _NIM_PATH_RE = re.compile(r"^(?P<archive>[^:]+):(?P<path>.+)" + re.escape(NIM_OBJECT_SUFFIX) + r"$")
 
 # Subsystem buckets, matched in order against (archive, decoded object path).
@@ -117,6 +120,25 @@ GROUP_RULES: list[tuple[str, Any]] = [
 OTHER_GROUP = "ESP-IDF misc"
 
 TOP_FILES = 150
+# Rows kept per subsystem in the detail document. Well above what the comment
+# renders, so `--detail-top` can be raised without re-measuring.
+DETAIL_KEYS = 40
+# ...and the remainder is folded into one "other" row so every table adds up.
+DETAIL_OTHER = "(everything else)"
+# The subsystems a FrameOS change actually moves are listed in full — every row
+# stored and every row rendered, no `--detail-top` cut and no folded remainder.
+# The rest (Wi-Fi blobs, TLS, libc, the 80-odd panel drivers) stay capped:
+# nothing we write lands there, so the long tail is noise in the PR comment.
+DETAIL_FULL_GROUPS = frozenset(
+    {
+        "FrameOS core (Nim)",
+        "FrameOS apps (Nim)",
+        "pixie",
+        "Nim stdlib",
+        "ESP-IDF misc",
+        "fos_* firmware shell (C)",
+    }
+)
 
 
 def _decode_name(key: str) -> tuple[str, str]:
@@ -134,8 +156,22 @@ def _decode_name(key: str) -> tuple[str, str]:
     if "(" in archive:
         archive, _, prefix = archive.partition("(")
         encoded = prefix + encoded
-    path = codecs.decode(encoded, "rot13")
-    # Nim mangling: `@m` prefixes the module, `@s` is a path separator.
+    # Nim mangles module paths as `@m<relative/path>` with `@s` for the
+    # separator (compiler/modulepaths.nim). Whether that mangled name is then
+    # ROT13-scrambled on disk depends on the Nim build: the official 2.2.4
+    # tarball used by the Docker/CI image emits plain `@m..@sframeos@s...`,
+    # while nixpkgs' Nim (the flox dev shell) applies mangleModuleName's rot13
+    # and emits `@z..@fsenzrbf@f...`. ROT13 is its own inverse, so decoding
+    # unconditionally would *scramble* the CI names and leave every marker
+    # unmatched — which silently dumped pixie, the Nim stdlib, the apps and
+    # the embedded font into the "FrameOS core (Nim)" bucket. Only decode
+    # names that are actually scrambled; `@z` is ROT13 of the `@m` marker.
+    path = codecs.decode(encoded, "rot13") if encoded.startswith("@z") else encoded
+    return archive, f"{_normalize_nim_path(path)}.nim"
+
+
+def _normalize_nim_path(path: str) -> str:
+    """Turn a Nim-mangled module path into a stable, readable source path."""
     path = path.replace("@m", "").replace("@s", "/")
     # Collapse the `../../../..` climb out of the nimcache directory, and
     # rewrite toolchain locations so names do not change when the Nim
@@ -144,7 +180,7 @@ def _decode_name(key: str) -> tuple[str, str]:
     path = re.sub(r"^.*?/nim/lib/", "nim/lib/", path)
     path = re.sub(r"^.*?\.nimble/pkgs2?/", "pkgs/", path)
     path = re.sub(r"^pkgs/([^/]+?)-[0-9a-f]{40}/", r"pkgs/\1/", path)
-    return archive, f"{path}.nim"
+    return path
 
 
 def _group_for(archive: str, name: str) -> str:
@@ -152,6 +188,71 @@ def _group_for(archive: str, name: str) -> str:
         if rule(archive, name):
             return label
     return OTHER_GROUP
+
+
+def _nim_detail_key(group: str, name: str) -> str:
+    """One readable row label for a Nim object inside its subsystem.
+
+    Each subsystem is split along the axis that is actually actionable for it:
+    apps by app, packages by package, pixie and the stdlib by module, the core
+    by directory (`frameos/js_runtime`, `frameos/utils`, ...) so the two big
+    clusters do not drown in single files.
+    """
+    parts = name.split("/")
+    if group == "FrameOS apps (Nim)":
+        # apps/data/icalJson/ical.nim -> apps/data/icalJson
+        return "/".join(parts[:3]) if len(parts) > 3 else name
+    if group == "pixie":
+        # pkgs/pixie-6.1.0/pixie/fileformats/svg.nim -> pixie/fileformats/svg.nim
+        return "/".join(parts[2:]) if len(parts) > 2 else name
+    if group == "Nim stdlib":
+        return name[len("nim/lib/") :] if name.startswith("nim/lib/") else name
+    if group.startswith("Nim packages"):
+        # pkgs/chrono-0.3.1/chrono.nim -> chrono 0.3.1
+        if len(parts) > 1:
+            package, _, version = parts[1].rpartition("-")
+            return f"{package} {version}" if package else parts[1]
+        return name
+    if group == "FrameOS core (Nim)":
+        # frameos/js_runtime/transpiler.nim -> frameos/js_runtime; a module that
+        # sits directly in frameos/ (or at the root) stays a row of its own.
+        return "/".join(parts[:2]) if len(parts) > 2 else name
+    return name
+
+
+def _detail_key(group: str, archive: str, name: str, split_by_archive: bool) -> str:
+    if archive == NIM_ARCHIVE and name.endswith(".nim"):
+        return _nim_detail_key(group, name)
+    # A subsystem built from several ESP-IDF archives (Wi-Fi, storage, lwIP,
+    # "misc") is most legible per archive; one built from a single archive
+    # (QuickJS, the fos_* shell, the display drivers) has to go per object.
+    return archive if split_by_archive else name
+
+
+def _details(entries: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    """Per-subsystem drill-down: {group: {row label: flash}}, biggest first."""
+    archives: dict[str, set[str]] = {}
+    for entry in entries:
+        archives.setdefault(entry["group"], set()).add(entry["archive"])
+    rows: dict[str, dict[str, int]] = {}
+    for entry in entries:
+        group = entry["group"]
+        split = len(archives[group]) > 1 and entry["archive"] != NIM_ARCHIVE
+        key = _detail_key(group, entry["archive"], entry["name"], split)
+        bucket = rows.setdefault(group, {})
+        bucket[key] = bucket.get(key, 0) + entry["flash"]
+    trimmed: dict[str, dict[str, int]] = {}
+    for group, bucket in rows.items():
+        ordered = sorted(bucket.items(), key=lambda item: (-item[1], item[0]))
+        if group in DETAIL_FULL_GROUPS:
+            trimmed[group] = dict(ordered)
+            continue
+        kept = dict(ordered[:DETAIL_KEYS])
+        rest = sum(flash for _, flash in ordered[DETAIL_KEYS:])
+        if rest:
+            kept[DETAIL_OTHER] = rest
+        trimmed[group] = kept
+    return trimmed
 
 
 def _run_esp_idf_size(map_file: Path, *flags: str) -> dict[str, Any]:
@@ -183,6 +284,7 @@ def measure(args: argparse.Namespace) -> int:
         "flash_bytes": args.flash_bytes,
         "sections": None,
         "groups": None,
+        "details": None,
         "archives": None,
         "files": None,
     }
@@ -228,6 +330,9 @@ def measure(args: argparse.Namespace) -> int:
                 files.append({"name": name, "archive": archive, "group": group, "flash": flash})
             files.sort(key=lambda entry: (-entry["flash"], entry["name"]))
             doc["groups"] = dict(sorted(groups.items(), key=lambda item: -item[1]["flash"]))
+            # Computed over every object, not just the `files` head: the
+            # drill-down has to add up to its subsystem total.
+            doc["details"] = _details(files)
             doc["files"] = files[:TOP_FILES]
             doc["archives"] = {
                 archive: int(sections.get("flash_total", 0) or 0)
@@ -270,8 +375,34 @@ def _kib(value: int | None) -> str:
     return "—" if value is None else f"{value / 1024:,.0f} KB"
 
 
+def _repair_legacy_names(doc: dict[str, Any]) -> dict[str, Any]:
+    """Undo the double-ROT13 that older documents recorded for Nim objects.
+
+    Documents written before the conditional-ROT13 fix scrambled the plain
+    `@m..@sframeos@s...` names the CI toolchain emits, so every Nim object was
+    stored under an unreadable name and bucketed into "FrameOS core (Nim)".
+    Un-scramble the names so per-object diffs against such a baseline line up,
+    and drop the group totals: they were computed over all objects, but only
+    the top `TOP_FILES` are stored, so they cannot be recomputed here. An
+    absent `groups` makes the report fall back to a no-baseline table instead
+    of printing deltas against buckets that never existed.
+    """
+    files = doc.get("files") or []
+    if not any(str(entry.get("name", "")).startswith("@z") for entry in files):
+        return doc
+    for entry in files:
+        name = str(entry.get("name", ""))
+        if not name.startswith("@z"):
+            continue
+        stem = name[: -len(".nim")] if name.endswith(".nim") else name
+        entry["name"] = f"{_normalize_nim_path(codecs.decode(stem, 'rot13'))}.nim"
+        entry["group"] = _group_for(str(entry.get("archive", "")), entry["name"])
+    doc["groups"] = None
+    return doc
+
+
 def _load(path: str) -> dict[str, Any]:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    return _repair_legacy_names(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
 def _headroom(doc: dict[str, Any]) -> str:
@@ -350,6 +481,57 @@ def _files_table(doc: dict[str, Any], base: dict[str, Any] | None, label: str, l
     return lines
 
 
+def _details_section(doc: dict[str, Any], base: dict[str, Any] | None, label: str, limit: int) -> list[str]:
+    """One table per subsystem showing what is inside it, diffed when possible.
+
+    This is the answer to "what is in FrameOS core (Nim)?" without downloading
+    the map: the core by directory, the apps by app, the packages by package,
+    pixie and the stdlib by module, and the ESP-IDF halves by archive.
+    """
+    details = doc.get("details") or {}
+    if not details:
+        return []
+    base_details = (base or {}).get("details") or {}
+    groups = doc.get("groups") or {}
+    lines: list[str] = []
+    for group, rows in sorted(details.items(), key=lambda item: -sum(item[1].values())):
+        base_rows = base_details.get(group) or {}
+        if len(rows) < 2 and not base_rows:
+            continue
+        total = groups.get(group, {}).get("flash") or sum(rows.values())
+        has_base = bool(base_rows)
+        lines.append(f"**{group}** — {_fmt_bytes(total)}")
+        lines.append("")
+        lines.append(f"| Part | This PR | {label} | Δ |" if has_base else "| Part | Flash |")
+        lines.append("|---|---:|---:|---:|" if has_base else "|---|---:|")
+        names = sorted(set(rows) | set(base_rows), key=lambda name: (-max(rows.get(name, 0), base_rows.get(name, 0)), name))
+        shown = len(names) if group in DETAIL_FULL_GROUPS else limit
+        for name in names[:shown]:
+            safe = name.replace("|", "\\|")
+            current = rows.get(name)
+            previous = base_rows.get(name)
+            if has_base:
+                # A row missing on one side really is zero bytes there (the
+                # tables cover every object), so show the full swing.
+                lines.append(
+                    f"| `{safe}` | {_fmt_bytes(current)} | {_fmt_bytes(previous)} | {_fmt_delta(current or 0, previous or 0)} |"
+                )
+            else:
+                lines.append(f"| `{safe}` | {_fmt_bytes(current)} |")
+        rest = names[shown:]
+        if rest:
+            current_rest = sum(rows.get(name, 0) for name in rest)
+            base_rest = sum(base_rows.get(name, 0) for name in rest)
+            row = f"| _{len(rest)} smaller rows_ | {_fmt_bytes(current_rest)} |"
+            if has_base:
+                row += f" {_fmt_bytes(base_rest)} | {_fmt_delta(current_rest, base_rest)} |"
+            lines.append(row)
+        lines.append("")
+    if not lines:
+        return []
+    return ["<details>", "<summary>Inside each subsystem</summary>", "", *lines, "</details>", ""]
+
+
 def _movers(doc: dict[str, Any], base: dict[str, Any] | None, limit: int = 15) -> list[str]:
     """Objects whose size changed the most against the baseline (both directions)."""
     base_files = (base or {}).get("files") or []
@@ -394,10 +576,14 @@ def render(args: argparse.Namespace) -> int:
         out.append(f"### Breakdown by subsystem — `{primary.get('platform')}`")
         out.append("")
         if not (primary_base and primary_base.get("groups")):
-            out.append(f"_{label} has no per-subsystem data (published before this report existed); totals only above._")
+            out.append(
+                f"_{label} has no comparable per-subsystem data — it predates this report, "
+                "or its Nim buckets were mis-attributed; totals only above._"
+            )
             out.append("")
         out += _groups_table(primary, primary_base, label)
         out.append("")
+        out += _details_section(primary, primary_base, label, args.detail_top)
         movers = _movers(primary, primary_base)
         if movers:
             out += ["<details>", "<summary>Biggest movers (per object)</summary>", ""]
@@ -407,7 +593,9 @@ def render(args: argparse.Namespace) -> int:
         out += _files_table(primary, primary_base, label, args.top)
         out += ["", "</details>", ""]
         out += [
-            "<sub>Flash = `.text` + `.rodata` from the linker map via `esp_idf_size`. "
+            "<sub>Flash = `.text` + `.rodata` from the linker map via `esp_idf_size`; "
+            "\"Inside each subsystem\" splits every bucket one level down (the Nim core by directory, "
+            "apps by app, packages by package, ESP-IDF by archive) over all objects, not just the largest. "
             '"String pool (attributed to efuse)" is the linker\'s merged string-literal pool for the whole image, '
             "not efuse code — see `docs/esp32-image-size.md`.</sub>",
         ]
@@ -485,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--intro", default="")
     r.add_argument("--footer", default="")
     r.add_argument("--top", type=int, default=30)
+    r.add_argument("--detail-top", type=int, default=12, help="rows per subsystem in the drill-down")
     r.add_argument("--out", default="")
     r.set_defaults(func=render)
 

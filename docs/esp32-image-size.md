@@ -23,8 +23,19 @@ data blobs (font, certs, string literals, unicode tables).
 Every PR build (`.github/workflows/e2e-docker.yml`, job `esp32_firmware_image`)
 runs `embedded/esp32/tools/firmware_size.py measure` from `ci_build_image.sh`,
 which writes `firmware-size.json` next to the binaries: totals, OTA-slot
-headroom and the per-subsystem breakdown below (with the ROT13 nimcache names
-decoded). The `esp32_firmware_size_report` job then posts ONE sticky
+headroom, the per-subsystem breakdown below (with the nimcache names
+demangled) and a one-level drill-down *inside* each subsystem — the Nim core by
+directory, the apps by app, the Nim packages by package, pixie and the stdlib
+by module, the ESP-IDF halves by archive. The drill-down is computed over every
+object in the map, not just the largest ones, so each table adds up to its
+subsystem total; the comment renders it under "Inside each subsystem". The
+subsystems our own changes move — the Nim core, the apps, pixie, the Nim
+stdlib, "ESP-IDF misc" and the `fos_*` shell — are listed **in full**, every
+row; the rest (Wi-Fi blobs, TLS, libc, the 80-odd panel drivers) are cut at
+`render --detail-top N` (default 12) with the remainder folded into one row so
+the table still adds up. Edit `DETAIL_FULL_GROUPS` in `firmware_size.py` to
+move a subsystem between the two.
+The `esp32_firmware_size_report` job then posts ONE sticky
 "ESP32 firmware size" comment on the PR — edited in place on every push, never
 a commit — comparing the build with the latest GitHub release. Releases publish
 their own document as `frameos-<version>-esp32-{s3,c3}-generic-size.json`, so
@@ -52,10 +63,17 @@ python -m esp_idf_size --format json --files build/frameos_esp32.map  # full nam
 
 Two gotchas when reading the output:
 
-1. **Nimcache object names are ROT13-encoded** (the path part only; the
-   `.nim.c.obj` suffix is untouched). `@z..@f...` is Nim's `@m..@s...` module
-   mangling after ROT13 — decode with `codecs.decode(name, "rot13")` in Python,
-   otherwise the entire Nim breakdown is unreadable.
+1. **Nimcache object names are mangled, and sometimes ROT13'd on top.** Nim
+   flattens a module path into one filename as `@m` + path with `@s` for the
+   separator (`compiler/modulepaths.nim`), so `frameos/interpreter.nim` becomes
+   `@m..@sframeos@sinterpreter.nim.c.obj`. Whether that name is *also*
+   ROT13-scrambled (`@z..@fsenzrbf@fvagrecergre.nim.c.obj`) depends on the Nim
+   build: the official 2.2.4 tarball in the Docker/CI image emits the plain
+   form, nixpkgs' Nim (the flox dev shell) applies `mangleModuleName`'s ROT13.
+   ROT13 is its own inverse, so decode *only* names that start with `@z` —
+   decoding unconditionally re-scrambles the CI names, and then every
+   `pixie`/`nim/lib`/`apps/` bucket rule misses and the whole Nim archive lands
+   in one "FrameOS core (Nim)" row. `firmware_size.py` handles both forms.
 2. **The linker misattributes the merged string pool.** See the "efuse" row
    below.
 
