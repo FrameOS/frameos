@@ -28,8 +28,13 @@ demangled) and a one-level drill-down *inside* each subsystem — the Nim core b
 directory, the apps by app, the Nim packages by package, pixie and the stdlib
 by module, the ESP-IDF halves by archive. The drill-down is computed over every
 object in the map, not just the largest ones, so each table adds up to its
-subsystem total; the comment renders it under "Inside each subsystem"
-(`render --detail-top N` controls how many rows per subsystem, default 12).
+subsystem total; the comment renders it under "Inside each subsystem". The
+subsystems our own changes move — the Nim core, the apps, pixie, the Nim
+stdlib, "ESP-IDF misc" and the `fos_*` shell — are listed **in full**, every
+row; the rest (Wi-Fi blobs, TLS, libc, the 80-odd panel drivers) are cut at
+`render --detail-top N` (default 12) with the remainder folded into one row so
+the table still adds up. Edit `DETAIL_FULL_GROUPS` in `firmware_size.py` to
+move a subsystem between the two.
 The `esp32_firmware_size_report` job then posts ONE sticky
 "ESP32 firmware size" comment on the PR — edited in place on every push, never
 a commit — comparing the build with the latest GitHub release. Releases publish

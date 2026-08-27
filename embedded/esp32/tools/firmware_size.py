@@ -125,6 +125,20 @@ TOP_FILES = 150
 DETAIL_KEYS = 40
 # ...and the remainder is folded into one "other" row so every table adds up.
 DETAIL_OTHER = "(everything else)"
+# The subsystems a FrameOS change actually moves are listed in full — every row
+# stored and every row rendered, no `--detail-top` cut and no folded remainder.
+# The rest (Wi-Fi blobs, TLS, libc, the 80-odd panel drivers) stay capped:
+# nothing we write lands there, so the long tail is noise in the PR comment.
+DETAIL_FULL_GROUPS = frozenset(
+    {
+        "FrameOS core (Nim)",
+        "FrameOS apps (Nim)",
+        "pixie",
+        "Nim stdlib",
+        "ESP-IDF misc",
+        "fos_* firmware shell (C)",
+    }
+)
 
 
 def _decode_name(key: str) -> tuple[str, str]:
@@ -230,6 +244,9 @@ def _details(entries: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
     trimmed: dict[str, dict[str, int]] = {}
     for group, bucket in rows.items():
         ordered = sorted(bucket.items(), key=lambda item: (-item[1], item[0]))
+        if group in DETAIL_FULL_GROUPS:
+            trimmed[group] = dict(ordered)
+            continue
         kept = dict(ordered[:DETAIL_KEYS])
         rest = sum(flash for _, flash in ordered[DETAIL_KEYS:])
         if rest:
@@ -488,7 +505,8 @@ def _details_section(doc: dict[str, Any], base: dict[str, Any] | None, label: st
         lines.append(f"| Part | This PR | {label} | Δ |" if has_base else "| Part | Flash |")
         lines.append("|---|---:|---:|---:|" if has_base else "|---|---:|")
         names = sorted(set(rows) | set(base_rows), key=lambda name: (-max(rows.get(name, 0), base_rows.get(name, 0)), name))
-        for name in names[:limit]:
+        shown = len(names) if group in DETAIL_FULL_GROUPS else limit
+        for name in names[:shown]:
             safe = name.replace("|", "\\|")
             current = rows.get(name)
             previous = base_rows.get(name)
@@ -500,7 +518,7 @@ def _details_section(doc: dict[str, Any], base: dict[str, Any] | None, label: st
                 )
             else:
                 lines.append(f"| `{safe}` | {_fmt_bytes(current)} |")
-        rest = names[limit:]
+        rest = names[shown:]
         if rest:
             current_rest = sum(rows.get(name, 0) for name in rest)
             base_rest = sum(base_rows.get(name, 0) for name in rest)
