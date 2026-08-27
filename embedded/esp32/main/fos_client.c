@@ -222,6 +222,19 @@ static void log_metrics_sample(void)
     xSemaphoreGive(s_metrics_lock);
 }
 
+double fos_client_metrics_newest_timestamp(void)
+{
+    if (s_metrics_lock == NULL) return 0;
+    xSemaphoreTake(s_metrics_lock, portMAX_DELAY);
+    double ts = 0;
+    if (s_metrics_count > 0) {
+        size_t newest = (s_metrics_next + FOS_METRICS_RING_CAP - 1) % FOS_METRICS_RING_CAP;
+        ts = s_metrics_ring[newest].timestamp;
+    }
+    xSemaphoreGive(s_metrics_lock);
+    return ts;
+}
+
 size_t fos_client_metrics_recent(fos_metrics_sample_t *out, size_t max)
 {
     if (out == NULL || max == 0 || s_metrics_lock == NULL) return 0;

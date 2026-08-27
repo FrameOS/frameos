@@ -40,6 +40,9 @@ typedef struct {
     char *json;
 } fos_metrics_sample_t;
 size_t fos_client_metrics_recent(fos_metrics_sample_t *out, size_t max);
+/* Timestamp of the newest sample (0 when none) — what the cloud client
+ * compares against its last push to know whether one is still owed. */
+double fos_client_metrics_newest_timestamp(void);
 bool fos_client_last_refresh_skipped(void);
 const char *fos_client_snapshot_mode(void);
 bool fos_client_display_state_ready(void);

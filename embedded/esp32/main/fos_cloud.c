@@ -995,17 +995,6 @@ static void ws_poll_logs(void)
     cJSON_Delete(msg);
 }
 
-bool fos_cloud_flush_logs(uint32_t timeout_ms)
-{
-    if (s_log_queue == NULL || !s_ws_client || !s_ws_ready || !s_logs_granted) return false;
-    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
-    while (uxQueueMessagesWaiting(s_log_queue) > 0) {
-        if (!s_ws_ready || esp_timer_get_time() >= deadline) return false;
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-    return true;
-}
-
 /* Parse a log line into the {"timestamp"?, "payload"} entry shape log_batch
  * uses; plain lines get the same wrapping the backend uploader applies. */
 static cJSON *log_line_entry(const char *line, double timestamp)
@@ -1098,6 +1087,27 @@ static void ws_poll_metrics(void)
         cJSON_Delete(msg);
     }
     for (size_t i = 0; i < count; i++) free(all[i].json);
+}
+
+bool fos_cloud_flush_logs(uint32_t timeout_ms)
+{
+    if (!s_ws_client || !s_ws_ready) return false;
+    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    while (true) {
+        bool logs_pending = s_logs_granted && s_log_queue != NULL &&
+                            uxQueueMessagesWaiting(s_log_queue) > 0;
+        /* The pass's metrics sample rides the same 1 s tick as the log
+         * batch (ws_poll_metrics); a deep-sleep frame produces exactly one
+         * per wake, and it is the only battery reading the cloud ever gets
+         * from it. A sample stamped in the same second as the last push is
+         * one ws_poll_metrics will never send (not "fresh") — do not wait
+         * on it. */
+        bool metrics_pending = s_metrics_granted &&
+                               fos_client_metrics_newest_timestamp() > s_metrics_last_pushed;
+        if (!logs_pending && !metrics_pending) return true;
+        if (!s_ws_ready || esp_timer_get_time() >= deadline) return false;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
 }
 
 /* get_metrics: the wire shape is a single sample ({"metrics": {…}}), so the

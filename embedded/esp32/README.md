@@ -402,8 +402,12 @@ per 900 s, with the radio listening the whole time. Three things changed:
   reading, the `sleep` forecast — is queued for the cloud task's 1 s batch
   tick, and `esp_deep_sleep` used to come first: a v2026.8.40 frame shipped
   not one battery sample in 20 hours of cycles. The sleep now waits up to
-  2.5 s for the queue to empty (`fos_cloud_flush_logs`) before announcing the
-  sleep (the hub drops the socket on `sleep`).
+  2.5 s for the log queue to empty **and** the pass's `metrics` sample to be
+  pushed (`fos_cloud_flush_logs`) before announcing the sleep (the hub drops
+  the socket on `sleep`). A deep-sleep frame samples metrics exactly once per
+  wake, at the end of its pass (after the render and the panel refresh, so
+  `renderLastMs` is this wake's); that one sample is now delivered every
+  cycle instead of winning a race with the sleep.
 
 The sleep also **holds for a running OTA** (up to 15 min): the
 `notify_update_available` verb only keeps the frame awake 15 s while the
