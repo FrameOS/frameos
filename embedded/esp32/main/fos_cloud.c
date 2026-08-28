@@ -1416,6 +1416,21 @@ bool fos_cloud_announce_sleep(uint32_t wake_in_seconds, int64_t next_render_at,
     return true;
 }
 
+bool fos_cloud_announce_render(const char *scene_id)
+{
+    if (!s_ws_client || !s_ws_ready) return false;
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return false;
+    cJSON_AddStringToObject(msg, "type", "render");
+    cJSON_AddStringToObject(msg, "active_scene", scene_id ? scene_id : "");
+    /* No snapshot files on this profile: the image is the framebuffer,
+     * fetched with image_get. */
+    cJSON_AddStringToObject(msg, "image", "image_get");
+    ws_send_json(msg);
+    cJSON_Delete(msg);
+    return true;
+}
+
 static void ws_reboot_task(void *arg)
 {
     (void)arg;
@@ -1507,7 +1522,14 @@ typedef struct {
     size_t data_len;
     long long offset;                   /* asset_put_chunk: where the bytes land */
     bool complete;                      /* asset_put_chunk: last chunk, commit to `path` */
+    int64_t deadline_us;                /* image_get: how long to wait for a render */
 } asset_job_t;
+
+/* An image_get that arrives before this boot's first render has finished
+ * (a deep-sleep wake takes ~60 s to render; the provider's queued command
+ * lands at hello) waits for the render instead of answering no_image. */
+#define FOS_CLOUD_IMAGE_WAIT_MAX_US (150LL * 1000000LL)
+static volatile bool s_asset_job_running = false;
 
 /* asset_put_chunk: the assembled file's ceiling on the card. Chunks arrive
  * one WS frame each (so each is bounded by FOS_CLOUD_WS_MAX_MSG anyway); the
@@ -1623,73 +1645,128 @@ static void asset_job_run_get(const asset_job_t *job)
     fclose(file);
 }
 
-/* Stream one in-memory payload as asset_chunk frames (image_get). */
-static void asset_stream_buffer(const char *id, const uint8_t *data, size_t total,
-                                const char *content_type)
+/* image_get as asset_chunk frames straight off the packed snapshot: the BMP
+ * is built a row at a time into one chunk buffer (FOS_CLOUD_ASSET_CHUNK_BYTES)
+ * and sent as each fills. Nothing image-sized is allocated — the 8 MB E1004
+ * could never spare the 960 KB copy plus the 960 KB BMP the old path
+ * needed, and answered every image_get with no_image. */
+typedef struct {
+    const char *id;
+    uint8_t *raw;
+    size_t raw_len;
+    char *b64;
+    size_t b64_cap;
+    size_t total;
+    size_t sent;
+    int seq;
+    bool failed;
+} image_stream_t;
+
+static bool image_stream_flush(image_stream_t *st, bool done)
 {
-    size_t b64_cap = ((FOS_CLOUD_ASSET_CHUNK_BYTES + 2) / 3) * 4 + 8;
-    char *b64 = fos_big_malloc(b64_cap);
-    if (!b64) {
-        asset_chunk_send_error(id, "no_memory");
-        return;
+    if (st->failed) return false;
+    if (st->raw_len == 0 && !done) return true;
+    size_t b64_len = 0;
+    if (mbedtls_base64_encode((unsigned char *)st->b64, st->b64_cap, &b64_len,
+                              st->raw, st->raw_len) != 0) {
+        st->failed = true;
+        return false;
     }
-    size_t offset = 0;
-    int seq = 0;
-    do {
-        size_t chunk = total - offset;
-        if (chunk > FOS_CLOUD_ASSET_CHUNK_BYTES) chunk = FOS_CLOUD_ASSET_CHUNK_BYTES;
-        size_t b64_len = 0;
-        if (mbedtls_base64_encode((unsigned char *)b64, b64_cap, &b64_len,
-                                  data + offset, chunk) != 0) {
-            asset_chunk_send_error(id, "no_memory");
-            break;
-        }
-        b64[b64_len] = '\0';
-        offset += chunk;
-        bool done = offset >= total;
-        cJSON *msg = cJSON_CreateObject();
-        if (!msg) {
-            asset_chunk_send_error(id, "no_memory");
-            break;
-        }
-        if (id[0]) cJSON_AddStringToObject(msg, "id", id);
-        cJSON_AddStringToObject(msg, "type", "asset_chunk");
-        cJSON_AddNumberToObject(msg, "seq", seq);
-        cJSON_AddStringToObject(msg, "data", b64);
-        cJSON_AddBoolToObject(msg, "done", done);
-        if (seq == 0) {
-            cJSON_AddNumberToObject(msg, "size", (double)total);
-            cJSON_AddNumberToObject(msg, "mtime", (double)(esp_timer_get_time() / 1000000));
-            cJSON_AddStringToObject(msg, "content_type", content_type);
-        }
-        if (!s_ws_client || !s_ws_ready) {
-            cJSON_Delete(msg);
-            break;
-        }
-        ws_send_json(msg);
+    st->b64[b64_len] = '\0';
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) {
+        st->failed = true;
+        return false;
+    }
+    if (st->id[0]) cJSON_AddStringToObject(msg, "id", st->id);
+    cJSON_AddStringToObject(msg, "type", "asset_chunk");
+    cJSON_AddNumberToObject(msg, "seq", st->seq);
+    cJSON_AddStringToObject(msg, "data", st->b64);
+    cJSON_AddBoolToObject(msg, "done", done);
+    if (st->seq == 0) {
+        cJSON_AddNumberToObject(msg, "size", (double)st->total);
+        cJSON_AddNumberToObject(msg, "mtime", (double)(esp_timer_get_time() / 1000000));
+        cJSON_AddStringToObject(msg, "content_type", "image/bmp");
+    }
+    if (!s_ws_client || !s_ws_ready) {
         cJSON_Delete(msg);
-        seq++;
-        if (done) break;
-    } while (true);
-    free(b64);
+        st->failed = true;
+        return false;
+    }
+    ws_send_json(msg);
+    cJSON_Delete(msg);
+    st->seq++;
+    st->sent += st->raw_len;
+    st->raw_len = 0;
+    return true;
 }
 
-/* image_get: the current render, packed to BMP by the same path the USB
- * `usb_api image` command uses. Runs on the cloud task; the pack allocates
- * from PSRAM and is freed before the next job. */
-static void asset_job_run_image(const asset_job_t *job)
+static void image_stream_begin(void *ctx, size_t total)
 {
-    uint8_t *bmp = NULL;
-    size_t bmp_len = 0;
-    char scene_id[128] = "";
-    if (fos_http_preview_bmp_alloc(&bmp, &bmp_len, scene_id, sizeof(scene_id)) != ESP_OK ||
-        !bmp || bmp_len == 0) {
-        free(bmp);
-        asset_chunk_send_error(job->id, "no_image");
-        return;
+    ((image_stream_t *)ctx)->total = total;
+}
+
+static bool image_stream_write(void *ctx, const uint8_t *data, size_t len)
+{
+    image_stream_t *st = (image_stream_t *)ctx;
+    while (len > 0) {
+        size_t room = FOS_CLOUD_ASSET_CHUNK_BYTES - st->raw_len;
+        size_t take = len < room ? len : room;
+        memcpy(st->raw + st->raw_len, data, take);
+        st->raw_len += take;
+        data += take;
+        len -= take;
+        if (st->raw_len == FOS_CLOUD_ASSET_CHUNK_BYTES) {
+            bool done = st->sent + st->raw_len >= st->total;
+            if (!image_stream_flush(st, done)) return false;
+        }
     }
-    asset_stream_buffer(job->id, bmp, bmp_len, "image/bmp");
-    free(bmp);
+    return true;
+}
+
+/* Returns false when the job was deferred (re-queued by the caller). */
+static bool asset_job_run_image(const asset_job_t *job)
+{
+    int width = 0, height = 0;
+    fos_pixel_format_t format = FOS_PIXEL_1BPP;
+    size_t packed_len = 0;
+    if (!fos_client_snapshot_info(&width, &height, &format, &packed_len, NULL, NULL)) {
+        if (fos_client_render_pending() && esp_timer_get_time() < job->deadline_us) {
+            return false; /* the render this boot is about to produce it */
+        }
+        asset_chunk_send_error(job->id, "no_image");
+        return true;
+    }
+    image_stream_t st = {.id = job->id, .raw = NULL, .raw_len = 0, .b64 = NULL,
+                         .b64_cap = ((FOS_CLOUD_ASSET_CHUNK_BYTES + 2) / 3) * 4 + 8,
+                         .total = 0, .sent = 0, .seq = 0, .failed = false};
+    st.raw = fos_big_malloc(FOS_CLOUD_ASSET_CHUNK_BYTES);
+    st.b64 = fos_big_malloc(st.b64_cap);
+    if (!st.raw || !st.b64) {
+        free(st.raw);
+        free(st.b64);
+        asset_chunk_send_error(job->id, "no_memory");
+        return true;
+    }
+    static const fos_preview_sink_t sink = {
+        .begin = image_stream_begin,
+        .write = image_stream_write,
+    };
+    /* A render packing into the buffer holds the lock for ~10 s on the
+     * E1004; wait it out rather than answer no_image. */
+    esp_err_t err = fos_http_preview_bmp_stream(&sink, &st, 30000, NULL, 0);
+    if (err == ESP_OK && !st.failed) {
+        /* The tail: whatever the last full chunk left behind. */
+        if (st.sent < st.total) image_stream_flush(&st, true);
+    } else if (st.seq == 0) {
+        /* Nothing on the wire yet: an ordinary error frame. Mid-stream the
+         * provider discards the partial when the stream just stops. */
+        asset_chunk_send_error(job->id, err == ESP_ERR_NOT_FOUND ? "no_image"
+                                        : err == ESP_ERR_TIMEOUT ? "busy" : "failed");
+    }
+    free(st.raw);
+    free(st.b64);
+    return true;
 }
 
 /* Write verbs ack from the job (the ack carries the result), so the SPI
@@ -1789,9 +1866,21 @@ static bool ws_process_asset_jobs(void)
     while (s_ws_client && s_ws_ready &&
            xQueueReceive(s_asset_jobs, &job, 0) == pdTRUE) {
         const char *err = NULL;
+        s_asset_job_running = true;
         switch (job.kind) {
             case ASSET_JOB_LIST: asset_job_run_list(&job); break;
-            case ASSET_JOB_IMAGE: asset_job_run_image(&job); break;
+            case ASSET_JOB_IMAGE:
+                if (!asset_job_run_image(&job)) {
+                    /* Deferred until the render lands: back of the queue,
+                     * looked at again on the next 1 s tick (not now — with
+                     * one job queued that would spin). */
+                    s_asset_job_running = false;
+                    if (xQueueSendToBack(s_asset_jobs, &job, 0) != pdTRUE) {
+                        asset_chunk_send_error(job.id, "busy");
+                    }
+                    return worked;
+                }
+                break;
             case ASSET_JOB_GET: asset_job_run_get(&job); break;
             case ASSET_JOB_PUT:
                 asset_job_run_put(&job);
@@ -1813,9 +1902,16 @@ static bool ws_process_asset_jobs(void)
         }
         free(job.data);
         job.data = NULL;
+        s_asset_job_running = false;
         worked = true;
     }
     return worked;
+}
+
+bool fos_cloud_asset_jobs_pending(void)
+{
+    if (s_asset_job_running) return true;
+    return s_asset_jobs && uxQueueMessagesWaiting(s_asset_jobs) > 0;
 }
 
 /* Free the payloads of any jobs abandoned by a dropped session. The provider
@@ -1838,7 +1934,8 @@ static void ws_flush_asset_jobs(void)
 static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const cJSON *id)
 {
     asset_job_t job = { .kind = (uint8_t)kind, .id = "", .path = "", .dst = "",
-                        .data = NULL, .data_len = 0, .offset = 0, .complete = false };
+                        .data = NULL, .data_len = 0, .offset = 0, .complete = false,
+                        .deadline_us = esp_timer_get_time() + FOS_CLOUD_IMAGE_WAIT_MAX_US };
     bool ack_now = true; /* read verbs: bare ack, then reply frames */
     if (cJSON_IsString(id) && id->valuestring &&
         strlen(id->valuestring) < sizeof(job.id)) {
@@ -2178,6 +2275,15 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         }
     }
     fos_config_t *config = fos_config();
+    /* Snapshot to diff against once persisted: the `settings:cloud` line
+     * below is the device-side confirmation of what the push changed. One
+     * lazily allocated copy, reused (this handler runs on the WS task only):
+     * not the stack — the config carries token buffers — and not a per-call
+     * malloc that every validation `return` above would have to free. NULL
+     * just loses the detail. */
+    static fos_config_t *before = NULL;
+    if (!before) before = fos_big_malloc(sizeof(*before));
+    if (before) memcpy(before, config, sizeof(*before));
     const cJSON *interval = cJSON_GetObjectItem(settings, "interval");
     if (interval != NULL) {
         if (!cJSON_IsNumber(interval) || interval->valuedouble < 1 ||
@@ -2391,6 +2497,16 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (fos_config_save() != ESP_OK) {
         ws_ack(id, false, "persist_failed");
         return;
+    }
+    {
+        char changes[320] = "";
+        fos_settings_describe_changes(before, config, changes, sizeof(changes));
+        char line[400];
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"settings:cloud\",\"source\":\"esp32\","
+                 "\"status\":\"applied\",\"changed\":\"%s\"}",
+                 changes);
+        frameos_nim_log_hook(line);
     }
     ws_ack(id, true, NULL);
     if (restart_for_init && !battery_changed && !rotate_changed) {

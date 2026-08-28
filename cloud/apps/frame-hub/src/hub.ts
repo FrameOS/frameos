@@ -53,8 +53,10 @@ import {
   cachedAssetFile,
   assetFetchCommandTtlMs,
   outstandingAssetGet,
+  queueImageGetIfIdle,
   sceneSnapshotAssetPath,
 } from "../../auth-web/src/lib/frame-asset-cache";
+import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
 import {
   allowsPrivateNetworkOrigins,
   getAllowedBrowserOrigins,
@@ -180,6 +182,13 @@ const logBatchRateLimit = { limit: 120, windowMs: 60_000 };
 // (SCENE_IMAGE_MAX_AGE_SECONDS); this is the ceiling that holds even if a
 // firmware forgets to, so a chatty frame cannot turn a preview into a stream.
 const renderPreviewRateLimit = { limit: 4, windowMs: 60_000 };
+// Each frame's last announced sleep (seconds), so a `render` from a
+// deep-sleep frame counts a page opened while it slept as "still looking":
+// it renders once per sleep, and the three-minute watch window alone never
+// spans one. In-process only — lost on restart, which just costs a preview
+// that refreshes on the next page load.
+const lastSleepSeconds = new Map<string, number>();
+const maxLastSleepEntries = 10_000;
 
 // Unauthenticated upgrade attempts are cheap for the client and cost the hub a
 // database select each, so they are limited per client IP through the shared
@@ -989,6 +998,10 @@ export async function startFrameHub(
         ? msg.reason.slice(0, 32)
         : null;
     session.sleeping = true;
+    if (lastSleepSeconds.size >= maxLastSleepEntries) {
+      lastSleepSeconds.clear();
+    }
+    lastSleepSeconds.set(session.frame.id, wakeInSeconds);
     await db
       .update(frames)
       .set({
@@ -1017,6 +1030,11 @@ export async function startFrameHub(
   // keeps a copy of what the device already drew for itself, while someone is
   // looking, and otherwise leaves the frame alone. It never renders scenes
   // itself and never asks a device to screenshot on demand.
+  //
+  // `image: "image_get"` (ESP32 firmware 2026.8.43+): the device keeps no
+  // snapshot files — its image IS the framebuffer — so the fetch is an
+  // image_get into the current-image slot rather than an asset_get of a
+  // per-scene PNG.
   async function handleRender(
     session: DeviceSession,
     msg: Record<string, unknown>,
@@ -1028,6 +1046,7 @@ export async function startFrameHub(
     if (!activeScene) {
       return;
     }
+    const imageViaGet = msg.image === "image_get";
     // Re-read: `session.frame` is the row as it was at connect, and viewers
     // come and go over the life of a socket.
     const [frame] = await db
@@ -1038,7 +1057,14 @@ export async function startFrameHub(
       .from(frames)
       .where(eq(frames.id, session.frame.id))
       .limit(1);
-    if (!frame || !framePreviewIsWatched(frame)) {
+    if (
+      !frame ||
+      !framePreviewIsWatched(
+        frame,
+        Date.now(),
+        previewWatchGraceMs(lastSleepSeconds.get(session.frame.id)),
+      )
+    ) {
       return;
     }
     // Cheap frequency cap on top of the device's own (it writes a snapshot at
@@ -1050,6 +1076,17 @@ export async function startFrameHub(
         renderPreviewRateLimit,
       ).allowed
     ) {
+      return;
+    }
+    if (imageViaGet) {
+      // The device is awake and connected this instant (it just announced),
+      // and holds its deep sleep for the stream, so the base TTL is right.
+      await queueImageGetIfIdle(
+        db,
+        frame.accountId,
+        session.frame.id,
+        assetFetchCommandTtlMs,
+      );
       return;
     }
     const path = sceneSnapshotAssetPath(activeScene);

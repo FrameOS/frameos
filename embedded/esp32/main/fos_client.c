@@ -30,6 +30,7 @@
 #include "fos_framebuffer.h"
 #include "fos_mem.h"
 #include "fos_ota.h"
+#include "fos_power.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
 #include "fos_settings.h"
@@ -44,17 +45,18 @@ static const char *TAG = "fos_client";
 #define START_RENDER_LOOP_BIT BIT1
 #define CLIENT_TASK_STACK_BYTES 40960
 
-/* Below this charge we stop rendering and sleep long to protect the cell. */
-#define FOS_BATTERY_CRITICAL_PCT 3
+/* Below FOS_POWER_CRITICAL_MV (fos_power.h) for two passes running we stop
+ * rendering and sleep this long to protect the cell. */
 #define FOS_BATTERY_CRITICAL_SLEEP_SEC (6 * 3600)
+/* The two ADC bursts behind one pass-start reading are this far apart; a
+ * Wi-Fi TX burst that sagged the first one has moved on by the second. */
+#define FOS_BATTERY_RESAMPLE_GAP_MS 60
 
-/* A cell reading at least this many mV counts as "running on battery" for
- * deep_sleep_on_battery. It is the best power-source signal we have: no
- * supported board wires VBUS to a readable pin (the PhotoPainter's AXP2101
- * could tell, but nothing reads its status registers yet). A plugged-in,
- * charging frame passes this too — acceptable, deep sleeping while charging
- * costs nothing. */
-#define FOS_BATTERY_PRESENT_MV 2500
+/* How long a deep sleep waits for the cloud task to finish streaming the
+ * frame's image (an `image_get` the provider queued on this pass's `render`
+ * announcement, or one that waited out the sleep in the command queue). The
+ * 960 KB E1004 BMP takes a few seconds; the cap is for a stalled socket. */
+#define FOS_ASSET_SLEEP_HOLD_MAX_SEC 45
 
 /* How long to hold the boot open for the provider's management socket before
  * a deep sleep, so queued commands can land (each arriving verb arms the
@@ -84,6 +86,10 @@ static const char *TAG = "fos_client";
  * RTC domain keeps both this variable and the system clock through deep
  * sleep. 0 = unknown, render on the next pass. */
 RTC_DATA_ATTR static time_t s_next_render_due;
+/* The pass-start power decision's memory (fos_power.h): the last believed
+ * cell reading and the confirmation streaks that keep one bad ADC burst
+ * from switching deep sleep off or parking the frame for six hours. */
+RTC_DATA_ATTR static fos_power_state_t s_power_state;
 
 /* FrameOS embedded bitmap wire format ("FOSB"):
  * magic[4] ver(u8) format(u8) width(u16le) height(u16le) reserved(u16le),
@@ -109,8 +115,17 @@ static EventGroupHandle_t s_events;
 static SemaphoreHandle_t s_snapshot_lock;
 static portMUX_TYPE s_keep_awake_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_render_count = 0;
+/* Passes that reached render_once this boot, failed or not: what
+ * fos_client_render_pending() means by "the wake's render is still owed". */
+static uint32_t s_render_attempts = 0;
 static int64_t s_last_render_ms = 0;
 static uint8_t *s_last_frame = NULL;
+/* True when s_last_frame IS the boot-time framebuffer reservation (borrowed,
+ * never freed here) rather than a copy this file owns. The reservation holds
+ * the last packed render until someone borrows it again, so a preview costs
+ * no PSRAM at all — the 8 MB E1004 could never afford the 960 KB copy and
+ * shipped "hash only" snapshots, i.e. no image, on every render. */
+static bool s_last_frame_borrowed = false;
 static size_t s_last_frame_len = 0;
 static int s_last_frame_width = 0;
 static int s_last_frame_height = 0;
@@ -199,7 +214,7 @@ static void log_metrics_sample(void)
         used += (size_t)snprintf(json + used, sizeof(json) - used,
                                  ",\"batteryPercent\":%d,\"batteryMillivolts\":%d,\"onBattery\":%s",
                                  battery_pct, battery_mv,
-                                 battery_mv >= FOS_BATTERY_PRESENT_MV ? "true" : "false");
+                                 battery_mv >= FOS_POWER_PRESENT_MV ? "true" : "false");
     }
     if (used < sizeof(json) - 2) {
         snprintf(json + used, sizeof(json) - used, "}");
@@ -546,15 +561,53 @@ static void log_render_event(const char *event, const char *scene_id,
     }
 }
 
+/* Drop a borrowed snapshot before its buffer is lent out again (the next
+ * render, a console display_test, the status screen): whoever borrows the
+ * reservation is about to overwrite it. Runs on the borrower's task from
+ * fos_framebuffer_acquire; a preview stream holding the lock finishes first
+ * (bounded — a stalled socket must not stall the panel). */
+static void snapshot_before_lend(void)
+{
+    if (!s_snapshot_lock) return;
+    if (xSemaphoreTake(s_snapshot_lock, pdMS_TO_TICKS(30000)) != pdTRUE) {
+        ESP_LOGW(TAG, "preview snapshot still streaming after 30 s; rendering over it");
+        return;
+    }
+    if (s_last_frame_borrowed) {
+        s_last_frame = NULL;
+        s_last_frame_len = 0;
+        s_last_frame_borrowed = false;
+    }
+    xSemaphoreGive(s_snapshot_lock);
+}
+
 static void store_snapshot(const uint8_t *buf, size_t len, int width, int height,
                            fos_pixel_format_t format, uint32_t render_count,
                            int64_t render_ms)
 {
     if (!buf || len == 0 || width <= 0 || height <= 0 || !s_snapshot_lock) return;
+    if (fos_framebuffer_is_reserved(buf)) {
+        /* The packed bytes stay put in the reservation until the next
+         * borrower; point at them instead of copying. */
+        xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+        uint8_t *old = s_last_frame_borrowed ? NULL : s_last_frame;
+        s_last_frame = (uint8_t *)buf;
+        s_last_frame_borrowed = true;
+        s_last_frame_len = len;
+        s_last_frame_width = width;
+        s_last_frame_height = height;
+        s_last_frame_format = format;
+        s_last_frame_render_count = render_count;
+        s_last_frame_render_ms = render_ms;
+        xSemaphoreGive(s_snapshot_lock);
+        free(old);
+        return;
+    }
     if (!should_keep_packed_snapshot(len)) {
         xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
-        uint8_t *old = s_last_frame;
+        uint8_t *old = s_last_frame_borrowed ? NULL : s_last_frame;
         s_last_frame = NULL;
+        s_last_frame_borrowed = false;
         s_last_frame_len = 0;
         s_last_frame_width = width;
         s_last_frame_height = height;
@@ -578,8 +631,9 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
     memcpy(copy, buf, len);
 
     xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
-    uint8_t *old = s_last_frame;
+    uint8_t *old = s_last_frame_borrowed ? NULL : s_last_frame;
     s_last_frame = copy;
+    s_last_frame_borrowed = false;
     s_last_frame_len = len;
     s_last_frame_width = width;
     s_last_frame_height = height;
@@ -630,6 +684,37 @@ esp_err_t fos_client_snapshot_copy(uint8_t *out, size_t out_len, int *width, int
     if (render_ms) *render_ms = s_last_frame_render_ms;
     xSemaphoreGive(s_snapshot_lock);
     return ESP_OK;
+}
+
+bool fos_client_snapshot_acquire(uint32_t timeout_ms, const uint8_t **buf, int *width,
+                                 int *height, fos_pixel_format_t *format, size_t *len)
+{
+    if (!buf || !s_snapshot_lock) return false;
+    if (xSemaphoreTake(s_snapshot_lock, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) return false;
+    if (!s_last_frame || s_last_frame_len == 0) {
+        xSemaphoreGive(s_snapshot_lock);
+        return false;
+    }
+    *buf = s_last_frame;
+    if (width) *width = s_last_frame_width;
+    if (height) *height = s_last_frame_height;
+    if (format) *format = s_last_frame_format;
+    if (len) *len = s_last_frame_len;
+    return true; /* lock held until fos_client_snapshot_release */
+}
+
+void fos_client_snapshot_release(void)
+{
+    if (s_snapshot_lock) xSemaphoreGive(s_snapshot_lock);
+}
+
+bool fos_client_render_pending(void)
+{
+    /* The first pass of a boot has not run its render yet (a deep-sleep wake
+     * renders before it does anything else), or the loop was told to render
+     * now. A render that failed counts as run: nothing is coming. */
+    if (s_render_attempts == 0 && !s_render_paused_for_memory) return true;
+    return s_events && (xEventGroupGetBits(s_events) & RENDER_NOW_BIT) != 0;
 }
 
 /* ------------------------------------------------------------ remote mode */
@@ -875,6 +960,7 @@ static esp_err_t render_once(void)
         }
     }
     int64_t total_ms = (esp_timer_get_time() - start) / 1000;
+    s_render_attempts++;
     current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
     log_render_event(err == ESP_OK ? "render:done" : "render:error", scene_id,
                      scene_name, err == ESP_OK ? "ok" : "error", "complete",
@@ -882,6 +968,11 @@ static esp_err_t render_once(void)
                      err == ESP_OK ? s_render_count : render_attempt, total_ms,
                      width, height, format, buf_len, err);
     frameos_nim_flush_logs();
+    if (err == ESP_OK && !skipped_refresh) {
+        /* "I drew something new" — the provider decides whether anyone is
+         * looking and fetches the image with image_get if so. */
+        fos_cloud_announce_render(scene_id);
+    }
     /* Returns the reservation to the pool, or frees a one-off allocation —
      * including the Nim renderer's buffer on the local-render path. */
     fos_framebuffer_release(buf);
@@ -1094,6 +1185,12 @@ static void client_task(void *arg)
                      wake_cause_name());
         }
         frameos_nim_log_hook(line);
+        /* The RTC due date is only meaningful across a deep sleep: after an
+         * OTA, an OOM restart or a power cycle the panel may show anything,
+         * so the first pass renders whatever the old bookkeeping said. */
+        if (esp_reset_reason() != ESP_RST_DEEPSLEEP) {
+            s_next_render_due = 0;
+        }
     }
     while (true) {
         int64_t cycle_start = esp_timer_get_time();
@@ -1129,21 +1226,73 @@ static void client_task(void *arg)
 
         /* Battery guardrail: when the cell is nearly empty, skip the (costly)
          * render + panel refresh and sleep long so a low battery can't keep
-         * cycling the display down to a damaging voltage. */
-        int battery_pct = -1, battery_mv = 0; /* one sample decides the whole pass */
-        if (fos_battery_present()) fos_battery_read(&battery_mv, &battery_pct);
-        bool battery_critical = battery_pct >= 0 && battery_pct <= FOS_BATTERY_CRITICAL_PCT;
-        bool on_battery = battery_mv >= FOS_BATTERY_PRESENT_MV;
-        bool deep_sleep_now =
-            config->deep_sleep || (config->deep_sleep_on_battery && on_battery);
+         * cycling the display down to a damaging voltage. Two bursts a
+         * moment apart, the higher one wins (a radio burst can only sag a
+         * reading, never inflate it); fos_power_decide then weighs it
+         * against the state carried in RTC memory — see fos_power.h for the
+         * log this replays. */
+        int battery_pct = -1, battery_mv = 0;
+        if (fos_battery_present()) {
+            fos_battery_read(&battery_mv, &battery_pct);
+            vTaskDelay(pdMS_TO_TICKS(FOS_BATTERY_RESAMPLE_GAP_MS));
+            int again_mv = 0, again_pct = -1;
+            fos_battery_read(&again_mv, &again_pct);
+            if (again_mv > battery_mv) {
+                battery_mv = again_mv;
+                battery_pct = again_pct;
+            }
+        }
+        fos_power_input_t power_in = {
+            .mv = battery_mv,
+            .deep_sleep = config->deep_sleep,
+            .deep_sleep_on_battery = config->deep_sleep_on_battery,
+        };
+        fos_power_decision_t power;
+        fos_power_decide(&power_in, &s_power_state, &power);
+        bool battery_critical = power.critical;
+        bool deep_sleep_now = power.deep_sleep;
+        /* Say what this pass decided and from what: the one line that tells
+         * "deep sleep silently off" from "the owner switched it off". Only
+         * where it can say something — a stay-connected frame without a
+         * cell would just repeat "off" every interval. */
+        if (config->deep_sleep || config->deep_sleep_on_battery || power.suspect ||
+            power.critical) {
+            char line[256];
+            size_t used = (size_t)snprintf(
+                line, sizeof(line),
+                "{\"event\":\"power\",\"source\":\"esp32\",\"deepSleep\":\"%s\","
+                "\"onBattery\":%s,\"wakeCheckSeconds\":%lu",
+                !deep_sleep_now ? "off" : config->deep_sleep ? "always"
+                                  : battery_critical ? "critical" : "battery",
+                power.on_battery ? "true" : "false",
+                (unsigned long)config->wake_check_sec);
+            if (fos_battery_present() && used < sizeof(line) - 96) {
+                used += (size_t)snprintf(line + used, sizeof(line) - used,
+                                         ",\"batteryMillivolts\":%d,\"batteryPercent\":%d",
+                                         battery_mv, battery_pct);
+                if (power.mv_used != battery_mv) {
+                    used += (size_t)snprintf(line + used, sizeof(line) - used,
+                                             ",\"believedMillivolts\":%d", power.mv_used);
+                }
+            }
+            if (power.suspect && used < sizeof(line) - 24) {
+                used += (size_t)snprintf(line + used, sizeof(line) - used, ",\"suspect\":true");
+            }
+            if (used < sizeof(line) - 2) {
+                snprintf(line + used, sizeof(line) - used, "}");
+                frameos_nim_log_hook(line);
+            }
+        }
         /* A wake-check pass: this deep-sleeping frame woke early (or is held
          * awake) only to check the control plane for commands — the panel's
          * scheduled render is not due yet, so skip the costly refresh. An
          * explicit render signal always wins. */
         time_t wall_now = time(NULL);
         bool clock_ok = fos_wifi_time_synced() && wall_now > 1000000000;
-        bool checkin_pass = deep_sleep_now && config->wake_check_sec > 0 &&
-                            !force_render && clock_ok &&
+        /* Not gated on wake_check_seconds: a keep-awake hold (a verb that
+         * arrived as the pass ended) also lands here with the due date still
+         * ahead, and used to render the same scene a second time. */
+        bool checkin_pass = deep_sleep_now && !force_render && clock_ok &&
                             s_next_render_due > wall_now + 2 &&
                             /* a due date past the longest allowed interval is
                              * garbage (clock jump, stale RTC) — render */
@@ -1227,7 +1376,26 @@ static void client_task(void *arg)
         }
         ESP_LOGI(TAG, "next render in %lu s (interval %lu s)",
                  (unsigned long)sleep_s, (unsigned long)interval);
+        /* The next panel refresh is due at the end of this wait — whether the
+         * wait is a deep sleep (the RTC keeps it) or an awake hold cut short
+         * by a keep-awake, whose follow-up pass must then check in, not
+         * render again. */
+        s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
+        if (deep_sleep_now && fos_display_present() && fos_cloud_asset_jobs_pending()) {
+            /* An image_get is queued or streaming (the provider fetches the
+             * frame's image on this pass's `render` announcement while
+             * someone is looking). A few seconds now beats an image that is
+             * never delivered. */
+            int64_t hold_end = esp_timer_get_time() +
+                               (int64_t)FOS_ASSET_SLEEP_HOLD_MAX_SEC * 1000000LL;
+            frameos_nim_log_hook("{\"event\":\"sleep:held\",\"source\":\"esp32\","
+                                 "\"reason\":\"image\"}");
+            while (fos_cloud_asset_jobs_pending() && esp_timer_get_time() < hold_end) {
+                vTaskDelay(pdMS_TO_TICKS(250));
+            }
+            keep_awake_s = keep_awake_remaining_seconds();
+        }
         if (deep_sleep_now && fos_display_present() && fos_ota_busy()) {
             /* See FOS_OTA_SLEEP_HOLD_MAX_SEC. Success reboots from inside the
              * OTA task; failure clears busy and we fall through to sleep. */
@@ -1272,7 +1440,6 @@ static void client_task(void *arg)
             if (config->wake_check_sec >= 60 && chunk > config->wake_check_sec) {
                 chunk = config->wake_check_sec;
             }
-            s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;
             bool wake_check = chunk < sleep_s;
             ESP_LOGI(TAG, "deep sleeping for %lu s%s%s", (unsigned long)chunk,
                      config->wake_schedule ? " (wake-on-schedule)" : "",
@@ -1358,6 +1525,7 @@ void fos_client_start(void)
     if (s_events) return;
     s_events = xEventGroupCreate();
     s_snapshot_lock = xSemaphoreCreateMutex();
+    fos_framebuffer_set_lend_hook(snapshot_before_lend);
     if (!s_events || !s_snapshot_lock) {
         ESP_LOGE(TAG, "render task init failed: event group or snapshot lock unavailable");
         if (s_events) {

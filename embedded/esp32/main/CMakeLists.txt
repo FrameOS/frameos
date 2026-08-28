@@ -4,6 +4,7 @@ idf_component_register(
         "fos_board.c"
         "fos_buttons.c"
         "fos_wake.c"
+        "fos_power.c"
         "fos_config.c"
         "fos_framebuffer.c"
         "fos_wifi.c"

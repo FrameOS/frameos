@@ -295,7 +295,13 @@ bytes with the device key. Implemented verbs: `get_state`, `render`,
 `set_scenes` (stored through the same interpreted-scene path as
 `usb_api upload-scenes`; `scene_ack` is sent only after the render task has
 actually hot-loaded the payload), `set_settings` (the `interval`/`name`
-subset), `image_get`, and the full asset verb set — `assets_list`,
+subset), `image_get` (the packed framebuffer as BMP, built a row at a time
+straight off the boot-time framebuffer reservation — since 2026.8.43 the
+preview snapshot borrows that buffer instead of copying it, and the stream
+allocates one 24 KiB chunk, so an 8 MB board with a 960 KB panel can finally
+serve one; an `image_get` that arrives before the wake's render waits for it,
+and the deep sleep holds while the stream goes out), and the full asset verb
+set — `assets_list`,
 `asset_get`, `asset_put`, `asset_mkdir`, `asset_delete`, `asset_rename` —
 against the mounted SD card (shared implementation in `main/fos_assets.c`,
 also behind the local HTTP asset API and the `usb_api` asset commands).
@@ -408,6 +414,31 @@ per 900 s, with the radio listening the whole time. Three things changed:
   wake, at the end of its pass (after the render and the panel refresh, so
   `renderLastMs` is this wake's); that one sample is now delivered every
   cycle instead of winning a race with the sleep.
+
+The pass-start power decision (2026.8.43, `fos_power.c`, host-tested by
+`main/tests/test_fos_power.c`) reads the cell twice a moment apart and keeps
+the higher burst, then weighs it against the last believed reading kept in
+RTC memory: a cell that was there a pass ago survives one implausible
+reading (two consecutive sub-2.5 V reads mean "no cell"), "critical" takes
+two consecutive passes below 3.2 V, and a critical cell always deep sleeps
+under `deep_sleep_on_battery` — it is a battery by definition. Before this,
+one 16-sample ADC burst reading "0 %" on a 3.9 V cell both parked the frame
+in the six-hour critical sleep and, because a sub-2.5 V reading also meant
+"no cell", switched deep sleep OFF, so the frame sat awake with the radio on
+for nine hours (E1004, 2026-08-27). Every pass now logs a `power` line —
+`deepSleep` (`battery` / `always` / `critical` / `off`), `onBattery`,
+`wakeCheckSeconds`, the millivolts read and, when they differ, the
+millivolts believed (`suspect: true`) — so "deep sleep silently off" and
+"the owner switched it off" are told apart in the cloud log; a settings
+push or poll that changes anything logs `settings:cloud` / `settings:sync`
+`applied` with the keys and values that changed.
+
+A pass that ends in an awake hold (a verb arrived, `keep_awake`) no longer
+renders again when the hold ends: the next panel refresh's due time is kept
+for every wait, so the follow-up pass checks in and sleeps until it. And
+the SNTP sync flag is also set from the sync callback: a pool that answered
+after the boot-time wait used to leave the whole boot "unsynced" — hub-stamped
+logs, no wake-check schedule — for as long as the frame stayed up.
 
 The sleep also **holds for a running OTA** (up to 15 min): the
 `notify_update_available` verb only keeps the frame awake 15 s while the

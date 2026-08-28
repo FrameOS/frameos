@@ -1614,13 +1614,18 @@ export async function markFramePreviewWatched(
   }
 }
 
+// `graceMs` stretches the window for a frame that was asleep: a deep-sleep
+// frame renders once per sleep, so "looked at it within the last sleep" is
+// what makes its next render worth fetching (previewWatchGraceMs in
+// frame-sleep.ts; the hub remembers each frame's last announced sleep).
 export function framePreviewIsWatched(
   frame: { previewWatchedAt: Date | null },
   now = Date.now(),
+  graceMs = 0,
 ): boolean {
   return (
     frame.previewWatchedAt !== null &&
-    now - frame.previewWatchedAt.getTime() <= previewWatchWindowMs
+    now - frame.previewWatchedAt.getTime() <= previewWatchWindowMs + graceMs
   );
 }
 

@@ -321,6 +321,18 @@ static void log_settings_event(const char *status, const char *detail)
     frameos_nim_log_hook(line);
 }
 
+/* `applied` with what changed: the owner toggling deep sleep in the cloud
+ * used to leave no trace on the device beyond a bare "applied". */
+static void log_settings_applied(const char *detail, const char *changed)
+{
+    char line[512];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"settings:sync\",\"source\":\"esp32\","
+             "\"status\":\"applied\",\"detail\":\"%s\",\"changed\":\"%s\"}",
+             detail ? detail : "", changed ? changed : "");
+    frameos_nim_log_hook(line);
+}
+
 /* Read at most `limit` bytes of the response body. Returns a NUL-terminated
  * malloc'd buffer (caller frees) or NULL. */
 static char *read_body(esp_http_client_handle_t client, int64_t content_length,
@@ -493,11 +505,93 @@ static bool apply_frame_settings(const cJSON *frame)
 static void log_settings_exit(const char *why)
 {
     /* Once per boot per reason would be ideal; once per pass is acceptable
-     * noise for a sync that should never silently die again. */
+     * noise for a sync that should never silently die again. NULL = the sync
+     * is going ahead: re-arm the guard, log nothing (this used to log a
+     * `skipped` with an empty detail two seconds before every `fetched`). */
     static const char *s_last_why = NULL;
     if (why == s_last_why) return;
     s_last_why = why;
-    log_settings_event("skipped", why);
+    if (why) log_settings_event("skipped", why);
+}
+
+/* Append "key=value" to a comma-separated list. */
+static void change_append(char *out, size_t out_len, const char *key, const char *value)
+{
+    size_t used = strlen(out);
+    if (used >= out_len) return;
+    snprintf(out + used, out_len - used, "%s%s=%s", used ? "," : "", key, value);
+}
+
+static void change_append_int(char *out, size_t out_len, const char *key, long value)
+{
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%ld", value);
+    change_append(out, out_len, key, buf);
+}
+
+void fos_settings_describe_changes(const fos_config_t *before, const fos_config_t *after,
+                                   char *out, size_t out_len)
+{
+    if (!out || out_len == 0) return;
+    out[0] = '\0';
+    if (!before || !after) return;
+    if (before->interval_sec != after->interval_sec) {
+        change_append_int(out, out_len, "interval", (long)after->interval_sec);
+    }
+    if (strcmp(before->hostname, after->hostname) != 0) {
+        change_append(out, out_len, "name", after->hostname);
+    }
+    if (before->render_mode != after->render_mode) {
+        change_append(out, out_len, "render_mode",
+                      after->render_mode == FOS_RENDER_REMOTE ? "remote" : "local");
+    }
+    if (before->rotate != after->rotate) {
+        change_append_int(out, out_len, "rotate", (long)after->rotate);
+    }
+    if (strcmp(before->scaling_mode, after->scaling_mode) != 0) {
+        change_append(out, out_len, "scaling_mode", after->scaling_mode);
+    }
+    if (strcmp(before->time_zone, after->time_zone) != 0) {
+        change_append(out, out_len, "timezone", after->time_zone);
+    }
+    if (before->deep_sleep != after->deep_sleep) {
+        change_append(out, out_len, "deep_sleep", after->deep_sleep ? "true" : "false");
+    }
+    if (before->deep_sleep_on_battery != after->deep_sleep_on_battery) {
+        change_append(out, out_len, "deep_sleep_on_battery",
+                      after->deep_sleep_on_battery ? "true" : "false");
+    }
+    if (before->wake_schedule != after->wake_schedule) {
+        change_append(out, out_len, "wake_schedule", after->wake_schedule ? "true" : "false");
+    }
+    if (before->wake_check_sec != after->wake_check_sec) {
+        change_append_int(out, out_len, "wake_check_seconds", (long)after->wake_check_sec);
+    }
+    if (before->battery_pin != after->battery_pin) {
+        change_append_int(out, out_len, "battery_pin", (long)after->battery_pin);
+    }
+    if (before->battery_divider != after->battery_divider) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%.2f", (double)after->battery_divider);
+        change_append(out, out_len, "battery_divider", buf);
+    }
+    if (before->battery_enable_pin != after->battery_enable_pin) {
+        change_append_int(out, out_len, "battery_enable_pin", (long)after->battery_enable_pin);
+    }
+    if (before->debug_logging != after->debug_logging) {
+        change_append(out, out_len, "debug", after->debug_logging ? "true" : "false");
+    }
+    if (before->max_http_response_bytes != after->max_http_response_bytes) {
+        change_append_int(out, out_len, "max_http_response_bytes",
+                          (long)after->max_http_response_bytes);
+    }
+    char buttons_before[FOS_GPIO_BUTTONS_SPEC_LEN];
+    char buttons_after[FOS_GPIO_BUTTONS_SPEC_LEN];
+    fos_config_format_gpio_buttons(before, buttons_before, sizeof(buttons_before));
+    fos_config_format_gpio_buttons(after, buttons_after, sizeof(buttons_after));
+    if (strcmp(buttons_before, buttons_after) != 0) {
+        change_append_int(out, out_len, "gpio_buttons", (long)after->gpio_button_count);
+    }
 }
 
 /* Pick the payload source and fill in its URL + Authorization value.
@@ -681,6 +775,10 @@ esp_err_t fos_settings_sync(bool force)
      * carries neither (the provider pushes them as set_settings/set_schedule
      * verbs), so these lookups simply miss on a cloud payload. */
     const cJSON *frame = cJSON_GetObjectItem(root, "frame");
+    /* A copy to diff against for the `applied` line; heap, not stack — the
+     * config carries the token buffers. NULL just loses the detail. */
+    fos_config_t *before = cJSON_IsObject(frame) ? malloc(sizeof(*before)) : NULL;
+    if (before) memcpy(before, config, sizeof(*before));
     bool changed = cJSON_IsObject(frame) ? apply_frame_settings(frame) : false;
     const cJSON *offset = cJSON_IsObject(frame)
                               ? cJSON_GetObjectItem(frame, "utcOffsetMinutes")
@@ -702,14 +800,18 @@ esp_err_t fos_settings_sync(bool force)
 
     if (changed) {
         if (fos_config_save() != ESP_OK) {
+            free(before);
             log_settings_event("error", "persist-failed");
             return ESP_FAIL;
         }
-        log_settings_event("applied", s_restart_after_apply ? "restarting" : "");
+        char changes[320] = "";
+        fos_settings_describe_changes(before, config, changes, sizeof(changes));
+        log_settings_applied(s_restart_after_apply ? "restarting" : "", changes);
         ESP_LOGI(TAG, "settings applied from backend (interval=%lu render_mode=%d rotate=%u scaling=%s)",
                  (unsigned long)config->interval_sec, (int)config->render_mode,
                  (unsigned)config->rotate, config->scaling_mode);
     }
+    free(before);
     if (response_etag[0]) {
         strlcpy(s_etag, response_etag, sizeof(s_etag));
     }

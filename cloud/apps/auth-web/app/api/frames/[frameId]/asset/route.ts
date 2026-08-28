@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../../src/lib/blobs";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import {
+  assetFetchCommandTtlMs,
   cachedAssetFile,
   queueAssetGetIfIdle,
   recentFailedAssetGet,
 } from "../../../../../src/lib/frame-asset-cache";
+import { commandTtlForFrame } from "../../../../../src/lib/frame-sleep";
 import {
   frameForAccount,
   maxAssetPathChars,
@@ -135,7 +137,14 @@ export async function GET(
   const needsFetch =
     !cached || now - cached.updatedAt.getTime() > cacheStaleAfterMs;
   if (needsFetch && frame.status === "active") {
-    await queueAssetGetIfIdle(db, session.accountId, frame.id, path, thumb);
+    await queueAssetGetIfIdle(
+      db,
+      session.accountId,
+      frame.id,
+      path,
+      thumb,
+      commandTtlForFrame(frame, assetFetchCommandTtlMs, now),
+    );
   }
   if (cached) {
     // Stale-while-revalidate: the refresh (if any) was queued above and the
