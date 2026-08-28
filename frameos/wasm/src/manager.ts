@@ -3,6 +3,7 @@
 // pane. Mirrors the device's own /control page (frameos/assets/web/control.html)
 // but runs entirely in the browser against the wasm runtime.
 import { FrameOSPreview, type FrameOSPreviewOptions } from './preview'
+import { selectFieldOptions } from './options'
 import { coerceStateFieldValue, evaluateShowIf, stateFieldShowIfValues } from './showIf'
 import { sceneEventButtons, type FrameOSScene, type StateField } from './types'
 
@@ -218,12 +219,18 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
     if (field.type === 'select' || field.type === 'boolean' || field.type === 'font') {
       const select = document.createElement('select')
       select.className = 'frameos-manager__input'
-      const opts = field.type === 'boolean' ? ['true', 'false'] : field.options ?? []
+      const opts =
+        field.type === 'boolean'
+          ? [
+              { label: 'true', value: 'true' },
+              { label: 'false', value: 'false' },
+            ]
+          : selectFieldOptions(field.options)
       for (const opt of opts) {
         const option = document.createElement('option')
-        option.value = opt
-        option.textContent = opt
-        option.selected = String(value ?? '') === opt
+        option.value = opt.value
+        option.textContent = opt.label
+        option.selected = String(value ?? '') === opt.value
         select.appendChild(option)
       }
       select.onchange = () => update(select.value)

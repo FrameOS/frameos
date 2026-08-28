@@ -178,6 +178,72 @@ describe("lintScenes", () => {
     ]);
   });
 
+  it("accepts both string and {value,label} select options on a scene field", () => {
+    expect(
+      messages([
+        scene({ fields: [{ name: "theme", options: ["dark", "light"], type: "select", value: "dark" }] }),
+      ]),
+    ).toEqual({ errors: [], warnings: [] });
+    expect(
+      messages([
+        scene({
+          fields: [
+            {
+              name: "theme",
+              options: [
+                { label: "Dark", value: "dark" },
+                { label: "Light", value: "light" },
+              ],
+              type: "select",
+              value: "dark",
+            },
+          ],
+        }),
+      ]),
+    ).toEqual({ errors: [], warnings: [] });
+  });
+
+  it("rejects select options that are neither a string nor a value/label pair", () => {
+    const { errors } = messages([
+      scene({
+        fields: [{ name: "theme", options: [{ label: "Dark" }], type: "select", value: "dark" }],
+      }),
+    ]);
+    expect(errors).toEqual([
+      expect.stringContaining('Scene field "theme": each option must be a string'),
+    ]);
+  });
+
+  it("rejects malformed select options on a scene-local app", () => {
+    const { errors } = messages([
+      scene({
+        apps: {
+          myApp: {
+            category: "data",
+            fields: [
+              { name: "theme", options: [{ label: "Dark" }], type: "select", value: "dark" },
+            ],
+            name: "My app",
+            output: [{ name: "out", type: "string" }],
+            sources: { "app.ts": "export function get() { return 'x' }", "config.json": "{}" },
+          },
+        },
+        edges: [
+          { id: "e1", source: "ev", sourceHandle: "next", target: "text", targetHandle: "prev", type: "appNodeEdge" },
+          { id: "e2", source: "my", sourceHandle: "fieldOutput", target: "text", targetHandle: "fieldInput/text", type: "codeNodeEdge" },
+        ],
+        nodes: [
+          { data: { keyword: "render" }, id: "ev", type: "event" },
+          { data: { config: {}, keyword: "render/text" }, id: "text", type: "app" },
+          { data: { config: { theme: "dark" }, keyword: "myApp" }, id: "my", type: "app" },
+        ],
+      }),
+    ]);
+    expect(errors).toEqual([
+      expect.stringContaining('Scene app "myApp" field "theme": each option must be a string'),
+    ]);
+  });
+
   it("accepts scene-local JS apps declared in the scene's apps map", () => {
     const { errors } = messages([
       scene({

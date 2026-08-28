@@ -35,7 +35,9 @@ function isOptionGroup(option: SelectOptionEntry): option is OptionGroup {
 function renderOption(option: SelectOption): JSX.Element {
   return (
     <option key={String(option.value)} value={option.value} disabled={option.disabled}>
-      {option.label}
+      {/* A non-string label (scenes have shipped `{ value, label }` option objects) would
+          crash the whole editor as an invalid React child, so never render one raw. */}
+      {typeof option.label === 'string' ? option.label : String(option.label ?? '')}
     </option>
   )
 }

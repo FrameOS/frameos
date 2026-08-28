@@ -1,4 +1,5 @@
 import type { AppConfig, AppConfigField, AppConfigFieldType, MarkdownField } from '../types'
+import { selectFieldValues } from './selectOptions'
 
 const fieldTypeToTsType: Record<AppConfigFieldType, string> = {
   string: 'string',
@@ -30,8 +31,11 @@ function literalString(value: string): string {
 }
 
 function fieldTsType(field: AppConfigField): string {
-  if (field.type === 'select' && Array.isArray(field.options) && field.options.length > 0) {
-    return field.options.map((option) => literalString(String(option))).join(' | ')
+  if (field.type === 'select') {
+    const values = selectFieldValues(field.options)
+    if (values.length > 0) {
+      return values.map(literalString).join(' | ')
+    }
   }
   return fieldTypeToTsType[field.type] ?? 'any'
 }

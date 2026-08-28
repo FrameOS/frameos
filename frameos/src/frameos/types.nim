@@ -460,13 +460,20 @@ type
     decodeBoundsNodeId*: NodeId
     decodeBoundsClaimedBy*: NodeId
 
+  # One choice of a "select" state field. Scenes store these either as a plain
+  # string (value doubles as the label) or as {"value": .., "label": ..}; the
+  # parseHook in interpreter.nim accepts both.
+  StateFieldOption* = object
+    value*: string
+    label*: string
+
   # State field definitions. Used in interpreted scenes, and to show the right form to the user
   StateField* = ref object
     name*: string
     label*: string
     fieldType*: string
     value*: JsonNode
-    options*: seq[string]
+    options*: seq[StateFieldOption]
     placeholder*: string
     required*: bool
     secret*: bool

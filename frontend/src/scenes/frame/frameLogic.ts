@@ -30,6 +30,9 @@ import {
   SceneNodeData,
   TemplateType,
   FrameId,
+  AppConfigField,
+  MarkdownField,
+  SceneApp,
 } from '../../types'
 import { forms } from 'kea-forms'
 import equal from 'fast-deep-equal'
@@ -77,6 +80,7 @@ import { normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { frameHasActivityLog } from '../../decorators/frame'
 import { frameRunsScenesInterpreted, normalizeSceneExecution, sceneExecutionForFrame } from '../../utils/sceneExecution'
 import { normalizeCustomEvent } from '../../utils/frameEvents'
+import { normalizeFieldOptions } from '../../utils/selectOptions'
 import { frameFormSceneErrors } from './frameFormSceneErrors'
 import {
   cloneSplitScreenSceneLayout,
@@ -1766,6 +1770,17 @@ function openSceneControlDrawer(frameId: FrameId, sceneId: string): void {
   router.actions.push(router.values.location.pathname, searchParams, router.values.hashParams)
 }
 
+function normalizeSceneAppFieldOptions(apps: Record<string, SceneApp>): Record<string, SceneApp> {
+  return Object.fromEntries(
+    Object.entries(apps).map(([keyword, app]) => [
+      keyword,
+      app.fields
+        ? { ...app, fields: app.fields.map((field: AppConfigField | MarkdownField) => normalizeFieldOptions(field)) }
+        : app,
+    ])
+  )
+}
+
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
   const settings = scene.settings ?? {}
   const frameRunsInterpreted = frameRunsScenesInterpreted(frame.mode)
@@ -1797,8 +1812,8 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
     name: scene.name || 'Untitled scene',
     nodes: arranged.nodes,
     edges: arranged.edges,
-    apps: normalizeSceneApps(scene.apps),
-    fields: scene.fields ?? [],
+    apps: normalizeSceneAppFieldOptions(normalizeSceneApps(scene.apps)),
+    fields: (scene.fields ?? []).map((field) => normalizeFieldOptions(field)),
     customEvents: (scene.customEvents ?? []).map((event) => normalizeCustomEvent(event)),
     settings: {
       ...settings,

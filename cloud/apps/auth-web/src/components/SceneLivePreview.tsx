@@ -40,6 +40,7 @@ import {
   type PreviewSettingsGroup,
 } from "../lib/preview-settings";
 import type { PreviewLogLine } from "../lib/preview-log";
+import { selectFieldOptions } from "../lib/select-options";
 import { ImageLightbox } from "./ImageLightbox";
 import { PreviewAssetsDialog } from "./PreviewAssetsDialog";
 import { PreviewLog } from "./PreviewLog";
@@ -1440,7 +1441,7 @@ function StateFieldRow({ field, id, value, onChange }: StateFieldRowProps) {
       </div>
     );
   } else if (type === "select" || type === "font") {
-    const options = field.options ?? [];
+    const options = selectFieldOptions(field.options);
     const current = textValue(value);
     control = (
       <select
@@ -1449,12 +1450,12 @@ function StateFieldRow({ field, id, value, onChange }: StateFieldRowProps) {
         onChange={(event) => onChange(event.target.value)}
         value={current}
       >
-        {options.includes(current) ? null : (
+        {options.some((option) => option.value === current) ? null : (
           <option value={current}>{current || "—"}</option>
         )}
         {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
+          <option key={option.value} value={option.value}>
+            {option.label}
           </option>
         ))}
       </select>

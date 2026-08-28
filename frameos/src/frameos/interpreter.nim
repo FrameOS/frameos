@@ -1628,6 +1628,45 @@ proc parseHook*(s: string, i: var int, v: var NodeId) =
   nodeMappingTable[str] = NodeId(globalNodeCounter)
   v = NodeId(globalNodeCounter)
 
+type RawStateFieldOption = object
+  value: string
+  label: string
+
+proc parseHook*(s: string, i: var int, v: var StateFieldOption) =
+  ## A select option is stored either as "value" (the value doubles as the
+  ## label) or as {"value": .., "label": ..}. Editors have also shipped numbers
+  ## and half-filled objects, and a scene that fails to parse takes the whole
+  ## frame down, so take whatever is there.
+  eatSpace(s, i)
+  if i < s.len and s[i] == '{':
+    var raw: RawStateFieldOption
+    parseHook(s, i, raw)
+    v = StateFieldOption(value: raw.value, label: if raw.label != "": raw.label else: raw.value)
+  elif i < s.len and s[i] == '"':
+    var tmp: string
+    parseHook(s, i, tmp)
+    v = StateFieldOption(value: tmp, label: tmp)
+  elif i < s.len and s[i] == '[':
+    # Nothing usable, but consume it so the rest of the scene still parses.
+    skipValue(s, i)
+    v = StateFieldOption()
+  else:
+    let symbol = parseSymbol(s, i)
+    let value = if symbol == "null": "" else: symbol
+    v = StateFieldOption(value: value, label: value)
+
+proc dumpHook*(s: var string, v: StateFieldOption) =
+  ## Round-trips back to the shape it came in as: a bare string unless it
+  ## carries a label of its own.
+  if v.label == "" or v.label == v.value:
+    dumpHook(s, v.value)
+  else:
+    s.add("{\"value\":")
+    dumpHook(s, v.value)
+    s.add(",\"label\":")
+    dumpHook(s, v.label)
+    s.add('}')
+
 proc parseHook*(s: string, i: var int, v: var SceneId) =
   var tmp: string
   parseHook(s, i, tmp)

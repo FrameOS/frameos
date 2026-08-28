@@ -320,6 +320,36 @@ def test_public_state_fields_include_value_and_show_if():
     assert '"counter": %*(5)' in source
 
 
+def test_select_options_accept_strings_and_value_label_pairs():
+    scene = {
+        "id": "scene",
+        "name": "Scene",
+        "nodes": [
+            {"id": "event", "type": "event", "data": {"keyword": "render"}, "position": {"x": 0, "y": 0}},
+        ],
+        "edges": [],
+        "fields": [
+            {
+                "name": "theme",
+                "type": "select",
+                "options": ["dark", {"value": "light", "label": "Light mode"}, {"label": "no value"}],
+                "value": "dark",
+                "access": "public",
+            },
+        ],
+        "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
+        "apps": {},
+    }
+    frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
+
+    source = write_scene_nim(frame, scene)
+
+    assert (
+        'options: @[StateFieldOption(value: "dark", label: "dark"), '
+        'StateFieldOption(value: "light", label: "Light mode")]'
+    ) in source
+
+
 def _fusion_scene(consumer_config=None, producer_cache=False, extra_edges=None, extra_nodes=None):
     scene = {
         "id": "scene",

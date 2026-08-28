@@ -8,7 +8,7 @@ import re
 from app.models.frame import Frame
 from app.models.apps import get_local_frame_apps, get_local_app_path, get_scene_app_id
 from app.codegen.drivers_nim import DEFAULT_COMPILATION_MODE
-from app.codegen.utils import sanitize_nim_string, natural_keys, nim_comment
+from app.codegen.utils import sanitize_nim_string, natural_keys, nim_comment, select_field_options
 from app.utils.js_apps import find_js_app_source_key
 from app.utils.scene_execution import scene_is_interpreted
 
@@ -1262,8 +1262,9 @@ class SceneWriter:
                 if field.get("type", "string") == "select":
                     opts = ", ".join(
                         [
-                            f'"{sanitize_nim_string(option)}"'
-                            for option in field.get("options", [])
+                            f'StateFieldOption(value: "{sanitize_nim_string(value)}", '
+                            f'label: "{sanitize_nim_string(label)}")'
+                            for value, label in select_field_options(field.get("options", []))
                         ]
                     )
 
