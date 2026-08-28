@@ -1,6 +1,7 @@
 #include "fos_wifi.h"
 
 #include <string.h>
+#include <sys/time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -342,9 +343,20 @@ int fos_wifi_rssi(void)
     return 0;
 }
 
+/* SNTP keeps polling in the background after the boot-time wait; a pool
+ * that answered late used to leave s_time_synced false for the whole boot —
+ * hub-stamped logs, no wake-check schedule, no wall-clock alignment — even
+ * though the clock had long been set (12 h of it on an awake E1004). */
+static void on_sntp_synced(struct timeval *tv)
+{
+    (void)tv;
+    s_time_synced = true;
+}
+
 esp_err_t fos_wifi_sync_time(uint32_t timeout_ms)
 {
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    config.sync_cb = on_sntp_synced;
     esp_err_t err = esp_netif_sntp_init(&config);
     if (err != ESP_OK) return err;
     /* Back from deep sleep with the RTC still counting: the clock is the

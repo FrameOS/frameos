@@ -1,8 +1,10 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "esp_err.h"
+#include "fos_config.h"
 
 /* Pull declarative settings and apply them without a rebuild. Runs on the
  * render task, next to the scenes sync, ETag'd against one of two sources:
@@ -17,6 +19,12 @@
  * Both feed frameos_nim_apply_service_settings, which replaces the groups the
  * payload carries and deletes the ones it does not. */
 esp_err_t fos_settings_sync(bool force);
+/* Which declarative settings differ between two config snapshots, as the
+ * wire's snake_case keys with their new values ("deep_sleep_on_battery=false,
+ * interval=900"), for the log line that confirms what a settings push or
+ * poll actually changed on the device. Empty string when nothing did. */
+void fos_settings_describe_changes(const fos_config_t *before, const fos_config_t *after,
+                                   char *out, size_t out_len);
 void fos_settings_request_sync(void);
 
 /* A cloud session reached `ready`. Pass whether its scopes list contained

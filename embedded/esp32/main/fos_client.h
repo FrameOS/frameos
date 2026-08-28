@@ -52,3 +52,15 @@ bool fos_client_snapshot_info(int *width, int *height, fos_pixel_format_t *forma
 esp_err_t fos_client_snapshot_copy(uint8_t *out, size_t out_len, int *width, int *height,
                                    fos_pixel_format_t *format, uint32_t *render_count,
                                    int64_t *render_ms);
+/* Borrow the packed snapshot in place for a streaming reader (the cloud
+ * image_get, the HTTP preview): on true the snapshot lock is HELD until
+ * fos_client_snapshot_release(), and a render that needs the buffer waits
+ * for it (bounded) — keep the hold to the seconds it takes to stream. False
+ * when there is no snapshot or the lock stayed busy for timeout_ms. */
+bool fos_client_snapshot_acquire(uint32_t timeout_ms, const uint8_t **buf, int *width,
+                                 int *height, fos_pixel_format_t *format, size_t *len);
+void fos_client_snapshot_release(void);
+/* True while a render is still owed: this boot's first pass has not finished,
+ * or a render signal is queued. An image_get arriving now waits for it
+ * instead of answering "no image" seconds before there is one. */
+bool fos_client_render_pending(void);

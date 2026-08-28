@@ -42,6 +42,14 @@ void fos_framebuffer_release(uint8_t *buf);
 /* Bytes held by the boot-time reservation, 0 when there is none. Reported in
  * the status JSON so "why did this render fail" is answerable from a log. */
 size_t fos_framebuffer_reserved_bytes(void);
+/* Is `buf` the reservation itself? Its bytes outlive a release: the last
+ * packed render stays readable in place until the next acquire, which is
+ * what lets the preview snapshot borrow it instead of copying 960 KB. */
+bool fos_framebuffer_is_reserved(const uint8_t *buf);
+/* Called on the acquiring task right before the reservation is lent out —
+ * the moment its previous contents stop being valid. fos_client.c uses it
+ * to drop a borrowed snapshot (after any in-flight preview stream). */
+void fos_framebuffer_set_lend_hook(void (*hook)(void));
 
 /* Reservation policy, split out so the host tests can pin it: always on
  * PSRAM boards; on PSRAM-less boards only when the buffer fits and enough

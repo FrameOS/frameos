@@ -1,10 +1,11 @@
-import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { frameAssetFiles, frameCommands } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../../src/lib/blobs";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
+import { queueImageGetIfIdle } from "../../../../../src/lib/frame-asset-cache";
+import { commandTtlForFrame, frameIsAsleep } from "../../../../../src/lib/frame-sleep";
 import {
-  enqueueFrameCommand,
   frameForAccount,
   frameImageAssetPath,
   markFramePreviewWatched,
@@ -14,6 +15,8 @@ import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
 
+// For an awake frame; a sleeping frame's fetch stretches to its next wake
+// (commandTtlForFrame) so the device finds it on the pass that can answer it.
 const fetchCommandTtlMs = 2 * 60 * 1000;
 // The preview panel wants "the current image" — anything older than a
 // render interval is history. A passive load (?t=-1, a tile filling in)
@@ -41,25 +44,6 @@ async function cachedImage(db: Db, frameId: string) {
         eq(frameAssetFiles.frameId, frameId),
         eq(frameAssetFiles.path, frameImageAssetPath),
         eq(frameAssetFiles.thumb, false),
-      ),
-    )
-    .limit(1);
-  return row;
-}
-
-async function outstandingImageGet(db: Db, frameId: string) {
-  const [row] = await db
-    .select({ id: frameCommands.id })
-    .from(frameCommands)
-    .where(
-      and(
-        eq(frameCommands.frameId, frameId),
-        eq(frameCommands.type, "image_get"),
-        inArray(frameCommands.status, ["pending", "sent"]),
-        or(
-          isNull(frameCommands.expiresAt),
-          gt(frameCommands.expiresAt, new Date()),
-        ),
       ),
     )
     .limit(1);
@@ -124,19 +108,17 @@ export async function GET(
   const wantsFresh = tParam !== null && tParam !== "-1";
   const needsFetch =
     !cached || now - cached.updatedAt.getTime() > imageStaleAfterMs;
-  if (
-    needsFetch &&
-    frame.status === "active" &&
-    !(await outstandingImageGet(db, frame.id))
-  ) {
-    await enqueueFrameCommand(db, {
-      createdByAccountId: session.accountId,
-      frameId: frame.id,
-      ttlMs: fetchCommandTtlMs,
-      type: "image_get",
-    });
+  if (needsFetch && frame.status === "active") {
+    await queueImageGetIfIdle(
+      db,
+      session.accountId,
+      frame.id,
+      commandTtlForFrame(frame, fetchCommandTtlMs, now),
+    );
   }
-  const canWaitForFresh = frame.status === "active";
+  // A frame that announced a sleep answers on its next wake, minutes away:
+  // the fetch is queued for it, but nobody should long-poll for it now.
+  const canWaitForFresh = frame.status === "active" && !frameIsAsleep(frame, now);
   if (cached && !(wantsFresh && needsFetch && canWaitForFresh)) {
     return await imageResponse(cached);
   }

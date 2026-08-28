@@ -39,3 +39,19 @@ typedef struct {
 
 void fos_http_collect_storage_info(fos_storage_info_t *info);
 esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene_id, size_t scene_id_len);
+
+/* The same BMP, streamed: `begin` is called once with the total byte count,
+ * then `write` with the header, the palette and each pixel row (bottom-up,
+ * BMP order) until the image is complete. A `write` returning false aborts
+ * the stream (ESP_FAIL). Reads the packed snapshot in place under its lock
+ * — no copy of the framebuffer, no whole-image buffer — which is what lets
+ * an 8 MB board with a 960 KB panel serve a preview at all. ESP_ERR_NOT_FOUND
+ * when nothing is rendered; ESP_ERR_TIMEOUT when the snapshot stayed locked
+ * (a render packing into it) for `lock_timeout_ms`. */
+typedef struct {
+    void (*begin)(void *ctx, size_t total);
+    bool (*write)(void *ctx, const uint8_t *data, size_t len);
+} fos_preview_sink_t;
+esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
+                                      uint32_t lock_timeout_ms,
+                                      char *scene_id, size_t scene_id_len);

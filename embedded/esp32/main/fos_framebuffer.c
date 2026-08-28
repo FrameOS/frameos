@@ -32,6 +32,7 @@ bool fos_framebuffer_should_reserve(size_t len, size_t psram_total, size_t inter
 static uint8_t *s_reserved;
 static size_t s_reserved_len;
 static SemaphoreHandle_t s_lock;
+static void (*s_lend_hook)(void);
 
 void fos_framebuffer_reserve(size_t len)
 {
@@ -90,6 +91,7 @@ uint8_t *fos_framebuffer_acquire(size_t len)
      * the twenty seconds an e-paper refresh takes. */
     if (s_reserved && len == s_reserved_len && s_lock &&
         xSemaphoreTake(s_lock, 0) == pdTRUE) {
+        if (s_lend_hook) s_lend_hook();
         return s_reserved;
     }
     uint8_t *buf = fos_big_malloc(len);
@@ -110,6 +112,16 @@ void fos_framebuffer_release(uint8_t *buf)
 size_t fos_framebuffer_reserved_bytes(void)
 {
     return s_reserved ? s_reserved_len : 0;
+}
+
+bool fos_framebuffer_is_reserved(const uint8_t *buf)
+{
+    return buf != NULL && buf == s_reserved;
+}
+
+void fos_framebuffer_set_lend_hook(void (*hook)(void))
+{
+    s_lend_hook = hook;
 }
 
 #endif /* ESP_PLATFORM */

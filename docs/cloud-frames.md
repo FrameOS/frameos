@@ -444,7 +444,7 @@ lines), nothing retained across disconnects, and error acks are ignored.
 | `scene_ack` | `{"checksum", "active_scene"}` | after a successful `set_scenes`, drives provider-side sync state. When the acked checksum matches the provider's current assigned set, the provider also promotes its per-scene deploy ledger (`assigned_scene_state` → `deployed_scene_state` on the frame row) so the workspace can name WHICH scene is still pending on later edits |
 | `assets` | `{"id", "assets": […], "truncated"?}` | reply to `assets_list`; the provider caches the latest listing per frame (the reference provider rejects listings over **256 KiB** of JSON rather than truncating them) |
 | `asset_chunk` | `{"id", "seq", "data", "done", …}` | reply stream to `asset_get`; the provider reassembles in order, bounds the total at its per-file cap, and discards the partial file on a chunk carrying `"error"` or on disconnect |
-| `render` | `{"active_scene": "…"}` | "I have written a fresh snapshot of this scene." Announcement only, never bytes — see Previews below. A provider that does not want it can ignore it entirely |
+| `render` | `{"active_scene": "…", "image"?: "image_get"}` | "I have written a fresh snapshot of this scene." Announcement only, never bytes — see Previews below. A provider that does not want it can ignore it entirely. `image: "image_get"` (ESP32 firmware **2026.8.43**+) says the device keeps no snapshot files — its image is its framebuffer — so a provider that wants the picture fetches it with `image_get` (into its current-image slot) rather than `asset_get` of a per-scene PNG |
 
 A provider must tolerate unknown frame→provider types (forward compatibility).
 
@@ -475,11 +475,24 @@ three-minute window). A frame nobody is looking at costs one small JSON
 message per snapshot write and nothing else — no polling, no scraping, and no
 standing stream of images out of a home.
 
-The fetch itself is the ordinary `asset_get` verb, so a provider that ignores
-`render` entirely still gets previews the moment a tile asks for one; it just
-gets them a render late. Devices must not send `render` more than once per
-snapshot write, and providers should cap the resulting fetches per frame
-regardless (the reference hub allows four a minute).
+The fetch itself is the ordinary `asset_get` verb (or `image_get` when the
+announcement says so), so a provider that ignores `render` entirely still
+gets previews the moment a tile asks for one; it just gets them a render
+late. Devices must not send `render` more than once per snapshot write, and
+providers should cap the resulting fetches per frame regardless (the
+reference hub allows four a minute).
+
+Two things make this work for a frame that deep sleeps between renders. A
+fetch queued while the frame is asleep must outlive the sleep: the reference
+provider stretches the `image_get` / `asset_get` TTL past the frame's
+announced `next_wake_at` (a two-minute TTL on a fifteen-minute sleeper
+expired every time). And "someone is looking" has to span one sleep: the
+frame renders exactly once per wake, so the reference hub adds the frame's
+last announced `wake_in_seconds` to its three-minute watch window when that
+frame's `render` arrives. On the device side, an `image_get` that lands at
+`hello` — before the wake's render exists — waits for that render (up to
+150 s) instead of answering `no_image`, and the deep sleep holds (up to 45 s)
+while the stream is still going out.
 
 A provider acks `log_batch` and `metrics` with `ok: false` and `rate_limited`
 when the frame exceeds its ingestion budget, or `payload_too_large` when a

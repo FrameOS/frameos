@@ -978,29 +978,51 @@ static uint8_t preview_palette_index(const uint8_t *buf, int width, int height,
     }
 }
 
-esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene_id, size_t scene_id_len)
+/* One BMP row (bottom-up order) of the snapshot, in scene orientation. */
+static void preview_bmp_row(const uint8_t *packed, int width, int height,
+                            fos_pixel_format_t format, int rotate, int out_width,
+                            int out_height, int y, uint16_t bit_count,
+                            uint8_t *row, size_t row_stride)
 {
-    if (out) *out = NULL;
-    if (out_len) *out_len = 0;
-    if (!out || !out_len) return ESP_ERR_INVALID_ARG;
+    memset(row, 0, row_stride);
+    for (int x = 0; x < out_width; x++) {
+        /* Scene (x,y) → the panel position the packer put it at (the
+         * same mapping embedded_main.panelCoords applies). */
+        int px = x, py = y;
+        switch (rotate) {
+            case 90: px = out_height - 1 - y; py = x; break;
+            case 180: px = out_width - 1 - x; py = out_height - 1 - y; break;
+            case 270: px = y; py = out_width - 1 - x; break;
+            default: break;
+        }
+        uint8_t index = preview_palette_index(packed, width, height, format, px, py);
+        if (bit_count == 1) {
+            if (index & 1u) row[(size_t)x >> 3] |= 0x80 >> (x & 7);
+        } else if (x & 1) {
+            row[(size_t)x >> 1] |= index & 0x0F;
+        } else {
+            row[(size_t)x >> 1] |= (index & 0x0F) << 4;
+        }
+    }
+}
 
+esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
+                                      uint32_t lock_timeout_ms,
+                                      char *scene_id, size_t scene_id_len)
+{
+    if (!sink || !sink->write) return ESP_ERR_INVALID_ARG;
     int width = 0, height = 0;
     fos_pixel_format_t format = FOS_PIXEL_1BPP;
     size_t packed_len = 0;
-    if (!fos_client_snapshot_info(&width, &height, &format, &packed_len, NULL, NULL)) {
+    const uint8_t *packed = NULL;
+    /* Is there anything at all? Cheap, and it tells NOT_FOUND from TIMEOUT. */
+    if (!fos_client_snapshot_info(&width, &height, &format, &packed_len, NULL, NULL) ||
+        width <= 0 || height <= 0 || packed_len == 0) {
         return ESP_ERR_NOT_FOUND;
     }
-    if (width <= 0 || height <= 0 || packed_len == 0) {
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    uint8_t *packed = fos_big_malloc(packed_len);
-    if (!packed) packed = malloc(packed_len);
-    if (!packed) return ESP_ERR_NO_MEM;
-    esp_err_t err = fos_client_snapshot_copy(packed, packed_len, &width, &height, &format, NULL, NULL);
-    if (err != ESP_OK) {
-        free(packed);
-        return ESP_ERR_NOT_FOUND;
+    if (!fos_client_snapshot_acquire(lock_timeout_ms, &packed, &width, &height, &format,
+                                     &packed_len)) {
+        return ESP_ERR_TIMEOUT;
     }
 
     /* The packed snapshot is in PANEL orientation (the packers rotate while
@@ -1017,31 +1039,26 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
     size_t pixel_bytes = row_stride * (size_t)out_height;
     size_t palette_bytes = palette_entries * 4u;
     if (pixel_bytes > UINT32_MAX - 54u - palette_bytes) {
-        free(packed);
+        fos_client_snapshot_release();
         return ESP_ERR_INVALID_SIZE;
     }
     size_t bmp_len = 54u + palette_bytes + pixel_bytes;
-    uint8_t *bmp = fos_big_malloc(bmp_len);
-    if (!bmp) bmp = malloc(bmp_len);
-    if (!bmp) {
-        free(packed);
-        return ESP_ERR_NO_MEM;
-    }
-    memset(bmp, 0, bmp_len);
 
-    bmp[0] = 'B'; bmp[1] = 'M';
-    put_u32le(&bmp[2], (uint32_t)bmp_len);
-    put_u32le(&bmp[10], (uint32_t)(54u + palette_bytes));
-    put_u32le(&bmp[14], 40);
-    put_u32le(&bmp[18], (uint32_t)out_width);
-    put_u32le(&bmp[22], (uint32_t)out_height);
-    put_u16le(&bmp[26], 1);
-    put_u16le(&bmp[28], bit_count);
-    put_u32le(&bmp[34], (uint32_t)pixel_bytes);
-    put_u32le(&bmp[46], (uint32_t)palette_entries);
-    put_u32le(&bmp[50], (uint32_t)palette_entries);
+    uint8_t header[54u + 16u * 4u];
+    memset(header, 0, sizeof(header));
+    header[0] = 'B'; header[1] = 'M';
+    put_u32le(&header[2], (uint32_t)bmp_len);
+    put_u32le(&header[10], (uint32_t)(54u + palette_bytes));
+    put_u32le(&header[14], 40);
+    put_u32le(&header[18], (uint32_t)out_width);
+    put_u32le(&header[22], (uint32_t)out_height);
+    put_u16le(&header[26], 1);
+    put_u16le(&header[28], bit_count);
+    put_u32le(&header[34], (uint32_t)pixel_bytes);
+    put_u32le(&header[46], (uint32_t)palette_entries);
+    put_u32le(&header[50], (uint32_t)palette_entries);
 
-    uint8_t *palette = bmp + 54u;
+    uint8_t *palette = header + 54u;
     memset(palette, 255, palette_bytes);
     size_t colors = 0;
     const uint8_t *rgb = preview_palette(format, &colors);
@@ -1056,68 +1073,122 @@ esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene
     if (scene_id && scene_id_len > 0) {
         current_scene_id(scene_id, scene_id_len);
     }
-    uint8_t *pixels = bmp + 54u + palette_bytes;
-    size_t row_index = 0;
-    for (int y = out_height - 1; y >= 0; y--) {
-        uint8_t *row = pixels + row_index * row_stride;
-        memset(row, 0, row_stride);
-        for (int x = 0; x < out_width; x++) {
-            /* Scene (x,y) → the panel position the packer put it at (the
-             * same mapping embedded_main.panelCoords applies). */
-            int px = x, py = y;
-            switch (rotate) {
-                case 90: px = out_height - 1 - y; py = x; break;
-                case 180: px = out_width - 1 - x; py = out_height - 1 - y; break;
-                case 270: px = y; py = out_width - 1 - x; break;
-                default: break;
-            }
-            uint8_t index = preview_palette_index(packed, width, height, format, px, py);
-            if (bit_count == 1) {
-                if (index & 1u) row[(size_t)x >> 3] |= 0x80 >> (x & 7);
-            } else if (x & 1) {
-                row[(size_t)x >> 1] |= index & 0x0F;
-            } else {
-                row[(size_t)x >> 1] |= (index & 0x0F) << 4;
-            }
-        }
-        row_index++;
-    }
 
-    free(packed);
-    *out = bmp;
-    *out_len = bmp_len;
+    uint8_t *row = malloc(row_stride);
+    if (!row) {
+        fos_client_snapshot_release();
+        return ESP_ERR_NO_MEM;
+    }
+    if (sink->begin) sink->begin(ctx, bmp_len);
+    bool ok = sink->write(ctx, header, 54u + palette_bytes);
+    for (int y = out_height - 1; ok && y >= 0; y--) {
+        preview_bmp_row(packed, width, height, format, rotate, out_width, out_height, y,
+                        bit_count, row, row_stride);
+        ok = sink->write(ctx, row, row_stride);
+    }
+    free(row);
+    fos_client_snapshot_release();
+    return ok ? ESP_OK : ESP_FAIL;
+}
+
+/* The whole BMP in one heap buffer, for callers that need it contiguous (the
+ * USB `usb_api image` reply). Built by the streaming path: the framebuffer
+ * itself is never copied. */
+typedef struct {
+    uint8_t *buf;
+    size_t cap;
+    size_t used;
+    bool failed;
+} preview_collect_t;
+
+static void preview_collect_begin(void *ctx, size_t total)
+{
+    preview_collect_t *c = (preview_collect_t *)ctx;
+    c->buf = fos_big_malloc(total);
+    if (!c->buf) c->buf = malloc(total);
+    c->cap = c->buf ? total : 0;
+    c->used = 0;
+    c->failed = c->buf == NULL;
+}
+
+static bool preview_collect_write(void *ctx, const uint8_t *data, size_t len)
+{
+    preview_collect_t *c = (preview_collect_t *)ctx;
+    if (!c->buf || c->used + len > c->cap) {
+        c->failed = true;
+        return false;
+    }
+    memcpy(c->buf + c->used, data, len);
+    c->used += len;
+    return true;
+}
+
+esp_err_t fos_http_preview_bmp_alloc(uint8_t **out, size_t *out_len, char *scene_id, size_t scene_id_len)
+{
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if (!out || !out_len) return ESP_ERR_INVALID_ARG;
+    preview_collect_t collect = {0};
+    static const fos_preview_sink_t sink = {
+        .begin = preview_collect_begin,
+        .write = preview_collect_write,
+    };
+    esp_err_t err = fos_http_preview_bmp_stream(&sink, &collect, 10000, scene_id, scene_id_len);
+    if (err == ESP_FAIL && collect.failed && !collect.buf) err = ESP_ERR_NO_MEM;
+    if (err != ESP_OK) {
+        free(collect.buf);
+        return err;
+    }
+    *out = collect.buf;
+    *out_len = collect.used;
     return ESP_OK;
+}
+
+/* httpd chunked send as a preview sink. */
+static bool preview_httpd_write(void *ctx, const uint8_t *data, size_t len)
+{
+    httpd_req_t *req = (httpd_req_t *)ctx;
+    return httpd_resp_send_chunk(req, (const char *)data, (ssize_t)len) == ESP_OK;
 }
 
 static esp_err_t preview_bmp_handler(httpd_req_t *req)
 {
     REQUIRE_PROTECTED_ACCESS();
 
-    uint8_t *bmp = NULL;
-    size_t bmp_len = 0;
     char scene_id[128];
     scene_id[0] = '\0';
-    esp_err_t err = fos_http_preview_bmp_alloc(&bmp, &bmp_len, scene_id, sizeof(scene_id));
-    if (err == ESP_ERR_NOT_FOUND) {
+    int width = 0, height = 0;
+    fos_pixel_format_t format = FOS_PIXEL_1BPP;
+    size_t packed_len = 0;
+    if (!fos_client_snapshot_info(&width, &height, &format, &packed_len, NULL, NULL)) {
         const char *reason = strcmp(fos_client_snapshot_mode(), "hash-only") == 0
             ? "panel image is rendered, but preview snapshot was not retained"
             : "no preview rendered yet";
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, reason);
     }
-    if (err == ESP_ERR_INVALID_SIZE) {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "preview too large");
-    }
-    if (err != ESP_OK) {
-        return httpd_resp_send_500(req);
-    }
+    /* Headers go out before the first chunk, so the scene id has to be read
+     * up front; the stream re-reads it under the lock (same value). */
+    current_scene_id(scene_id, sizeof(scene_id));
     httpd_resp_set_type(req, "image/bmp");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     if (scene_id[0]) {
         httpd_resp_set_hdr(req, "X-Scene-Id", scene_id);
     }
-    err = httpd_resp_send(req, (const char *)bmp, bmp_len);
-    free(bmp);
-    return err;
+    static const fos_preview_sink_t sink = { .begin = NULL, .write = preview_httpd_write };
+    esp_err_t err = fos_http_preview_bmp_stream(&sink, req, 10000, NULL, 0);
+    if (err == ESP_ERR_NOT_FOUND) {
+        return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no preview rendered yet");
+    }
+    if (err == ESP_ERR_TIMEOUT) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "preview busy (rendering)");
+    }
+    if (err == ESP_ERR_INVALID_SIZE) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "preview too large");
+    }
+    if (err != ESP_OK) {
+        return err;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 static esp_err_t setup_post_handler(httpd_req_t *req)

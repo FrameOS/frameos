@@ -14,6 +14,10 @@ import {
   type FramesDatabase,
 } from "./frames";
 
+// For an AWAKE frame. A sleeping frame's fetch has to outlive its sleep:
+// callers pass commandTtlForFrame(frame, assetFetchCommandTtlMs) instead
+// (frame-sleep.ts) — a 2-minute TTL on a 15-minute sleeper expired every
+// single time, which is how a frame's image stayed stale for days.
 export const assetFetchCommandTtlMs = 2 * 60 * 1000;
 
 /**
@@ -129,6 +133,7 @@ export async function queueAssetGetIfIdle(
   frameId: string,
   path: string,
   thumb: boolean,
+  ttlMs: number = assetFetchCommandTtlMs,
 ) {
   if (await outstandingAssetGet(db, frameId, path, thumb)) {
     return;
@@ -137,9 +142,53 @@ export async function queueAssetGetIfIdle(
     createdByAccountId: accountId,
     frameId,
     payload: { path, ...(thumb ? { thumb: true } : {}) },
-    ttlMs: assetFetchCommandTtlMs,
+    ttlMs,
     type: "asset_get",
   });
+}
+
+/** A live (pending or sent, unexpired) image_get for this frame. */
+export async function outstandingImageGet(db: FramesDatabase, frameId: string) {
+  const [row] = await db
+    .select({ id: frameCommands.id })
+    .from(frameCommands)
+    .where(
+      and(
+        eq(frameCommands.frameId, frameId),
+        eq(frameCommands.type, "image_get"),
+        inArray(frameCommands.status, ["pending", "sent"]),
+        or(
+          isNull(frameCommands.expiresAt),
+          gt(frameCommands.expiresAt, new Date()),
+        ),
+      ),
+    )
+    .limit(1);
+  return row;
+}
+
+/**
+ * Queue an image_get (the frame's current rendered image, cached under
+ * frameImageAssetPath) unless one is already in flight. The route behind the
+ * preview panel and the hub's `render` handler (for devices whose image is
+ * their framebuffer, not a snapshot file) both go through here.
+ */
+export async function queueImageGetIfIdle(
+  db: Parameters<typeof enqueueFrameCommand>[0],
+  accountId: string,
+  frameId: string,
+  ttlMs: number = assetFetchCommandTtlMs,
+) {
+  if (await outstandingImageGet(db, frameId)) {
+    return false;
+  }
+  await enqueueFrameCommand(db, {
+    createdByAccountId: accountId,
+    frameId,
+    ttlMs,
+    type: "image_get",
+  });
+  return true;
 }
 
 /**

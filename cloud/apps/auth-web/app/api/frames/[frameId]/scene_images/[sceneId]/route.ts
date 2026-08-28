@@ -3,11 +3,13 @@ import { readBlob } from "../../../../../../src/lib/blobs";
 import { csrfResponse } from "../../../../../../src/lib/csrf";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
 import {
+  assetFetchCommandTtlMs,
   cachedAssetFile,
   queueAssetGetIfIdle,
   recentFailedAssetGet,
   sceneSnapshotAssetPath,
 } from "../../../../../../src/lib/frame-asset-cache";
+import { commandTtlForFrame } from "../../../../../../src/lib/frame-sleep";
 import {
   frameForAccount,
   markFramePreviewWatched,
@@ -131,6 +133,7 @@ export async function GET(
       frame.id,
       snapshotPath,
       thumb,
+      commandTtlForFrame(frame, assetFetchCommandTtlMs),
     );
   }
   const cachedContent = await readBlob(cached);

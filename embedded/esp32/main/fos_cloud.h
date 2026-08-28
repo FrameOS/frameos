@@ -64,6 +64,17 @@ bool fos_cloud_ws_connected(void);
  * before esp_deep_sleep. False when there is no live session. */
 bool fos_cloud_announce_sleep(uint32_t wake_in_seconds, int64_t next_render_at,
                               const char *reason, bool wake_check);
+/* Tell the provider the panel just got a fresh render of `scene_id` (the
+ * `render` message, docs/cloud-frames.md "Previews"). The provider decides
+ * whether anyone is looking and, if so, queues an `image_get` — this
+ * profile keeps no snapshot files, so the message says the image is to be
+ * fetched with image_get rather than asset_get. False without a session. */
+bool fos_cloud_announce_render(const char *scene_id);
+/* An asset job (an image_get streaming the frame's image, a card read or
+ * write) is queued or running on the cloud task. A deep sleep waits for
+ * these — bounded — so an image the provider asked for on this very pass is
+ * delivered before the CPU halts. */
+bool fos_cloud_asset_jobs_pending(void);
 /* Wait (up to timeout_ms) for every log line queued for the live session,
  * and the newest metrics sample, to be handed to the socket — the cloud task
  * batches both on a 1 s tick, so a caller about to halt the CPU has to give
