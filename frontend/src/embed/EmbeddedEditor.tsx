@@ -528,9 +528,7 @@ function EmbeddedEditorBody({
   const selectedScene = scenes.find((scene) => scene.id === selectedSceneId) ?? null
 
   return (
-    <div
-      className={clsx('frameos-app-shell flex h-full flex-col overflow-hidden', `frameos-theme-${theme}`, surface)}
-    >
+    <div className={clsx('frameos-app-shell flex h-full flex-col overflow-hidden', `frameos-theme-${theme}`, surface)}>
       {scenes.length > 1 ? (
         <div className={clsx('flex shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1', divider)}>
           {scenes.map((scene) => (
@@ -599,7 +597,12 @@ function EmbeddedEditorBody({
           bodyClassName="h-[calc(100dvh-11rem)]"
         >
           <div className="h-full min-h-0 overflow-hidden">
-            <EditApp editorKey={appEditor.key} sceneId={appEditor.sceneId} nodeId={appEditor.nodeId ?? ''} />
+            <EditApp
+              editorKey={appEditor.key}
+              sceneId={appEditor.sceneId}
+              nodeId={appEditor.nodeId ?? ''}
+              showToolbar
+            />
           </div>
         </Modal>
       ) : null}

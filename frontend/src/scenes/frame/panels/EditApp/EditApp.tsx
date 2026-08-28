@@ -22,6 +22,9 @@ interface EditAppProps {
   nodeId: string
   showFileList?: boolean
   compactWarnings?: boolean
+  // Renders a slim Save / Discard row above the code editor. Hosts with their
+  // own save controls (the apps workspace top bar) leave this off.
+  showToolbar?: boolean
 }
 
 interface EditAppFileListProps {
@@ -186,7 +189,14 @@ export function EditAppFileList({ sceneId, nodeId, className }: EditAppFileListP
   )
 }
 
-export function EditApp({ editorKey, sceneId, nodeId, showFileList = true, compactWarnings = false }: EditAppProps) {
+export function EditApp({
+  editorKey,
+  sceneId,
+  nodeId,
+  showFileList = true,
+  compactWarnings = false,
+  showToolbar = false,
+}: EditAppProps) {
   const { frameId } = useValues(frameLogic)
   const { theme } = useValues(workspaceLogic)
   const { persistUntilClosed } = useActions(frameEditorsLogic)
@@ -207,8 +217,9 @@ export function EditApp({ editorKey, sceneId, nodeId, showFileList = true, compa
     hasMultipleAppUsages,
     appTypeDeclarations,
     scene,
+    hasChanges,
   } = useValues(logic)
-  const { forkAndSaveChanges, updateFile } = useActions(logic)
+  const { forkAndSaveChanges, updateFile, saveChanges, discardChanges } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
@@ -277,6 +288,33 @@ export function EditApp({ editorKey, sceneId, nodeId, showFileList = true, compa
             </div>
             <Button size="small" color="secondary" onClick={forkAndSaveChanges} className="shrink-0">
               Fork and save this copy
+            </Button>
+          </div>
+        ) : null}
+        {showToolbar ? (
+          <div className="edit-app-toolbar flex shrink-0 items-center gap-2 text-xs">
+            <div className="frameos-muted min-w-0 flex-1 truncate font-mono" title={activeFile}>
+              {activeFile}
+              {hasChanges ? <span className="ml-1 font-sans font-semibold">(unsaved)</span> : null}
+            </div>
+            <Button
+              size="tiny"
+              color="secondary"
+              onClick={() => discardChanges()}
+              disabled={!hasChanges}
+              className="!px-2 !text-xs"
+            >
+              Discard
+            </Button>
+            <Button
+              size="tiny"
+              color={hasChanges ? 'primary' : 'secondary'}
+              onClick={() => saveChanges()}
+              disabled={!hasChanges || requiresCompiledOnSave}
+              className="!px-2 !text-xs"
+              title={requiresCompiledOnSave ? 'Compiled Nim apps are read only here' : 'Save changes'}
+            >
+              Save
             </Button>
           </div>
         ) : null}
