@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button } from '../../../../components/Button'
 import { Select } from '../../../../components/Select'
+import { selectFieldOptions, selectFieldValues } from '../../../../utils/selectOptions'
 import { TextInput } from '../../../../components/TextInput'
 import { TextArea } from '../../../../components/TextArea'
 import type {
@@ -141,7 +142,7 @@ export function ShowIfEditor({ value, onChange, availableFields }: ShowIfEditorP
       return true
     }
     if (conditionField?.type === 'select') {
-      return conditionField.options?.[0]
+      return selectFieldValues(conditionField.options)[0]
     }
     return undefined
   }
@@ -233,7 +234,7 @@ export function ShowIfEditor({ value, onChange, availableFields }: ShowIfEditorP
               ) : conditionField?.type === 'select' && conditionField.options?.length ? (
                 <Select
                   value={conditionValueToString(row.value)}
-                  options={conditionField.options.map((option) => ({ label: option, value: option }))}
+                  options={selectFieldOptions(conditionField.options)}
                   onChange={(text) => updateRow(index, { value: text })}
                   className="min-w-[7rem]"
                 />

@@ -161,13 +161,56 @@ function fieldOptions(fields: AppField[], name: string): Set<string> | undefined
       continue;
     }
     sawSelect = true;
-    if (Array.isArray(field.options)) {
-      for (const option of field.options) {
-        options.add(String(option));
-      }
+    for (const value of optionValues(field.options)) {
+      options.add(value);
     }
   }
   return sawSelect && options.size > 0 ? options : undefined;
+}
+
+// A select option is either a plain string or a { value, label } pair (both
+// strings). Anything else — a number, a half-filled object — is stored but
+// unrenderable, so it never reaches the editor.
+function optionShapeIssue(options: unknown): string | undefined {
+  if (options === undefined || options === null) {
+    return undefined;
+  }
+  if (!Array.isArray(options)) {
+    return `"options" must be a list; got ${JSON.stringify(options)}`;
+  }
+  const bad = options.find((option) => {
+    if (typeof option === "string") {
+      return false;
+    }
+    const entry = obj(option);
+    return !entry || typeof entry.value !== "string" || typeof entry.label !== "string";
+  });
+  if (bad === undefined) {
+    return undefined;
+  }
+  return (
+    `each option must be a string ("dark") or a { "value": "dark", "label": "Dark" } pair ` +
+    `(both strings); got ${JSON.stringify(bad)}`
+  );
+}
+
+// The values a select field can legitimately store.
+function optionValues(options: unknown): string[] {
+  if (!Array.isArray(options)) {
+    return [];
+  }
+  const values: string[] = [];
+  for (const option of options) {
+    if (typeof option === "string") {
+      values.push(option);
+    } else {
+      const value = obj(option)?.value;
+      if (typeof value === "string") {
+        values.push(value);
+      }
+    }
+  }
+  return values;
 }
 
 function hasDefault(fields: AppField[], name: string): boolean {
@@ -387,6 +430,10 @@ export function lintScene(
     if (type === "select" && !(Array.isArray(field.options) && field.options.length > 0)) {
       push("error", `Scene field "${name}" is a select but has no options.`);
     }
+    const optionIssue = optionShapeIssue(field.options);
+    if (optionIssue) {
+      push("error", `Scene field "${name}": ${optionIssue}.`);
+    }
     if (field.value === undefined || field.value === null) {
       if (["integer", "float", "boolean", "select", "color"].includes(type ?? "")) {
         push("warning", `Scene field "${name}" (${type}) has no default "value"; give it a string default.`);
@@ -406,6 +453,12 @@ export function lintScene(
   // --- scene-local JS apps --------------------------------------------------
   if (sceneApps) {
     for (const [keyword, raw] of Object.entries(sceneApps)) {
+      for (const field of fieldsOf(obj(raw))) {
+        const issue = optionShapeIssue(field.options);
+        if (issue) {
+          push("error", `Scene app "${keyword}" field "${str(field.name) ?? ""}": ${issue}.`);
+        }
+      }
       const sources = obj(obj(raw)?.sources) ?? {};
       for (const [file, content] of Object.entries(sources)) {
         if (typeof content !== "string" || !/\.(ts|js|tsx|jsx)$/.test(file)) {
@@ -544,6 +597,14 @@ export function lintScene(
         continue;
       }
       appByNode.set(id, app);
+      if (app.source === "inline") {
+        for (const field of app.fields) {
+          const issue = optionShapeIssue(field.options);
+          if (issue) {
+            push("error", `App ${keyword} field "${str(field.name) ?? ""}": ${issue}.`, id);
+          }
+        }
+      }
       const config = obj(data.config) ?? {};
       for (const [key, value] of Object.entries(config)) {
         if (!app.fieldNames.has(key)) {

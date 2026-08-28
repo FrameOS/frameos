@@ -22,6 +22,9 @@ Reference shapes:
   - code: { codeJS: string, codeArgs?: {name,type}[], codeOutputs?: {name,type}[] } — QuickJS snippet.
   - scene: { keyword: string, config: object } — embeds another scene by id.
 - Field: { name, type, label?, description?, required?, value?, options?, access?, persist? }
+- "options" (select fields only): a list of strings — ["dark", "light"] — or of { "value": "dark",
+  "label": "Dark mode" } pairs when the label shown should differ from the stored value. Nothing else;
+  config and state always hold the option's value, never its label.
 - Field types: string, text, float, integer, boolean, color, date, json, node, scene, image, font, select, path.
 
 Rules:

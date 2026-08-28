@@ -98,7 +98,7 @@
         "options": {
           "description": "List of options for the field, only used if type is 'select'",
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/SelectFieldOption"
           },
           "type": "array"
         },
@@ -481,6 +481,27 @@
         }
       },
       "type": "object"
+    },
+    "SelectFieldOption": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": ["value", "label"],
+          "type": "object"
+        }
+      ],
+      "description": "One choice of a 'select' field: a plain string (the value doubles as the label), or an explicit pair when the stored value and the text shown differ."
     }
   }
 }

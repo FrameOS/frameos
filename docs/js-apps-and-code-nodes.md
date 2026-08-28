@@ -68,6 +68,10 @@ A scene can bundle its own apps in its top-level `apps` map:
 }
 ```
 
+A `select` field lists its choices in `options`, either as plain strings
+(`["dark", "light"]`) or as `{ "value": "dark", "label": "Dark mode" }` pairs
+when the label shown should differ from the value stored in config or state.
+
 App nodes then use `keyword: "myPanel"`. Inside `app.ts` the app sees
 `app.config` (its fields), `app.state`, `app.frame` (`width`, `height`,
 `rotate`, `timeZone`), `context`, and the `frameos` helpers:

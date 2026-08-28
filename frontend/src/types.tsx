@@ -616,6 +616,12 @@ export interface ConfigFieldConditionAnd {
   and: ConfigFieldCondition[]
 }
 
+/**
+ * One choice of a 'select' field: a plain string (the value doubles as the label),
+ * or an explicit pair when the stored value and the text shown differ.
+ */
+export type SelectFieldOption = string | { value: string; label: string }
+
 export interface AppConfigField {
   /** Unique config field keyword */
   name: string
@@ -624,7 +630,7 @@ export interface AppConfigField {
   /** Type of the field */
   type: AppConfigFieldType
   /** List of options for the field, only used if type is 'select' */
-  options?: string[]
+  options?: SelectFieldOption[]
   /** Whether the path points at a file, a folder or either, only used if type is 'path' */
   pick?: PathFieldPick
   /** Allowed file extensions without the dot (e.g. ["jpg", "png"]), only used if type is 'path' */

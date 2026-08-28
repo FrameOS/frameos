@@ -2,6 +2,7 @@ import { ColorInput } from '../../../../components/ColorInput'
 import { FontSelect } from '../../../../components/FontSelect'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
 import { Select } from '../../../../components/Select'
+import { selectFieldOptions } from '../../../../utils/selectOptions'
 import { TextArea } from '../../../../components/TextArea'
 import { TextInput } from '../../../../components/TextInput'
 import { PathInput } from '../Assets/PathInput'
@@ -38,7 +39,7 @@ export function StateFieldEdit({
     <Select
       value={stateChanges[field.name] ?? currentState[field.name] ?? value ?? field.value}
       onChange={onChange}
-      options={(field.options ?? []).map((option) => ({ label: option, value: option }))}
+      options={selectFieldOptions(field.options)}
     />
   ) : field.type === 'boolean' ? (
     <Select

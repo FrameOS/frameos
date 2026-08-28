@@ -12,6 +12,30 @@ def sanitize_nim_string(string: str) -> str:
         .replace('\n', '\\n')
     )
 
+def select_field_options(options) -> list[tuple[str, str]]:
+    """(value, label) pairs for a select field.
+
+    Options are stored as plain strings, or as {"value": .., "label": ..} pairs when the
+    label shown differs from the stored value. Anything unusable is dropped rather than
+    written into the scene as garbage.
+    """
+    pairs: list[tuple[str, str]] = []
+    for option in options or []:
+        if isinstance(option, dict):
+            value = option.get("value")
+            label = option.get("label")
+        else:
+            value = option
+            label = None
+        if isinstance(value, bool) or value is None or isinstance(value, (dict, list)):
+            continue
+        value = str(value)
+        if isinstance(label, bool) or label is None or isinstance(label, (dict, list)):
+            label = value
+        pairs.append((value, str(label)))
+    return pairs
+
+
 def nim_comment(text) -> str:
     # Collapse user text to a single line for use in a generated Nim comment: a
     # raw newline would otherwise close the '# ...' comment and let the rest of

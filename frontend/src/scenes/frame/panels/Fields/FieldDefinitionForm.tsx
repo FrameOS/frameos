@@ -1,5 +1,6 @@
 import { Field } from '../../../../components/Field'
 import { Select } from '../../../../components/Select'
+import { selectOptionsFromText, selectOptionsToText } from '../../../../utils/selectOptions'
 import { Switch } from '../../../../components/Switch'
 import { TextArea } from '../../../../components/TextArea'
 import { TextInput } from '../../../../components/TextInput'
@@ -72,12 +73,14 @@ export function FieldDefinitionForm<T extends AppConfigField>({
         <Select options={appConfigFieldTypes.filter((f) => f !== 'node').map((k) => ({ label: k, value: k }))} />
       </Field>
       {field.type === 'select' ? (
-        <Field name="options" label="Options (one per line)">
+        <Field name="options" label='Options (one per line, "value | Label" to show a different label)'>
           <TextArea
-            value={(field.options ?? []).join('\n')}
+            value={selectOptionsToText(field.options)}
             rows={3}
             onChange={(value) =>
-              setFields(fields.map((field, i) => (i === index ? { ...field, options: value.split('\n') } : field)))
+              setFields(
+                fields.map((field, i) => (i === index ? { ...field, options: selectOptionsFromText(value) } : field))
+              )
             }
           />
         </Field>

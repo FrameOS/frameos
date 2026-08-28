@@ -7,6 +7,7 @@
 export { FrameOSPreview, createFrameOSPreview, type FrameOSPreviewOptions } from './preview'
 export { ditherFrame, panelPalettes, panelPaletteFor, type PanelPaletteKey } from './dither'
 export { mountFrameOSManager, type FrameOSManagerHandle, type FrameOSManagerOptions } from './manager'
+export { selectFieldOptions } from './options'
 export {
   coerceStateFieldValue,
   evaluateShowIf,
@@ -25,6 +26,7 @@ export {
   type SceneEventButton,
   type SceneInfo,
   type SceneNode,
+  type SelectFieldOption,
   type ShowIfCondition,
   type StateField,
 } from './types'

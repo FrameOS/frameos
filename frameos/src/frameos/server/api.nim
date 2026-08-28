@@ -3,7 +3,7 @@ import jsony
 import pixie
 import chroma
 import times
-import std/[os, strformat, strutils, tables, algorithm]
+import std/[os, strformat, strutils, tables, algorithm, sequtils]
 import locks
 import zippy
 import mummy
@@ -906,15 +906,16 @@ proc renderControlPage*(request: Request) =
     elif fieldType == "select" or fieldType == "boolean" or fieldType == "font":
       fieldsHtml.add(fmt"<select id='{h($key)}' placeholder='{h(placeholder)}'>")
       {.gcsafe.}:
-        let options = if fieldType == "boolean": @[
-          "true", "false"
-        ] elif fieldType == "font":
-          getAvailableFonts(globalFrameConfig.assetsPath)
+        let options = if fieldType == "boolean":
+          @[StateFieldOption(value: "true", label: "true"), StateFieldOption(value: "false", label: "false")]
+        elif fieldType == "font":
+          getAvailableFonts(globalFrameConfig.assetsPath).mapIt(StateFieldOption(value: it, label: it))
         else:
           field.options
       for option in options:
-        let selected = if option == stringValue: " selected" else: ""
-        fieldsHtml.add(fmt"<option value='{h($option)}'{selected}>{h($option)}</option>")
+        let selected = if option.value == stringValue: " selected" else: ""
+        let optionLabel = if option.label != "": option.label else: option.value
+        fieldsHtml.add(fmt"<option value='{h(option.value)}'{selected}>{h(optionLabel)}</option>")
       fieldsHtml.add("</select><br/><br/>")
     elif fieldType == "date":
       fieldsHtml.add(fmt"<input type='date' id='{h($key)}' placeholder='{h(placeholder)}' value='{h(stringValue)}' /><br/><br/>")

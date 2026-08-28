@@ -7,6 +7,7 @@ import { RevealDots } from '../../../../components/Reveal'
 import { diagramLogic } from './diagramLogic'
 import { TextInput } from '../../../../components/TextInput'
 import { Select } from '../../../../components/Select'
+import { selectFieldOptions } from '../../../../utils/selectOptions'
 import React, { useState } from 'react'
 import { TextArea } from '../../../../components/TextArea'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
@@ -415,7 +416,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
                                     value={
                                       data.config && field.name in data.config ? data.config[field.name] : field.value
                                     }
-                                    options={(field.options ?? []).map((o) => ({ value: o, label: o }))}
+                                    options={selectFieldOptions(field.options)}
                                     onChange={(value) => updateNodeConfig(id, field.name, value)}
                                   />
                                 ) : field.type === 'scene' ? (

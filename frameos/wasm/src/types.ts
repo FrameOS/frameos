@@ -16,13 +16,19 @@ export interface ConfigFieldConditionAnd {
 
 export type ShowIfCondition = ConfigFieldCondition | ConfigFieldConditionAnd
 
+/**
+ * One choice of a 'select' field: a plain string (the value doubles as the label),
+ * or an explicit pair when the stored value and the text shown differ.
+ */
+export type SelectFieldOption = string | { value: string; label: string }
+
 /** A scene state field, as found in a scene JSON's `fields` array. */
 export interface StateField {
   name: string
   label?: string
   type?: string
   value?: unknown
-  options?: string[]
+  options?: SelectFieldOption[]
   placeholder?: string
   required?: boolean
   secret?: boolean
