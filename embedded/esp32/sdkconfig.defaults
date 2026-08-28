@@ -17,8 +17,30 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 # CONFIG_APP_COMPILE_TIME_DATE is not set
 CONFIG_APP_RETRIEVE_LEN_ELF_SHA=64
-CONFIG_ESP_ERR_TO_NAME_LOOKUP=y
 # CONFIG_MBEDTLS_ERROR_STRINGS is not set
+
+# Text the image carries only to explain its own failures. The linker merges
+# every string literal into one pool (the ~180K the size report attributes to
+# `esp_efuse_utility.c.obj`), and three kinds of it buy little on a frame that
+# reports faults over the cloud link:
+#
+#   ASSERTIONS_SILENT   assertions still abort, they just no longer carry the
+#                       expression text and __FILE__ path (~29K of the pool
+#                       was `blk >= 0 && blk < EFUSE_BLK_MAX`-style strings
+#                       plus `//IDF/components/...` paths). A failed assert
+#                       prints its address; decode it against the .elf with
+#                       `xtensa-esp32s3-elf-addr2line -e frameos_esp32.elf`.
+#   CHECKS_SILENT       drops the message in ESP_RETURN_ON_*/ESP_EXIT_ON_*.
+#                       FrameOS' own C uses those macros four times; the rest
+#                       is ESP-IDF internals.
+#   ERR_TO_NAME_LOOKUP  esp_err_to_name() falls back to "ERROR 0x105" instead
+#                       of "ESP_ERR_NOT_FOUND" — the numeric code still
+#                       reaches the log, and it is the code we grep for.
+#
+# Assertions themselves stay ENABLED: only their strings go.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+CONFIG_COMPILER_OPTIMIZATION_CHECKS_SILENT=y
+# CONFIG_ESP_ERR_TO_NAME_LOOKUP is not set
 
 # 8MB flash (Seeed XIAO ESP32-S3 and similar S3 modules), OTA A/B layout.
 # The default table gives each OTA slot 3520K (3.44MiB) and keeps a 1M

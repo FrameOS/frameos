@@ -59,6 +59,10 @@ echo "generating FrameOS app loaders"
 FRAMEOS_ROOT_DIR="$FRAMEOS_DIR" python3 "$FRAMEOS_DIR/tools/makeapploaders.py"
 
 cd "$FRAMEOS_DIR"
+# -d:pixieNoPpm drops pixie's Netpbm (P3/P6) codec, ~7.4 KB of an image that
+# runs at 93% of its OTA slot. No frame is ever handed a .ppm: the format has
+# no place in a web fetch, a scene asset or an upload, and every other decoder
+# stays. Pi builds keep it (flash is not scarce there).
 # shellcheck disable=SC2086
 nim c \
     $EXTRA_NIM_FLAGS \
@@ -74,6 +78,7 @@ nim c \
     -d:useMalloc \
     -d:noSignalHandler \
     -d:frameosEmbedded \
+    -d:pixieNoPpm \
     --nimcache:"$NIMCACHE" \
     src/embedded/embedded_main.nim
 
