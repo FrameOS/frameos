@@ -95,7 +95,7 @@ describe("scene origin stamps", () => {
     const stamped = withStoreSceneOrigin([null, "x", { name: "no id" }], source);
     expect(stamped[0]).toBeNull();
     expect(stamped[1]).toBe("x");
-    expect((stamped[2] as { origin: { sceneId?: string } }).origin.sceneId).toBeUndefined();
+    expect((stamped[2] as unknown as { origin: { sceneId?: string } }).origin.sceneId).toBeUndefined();
   });
 
   it("rewrites scenes.json inside the interchange zip and keeps the manifest and image bytes", () => {
@@ -119,9 +119,9 @@ describe("scene origin stamps", () => {
       "Visited World Map/scenes.json",
       "Visited World Map/template.json",
     ]);
-    expect(Buffer.from(files["Visited World Map/template.json"])).toEqual(Buffer.from(manifest));
-    expect(Buffer.from(files["Visited World Map/image.jpg"])).toEqual(Buffer.from(image));
-    const scenes = JSON.parse(Buffer.from(files["Visited World Map/scenes.json"]).toString("utf8"));
+    expect(Buffer.from(files["Visited World Map/template.json"]!)).toEqual(Buffer.from(manifest));
+    expect(Buffer.from(files["Visited World Map/image.jpg"]!)).toEqual(Buffer.from(image));
+    const scenes = JSON.parse(Buffer.from(files["Visited World Map/scenes.json"]!).toString("utf8"));
     expect(scenes).toEqual([
       {
         edges: [],

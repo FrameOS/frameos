@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { createDb, sessions } from "@frameos-cloud/db";
 import { hasDatabaseUrl } from "./env";
 import { derivedSigningKey } from "./keys";
+import { authenticateApiToken, bearerToken, isApiToken } from "./api-tokens";
 import { hashSecret } from "./secrets";
 import {
   sessionAbsoluteMaxAgeSeconds,
@@ -25,12 +26,18 @@ export {
 
 export type SessionProfile = {
   accountId?: string | undefined;
+  // Set when the request authenticated with a personal API token (lib/api-tokens)
+  // instead of a session cookie. Routes that must not run on a token — minting
+  // more tokens, say — check this; everything else treats both alike.
+  apiToken?: { access: "full" | "read_only"; id: string; name: string } | undefined;
   email?: string | undefined;
   emailVerified?: boolean | undefined;
   name?: string | undefined;
   providerIssuer: string;
   providerSubject: string;
 };
+
+export const apiTokenProviderIssuer = "frameos-cloud-api-token";
 
 function secretKey() {
   return derivedSigningKey("session");
@@ -107,7 +114,7 @@ export async function readSession() {
     const cookieStore = await cookies();
     const token = cookieStore.get(sessionCookieName)?.value;
     if (!token) {
-      return undefined;
+      return readApiTokenSession();
     }
 
     const verified = await jwtVerify(token, secretKey());
@@ -140,6 +147,34 @@ export async function readSession() {
     }
 
     return sessionProfile;
+  } catch {
+    return undefined;
+  }
+}
+
+// A personal API token in the Authorization header stands in for the cookie:
+// same profile shape, so every route's `readSession()` gate accepts it
+// unchanged. Only consulted when there is no cookie — a browser tab never
+// sends a bearer, and a script never has the cookie.
+async function readApiTokenSession(): Promise<SessionProfile | undefined> {
+  try {
+    const token = bearerToken((await headers()).get("authorization"));
+    if (!isApiToken(token) || !hasDatabaseUrl()) {
+      return undefined;
+    }
+    const authenticated = await authenticateApiToken(createDb(), token);
+    if (!authenticated) {
+      return undefined;
+    }
+    return {
+      accountId: authenticated.account.id,
+      apiToken: authenticated.token,
+      email: authenticated.account.email ?? undefined,
+      emailVerified: true,
+      name: authenticated.account.name ?? undefined,
+      providerIssuer: apiTokenProviderIssuer,
+      providerSubject: `api-token:${authenticated.token.id}`,
+    };
   } catch {
     return undefined;
   }

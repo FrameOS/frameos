@@ -20,6 +20,11 @@ provides:
   at all — scene assignment, screenshots, logs, metrics, and signed OTA
   updates. Design: [`docs/cloud-frames.md`](docs/cloud-frames.md).
 - **Config backups** for linked self-hosted backends.
+- **API tokens and an MCP server**: personal bearer tokens for the JSON API,
+  and `POST /api/mcp` — the whole account surface (frames, scenes, store,
+  scene AI, server-side previews) as Model Context Protocol tools for AI
+  agents, implemented in `packages/mcp` as a thin wrapper over the routes.
+  Design: [`docs/mcp.md`](docs/mcp.md).
 
 **You do not need any of this to use FrameOS.** The self-hosted backend and
 the frames themselves work with zero cloud, forever — that is a hard rule of

@@ -8,6 +8,8 @@ const eventLabels: Record<string, string> = {
   "account.password_changed": "Password changed",
   "account.password_reset": "Password reset completed",
   "account.password_reset_requested": "Password reset requested",
+  "account.api_token_created": "API token created",
+  "account.api_token_revoked": "API token revoked",
   "account.passkey_added": "Passkey added",
   "account.passkey_removed": "Passkey removed",
   "account.passkey_renamed": "Passkey renamed",

@@ -110,6 +110,7 @@ export default async function AccountLayout({
         hrefs={{
           activity: getAccountUrl("/account/activity"),
           backups: getAccountUrl("/account/backups"),
+          developer: getAccountUrl("/account/developer"),
           installs: getAccountUrl("/account/installs"),
           security: getAccountUrl("/account/security"),
         }}
