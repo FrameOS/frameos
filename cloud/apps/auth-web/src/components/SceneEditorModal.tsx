@@ -1885,6 +1885,9 @@ export function SceneEditorModal({
           initialPrompt,
           loginUrl,
           mode: "existing",
+          // The listing write already landed server-side; the Info panel is
+          // rendered from the page's data, so it needs to re-fetch to show it.
+          onListingSaved: () => router.refresh(),
           onScenes: applyAiEvent,
           saveHint,
           settingsUrl,

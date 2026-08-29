@@ -48,6 +48,7 @@ function context(row: Row): ToolContext & { set: ReturnType<typeof vi.fn> } {
 
 const listing = {
   accountId: owner,
+  visibility: "public",
   category: "art",
   description: "The old blurb",
   id: sceneId,
@@ -97,6 +98,8 @@ describe("update_scene_listing", () => {
       "updatedAt",
     ]);
     expect(String(output.note)).toMatch(/does not need to press Save/);
+    // A user mid-draft must be told their unsaved editor work was untouched.
+    expect(String(output.note)).toMatch(/made no new version/);
     expect((output.listing as JsonObject).description).toBe(
       "A map of everywhere I have been.",
     );

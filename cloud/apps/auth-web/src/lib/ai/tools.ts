@@ -1312,7 +1312,10 @@ async function updateSceneListing(
       name: updated.name,
       tags: updated.tags,
     },
-    note: "Saved to the store listing already — the user does not need to press Save for this.",
+    note:
+      `Saved to the store listing already — this is live on the scene's ${updated.visibility} page now, and ` +
+      "the user does not need to press Save for it. It is listing text, not scene content: it made no new " +
+      "version, and their unsaved editor work is untouched. Say so.",
     ok: true,
   });
 }

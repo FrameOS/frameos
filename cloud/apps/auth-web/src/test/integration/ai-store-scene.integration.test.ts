@@ -310,6 +310,7 @@ describe("update_scene_listing", () => {
     ) as { listing: { description: string }; note: string; ok: boolean };
     expect(result.ok).toBe(true);
     expect(result.note).toMatch(/does not need to press Save/);
+    expect(result.note).toMatch(/made no new version/);
 
     const [row] = await db.select().from(storeScenes).where(eq(storeScenes.id, scene.id));
     expect(row).toMatchObject({
