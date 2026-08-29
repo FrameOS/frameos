@@ -47,6 +47,13 @@ import {
   supersedePendingCommands,
 } from "../frames";
 import { createAccountScene } from "../account-scene-create";
+import { recordAuditEvent } from "../audit";
+import { storeCategories } from "../categories";
+import {
+  maxSceneDescriptionChars,
+  moderateListingChanges,
+  parseListingChanges,
+} from "../store-listing";
 import { forkStoreScene, sceneIdPattern } from "../store-fork";
 import { readBlob } from "../blobs";
 import { extractScenesFromZip } from "../scene-title";
@@ -467,6 +474,44 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
   },
   {
     description:
+      "Edit the STORE LISTING of a saved scene the user owns: the description shown on its store page, its " +
+      "tags and its category. Writes straight to the store — there is nothing for the user to save afterwards. " +
+      "This is what \"update the description\" means for a scene: the listing's own description, NOT an app's " +
+      "`description` field inside the scene (for those use patch_scene). Only fields you name change. Fails " +
+      "when the scene is not the user's — say so rather than editing the scene's contents instead.",
+    name: "update_scene_listing",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        category: {
+          description:
+            "Category slug for the store's shelves, or null to clear it. One of: " +
+            storeCategories.map((category) => category.slug).join(", ") + ".",
+          type: ["string", "null"],
+        },
+        description: {
+          description:
+            `The store page's description (markdown, up to ${maxSceneDescriptionChars} characters), or null to clear it. ` +
+            "Send the complete new text, not a diff.",
+          type: ["string", "null"],
+        },
+        scene_id: {
+          description:
+            "Store scene uuid. Omit for the scene the user has open (from search_store_scenes otherwise).",
+          type: "string",
+        },
+        tags: {
+          description: "Up to 5 lowercase tags (letters, digits, hyphens). Replaces the current set.",
+          items: { type: "string" },
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    type: "function",
+  },
+  {
+    description:
       "Deliver a modified version of the user's CURRENT scene to the editor. Send the complete updated " +
       "scene JSON (not a diff). Keeps the current scene id. Validates first; fix reported issues and retry.",
     name: "update_scene",
@@ -605,6 +650,7 @@ export const toolLabels: Record<string, string> = {
   search_examples: "Searching examples",
   search_store_scenes: "Searching the store",
   update_scene: "Updating scene",
+  update_scene_listing: "Updating store listing",
   patch_scene: "Patching scene",
   edit_app_source: "Editing app source",
 };
@@ -1181,6 +1227,99 @@ function withChanges(delivered: string, changes: string[]): string {
   }
 }
 
+// Edit the store listing of a scene the user owns: description, tags,
+// category. Unlike everything else the chat writes, this lands immediately —
+// but it only touches the words on the store page, never a byte of the
+// scene, so there is no work of the user's it can destroy. Ownership, the
+// field rules and the moderation gate are the store's own, shared with the
+// PATCH route the web form posts to.
+async function updateSceneListing(
+  ctx: ToolContext,
+  args: JsonObject,
+): Promise<string> {
+  const sceneId = asString(args.scene_id) ?? ctx.storeSceneId ?? null;
+  if (!sceneId) {
+    return JSON.stringify({
+      error:
+        "No scene to edit. The user has no store scene open here — find one with search_store_scenes and pass its scene_id.",
+      ok: false,
+    });
+  }
+  if (!sceneIdPattern.test(sceneId)) {
+    return JSON.stringify({ error: "scene_id must be a store scene uuid", ok: false });
+  }
+
+  const parsed = parseListingChanges(args);
+  if ("error" in parsed) {
+    return JSON.stringify({ error: parsed.error, ok: false });
+  }
+  const { changes } = parsed;
+  if (Object.keys(changes).length === 0) {
+    return JSON.stringify({
+      error: "nothing_to_update — pass at least one of description, tags or category.",
+      ok: false,
+    });
+  }
+
+  // Owned scenes only. A visitor editing someone else's store page is the
+  // whole reason this check is not "can you read it".
+  const [scene] = await ctx.db
+    .select()
+    .from(storeScenes)
+    .where(and(eq(storeScenes.id, sceneId), eq(storeScenes.accountId, ctx.accountId)))
+    .limit(1);
+  if (!scene) {
+    return JSON.stringify({
+      error:
+        "This scene is not in the user's account, so its store listing is not theirs to edit. Tell them so — " +
+        "do not edit the scene's contents instead. They can fork it (save_scene) and describe their own copy.",
+      ok: false,
+    });
+  }
+
+  const moderation = await moderateListingChanges({ changes, scene });
+  if (!moderation.ok) {
+    return JSON.stringify({
+      error:
+        moderation.error === "content_rejected"
+          ? `The store's moderation refused this text (${(moderation.categories ?? []).join(", ") || "policy"}). Rewrite it.`
+          : "Moderation is unavailable right now; the listing was not changed.",
+      ok: false,
+    });
+  }
+
+  const [updated] = await ctx.db
+    .update(storeScenes)
+    .set({ ...changes, updatedAt: new Date() })
+    .where(eq(storeScenes.id, scene.id))
+    .returning();
+  if (!updated) {
+    return JSON.stringify({ error: "scene_update_failed", ok: false });
+  }
+  // The web form's PATCH audits only visibility and version changes; this
+  // one leaves a trail for every field, because nobody pressed a button.
+  await recordAuditEvent(ctx.db, {
+    accountId: ctx.accountId,
+    actor: { accountId: ctx.accountId, providerSubject: ctx.providerSubject ?? "" },
+    eventType: "store.listing_edited",
+    metadata: { fields: Object.keys(changes).sort(), name: scene.name, via: "ai_chat" },
+    target: { sceneId: scene.id },
+  });
+  return JSON.stringify({
+    listing: {
+      category: updated.category,
+      description: updated.description,
+      name: updated.name,
+      tags: updated.tags,
+    },
+    note:
+      `Saved to the store listing already — this is live on the scene's ${updated.visibility} page now, and ` +
+      "the user does not need to press Save for it. It is listing text, not scene content: it made no new " +
+      "version, and their unsaved editor work is untouched. Say so.",
+    ok: true,
+  });
+}
+
 // Save whatever the chat is holding into the user's account as a NEW private
 // scene. Never an overwrite: a chat that could rewrite a saved scene in place
 // would be one bad turn away from destroying work the user did not ask it to
@@ -1650,6 +1789,9 @@ export async function executeTool(
     }
     case "patch_scene": {
       return patchScene(ctx, args);
+    }
+    case "update_scene_listing": {
+      return updateSceneListing(ctx, args);
     }
     case "edit_app_source": {
       return editAppSource(ctx, args);

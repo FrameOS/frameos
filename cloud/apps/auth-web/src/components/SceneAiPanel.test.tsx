@@ -80,6 +80,42 @@ afterEach(() => {
 });
 
 describe("SceneAiPanel", () => {
+  it("tells the page to re-read the listing once the AI has written it", async () => {
+    fetchMock.mockResolvedValueOnce(
+      ndjson([
+        { chatId: "chat-1", type: "chat" },
+        { label: "Updating store listing", name: "update_scene_listing", status: "start", type: "tool" },
+        { label: "Updating store listing", name: "update_scene_listing", status: "done", type: "tool" },
+        { reply: "Rewrote the description.", tool: "reply", type: "done" },
+      ]),
+    );
+    const onListingSaved = vi.fn();
+    renderPanel({ onListingSaved });
+
+    sendPrompt("update the description");
+
+    await waitFor(() => expect(onListingSaved).toHaveBeenCalledOnce());
+  });
+
+  it("leaves the page alone while the listing write is still running", async () => {
+    fetchMock.mockResolvedValueOnce(
+      ndjson([
+        { chatId: "chat-1", type: "chat" },
+        { label: "Updating store listing", name: "update_scene_listing", status: "start", type: "tool" },
+        { label: "Searching apps", name: "search_apps", status: "done", type: "tool" },
+        { text: "Looking.", type: "delta" },
+        { reply: "Looking.", tool: "reply", type: "done" },
+      ]),
+    );
+    const onListingSaved = vi.fn();
+    renderPanel({ onListingSaved });
+
+    sendPrompt("update the description");
+
+    await screen.findByText("Looking.");
+    expect(onListingSaved).not.toHaveBeenCalled();
+  });
+
   it("streams the reply, applies delivered scenes and reports the render check", async () => {
     fetchMock.mockResolvedValueOnce(
       ndjson([

@@ -118,6 +118,10 @@ export type SceneAiPanelProps = {
   loginUrl?: string | undefined;
   /** One line telling the user where their saves go. */
   saveHint?: string | undefined;
+  /** The AI wrote the scene's store listing (description/tags/category).
+   * That write is server-side and immediate, so the page's own copy of the
+   * listing — the Info panel — has to be told to catch up. */
+  onListingSaved?: (() => void) | undefined;
 };
 
 function newId(): string {
@@ -372,6 +376,7 @@ export function SceneAiPanel({
   settingsUrl,
   loginUrl = "/login",
   saveHint,
+  onListingSaved,
 }: SceneAiPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -395,6 +400,10 @@ export function SceneAiPanel({
   // Always the freshest props for the in-flight turn (it spans awaits).
   const propsRef = useRef({ getScenes, height, mode, onScenes, selectedSceneId, storeSceneId, width });
   propsRef.current = { getScenes, height, mode, onScenes, selectedSceneId, storeSceneId, width };
+  // Same reason as propsRef: the turn spans awaits, so the callback has to
+  // be read when the tool reports, not captured when the turn started.
+  const listingSavedRef = useRef(onListingSaved);
+  listingSavedRef.current = onListingSaved;
 
   useEffect(() => {
     setReturnTo(window.location.href);
@@ -530,6 +539,9 @@ export function SceneAiPanel({
                     }
                     return { tools };
                   });
+                  if (event.name === "update_scene_listing" && event.status === "done") {
+                    listingSavedRef.current?.();
+                  }
                   break;
                 case "scenes": {
                   const applied = applyScenes(event);

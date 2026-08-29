@@ -6,6 +6,7 @@ import {
   FileArchive,
   GitFork,
   Info,
+  LogIn,
   MonitorDown,
   MoreHorizontal,
   Pencil,
@@ -1764,6 +1765,22 @@ export function SceneEditorModal({
       : versionList;
 
   const actions: SceneEditorAction[] = [];
+  // A visitor with no way to keep an edit — no Save, no Fork — is signed
+  // out: the bar says where saving lives instead of only that it doesn't.
+  // `window.location` is safe here: the render stops at the `panels` guard
+  // above until the browser has mounted.
+  if (!signedIn && !canSave && !canFork) {
+    const returnTo = `${window.location.origin}${window.location.pathname}${window.location.search}${window.location.hash}`;
+    actions.push({
+      Icon: LogIn,
+      emphasized: true,
+      href: `${loginUrl}${loginUrl.includes("?") ? "&" : "?"}return_to=${encodeURIComponent(returnTo)}`,
+      key: "signin",
+      label: "Sign in to edit",
+      primary: true,
+      title: "Sign in to save your edits as a scene of your own — and to use the AI assistant",
+    });
+  }
   if (canSave) {
     actions.push({
       Icon: Save,
@@ -1846,7 +1863,14 @@ export function SceneEditorModal({
         ) : null}
         {nameInInfo ? null : nameTitle}
         {!canSave ? (
-          <span className="pill" title="Explore and tweak freely; nothing you change here is saved anywhere">
+          <span
+            className="pill"
+            title={
+              signedIn
+                ? "Explore and tweak freely; “Fork & save copy” is how an edit becomes yours"
+                : "Explore and tweak freely; sign in to keep an edit"
+            }
+          >
             Playground — changes are not saved
           </span>
         ) : null}
@@ -1861,6 +1885,9 @@ export function SceneEditorModal({
           initialPrompt,
           loginUrl,
           mode: "existing",
+          // The listing write already landed server-side; the Info panel is
+          // rendered from the page's data, so it needs to re-fetch to show it.
+          onListingSaved: () => router.refresh(),
           onScenes: applyAiEvent,
           saveHint,
           settingsUrl,
