@@ -565,13 +565,26 @@ Two allocation facts worth knowing before profiling anything here:
   which is also where Wi-Fi, lwIP and TLS allocate. That is why a frame with
   many scenes could render happily and still be unable to open a TLS
   connection.
-- QuickJS and cJSON still use libc `malloc`, so they still land in internal
-  RAM. The scene splitter deliberately avoids cJSON on the large payload for
-  that reason, scanning bracket depth over the raw bytes instead.
+- QuickJS allocates from PSRAM too (`fos_js_new_runtime` in the
+  `frameos_quickjs` component installs `JSMallocFunctions` backed by
+  `heap_caps_malloc(MALLOC_CAP_SPIRAM)`). cJSON still uses libc `malloc`, so
+  it lands in internal RAM; the scene splitter deliberately avoids cJSON on
+  the large payload for that reason, scanning bracket depth over the raw
+  bytes instead.
+- What is left in internal RAM is the firmware's own footprint: FreeRTOS task
+  stacks (the `fos_client` render task alone is 40 KB, and it must stay
+  internal because it writes NVS — a PSRAM stack asserts inside the flash
+  driver), Wi-Fi and lwIP, the WebSocket client's task and buffers, SPIFFS.
+  A healthy S3 frame idles around 80–90 KB free with a 40–50 KB largest
+  block, flat across renders; that number is the same with one scene or
+  twenty, because only the active scene is resident (see the lazy path
+  above).
 
-The cloud link refuses to dial below 48K free internal with a 16K contiguous
-block (`FOS_CLOUD_WS_MIN_INTERNAL_*`) and says so in `status` and the logs,
-rather than failing inside esp-tls as a connection reset.
+The cloud link refuses to dial below 24K free internal with a 12K contiguous
+block (`FOS_CLOUD_WS_MIN_INTERNAL_*`, floors for starting a session — the
+mbedTLS side is in PSRAM) and says so in `status` and the logs, rather than
+failing inside esp-tls as a connection reset. `frontend/src/utils/frameMemory.ts`
+mirrors these numbers for the workspace banner; change both.
 
 ## Memory guardrails (M4)
 

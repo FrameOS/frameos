@@ -129,14 +129,14 @@ function nodeKindLabel(item: DiagramNodeTreeItem): string {
 }
 
 /**
- * "This frame is out of internal RAM" — shown on the scene list because that
- * is where the cause is: on an ESP32 every parsed scene lives in the small
- * internal pool (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL sends sub-16 KB
- * allocations there), while the render canvas sits in PSRAM. A frame can
- * therefore render perfectly and still have too little left to open the TLS
- * session its cloud link needs — which surfaces as a connection error and
- * looks like a network fault. The numbers come from the device's own metrics;
- * the thresholds match the firmware (see utils/frameMemory.ts).
+ * "This frame is short of internal RAM" — shown on the scene list because the
+ * one lever the user has is which scene is active: the firmware keeps only
+ * that scene resident (Nim and QuickJS heaps live in PSRAM; the ~300 KB
+ * internal pool is task stacks, Wi-Fi, lwIP and the cloud socket). A frame
+ * can render perfectly and still have too little internal RAM left to open
+ * the TLS session its cloud link needs — which surfaces as a connection error
+ * and looks like a network fault. The numbers come from the device's own
+ * metrics; the thresholds mirror the firmware (see utils/frameMemory.ts).
  */
 function FrameMemoryNotice({ frame }: { frame: FrameType }): JSX.Element | null {
   const advisory = frameMemoryAdvisory(frame.last_metrics, { cloudManaged: workspaceMode() === 'cloud' })
