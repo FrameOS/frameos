@@ -312,3 +312,37 @@ export function get() {
     check "this.count = count;" in output
     check "public value" notin output
     check "private readonly" notin output
+
+  proc eraseTypes(code: string): string =
+    # What the app runtime does: TypeScript off, module syntax left for QuickJS.
+    transform(code, TransformOptions(filePath: "app.ts", transforms: @["typescript"], skipSourceMap: true)).code
+
+  test "erases inline type-only import specifiers":
+    # TypeScript 4.5 `import { a, type B }`: the value import stays, the type
+    # goes, and an import that was nothing but types disappears without
+    # moving the lines under it.
+    let mixed = eraseTypes("""import { label, type Labelled, type Other as O } from './util'
+export const get = () => label()
+""")
+    check "import { label } from './util'" in mixed
+    check "Labelled" notin mixed
+    check "export const get = () => label()" in mixed
+
+    let typesOnly = eraseTypes("""import { type A, type B } from './types'
+import { value } from './value'
+export const get = () => value
+""")
+    check "./types" notin typesOnly
+    check typesOnly.startsWith("\nimport { value } from './value'")
+
+    let withDefault = eraseTypes("""import helper, { type Shape } from './helper'
+export const get = () => helper()
+""")
+    check "import helper from './helper'" in withDefault
+    check "Shape" notin withDefault
+
+    # `type` is a legal binding name; only `type Name` is a modifier.
+    let named = eraseTypes("""import { type } from './kinds'
+export const get = () => type
+""")
+    check "import { type } from './kinds'" in named

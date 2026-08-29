@@ -81,6 +81,31 @@ App nodes then use `keyword: "myPanel"`. Inside `app.ts` the app sees
 node helpers (`format`, `now`, `parseTs`); pass such values in through fields.
 `Date` is UTC-only here as well.
 
+### More than one file
+
+`sources` can hold helper modules and data next to `app.ts`, and `app.ts`
+imports them with relative paths:
+
+```json
+"sources": {
+  "config.json": "…",
+  "app.ts": "import { panel } from './panel'\nimport icons from './icons.json'\nexport function get(app) { return panel(app, icons) }",
+  "panel.tsx": "export const panel = (app, icons) => <image width={app.frame.width} … />",
+  "icons.json": "{ \"sun\": \"<svg …>\" }"
+}
+```
+
+- `./name` resolves to `name.ts`, `name.tsx`, `name.js`, `name.jsx` or
+  `name.json` (also `./name.js` for a `name.ts`, as TypeScript allows);
+  `../` climbs folders inside the app (`lib/util.ts` → `../data.json`).
+- A `.json` file's parsed value is its default export.
+- JSX is lowered only in `.tsx`/`.jsx` files; `import { x, type T }` erases
+  the type specifier.
+- Only the app's own files resolve. There are no npm packages, no
+  `require()`, and no dynamic `import()`.
+- Each file is evaluated once per app, however many files import it, and
+  errors name the file and line they came from (`util.ts:5`).
+
 ### The export that runs
 
 | category | export the runtime calls | how the node is wired |

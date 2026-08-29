@@ -15,10 +15,31 @@ import frameos/utils/system
 import frameos/js_runtime/burrito
 
 type
+  JsAppModule = ref object
+    ## One of the app's other files, loaded because something imported it.
+    ## Keeps the same transpiled output the main module keeps, for the same
+    ## reason: re-creating the interpreter must not re-transpile. The source
+    ## itself is not copied here; it is read from the runtime's `sources`.
+    name: string
+    allowJsx: bool
+    transpiled: bool
+    transpiledCode: string
+    map: SourceLineMap
+    mapBuilt: bool
+
   JsAppRuntime* = ref object
     category*: string
     outputType*: string
     source*: string
+    ## The main module's file name (app.ts, app.tsx, ...). Imports resolve
+    ## relative to it, and error locations name it.
+    sourceName*: string
+    ## Every file of the app by name, as the scene JSON carries it — the pool
+    ## `import './x'` draws from. Held as the JsonNode rather than copied out:
+    ## on a frame the scene keeps these strings alive anyway, and a second
+    ## copy of every helper file is memory an ESP32 does not have.
+    sources*: JsonNode
+    modules: Table[string, JsAppModule]
     ## Only .tsx/.jsx sources get the JSX transform, as in TypeScript itself.
     allowJsx*: bool
     settingsKeys*: seq[string]
@@ -47,6 +68,9 @@ type
     contextImageJson: JsonNode
 
 var jsAppEnvByCtx = initTable[ptr JSContext, JsAppEvalEnv]()
+## The runtime behind each live interpreter, for the module loader: QuickJS
+## hands the loader a context, and the app's files live on the runtime.
+var jsAppRuntimeByCtx = initTable[ptr JSContext, JsAppRuntime]()
 
 proc teardownJsRuntime(runtime: JsAppRuntime) =
   ## Close one JS app node's interpreter. Not embedded-only: JsAppRuntime has
@@ -57,6 +81,8 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
   if not runtime.js.context.isNil:
     if jsAppEnvByCtx.hasKey(runtime.js.context):
       jsAppEnvByCtx.del(runtime.js.context)
+    if jsAppRuntimeByCtx.hasKey(runtime.js.context):
+      jsAppRuntimeByCtx.del(runtime.js.context)
     # The transpiler's source map is held in a global keyed by context, and
     # for a large app it is a bigger object than the QuickJS runtime itself.
     # Dropping the runtime without this recovers only the interpreter.
@@ -728,13 +754,20 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
   return jsonToJS(ctx, arr)
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string,
-    settingsKeys: seq[string] = @[], sourceName: string = ""): JsAppRuntime =
+    settingsKeys: seq[string] = @[], sourceName: string = "",
+    sources: JsonNode = nil): JsAppRuntime =
+  ## `sources` is the app's file map (name → contents) that `source` may
+  ## import from; `sourceName` names the main module among them.
   when defined(memProbe): memProbe("  NEW JsAppRuntime " & category & " src=" & $source.len & "B")
+  let mainName = if sourceName.len > 0: sourceName else: "app.ts"
   return JsAppRuntime(
     category: category,
     outputType: outputType,
     source: source,
-    allowJsx: sourceName.endsWith(".tsx") or sourceName.endsWith(".jsx"),
+    sourceName: mainName,
+    sources: sources,
+    modules: initTable[string, JsAppModule](),
+    allowJsx: mainName.endsWith(".tsx") or mainName.endsWith(".jsx"),
     settingsKeys: settingsKeys,
     nextImageId: 0,
     images: initTable[int, Image](),
@@ -763,6 +796,192 @@ proc sourceMapForRuntime(runtime: JsAppRuntime): SourceLineMap {.gcsafe, raises:
     runtime.transpiledMap = emptySourceLineMap(runtime.transpiledName, runtime.transpiledName)
   runtime.transpiledMapBuilt = true
   runtime.transpiledMap
+
+proc appFile(runtime: JsAppRuntime, name: string): string =
+  ## Contents of one of the app's files, "" when absent.
+  if runtime.sources.isNil or runtime.sources.kind != JObject:
+    return ""
+  runtime.sources{name}.getStr("")
+
+proc hasAppFile(sources: JsonNode, name: string): bool =
+  not sources.isNil and sources.kind == JObject and sources.hasKey(name) and
+    sources[name].kind == JString
+
+proc sourceMapForModule(runtime: JsAppRuntime, module: JsAppModule): SourceLineMap {.gcsafe, raises: [].} =
+  ## An imported file's line map, built lazily like the main module's.
+  if module.mapBuilt:
+    return module.map
+  try:
+    module.map = lineBasedSourceLineMap(runtime.appFile(module.name), module.transpiledCode,
+                                        module.name, module.name)
+  except CatchableError, Defect:
+    module.map = emptySourceLineMap(module.name, module.name)
+  module.mapBuilt = true
+  module.map
+
+const JsAppModuleExtensions = [".ts", ".tsx", ".js", ".jsx", ".json"]
+
+proc resolveAppModule*(sources: JsonNode, name: string): string =
+  ## The file an import specifier names, or "" when the app has no such file.
+  ## `name` is already joined against the importer (`./util` from app.ts is
+  ## `util`; from lib/a.ts it is `lib/util`). Tries the name as written, then
+  ## the usual extensions, then the TypeScript convention of spelling
+  ## `./util.js` for a file that is really `util.ts`.
+  if name.len == 0:
+    return ""
+  if sources.hasAppFile(name):
+    return name
+  for ext in JsAppModuleExtensions:
+    if sources.hasAppFile(name & ext):
+      return name & ext
+  if name.endsWith(".js"):
+    let stem = name[0 ..< name.len - 3]
+    for ext in [".ts", ".tsx"]:
+      if sources.hasAppFile(stem & ext):
+        return stem & ext
+  elif name.endsWith(".jsx"):
+    let stem = name[0 ..< name.len - 4]
+    if sources.hasAppFile(stem & ".tsx"):
+      return stem & ".tsx"
+  ""
+
+proc resolveModuleName(runtime: JsAppRuntime, name: string): string =
+  ## `resolveAppModule` over this app's files, where the main module counts
+  ## as a file too (a helper may import `./app` back; QuickJS then finds the
+  ## already-loaded module under that name instead of asking for it again).
+  if name == runtime.sourceName:
+    return name
+  for ext in JsAppModuleExtensions:
+    if name & ext == runtime.sourceName:
+      return runtime.sourceName
+  resolveAppModule(runtime.sources, name)
+
+proc joinModulePath*(baseName, name: string): string =
+  ## QuickJS's own rule, in Nim: a specifier starting with `.` is taken relative
+  ## to the importing module's folder (`./util` in lib/a.ts is lib/util), and
+  ## anything else is left as written. A `..` that climbs above the app stays
+  ## in the result, so the error can show what was asked for.
+  if name.len == 0 or name[0] != '.':
+    return name
+  var parts: seq[string] = @[]
+  let slash = baseName.rfind('/')
+  if slash > 0:
+    for part in baseName[0 ..< slash].split('/'):
+      if part.len > 0:
+        parts.add(part)
+  for segment in name.split('/'):
+    if segment.len == 0 or segment == ".":
+      continue
+    if segment == ".." and parts.len > 0 and parts[^1] != "..":
+      discard parts.pop()
+    else:
+      parts.add(segment)
+  parts.join("/")
+
+proc jsAppModuleNormalize(ctx: ptr JSContext, baseName: cstring, name: cstring,
+                          opaque: pointer): cstring {.cdecl.} =
+  ## Canonicalise every specifier to the file it names, so `./counter` and
+  ## `./counter.ts` from two importers are one module, evaluated once.
+  var canonical = ""
+  try:
+    canonical = joinModulePath($baseName, $name)
+    let runtime = jsAppRuntimeByCtx.getOrDefault(ctx)
+    if not runtime.isNil:
+      let resolved = runtime.resolveModuleName(canonical)
+      if resolved.len > 0:
+        canonical = resolved
+  except CatchableError:
+    canonical = $name
+  js_strdup(ctx, canonical.cstring)
+
+proc rethrowNamingModule(ctx: ptr JSContext, name: string) =
+  ## QuickJS's compile and JSON errors carry the location only in `stack`;
+  ## the message alone ("expecting '}'") would leave the author guessing
+  ## which of the app's files it means. Re-throw with the file and position
+  ## in the message, where the app's error log will show it.
+  let exception = JS_GetException(ctx)
+  defer: JS_FreeValue(ctx, exception)
+  var text = toNimString(ctx, exception)
+  var location = ""
+  if jsIsObject(exception):
+    let stackVal = JS_GetPropertyStr(ctx, exception, "stack")
+    defer: JS_FreeValue(ctx, stackVal)
+    location = toNimString(ctx, stackVal).strip()
+    if location.contains('\n'):
+      location = location.split('\n')[0].strip()
+    if location.startsWith("at "):
+      location = location[3 .. ^1]
+    if location == "undefined":
+      location = ""
+  if not text.contains(name):
+    text = name & ": " & text
+  if location.len > 0 and not text.contains(location):
+    text.add(" (" & location & ")")
+  discard JS_ThrowSyntaxError(ctx, "%s", text.cstring)
+
+proc jsAppJsonModuleInit(ctx: ptr JSContext, m: ptr JSModuleDef): cint {.cdecl.} =
+  ## `import data from './x.json'`: the parsed value is the default export.
+  discard JS_SetModuleExport(ctx, m, "default", JS_GetModulePrivateValue(ctx, m))
+  0
+
+proc loadAppJsonModule(ctx: ptr JSContext, name: string, text: string): ptr JSModuleDef =
+  let parsed = JS_ParseJSON(ctx, text.cstring, text.len.csize_t, name.cstring)
+  if JS_IsException(parsed) != 0:
+    rethrowNamingModule(ctx, name)
+    return nil
+  result = JS_NewCModule(ctx, name.cstring, jsAppJsonModuleInit)
+  if result == nil:
+    JS_FreeValue(ctx, parsed)
+    return nil
+  discard JS_AddModuleExport(ctx, result, "default")
+  discard JS_SetModulePrivateValue(ctx, result, parsed)
+
+proc loadAppScriptModule(ctx: ptr JSContext, runtime: JsAppRuntime, name: string): ptr JSModuleDef =
+  var module = runtime.modules.getOrDefault(name)
+  if module.isNil:
+    module = JsAppModule(name: name, allowJsx: name.endsWith(".tsx") or name.endsWith(".jsx"))
+    runtime.modules[name] = module
+  if not module.transpiled:
+    try:
+      module.transpiledCode = transpileAppSource(runtime.appFile(name), name, module.allowJsx)
+    except CatchableError as error:
+      discard JS_ThrowSyntaxError(ctx, "%s", (name & ": " & error.msg).cstring)
+      return nil
+    module.transpiled = true
+  let loaded = module
+  registerJsSourceMapProvider(ctx, name,
+    proc(): SourceLineMap {.closure, gcsafe, raises: [].} = runtime.sourceMapForModule(loaded))
+  result = compileModule(ctx, module.transpiledCode, name)
+  if result == nil:
+    rethrowNamingModule(ctx, name)
+
+proc jsAppModuleLoader(ctx: ptr JSContext, moduleName: cstring, opaque: pointer): ptr JSModuleDef {.cdecl.} =
+  ## QuickJS calls this for every `import` the app's modules make. Modules are
+  ## the app's own files and nothing else: there is no package registry on a
+  ## frame, so a bare specifier fails the same way a missing file does.
+  let name = $moduleName
+  try:
+    let runtime = jsAppRuntimeByCtx.getOrDefault(ctx)
+    if runtime.isNil:
+      discard JS_ThrowReferenceError(ctx, "could not load module '%s'", name.cstring)
+      return nil
+    let resolved = resolveAppModule(runtime.sources, name)
+    if resolved.len == 0:
+      discard JS_ThrowReferenceError(ctx, "%s",
+        ("Cannot import '" & name & "': it is not one of this app's files. Import the app's own " &
+         "files with a relative path (./helper, ./data.json); npm packages are not available.").cstring)
+      return nil
+    if resolved.endsWith(".json"):
+      return loadAppJsonModule(ctx, resolved, runtime.appFile(resolved))
+    return loadAppScriptModule(ctx, runtime, resolved)
+  except CatchableError as error:
+    discard JS_ThrowInternalError(ctx, "%s", ("Could not load module '" & name & "': " & error.msg).cstring)
+    return nil
+
+proc mapAppErrorText(runtime: JsAppRuntime, ctx: ptr JSContext, text: string): string =
+  ## Rewrite locations in the main module, then in any imported module whose
+  ## map was registered while it loaded.
+  mapJsErrorText(ctx, text.mapJsErrorText(runtime.sourceMapForRuntime()))
 
 proc storeImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
   if image.isNil:
@@ -923,7 +1142,7 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
       if key.kind == JString and key.getStr().len > 0:
         settingsKeys.add(key.getStr())
   let runtime = newJsAppRuntime(category, outputType, source, settingsKeys,
-                                jsAppSourceNameFromSources(sources))
+                                jsAppSourceNameFromSources(sources), sources)
   return DynamicJsApp(
     nodeId: node.id,
     nodeName: node.data{"name"}.getStr(keyword),
@@ -984,6 +1203,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig) =
   when defined(memProbe): memProbe("    newQuickJS BEFORE")
   runtime.js = newQuickJS(sceneJsConfig(frameConfig))
   when defined(memProbe): memProbe("    newQuickJS AFTER")
+  jsAppRuntimeByCtx[runtime.js.context] = runtime
+  runtime.js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)
   runtime.js.registerFunction("jsAppLog", jsAppLog)
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
   runtime.js.registerFunction("jsSetState", jsSetState)
@@ -1094,7 +1315,9 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig) =
       : undefined;
   }
   """ & sceneJsPrelude)
-  let filename = "<frameos:app:" & runtime.category & ":" & runtime.outputType & ">"
+  # Named after the real file so `./helper` resolves beside it and error
+  # locations read `app.ts:12:3`.
+  let filename = runtime.sourceName
   if not runtime.transpiled:
     when defined(memProbe): memProbe("      prelude done, transpile src=" & $runtime.source.len & "B BEFORE")
     # Erase types and stop: the module form goes to QuickJS as-is, and no line
@@ -1128,9 +1351,9 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig) =
       try:
         namespace = runtime.js.evalModuleNamespace(runtime.transpiledCode, filename)
       except CatchableError as retryError:
-        raise newException(JSException, retryError.msg.mapJsErrorText(runtime.sourceMapForRuntime()))
+        raise newException(JSException, runtime.mapAppErrorText(ctx, retryError.msg))
     else:
-      raise newException(JSException, error.msg.mapJsErrorText(runtime.sourceMapForRuntime()))
+      raise newException(JSException, runtime.mapAppErrorText(ctx, error.msg))
   let globalObj = JS_GetGlobalObject(ctx)
   let installed = JS_SetPropertyStr(ctx, globalObj, "__frameosModule", namespace)
   JS_FreeValue(ctx, globalObj)

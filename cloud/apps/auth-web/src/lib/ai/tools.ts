@@ -571,7 +571,8 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
           type: "array",
         },
         file: {
-          description: 'File name inside the app\'s sources, e.g. "app.ts" or "config.json". Omit for a code node.',
+          description:
+            'File name inside the app\'s sources, e.g. "app.ts", "config.json", or a helper like "lib/util.ts". Omit for a code node.',
           type: "string",
         },
         node_id: { description: "Node id (for node-level sources or a code node).", type: "string" },

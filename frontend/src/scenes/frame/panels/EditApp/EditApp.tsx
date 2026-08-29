@@ -43,12 +43,25 @@ export function appSourceEditorLanguage(file: string): string {
     : 'python'
 }
 
+/** Files the frame's module loader can `import`: the app's own code and JSON. */
+export function isImportableAppSource(file: string): boolean {
+  return /\.(ts|tsx|js|jsx|json)$/.test(file)
+}
+
 export function configureAppSourceEditor(monaco: Monaco) {
   const compilerOptions = {
     allowJs: true,
     allowNonTsExtensions: true,
     target: monaco.languages.typescript.ScriptTarget.ES2020,
     jsx: monaco.languages.typescript.JsxEmit.Preserve,
+    // An app can `import { x } from './helper'` and `import data from
+    // './data.json'` — the frame resolves both against the app's own files,
+    // and so must the type checker here.
+    module: monaco.languages.typescript.ModuleKind.ESNext,
+    moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+    resolveJsonModule: true,
+    allowSyntheticDefaultImports: true,
+    esModuleInterop: true,
   }
   monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions)
   monaco.languages.typescript.javascriptDefaults.setCompilerOptions({ ...compilerOptions, checkJs: true })
@@ -224,6 +237,9 @@ export function EditApp({
     [null, null]
   )
   const appTypesLibsRef = useRef<{ dispose: () => void }[]>([])
+  // Models for the app's other files, so `./helper` resolves while editing
+  // app.ts. The Editor below adopts one of these when its tab is opened.
+  const siblingModelsRef = useRef<Map<string, importedEditor.ITextModel>>(new Map())
 
   useEffect(() => {
     if (editorKey) {
@@ -239,6 +255,45 @@ export function EditApp({
       }
     }
   }, [monaco, activeFile, modelMarkers])
+
+  useEffect(() => {
+    if (!monaco) {
+      return
+    }
+    const present = new Set<string>()
+    for (const [file, content] of Object.entries(sources)) {
+      if (!isImportableAppSource(file)) {
+        continue
+      }
+      present.add(file)
+      const uri = monaco.Uri.parse(`inmemory://app-editor/${nodeId}/${file}`)
+      const existing = monaco.editor.getModel(uri)
+      if (!existing) {
+        siblingModelsRef.current.set(file, monaco.editor.createModel(content ?? '', appSourceEditorLanguage(file), uri))
+      } else if (file !== activeFile && existing.getValue() !== content) {
+        existing.setValue(content ?? '')
+      }
+    }
+    for (const [file, model] of siblingModelsRef.current) {
+      if (!present.has(file) && file !== activeFile) {
+        if (!model.isDisposed()) {
+          model.dispose()
+        }
+        siblingModelsRef.current.delete(file)
+      }
+    }
+  }, [monaco, sources, nodeId, activeFile])
+
+  useEffect(() => {
+    return () => {
+      for (const model of siblingModelsRef.current.values()) {
+        if (!model.isDisposed()) {
+          model.dispose()
+        }
+      }
+      siblingModelsRef.current.clear()
+    }
+  }, [nodeId])
 
   useEffect(() => {
     if (!monaco) {

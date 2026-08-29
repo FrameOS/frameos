@@ -527,7 +527,7 @@ export const editAppLogic = kea<editAppLogicType>([
       actions.setSourceErrors(file, errors || [])
     },
     addFile: () => {
-      const fileName = window.prompt('Enter file name')
+      const fileName = window.prompt('Enter file name (e.g. helper.ts, icons.tsx, data.json)')
       if (fileName) {
         actions.updateFile(fileName, '')
         actions.setActiveFile(fileName)

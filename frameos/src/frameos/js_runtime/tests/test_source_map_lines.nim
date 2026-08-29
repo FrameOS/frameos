@@ -70,3 +70,22 @@ suite "source map line mapping":
     let map = lineBasedSourceLineMap(text, text, "gen.js", "src.ts")
     check text.len > 10_000
     check map.segments.len <= lineCount * 3
+
+  test "a file name only matches at a path boundary":
+    # Modules are named after their files, and `util.ts` is the tail of
+    # `lib/util.ts`. The shorter name's map must leave the longer's alone.
+    let map = lineBasedSourceLineMap("a\nb", "// prelude\na\nb", "util.ts", "util.ts")
+    check "at f (util.ts:3:1)".rewriteQuickJsLocations(map) == "at f (util.ts:2:1)"
+    check "at f (lib/util.ts:3:1)".rewriteQuickJsLocations(map) == "at f (lib/util.ts:3:1)"
+    check "at f (myutil.ts:3:1)".rewriteQuickJsLocations(map) == "at f (myutil.ts:3:1)"
+
+  test "a line that only lost its type annotation still anchors":
+    # After an erased interface, `export function f(): string {` comes out
+    # as `export function f(){`. That line used to match nothing, so the
+    # throw under it was reported one line off or not mapped at all.
+    let source = "export interface Unused {\n  a: number\n}\nexport function explode(): string {\n  throw new Error(\"boom\")\n}\n"
+    let generated = "\nexport function explode(){\n  throw new Error(\"boom\")\n}\n"
+    let map = lineBasedSourceLineMap(source, generated, "util.ts", "util.ts")
+    check map.mapGeneratedLine(2) == 4
+    check map.mapGeneratedLine(3) == 5
+    check map.mapGeneratedLine(4) == 6

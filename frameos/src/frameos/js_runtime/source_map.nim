@@ -93,6 +93,23 @@ proc addLineSegments(result: var SourceLineMap, generatedLine: int, generatedTex
 # distance ahead, which is what the table was being asked for.
 const LineLookahead = 64
 
+proc erasedFrom(generated, source: string): bool =
+  ## Whether `generated` could be `source` with its TypeScript removed: every
+  ## character appears in `source` in order, and at least half the line is
+  ## left. Erasure only deletes, so `export function f(){` still matches
+  ## `export function f(): string {` after the annotation is gone — without
+  ## this, such a line anchored on nothing and the lines after it drifted.
+  if generated.len == 0 or generated.len > source.len or generated.len * 2 < source.len:
+    return false
+  var j = 0
+  for ch in generated:
+    while j < source.len and source[j] != ch:
+      inc j
+    if j >= source.len:
+      return false
+    inc j
+  true
+
 proc lineBasedSourceLineMap*(source, generated, generatedName, sourceName: string): SourceLineMap =
   let sourceLines = source.splitLines()
   let generatedLines = generated.splitLines()
@@ -113,7 +130,8 @@ proc lineBasedSourceLineMap*(source, generated, generatedName, sourceName: strin
 
   while generatedIndex < generatedLines.len and sourceIndex < sourceLines.len:
     let generatedNorm = normalizedLine(generatedLines[generatedIndex])
-    if generatedNorm == normalizedSource[sourceIndex]:
+    if generatedNorm == normalizedSource[sourceIndex] or
+        generatedNorm.erasedFrom(normalizedSource[sourceIndex]):
       result.generatedToSourceLine[generatedIndex + 1] = sourceIndex + 1
       result.addLineSegments(generatedIndex + 1, generatedLines[generatedIndex],
                              sourceIndex + 1, sourceLines[sourceIndex])
@@ -127,19 +145,34 @@ proc lineBasedSourceLineMap*(source, generated, generatedName, sourceName: strin
     # Lines diverged. Look ahead a bounded distance on each side: a match
     # found ahead in the source means lines were dropped (a stripped type),
     # a match ahead in the generated code means lines were inserted.
+    # A blank line is not an anchor: the one an erased interface leaves
+    # behind would otherwise latch onto the next blank line anywhere in the
+    # file and drag every line after it out of place.
     var sourceAhead = -1
     var limit = min(sourceLines.len, sourceIndex + 1 + LineLookahead)
-    for candidate in sourceIndex + 1 ..< limit:
-      if normalizedSource[candidate] == generatedNorm:
-        sourceAhead = candidate
-        break
+    if generatedNorm.len > 0:
+      for candidate in sourceIndex + 1 ..< limit:
+        if normalizedSource[candidate] == generatedNorm:
+          sourceAhead = candidate
+          break
 
     var generatedAhead = -1
     limit = min(generatedLines.len, generatedIndex + 1 + LineLookahead)
-    for candidate in generatedIndex + 1 ..< limit:
-      if normalizedLine(generatedLines[candidate]) == normalizedSource[sourceIndex]:
-        generatedAhead = candidate
-        break
+    if normalizedSource[sourceIndex].len > 0:
+      for candidate in generatedIndex + 1 ..< limit:
+        if normalizedLine(generatedLines[candidate]) == normalizedSource[sourceIndex]:
+          generatedAhead = candidate
+          break
+
+    # No exact anchor either way: accept a source line ahead that this
+    # generated line is an erasure of (the usual case right after a stripped
+    # interface or type alias).
+    if sourceAhead < 0 and generatedAhead < 0:
+      limit = min(sourceLines.len, sourceIndex + 1 + LineLookahead)
+      for candidate in sourceIndex + 1 ..< limit:
+        if generatedNorm.erasedFrom(normalizedSource[candidate]):
+          sourceAhead = candidate
+          break
 
     if sourceAhead >= 0 and (generatedAhead < 0 or
         sourceAhead - sourceIndex <= generatedAhead - generatedIndex):
@@ -233,6 +266,13 @@ proc rewriteQuickJsLocations*(text: string, sourceMap: SourceLineMap): string =
     if at < 0:
       result.add(text[i..^1])
       break
+
+    # Module names are file names now, so `util.ts:` must not match inside
+    # `lib/util.ts:` — the shorter name's map would rewrite the longer's lines.
+    if at > 0 and text[at - 1] in {'/', '.', '-', '_', 'a'..'z', 'A'..'Z', '0'..'9'}:
+      result.add(text[i..at])
+      i = at + 1
+      continue
 
     result.add(text[i..<at])
     var lineStart = at + sourceMap.generatedName.len + 1
