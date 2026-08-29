@@ -164,16 +164,17 @@ proc esp32State(): JsonNode {.gcsafe.} =
     let states = parseJson(sceneStateJson())
     result["states"] = if states.kind == JObject: states else: %*{}
 
-proc esp32Context(scopes: seq[string], scenesChecksum: string,
-                  backendManaged: bool): CloudVerbContext {.gcsafe.} =
+var esp32Ctx: CloudVerbContext
+  ## Built once (twenty-odd closures), then re-pointed at the session's
+  ## grants per verb: the callbacks never change, the scopes and the applied
+  ## checksum do.
+
+proc buildEsp32Context(): CloudVerbContext {.gcsafe.} =
   {.cast(gcsafe).}:
     CloudVerbContext(
       frameConfig: getFrameConfig(),
-      scopes: scopes,
-      scenesChecksum: scenesChecksum,
       installedVersion: token(cVersion()),
       settingsAllowlist: @CLOUD_SETTINGS_ALLOWLIST_ESP32,
-      backendManaged: backendManaged,
       # The render task loads a pushed payload from flash on its next pass;
       # fos_cloud.c sends scene_ack when the load lands (ws_poll_scene_ack).
       deferredSceneAck: true,
@@ -289,8 +290,12 @@ proc fos_nim_cloud_verb_impl(msg: cstring, len: csize_t, scopesJson: cstring,
     return ""
   var replies = newJArray()
   try:
-    let ctx = esp32Context(parseScopes(scopesJson), $scenesChecksum, backendManaged)
-    let reply = handleCloudVerb(ctx, parsed)
+    if esp32Ctx.isNil:
+      esp32Ctx = buildEsp32Context()
+    esp32Ctx.scopes = parseScopes(scopesJson)
+    esp32Ctx.scenesChecksum = $scenesChecksum
+    esp32Ctx.backendManaged = backendManaged
+    let reply = handleCloudVerb(esp32Ctx, parsed)
     if reply.ack != nil:
       replies.add(reply.ack)
     for extra in reply.extra:

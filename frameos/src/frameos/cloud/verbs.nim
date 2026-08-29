@@ -35,11 +35,13 @@ import frameos/channels
 import frameos/interpreter
 import frameos/js_runtime/app_runtime
 import frameos/types
-import ./scene_guard
-
-# Tests and other importers keep reaching CLOUD_REFUSED_APP_KEYWORDS /
-# refusedCloudAppKeyword through this module.
-export scene_guard
+when not defined(frameosEmbedded):
+  # The apps this guard refuses (a child-process Chromium, ffmpeg) are not in
+  # the firmware's catalog at all, so the walk is Linux-only. Tests and other
+  # importers keep reaching CLOUD_REFUSED_APP_KEYWORDS / refusedCloudAppKeyword
+  # through this module.
+  import ./scene_guard
+  export scene_guard
 
 const
   # The scope that gates `refresh_service_settings` (docs/cloud-frames.md,
@@ -352,13 +354,20 @@ proc audit(ctx: CloudVerbContext, verb: string, ok: bool, error = "") =
   if not ctx.auditFn.isNil:
     ctx.auditFn(payload)
 
+proc refuse(ctx: CloudVerbContext, verb: string, id: JsonNode, error: string,
+            detail = ""): CloudVerbReply =
+  ## One refusal: the audit line (with the detail, which never reaches the
+  ## wire) and the error ack. Every refusal in this module goes through here —
+  ## a single call per site is what keeps the layer small on the firmware.
+  ctx.audit(verb, false, if detail.len > 0: error & ": " & detail else: error)
+  CloudVerbReply(ack: ackError(id, error))
+
 proc hasScope(ctx: CloudVerbContext, scope: string): bool =
   scope in ctx.scopes
 
 proc refuseBackendManaged(ctx: CloudVerbContext, verb: string, id: JsonNode): CloudVerbReply =
   ## The `backend_managed` refusal for a content verb (see backendManaged).
-  ctx.audit(verb, false, "backend_managed")
-  CloudVerbReply(ack: ackError(id, "backend_managed"))
+  ctx.refuse(verb, id, "backend_managed")
 
 proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if ctx.backendManaged:
@@ -367,12 +376,10 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
   let checksum = msg{"checksum"}.getStr("")
   let (ok, error) = validateInterpretedScenesPayload(scenes)
   if not ok:
-    ctx.audit("set_scenes", false, error)
-    return CloudVerbReply(ack: ackError(id, error))
-  let refused = refusedCloudAppKeyword(scenes)
+    return ctx.refuse("set_scenes", id, error)
+  let refused = when defined(frameosEmbedded): "" else: refusedCloudAppKeyword(scenes)
   if refused.len > 0:
-    ctx.audit("set_scenes", false, "app_not_allowed: " & refused)
-    return CloudVerbReply(ack: ackError(id, "app_not_allowed"))
+    return ctx.refuse("set_scenes", id, "app_not_allowed", refused)
   # The workspace's "preview on frame" flow names which pushed scene to
   # activate and seeds its public state; the runtime's uploadScenes handler
   # honors both keys (runner.nim), so pass them through untouched.
@@ -426,8 +433,7 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
     # date forever; a retryable error makes it push again instead.
     else: "queue_full"
   if applyError.len > 0:
-    ctx.audit("set_scenes", false, applyError)
-    return CloudVerbReply(ack: ackError(id, applyError))
+    return ctx.refuse("set_scenes", id, applyError)
   ctx.audit("set_scenes", true)
   if ctx.deferredSceneAck:
     # Accepted, not yet live: the platform reports (and remembers) the
@@ -455,20 +461,6 @@ proc numberInRange(node: JsonNode, low, high: float): bool =
 proc intInRange(node: JsonNode, low, high: int): bool =
   node != nil and node.kind == JInt and node.getInt() >= low and node.getInt() <= high
 
-proc isHtmlHexColor(node: JsonNode): bool =
-  ## "#rrggbb" only — the one spelling every producer of these values (the
-  ## SPA's ColorInput, the backend's frame.json writer) uses, and the one
-  ## loadControlCode's parseHtmlColor cannot choke on.
-  if node == nil or node.kind != JString:
-    return false
-  let value = node.getStr("")
-  if value.len != 7 or value[0] != '#':
-    return false
-  for ch in value[1 .. ^1]:
-    if ch notin {'0'..'9', 'a'..'f', 'A'..'F'}:
-      return false
-  true
-
 proc onlyKeys(node: JsonNode, allowed: openArray[string]): bool =
   ## Object shape guard: every key present must be one of `allowed`. An
   ## unknown sub-key is refused for the same reason an unknown top-level key
@@ -480,6 +472,137 @@ proc onlyKeys(node: JsonNode, allowed: openArray[string]): bool =
     if key notin allowed:
       return false
   true
+
+when not defined(frameosEmbedded):
+  proc isHtmlHexColor(node: JsonNode): bool =
+    ## "#rrggbb" only — the one spelling every producer of these values (the
+    ## SPA's ColorInput, the backend's frame.json writer) uses, and the one
+    ## loadControlCode's parseHtmlColor cannot choke on.
+    if node == nil or node.kind != JString:
+      return false
+    let value = node.getStr("")
+    if value.len != 7 or value[0] != '#':
+      return false
+    for ch in value[1 .. ^1]:
+      if ch notin {'0'..'9', 'a'..'f', 'A'..'F'}:
+        return false
+    true
+
+  proc validateLinuxSetting(key: string, value: JsonNode): bool =
+    ## The keys only the Linux runtime honours (CLOUD_SETTINGS_ALLOWLIST minus
+    ## CLOUD_SETTINGS_ALLOWLIST_ESP32). Not compiled into the firmware: its
+    ## allowlist refuses these keys before any validator runs, and on a chip
+    ## at 90% of its flash slot unreachable code is not free.
+    case key
+    of "flip":
+      value.kind == JString and value.getStr("") in ["", "horizontal", "vertical", "both"]
+    of "error_behavior":
+      # The frontend/backend spelling; frontendErrorBehaviorToRuntime maps it
+      # onto errorBehavior in frame.json.
+      if not onlyKeys(value, ["mode", "retry_seconds", "silent_retry_seconds",
+                              "silent_retry_forever", "silent_window_minutes",
+                              "show_error_retry_seconds"]):
+        return false
+      for subKey in value.keys:
+        let ok = case subKey
+          of "mode":
+            value[subKey].kind == JString and
+              value[subKey].getStr("") in ["safe_mode", "show_error_retry", "silent_retry"]
+          of "silent_retry_forever":
+            value[subKey].kind == JBool
+          of "silent_window_minutes":
+            numberInRange(value[subKey], 1, CloudErrorWindowCeilingMinutes)
+          else:
+            numberInRange(value[subKey], 1, CloudErrorRetryCeilingSeconds)
+        if not ok:
+          return false
+      true
+    of "control_code":
+      # The runtime's controlCode shape (loadControlCode): a bool `enabled`,
+      # numbers, and #rrggbb colours — not the SPA form's string spellings.
+      if not onlyKeys(value, ["enabled", "position", "size", "padding",
+                              "offsetX", "offsetY", "qrCodeColor", "backgroundColor"]):
+        return false
+      for subKey in value.keys:
+        let ok = case subKey
+          of "enabled": value[subKey].kind == JBool
+          of "position":
+            value[subKey].kind == JString and value[subKey].getStr("") in
+              ["top-left", "top-right", "bottom-left", "bottom-right", "center"]
+          of "size": numberInRange(value[subKey], 1, 50)
+          of "padding": intInRange(value[subKey], 0, 50)
+          of "offsetX", "offsetY": intInRange(value[subKey], -4096, 4096)
+          else: isHtmlHexColor(value[subKey])
+        if not ok:
+          return false
+      true
+    of "metrics_interval":
+      # 0 disables the sampler (metrics.nim); anything else is a period.
+      numberInRange(value, 0, CloudMetricsIntervalCeilingSeconds)
+    of "save_assets":
+      # A single switch, or a per-app-keyword map of switches.
+      if value.kind == JBool:
+        return true
+      if value.kind != JObject or value.len > CloudSaveAssetsMaxEntries:
+        return false
+      for appKey in value.keys:
+        if appKey.len == 0 or appKey.len > 64 or value[appKey].kind != JBool:
+          return false
+      true
+    of "timezone_updater":
+      # enabled/hour only. The download URL is deliberately NOT accepted from a
+      # provider: the endpoint stays the FrameOS-owned default (or whatever the
+      # local admin set) — see handleSetSettings for how it is carried over.
+      if not onlyKeys(value, ["enabled", "hour"]):
+        return false
+      for subKey in value.keys:
+        let ok = case subKey
+          of "enabled": value[subKey].kind == JBool
+          else: intInRange(value[subKey], 0, 23)
+        if not ok:
+          return false
+      true
+    of "palette":
+      # The SPA's Palette shape (frame.json `palette`): "#rrggbb" colours plus
+      # the optional display name and per-colour names. An empty colour list is
+      # a valid value — it hands the panel back its built-in palette.
+      if not onlyKeys(value, ["name", "colors", "colorNames"]):
+        return false
+      let colors = value{"colors"}
+      if colors == nil or colors.kind != JArray or colors.len > CloudPaletteMaxColors:
+        return false
+      for color in colors.items:
+        if not isHtmlHexColor(color):
+          return false
+      if value.hasKey("name") and not (value["name"].kind == JString and value["name"].getStr("").len <= 64):
+        return false
+      if value.hasKey("colorNames"):
+        let names = value["colorNames"]
+        if names.kind != JArray or names.len != colors.len:
+          return false
+        for name in names.items:
+          if name.kind != JString or name.getStr("").len > 32:
+            return false
+      true
+    of "device_config":
+      # STRICTLY the partial-refresh policy. Everything else in deviceConfig is
+      # hardware wiring (VCOM, pins, upload URL and headers, SD card, render
+      # mode) and stays the device's own — the persist path patches, so what
+      # is not sent is not touched.
+      if not onlyKeys(value, ["partial", "partialMaxAreaPercent", "partialMaxRefreshesBeforeFull"]):
+        return false
+      if value.len == 0:
+        return false
+      for subKey in value.keys:
+        let ok = case subKey
+          of "partial": value[subKey].kind == JBool
+          of "partialMaxAreaPercent": numberInRange(value[subKey], 0, 100)
+          else: intInRange(value[subKey], 0, CloudPartialRefreshMaxRefreshes)
+        if not ok:
+          return false
+      true
+    else:
+      false
 
 proc validateCloudSetting*(key: string, value: JsonNode): bool =
   ## Is `value` an acceptable value for allowlisted setting `key`? The device
@@ -514,115 +637,8 @@ proc validateCloudSetting*(key: string, value: JsonNode): bool =
     intInRange(value, -1, CloudBatteryPinMax)
   of "battery_divider":
     numberInRange(value, CloudBatteryDividerMin, CloudBatteryDividerMax)
-  of "flip":
-    value.kind == JString and value.getStr("") in ["", "horizontal", "vertical", "both"]
-  of "error_behavior":
-    # The frontend/backend spelling; frontendErrorBehaviorToRuntime maps it
-    # onto errorBehavior in frame.json.
-    if not onlyKeys(value, ["mode", "retry_seconds", "silent_retry_seconds",
-                            "silent_retry_forever", "silent_window_minutes",
-                            "show_error_retry_seconds"]):
-      return false
-    for subKey in value.keys:
-      let ok = case subKey
-        of "mode":
-          value[subKey].kind == JString and
-            value[subKey].getStr("") in ["safe_mode", "show_error_retry", "silent_retry"]
-        of "silent_retry_forever":
-          value[subKey].kind == JBool
-        of "silent_window_minutes":
-          numberInRange(value[subKey], 1, CloudErrorWindowCeilingMinutes)
-        else:
-          numberInRange(value[subKey], 1, CloudErrorRetryCeilingSeconds)
-      if not ok:
-        return false
-    true
-  of "control_code":
-    # The runtime's controlCode shape (loadControlCode): a bool `enabled`,
-    # numbers, and #rrggbb colours — not the SPA form's string spellings.
-    if not onlyKeys(value, ["enabled", "position", "size", "padding",
-                            "offsetX", "offsetY", "qrCodeColor", "backgroundColor"]):
-      return false
-    for subKey in value.keys:
-      let ok = case subKey
-        of "enabled": value[subKey].kind == JBool
-        of "position":
-          value[subKey].kind == JString and value[subKey].getStr("") in
-            ["top-left", "top-right", "bottom-left", "bottom-right", "center"]
-        of "size": numberInRange(value[subKey], 1, 50)
-        of "padding": intInRange(value[subKey], 0, 50)
-        of "offsetX", "offsetY": intInRange(value[subKey], -4096, 4096)
-        else: isHtmlHexColor(value[subKey])
-      if not ok:
-        return false
-    true
-  of "metrics_interval":
-    # 0 disables the sampler (metrics.nim); anything else is a period.
-    numberInRange(value, 0, CloudMetricsIntervalCeilingSeconds)
   of "max_http_response_bytes":
     intInRange(value, CloudMaxHttpResponseBytesFloor, CloudMaxHttpResponseBytesCeiling)
-  of "save_assets":
-    # A single switch, or a per-app-keyword map of switches.
-    if value.kind == JBool:
-      return true
-    if value.kind != JObject or value.len > CloudSaveAssetsMaxEntries:
-      return false
-    for appKey in value.keys:
-      if appKey.len == 0 or appKey.len > 64 or value[appKey].kind != JBool:
-        return false
-    true
-  of "timezone_updater":
-    # enabled/hour only. The download URL is deliberately NOT accepted from a
-    # provider: the endpoint stays the FrameOS-owned default (or whatever the
-    # local admin set) — see handleSetSettings for how it is carried over.
-    if not onlyKeys(value, ["enabled", "hour"]):
-      return false
-    for subKey in value.keys:
-      let ok = case subKey
-        of "enabled": value[subKey].kind == JBool
-        else: intInRange(value[subKey], 0, 23)
-      if not ok:
-        return false
-    true
-  of "palette":
-    # The SPA's Palette shape (frame.json `palette`): "#rrggbb" colours plus
-    # the optional display name and per-colour names. An empty colour list is
-    # a valid value — it hands the panel back its built-in palette.
-    if not onlyKeys(value, ["name", "colors", "colorNames"]):
-      return false
-    let colors = value{"colors"}
-    if colors == nil or colors.kind != JArray or colors.len > CloudPaletteMaxColors:
-      return false
-    for color in colors.items:
-      if not isHtmlHexColor(color):
-        return false
-    if value.hasKey("name") and not (value["name"].kind == JString and value["name"].getStr("").len <= 64):
-      return false
-    if value.hasKey("colorNames"):
-      let names = value["colorNames"]
-      if names.kind != JArray or names.len != colors.len:
-        return false
-      for name in names.items:
-        if name.kind != JString or name.getStr("").len > 32:
-          return false
-    true
-  of "device_config":
-    # STRICTLY the partial-refresh policy. Everything else in deviceConfig is
-    # hardware wiring (VCOM, pins, upload URL and headers, SD card, render
-    # mode) and stays the device's own — the persist path patches, so what
-    # is not sent is not touched.
-    if not onlyKeys(value, ["partial", "partialMaxAreaPercent", "partialMaxRefreshesBeforeFull"]):
-      return false
-    if value.len == 0:
-      return false
-    for subKey in value.keys:
-      let ok = case subKey
-        of "partial": value[subKey].kind == JBool
-        of "partialMaxAreaPercent": numberInRange(value[subKey], 0, 100)
-        else: intInRange(value[subKey], 0, CloudPartialRefreshMaxRefreshes)
-      if not ok:
-        return false
-    true
   of "gpio_buttons":
     # [{pin, label}] — the whole list, replaced. An empty list unbinds every
     # button; a pin appearing twice is refused (the driver would register
@@ -643,7 +659,10 @@ proc validateCloudSetting*(key: string, value: JsonNode): bool =
       seenPins.add(button["pin"].getInt())
     true
   else:
-    false
+    when defined(frameosEmbedded):
+      false
+    else:
+      validateLinuxSetting(key, value)
 
 proc settingsAllowlist(ctx: CloudVerbContext): seq[string] =
   if ctx.settingsAllowlist.len > 0: ctx.settingsAllowlist
@@ -654,23 +673,19 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
     return refuseBackendManaged(ctx, "set_settings", id)
   let settings = msg{"settings"}
   if settings == nil or settings.kind != JObject:
-    ctx.audit("set_settings", false, "invalid_settings")
-    return CloudVerbReply(ack: ackError(id, "invalid_settings"))
+    return ctx.refuse("set_settings", id, "invalid_settings")
   # One unknown key refuses the whole verb: the allowlist is the contract, and
   # partial application would leave provider and frame disagreeing about what
   # got set. One bad VALUE refuses it too, for the same reason.
   let allowlist = ctx.settingsAllowlist()
   for key in settings.keys:
     if key notin allowlist:
-      ctx.audit("set_settings", false, "setting_not_allowed: " & key)
-      return CloudVerbReply(ack: ackError(id, "setting_not_allowed"))
+      return ctx.refuse("set_settings", id, "setting_not_allowed", key)
     if not validateCloudSetting(key, settings[key]):
-      ctx.audit("set_settings", false, "invalid_settings: " & key)
-      return CloudVerbReply(ack: ackError(id, "invalid_settings"))
+      return ctx.refuse("set_settings", id, "invalid_settings", key)
   # A tzdata slice without the zone it belongs to is meaningless.
   if settings.hasKey("timezone_data") and not settings.hasKey("timezone"):
-    ctx.audit("set_settings", false, "invalid_settings: timezone_data")
-    return CloudVerbReply(ack: ackError(id, "invalid_settings"))
+    return ctx.refuse("set_settings", id, "invalid_settings", "timezone_data")
   var payload = newJObject()
   for key in settings.keys:
     payload[key] = copy(settings[key])
@@ -696,11 +711,9 @@ proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
         # The persist path's own refusal of a value that passed the shape
         # check — a GPIO the board does not have, a rotation the panel
         # cannot do. The verb is refused whole, like any invalid value.
-        ctx.audit("set_settings", false, "invalid_settings: " & error.msg)
-        return CloudVerbReply(ack: ackError(id, "invalid_settings"))
+        return ctx.refuse("set_settings", id, "invalid_settings", error.msg)
       except CatchableError as error:
-        ctx.audit("set_settings", false, "persist_failed: " & error.msg)
-        return CloudVerbReply(ack: ackError(id, "persist_failed"))
+        return ctx.refuse("set_settings", id, "persist_failed", error.msg)
       # A driver-init key (see CLOUD_SETTINGS_RESTART_KEYS) needs the process
       # to come back up; everything else is picked up by a config reload.
       var needsRestart = false
@@ -730,11 +743,9 @@ proc handleRefreshServiceSettings(ctx: CloudVerbContext, id: JsonNode): CloudVer
   if not ctx.hasScope(ServiceSettingsScope):
     # The provider's 403 on the fetch is the real revocation boundary, but a
     # device that knows it was never granted the scope says so up front.
-    ctx.audit("refresh_service_settings", false, "insufficient_scope")
-    return CloudVerbReply(ack: ackError(id, "insufficient_scope"))
+    return ctx.refuse("refresh_service_settings", id, "insufficient_scope")
   if ctx.refreshServiceSettingsFn.isNil:
-    ctx.audit("refresh_service_settings", false, "unsupported_verb")
-    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+    return ctx.refuse("refresh_service_settings", id, "unsupported_verb")
   # Ack on ACCEPTING the nudge, not on completing the fetch: the fetch is HTTP
   # on our own schedule, and a failed fetch must not look like a refused verb.
   ctx.refreshServiceSettingsFn()
@@ -750,8 +761,7 @@ proc handleSetSchedule(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
   if schedule != nil and schedule.kind == JNull:
     schedule = %*{"events": []}
   if schedule == nil or schedule.kind != JObject:
-    ctx.audit("set_schedule", false, "invalid_schedule")
-    return CloudVerbReply(ack: ackError(id, "invalid_schedule"))
+    return ctx.refuse("set_schedule", id, "invalid_schedule")
   var payload = %*{"schedule": schedule}
   # The frame's current UTC offset, sent by providers for devices without a
   # tz database (docs/cloud-frames.md `set_schedule`). Carried through to the
@@ -763,11 +773,9 @@ proc handleSetSchedule(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clou
   try:
     ctx.persistSettingsFn(payload)
   except ValueError as error:
-    ctx.audit("set_schedule", false, "invalid_schedule: " & error.msg)
-    return CloudVerbReply(ack: ackError(id, "invalid_schedule"))
+    return ctx.refuse("set_schedule", id, "invalid_schedule", error.msg)
   except CatchableError as error:
-    ctx.audit("set_schedule", false, "persist_failed: " & error.msg)
-    return CloudVerbReply(ack: ackError(id, "persist_failed"))
+    return ctx.refuse("set_schedule", id, "persist_failed", error.msg)
   discard ctx.sendEventFn("reload", %*{})
   ctx.audit("set_schedule", true)
   CloudVerbReply(ack: ackOk(id))
@@ -777,8 +785,7 @@ proc handleSetCurrentScene(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): 
     return refuseBackendManaged(ctx, "set_current_scene", id)
   let sceneId = msg{"scene_id"}.getStr("")
   if sceneId.len == 0:
-    ctx.audit("set_current_scene", false, "invalid_scene_id")
-    return CloudVerbReply(ack: ackError(id, "invalid_scene_id"))
+    return ctx.refuse("set_current_scene", id, "invalid_scene_id")
   var payload = %*{"sceneId": sceneId}
   # Optional public scene-state values, same shape the local setCurrentScene
   # event carries (docs/cloud-frames.md).
@@ -788,21 +795,18 @@ proc handleSetCurrentScene(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): 
   if not ctx.sendEventFn("setCurrentScene", payload):
     # Dropped on the floor (a full runtime queue): an ok ack would tell the
     # provider the switch happened.
-    ctx.audit("set_current_scene", false, "queue_full")
-    return CloudVerbReply(ack: ackError(id, "queue_full"))
+    return ctx.refuse("set_current_scene", id, "queue_full")
   ctx.audit("set_current_scene", true)
   CloudVerbReply(ack: ackOk(id))
 
 proc handleAssetsList(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   if ctx.listAssetsFn.isNil:
-    ctx.audit("assets_list", false, "unsupported_verb")
-    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+    return ctx.refuse("assets_list", id, "unsupported_verb")
   let listing =
     try:
       ctx.listAssetsFn()
     except CatchableError as error:
-      ctx.audit("assets_list", false, "read_failed: " & error.msg)
-      return CloudVerbReply(ack: ackError(id, "read_failed"))
+      return ctx.refuse("assets_list", id, "read_failed", error.msg)
   var reply = %*{"type": "assets"}
   if id != nil and id.kind != JNull:
     reply["id"] = id
@@ -848,23 +852,18 @@ proc assetChunkExtras(id: JsonNode, asset: AssetReadResult): seq[JsonNode] =
 
 proc handleAssetGet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if ctx.readAssetFn.isNil:
-    ctx.audit("asset_get", false, "unsupported_verb")
-    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+    return ctx.refuse("asset_get", id, "unsupported_verb")
   let path = msg{"path"}.getStr("")
   if path.len == 0:
-    ctx.audit("asset_get", false, "invalid_path")
-    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+    return ctx.refuse("asset_get", id, "invalid_path")
   let thumb = msg{"thumb"}.getBool(false)
   let asset =
     try:
       ctx.readAssetFn(path, thumb)
     except CatchableError as error:
-      ctx.audit("asset_get", false, "read_failed: " & error.msg)
-      return CloudVerbReply(ack: ackError(id, "read_failed"))
+      return ctx.refuse("asset_get", id, "read_failed", error.msg)
   if asset.error.len > 0:
-    ctx.audit("asset_get", false,
-      if asset.detail.len > 0: asset.error & ": " & asset.detail else: asset.error)
-    return CloudVerbReply(ack: ackError(id, asset.error))
+    return ctx.refuse("asset_get", id, asset.error, asset.detail)
   ctx.audit("asset_get", true)
   if asset.streamed:
     return CloudVerbReply(ack: ackOk(id))
@@ -872,16 +871,14 @@ proc handleAssetGet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVe
 
 proc handleImageGet(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   if ctx.getImageFn.isNil:
-    ctx.audit("image_get", false, "unsupported_verb")
-    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+    return ctx.refuse("image_get", id, "unsupported_verb")
   let image =
     try:
       ctx.getImageFn()
     except CatchableError:
       AssetReadResult(error: "no_image")
   if image.error.len > 0:
-    ctx.audit("image_get", false, image.error)
-    return CloudVerbReply(ack: ackError(id, image.error))
+    return ctx.refuse("image_get", id, image.error)
   ctx.audit("image_get", true)
   if image.streamed:
     return CloudVerbReply(ack: ackOk(id))
@@ -914,25 +911,20 @@ proc refusedWritePath(path: string): bool =
 
 proc handleAssetPut(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if ctx.writeAssetFn.isNil:
-    ctx.audit("asset_put", false, "unsupported_verb")
-    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+    return ctx.refuse("asset_put", id, "unsupported_verb")
   let path = msg{"path"}.getStr("")
   if path.len == 0 or refusedWritePath(path):
-    ctx.audit("asset_put", false, "invalid_path")
-    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+    return ctx.refuse("asset_put", id, "invalid_path")
   let encoded = msg{"data"}.getStr("")
   var data: string
   try:
     data = decode(encoded)
   except CatchableError:
-    ctx.audit("asset_put", false, "invalid_data")
-    return CloudVerbReply(ack: ackError(id, "invalid_data"))
+    return ctx.refuse("asset_put", id, "invalid_data")
   if data.len == 0:
-    ctx.audit("asset_put", false, "invalid_data")
-    return CloudVerbReply(ack: ackError(id, "invalid_data"))
+    return ctx.refuse("asset_put", id, "invalid_data")
   if data.len > HubMaxAssetUploadBytes:
-    ctx.audit("asset_put", false, "too_large")
-    return CloudVerbReply(ack: ackError(id, "too_large"))
+    return ctx.refuse("asset_put", id, "too_large")
   try:
     let stored = ctx.writeAssetFn(path, data)
     ctx.audit("asset_put", true)
@@ -941,8 +933,7 @@ proc handleAssetPut(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVe
     CloudVerbReply(ack: ack)
   except CatchableError as error:
     let wireError = assetWriteError(error)
-    ctx.audit("asset_put", false, wireError)
-    CloudVerbReply(ack: ackError(id, wireError))
+    ctx.refuse("asset_put", id, wireError)
 
 proc validCloudUploadId*(uploadId: string): bool =
   ## [A-Za-z0-9_-]{1,64}: it becomes a filename component on the device.
@@ -962,37 +953,29 @@ proc handleAssetPutChunk(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Cl
   ## twice overwrites itself instead of appending. Nothing is visible in the
   ## assets directory until the final chunk lands.
   if ctx.putAssetChunkFn.isNil:
-    ctx.audit("asset_put_chunk", false, "unsupported_verb")
-    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+    return ctx.refuse("asset_put_chunk", id, "unsupported_verb")
   let uploadId = msg{"upload_id"}.getStr("")
   if not validCloudUploadId(uploadId):
-    ctx.audit("asset_put_chunk", false, "invalid_upload_id")
-    return CloudVerbReply(ack: ackError(id, "invalid_upload_id"))
+    return ctx.refuse("asset_put_chunk", id, "invalid_upload_id")
   let offsetNode = msg{"offset"}
   if offsetNode == nil or offsetNode.kind != JInt or offsetNode.getBiggestInt() < 0:
-    ctx.audit("asset_put_chunk", false, "invalid_offset")
-    return CloudVerbReply(ack: ackError(id, "invalid_offset"))
+    return ctx.refuse("asset_put_chunk", id, "invalid_offset")
   let offset = offsetNode.getBiggestInt()
   let complete = msg{"complete"}.getBool(false)
   let path = msg{"path"}.getStr("")
   # The destination is only needed (and only checked) on the final chunk;
   # the part itself never lives in the assets directory.
   if complete and (path.len == 0 or refusedWritePath(path)):
-    ctx.audit("asset_put_chunk", false, "invalid_path")
-    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+    return ctx.refuse("asset_put_chunk", id, "invalid_path")
   var data: string
   try:
     data = decode(msg{"data"}.getStr(""))
   except CatchableError:
-    ctx.audit("asset_put_chunk", false, "invalid_data")
-    return CloudVerbReply(ack: ackError(id, "invalid_data"))
+    return ctx.refuse("asset_put_chunk", id, "invalid_data")
   if data.len == 0 or data.len > HubMaxAssetUploadBytes:
-    ctx.audit("asset_put_chunk", false,
-              if data.len == 0: "invalid_data" else: "too_large")
-    return CloudVerbReply(ack: ackError(id, if data.len == 0: "invalid_data" else: "too_large"))
+    return ctx.refuse("asset_put_chunk", id, if data.len == 0: "invalid_data" else: "too_large")
   if offset + data.len > HubMaxChunkedUploadBytes:
-    ctx.audit("asset_put_chunk", false, "too_large")
-    return CloudVerbReply(ack: ackError(id, "too_large"))
+    return ctx.refuse("asset_put_chunk", id, "too_large")
   try:
     let stored = ctx.putAssetChunkFn(uploadId, offset, data, if complete: path else: "")
     ctx.audit("asset_put_chunk", true)
@@ -1007,65 +990,54 @@ proc handleAssetPutChunk(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Cl
     # so distinctly, it is the one write error that is not the device's.
     let wireError = if error of ValueError and error.msg == "chunk_gap": "chunk_gap"
                     else: assetWriteError(error)
-    ctx.audit("asset_put_chunk", false, wireError)
-    CloudVerbReply(ack: ackError(id, wireError))
+    ctx.refuse("asset_put_chunk", id, wireError)
 
 proc handleAssetMkdir(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if ctx.mkdirAssetFn.isNil:
-    ctx.audit("asset_mkdir", false, "unsupported_verb")
-    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+    return ctx.refuse("asset_mkdir", id, "unsupported_verb")
   let path = msg{"path"}.getStr("")
   if path.len == 0 or refusedWritePath(path):
-    ctx.audit("asset_mkdir", false, "invalid_path")
-    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+    return ctx.refuse("asset_mkdir", id, "invalid_path")
   try:
     ctx.mkdirAssetFn(path)
     ctx.audit("asset_mkdir", true)
     CloudVerbReply(ack: ackOk(id))
   except CatchableError as error:
     let wireError = assetWriteError(error)
-    ctx.audit("asset_mkdir", false, wireError)
-    CloudVerbReply(ack: ackError(id, wireError))
+    ctx.refuse("asset_mkdir", id, wireError)
 
 proc handleAssetDelete(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if ctx.deleteAssetFn.isNil:
-    ctx.audit("asset_delete", false, "unsupported_verb")
-    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+    return ctx.refuse("asset_delete", id, "unsupported_verb")
   let path = msg{"path"}.getStr("")
   if path.len == 0 or refusedWritePath(path):
-    ctx.audit("asset_delete", false, "invalid_path")
-    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+    return ctx.refuse("asset_delete", id, "invalid_path")
   try:
     ctx.deleteAssetFn(path)
     ctx.audit("asset_delete", true)
     CloudVerbReply(ack: ackOk(id))
   except CatchableError as error:
     let wireError = assetWriteError(error)
-    ctx.audit("asset_delete", false, wireError)
-    CloudVerbReply(ack: ackError(id, wireError))
+    ctx.refuse("asset_delete", id, wireError)
 
 proc handleAssetRename(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if ctx.renameAssetFn.isNil:
-    ctx.audit("asset_rename", false, "unsupported_verb")
-    return CloudVerbReply(ack: ackError(id, "unsupported_verb"))
+    return ctx.refuse("asset_rename", id, "unsupported_verb")
   let src = msg{"src"}.getStr("")
   let dst = msg{"dst"}.getStr("")
   if src.len == 0 or dst.len == 0 or refusedWritePath(src) or refusedWritePath(dst):
-    ctx.audit("asset_rename", false, "invalid_path")
-    return CloudVerbReply(ack: ackError(id, "invalid_path"))
+    return ctx.refuse("asset_rename", id, "invalid_path")
   try:
     ctx.renameAssetFn(src, dst)
     ctx.audit("asset_rename", true)
     CloudVerbReply(ack: ackOk(id))
   except CatchableError as error:
     let wireError = assetWriteError(error)
-    ctx.audit("asset_rename", false, wireError)
-    CloudVerbReply(ack: ackError(id, wireError))
+    ctx.refuse("asset_rename", id, wireError)
 
 proc handleGetLogs(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   if not ctx.hasScope("telemetry:logs"):
-    ctx.audit("get_logs", false, "insufficient_scope")
-    return CloudVerbReply(ack: ackError(id, "insufficient_scope"))
+    return ctx.refuse("get_logs", id, "insufficient_scope")
   let since = msg{"since"}.getStr("")
   var limit = msg{"limit"}.getInt(HubGetLogsDefaultLimit)
   limit = max(1, min(limit, HubGetLogsMaxLimit))
@@ -1094,8 +1066,7 @@ proc handleGetLogs(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVer
 
 proc handleGetMetrics(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   if not ctx.hasScope("telemetry:metrics"):
-    ctx.audit("get_metrics", false, "insufficient_scope")
-    return CloudVerbReply(ack: ackError(id, "insufficient_scope"))
+    return ctx.refuse("get_metrics", id, "insufficient_scope")
   # getMetricsFn hands back the device's sample history (oldest first, each
   # {"metrics": {…}, …} like the UI's metrics feed) or a single sample; the
   # wire carries one `metrics` message with the newest, same as the periodic
@@ -1110,8 +1081,7 @@ proc handleGetMetrics(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   elif history != nil and history.kind == JObject:
     sample = history
   if sample == nil:
-    ctx.audit("get_metrics", false, "no_metrics")
-    return CloudVerbReply(ack: ackError(id, "no_metrics"))
+    return ctx.refuse("get_metrics", id, "no_metrics")
   var reply = %*{"type": "metrics", "metrics": sample}
   if id != nil and id.kind != JNull:
     reply["id"] = id
@@ -1202,6 +1172,5 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     ctx.requestUpgradeFn()
   else:
     let label = if verb.len > 0: verb else: "(missing type)"
-    ctx.audit(label, false, "unknown_verb")
-    result = CloudVerbReply(ack: ackError(id, "unknown_verb"))
+    result = ctx.refuse(label, id, "unknown_verb")
 
