@@ -945,7 +945,6 @@ export interface FrameSceneSettings {
   refreshInterval?: number
   backgroundColor?: string
   execution?: 'compiled' | 'interpreted'
-  prompt?: string
   autoArrangeOnLoad?: boolean
   splitScreenLayout?: Record<string, any>
 }

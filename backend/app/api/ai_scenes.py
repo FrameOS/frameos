@@ -472,15 +472,6 @@ async def generate_scene(
     if response_payload:
         _split_state_nodes_by_app(response_payload)
 
-    for scene in scenes:
-        if not isinstance(scene, dict):
-            continue
-        settings: dict[str, Any] | None = scene.get("settings") or {}
-        if not isinstance(settings, dict):
-            settings = {}
-            scene["settings"] = settings
-        settings["prompt"] = prompt
-
     context_response = [
         AiSceneContextItem(
             source_type=item.source_type,

@@ -277,23 +277,6 @@ export function splitStateNodesByApp(payload: JsonObject): void {
   }
 }
 
-// Stamp the originating prompt into each scene's settings, so a scene
-// remembers what it was asked to be.
-export function stampScenePrompt(scenes: unknown[], prompt: string): void {
-  for (const scene of scenes) {
-    if (!scene || typeof scene !== "object" || Array.isArray(scene)) {
-      continue;
-    }
-    const entry = scene as JsonObject;
-    let settings = entry.settings;
-    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
-      settings = {};
-      entry.settings = settings;
-    }
-    (settings as JsonObject).prompt = prompt;
-  }
-}
-
 // Repo JS apps (repo/apps/code/*) are templates, not runtime keywords: the
 // frame only knows an app once its config + sources sit in the scene's own
 // "apps" map under a short keyword (the Weather sample carries weatherIcons

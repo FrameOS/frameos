@@ -22,6 +22,7 @@ import {
   DiagramNode,
   FrameErrorBehavior,
   FrameScene,
+  FrameSceneSettings,
   FrameSyncChoice,
   FrameSyncSceneChoice,
   FrameSyncSectionId,
@@ -1782,7 +1783,10 @@ function normalizeSceneAppFieldOptions(apps: Record<string, SceneApp>): Record<s
 }
 
 export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameType>): FrameScene {
-  const settings = scene.settings ?? {}
+  // AI-generated scenes used to carry the user's prompt here. It was never
+  // needed to run the scene and could hold more than the user meant to share
+  // in an exported scenes.json, so it is dropped on load and gone on save.
+  const { prompt: _droppedPrompt, ...settings } = (scene.settings ?? {}) as FrameSceneSettings & { prompt?: unknown }
   const frameRunsInterpreted = frameRunsScenesInterpreted(frame.mode)
   const normalizedRawNodes = (scene.nodes ?? []).map((node) => normalizeNode(node as DiagramNode))
   const sanitizedNodes = sanitizeNodes(normalizedRawNodes)

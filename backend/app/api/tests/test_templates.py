@@ -1,3 +1,7 @@
+import io
+import json
+import zipfile
+
 import pytest
 from app.models.template import Template
 
@@ -176,3 +180,22 @@ async def test_create_template_from_url_rejects_pages_without_meta(async_client,
     )
     assert response.status_code == 422
     assert "frameos:zip" in response.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_export_template_strips_scene_prompts(async_client, db):
+    scenes = [
+        {'id': 'a', 'name': 'AI scene', 'nodes': [], 'edges': [], 'settings': {'prompt': 'secret request', 'refreshInterval': 60}},
+        {'id': 'b', 'name': 'Plain', 'nodes': [], 'edges': []},
+    ]
+    t = Template(project_id=async_client.project_id, name='Prompted', scenes=scenes, config={})
+    db.add(t)
+    db.commit()
+    response = await async_client.get(f'/api/templates/{t.id}/export')
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        exported = json.loads(zf.read('Prompted/scenes.json'))
+    assert exported[0]['settings'] == {'refreshInterval': 60}
+    assert 'settings' not in exported[1]
+    # The stored template is untouched.
+    db.refresh(t)
+    assert t.scenes[0]['settings']['prompt'] == 'secret request'

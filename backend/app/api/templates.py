@@ -1,4 +1,5 @@
 import base64
+import copy
 import io
 import re
 import urllib.parse
@@ -64,6 +65,20 @@ def frameos_zip_url_from_html(content: bytes, page_url: str) -> str | None:
     return urllib.parse.urljoin(page_url, zip_url)
 
 
+def strip_scene_prompts(scenes):
+    """Older AI-generated scenes carry the user's prompt in settings.prompt. It
+    was never needed to run the scene and can hold more than the user meant to
+    share, so it never leaves in an exported scenes.json."""
+    if not isinstance(scenes, list):
+        return scenes
+    scenes = copy.deepcopy(scenes)
+    for scene in scenes:
+        settings = scene.get('settings') if isinstance(scene, dict) else None
+        if isinstance(settings, dict):
+            settings.pop('prompt', None)
+    return scenes
+
+
 def template_zip_bytes(template: Template) -> bytes:
     """The template interchange zip: {name}/template.json + scenes.json + image.jpg.
     Also the payload format for cloud template backups."""
@@ -72,7 +87,7 @@ def template_zip_bytes(template: Template) -> bytes:
     template_dict.pop('id', None)
     in_memory = io.BytesIO()
     with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
-        scenes = template_dict.pop('scenes', [])
+        scenes = strip_scene_prompts(template_dict.pop('scenes', []))
         template_dict['scenes'] = './scenes.json'
         template_dict['image'] = './image.jpg'
         # The FrameOS version this template was exported with. Informational —

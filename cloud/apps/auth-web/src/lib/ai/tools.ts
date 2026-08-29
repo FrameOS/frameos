@@ -29,7 +29,6 @@ import {
 import {
   bundleRepoApps,
   splitStateNodesByApp,
-  stampScenePrompt,
   validateAppKeywords,
   validateScenePayload,
   type JsonObject,
@@ -767,7 +766,6 @@ function deliverScenes(
   }
 
   splitStateNodesByApp(payload);
-  stampScenePrompt(payload.scenes as unknown[], ctx.prompt);
   ctx.deliveredTool = tool;
   ctx.deliveredScenes = payload.scenes as unknown[];
   ctx.emitScenes({
