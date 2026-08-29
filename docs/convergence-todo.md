@@ -3,7 +3,7 @@
 *Written 2026-08-30 against `main` at `9ae6cabd`. Replaces the 2026-08-29
 draft of this file, which planned the full merge (cloud becomes the backend,
 backend/SSH/Remote retired). That is not what we are doing now. Companion to
-`docs/deep-analysis-brutal.md` (the diagnosis; its postscript records what was
+`docs/convergence-brutal-analysis.md` (the diagnosis; its postscript records what was
 kept from it). Read cold: each stage says what exists before it says what to
 do. When an item ships, delete it.*
 
