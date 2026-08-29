@@ -160,3 +160,29 @@ The repo already contains the best design for the stated goal — JS-loadable
 scenes, hub-rendered bitmaps for weak boards, a cloud-shaped control plane,
 wasm preview. It is buried under three earlier designs that were never
 removed. The best next move is not building; it is choosing, and then deleting.
+
+## Postscript — what was decided (2026-08-30)
+
+The analysis stands as written. The treatment in `docs/convergence-todo.md`
+takes a narrower cut than "What best would look like from here" above, on
+purpose — one deletion at a time, no rewrite:
+
+- **§1, three-and-a-half ways to execute a scene → taken, in part.**
+  Compiled Nim scenes are sidelined now (no new operation produces one,
+  every surface warns, an AI converter ports them) and the codegen +
+  per-frame compile machinery is deleted after a deprecation date. Porting
+  the 40 Nim built-ins to JS is *not* taken: they stay in the binary, the
+  interpreter dispatches to them by keyword, and the converter's "no JS
+  equivalent" column is the running list of what a port would need.
+- **§2, four control planes → not taken now.** The backend (Python,
+  self-hosted, with SSH/terminal/Remote) and the cloud stay two products.
+  Whether SSH moves into the cloud or the backend retires is parked.
+- **§3, rendering strategy → not decided.** Thin clients keep
+  `/embedded/render`; the hub-renders question stays open.
+- **§4, ESP32 verb duplication → settled by measurement** (PR #412 scrapped,
+  PR #413's shared contract merged). A scene `.so` mechanism was also
+  measured, in 2026-08-16's `shared`/`shared-scenes` modes, and deleted:
+  Nim refs across a `.so` boundary under ORC crash the host.
+- **§5 and §6, the cloud's scope and the hardware bench → unchanged and
+  still owed.** Nothing in the current plan touches device code, so
+  neither gates the other.
