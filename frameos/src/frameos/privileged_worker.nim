@@ -247,6 +247,24 @@ proc executePrivilegedRequest*(request: PrivilegedRequest): PrivilegedResult =
 # The loop
 # ---------------------------------------------------------------------------
 
+proc restoreRuntimeOwnership() =
+  ## Every verb runs as root, and several of them write into the runtime's
+  ## own directories: `install-release` and `apply-setup` leave
+  ## `state/upgrade-status.json`, log lines and setup output behind. Left
+  ## root-owned, the next unprivileged write to that file fails with EACCES
+  ## — which would break the *following* upgrade, not this one, and be a
+  ## puzzle to debug. Hand the runtime's directories back after every
+  ## request; it is a chown over a handful of small files.
+  if not runningAsRoot():
+    return
+  try:
+    let user = buildrootServiceUser(loadConfig(), installedServiceUser(), buildrootUsesNetworkManager())
+    if user != "root":
+      applyBuildrootOwnership(user)
+  except CatchableError as e:
+    # Never let this sink a request whose work already succeeded.
+    workerLog("could not restore runtime ownership: " & e.msg)
+
 proc handleRequestFile*(path: string, resultsDir: string): bool =
   ## Parse, execute, answer, remove. Returns false when the file was not a
   ## request at all (it is removed anyway so the queue cannot wedge).
@@ -286,6 +304,7 @@ proc handleRequestFile*(path: string, resultsDir: string): bool =
   let res = executePrivilegedRequest(request)
   workerLog($request.verb & " " & (if res.ok: "ok" else: "failed: " & res.error) &
     " in " & formatFloat(epochTime() - started, ffDecimal, 2) & "s")
+  restoreRuntimeOwnership()
   try:
     writePrivilegedResult(resultsDir, request.id, res)
   except CatchableError as e:

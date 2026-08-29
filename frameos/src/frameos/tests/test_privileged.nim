@@ -182,6 +182,21 @@ block test_worker_drains_queue_and_refuses_junk:
     setPrivilegedExecHookForTest(nil)
     removeDir(root)
 
+block test_ownership_script_covers_what_the_root_worker_writes:
+  # The worker runs every verb as root, so `install-release` and
+  # `apply-setup` leave root-owned files in state/ and logs/ — including
+  # upgrade-status.json, which the unprivileged runtime rewrites on the NEXT
+  # upgrade. handleRequestFile calls restoreRuntimeOwnership after each
+  # request; this pins that the script it uses actually covers those paths.
+  let ownership = buildrootOwnershipScript("frameos", "/srv/frameos")
+  for path in ["state", "logs", "runtime", "staging"]:
+    doAssert ("/srv/frameos'/" & path) in ownership or ("'/srv/frameos'/" & path) in ownership,
+      "ownership script does not cover " & path & ": " & ownership
+  doAssert "chown -R 'frameos:frameos' '/srv/frameos'/logs" in ownership or
+    "chown -R 'frameos:frameos' '/srv/frameos'/$p" in ownership or
+    "for p in logs tmp runtime staging privileged/results" in ownership,
+    "logs are not chowned recursively"
+
 block test_hotspot_start_sequence_cleans_up_on_failure:
   var calls: seq[seq[string]] = @[]
   setPrivilegedExecHookForTest(proc(program: string, args: seq[string], timeoutMs: int): tuple[rc: int, output: string] {.gcsafe.} =

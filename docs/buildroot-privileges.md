@@ -322,6 +322,13 @@ via `debugfs sif` on the finished ext4), by `PARTITION_POST_BUILD_SCRIPT` for
 base images, and by `buildrootOwnershipScript` in `frameos setup` /
 `install-release` on the device.
 
+Every verb runs as root, so several of them (`install-release`,
+`apply-setup`) leave root-owned files in the runtime's own directories —
+`state/upgrade-status.json` above all, which the unprivileged runtime
+rewrites on the *next* upgrade. The worker therefore re-applies the
+ownership layout after each request; without it the failure would surface
+one upgrade later, as an EACCES on a status file.
+
 ### OTA and migration
 
 `frameos upgrade` as the `frameos` user: check GitHub, download the archive
