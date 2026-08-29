@@ -179,10 +179,14 @@ export function ApiTokensSection({
       )}
 
       {canCreate ? (
-        <form className="stack" onSubmit={(event) => void create(event)}>
-          <div className="field">
+        <form
+          className="api-token-form"
+          onSubmit={(event) => void create(event)}
+        >
+          <div className="field api-token-form__name">
             <label htmlFor="api-token-name">Name</label>
             <input
+              className="input"
               id="api-token-name"
               maxLength={64}
               onChange={(event) => setName(event.target.value)}
@@ -194,19 +198,21 @@ export function ApiTokensSection({
           <div className="field">
             <label htmlFor="api-token-access">Access</label>
             <select
+              className="input"
               id="api-token-access"
               onChange={(event) =>
                 setAccess(event.target.value as "full" | "read_only")
               }
               value={access}
             >
-              <option value="full">Full — everything the account can do</option>
-              <option value="read_only">Read-only — look, never change</option>
+              <option value="full">Full access</option>
+              <option value="read_only">Read-only</option>
             </select>
           </div>
           <div className="field">
             <label htmlFor="api-token-expiry">Expires</label>
             <select
+              className="input"
               id="api-token-expiry"
               onChange={(event) => setExpiresInDays(event.target.value)}
               value={expiresInDays}
@@ -218,19 +224,20 @@ export function ApiTokensSection({
               <option value="365">In a year</option>
             </select>
           </div>
-          <div className="actions">
-            <button
-              className="button button-primary"
-              disabled={busy || tokens.length >= maxTokens}
-              type="submit"
-            >
-              <Plus aria-hidden size={16} />
-              Create token
-            </button>
-            <span className="copy">
-              {tokens.length} / {maxTokens} tokens
-            </span>
-          </div>
+          <button
+            className="button button-primary"
+            disabled={busy || tokens.length >= maxTokens}
+            type="submit"
+          >
+            <Plus aria-hidden size={16} />
+            Create token
+          </button>
+          <p className="copy api-token-form__hint">
+            {access === "read_only"
+              ? "Read-only tokens can look at everything but never change it."
+              : "Full tokens can do everything the account can, except revoke frames or approve device links."}{" "}
+            {tokens.length} of {maxTokens} tokens used.
+          </p>
         </form>
       ) : (
         <p className="copy">

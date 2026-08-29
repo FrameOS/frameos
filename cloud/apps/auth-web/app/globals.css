@@ -68,7 +68,8 @@ a {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -456,6 +457,50 @@ html.theme-dark .button-primary {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 12px;
+}
+
+/* The new-token form on /account/developer: one row — the name grows, the
+   two selects and the button take what they need — over a one-line hint.
+   Not .actions: that grid stretches a button to the card's full width,
+   which is right in the 420px auth card and wrong in a wide content card. */
+.api-token-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.api-token-form__name {
+  min-width: 0;
+}
+
+.api-token-form .input {
+  min-height: 40px;
+}
+
+.api-token-form select.input {
+  padding-right: 32px;
+}
+
+.api-token-form .button {
+  min-height: 40px;
+}
+
+.api-token-form__hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .api-token-form {
+    grid-template-columns: 1fr;
+  }
+
+  .api-token-form .button {
+    justify-self: start;
+  }
 }
 
 .device-request-card {
