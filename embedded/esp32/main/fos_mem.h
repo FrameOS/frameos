@@ -25,6 +25,30 @@ static inline void *fos_big_realloc(void *ptr, size_t size)
     return heap_caps_realloc(ptr, size, MALLOC_CAP_8BIT);
 }
 
+// Internal RAM as malloc() sees it.
+//
+// heap_caps_get_free_size(MALLOC_CAP_INTERNAL) sums every heap that carries
+// the INTERNAL cap, including ones WITHOUT MALLOC_CAP_DEFAULT — chiefly the
+// CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL pool (64 KB in sdkconfig.defaults).
+// ESP-IDF carves that pool out at boot as a last-resort DMA|INTERNAL region
+// (esp_psram_extram_reserve_dma_pool) that malloc(), lwIP's pbufs and the
+// socket side of a TLS dial can never draw from. So the familiar "internal
+// free" figure overstates what a cloud dial or an HTTPS fetch can actually
+// get by up to the size of that pool. These report the DEFAULT-capable
+// subset: the number the network stack lives on. Keep the plain INTERNAL
+// figures too — every threshold in this firmware was calibrated against
+// them on hardware, and the two are compared side by side in `status`,
+// `heapinfo` and the metrics sample until the floors are re-measured.
+static inline size_t fos_mem_internal_malloc_free(void)
+{
+    return heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT);
+}
+
+static inline size_t fos_mem_internal_malloc_largest(void)
+{
+    return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT | MALLOC_CAP_8BIT);
+}
+
 // One always-on heap line per boot milestone: internal free / largest block /
 // lowest-ever free, plus PSRAM free when the module has any. Cheap enough to
 // keep on in shipping firmware — the point is that a field log answers "what

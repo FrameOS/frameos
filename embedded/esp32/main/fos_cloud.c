@@ -104,8 +104,8 @@ static const char *NVS_NS = "frameos";
  *
  * These are floors for STARTING a session, not for keeping one — an
  * established connection costs far less. */
-#define FOS_CLOUD_WS_MIN_INTERNAL_FREE (24 * 1024)
-#define FOS_CLOUD_WS_MIN_INTERNAL_BLOCK (12 * 1024)
+/* FOS_CLOUD_WS_MIN_INTERNAL_FREE / _BLOCK live in fos_cloud.h so `status`
+ * prints the same numbers this guard enforces. */
 #define FOS_CLOUD_WS_MIN_PSRAM_FREE (128 * 1024)
 /* How long scene_ack waits for the render task to hot-load a pushed payload. */
 #define FOS_CLOUD_SCENE_ACK_TIMEOUT_MS (120 * 1000)
@@ -181,6 +181,11 @@ bool fos_cloud_api_access(char *url, size_t url_len,
     return true;
 }
 bool fos_cloud_ws_connected(void) { return s_ws_ready; }
+
+size_t fos_cloud_task_stack_free(void)
+{
+    return s_task != NULL ? (size_t)uxTaskGetStackHighWaterMark(s_task) : 0;
+}
 
 static void set_last_error(const char *message)
 {

@@ -34,6 +34,18 @@ export interface FrameMemoryReport {
   largestInternalBlockKb?: number
   freePsramKb?: number
   loadedScenes?: number
+  /**
+   * The internal figures as malloc() sees them (metrics `freeHeapMallocKB` /
+   * `largestHeapMallocBlockKB`, firmware ≥ 2026.8.43). `freeInternalKb` also
+   * counts the 64 KB DMA reserve pool that Wi-Fi keeps for itself and a TLS
+   * dial can never draw from, so this pair is the honest headroom. Advisory
+   * levels still key off the plain figure because the firmware's floors were
+   * calibrated against it; these are shown, not judged, until re-measured.
+   */
+  mallocFreeInternalKb?: number
+  mallocLargestInternalBlockKb?: number
+  /** Lowest-ever free bytes on the render task's 40 KB internal stack. */
+  renderStackFreeBytes?: number
 }
 
 function numberOrUndefined(value: unknown): number | undefined {
@@ -62,6 +74,12 @@ export function readFrameMemory(metrics: unknown): FrameMemoryReport | null {
   if (psram !== undefined) report.freePsramKb = psram
   const scenes = numberOrUndefined(sample.loadedScenes)
   if (scenes !== undefined) report.loadedScenes = scenes
+  const mallocFree = numberOrUndefined(sample.freeHeapMallocKB)
+  if (mallocFree !== undefined) report.mallocFreeInternalKb = mallocFree
+  const mallocBlock = numberOrUndefined(sample.largestHeapMallocBlockKB)
+  if (mallocBlock !== undefined) report.mallocLargestInternalBlockKb = mallocBlock
+  const renderStack = numberOrUndefined(sample.renderStackFreeBytes)
+  if (renderStack !== undefined) report.renderStackFreeBytes = renderStack
   return report
 }
 
@@ -111,6 +129,14 @@ export function frameMemoryAdvisory(
           report.freePsramKb
         )} KB free) — it is the small internal pool that TLS, Wi-Fi and lwIP draw from.`
       : ''
+  const mallocPart =
+    report.mallocFreeInternalKb !== undefined
+      ? ` Of that, ${Math.round(report.mallocFreeInternalKb)} KB` +
+        (report.mallocLargestInternalBlockKb !== undefined
+          ? ` (largest block ${Math.round(report.mallocLargestInternalBlockKb)} KB)`
+          : '') +
+        ` is reachable by malloc — the rest is the DMA reserve Wi-Fi keeps for itself.`
+      : ''
   const blockPart =
     largestInternalBlockKb !== undefined
       ? `, largest block ${Math.round(largestInternalBlockKb)} KB (needs ${cloudLinkInternalBlockKb} KB)`
@@ -122,7 +148,7 @@ export function frameMemoryAdvisory(
         `This frame last reported ${Math.round(freeInternalKb)} KB of free internal RAM${blockPart}` +
         `${scenePart}. Opening the ${options.cloudManaged ? 'cloud link' : 'device TLS connection'} needs about ` +
         `${cloudLinkInternalFreeKb} KB free with a ${cloudLinkInternalBlockKb} KB contiguous block, so it cannot ` +
-        `connect and will keep retrying.${psramPart} Only the active scene is held in memory, so switching to a ` +
+        `connect and will keep retrying.${mallocPart}${psramPart} Only the active scene is held in memory, so switching to a ` +
         `lighter scene (fewer nodes, less inline JS, fewer concurrent fetches) frees it without a reboot; if every ` +
         `scene sits this low, the firmware's own footprint is the problem, not the scenes.`,
       headline: `Low memory: ${Math.round(freeInternalKb)} KB internal RAM free — too little for the cloud link`,
@@ -134,7 +160,7 @@ export function frameMemoryAdvisory(
     detail:
       `This frame last reported ${Math.round(freeInternalKb)} KB of free internal RAM${blockPart}${scenePart}. ` +
       `The cloud link needs about ${cloudLinkInternalFreeKb} KB free with a ${cloudLinkInternalBlockKb} KB block ` +
-      `to open its TLS session, so there is not much headroom left.${psramPart} Only the active scene is held ` +
+      `to open its TLS session, so there is not much headroom left.${mallocPart}${psramPart} Only the active scene is held ` +
       `in memory, so this is the cost of that scene on top of the firmware's fixed footprint — a heavier scene ` +
       `may take the frame offline while leaving it rendering.`,
     headline: `Memory is tight: ${Math.round(freeInternalKb)} KB internal RAM free`,

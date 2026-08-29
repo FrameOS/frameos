@@ -247,18 +247,30 @@ static int cmd_status(int argc, char **argv)
     printf("renders:     %lu (last %lld ms)\n",
            (unsigned long)fos_client_render_count(), fos_client_last_render_ms());
     /* Internal RAM is the scarce one and the largest BLOCK is what decides
-     * whether TLS can start, so both are printed. The cloud link needs
-     * ~48 KB free with a 16 KB block (FOS_CLOUD_WS_MIN_INTERNAL_* in
-     * fos_cloud.c); below that `cloud_error:` above says so outright. */
+     * whether TLS can start, so both are printed, against the floors the
+     * cloud link actually enforces (FOS_CLOUD_WS_MIN_INTERNAL_* in
+     * fos_cloud.h); below them `cloud_error:` above says so outright. The
+     * second line is the same pool as malloc() sees it, without the DMA
+     * reserve the first line counts (fos_mem.h). */
     size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t internal_block =
         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    printf("heap:        internal %u free (%u largest block)%s, psram %u free\n",
+    bool too_low = internal_free < FOS_CLOUD_WS_MIN_INTERNAL_FREE ||
+                   internal_block < FOS_CLOUD_WS_MIN_INTERNAL_BLOCK;
+    printf("heap:        internal %u free (%u largest block), psram %u free\n",
            (unsigned)internal_free, (unsigned)internal_block,
-           (internal_free < 48 * 1024 || internal_block < 16 * 1024)
-               ? " — TOO LOW for the cloud link (needs 49152 free / 16384 block)"
-               : "",
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    if (too_low) {
+        printf("             TOO LOW for the cloud link (needs %u free / %u block)\n",
+               (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_FREE,
+               (unsigned)FOS_CLOUD_WS_MIN_INTERNAL_BLOCK);
+    }
+    printf("             malloc-able %u free (%u largest block); "
+           "stacks: render %u B, cloud %u B lowest-ever free\n",
+           (unsigned)fos_mem_internal_malloc_free(),
+           (unsigned)fos_mem_internal_malloc_largest(),
+           (unsigned)fos_client_task_stack_free(),
+           (unsigned)fos_cloud_task_stack_free());
     return 0;
 }
 
@@ -277,6 +289,11 @@ static int cmd_heapinfo(int argc, char **argv)
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
            (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    printf("--- internal as malloc() sees it (MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT)\n");
+    printf("free=%u largest=%u min_ever_free=%u\n",
+           (unsigned)fos_mem_internal_malloc_free(),
+           (unsigned)fos_mem_internal_malloc_largest(),
+           (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT));
     printf("--- psram (MALLOC_CAP_SPIRAM)\n");
     printf("total=%u free=%u largest=%u min_ever_free=%u\n",
            (unsigned)heap_caps_get_total_size(MALLOC_CAP_SPIRAM),

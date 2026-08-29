@@ -141,6 +141,13 @@ static fos_display_state_t s_display_state;
 static void load_display_state(void);
 
 uint32_t fos_client_render_count(void) { return s_render_count; }
+
+static TaskHandle_t s_client_task = NULL;
+
+size_t fos_client_task_stack_free(void)
+{
+    return s_client_task != NULL ? (size_t)uxTaskGetStackHighWaterMark(s_client_task) : 0;
+}
 int64_t fos_client_last_render_ms(void) { return s_last_render_ms; }
 bool fos_client_last_refresh_skipped(void) { return s_last_refresh_skipped; }
 
@@ -184,7 +191,7 @@ static const char *wake_cause_name(void)
 
 static void log_metrics_sample(void)
 {
-    char json[512];
+    char json[640];
     int battery_pct = -1, battery_mv = 0;
     if (fos_battery_present()) fos_battery_read(&battery_mv, &battery_pct);
     size_t used = (size_t)snprintf(
@@ -193,7 +200,9 @@ static void log_metrics_sample(void)
         "\"wakeCause\":\"%s\","
         "\"uptimeSeconds\":%lld,"
         "\"freeHeapKB\":%u,\"largestHeapBlockKB\":%u,"
+        "\"freeHeapMallocKB\":%u,\"largestHeapMallocBlockKB\":%u,"
         "\"freePsramKB\":%u,\"largestPsramBlockKB\":%u,"
+        "\"renderStackFreeBytes\":%u,\"cloudStackFreeBytes\":%u,"
         "\"wifiRssi\":%d,\"renders\":%lu,\"renderLastMs\":%lld,"
         "\"loadedScenes\":%d",
         wake_cause_name(),
@@ -203,8 +212,21 @@ static void log_metrics_sample(void)
          * block, so a frame with 50 KB free in 4 KB pieces still cannot open
          * the cloud link. This is the number that explains such a frame. */
         (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024),
+        /* The same two numbers as malloc() sees them — without the DMA
+         * reserve pool that the plain INTERNAL figures above include but a
+         * TLS dial cannot touch (fos_mem.h). A frame whose freeHeapKB looks
+         * healthy while this pair is near zero is one dial away from
+         * "connection reset by peer". */
+        (unsigned)(fos_mem_internal_malloc_free() / 1024),
+        (unsigned)(fos_mem_internal_malloc_largest() / 1024),
         (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
         (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
+        /* Stack high-water marks, in bytes. This sample runs on the client
+         * task itself, so NULL is the render task — the 40 KB
+         * CLIENT_TASK_STACK_BYTES that internal RAM pays for whether the
+         * renderer ever needed it or not. */
+        (unsigned)uxTaskGetStackHighWaterMark(NULL),
+        (unsigned)fos_cloud_task_stack_free(),
         fos_wifi_rssi(), (unsigned long)s_render_count, s_last_render_ms,
         fos_scenes_loaded());
     if (battery_pct >= 0 && used < sizeof(json) - 128) {
@@ -1544,7 +1566,7 @@ void fos_client_start(void)
      * the flash cache may be disabled; reserve it early, then resume after
      * HTTP/HTTPS have started. */
     BaseType_t created = xTaskCreate(client_task, "fos_client", CLIENT_TASK_STACK_BYTES,
-                                     NULL, 5, NULL);
+                                     NULL, 5, &s_client_task);
     if (created != pdPASS) {
         ESP_LOGE(TAG, "render task start failed: internal=%u psram=%u",
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),

@@ -581,10 +581,38 @@ Two allocation facts worth knowing before profiling anything here:
   above).
 
 The cloud link refuses to dial below 24K free internal with a 12K contiguous
-block (`FOS_CLOUD_WS_MIN_INTERNAL_*`, floors for starting a session — the
-mbedTLS side is in PSRAM) and says so in `status` and the logs, rather than
-failing inside esp-tls as a connection reset. `frontend/src/utils/frameMemory.ts`
-mirrors these numbers for the workspace banner; change both.
+block (`FOS_CLOUD_WS_MIN_INTERNAL_*` in `fos_cloud.h`, floors for starting a
+session — the mbedTLS side is in PSRAM) and says so in `status` and the logs,
+rather than failing inside esp-tls as a connection reset.
+`frontend/src/utils/frameMemory.ts` mirrors these numbers for the workspace
+banner; change both.
+
+**"Internal free" counts memory malloc() cannot use.** Every internal figure
+above — the floors, `freeHeapKB` in the metrics sample, `status` — is
+`heap_caps_get_free_size(MALLOC_CAP_INTERNAL)`, which sums every heap
+carrying the INTERNAL cap. That includes the
+`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL` pool (64 KB in sdkconfig.defaults):
+ESP-IDF carves it out at boot as a DMA|INTERNAL region *without*
+`MALLOC_CAP_DEFAULT` (`esp_psram_extram_reserve_dma_pool`), a last resort
+for DMA-capable allocations once the main heap is full. `malloc()`, lwIP's
+pbufs and the socket side of a TLS dial never see it, so the familiar number
+overstates what a dial can get by up to 64 KB. `fos_mem_internal_malloc_free()`
+/ `_largest()` (`fos_mem.h`) report the `INTERNAL | DEFAULT` subset; the
+metrics sample carries them as `freeHeapMallocKB` /
+`largestHeapMallocBlockKB` next to the old pair, `status` prints a
+"malloc-able" line, and `heapinfo` has a matching section. The sample also
+carries `renderStackFreeBytes` / `cloudStackFreeBytes` (FreeRTOS high-water
+marks) so the 40 KB render stack's real use is visible in the cloud logs.
+
+The floors were tuned on hardware against the inflated figure and still use
+it — an E1002 at "78 KB free" dials fine, so the honest number it needs is
+smaller than any floor written down so far. Once a few frames have reported
+both pairs, recalibrate the floors on the malloc-able figures and switch
+`ws_heap_ready()`, `https_heap_ready()`, `log_upload_heap_ready()` and the
+banner over together. Candidate levers if the honest headroom turns out
+thin: `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y` (Wi-Fi/lwIP dynamic buffers
+PSRAM-first, internal fallback), the reserve pool back to IDF's 32 KB
+default, and right-sizing task stacks from the high-water marks.
 
 ## Memory guardrails (M4)
 

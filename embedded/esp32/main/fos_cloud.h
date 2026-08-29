@@ -48,6 +48,15 @@ esp_err_t fos_cloud_start(void);
 
 #define FOS_CLOUD_TOKEN_LEN 256
 
+/* Internal-RAM floors for STARTING a management WebSocket session (the
+ * mbedTLS side lives in PSRAM; these pay for the client's task stack, lwIP's
+ * socket and pbufs). Measured against heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+ * i.e. INCLUDING the DMA reserve pool — see fos_mem.h. Shared with the
+ * console's `status` line and mirrored by frontend/src/utils/frameMemory.ts;
+ * change all three together. */
+#define FOS_CLOUD_WS_MIN_INTERNAL_FREE (24 * 1024)
+#define FOS_CLOUD_WS_MIN_INTERNAL_BLOCK (12 * 1024)
+
 fos_cloud_state_t fos_cloud_state(void);
 /* "none" | "pending" | "enrolled" | "error" */
 const char *fos_cloud_state_name(void);
@@ -57,6 +66,10 @@ const char *fos_cloud_last_error(void);
 const char *fos_cloud_frame_id(void);
 /* True while the management WebSocket is connected and past `ready`. */
 bool fos_cloud_ws_connected(void);
+/* Lowest-ever free bytes on the cloud task's own stack (FreeRTOS high-water
+ * mark), 0 before the task exists. Internal RAM pays for every task stack,
+ * so this is how oversized stacks get found without a debugger. */
+size_t fos_cloud_task_stack_free(void);
 /* Tell the provider the frame is about to deep sleep: it wakes (and redials)
  * in `wake_in_seconds`; `next_render_at` is the unix time of the next panel
  * refresh (0 = unknown, no synced clock); `wake_check` says this wake is
