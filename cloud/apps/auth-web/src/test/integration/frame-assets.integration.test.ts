@@ -269,6 +269,38 @@ describe("GET /api/frames/{id}/asset", () => {
     expect(await commandsOfType(frame.id, "asset_get")).toHaveLength(0);
   });
 
+  it("refreshes a stale copy behind the response only while the frame is connected", async () => {
+    const staleUpdatedAt = new Date(Date.now() - 60 * 60 * 1000);
+    for (const connected of [true, false]) {
+      const { frame } = await activeFrame("active", connected);
+      await storeFrameAssetFile(db, frame.id, {
+        content: Buffer.from("old-bytes"),
+        contentType: "image/jpeg",
+        path: "photos/old.jpg",
+        thumb: true,
+      });
+      await db
+        .update(frameAssetFiles)
+        .set({ updatedAt: staleUpdatedAt })
+        .where(eq(frameAssetFiles.frameId, frame.id));
+      const response = await getFrameAsset(
+        getRequest(`/api/frames/${frame.id}/asset?path=photos/old.jpg&thumb=1`),
+        assetsParams(frame.id),
+      );
+      // The stale bytes serve either way…
+      expect(response.status).toBe(200);
+      expect(Buffer.from(await response.arrayBuffer()).toString()).toBe(
+        "old-bytes",
+      );
+      // …but only a frame on the socket gets asked for fresh ones. A sleeping
+      // battery frame changes nothing on its card, and queueing toward it
+      // just parked one asset_get per thumbnail until the wake.
+      expect(await commandsOfType(frame.id, "asset_get")).toHaveLength(
+        connected ? 1 : 0,
+      );
+    }
+  });
+
   it("keeps thumb and original cache entries apart", async () => {
     const { frame } = await activeFrame();
     await storeFrameAssetFile(db, frame.id, {

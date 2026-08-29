@@ -130,7 +130,17 @@ function rawPublicKeyBase64() {
   return Buffer.from(spki.subarray(spki.length - 32)).toString("base64");
 }
 
-async function activeFrame(accountId: string) {
+// Connected by default: a snapshot fetch is only queued toward a device on
+// the socket, and most cases here are about that fetch. Tests for the
+// asleep/offline and ESP32 paths override.
+async function activeFrame(
+  accountId: string,
+  overrides: {
+    connected?: boolean;
+    hardware?: Record<string, unknown>;
+    nextWakeAt?: Date;
+  } = {},
+) {
   const [client] = await db
     .insert(linkedClients)
     .values({
@@ -145,13 +155,24 @@ async function activeFrame(accountId: string) {
     .insert(frames)
     .values({
       accountId,
+      connected: overrides.connected ?? true,
+      hardware: overrides.hardware ?? null,
       linkedClientId: client!.id,
       name: "Scene image frame",
+      nextWakeAt: overrides.nextWakeAt ?? null,
       publicKey: rawPublicKeyBase64(),
       status: "active",
     })
     .returning();
   return frame!;
+}
+
+async function queuedCommandTypes(frameId: string) {
+  const rows = await db
+    .select({ type: frameCommands.type })
+    .from(frameCommands)
+    .where(eq(frameCommands.frameId, frameId));
+  return rows.map((row) => row.type);
 }
 
 // The published zip carries the RUNTIME scene ids in scenes.json — the ids
@@ -577,9 +598,9 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
     });
   });
 
-  it("404s fast for an unmapped scene on a disconnected frame, still queueing the fetch", async () => {
+  it("404s fast for an unmapped scene on a disconnected frame, and queues nothing toward it", async () => {
     const accountId = await signIn();
-    const frame = await activeFrame(accountId);
+    const frame = await activeFrame(accountId, { connected: false });
 
     const started = Date.now();
     const response = await getSceneImage(
@@ -589,11 +610,100 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
     expect(response.status).toBe(404);
     // No long poll: the frame is not connected, so waiting cannot help.
     expect(Date.now() - started).toBeLessThan(5000);
-    const queued = await db
-      .select({ type: frameCommands.type })
-      .from(frameCommands)
-      .where(eq(frameCommands.frameId, frame.id));
-    expect(queued.map((row) => row.type)).toEqual(["asset_get"]);
+    // And no queued fetch: an offline frame renders nothing, so there is no
+    // snapshot to collect until it is back and a tile asks again.
+    expect(await queuedCommandTypes(frame.id)).toEqual([]);
+  });
+
+  it("serves a stale snapshot to a sleeping frame's tile without queueing a refresh", async () => {
+    // The E1004 case: a battery frame that sleeps 15 minutes between
+    // renders. Every tile poll during the sleep found the cached snapshot
+    // older than 5 minutes and parked an asset_get per scene in the queue,
+    // each stretched to the wake — nine "asset get" rows in the deploy
+    // drawer for a picture that could not have changed.
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId, {
+      connected: false,
+      nextWakeAt: new Date(Date.now() + 15 * 60 * 1000),
+    });
+    await db.insert(frameAssetFiles).values({
+      content: Buffer.from("device-render"),
+      contentType: "image/png",
+      frameId: frame.id,
+      path: sceneSnapshotAssetPath("runtime-asleep"),
+      sizeBytes: "device-render".length,
+      thumb: true,
+      updatedAt: new Date(Date.now() - 60 * 60 * 1000),
+    });
+
+    const response = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-asleep?thumb=1`),
+      routeParams(frame.id, "runtime-asleep"),
+    );
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer()).toString()).toBe(
+      "device-render",
+    );
+    expect(await queuedCommandTypes(frame.id)).toEqual([]);
+  });
+
+  it("refreshes a stale snapshot once the frame is back on the socket", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId, { connected: true });
+    await db.insert(frameAssetFiles).values({
+      content: Buffer.from("device-render"),
+      contentType: "image/png",
+      frameId: frame.id,
+      path: sceneSnapshotAssetPath("runtime-awake"),
+      sizeBytes: "device-render".length,
+      thumb: true,
+      updatedAt: new Date(Date.now() - 60 * 60 * 1000),
+    });
+
+    const response = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-awake?thumb=1`),
+      routeParams(frame.id, "runtime-awake"),
+    );
+    expect(response.status).toBe(200);
+    expect(await queuedCommandTypes(frame.id)).toEqual(["asset_get"]);
+  });
+
+  it("never asks ESP32 firmware for a per-scene snapshot: its image is its framebuffer", async () => {
+    const accountId = await signIn();
+    const frame = await activeFrame(accountId, {
+      connected: true,
+      hardware: { platform: "esp32-s3", device: "reterminal_e1004" },
+    });
+    const scene = await createStoreScene(accountId, {
+      name: "On a chip",
+      previewImage: Buffer.from("cover-bytes"),
+      previewImageType: "image/jpeg",
+      runtimeSceneIds: ["runtime-esp"],
+    });
+    await assignScene(frame.id, scene.id);
+
+    // Nothing cached: the store cover serves, and no doomed asset_get is
+    // queued (the device would only answer not_found).
+    const covered = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-esp?thumb=1`),
+      routeParams(frame.id, "runtime-esp"),
+    );
+    expect(covered.status).toBe(200);
+    expect(Buffer.from(await covered.arrayBuffer()).toString()).toBe(
+      "cover-bytes",
+    );
+    expect(await queuedCommandTypes(frame.id)).toEqual([]);
+
+    // Nothing to serve at all: a fast 404, not a long poll for a snapshot
+    // that will never arrive.
+    const started = Date.now();
+    const missing = await getSceneImage(
+      getRequest(`/api/frames/${frame.id}/scene_images/runtime-nowhere`),
+      routeParams(frame.id, "runtime-nowhere"),
+    );
+    expect(missing.status).toBe(404);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(await queuedCommandTypes(frame.id)).toEqual([]);
   });
 });
 

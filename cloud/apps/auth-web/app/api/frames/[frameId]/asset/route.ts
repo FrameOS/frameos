@@ -134,8 +134,17 @@ export async function GET(
 
   const cached = await cachedAssetFile(db, frame.id, path, thumb);
   const now = Date.now();
+  // A stale copy is only refreshed behind the response while the frame is
+  // on the socket: a sleeping or offline frame changes nothing on its card,
+  // so the cached bytes are still exactly what is there, and queueing a
+  // fetch per thumbnail toward it only fills the command queue until it
+  // wakes. A cache miss still queues regardless — the person asked for
+  // this file, and the sleep-aware TTL lets the device answer on its next
+  // wake.
   const needsFetch =
-    !cached || now - cached.updatedAt.getTime() > cacheStaleAfterMs;
+    !cached ||
+    (frame.connected &&
+      now - cached.updatedAt.getTime() > cacheStaleAfterMs);
   if (needsFetch && frame.status === "active") {
     await queueAssetGetIfIdle(
       db,

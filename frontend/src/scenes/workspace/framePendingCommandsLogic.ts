@@ -46,7 +46,11 @@ export interface FramePendingCommandsLogicProps {
 const POLL_INTERVAL_MS = 15 * 1000
 
 const commandLabels: Record<string, string> = {
+  // The cloud's own background fetches (a preview tile, an asset thumbnail)
+  // ride the same queue; named so they do not read as something the owner did.
+  asset_get: 'Fetch a file for a preview',
   get_metrics: 'Collect metrics',
+  image_get: 'Fetch the current image',
   notify_update_available: 'Check for a firmware update',
   reboot: 'Reboot',
   refresh_service_settings: 'Re-read service API keys',

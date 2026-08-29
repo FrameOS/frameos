@@ -486,7 +486,13 @@ Two things make this work for a frame that deep sleeps between renders. A
 fetch queued while the frame is asleep must outlive the sleep: the reference
 provider stretches the `image_get` / `asset_get` TTL past the frame's
 announced `next_wake_at` (a two-minute TTL on a fifteen-minute sleeper
-expired every time). And "someone is looking" has to span one sleep: the
+expired every time). The converse also holds: a sleeping or offline frame
+renders nothing, so a snapshot the provider already holds is not stale while
+it sleeps. The reference provider re-fetches a cached snapshot only toward a
+connected device, and never queues per-scene snapshot fetches toward ESP32
+firmware at all (it has no snapshot files; every one came back `not_found`),
+so a tile poll during a sleep no longer parks one command per scene in the
+queue. And "someone is looking" has to span one sleep: the
 frame renders exactly once per wake, so the reference hub adds the frame's
 last announced `wake_in_seconds` to its three-minute watch window when that
 frame's `render` arrives. On the device side, an `image_get` that lands at

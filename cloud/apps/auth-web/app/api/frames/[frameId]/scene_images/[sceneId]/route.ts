@@ -12,6 +12,7 @@ import {
 import { commandTtlForFrame } from "../../../../../../src/lib/frame-sleep";
 import {
   frameForAccount,
+  frameHardwareIsEsp32,
   markFramePreviewWatched,
   maxAssetFileBytes,
   storeFrameAssetFile,
@@ -117,23 +118,44 @@ export async function GET(
   const now = Date.now();
   const needsFetch =
     !cached || now - cached.updatedAt.getTime() > snapshotStaleAfterMs;
-  let refused = needsFetch
-    ? await recentFailedAssetGet(
-        db,
-        frame.id,
-        snapshotPath,
-        thumb,
-        refusalMemoryMs,
-      )
-    : undefined;
-  if (needsFetch && !refused && frame.status === "active") {
+  // A snapshot fetch is only worth queueing toward a device that has
+  // snapshot files AND is on the socket right now:
+  //
+  //   - ESP32 firmware keeps none — its image is its framebuffer, fetched
+  //     with image_get by the hub's `render` handler — so every per-scene
+  //     asset_get it is sent comes back not_found. Tiles poll, and on a
+  //     battery frame that meant one doomed command per scene per wake.
+  //   - A frame that is asleep or offline renders nothing: whatever the cache
+  //     holds is exactly what is on the card, so a "stale" copy is not stale.
+  //     Queueing anyway just parks a fetch per scene in the command queue
+  //     until the wake (the deploy drawer lists every one of them), and the
+  //     wake that renders re-fetches the active scene through `render`.
+  //
+  // The install-time cover copy and the store cover keep the tile filled
+  // meanwhile; the device's own snapshot replaces them the next time a tile
+  // asks while the frame is connected.
+  const canFetchSnapshot =
+    frame.status === "active" &&
+    frame.connected &&
+    !frameHardwareIsEsp32(frame);
+  let refused =
+    needsFetch && canFetchSnapshot
+      ? await recentFailedAssetGet(
+          db,
+          frame.id,
+          snapshotPath,
+          thumb,
+          refusalMemoryMs,
+        )
+      : undefined;
+  if (needsFetch && canFetchSnapshot && !refused) {
     await queueAssetGetIfIdle(
       db,
       session.accountId,
       frame.id,
       snapshotPath,
       thumb,
-      commandTtlForFrame(frame, assetFetchCommandTtlMs),
+      commandTtlForFrame(frame, assetFetchCommandTtlMs, now),
     );
   }
   const cachedContent = await readBlob(cached);
@@ -147,10 +169,10 @@ export async function GET(
     return imageResponse(cover.content, cover.contentType, coverBrowserMaxAge);
   }
 
-  // Long-polling only makes sense for a frame that is on the socket right
-  // now; a sleeping frame still gets the queued fetch on its next sync, and
-  // the tile heals on a later request.
-  if (refused || frame.status !== "active" || !frame.connected) {
+  // Long-polling only makes sense when a fetch was actually queued toward a
+  // device that can answer it now; otherwise the tile heals on a later
+  // request.
+  if (refused || !canFetchSnapshot) {
     return jsonError("no_image", 404);
   }
   const deadline = now + longPollTotalMs;
