@@ -329,6 +329,9 @@ proc runPrivilegedWorker*(lingerMs = DefaultLingerMs): int =
     return 0
   if fileExists("/srv/frameos/current/frame.json") and getCurrentDir() != "/srv/frameos/current":
     setCurrentDir("/srv/frameos/current")
+  let pruned = prunePrivilegedResults(resultsDir)
+  if pruned > 0:
+    workerLog("pruned " & $pruned & " stale result(s)")
   var idleSince = epochTime()
   var handled = 0
   while true:

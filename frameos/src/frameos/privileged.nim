@@ -416,6 +416,24 @@ proc writePrivilegedResult*(resultsDir: string, id: string, res: PrivilegedResul
   createDir(resultsDir)
   writeAtomically(resultsDir / (id & ".json"), $res.toJson() & "\n")
 
+proc prunePrivilegedResults*(resultsDir: string, maxAgeSeconds = 3600.0): int =
+  ## Drops results nobody came back for. A successful `install-release`
+  ## restarts frameos.service, which kills the cgroup the waiting `frameos
+  ## upgrade` child lives in — so exactly the results that matter most are
+  ## the ones left behind. Returns how many were removed.
+  if not dirExists(resultsDir):
+    return
+  let now = epochTime()
+  for kind, path in walkDir(resultsDir):
+    if kind != pcFile or not path.endsWith(".json"):
+      continue
+    try:
+      if now - getLastModificationTime(path).toUnixFloat() > maxAgeSeconds:
+        removeFile(path)
+        inc result
+    except CatchableError:
+      discard
+
 proc pendingPrivilegedRequestFiles*(queueDir: string): seq[string] =
   ## Regular request files in the queue, oldest first. Temp files (leading
   ## dot) and anything that is not a regular file are skipped, not deleted:

@@ -137,6 +137,26 @@ block test_request_hook_replaces_transport:
   finally:
     resetPrivilegedRequestHookForTest()
 
+block test_stale_results_are_pruned:
+  # A successful install-release restarts frameos.service, killing the
+  # cgroup the waiting `frameos upgrade` child lives in — so its result is
+  # never collected. The worker prunes those on its next run.
+  let root = tempRoot("prune")
+  let resultsDir = root / PrivilegedResultsDirName
+  createDir(resultsDir)
+  try:
+    writePrivilegedResult(resultsDir, "fresh", privilegedOk("recent"))
+    writePrivilegedResult(resultsDir, "stale", privilegedOk("orphaned"))
+    let stalePath = resultsDir / "stale.json"
+    let old = getTime() - initDuration(hours = 3)
+    setLastModificationTime(stalePath, old)
+    doAssert prunePrivilegedResults(resultsDir) == 1
+    doAssert not fileExists(stalePath)
+    doAssert fileExists(resultsDir / "fresh.json"), "a result someone may still be waiting for stays"
+    doAssert prunePrivilegedResults(resultsDir) == 0
+  finally:
+    removeDir(root)
+
 block test_worker_drains_queue_and_refuses_junk:
   let root = tempRoot("worker")
   let queueDir = root / PrivilegedQueueDirName

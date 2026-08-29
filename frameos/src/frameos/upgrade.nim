@@ -929,7 +929,7 @@ proc installStagedReleaseArchive*(archivePath, minisig, version: string): JsonNo
     writeUpgradeStatus(result)
     setupLog("FrameOS upgrade failed: " & error.msg)
 
-proc performFrameOSUpgradeThroughDoor(release: FrameOSReleaseInfo, currentVersion: string): JsonNode =
+proc performFrameOSUpgradeThroughDoor(release: FrameOSReleaseInfo): JsonNode =
   ## The unprivileged half: fetch and verify as the runtime user, then ask
   ## root to install. The worker owns upgrade-status.json from the moment it
   ## accepts the request; this side only records the outcome if it is still
@@ -1002,7 +1002,7 @@ proc performFrameOSUpgrade*(options: FrameOSUpgradeOptions): JsonNode =
     writeUpgradeStatus(result)
 
     if privilegedDoorAvailable():
-      return performFrameOSUpgradeThroughDoor(release, currentVersion)
+      return performFrameOSUpgradeThroughDoor(release)
 
     var staged = stageFrameOSRelease(release)
     activateStagedRelease(staged)
