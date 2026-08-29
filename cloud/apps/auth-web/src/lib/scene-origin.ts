@@ -106,7 +106,8 @@ export function rebuildZipWithSceneOrigins(
       manifestPath.length - "template.json".length,
     );
     const scenesBytes = files[`${folder}scenes.json`];
-    if (!scenesBytes) {
+    const manifestBytes = files[manifestPath];
+    if (!scenesBytes || !manifestBytes) {
       return undefined;
     }
     const scenes: unknown = JSON.parse(Buffer.from(scenesBytes).toString("utf8"));
@@ -114,7 +115,7 @@ export function rebuildZipWithSceneOrigins(
       return undefined;
     }
     const next: Record<string, Uint8Array> = {
-      [manifestPath]: files[manifestPath],
+      [manifestPath]: manifestBytes,
       [`${folder}scenes.json`]: strToU8(
         JSON.stringify(withStoreSceneOrigin(scenes, source), null, 2),
       ),

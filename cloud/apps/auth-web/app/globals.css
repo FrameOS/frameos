@@ -3891,3 +3891,18 @@ html.theme-dark .action-card__ghost {
   font-weight: 650;
   box-shadow: inset 0 0 0 1px var(--primary);
 }
+
+/* Setup snippets on /account/developer: a scrolling, copyable block that
+   keeps its line breaks and never widens the page. */
+.code-block {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+}

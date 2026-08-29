@@ -39,6 +39,38 @@ describe("csrfResponse", () => {
     }
   });
 
+  it("exempts requests that carry a personal API token", () => {
+    process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
+    // No Origin at all — a script, not a browser tab.
+    const request = new NextRequest("https://cloud.frameos.net/api/frames/x", {
+      headers: { authorization: "Bearer fc_api_abcdef" },
+      method: "POST",
+    });
+    expect(csrfResponse(request)).toBeUndefined();
+  });
+
+  it("stops read-only tokens before the route does any work", async () => {
+    process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
+    const request = new NextRequest("https://cloud.frameos.net/api/frames/x", {
+      headers: { authorization: "Bearer fc_apiro_abcdef" },
+      method: "POST",
+    });
+    const response = csrfResponse(request);
+    expect(response?.status).toBe(403);
+    expect(await response?.json()).toEqual({ error: "read_only_token" });
+  });
+
+  it("still demands an origin for other bearer kinds", async () => {
+    process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
+    const request = new NextRequest("https://cloud.frameos.net/api/frames/x", {
+      headers: { authorization: "Bearer fc_link_abcdef" },
+      method: "POST",
+    });
+    const response = csrfResponse(request);
+    expect(response?.status).toBe(403);
+    expect(await response?.json()).toEqual({ error: "missing_origin" });
+  });
+
   it("rejects other origins", async () => {
     process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
     process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";

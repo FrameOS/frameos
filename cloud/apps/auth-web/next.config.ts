@@ -213,7 +213,11 @@ function createNextConfig(phase: string): NextConfig {
         },
       ];
     },
-    transpilePackages: ["@frameos-cloud/auth-client", "@frameos-cloud/db"],
+    transpilePackages: [
+      "@frameos-cloud/auth-client",
+      "@frameos-cloud/db",
+      "@frameos-cloud/mcp",
+    ],
   };
 }
 

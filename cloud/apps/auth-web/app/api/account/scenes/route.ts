@@ -1,8 +1,12 @@
-import { NextRequest } from "next/server";
+import { and, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { storeScenes } from "@frameos-cloud/db";
+import { NextRequest, NextResponse } from "next/server";
 import {
   createAccountScene,
   maxSceneNameChars,
 } from "../../../../src/lib/account-scene-create";
+import { sceneSummary } from "../../../../src/lib/store";
+import { sceneHasAnyImageSql } from "../../../../src/lib/store-preview";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import {
   jsonError,
@@ -18,6 +22,85 @@ import { maxPublishesPerHour } from "../../../../src/lib/store";
 import { framePreviewForNewScene } from "../../../../src/lib/scene-images";
 
 export const runtime = "nodejs";
+
+// The account's own scenes, the same rows /my-scenes renders, as JSON —
+// for scripts and the MCP server, which have no server-rendered page to
+// read. `?q=` matches name, slug and tags; `?visibility=private|public`
+// and `?status=active|pulled|featured` narrow it the way the page's
+// filters do. Newest change first, capped at 500 like the drive index.
+export async function GET(request: NextRequest) {
+  const limited = await rateLimitResponse(request, "account:scenes-list", {
+    limit: 240,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (limited) {
+    return limited;
+  }
+  const session = await readSession();
+  if (!session?.accountId) {
+    return jsonError("login_required", 401);
+  }
+  const { db, response } = requireDatabase();
+  if (!db) {
+    return response;
+  }
+  const params = request.nextUrl.searchParams;
+  const query = params.get("q")?.trim().slice(0, 100) ?? "";
+  const visibility = params.get("visibility") ?? "";
+  const status = params.get("status") ?? "";
+  const conditions: SQL[] = [eq(storeScenes.accountId, session.accountId)];
+  if (query) {
+    const pattern = `%${query.replace(/[%_\\]/g, "\\$&")}%`;
+    const match = or(
+      ilike(storeScenes.name, pattern),
+      ilike(storeScenes.slug, pattern),
+      sql`array_to_string(${storeScenes.tags}, ' ') ilike ${pattern}`,
+    );
+    if (match) {
+      conditions.push(match);
+    }
+  }
+  if (visibility === "private" || visibility === "public") {
+    conditions.push(eq(storeScenes.visibility, visibility));
+  }
+  if (status === "pulled" || status === "active") {
+    conditions.push(eq(storeScenes.status, status));
+  } else if (status === "featured") {
+    conditions.push(sql`${storeScenes.featuredAt} is not null`);
+  }
+  const rows = await db
+    .select({
+      category: storeScenes.category,
+      createdAt: storeScenes.createdAt,
+      description: storeScenes.description,
+      downloadCount: storeScenes.downloadCount,
+      featuredAt: storeScenes.featuredAt,
+      frameosVersion: storeScenes.frameosVersion,
+      hasPreview: sceneHasAnyImageSql,
+      id: storeScenes.id,
+      latestVersion: storeScenes.latestVersion,
+      name: storeScenes.name,
+      riskFlags: storeScenes.riskFlags,
+      slug: storeScenes.slug,
+      status: storeScenes.status,
+      tags: storeScenes.tags,
+      updatedAt: storeScenes.updatedAt,
+      visibility: storeScenes.visibility,
+    })
+    .from(storeScenes)
+    .where(and(...conditions))
+    .orderBy(desc(storeScenes.updatedAt))
+    .limit(500);
+  return NextResponse.json(
+    {
+      scenes: rows.map((row) => ({
+        ...sceneSummary(row),
+        has_preview: Boolean(row.hasPreview),
+      })),
+    },
+    { headers: { "cache-control": "no-store" } },
+  );
+}
 
 // Create a NEW private cloud scene from raw scenes JSON — the workspace's
 // "save this frame's edited scenes to my account" path, which has no ZIP to

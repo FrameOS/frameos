@@ -10,6 +10,7 @@ const sections = [
   { href: "/account/backups", key: "backups", label: "Backups" },
   { href: "/account/activity", key: "activity", label: "Activity" },
   { href: "/account/security", key: "security", label: "Security" },
+  { href: "/account/developer", key: "developer", label: "Developer" },
 ] as const;
 
 export function AccountNav({

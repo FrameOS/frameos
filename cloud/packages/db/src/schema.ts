@@ -301,6 +301,35 @@ export const sessions = pgTable(
   }),
 );
 
+// Personal API tokens (migration 0040): a bearer credential for the JSON API
+// and the MCP server that stands in for the account. Hash-at-rest like a
+// session; `access` is "full" or "read_only" and is mirrored by the token's
+// prefix (fc_api_ / fc_apiro_) so a mutation can be refused before any lookup.
+export const accountApiTokens = pgTable(
+  "account_api_tokens",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    access: text("access").default("full").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    // Leading characters of the token, for telling tokens apart in a list.
+    tokenHint: text("token_hint").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => ({
+    accountIdx: index("account_api_tokens_account_idx").on(table.accountId),
+    tokenHashUnique: uniqueIndex("account_api_tokens_token_hash_unique").on(
+      table.tokenHash,
+    ),
+  }),
+);
+
 // Optional second factors (migration 0034). Two-factor is ON for an account
 // exactly when it has a confirmed TOTP secret or at least one passkey — the
 // credentials are the flag, so nothing can drift out of sync with them.

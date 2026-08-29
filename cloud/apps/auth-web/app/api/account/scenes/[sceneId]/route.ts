@@ -1,7 +1,14 @@
-import { and, eq } from "drizzle-orm";
-import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
+import { and, desc, eq } from "drizzle-orm";
+import {
+  storeSceneImages,
+  storeScenes,
+  storeSceneVersions,
+} from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
+import { getScenesBaseUrl } from "../../../../../src/lib/env";
+import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import { readSession } from "../../../../../src/lib/session";
 import {
   blobNamespaces,
   readBlob,
@@ -11,6 +18,7 @@ import {
   jsonError,
   parseOptionalString,
   readJsonObject,
+  requireDatabase,
 } from "../../../../../src/lib/device-flow";
 import { normalizeCategory } from "../../../../../src/lib/categories";
 import { moderateStoreContent } from "../../../../../src/lib/moderation";
@@ -33,6 +41,109 @@ import {
 export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ sceneId: string }> };
+
+// One owned scene with what the /s/[slug] page shows its owner: the
+// summary, every version (yanked ones included — yank hides from "latest",
+// it does not delete) and the gallery image ids. The content itself stays
+// at GET /api/store/scenes/{id}/scenes.json?version=N.
+export async function GET(request: NextRequest, context: RouteContext) {
+  const limited = await rateLimitResponse(request, "account:scene-detail", {
+    limit: 240,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (limited) {
+    return limited;
+  }
+  const session = await readSession();
+  if (!session?.accountId) {
+    return jsonError("login_required", 401);
+  }
+  const { db, response } = requireDatabase();
+  if (!db) {
+    return response;
+  }
+  const { sceneId } = await context.params;
+  if (!/^[0-9a-f-]{36}$/i.test(sceneId)) {
+    return jsonError("scene_not_found", 404);
+  }
+  const [scene] = await db
+    .select()
+    .from(storeScenes)
+    .where(
+      and(
+        eq(storeScenes.id, sceneId),
+        eq(storeScenes.accountId, session.accountId),
+      ),
+    )
+    .limit(1);
+  if (!scene) {
+    return jsonError("scene_not_found", 404);
+  }
+  const [versions, images] = await Promise.all([
+    db
+      .select({
+        createdAt: storeSceneVersions.createdAt,
+        frameosVersion: storeSceneVersions.frameosVersion,
+        message: storeSceneVersions.message,
+        riskFlags: storeSceneVersions.riskFlags,
+        sha256: storeSceneVersions.sha256,
+        sizeBytes: storeSceneVersions.sizeBytes,
+        version: storeSceneVersions.version,
+        yankedAt: storeSceneVersions.yankedAt,
+      })
+      .from(storeSceneVersions)
+      .where(eq(storeSceneVersions.sceneId, scene.id))
+      .orderBy(desc(storeSceneVersions.version)),
+    db
+      .select({
+        contentType: storeSceneImages.contentType,
+        createdAt: storeSceneImages.createdAt,
+        id: storeSceneImages.id,
+        position: storeSceneImages.position,
+        sizeBytes: storeSceneImages.sizeBytes,
+      })
+      .from(storeSceneImages)
+      .where(eq(storeSceneImages.sceneId, scene.id))
+      .orderBy(storeSceneImages.position, storeSceneImages.createdAt),
+  ]);
+  const hasPrimaryPreview =
+    scene.previewImage !== null || scene.previewObjectKey !== null;
+  return NextResponse.json(
+    {
+      images: images.map((image) => ({
+        content_type: image.contentType,
+        created_at: image.createdAt.toISOString(),
+        id: image.id,
+        position: image.position,
+        size_bytes: image.sizeBytes,
+        url: `/api/store/scenes/${scene.id}/images/${image.id}`,
+      })),
+      scene: {
+        ...sceneSummary(scene),
+        has_preview: hasPrimaryPreview || images.length > 0,
+        preview_url: hasPrimaryPreview
+          ? `/api/store/scenes/${scene.id}/image?v=${scene.latestVersion}`
+          : (images[0] && `/api/store/scenes/${scene.id}/images/${images[0].id}`) ?? null,
+        pulled_reason: scene.pulledReason,
+        share_url: scene.shareToken
+          ? `${getScenesBaseUrl()}/s/${scene.slug}?share=${scene.shareToken}`
+          : null,
+        url: `${getScenesBaseUrl()}/s/${scene.slug}`,
+      },
+      versions: versions.map((version) => ({
+        created_at: version.createdAt.toISOString(),
+        frameos_version: version.frameosVersion,
+        message: version.message,
+        risk_flags: version.riskFlags,
+        sha256: version.sha256,
+        size_bytes: version.sizeBytes,
+        version: version.version,
+        yanked: version.yankedAt !== null,
+      })),
+    },
+    { headers: { "cache-control": "no-store" } },
+  );
+}
 
 // Owner management of a published scene from the web: visibility toggle,
 // description/tags/minimum FrameOS version edit, delete. Moderation state
