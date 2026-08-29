@@ -14,8 +14,9 @@ import { Tooltip } from './Tooltip'
  *
  *  - CLOUD: pushed live over `set_settings` (deep_sleep, deep_sleep_on_battery,
  *    wake_check_seconds, battery_pin, battery_divider, battery_enable_pin —
- *    the esp32 subset of allowedFrameSettings), applied by
- *    ws_handle_set_settings.
+ *    the esp32 subset of allowedFrameSettings), validated by the shared
+ *    verb layer (frameos/cloud/verbs.nim CLOUD_SETTINGS_ALLOWLIST_ESP32) and
+ *    applied by fos_settings_apply_cloud_json.
  *  - BACKEND: stored in the frame's `device_config` and handed to the device
  *    by its settings poll (embedded_frame_settings in
  *    backend/app/api/embedded_device.py sends deepSleepOnBattery /

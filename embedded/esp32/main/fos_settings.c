@@ -502,6 +502,281 @@ static bool apply_frame_settings(const cJSON *frame)
     return changed;
 }
 
+/* A refused cloud settings push must leave the config exactly as it was:
+ * the keys applied before the bad one are still in RAM (never saved). */
+static esp_err_t refuse(const fos_config_t *before, fos_config_t *config, const char **err)
+{
+    if (before) memcpy(config, before, sizeof(*config));
+    *err = "invalid_settings";
+    return ESP_ERR_INVALID_ARG;
+}
+
+/* Cloud `set_settings` (docs/cloud-frames.md), the device side. The ESP32
+ * profile persists the subset that maps onto fos_config: `interval`
+ * (interval_sec, picked up by the render loop's next pass, no reboot),
+ * `name` (the DHCP hostname — the provider-side display name stays
+ * authoritative on the provider), `rotate` (the renderer sizes its canvas
+ * once at init, so this one costs a reboot) and `scaling_mode` (a per-decode
+ * fallback fit, applied live on the next render pass). The power keys —
+ * `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up
+ * by the render loop's next pass) and `battery_pin` / `battery_divider` /
+ * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
+ * round out the profile, with `debug`, `max_http_response_bytes`,
+ * `gpio_buttons` and `timezone` (+ `timezone_data`). Same keys, same
+ * spellings as the wire: the verb layer hands the object through as is. */
+esp_err_t fos_settings_apply_cloud_json(const cJSON *settings, const char **err,
+                                        bool *reboot)
+{
+    *err = NULL;
+    *reboot = false;
+    if (!cJSON_IsObject(settings)) {
+        *err = "invalid_settings";
+        return ESP_ERR_INVALID_ARG;
+    }
+    /* The allowlist and every value's shape were checked by the shared verb
+     * layer (frameos/cloud/verbs.nim, CLOUD_SETTINGS_ALLOWLIST_ESP32); the
+     * range checks below are the device's own last word. Every refusal
+     * returns before fos_config_save(), so a refused push leaves NVS as it
+     * was — the in-RAM writes above the refusal are reverted from `before`. */
+    fos_config_t *config = fos_config();
+    /* Snapshot to diff against once persisted: the `settings:cloud` line
+     * below is the device-side confirmation of what the push changed. One
+     * lazily allocated copy, reused (this runs on the cloud task only):
+     * not the stack — the config carries token buffers — and not a per-call
+     * malloc that every validation `return` above would have to free. NULL
+     * just loses the detail. */
+    static fos_config_t *before = NULL;
+    if (!before) before = fos_big_malloc(sizeof(*before));
+    if (before) memcpy(before, config, sizeof(*before));
+    const cJSON *interval = cJSON_GetObjectItem(settings, "interval");
+    if (interval != NULL) {
+        if (!cJSON_IsNumber(interval) || interval->valuedouble < 1 ||
+            interval->valuedouble > 86400) {
+            return refuse(before, config, err);
+        }
+        uint32_t seconds = (uint32_t)interval->valuedouble;
+        /* Same floor the local admin API applies (fos_http.c). */
+        if (seconds < 5) seconds = 5;
+        config->interval_sec = seconds;
+    }
+    const cJSON *name = cJSON_GetObjectItem(settings, "name");
+    if (name != NULL) {
+        if (!cJSON_IsString(name) || !name->valuestring[0]) {
+            return refuse(before, config, err);
+        }
+        strlcpy(config->hostname, name->valuestring, sizeof(config->hostname));
+    }
+    /* Validate rotate before touching config, so an invalid one leaves the
+     * whole verb unapplied (the interval/name writes above are still in RAM
+     * — nothing is persisted until fos_config_save() below). */
+    bool rotate_changed = false;
+    const cJSON *rotate = cJSON_GetObjectItem(settings, "rotate");
+    if (rotate != NULL) {
+        uint16_t normalized = 0;
+        if (!cJSON_IsNumber(rotate) ||
+            !fos_config_normalize_rotate(rotate->valuedouble, &normalized)) {
+            return refuse(before, config, err);
+        }
+        rotate_changed = config->rotate != normalized;
+        config->rotate = normalized;
+    }
+    const cJSON *scaling = cJSON_GetObjectItem(settings, "scaling_mode");
+    if (scaling != NULL) {
+        char normalized[16];
+        if (!cJSON_IsString(scaling) ||
+            !fos_config_normalize_scaling_mode(scaling->valuestring, normalized,
+                                               sizeof(normalized))) {
+            return refuse(before, config, err);
+        }
+        /* No reboot: a per-decode fallback, pushed into the Nim runtime by
+         * fos_client on the next pass. */
+        strlcpy(config->scaling_mode, normalized, sizeof(config->scaling_mode));
+    }
+    const cJSON *timezone = cJSON_GetObjectItem(settings, "timezone");
+    const cJSON *timezone_data = cJSON_GetObjectItem(settings, "timezone_data");
+    if (timezone != NULL) {
+        if (!cJSON_IsString(timezone) || strlen(timezone->valuestring) >= sizeof(config->time_zone)) {
+            return refuse(before, config, err);
+        }
+        if (timezone_data != NULL && !cJSON_IsNull(timezone_data) && !cJSON_IsObject(timezone_data)) {
+            return refuse(before, config, err);
+        }
+        /* No reboot: TZ is read on every localtime() call. The provider
+         * sends the zone's tzdata slice with the name; a name alone is
+         * resolved from tz.frameos.net by fos_tz_resolve_pending. */
+        if (strcmp(config->time_zone, timezone->valuestring) != 0) {
+            strlcpy(config->time_zone, timezone->valuestring, sizeof(config->time_zone));
+            fos_tz_clear();
+        }
+        char *slice = cJSON_IsObject(timezone_data) ? cJSON_PrintUnformatted(timezone_data) : NULL;
+        fos_tz_install(slice);
+        free(slice);
+    } else if (timezone_data != NULL) {
+        return refuse(before, config, err);
+    }
+    const cJSON *deep_sleep = cJSON_GetObjectItem(settings, "deep_sleep");
+    if (deep_sleep != NULL) {
+        if (!cJSON_IsBool(deep_sleep)) {
+            return refuse(before, config, err);
+        }
+        config->deep_sleep = cJSON_IsTrue(deep_sleep);
+    }
+    const cJSON *sleep_on_battery = cJSON_GetObjectItem(settings, "deep_sleep_on_battery");
+    if (sleep_on_battery != NULL) {
+        if (!cJSON_IsBool(sleep_on_battery)) {
+            return refuse(before, config, err);
+        }
+        config->deep_sleep_on_battery = cJSON_IsTrue(sleep_on_battery);
+    }
+    const cJSON *wake_check = cJSON_GetObjectItem(settings, "wake_check_seconds");
+    if (wake_check != NULL) {
+        if (!cJSON_IsNumber(wake_check) || wake_check->valuedouble < 0 ||
+            wake_check->valuedouble > 86400) {
+            return refuse(before, config, err);
+        }
+        uint32_t seconds = (uint32_t)wake_check->valuedouble;
+        /* Sub-minute check-ins would drain a battery for nothing; 0 stays 0
+         * (only wake to render). Same floor as the backend settings poll. */
+        if (seconds > 0 && seconds < 60) seconds = 60;
+        config->wake_check_sec = seconds;
+    }
+    /* Battery sensing: the ADC is set up once at boot (main.c), so a changed
+     * pin or divider takes a deferred reboot, exactly like rotate. */
+    bool battery_changed = false;
+    const cJSON *battery_pin = cJSON_GetObjectItem(settings, "battery_pin");
+    if (battery_pin != NULL) {
+        if (!cJSON_IsNumber(battery_pin) || battery_pin->valuedouble < -1 ||
+            battery_pin->valuedouble > 48) {
+            return refuse(before, config, err);
+        }
+        int8_t pin = (int8_t)battery_pin->valuedouble;
+        battery_changed = battery_changed || config->battery_pin != pin;
+        config->battery_pin = pin;
+    }
+    const cJSON *battery_divider = cJSON_GetObjectItem(settings, "battery_divider");
+    if (battery_divider != NULL) {
+        if (!cJSON_IsNumber(battery_divider) || battery_divider->valuedouble < 0.5 ||
+            battery_divider->valuedouble > 20.0) {
+            return refuse(before, config, err);
+        }
+        float divider = (float)battery_divider->valuedouble;
+        battery_changed = battery_changed || config->battery_divider != divider;
+        config->battery_divider = divider;
+    }
+    /* The GPIO that switches the divider on around each read (Seeed
+     * reTerminal E10xx: 21); -1 = always-on divider. Same NVS key the
+     * console's `set battery_enable_pin` and the backend settings poll's
+     * batteryEnablePin write. */
+    const cJSON *battery_enable_pin = cJSON_GetObjectItem(settings, "battery_enable_pin");
+    if (battery_enable_pin != NULL) {
+        if (!cJSON_IsNumber(battery_enable_pin) || battery_enable_pin->valuedouble < -1 ||
+            battery_enable_pin->valuedouble > 48) {
+            return refuse(before, config, err);
+        }
+        int8_t pin = (int8_t)battery_enable_pin->valuedouble;
+        battery_changed = battery_changed || config->battery_enable_pin != pin;
+        config->battery_enable_pin = pin;
+    }
+    /* Debug logging: the render loop pushes config->debug_logging into the
+     * Nim runtime every pass (fos_client.c), so this applies live. */
+    const cJSON *debug = cJSON_GetObjectItem(settings, "debug");
+    if (debug != NULL) {
+        if (!cJSON_IsBool(debug)) {
+            return refuse(before, config, err);
+        }
+        config->debug_logging = cJSON_IsTrue(debug);
+    }
+    /* Per-request HTTP body ceiling: handed to frameos_nim_init once at boot
+     * (main.c), so a change takes the same deferred reboot as rotate. Same
+     * floor as the local admin API; the ceiling is the Pi runtime's default
+     * (a provider can lower a device's bound, never raise it past that). */
+    bool restart_for_init = false;
+    const cJSON *max_http = cJSON_GetObjectItem(settings, "max_http_response_bytes");
+    if (max_http != NULL) {
+        if (!cJSON_IsNumber(max_http) || max_http->valuedouble < 1024 ||
+            max_http->valuedouble > 64.0 * 1024 * 1024) {
+            return refuse(before, config, err);
+        }
+        uint32_t bytes = (uint32_t)max_http->valuedouble;
+        restart_for_init = restart_for_init || config->max_http_response_bytes != bytes;
+        config->max_http_response_bytes = bytes;
+    }
+    /* GPIO buttons: [{pin, label}], the whole list replaced — the same
+     * shape the Pi runtime takes, parsed through the console's spec parser
+     * so the limits (FOS_GPIO_BUTTONS_MAX, label length, pin range) live in
+     * one place. fos_buttons_init runs once at boot, hence the reboot. */
+    const cJSON *buttons = cJSON_GetObjectItem(settings, "gpio_buttons");
+    if (buttons != NULL) {
+        if (!cJSON_IsArray(buttons) || cJSON_GetArraySize(buttons) > FOS_GPIO_BUTTONS_MAX) {
+            return refuse(before, config, err);
+        }
+        char spec[FOS_GPIO_BUTTONS_SPEC_LEN] = "";
+        size_t used = 0;
+        const cJSON *button = NULL;
+        cJSON_ArrayForEach(button, buttons) {
+            const cJSON *pin = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "pin") : NULL;
+            const cJSON *label = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "label") : NULL;
+            if (!cJSON_IsNumber(pin) || pin->valuedouble < 0 || pin->valuedouble > 48 ||
+                pin->valuedouble != (double)(int)pin->valuedouble ||
+                !cJSON_IsString(label) || !label->valuestring[0] ||
+                strlen(label->valuestring) >= FOS_GPIO_BUTTON_LABEL_LEN ||
+                strchr(label->valuestring, '\n') != NULL || strchr(label->valuestring, ':') != NULL) {
+                return refuse(before, config, err);
+            }
+            int written = snprintf(spec + used, sizeof(spec) - used, "%s%d:%s",
+                                   used ? "\n" : "", (int)pin->valuedouble, label->valuestring);
+            if (written < 0 || (size_t)written >= sizeof(spec) - used) {
+                return refuse(before, config, err);
+            }
+            used += (size_t)written;
+        }
+        char buttons_before[FOS_GPIO_BUTTONS_SPEC_LEN];
+        fos_config_format_gpio_buttons(config, buttons_before, sizeof(buttons_before));
+        if (fos_config_parse_gpio_buttons(spec, config) != ESP_OK) {
+            return refuse(before, config, err);
+        }
+        char buttons_after[FOS_GPIO_BUTTONS_SPEC_LEN];
+        fos_config_format_gpio_buttons(config, buttons_after, sizeof(buttons_after));
+        restart_for_init = restart_for_init || strcmp(buttons_before, buttons_after) != 0;
+    }
+    if (fos_config_save() != ESP_OK) {
+        *err = "persist_failed";
+        return ESP_FAIL;
+    }
+    {
+        char changes[320] = "";
+        fos_settings_describe_changes(before, config, changes, sizeof(changes));
+        char line[400];
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"settings:cloud\",\"source\":\"esp32\","
+                 "\"status\":\"applied\",\"changed\":\"%s\"}",
+                 changes);
+        frameos_nim_log_hook(line);
+    }
+    /* Which boot-time setting changed decides the log line; any of them
+     * costs the deferred reboot the caller schedules after the ack. */
+    if (restart_for_init && !battery_changed && !rotate_changed) {
+        ESP_LOGW(TAG, "cloud: boot-time setting changed (http ceiling %lu, %u buttons); restarting",
+                 (unsigned long)config->max_http_response_bytes, (unsigned)config->gpio_button_count);
+    }
+    if (battery_changed && !rotate_changed) {
+        ESP_LOGW(TAG, "cloud: battery sensing changed (pin %d, divider %.2f, enable pin %d); "
+                 "restarting to re-init the ADC",
+                 (int)config->battery_pin, (double)config->battery_divider,
+                 (int)config->battery_enable_pin);
+    }
+    if (rotate_changed) {
+        /* The Nim runtime sizes the scene canvas at init (main.c passes
+         * config->rotate into frameos_nim_init), and the panel packers read
+         * the config directly — a restart is what makes a new rotation take
+         * effect, exactly as on the backend settings poll. */
+        ESP_LOGW(TAG, "cloud: rotation changed to %u; restarting to re-init the renderer",
+                 (unsigned)config->rotate);
+    }
+    *reboot = restart_for_init || battery_changed || rotate_changed;
+    return ESP_OK;
+}
+
 static void log_settings_exit(const char *why)
 {
     /* Once per boot per reason would be ideal; once per pass is acceptable

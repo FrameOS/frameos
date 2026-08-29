@@ -34,10 +34,7 @@
 #include "fos_config.h"
 #include "fos_mem.h"
 #include "fos_http.h"
-#include "fos_ota.h"
 #include "fos_scenes.h"
-#include "fos_schedule.h"
-#include "fos_tz.h"
 #include "fos_settings.h"
 #include "fos_wifi.h"
 #include "fos_netguard.h"
@@ -63,7 +60,12 @@ static const char *NVS_NS = "frameos";
 #define FOS_CLOUD_RESPONSE_MAX 2048
 #define FOS_CLOUD_BACKOFF_MIN_MS (10 * 1000)
 #define FOS_CLOUD_BACKOFF_MAX_MS (15 * 60 * 1000)
-#define FOS_CLOUD_TASK_STACK 8192
+/* The cloud task also runs the shared Nim verb layer (ws_process_verbs):
+ * parsing a set_scenes push, validating it and reprinting the scenes
+ * array all happen on this stack. 8 KB carried the telemetry polls; the
+ * verb path needs the headroom (measured high-water mark is reported by
+ * `status` — fos_cloud_task_stack_free). */
+#define FOS_CLOUD_TASK_STACK 16384
 /* Device cap on a single management WebSocket text frame. Deliberately well
  * under the provider-side limit: the reassembly buffer plus the cJSON tree of
  * a max-size set_scenes already crowd an ESP32, and /state itself only holds
@@ -109,16 +111,24 @@ static const char *NVS_NS = "frameos";
 #define FOS_CLOUD_WS_MIN_PSRAM_FREE (128 * 1024)
 /* How long scene_ack waits for the render task to hot-load a pushed payload. */
 #define FOS_CLOUD_SCENE_ACK_TIMEOUT_MS (120 * 1000)
-/* Asset verbs (docs/cloud-frames.md assets_list/asset_get). Files are read
- * off the SD card and streamed as base64 asset_chunk frames from the cloud
- * task — never from the WS event handler, which must stay responsive. The
- * caps match the reference provider: it refuses to cache anything bigger. */
-#define FOS_CLOUD_ASSET_MAX_FILE_BYTES (8u * 1024u * 1024u)
+/* asset_get / image_get (docs/cloud-frames.md). The verb layer validates the
+ * request (fos_cloud_verbs.c does the stat); the bytes are then read off the
+ * SD card — or packed from the last render — and streamed as base64
+ * asset_chunk frames from the cloud task, 24 KiB at a time, never held whole
+ * in memory and never sent from the WS event handler. */
 #define FOS_CLOUD_ASSET_CHUNK_BYTES (24u * 1024u)
-#define FOS_CLOUD_ASSET_LIST_MAX_ENTRIES 2000
-#define FOS_CLOUD_ASSET_LIST_MAX_DEPTH 8
 #define FOS_CLOUD_ASSET_PATH_MAX 256
 #define FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH 8
+/* Provider→frame verbs wait here, as raw bytes, for the cloud task to hand
+ * them to the Nim verb layer. Eight is more than the provider ever has in
+ * flight (it drains its durable queue in order); over that the verb is
+ * acked `busy` and redelivered. */
+#define FOS_CLOUD_VERB_QUEUE_DEPTH 8
+/* How long one tick waits for the runtime lock before leaving the verb in
+ * the queue. A render holds the lock for its whole duration (90 s+ on a
+ * 13.3" panel) and telemetry on this task must keep flowing meanwhile, so
+ * the wait is short and the verb simply gets the next tick. */
+#define FOS_CLOUD_VERB_LOCK_WAIT_MS 250
 /* Log forwarding: every structured log line (frameos_nim_log_hook) is teed
  * into a small queue while the WS session is live AND the provider granted
  * telemetry:logs, then the cloud task coalesces the queue into one
@@ -900,6 +910,51 @@ static esp_err_t enroll_once(bool *permanent)
     return ESP_FAIL;
 }
 
+cJSON *fos_cloud_log_line_entry(const char *line, double timestamp)
+{
+    cJSON *payload = cJSON_Parse(line);
+    if (payload != NULL && !cJSON_IsObject(payload)) {
+        cJSON_Delete(payload);
+        payload = NULL;
+    }
+    if (payload == NULL) {
+        payload = cJSON_CreateObject();
+        if (payload == NULL) return NULL;
+        cJSON_AddStringToObject(payload, "event", "log");
+        cJSON_AddStringToObject(payload, "source", "esp32");
+        cJSON_AddStringToObject(payload, "message", line);
+    }
+    cJSON *entry = cJSON_CreateObject();
+    if (entry == NULL) {
+        cJSON_Delete(payload);
+        return NULL;
+    }
+    if (timestamp > 1e9) cJSON_AddNumberToObject(entry, "timestamp", timestamp);
+    cJSON_AddItemToObject(entry, "payload", payload);
+    return entry;
+}
+
+/* reboot / restart_runtime / a settings change that needs a boot: delayed so
+ * the ack still flushes over the socket first. Once — a push that changes
+ * three boot-time settings restarts once, and restart_runtime on top of it
+ * does not start a second timer. */
+static void reboot_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(750));
+    esp_restart();
+}
+
+void fos_cloud_schedule_reboot(void)
+{
+    static bool scheduled = false;
+    if (scheduled) return;
+    scheduled = true;
+    if (xTaskCreate(reboot_task, "fos_cloud_reboot", 2048, NULL, 5, NULL) != pdPASS) {
+        esp_restart();
+    }
+}
+
 /* --------------------------------------------------- management WebSocket */
 
 #ifdef FOS_CLOUD_HAVE_WS
@@ -963,8 +1018,6 @@ static void ws_previous_close_json(char *out, size_t out_len)
 
 static void ws_backoff_reset(void);
 static void ws_ack(const cJSON *id, bool ok, const char *error);
-static cJSON *log_line_entry(const char *line, double timestamp);
-
 static void ws_send_json(cJSON *msg)
 {
     char *text = cJSON_PrintUnformatted(msg);
@@ -1035,7 +1088,7 @@ static void ws_poll_logs(void)
         }
         /* Without SNTP the entry carries no timestamp and the hub stamps
          * its own arrival time — better than a 1970 date. */
-        cJSON *entry = log_line_entry(line, have_time ? now : 0);
+        cJSON *entry = fos_cloud_log_line_entry(line, have_time ? now : 0);
         free(line);
         if (entry == NULL) continue;
         cJSON_AddItemToArray(logs, entry);
@@ -1055,71 +1108,6 @@ static void ws_poll_logs(void)
     cJSON_AddItemToObject(msg, "logs", logs);
     ws_send_json(msg);
     cJSON_Delete(msg);
-}
-
-/* Parse a log line into the {"timestamp"?, "payload"} entry shape log_batch
- * uses; plain lines get the same wrapping the backend uploader applies. */
-static cJSON *log_line_entry(const char *line, double timestamp)
-{
-    cJSON *payload = cJSON_Parse(line);
-    if (payload != NULL && !cJSON_IsObject(payload)) {
-        cJSON_Delete(payload);
-        payload = NULL;
-    }
-    if (payload == NULL) {
-        payload = cJSON_CreateObject();
-        if (payload == NULL) return NULL;
-        cJSON_AddStringToObject(payload, "event", "log");
-        cJSON_AddStringToObject(payload, "source", "esp32");
-        cJSON_AddStringToObject(payload, "message", line);
-    }
-    cJSON *entry = cJSON_CreateObject();
-    if (entry == NULL) {
-        cJSON_Delete(payload);
-        return NULL;
-    }
-    if (timestamp > 1e9) cJSON_AddNumberToObject(entry, "timestamp", timestamp);
-    cJSON_AddItemToObject(entry, "payload", payload);
-    return entry;
-}
-
-/* get_logs: replay the on-device ring as a log_batch with the command id. */
-static void ws_handle_get_logs(const cJSON *root, const cJSON *id)
-{
-    if (!s_logs_granted) {
-        ws_ack(id, false, "insufficient_scope");
-        return;
-    }
-    size_t limit = FOS_NIM_LOG_RING_CAP;
-    const cJSON *limit_item = cJSON_GetObjectItem(root, "limit");
-    if (cJSON_IsNumber(limit_item) && limit_item->valuedouble >= 1 &&
-        limit_item->valuedouble < FOS_NIM_LOG_RING_CAP) {
-        limit = (size_t)limit_item->valuedouble;
-    }
-    frameos_log_entry_t *entries = calloc(FOS_NIM_LOG_RING_CAP, sizeof(*entries));
-    if (entries == NULL) {
-        ws_ack(id, false, "no_memory");
-        return;
-    }
-    size_t count = frameos_nim_log_recent(entries, FOS_NIM_LOG_RING_CAP);
-    size_t start = count > limit ? count - limit : 0; /* newest `limit` lines */
-    ws_ack(id, true, NULL);
-    cJSON *msg = cJSON_CreateObject();
-    cJSON *logs = msg ? cJSON_AddArrayToObject(msg, "logs") : NULL;
-    if (logs != NULL) {
-        if (cJSON_IsString(id) || cJSON_IsNumber(id)) {
-            cJSON_AddItemToObject(msg, "id", cJSON_Duplicate(id, false));
-        }
-        cJSON_AddStringToObject(msg, "type", "log_batch");
-        for (size_t i = start; i < count; i++) {
-            cJSON *entry = log_line_entry(entries[i].line, entries[i].timestamp);
-            if (entry != NULL) cJSON_AddItemToArray(logs, entry);
-        }
-        ws_send_json(msg);
-    }
-    cJSON_Delete(msg);
-    for (size_t i = 0; i < count; i++) free(entries[i].line);
-    free(entries);
 }
 
 /* Push the newest metrics sample once it changes (one per render pass) —
@@ -1172,37 +1160,6 @@ bool fos_cloud_flush_logs(uint32_t timeout_ms)
     }
 }
 
-/* get_metrics: the wire shape is a single sample ({"metrics": {…}}), so the
- * reply carries the newest one. */
-static void ws_handle_get_metrics(const cJSON *id)
-{
-    if (!s_metrics_granted) {
-        ws_ack(id, false, "insufficient_scope");
-        return;
-    }
-    fos_metrics_sample_t samples[32] = {0};
-    size_t count = fos_client_metrics_recent(samples, 32);
-    if (count == 0) {
-        ws_ack(id, false, "no_metrics");
-        return;
-    }
-    ws_ack(id, true, NULL);
-    cJSON *sample = cJSON_Parse(samples[count - 1].json);
-    cJSON *msg = cJSON_CreateObject();
-    if (msg != NULL && sample != NULL) {
-        if (cJSON_IsString(id) || cJSON_IsNumber(id)) {
-            cJSON_AddItemToObject(msg, "id", cJSON_Duplicate(id, false));
-        }
-        cJSON_AddStringToObject(msg, "type", "metrics");
-        cJSON_AddItemToObject(msg, "metrics", sample);
-        sample = NULL;
-        ws_send_json(msg);
-    }
-    cJSON_Delete(sample);
-    cJSON_Delete(msg);
-    for (size_t i = 0; i < count; i++) free(samples[i].json);
-}
-
 /* How long WS-task and cloud-task callers wait for the Nim runtime. A render
  * holds it for its whole duration (90 s+ on a 13.3" panel); the hub closes
  * an unauthenticated socket after 15 s, so a hello must never queue behind
@@ -1245,12 +1202,27 @@ static void nim_snapshot_release(nim_snapshot_t *snap)
     snap->states = NULL;
 }
 
+void fos_cloud_add_static_state(cJSON *msg)
+{
+    cJSON_AddStringToObject(msg, "frameos_version", esp_app_get_description()->version);
+    add_hardware_json(msg);
+    /* Cloud-installed scenes: report the checksum of the payload the render
+     * task last applied, not the store's etag (which is the literal "local"
+     * for every pushed payload). Anything else resident — backend-synced or
+     * locally uploaded — reports the etag, which is the truth the provider
+     * should see: out of sync. */
+    if (fos_scenes_from_cloud() && s_applied_scenes_checksum[0]) {
+        cJSON_AddStringToObject(msg, "scenes_checksum", s_applied_scenes_checksum);
+    } else {
+        cJSON_AddStringToObject(msg, "scenes_checksum", fos_scenes_etag());
+    }
+}
+
 /* Attach the hello-shaped state fields to msg. `snap->states` moves into
  * msg; the scene fields are omitted entirely when the snapshot timed out. */
 static void add_state_fields(cJSON *msg, nim_snapshot_t *snap)
 {
-    cJSON_AddStringToObject(msg, "frameos_version", esp_app_get_description()->version);
-    add_hardware_json(msg);
+    fos_cloud_add_static_state(msg);
     if (snap->ok) {
         cJSON *states = snap->states ? snap->states : cJSON_CreateObject();
         snap->states = NULL;
@@ -1261,16 +1233,6 @@ static void add_state_fields(cJSON *msg, nim_snapshot_t *snap)
         if (snap->scene_id[0]) {
             cJSON_AddStringToObject(msg, "active_scene", snap->scene_id);
         }
-    }
-    /* Cloud-installed scenes: report the checksum of the payload the render
-     * task last applied, not the store's etag (which is the literal "local"
-     * for every pushed payload). Anything else resident — backend-synced or
-     * locally uploaded — reports the etag, which is the truth the provider
-     * should see: out of sync. */
-    if (fos_scenes_from_cloud() && s_applied_scenes_checksum[0]) {
-        cJSON_AddStringToObject(msg, "scenes_checksum", s_applied_scenes_checksum);
-    } else {
-        cJSON_AddStringToObject(msg, "scenes_checksum", fos_scenes_etag());
     }
 }
 
@@ -1375,27 +1337,6 @@ static void ws_ack(const cJSON *id, bool ok, const char *error)
     cJSON_Delete(msg);
 }
 
-/* get_state reply. The hub takes a `state` message without `states` as the
- * whole payload being the state, so a snapshot that timed out sends nothing
- * and the verb is refused instead (runtime_busy); the provider retries. */
-static bool ws_send_state(const cJSON *id)
-{
-    nim_snapshot_t snap;
-    nim_snapshot_take(&snap);
-    bool sent = false;
-    cJSON *msg = snap.ok ? cJSON_CreateObject() : NULL;
-    if (msg) {
-        if (id) cJSON_AddItemToObject(msg, "id", cJSON_Duplicate(id, 1));
-        cJSON_AddStringToObject(msg, "type", "state");
-        add_state_fields(msg, &snap);
-        ws_send_json(msg);
-        cJSON_Delete(msg);
-        sent = true;
-    }
-    nim_snapshot_release(&snap);
-    return sent;
-}
-
 /* The last thing a deep-sleeping frame says before the CPU halts. Without
  * it the provider only learns of the sleep when a heartbeat ping goes
  * unanswered (up to a minute later) and can say nothing about when the frame
@@ -1436,18 +1377,13 @@ bool fos_cloud_announce_render(const char *scene_id)
     return true;
 }
 
-static void ws_reboot_task(void *arg)
+void fos_cloud_arm_scene_ack(const char *checksum, uint32_t generation)
 {
-    (void)arg;
-    vTaskDelay(pdMS_TO_TICKS(750)); /* let the ack flush first */
-    esp_restart();
-}
-
-static void ws_schedule_reboot(void)
-{
-    if (xTaskCreate(ws_reboot_task, "fos_cloud_reboot", 2048, NULL, 5, NULL) != pdPASS) {
-        esp_restart();
-    }
+    strlcpy(s_scene_ack_checksum, checksum ? checksum : "", sizeof(s_scene_ack_checksum));
+    s_scene_ack_generation = generation;
+    s_scene_ack_deadline_us =
+        esp_timer_get_time() + (int64_t)FOS_CLOUD_SCENE_ACK_TIMEOUT_MS * 1000;
+    s_scene_ack_pending = true;
 }
 
 /* Emit the scene_ack for the last accepted set_scenes, once the render task
@@ -1507,27 +1443,11 @@ static void ws_poll_scene_ack(void)
 
 /* ------------------------------------------------------------- asset verbs */
 
-typedef enum {
-    ASSET_JOB_LIST = 0,
-    ASSET_JOB_GET = 1,
-    ASSET_JOB_IMAGE = 2,
-    ASSET_JOB_PUT = 3,
-    ASSET_JOB_MKDIR = 4,
-    ASSET_JOB_DELETE = 5,
-    ASSET_JOB_RENAME = 6,
-    ASSET_JOB_PUT_CHUNK = 7,
-} asset_job_kind_t;
-
 typedef struct {
-    uint8_t kind;
-    char id[48]; /* command uuid, echoed on every reply frame */
+    fos_cloud_read_kind_t kind;
+    char id[80]; /* command id, echoed on every chunk frame */
     char path[FOS_CLOUD_ASSET_PATH_MAX];
-    char dst[FOS_CLOUD_ASSET_PATH_MAX]; /* rename destination; asset_put_chunk upload_id */
-    uint8_t *data;                      /* asset_put(_chunk) payload, owned by the job */
-    size_t data_len;
-    long long offset;                   /* asset_put_chunk: where the bytes land */
-    bool complete;                      /* asset_put_chunk: last chunk, commit to `path` */
-    int64_t deadline_us;                /* image_get: how long to wait for a render */
+    int64_t deadline_us; /* image_get: how long to wait for a render */
 } asset_job_t;
 
 /* An image_get that arrives before this boot's first render has finished
@@ -1536,27 +1456,7 @@ typedef struct {
 #define FOS_CLOUD_IMAGE_WAIT_MAX_US (150LL * 1000000LL)
 static volatile bool s_asset_job_running = false;
 
-/* asset_put_chunk: the assembled file's ceiling on the card. Chunks arrive
- * one WS frame each (so each is bounded by FOS_CLOUD_WS_MAX_MSG anyway); the
- * whole is a disk question. Mirrors HubMaxChunkedUploadBytes on the Linux
- * runtime. */
-#define FOS_CLOUD_ASSET_CHUNKED_MAX_BYTES (64LL * 1024 * 1024)
-
 static QueueHandle_t s_asset_jobs = NULL;
-
-static void asset_job_run_list(const asset_job_t *job)
-{
-    cJSON *msg = cJSON_CreateObject();
-    if (!msg) return;
-    if (job->id[0]) cJSON_AddStringToObject(msg, "id", job->id);
-    cJSON_AddStringToObject(msg, "type", "assets");
-    cJSON *assets = cJSON_AddArrayToObject(msg, "assets");
-    bool truncated = false;
-    if (assets) fos_assets_list_json(assets, &truncated);
-    if (truncated) cJSON_AddBoolToObject(msg, "truncated", true);
-    ws_send_json(msg);
-    cJSON_Delete(msg);
-}
 
 static void asset_chunk_send_error(const char *id, const char *error)
 {
@@ -1774,93 +1674,6 @@ static bool asset_job_run_image(const asset_job_t *job)
     return true;
 }
 
-/* Write verbs ack from the job (the ack carries the result), so the SPI
- * writes happen on the cloud task like every other asset job. */
-static void asset_job_ack(const char *id, bool ok, const char *error)
-{
-    cJSON *msg = cJSON_CreateObject();
-    if (!msg) return;
-    if (id[0]) cJSON_AddStringToObject(msg, "id", id);
-    cJSON_AddStringToObject(msg, "type", "ack");
-    cJSON_AddBoolToObject(msg, "ok", ok);
-    if (!ok && error) cJSON_AddStringToObject(msg, "error", error);
-    ws_send_json(msg);
-    cJSON_Delete(msg);
-}
-
-static void asset_job_run_put(const asset_job_t *job)
-{
-    const char *err = NULL;
-    if (fos_assets_write_file(job->path, job->data, job->data_len, &err) != ESP_OK) {
-        asset_job_ack(job->id, false, err ? err : "write_failed");
-        return;
-    }
-    struct stat st;
-    cJSON *msg = cJSON_CreateObject();
-    if (!msg) return;
-    if (job->id[0]) cJSON_AddStringToObject(msg, "id", job->id);
-    cJSON_AddStringToObject(msg, "type", "ack");
-    cJSON_AddBoolToObject(msg, "ok", true);
-    cJSON *asset = cJSON_AddObjectToObject(msg, "asset");
-    if (asset) {
-        cJSON_AddStringToObject(asset, "path", job->path);
-        bool have_stat = fos_assets_stat(job->path, &st) == ESP_OK;
-        cJSON_AddNumberToObject(asset, "size",
-                                have_stat ? (double)st.st_size : (double)job->data_len);
-        cJSON_AddNumberToObject(asset, "mtime", have_stat ? (double)st.st_mtime : 0);
-        cJSON_AddBoolToObject(asset, "is_dir", false);
-    }
-    ws_send_json(msg);
-    cJSON_Delete(msg);
-}
-
-/* asset_put_chunk: one offset-addressed write into `<root>/.uploads/<id>.part`
- * (fos_assets_chunk_begin — offset 0 starts the part, a hole is `chunk_gap`,
- * a resent chunk overwrites itself), committed to `path` on the final chunk.
- * The very same part protocol the USB/HTTP chunked upload uses, so a
- * provider-pushed font and a backend-pushed one land the same way. */
-static void asset_job_run_put_chunk(const asset_job_t *job)
-{
-    const char *err = NULL;
-    fos_assets_writer_t writer;
-    if (fos_assets_chunk_begin(job->dst, job->offset, &writer, &err) != ESP_OK) {
-        asset_job_ack(job->id, false, err ? err : "write_failed");
-        return;
-    }
-    if (fos_assets_write_chunk(&writer, job->data, job->data_len) != ESP_OK) {
-        fos_assets_chunk_close(&writer);
-        asset_job_ack(job->id, false, "write_failed");
-        return;
-    }
-    long long received = 0;
-    if (fos_assets_chunk_finish(&writer, job->complete ? job->path : NULL,
-                                &received, &err) != ESP_OK) {
-        asset_job_ack(job->id, false, err ? err : "write_failed");
-        return;
-    }
-    cJSON *msg = cJSON_CreateObject();
-    if (!msg) return;
-    if (job->id[0]) cJSON_AddStringToObject(msg, "id", job->id);
-    cJSON_AddStringToObject(msg, "type", "ack");
-    cJSON_AddBoolToObject(msg, "ok", true);
-    if (job->complete) {
-        struct stat st;
-        cJSON *asset = cJSON_AddObjectToObject(msg, "asset");
-        if (asset) {
-            bool have_stat = fos_assets_stat(job->path, &st) == ESP_OK;
-            cJSON_AddStringToObject(asset, "path", job->path);
-            cJSON_AddNumberToObject(asset, "size",
-                                    have_stat ? (double)st.st_size : (double)received);
-            cJSON_AddNumberToObject(asset, "mtime", have_stat ? (double)st.st_mtime : 0);
-            cJSON_AddBoolToObject(asset, "is_dir", false);
-        }
-    } else {
-        cJSON_AddNumberToObject(msg, "received", (double)received);
-    }
-    ws_send_json(msg);
-    cJSON_Delete(msg);
-}
-
 /* Drain queued asset jobs. Called from the cloud task — file I/O over SPI
  * plus multi-frame sends must never run inside the WS event handler. */
 static bool ws_process_asset_jobs(void)
@@ -1870,11 +1683,9 @@ static bool ws_process_asset_jobs(void)
     asset_job_t job;
     while (s_ws_client && s_ws_ready &&
            xQueueReceive(s_asset_jobs, &job, 0) == pdTRUE) {
-        const char *err = NULL;
         s_asset_job_running = true;
         switch (job.kind) {
-            case ASSET_JOB_LIST: asset_job_run_list(&job); break;
-            case ASSET_JOB_IMAGE:
+            case FOS_CLOUD_READ_IMAGE:
                 if (!asset_job_run_image(&job)) {
                     /* Deferred until the render lands: back of the queue,
                      * looked at again on the next 1 s tick (not now — with
@@ -1886,27 +1697,8 @@ static bool ws_process_asset_jobs(void)
                     return worked;
                 }
                 break;
-            case ASSET_JOB_GET: asset_job_run_get(&job); break;
-            case ASSET_JOB_PUT:
-                asset_job_run_put(&job);
-                break;
-            case ASSET_JOB_PUT_CHUNK:
-                asset_job_run_put_chunk(&job);
-                break;
-            case ASSET_JOB_MKDIR:
-                asset_job_ack(job.id, fos_assets_mkdir(job.path, &err) == ESP_OK, err);
-                break;
-            case ASSET_JOB_DELETE:
-                asset_job_ack(job.id, fos_assets_delete(job.path, &err) == ESP_OK, err);
-                break;
-            case ASSET_JOB_RENAME:
-                asset_job_ack(job.id,
-                              fos_assets_rename(job.path, job.dst, &err) == ESP_OK, err);
-                break;
-            default: break;
+            case FOS_CLOUD_READ_ASSET: asset_job_run_get(&job); break;
         }
-        free(job.data);
-        job.data = NULL;
         s_asset_job_running = false;
         worked = true;
     }
@@ -1919,210 +1711,27 @@ bool fos_cloud_asset_jobs_pending(void)
     return s_asset_jobs && uxQueueMessagesWaiting(s_asset_jobs) > 0;
 }
 
-/* Free the payloads of any jobs abandoned by a dropped session. The provider
- * redelivers the commands on the next session, so dropping is correct — the
- * heap buffers must not go with them. */
+/* Drop the jobs abandoned by a dropped session: the provider redelivers the
+ * commands on the next one. */
 static void ws_flush_asset_jobs(void)
 {
     if (!s_asset_jobs) return;
     asset_job_t job;
-    while (xQueueReceive(s_asset_jobs, &job, 0) == pdTRUE) {
-        free(job.data);
-    }
+    while (xQueueReceive(s_asset_jobs, &job, 0) == pdTRUE) {}
 }
 
-/* WS-handler side: validate cheaply (a stat, no reads), ack, and hand the
- * heavy part to the cloud task. A full queue is an honest `busy` — the
- * provider's queue redelivers or the browser retries. Write verbs skip the
- * handler ack entirely: their ack carries the result, so it is sent from the
- * job once the SPI write finished. */
-static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const cJSON *id)
-{
-    asset_job_t job = { .kind = (uint8_t)kind, .id = "", .path = "", .dst = "",
-                        .data = NULL, .data_len = 0, .offset = 0, .complete = false,
-                        .deadline_us = esp_timer_get_time() + FOS_CLOUD_IMAGE_WAIT_MAX_US };
-    bool ack_now = true; /* read verbs: bare ack, then reply frames */
-    if (cJSON_IsString(id) && id->valuestring &&
-        strlen(id->valuestring) < sizeof(job.id)) {
-        strlcpy(job.id, id->valuestring, sizeof(job.id));
-    }
-    if (kind == ASSET_JOB_GET) {
-        const cJSON *path_item = cJSON_GetObjectItem(root, "path");
-        const char *raw = cJSON_IsString(path_item) ? path_item->valuestring : NULL;
-        if (!fos_assets_sanitize_path(raw, job.path, sizeof(job.path))) {
-            ws_ack(id, false, "invalid_path");
-            return;
-        }
-        if (!fos_assets_available()) {
-            ws_ack(id, false, "not_found");
-            return;
-        }
-        struct stat st;
-        if (fos_assets_stat(job.path, &st) != ESP_OK) {
-            ws_ack(id, false, "not_found");
-            return;
-        }
-        if (S_ISDIR(st.st_mode)) {
-            ws_ack(id, false, "is_directory");
-            return;
-        }
-        if ((size_t)st.st_size > FOS_CLOUD_ASSET_MAX_FILE_BYTES) {
-            ws_ack(id, false, "too_large");
-            return;
-        }
-        /* `thumb` is accepted and ignored: no thumbnailer on this profile,
-         * the original bytes are the reply (docs/cloud-frames.md). */
-    } else if (kind == ASSET_JOB_PUT || kind == ASSET_JOB_MKDIR ||
-               kind == ASSET_JOB_DELETE) {
-        const cJSON *path_item = cJSON_GetObjectItem(root, "path");
-        const char *raw = cJSON_IsString(path_item) ? path_item->valuestring : NULL;
-        if (!fos_assets_sanitize_write_path(raw, job.path, sizeof(job.path))) {
-            ws_ack(id, false, "invalid_path");
-            return;
-        }
-        ack_now = false;
-    } else if (kind == ASSET_JOB_PUT_CHUNK) {
-        /* upload_id names the part on the card ([A-Za-z0-9_-], bounded);
-         * offset says where the bytes land; the destination path is only
-         * needed — and only checked — on the final (`complete`) chunk. */
-        const cJSON *upload_item = cJSON_GetObjectItem(root, "upload_id");
-        const char *upload_id = cJSON_IsString(upload_item) ? upload_item->valuestring : NULL;
-        if (!fos_assets_valid_upload_id(upload_id) || strlen(upload_id) >= sizeof(job.dst)) {
-            ws_ack(id, false, "invalid_upload_id");
-            return;
-        }
-        strlcpy(job.dst, upload_id, sizeof(job.dst));
-        const cJSON *offset_item = cJSON_GetObjectItem(root, "offset");
-        if (!cJSON_IsNumber(offset_item) || offset_item->valuedouble < 0 ||
-            offset_item->valuedouble != (double)(long long)offset_item->valuedouble) {
-            ws_ack(id, false, "invalid_offset");
-            return;
-        }
-        job.offset = (long long)offset_item->valuedouble;
-        const cJSON *complete_item = cJSON_GetObjectItem(root, "complete");
-        job.complete = cJSON_IsTrue(complete_item);
-        if (job.complete) {
-            const cJSON *path_item = cJSON_GetObjectItem(root, "path");
-            const char *raw = cJSON_IsString(path_item) ? path_item->valuestring : NULL;
-            if (!fos_assets_sanitize_write_path(raw, job.path, sizeof(job.path))) {
-                ws_ack(id, false, "invalid_path");
-                return;
-            }
-        }
-        if (!fos_assets_available()) {
-            ws_ack(id, false, "not_found");
-            return;
-        }
-        ack_now = false;
-    } else if (kind == ASSET_JOB_RENAME) {
-        const cJSON *src_item = cJSON_GetObjectItem(root, "src");
-        const cJSON *dst_item = cJSON_GetObjectItem(root, "dst");
-        const char *src = cJSON_IsString(src_item) ? src_item->valuestring : NULL;
-        const char *dst = cJSON_IsString(dst_item) ? dst_item->valuestring : NULL;
-        if (!fos_assets_sanitize_write_path(src, job.path, sizeof(job.path)) ||
-            !fos_assets_sanitize_write_path(dst, job.dst, sizeof(job.dst))) {
-            ws_ack(id, false, "invalid_path");
-            return;
-        }
-        ack_now = false;
-    }
-    if (kind == ASSET_JOB_PUT || kind == ASSET_JOB_PUT_CHUNK) {
-        const cJSON *data_item = cJSON_GetObjectItem(root, "data");
-        const char *b64 = cJSON_IsString(data_item) ? data_item->valuestring : NULL;
-        size_t b64_len = b64 ? strlen(b64) : 0;
-        if (!b64 || b64_len == 0) {
-            ws_ack(id, false, "invalid_data");
-            return;
-        }
-        if (kind == ASSET_JOB_PUT_CHUNK &&
-            job.offset + (long long)((b64_len / 4) * 3) > FOS_CLOUD_ASSET_CHUNKED_MAX_BYTES) {
-            ws_ack(id, false, "too_large");
-            return;
-        }
-        size_t raw_cap = (b64_len / 4) * 3 + 4;
-        uint8_t *raw = fos_big_malloc(raw_cap);
-        if (!raw) {
-            ws_ack(id, false, "no_memory");
-            return;
-        }
-        size_t raw_len = 0;
-        if (mbedtls_base64_decode(raw, raw_cap, &raw_len,
-                                  (const unsigned char *)b64, b64_len) != 0 ||
-            raw_len == 0) {
-            free(raw);
-            ws_ack(id, false, "invalid_data");
-            return;
-        }
-        job.data = raw;
-        job.data_len = raw_len;
-    }
-    if (!s_asset_jobs) {
-        s_asset_jobs = xQueueCreate(FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH, sizeof(asset_job_t));
-    }
-    if (!s_asset_jobs || xQueueSend(s_asset_jobs, &job, 0) != pdTRUE) {
-        free(job.data);
-        ws_ack(id, false, "busy");
-        return;
-    }
-    if (ack_now) ws_ack(id, true, NULL);
-}
+/* The read a verb callback asked for (fos_cloud_queue_asset_read), waiting
+ * for the verb runner to pair it with the command id and queue it. */
+static bool s_pending_read_armed = false;
+static asset_job_t s_pending_read;
 
-/* set_scenes: same storage the USB `usb_api upload-scenes` command uses —
- * fos_scenes_set_json persists the interpreted-scene JSON and the render task
- * hot-loads it (compiled payloads are refused by the interpreted runtime
- * loader).
- *
- * Heap discipline: a max-size push already costs the reassembly buffer plus
- * the cJSON tree, so only the `scenes` array is reprinted here and handed
- * straight to the storage layer. Going through
- * fos_http_store_uploaded_scenes_payload() would reprint the whole envelope,
- * then parse and print it a second time inside that function — four to five
- * copies live at once on a device whose scene store tops out at 512 KiB. */
-static void ws_handle_set_scenes(const cJSON *root, const cJSON *id)
+void fos_cloud_queue_asset_read(fos_cloud_read_kind_t kind, const char *path)
 {
-    const cJSON *scenes = cJSON_GetObjectItem(root, "scenes");
-    if (!cJSON_IsArray(scenes)) {
-        ws_ack(id, false, "not_interpreted");
-        return;
-    }
-    char *payload = cJSON_PrintUnformatted((cJSON *)scenes);
-    if (!payload) {
-        ws_ack(id, false, "no_memory");
-        return;
-    }
-    uint32_t generation = fos_scenes_apply_generation();
-    /* Declared CLOUD so the store remembers who installed these scenes:
-     * apply_network_policy() keeps the RFC1918 deny alive on that flag even
-     * after a demotion drops FOS_CLOUD_ENROLLED. */
-    esp_err_t err = fos_scenes_set_json_from(payload, strlen(payload),
-                                             FOS_SCENES_SOURCE_CLOUD);
-    cJSON_free(payload);
-    if (err != ESP_OK) {
-        const char *detail = fos_scenes_last_error();
-        ws_ack(id, false, (detail && detail[0]) ? detail : "scene_store_failed");
-        return;
-    }
-    /* Optional scene_id names which pushed scene to activate (the workspace's
-     * "preview on frame" flow). Queued now, applied by the render task AFTER
-     * the payload loads — fos_client.c applies pending scenes before pending
-     * selection, so the id exists by then. Unknown ids are dropped there. */
-    const cJSON *scene_id = cJSON_GetObjectItem(root, "scene_id");
-    if (cJSON_IsString(scene_id) && scene_id->valuestring && scene_id->valuestring[0]) {
-        fos_scenes_select(scene_id->valuestring);
-    }
-    fos_client_render_now();
-    ws_ack(id, true, NULL);
-
-    /* scene_ack waits for the render task; see ws_poll_scene_ack(). */
-    const cJSON *checksum = cJSON_GetObjectItem(root, "checksum");
-    s_scene_ack_checksum[0] = '\0';
-    if (cJSON_IsString(checksum) && checksum->valuestring) {
-        strlcpy(s_scene_ack_checksum, checksum->valuestring, sizeof(s_scene_ack_checksum));
-    }
-    s_scene_ack_generation = generation;
-    s_scene_ack_deadline_us =
-        esp_timer_get_time() + (int64_t)FOS_CLOUD_SCENE_ACK_TIMEOUT_MS * 1000;
-    s_scene_ack_pending = true;
+    memset(&s_pending_read, 0, sizeof(s_pending_read));
+    s_pending_read.kind = kind;
+    strlcpy(s_pending_read.path, path ? path : "", sizeof(s_pending_read.path));
+    s_pending_read.deadline_us = esp_timer_get_time() + FOS_CLOUD_IMAGE_WAIT_MAX_US;
+    s_pending_read_armed = true;
 }
 
 /* Skip one JSON value starting at *i (which points at its first byte).
@@ -2232,534 +1841,288 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
     return false;
 }
 
-/* set_settings: the declarative allowlist (docs/cloud-frames.md). The ESP32
- * profile persists the subset that maps onto fos_config: `interval`
- * (interval_sec, picked up by the render loop's next pass, no reboot),
- * `name` (the DHCP hostname — the provider-side display name stays
- * authoritative on the provider), `rotate` (the renderer sizes its canvas
- * once at init, so this one costs a reboot) and `scaling_mode` (a per-decode
- * fallback fit, applied live on the next render pass). The power keys —
- * `deep_sleep`, `deep_sleep_on_battery`, `wake_check_seconds` (all picked up
- * by the render loop's next pass) and `battery_pin` / `battery_divider` /
- * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
- * round out the profile.
- * Any other key refuses the WHOLE verb with setting_not_allowed, mirroring
- * the Nim runtime, so the provider never half-applies a settings push. */
-static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
+/* Pull one top-level string field out of a message without building a cJSON
+ * tree, so the WS task can route a 500 KB set_scenes by its `type` without
+ * parsing the payload. Only depth-1 keys are considered. */
+static bool ws_raw_string_field(const char *data, size_t len, const char *key,
+                                char *out, size_t out_len)
 {
-    const cJSON *settings = cJSON_GetObjectItem(root, "settings");
-    if (!cJSON_IsObject(settings)) {
-        ws_ack(id, false, "invalid_settings");
-        return;
-    }
-    static const char *settable_keys[] = {
-        "interval", "name", "rotate", "scaling_mode",
-        /* 2026.8.34: an IANA zone name plus that zone's tzdata slice
-         * (fos_tz.h), applied live. */
-        "timezone",
-        "timezone_data",
-        "deep_sleep", "deep_sleep_on_battery", "wake_check_seconds",
-        "battery_pin", "battery_divider", "battery_enable_pin",
-        /* 2026.8.31: what the local admin API and the console already set. */
-        "debug", "max_http_response_bytes", "gpio_buttons",
-    };
-    const cJSON *entry = NULL;
-    cJSON_ArrayForEach(entry, settings) {
-        const char *key = entry->string ? entry->string : "";
-        bool known = false;
-        for (size_t k = 0; k < sizeof(settable_keys) / sizeof(settable_keys[0]); k++) {
-            if (strcmp(key, settable_keys[k]) == 0) {
-                known = true;
-                break;
+    size_t key_want = strlen(key);
+    size_t i = 0;
+    out[0] = '\0';
+    while (i < len && (unsigned char)data[i] <= ' ') i++;
+    if (i >= len || data[i] != '{') return false;
+    i++;
+    while (i < len) {
+        while (i < len && ((unsigned char)data[i] <= ' ' || data[i] == ',')) i++;
+        if (i >= len || data[i] == '}') return false;
+        if (data[i] != '"') return false;
+        size_t key_start = ++i;
+        while (i < len && data[i] != '"') {
+            if (data[i] == '\\' && i + 1 < len) i++;
+            i++;
+        }
+        if (i >= len) return false;
+        size_t key_len = i - key_start;
+        i++;
+        while (i < len && (unsigned char)data[i] <= ' ') i++;
+        if (i >= len || data[i] != ':') return false;
+        i++;
+        while (i < len && (unsigned char)data[i] <= ' ') i++;
+        if (i >= len) return false;
+        if (key_len == key_want && strncmp(data + key_start, key, key_want) == 0) {
+            size_t value_start = i;
+            raw_skip_value(data, len, &i);
+            size_t value_len = i - value_start;
+            if (value_len < 2 || data[value_start] != '"' ||
+                data[value_start + value_len - 1] != '"') {
+                return false;
             }
+            value_start++;
+            value_len -= 2;
+            if (value_len >= out_len) return false;
+            memcpy(out, data + value_start, value_len);
+            out[value_len] = '\0';
+            return strchr(out, '\\') == NULL;
         }
-        if (!known) {
-            ESP_LOGW(TAG, "ws: set_settings key \"%s\" not supported on the esp32 profile", key);
-            ws_ack(id, false, "setting_not_allowed");
-            return;
-        }
+        raw_skip_value(data, len, &i);
     }
-    fos_config_t *config = fos_config();
-    /* Snapshot to diff against once persisted: the `settings:cloud` line
-     * below is the device-side confirmation of what the push changed. One
-     * lazily allocated copy, reused (this handler runs on the WS task only):
-     * not the stack — the config carries token buffers — and not a per-call
-     * malloc that every validation `return` above would have to free. NULL
-     * just loses the detail. */
-    static fos_config_t *before = NULL;
-    if (!before) before = fos_big_malloc(sizeof(*before));
-    if (before) memcpy(before, config, sizeof(*before));
-    const cJSON *interval = cJSON_GetObjectItem(settings, "interval");
-    if (interval != NULL) {
-        if (!cJSON_IsNumber(interval) || interval->valuedouble < 1 ||
-            interval->valuedouble > 86400) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        uint32_t seconds = (uint32_t)interval->valuedouble;
-        /* Same floor the local admin API applies (fos_http.c). */
-        if (seconds < 5) seconds = 5;
-        config->interval_sec = seconds;
-    }
-    const cJSON *name = cJSON_GetObjectItem(settings, "name");
-    if (name != NULL) {
-        if (!cJSON_IsString(name) || !name->valuestring[0]) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        strlcpy(config->hostname, name->valuestring, sizeof(config->hostname));
-    }
-    /* Validate rotate before touching config, so an invalid one leaves the
-     * whole verb unapplied (the interval/name writes above are still in RAM
-     * — nothing is persisted until fos_config_save() below). */
-    bool rotate_changed = false;
-    const cJSON *rotate = cJSON_GetObjectItem(settings, "rotate");
-    if (rotate != NULL) {
-        uint16_t normalized = 0;
-        if (!cJSON_IsNumber(rotate) ||
-            !fos_config_normalize_rotate(rotate->valuedouble, &normalized)) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        rotate_changed = config->rotate != normalized;
-        config->rotate = normalized;
-    }
-    const cJSON *scaling = cJSON_GetObjectItem(settings, "scaling_mode");
-    if (scaling != NULL) {
-        char normalized[16];
-        if (!cJSON_IsString(scaling) ||
-            !fos_config_normalize_scaling_mode(scaling->valuestring, normalized,
-                                               sizeof(normalized))) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        /* No reboot: a per-decode fallback, pushed into the Nim runtime by
-         * fos_client on the next pass. */
-        strlcpy(config->scaling_mode, normalized, sizeof(config->scaling_mode));
-    }
-    const cJSON *timezone = cJSON_GetObjectItem(settings, "timezone");
-    const cJSON *timezone_data = cJSON_GetObjectItem(settings, "timezone_data");
-    if (timezone != NULL) {
-        if (!cJSON_IsString(timezone) || strlen(timezone->valuestring) >= sizeof(config->time_zone)) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        if (timezone_data != NULL && !cJSON_IsNull(timezone_data) && !cJSON_IsObject(timezone_data)) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        /* No reboot: TZ is read on every localtime() call. The provider
-         * sends the zone's tzdata slice with the name; a name alone is
-         * resolved from tz.frameos.net by fos_tz_resolve_pending. */
-        if (strcmp(config->time_zone, timezone->valuestring) != 0) {
-            strlcpy(config->time_zone, timezone->valuestring, sizeof(config->time_zone));
-            fos_tz_clear();
-        }
-        char *slice = cJSON_IsObject(timezone_data) ? cJSON_PrintUnformatted(timezone_data) : NULL;
-        fos_tz_install(slice);
-        free(slice);
-    } else if (timezone_data != NULL) {
-        ws_ack(id, false, "invalid_settings");
-        return;
-    }
-    const cJSON *deep_sleep = cJSON_GetObjectItem(settings, "deep_sleep");
-    if (deep_sleep != NULL) {
-        if (!cJSON_IsBool(deep_sleep)) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        config->deep_sleep = cJSON_IsTrue(deep_sleep);
-    }
-    const cJSON *sleep_on_battery = cJSON_GetObjectItem(settings, "deep_sleep_on_battery");
-    if (sleep_on_battery != NULL) {
-        if (!cJSON_IsBool(sleep_on_battery)) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        config->deep_sleep_on_battery = cJSON_IsTrue(sleep_on_battery);
-    }
-    const cJSON *wake_check = cJSON_GetObjectItem(settings, "wake_check_seconds");
-    if (wake_check != NULL) {
-        if (!cJSON_IsNumber(wake_check) || wake_check->valuedouble < 0 ||
-            wake_check->valuedouble > 86400) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        uint32_t seconds = (uint32_t)wake_check->valuedouble;
-        /* Sub-minute check-ins would drain a battery for nothing; 0 stays 0
-         * (only wake to render). Same floor as the backend settings poll. */
-        if (seconds > 0 && seconds < 60) seconds = 60;
-        config->wake_check_sec = seconds;
-    }
-    /* Battery sensing: the ADC is set up once at boot (main.c), so a changed
-     * pin or divider takes a deferred reboot, exactly like rotate. */
-    bool battery_changed = false;
-    const cJSON *battery_pin = cJSON_GetObjectItem(settings, "battery_pin");
-    if (battery_pin != NULL) {
-        if (!cJSON_IsNumber(battery_pin) || battery_pin->valuedouble < -1 ||
-            battery_pin->valuedouble > 48) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        int8_t pin = (int8_t)battery_pin->valuedouble;
-        battery_changed = battery_changed || config->battery_pin != pin;
-        config->battery_pin = pin;
-    }
-    const cJSON *battery_divider = cJSON_GetObjectItem(settings, "battery_divider");
-    if (battery_divider != NULL) {
-        if (!cJSON_IsNumber(battery_divider) || battery_divider->valuedouble < 0.5 ||
-            battery_divider->valuedouble > 20.0) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        float divider = (float)battery_divider->valuedouble;
-        battery_changed = battery_changed || config->battery_divider != divider;
-        config->battery_divider = divider;
-    }
-    /* The GPIO that switches the divider on around each read (Seeed
-     * reTerminal E10xx: 21); -1 = always-on divider. Same NVS key the
-     * console's `set battery_enable_pin` and the backend settings poll's
-     * batteryEnablePin write. */
-    const cJSON *battery_enable_pin = cJSON_GetObjectItem(settings, "battery_enable_pin");
-    if (battery_enable_pin != NULL) {
-        if (!cJSON_IsNumber(battery_enable_pin) || battery_enable_pin->valuedouble < -1 ||
-            battery_enable_pin->valuedouble > 48) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        int8_t pin = (int8_t)battery_enable_pin->valuedouble;
-        battery_changed = battery_changed || config->battery_enable_pin != pin;
-        config->battery_enable_pin = pin;
-    }
-    /* Debug logging: the render loop pushes config->debug_logging into the
-     * Nim runtime every pass (fos_client.c), so this applies live. */
-    const cJSON *debug = cJSON_GetObjectItem(settings, "debug");
-    if (debug != NULL) {
-        if (!cJSON_IsBool(debug)) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        config->debug_logging = cJSON_IsTrue(debug);
-    }
-    /* Per-request HTTP body ceiling: handed to frameos_nim_init once at boot
-     * (main.c), so a change takes the same deferred reboot as rotate. Same
-     * floor as the local admin API; the ceiling is the Pi runtime's default
-     * (a provider can lower a device's bound, never raise it past that). */
-    bool restart_for_init = false;
-    const cJSON *max_http = cJSON_GetObjectItem(settings, "max_http_response_bytes");
-    if (max_http != NULL) {
-        if (!cJSON_IsNumber(max_http) || max_http->valuedouble < 1024 ||
-            max_http->valuedouble > 64.0 * 1024 * 1024) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        uint32_t bytes = (uint32_t)max_http->valuedouble;
-        restart_for_init = restart_for_init || config->max_http_response_bytes != bytes;
-        config->max_http_response_bytes = bytes;
-    }
-    /* GPIO buttons: [{pin, label}], the whole list replaced — the same
-     * shape the Pi runtime takes, parsed through the console's spec parser
-     * so the limits (FOS_GPIO_BUTTONS_MAX, label length, pin range) live in
-     * one place. fos_buttons_init runs once at boot, hence the reboot. */
-    const cJSON *buttons = cJSON_GetObjectItem(settings, "gpio_buttons");
-    if (buttons != NULL) {
-        if (!cJSON_IsArray(buttons) || cJSON_GetArraySize(buttons) > FOS_GPIO_BUTTONS_MAX) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        char spec[FOS_GPIO_BUTTONS_SPEC_LEN] = "";
-        size_t used = 0;
-        const cJSON *button = NULL;
-        cJSON_ArrayForEach(button, buttons) {
-            const cJSON *pin = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "pin") : NULL;
-            const cJSON *label = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "label") : NULL;
-            if (!cJSON_IsNumber(pin) || pin->valuedouble < 0 || pin->valuedouble > 48 ||
-                pin->valuedouble != (double)(int)pin->valuedouble ||
-                !cJSON_IsString(label) || !label->valuestring[0] ||
-                strlen(label->valuestring) >= FOS_GPIO_BUTTON_LABEL_LEN ||
-                strchr(label->valuestring, '\n') != NULL || strchr(label->valuestring, ':') != NULL) {
-                ws_ack(id, false, "invalid_settings");
-                return;
-            }
-            int written = snprintf(spec + used, sizeof(spec) - used, "%s%d:%s",
-                                   used ? "\n" : "", (int)pin->valuedouble, label->valuestring);
-            if (written < 0 || (size_t)written >= sizeof(spec) - used) {
-                ws_ack(id, false, "invalid_settings");
-                return;
-            }
-            used += (size_t)written;
-        }
-        char before[FOS_GPIO_BUTTONS_SPEC_LEN];
-        fos_config_format_gpio_buttons(config, before, sizeof(before));
-        if (fos_config_parse_gpio_buttons(spec, config) != ESP_OK) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        char after[FOS_GPIO_BUTTONS_SPEC_LEN];
-        fos_config_format_gpio_buttons(config, after, sizeof(after));
-        restart_for_init = restart_for_init || strcmp(before, after) != 0;
-    }
-    if (fos_config_save() != ESP_OK) {
-        ws_ack(id, false, "persist_failed");
-        return;
-    }
-    {
-        char changes[320] = "";
-        fos_settings_describe_changes(before, config, changes, sizeof(changes));
-        char line[400];
-        snprintf(line, sizeof(line),
-                 "{\"event\":\"settings:cloud\",\"source\":\"esp32\","
-                 "\"status\":\"applied\",\"changed\":\"%s\"}",
-                 changes);
-        frameos_nim_log_hook(line);
-    }
-    ws_ack(id, true, NULL);
-    if (restart_for_init && !battery_changed && !rotate_changed) {
-        ESP_LOGW(TAG, "ws: boot-time setting changed (http ceiling %lu, %u buttons); restarting",
-                 (unsigned long)config->max_http_response_bytes, (unsigned)config->gpio_button_count);
-        ws_schedule_reboot();
-    }
-    if (battery_changed && !rotate_changed) {
-        ESP_LOGW(TAG, "ws: battery sensing changed (pin %d, divider %.2f, enable pin %d); "
-                 "restarting to re-init the ADC",
-                 (int)config->battery_pin, (double)config->battery_divider,
-                 (int)config->battery_enable_pin);
-        ws_schedule_reboot();
-    }
-    if (rotate_changed) {
-        /* The Nim runtime sizes the scene canvas at init (main.c passes
-         * config->rotate into frameos_nim_init), and the panel packers read
-         * the config directly — a restart is what makes a new rotation take
-         * effect, exactly as on the backend settings poll. Ack first: the
-         * reboot task's delay is what lets it flush over the socket. */
-        ESP_LOGW(TAG, "ws: rotation changed to %u; restarting to re-init the renderer",
-                 (unsigned)config->rotate);
-        ws_schedule_reboot();
-    }
+    return false;
 }
 
-/* Ack a message we could not parse, so the provider's durable queue moves on. */
-static void ws_ack_unparseable(const char *data, size_t len)
+/* `ready`: the session is authenticated and this is what it may do. */
+static void ws_handle_ready(const cJSON *root)
 {
-    char id[80];
-    bool is_number = false;
-    if (!ws_raw_message_id(data, len, id, sizeof(id), &is_number)) return;
-    cJSON *id_item = is_number ? cJSON_CreateNumber(strtod(id, NULL))
-                               : cJSON_CreateString(id);
-    if (!id_item) return;
-    ws_ack(id_item, false, "invalid_json");
-    cJSON_Delete(id_item);
+    /* The ready message is authoritative for what this session may do:
+     * its scopes array reflects the provider's current grant, including
+     * revocations since enrollment. */
+    bool logs_granted = false;
+    bool metrics_granted = false;
+    bool service_settings_granted = false;
+    const cJSON *scopes = cJSON_GetObjectItem(root, "scopes");
+    const cJSON *scope = NULL;
+    cJSON_ArrayForEach(scope, scopes) {
+        if (!cJSON_IsString(scope) || !scope->valuestring) continue;
+        if (strcmp(scope->valuestring, "telemetry:logs") == 0) {
+            logs_granted = true;
+        } else if (strcmp(scope->valuestring, "telemetry:metrics") == 0) {
+            metrics_granted = true;
+        } else if (strcmp(scope->valuestring, "settings:services") == 0) {
+            service_settings_granted = true;
+        }
+    }
+    s_logs_granted = logs_granted;
+    s_metrics_granted = metrics_granted;
+    /* Service settings are fetched, never pushed: this only tells the
+     * settings poll it may ask. It pulls once before the next render, so a
+     * key the owner changed while this frame was offline lands on
+     * reconnect without waiting for a nudge. Unlike the telemetry flags
+     * this one is additive and outlives the session — the provider's
+     * `403 insufficient_scope` is what removes the keys again. */
+    fos_settings_cloud_scope_granted(service_settings_granted);
+    s_ws_ready = true;
+    s_ws_auth_failures = 0; /* a completed handshake clears the streak */
+    ws_backoff_reset();
+    /* Through the log hook, not ESP_LOGI: which scopes this session got
+     * is the first thing to check when a frame "sends no logs", and an
+     * INFO line is compiled out at CONFIG_LOG_MAXIMUM_LEVEL=WARN. The
+     * hook prints to the console, so the answer is on the USB serial
+     * stream even in the not-granted case that keeps it off the wire.
+     *
+     * Version and boot slot ride along because this is the first line
+     * of a boot that can reach cloud retention at all: the bootup event
+     * fires before the session exists and the tap drops it, so without
+     * this an OTA reboot never echoes what it now runs. */
+    const esp_partition_t *running_part = esp_ota_get_running_partition();
+    s_session_count++;
+    char previous[96];
+    ws_previous_close_json(previous, sizeof(previous));
+    char event[352];
+    snprintf(event, sizeof(event),
+             "{\"event\":\"cloud:session_ready\",\"source\":\"esp32\","
+             "\"logs\":%s,\"metrics\":%s,\"serviceSettings\":%s,"
+             "\"version\":\"%s\",\"bootedFrom\":\"%s\",\"session\":%lu,"
+             "\"uptimeSeconds\":%lld%s}",
+             logs_granted ? "true" : "false",
+             metrics_granted ? "true" : "false",
+             service_settings_granted ? "true" : "false",
+             esp_app_get_description()->version,
+             running_part ? running_part->label : "?",
+             (unsigned long)s_session_count,
+             (long long)(esp_timer_get_time() / 1000000), previous);
+    frameos_nim_log_hook(event);
+    s_prev_close_how = NULL;
+    s_prev_close_code = 0;
 }
 
-static void ws_handle_message(const char *data, size_t len)
-{
-    cJSON *root = cJSON_ParseWithLength(data, len);
-    if (!root) {
-        ESP_LOGW(TAG, "ws: unparseable message (%u bytes)", (unsigned)len);
-        ws_ack_unparseable(data, len);
-        return;
-    }
-    const cJSON *type_item = cJSON_GetObjectItem(root, "type");
-    const cJSON *id = cJSON_GetObjectItem(root, "id");
-    const char *type = cJSON_IsString(type_item) ? type_item->valuestring : "";
+/* Provider→frame verbs are queued here as raw bytes for the cloud task
+ * (ws_process_verbs), which hands them to the shared Nim verb layer. The WS
+ * task parses nothing but the two handshake messages, so a 500 KB
+ * set_scenes never costs it a cJSON tree and no verb ever waits on this task
+ * for a render to release the runtime lock. */
+typedef struct {
+    char *data;
+    size_t len;
+} verb_msg_t;
 
+static QueueHandle_t s_verb_queue = NULL;
+
+static void ws_flush_verb_queue(void)
+{
+    if (!s_verb_queue) return;
+    verb_msg_t item;
+    while (xQueueReceive(s_verb_queue, &item, 0) == pdTRUE) free(item.data);
+    s_pending_read_armed = false;
+}
+
+/* Returns true when the message buffer is now owned by the verb queue. */
+static bool ws_handle_message(char *data, size_t len)
+{
+    char type[48];
+    if (!ws_raw_string_field(data, len, "type", type, sizeof(type))) type[0] = '\0';
+    if (strcmp(type, "challenge") == 0 || strcmp(type, "ready") == 0) {
+        cJSON *root = cJSON_ParseWithLength(data, len);
+        if (!root) {
+            ESP_LOGW(TAG, "ws: unparseable %s message (%u bytes)", type, (unsigned)len);
+            return false;
+        }
+        if (strcmp(type, "challenge") == 0) ws_send_auth(root);
+        else ws_handle_ready(root);
+        cJSON_Delete(root);
+        return false;
+    }
+    if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
+        return false; /* provider-side notices; nothing to do */
+    }
     /* A verb arriving is the provider actively driving this frame: hold off
      * deep sleep briefly so a burst (set_scenes + set_settings + render)
      * completes before the frame disappears. Short on purpose — the local
-     * HTTP API's 3-minute hold would cost real battery on every check-in.
-     * Handshake messages and provider notices do not count. */
-    if (strcmp(type, "challenge") != 0 && strcmp(type, "ready") != 0 &&
-        strcmp(type, "error") != 0 && strcmp(type, "ack") != 0) {
-        fos_client_keep_awake_ms(15000);
+     * HTTP API's 3-minute hold would cost real battery on every check-in. */
+    fos_client_keep_awake_ms(15000);
+    if (!s_verb_queue) {
+        s_verb_queue = xQueueCreate(FOS_CLOUD_VERB_QUEUE_DEPTH, sizeof(verb_msg_t));
     }
-
-    /* One control plane owns the content (docs/cloud-frames.md): enrollment
-     * is refused while a backend is configured, but a device that gained a
-     * backend AFTER enrolling (bench/dev setups) must not let the provider's
-     * stale scene assignment overwrite the backend's set on every reconnect
-     * — the hub re-pushes whenever its assigned checksum differs. Content
-     * mutations defer to the backend; telemetry, assets and OTA still work. */
-    static const char *backend_owned_verbs[] = {
-        "set_scenes", "set_current_scene", "set_settings", "set_schedule",
-        /* Service settings too: the settings poll takes its payload from the
-         * backend whenever one is configured, so acking a provider's nudge
-         * `ok: true` would promise a fetch that never reads the provider. */
-        "refresh_service_settings",
-    };
-    if (fos_config()->backend_url[0] != '\0') {
-        for (size_t i = 0; i < sizeof(backend_owned_verbs) / sizeof(backend_owned_verbs[0]); i++) {
-            if (strcmp(type, backend_owned_verbs[i]) == 0) {
-                ESP_LOGW(TAG, "ws: refusing %s — this frame is backend-managed", type);
-                ws_ack(id, false, "backend_managed");
-                cJSON_Delete(root);
-                return;
+    verb_msg_t item = {.data = data, .len = len};
+    if (!s_verb_queue || xQueueSend(s_verb_queue, &item, 0) != pdTRUE) {
+        char id[80];
+        bool is_number = false;
+        if (ws_raw_message_id(data, len, id, sizeof(id), &is_number)) {
+            cJSON *id_item = is_number ? cJSON_CreateNumber(strtod(id, NULL))
+                                       : cJSON_CreateString(id);
+            if (id_item) {
+                ws_ack(id_item, false, "busy");
+                cJSON_Delete(id_item);
             }
         }
+        return false;
     }
+    return true;
+}
 
-    if (strcmp(type, "challenge") == 0) {
-        ws_send_auth(root);
-    } else if (strcmp(type, "ready") == 0) {
-        /* The ready message is authoritative for what this session may do:
-         * its scopes array reflects the provider's current grant, including
-         * revocations since enrollment. */
-        bool logs_granted = false;
-        bool metrics_granted = false;
-        bool service_settings_granted = false;
-        const cJSON *scopes = cJSON_GetObjectItem(root, "scopes");
-        const cJSON *scope = NULL;
-        cJSON_ArrayForEach(scope, scopes) {
-            if (!cJSON_IsString(scope) || !scope->valuestring) continue;
-            if (strcmp(scope->valuestring, "telemetry:logs") == 0) {
-                logs_granted = true;
-            } else if (strcmp(scope->valuestring, "telemetry:metrics") == 0) {
-                metrics_granted = true;
-            } else if (strcmp(scope->valuestring, "settings:services") == 0) {
-                service_settings_granted = true;
-            }
-        }
-        s_logs_granted = logs_granted;
-        s_metrics_granted = metrics_granted;
-        /* Service settings are fetched, never pushed: this only tells the
-         * settings poll it may ask. It pulls once before the next render, so a
-         * key the owner changed while this frame was offline lands on
-         * reconnect without waiting for a nudge. Unlike the telemetry flags
-         * this one is additive and outlives the session — the provider's
-         * `403 insufficient_scope` is what removes the keys again. */
-        fos_settings_cloud_scope_granted(service_settings_granted);
-        s_ws_ready = true;
-        s_ws_auth_failures = 0; /* a completed handshake clears the streak */
-        ws_backoff_reset();
-        /* Through the log hook, not ESP_LOGI: which scopes this session got
-         * is the first thing to check when a frame "sends no logs", and an
-         * INFO line is compiled out at CONFIG_LOG_MAXIMUM_LEVEL=WARN. The
-         * hook prints to the console, so the answer is on the USB serial
-         * stream even in the not-granted case that keeps it off the wire.
-         *
-         * Version and boot slot ride along because this is the first line
-         * of a boot that can reach cloud retention at all: the bootup event
-         * fires before the session exists and the tap drops it, so without
-         * this an OTA reboot never echoes what it now runs. */
-        const esp_partition_t *running_part = esp_ota_get_running_partition();
-        s_session_count++;
-        char previous[96];
-        ws_previous_close_json(previous, sizeof(previous));
-        char event[352];
-        snprintf(event, sizeof(event),
-                 "{\"event\":\"cloud:session_ready\",\"source\":\"esp32\","
-                 "\"logs\":%s,\"metrics\":%s,\"serviceSettings\":%s,"
-                 "\"version\":\"%s\",\"bootedFrom\":\"%s\",\"session\":%lu,"
-                 "\"uptimeSeconds\":%lld%s}",
-                 logs_granted ? "true" : "false",
-                 metrics_granted ? "true" : "false",
-                 service_settings_granted ? "true" : "false",
-                 esp_app_get_description()->version,
-                 running_part ? running_part->label : "?",
-                 (unsigned long)s_session_count,
-                 (long long)(esp_timer_get_time() / 1000000), previous);
-        frameos_nim_log_hook(event);
-        s_prev_close_how = NULL;
-        s_prev_close_code = 0;
-    } else if (strcmp(type, "get_state") == 0) {
-        if (!ws_send_state(id)) ws_ack(id, false, "runtime_busy");
-        else ws_ack(id, true, NULL);
+/* Send the verb layer's replies — a JSON array of messages, the ack first —
+ * in order. */
+static void ws_send_verb_replies(const char *reply_json)
+{
+    cJSON *replies = cJSON_Parse(reply_json);
+    if (!cJSON_IsArray(replies)) {
+        ESP_LOGW(TAG, "ws: verb layer returned no reply array");
+        cJSON_Delete(replies);
+        return;
+    }
+    cJSON *msg = NULL;
+    cJSON_ArrayForEach(msg, replies) {
+        if (cJSON_IsObject(msg)) ws_send_json(msg);
+    }
+    cJSON_Delete(replies);
+}
+
+/* A verb the Nim layer could not take: no runtime in this image (the ESP32-C3
+ * thin client ships none — docs/cloud-frames.md "Device profiles" answers
+ * such a profile `unsupported_verb`, with the two things a thin client can
+ * still do handled here), or a message that was not a JSON object. */
+static void ws_verb_fallback(const char *data, size_t len, int rc)
+{
+    char id[80];
+    bool is_number = false;
+    cJSON *id_item = NULL;
+    if (ws_raw_message_id(data, len, id, sizeof(id), &is_number)) {
+        id_item = is_number ? cJSON_CreateNumber(strtod(id, NULL)) : cJSON_CreateString(id);
+    }
+    char type[48];
+    if (!ws_raw_string_field(data, len, "type", type, sizeof(type))) type[0] = '\0';
+    if (rc == FRAMEOS_NIM_VERB_INVALID) {
+        ws_ack(id_item, false, "invalid_json");
+    } else if (strcmp(type, "reboot") == 0 || strcmp(type, "restart_runtime") == 0) {
+        ws_ack(id_item, true, NULL);
+        fos_cloud_schedule_reboot();
     } else if (strcmp(type, "render") == 0) {
         fos_client_render_now();
-        ws_ack(id, true, NULL);
-    } else if (strcmp(type, "set_current_scene") == 0) {
-        char scene_id[128] = "";
-        if (json_field_str(root, "scene_id", scene_id, sizeof(scene_id)) &&
-            fos_scenes_select(scene_id) == ESP_OK) {
-            fos_client_render_now();
-            ws_ack(id, true, NULL);
-        } else {
-            ws_ack(id, false, "unknown_scene");
-        }
-    } else if (strcmp(type, "set_scenes") == 0) {
-        ws_handle_set_scenes(root, id);
-    } else if (strcmp(type, "set_settings") == 0) {
-        ws_handle_set_settings(root, id);
-    } else if (strcmp(type, "assets_list") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_LIST, root, id);
-    } else if (strcmp(type, "asset_get") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_GET, root, id);
-    } else if (strcmp(type, "asset_put") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_PUT, root, id);
-    } else if (strcmp(type, "asset_put_chunk") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_PUT_CHUNK, root, id);
-    } else if (strcmp(type, "asset_mkdir") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_MKDIR, root, id);
-    } else if (strcmp(type, "asset_delete") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_DELETE, root, id);
-    } else if (strcmp(type, "asset_rename") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_RENAME, root, id);
-    } else if (strcmp(type, "image_get") == 0) {
-        ws_handle_asset_verb(ASSET_JOB_IMAGE, root, id);
-    } else if (strcmp(type, "reboot") == 0 || strcmp(type, "restart_runtime") == 0) {
-        /* On ESP32 the runtime IS the firmware: restart_runtime == reboot. */
-        ws_ack(id, true, NULL);
-        ws_schedule_reboot();
-    } else if (strcmp(type, "set_schedule") == 0) {
-        /* The chip carries no tz database, so the provider sends the frame's
-         * current UTC offset alongside the schedule (the backend poll does the
-         * same via the `frame` object). Apply it first: without it a
-         * cloud-only frame evaluates every event in UTC. */
-        const cJSON *offset = cJSON_GetObjectItem(root, "utcOffsetMinutes");
-        if (cJSON_IsNumber(offset)) {
-            fos_schedule_set_utc_offset_minutes((int)offset->valuedouble);
-        }
-        const cJSON *schedule = cJSON_GetObjectItem(root, "schedule");
-        if (schedule == NULL || cJSON_IsNull(schedule)) {
-            fos_schedule_set_json(NULL, 0);
-            ws_ack(id, true, NULL);
-        } else if (!cJSON_IsObject(schedule)) {
-            ws_ack(id, false, "invalid_schedule");
-        } else {
-            char *printed = cJSON_PrintUnformatted(schedule);
-            if (printed == NULL) {
-                ws_ack(id, false, "no_memory");
-            } else if (fos_schedule_set_json(printed, strlen(printed)) == ESP_OK) {
-                ws_ack(id, true, NULL);
-            } else {
-                ws_ack(id, false, "invalid_schedule");
-            }
-            cJSON_free(printed);
-        }
-    } else if (strcmp(type, "refresh_service_settings") == 0) {
-        /* Advisory nudge: "your service settings changed, re-fetch them". The
-         * payload is always empty — API keys never ride the command queue
-         * (docs/cloud-frames.md, "Service settings") and nothing here reads
-         * one. Disjoint from set_settings: the six service groups are not in
-         * that verb's allowlist and never become settable over the socket.
-         * Ack on ACCEPTING the nudge, not on completing the fetch: the fetch
-         * is HTTP on the render task's schedule, and a failed fetch must not
-         * look like a refused verb. */
-        if (!fos_settings_cloud_scope()) {
-            ws_ack(id, false, "insufficient_scope");
-        } else {
-            ws_ack(id, true, NULL);
-            fos_settings_request_sync();
-        }
-    } else if (strcmp(type, "get_logs") == 0) {
-        ws_handle_get_logs(root, id);
-    } else if (strcmp(type, "get_metrics") == 0) {
-        ws_handle_get_metrics(id);
-    } else if (strcmp(type, "notify_update_available") == 0) {
-        /* Signed cloud OTA (docs/cloud-frames.md): fetch the manifest,
-         * verify the minisign signature, apply. Runs in its own task —
-         * the ack only means "the check was accepted". */
-        ws_ack(id, true, NULL);
-        fos_ota_request_cloud_update();
-    } else if (strcmp(type, "error") == 0 || strcmp(type, "ack") == 0) {
-        /* provider-side notices; nothing to do */
-        /* Every documented verb is now implemented on this profile —
-         * `unsupported_verb` retired with the last holdout (cloud OTA). */
+        ws_ack(id_item, true, NULL);
     } else {
-        /* Audit-log and refuse everything not in the allowlist. */
-        ESP_LOGW(TAG, "ws: refusing verb \"%s\"", type[0] ? type : "(none)");
-        ws_ack(id, false, "unknown_verb");
+        ESP_LOGW(TAG, "ws: no runtime for verb \"%s\"", type[0] ? type : "(none)");
+        ws_ack(id_item, false, "unsupported_verb");
     }
-    cJSON_Delete(root);
+    cJSON_Delete(id_item);
+}
+
+/* Cloud task: run the queued verbs through the Nim verb layer, in order. A
+ * verb that finds the runtime busy (a render holds the lock) stays queued
+ * and is retried next tick — the telemetry polls on this task keep going
+ * meanwhile, and nothing here ever blocks the WS task. */
+static void ws_process_verbs(void)
+{
+    if (!s_verb_queue) return;
+    verb_msg_t item;
+    while (xQueuePeek(s_verb_queue, &item, 0) == pdTRUE) {
+        if (!s_ws_client || !s_ws_ready) {
+            /* Session gone: the provider redelivers on the next one. */
+            ws_flush_verb_queue();
+            return;
+        }
+        /* This session's grants (the `ready` message), plus settings:services
+         * once it has EVER been announced this boot — that scope is additive
+         * (fos_settings_cloud_scope), the telemetry ones are per session. */
+        char scopes[128];
+        snprintf(scopes, sizeof(scopes), "[\"frame:managed\"%s%s%s]",
+                 s_logs_granted ? ",\"telemetry:logs\"" : "",
+                 s_metrics_granted ? ",\"telemetry:metrics\"" : "",
+                 fos_settings_cloud_scope() ? ",\"settings:services\"" : "");
+        /* The checksum the provider was last told (hello / scene_ack), so an
+         * unchanged redelivery is acked without a re-render. */
+        const char *checksum =
+            (fos_scenes_from_cloud() && s_applied_scenes_checksum[0]) ? s_applied_scenes_checksum : "";
+        /* One control plane owns the content (docs/cloud-frames.md): a device
+         * that gained a backend AFTER enrolling (bench/dev setups) must not let
+         * the provider's stale assignment overwrite the backend's set. */
+        bool backend_managed = fos_config()->backend_url[0] != '\0';
+        const char *reply = NULL;
+        s_pending_read_armed = false;
+        int rc = frameos_nim_cloud_verb(item.data, item.len, scopes, checksum, backend_managed,
+                                        FOS_CLOUD_VERB_LOCK_WAIT_MS, &reply);
+        if (rc == FRAMEOS_NIM_VERB_BUSY) return; /* the render's; next tick */
+        xQueueReceive(s_verb_queue, &item, 0);
+        if (rc == FRAMEOS_NIM_VERB_HANDLED) {
+            ws_send_verb_replies(reply);
+            if (s_pending_read_armed) {
+                /* The ack went out; now the bytes, from the asset queue. */
+                s_pending_read_armed = false;
+                char id[80];
+                bool is_number = false;
+                if (ws_raw_message_id(item.data, item.len, id, sizeof(id), &is_number)) {
+                    strlcpy(s_pending_read.id, id, sizeof(s_pending_read.id));
+                }
+                if (!s_asset_jobs) {
+                    s_asset_jobs = xQueueCreate(FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH, sizeof(asset_job_t));
+                }
+                if (!s_asset_jobs || xQueueSend(s_asset_jobs, &s_pending_read, 0) != pdTRUE) {
+                    asset_chunk_send_error(s_pending_read.id, "busy");
+                }
+            }
+        } else {
+            ws_verb_fallback(item.data, item.len, rc);
+        }
+        free(item.data);
+    }
 }
 
 /* Jittered exponential backoff for the redial, as promised by
@@ -2936,8 +2299,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base, int32_t event_id,
             s_ws_rx_len = (size_t)data->payload_offset + (size_t)data->data_len;
             if (s_ws_rx_len == (size_t)data->payload_len) {
                 s_ws_rx[s_ws_rx_len] = '\0';
-                ws_handle_message(s_ws_rx, s_ws_rx_len);
-                free(s_ws_rx);
+                if (!ws_handle_message(s_ws_rx, s_ws_rx_len)) free(s_ws_rx);
                 s_ws_rx = NULL;
                 s_ws_rx_len = 0;
             }
@@ -3126,6 +2488,7 @@ static void ws_stop(void)
     s_metrics_granted = false;
     ws_drain_log_queue();
     ws_flush_asset_jobs();
+    ws_flush_verb_queue();
     s_scene_ack_pending = false;
     free(s_ws_rx); /* the ws task is gone; nothing else touches this */
     s_ws_rx = NULL;
@@ -3156,7 +2519,16 @@ static void ws_stop(void) {}
 static void ws_backoff_reset(void) {}
 static void ws_poll_scene_ack(void) {}
 static void ws_poll_logs(void) {}
+static void ws_process_verbs(void) {}
 static bool ws_process_asset_jobs(void) { return false; }
+void fos_cloud_queue_asset_read(fos_cloud_read_kind_t kind, const char *path) { (void)kind; (void)path; }
+void fos_cloud_arm_scene_ack(const char *checksum, uint32_t generation) { (void)checksum; (void)generation; }
+void fos_cloud_add_static_state(cJSON *msg)
+{
+    cJSON_AddStringToObject(msg, "frameos_version", esp_app_get_description()->version);
+    add_hardware_json(msg);
+    cJSON_AddStringToObject(msg, "scenes_checksum", fos_scenes_etag());
+}
 static bool ws_demote_requested(void) { return false; }
 static void ws_clear_demote_request(void) {}
 
@@ -3291,6 +2663,7 @@ static void cloud_task(void *arg)
             /* Streamed asset replies run here, off the WS task. A 1 s idle
              * tick keeps browse-the-SD latency humane; the polls are cheap
              * flag/queue checks. */
+            ws_process_verbs();
             ws_process_asset_jobs();
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;

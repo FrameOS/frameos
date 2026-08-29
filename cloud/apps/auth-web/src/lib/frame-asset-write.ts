@@ -22,7 +22,7 @@ import { readSession } from "./session";
 
 type CommandDatabase = Parameters<typeof enqueueFrameCommand>[0];
 
-// Mirror of HubMaxAssetUploadBytes (frameos/src/frameos/cloud/hub_client.nim):
+// Mirror of HubMaxAssetUploadBytes (frameos/src/frameos/cloud/verbs.nim):
 // a single-shot `asset_put` rides one base64-encoded WS frame under the
 // device's 4 MiB inbound cap. Bigger files ride `asset_put_chunk` — see
 // uploadAssetBytes — up to maxChunkedAssetUploadBytes.

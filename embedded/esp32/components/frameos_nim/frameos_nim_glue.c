@@ -65,6 +65,8 @@ extern double fos_nim_scene_interval_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
 extern bool fos_nim_send_event_impl(const char *event, const char *payload_json);
+extern const char *fos_nim_cloud_verb_impl(const char *msg, size_t len, const char *scopes_json,
+                                           const char *scenes_checksum, bool backend_managed);
 
 static bool s_nim_started = false;
 static bool s_nim_ready = false;
@@ -98,10 +100,15 @@ static fos_nim_log_node_t *s_log_tail = NULL;
 static size_t s_log_pending = 0;
 static size_t s_log_dropped = 0;
 
+/* The runtime lock is RECURSIVE: Nim is --threads:off, so two tasks must
+ * never be inside it at once, but one task may re-enter it — a cloud verb
+ * (frameos_nim_cloud_verb) runs Nim, whose firmware callbacks call
+ * fos_tz_install → frameos_nim_load_tz_data, which takes the lock again on
+ * the same task. A plain mutex deadlocked there. */
 static bool nim_lock_take(void)
 {
     if (s_nim_lock == NULL) return true;
-    return xSemaphoreTake(s_nim_lock, portMAX_DELAY) == pdTRUE;
+    return xSemaphoreTakeRecursive(s_nim_lock, portMAX_DELAY) == pdTRUE;
 }
 
 /* Bounded variant for callers that must not park behind a render: the
@@ -111,13 +118,13 @@ static bool nim_lock_take(void)
 static bool nim_lock_take_for(int timeout_ms)
 {
     if (s_nim_lock == NULL) return true;
-    if (timeout_ms < 0) return xSemaphoreTake(s_nim_lock, portMAX_DELAY) == pdTRUE;
-    return xSemaphoreTake(s_nim_lock, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
+    if (timeout_ms < 0) return xSemaphoreTakeRecursive(s_nim_lock, portMAX_DELAY) == pdTRUE;
+    return xSemaphoreTakeRecursive(s_nim_lock, pdMS_TO_TICKS(timeout_ms)) == pdTRUE;
 }
 
 static void nim_lock_give(void)
 {
-    if (s_nim_lock != NULL) xSemaphoreGive(s_nim_lock);
+    if (s_nim_lock != NULL) xSemaphoreGiveRecursive(s_nim_lock);
 }
 
 /* ------------------------------------------------------- the scene canvas
@@ -520,7 +527,7 @@ bool frameos_nim_init(int width, int height, const char *frame_name,
     s_log_upload_enabled = false;
     ensure_log_lock();
     if (s_nim_lock == NULL) {
-        s_nim_lock = xSemaphoreCreateMutex();
+        s_nim_lock = xSemaphoreCreateRecursiveMutex();
         if (s_nim_lock == NULL) {
             ESP_LOGW("fos_nim", "failed to create Nim runtime mutex");
         }
@@ -792,6 +799,34 @@ bool frameos_nim_send_event(const char *event, const char *payload_json)
     s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return ok;
+}
+
+int frameos_nim_cloud_verb(const char *msg, size_t len, const char *scopes_json,
+                           const char *scenes_checksum, bool backend_managed,
+                           int timeout_ms, const char **reply_json)
+{
+    *reply_json = NULL;
+    if (!s_nim_ready || msg == NULL) return FRAMEOS_NIM_VERB_NO_RUNTIME;
+    if (!nim_lock_take_for(timeout_ms)) return FRAMEOS_NIM_VERB_BUSY;
+    int result;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        const char *reply = fos_nim_cloud_verb_impl(msg, len, scopes_json ? scopes_json : "[]",
+                                                    scenes_checksum ? scenes_checksum : "",
+                                                    backend_managed);
+        if (reply == NULL || reply[0] == '\0') {
+            result = FRAMEOS_NIM_VERB_INVALID;
+        } else {
+            *reply_json = reply;
+            result = FRAMEOS_NIM_VERB_HANDLED;
+        }
+    } else {
+        nim_oom_abort_note("cloud verb");
+        result = FRAMEOS_NIM_VERB_NO_RUNTIME;
+    }
+    s_nim_oom_jmp_armed = false;
+    nim_lock_give();
+    return result;
 }
 
 static void note_log_drop(void)

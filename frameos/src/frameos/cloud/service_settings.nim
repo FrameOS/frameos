@@ -33,12 +33,12 @@ import std/uri
 
 import frameos/utils/http_client
 
+# The scope the link must hold for the provider to answer this route at all
+# is `settings:services` (ServiceSettingsScope in cloud/verbs.nim, which gates
+# the refresh nudge). A frame's own scope list is additive and never forgets,
+# so the provider's `403 insufficient_scope` — not the local list — is what a
+# revocation actually means (see applyServiceSettingsFetch).
 const
-  ServiceSettingsScope* = "settings:services"
-    ## The scope the link must hold for the provider to answer this route at
-    ## all. A frame's own scope list is additive and never forgets, so the
-    ## provider's `403 insufficient_scope` — not the local list — is what a
-    ## revocation actually means (see applyServiceSettingsFetch).
   ServiceSettingsMaxBytes* = 16 * 1024
     ## The whole deliverable set is six groups of at most two short string
     ## fields, so 16 KiB is orders of magnitude more than the contract needs.

@@ -20,20 +20,23 @@
  *               the same transport rule as cloud_url
  *
  * When enrolled and the firmware is built with esp_websocket_client, the
- * management WebSocket session (hello / challenge / auth / ready) runs with
- * the small allowlisted verb set. Documented verbs outside the esp32 profile
- * (set_schedule, set_settings, get_logs, get_metrics,
- * notify_update_available) are acked `unsupported_verb`; anything not in the
- * protocol at all is acked `unknown_verb`. Redials use jittered exponential
- * backoff (5 s → 5 min) and three consecutive authentication rejections
- * demote the device back to standalone, keeping the device key and the last
- * pushed scenes.
+ * management WebSocket session (hello / challenge / auth / ready) runs here;
+ * this file is the TRANSPORT only — the socket, the handshake, the redial
+ * backoff, log/metrics telemetry and the chunked asset streams. Every
+ * provider→frame verb is handed as raw bytes to the shared Nim verb layer
+ * (frameos/cloud/verbs.nim, the same code the Linux runtime runs, bound to
+ * the firmware by fos_cloud_verbs.c), which owns the verb table, the scope
+ * checks, the settings allowlist and every ack shape. Redials use jittered
+ * exponential backoff (5 s → 5 min) and three consecutive authentication
+ * rejections demote the device back to standalone, keeping the device key
+ * and the last pushed scenes.
  */
 #pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
 #include "esp_err.h"
+#include "cJSON.h"
 
 typedef enum {
     FOS_CLOUD_NONE = 0,  /* no cloud provider configured */
@@ -103,6 +106,40 @@ bool fos_cloud_flush_logs(uint32_t timeout_ms);
 const char *fos_cloud_ws_url(void);
 /* Forget that override (NVS + live copy) and go back to cloud_url + ws_path. */
 void fos_cloud_clear_ws_url(void);
+
+/* ---- for fos_cloud_verbs.c (the firmware's CloudVerbContext) ----------
+ *
+ * The verbs themselves are dispatched by the shared Nim verb layer; these
+ * are the transport-side hooks its firmware callbacks need. Cloud task only,
+ * called from inside a verb. */
+
+/* Largest file asset_get will stream; the reference provider refuses to
+ * cache anything bigger. */
+#define FOS_CLOUD_ASSET_MAX_FILE_BYTES (8u * 1024u * 1024u)
+
+typedef enum {
+    FOS_CLOUD_READ_ASSET = 0, /* a file off the SD card (path = sanitized relative path) */
+    FOS_CLOUD_READ_IMAGE = 1, /* the frame's rendered image as BMP */
+} fos_cloud_read_kind_t;
+
+/* asset_get / image_get were accepted: after the verb's ack goes out, stream
+ * the bytes as asset_chunk frames from the cloud task. The command id is
+ * attached by the verb runner (it is the raw message's, not the callback's
+ * to know). One per verb. */
+void fos_cloud_queue_asset_read(fos_cloud_read_kind_t kind, const char *path);
+/* set_scenes was stored: emit scene_ack (carrying `checksum`) once the
+ * render task's apply generation moves past `generation` and the load
+ * succeeded; remember the checksum for the next hello then. */
+void fos_cloud_arm_scene_ack(const char *checksum, uint32_t generation);
+/* reboot / restart_runtime / a boot-time setting changed: esp_restart() after
+ * a short delay so the ack still flushes over the socket. Idempotent. */
+void fos_cloud_schedule_reboot(void);
+/* The hello-shaped fields the transport knows — frameos_version, hardware,
+ * scenes_checksum — added to `msg`. The runtime adds active_scene/states. */
+void fos_cloud_add_static_state(cJSON *msg);
+/* Parse a log line into the {"timestamp"?, "payload"} entry shape log_batch
+ * uses; plain lines get the same wrapping the backend uploader applies. */
+cJSON *fos_cloud_log_line_entry(const char *line, double timestamp);
 
 /* Provider REST access for device-authed routes (cloud OTA manifest and
  * download): fills the provider base URL, the provider-assigned frame id and

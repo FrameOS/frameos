@@ -408,7 +408,7 @@ Raw `assets_path` and `log_to_file` paths are not exposed either; if they are
 ever wanted remotely they get redesigned as bounded toggles on fixed
 FrameOS-owned directories. Hardware identity reported by the frame stays
 authoritative. Adding a key is always the same four-list change (device
-allowlist + validator in `hub_client.nim`, the auth-web validator and version
+allowlist + validator in `cloud/verbs.nim`, the auth-web validator and version
 floor, `frontend/src/utils/cloudFrameSettings.ts`, this table) — and because
 the device refuses the WHOLE push on a key it does not recognise, nothing new
 goes out before the frames understand it.
@@ -423,15 +423,33 @@ configured, in which case the nudge is refused `backend_managed` because the
 provider is not that frame's settings source; the copy lives in RAM and is
 re-pulled every boot), `notify_update_available` (signed cloud OTA: manifest + download from the provider, minisign Ed25519 over BLAKE2b-512 verified against the baked key before the boot slot switches) | — |
 
-The ESP32 profile is a subset because the firmware has no scheduler, no log
-buffer and no metrics buffer to expose, and updates itself from its own
-configured archive. A provider should degrade gracefully — hide or disable
-those controls for a frame whose `hardware.platform` is `esp32`, rather than
-enqueueing commands that will come back refused. Logs still flow: `get_logs`
-stays unsupported (nothing buffered to replay), but the firmware pushes
+Both profiles run the **same verb layer**: `frameos/src/frameos/cloud/verbs.nim`
+holds the verb table, the scope checks, the `set_settings` allowlists
+(`CLOUD_SETTINGS_ALLOWLIST` for Linux, `CLOUD_SETTINGS_ALLOWLIST_ESP32` for
+the firmware) and every ack shape, and each platform injects what its
+callbacks do — the Linux runtime from `cloud/hub_client.nim`, the ESP32 from
+`src/embedded/embedded_cloud.nim` + `embedded/esp32/main/fos_cloud_verbs.c`.
+`fos_cloud.c` is the socket, the handshake, the redial backoff, telemetry and
+the chunked asset streams; it interprets no verb. Where the profiles differ
+it is in the callbacks, not the table: the ESP32 answers `set_scenes` with a
+bare ack and sends `scene_ack` only once its render task has hot-loaded the
+payload from flash (minutes later on a sleeping frame), streams `asset_get`
+and `image_get` from the SD card / the packed snapshot after the ack instead
+of holding the file in memory, replays `get_logs` from its 128-line ring
+(entries stamped as epoch seconds, or unstamped before SNTP), and answers
+`get_metrics` with its newest sample. A verb arriving while a render holds
+the runtime (90 s+ on a 13.3" panel) waits for it on the device and is
+answered afterwards — `reboot` included, so a panel is never reset
+mid-refresh. A provider should still degrade gracefully for a frame whose
+`hardware.platform` is `esp32` — the settings the firmware refuses are
+refused whole, as everywhere. Logs also flow unasked: the firmware pushes
 `log_batch` messages while the session is live and `telemetry:logs` is in
 the ready scopes — a tick coalescer only (up to one batch per second, ≤60
 lines), nothing retained across disconnects, and error acks are ignored.
+
+The ESP32-C3 thin client ships no Nim runtime and therefore no verb layer: it
+answers `reboot`/`restart_runtime`/`render` itself and everything else
+`unsupported_verb`, which is what this section's first paragraph is for.
 
 ### Frame → provider messages
 

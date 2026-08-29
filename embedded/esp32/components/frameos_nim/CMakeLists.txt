@@ -27,6 +27,14 @@ if(NIM_GENERATED_SRCS)
         -Wno-error=implicit-function-declaration
         -fno-strict-aliasing -fno-lto)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE FRAMEOS_NIM_ENABLED=1)
+    # The cloud verb layer (src/embedded/embedded_cloud.nim) calls back into
+    # main/fos_cloud_verbs.c — a reverse dependency on `main`, which the
+    # linker only scans once and before this library's objects are pulled in.
+    # The documented cure (build-system.rst, "Circular Dependencies"): name one
+    # of those symbols as undefined up front, so libmain.a's
+    # fos_cloud_verbs.c.obj — which defines all of them — joins the link
+    # regardless of order.
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-u fos_cloud_cb_free")
 else()
     # fos_netguard.c is in both branches on purpose: fos_cloud.c arms the
     # private-network policy unconditionally, so a thin-client image that

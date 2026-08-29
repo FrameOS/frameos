@@ -126,6 +126,23 @@ bool frameos_nim_render_requested(void);
 /* Deliver a JSON event payload to the current interpreted scene. */
 bool frameos_nim_send_event(const char *event, const char *payload_json);
 
+/* Cloud verb layer (frameos/src/frameos/cloud/verbs.nim, the same code the
+ * Linux runtime runs, bound to the firmware by src/embedded/embedded_cloud.nim
+ * + main/fos_cloud_verbs.c). One provider→frame message in; on
+ * FRAMEOS_NIM_VERB_HANDLED *reply_json is a JSON array of the messages to
+ * send, in order (the ack first), valid until the next call. BUSY means the
+ * runtime lock stayed taken for timeout_ms (a render): nothing happened, call
+ * again. INVALID: the message is not a JSON object. NO_RUNTIME: no Nim in
+ * this image, or not initialized yet. Every callback into the firmware runs
+ * on the caller's task, inside the (recursive) runtime lock. */
+#define FRAMEOS_NIM_VERB_HANDLED 1
+#define FRAMEOS_NIM_VERB_BUSY 0
+#define FRAMEOS_NIM_VERB_INVALID -1
+#define FRAMEOS_NIM_VERB_NO_RUNTIME -2
+int frameos_nim_cloud_verb(const char *msg, size_t len, const char *scopes_json,
+                           const char *scenes_checksum, bool backend_managed,
+                           int timeout_ms, const char **reply_json);
+
 /* Provided by the firmware for the Nim side (logging hook). */
 void frameos_nim_log_hook(const char *msg);
 

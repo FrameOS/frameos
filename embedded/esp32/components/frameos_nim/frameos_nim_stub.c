@@ -77,6 +77,15 @@ bool frameos_nim_send_event(const char *event, const char *payload_json)
     return false;
 }
 void frameos_nim_log_hook(const char *msg) { (void)msg; }
+int frameos_nim_cloud_verb(const char *msg, size_t len, const char *scopes_json,
+                           const char *scenes_checksum, bool backend_managed,
+                           int timeout_ms, const char **reply_json)
+{
+    (void)msg; (void)len; (void)scopes_json; (void)scenes_checksum; (void)backend_managed;
+    (void)timeout_ms;
+    *reply_json = NULL;
+    return FRAMEOS_NIM_VERB_NO_RUNTIME;
+}
 size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
 {
     (void)out; (void)max;

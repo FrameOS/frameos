@@ -297,7 +297,8 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     renderPanel(cloudFrame("esp32-s3"));
 
     const rendered = new Set(renderedFieldNames());
-    // What the firmware's ws_handle_set_settings actually applies.
+    // What the firmware actually applies (CLOUD_SETTINGS_ALLOWLIST_ESP32 in
+    // frameos/src/frameos/cloud/verbs.nim).
     expect(rendered.has("name")).toBe(true);
     expect(rendered.has("interval")).toBe(true);
     expect(rendered.has("rotate")).toBe(true);

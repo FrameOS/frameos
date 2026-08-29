@@ -122,7 +122,7 @@ export const maxScenesPayloadBytes = 3 * 1024 * 1024;
 // design; the device enforces the same list independently.
 //
 // These are the device's wire names, and they must stay exactly in sync with
-// CLOUD_SETTINGS_ALLOWLIST in frameos/src/frameos/cloud/hub_client.nim: the
+// CLOUD_SETTINGS_ALLOWLIST in frameos/src/frameos/cloud/verbs.nim: the
 // hub forwards keys verbatim and the device refuses the WHOLE verb when it
 // sees one it does not know, so a single wrong spelling here silently drops
 // every setting in the push. (`brightness` joins the list once the runtime
@@ -172,7 +172,7 @@ export const allowedFrameSettings = new Map<
   // The 2026.8.30 batch (Pi/Linux runtime only). Gated per frame on its
   // reported frameos_version — see extendedFrameSettingKeys — because a frame
   // on older firmware refuses the WHOLE push on any of them. Value rules
-  // mirror validateCloudSetting in hub_client.nim; the device re-checks.
+  // mirror validateCloudSetting in verbs.nim; the device re-checks.
   ["flip", (v) => v === "" || v === "horizontal" || v === "vertical" || v === "both"],
   ["error_behavior", isValidErrorBehavior],
   ["control_code", isValidControlCode],
@@ -200,7 +200,7 @@ export const allowedFrameSettings = new Map<
 ]);
 
 // Bounds shared with the device (CloudMaxHttpResponseBytes* in
-// hub_client.nim): the ceiling is the runtime's own default (64 MiB), so a
+// verbs.nim): the ceiling is the runtime's own default (64 MiB), so a
 // push can lower a Pi Zero's per-request memory bound but never raise it.
 export const minMaxHttpResponseBytes = 64 * 1024;
 export const maxMaxHttpResponseBytes = 64 * 1024 * 1024;
@@ -505,8 +505,10 @@ export function validateFrameSettings(
   return { settings: Object.fromEntries(entries) };
 }
 
-// The subset the ESP32 firmware really applies in its `set_settings` handler
-// (embedded/esp32/main/fos_cloud.c ws_handle_set_settings): `interval`
+// The subset the ESP32 firmware really applies for `set_settings`
+// (CLOUD_SETTINGS_ALLOWLIST_ESP32 in frameos/src/frameos/cloud/verbs.nim, the
+// shared verb layer; the values land in embedded/esp32/main/fos_settings.c
+// fos_settings_apply_cloud_json): `interval`
 // (interval_sec), `name` (the DHCP hostname), `rotate` (validated with the
 // same 0/90/180/270 normalization the backend settings poll uses, then
 // deferred-rebooted so the renderer re-inits), `scaling_mode`
@@ -823,7 +825,7 @@ export function validateFrameSchedule(
 // before serving frame.json for exactly this reason — so the disabled flags
 // are resolved here and never reach the wire. A fully disabled schedule
 // ships as zero events, NOT as null: the Pi's set_schedule handler
-// (hub_client.nim handleSetSchedule) refuses a non-object schedule.
+// (verbs.nim handleSetSchedule) refuses a non-object schedule.
 export function scheduleDevicePayload(schedule: FrameSchedule): {
   events: Omit<FrameScheduleEvent, "disabled">[];
 } {

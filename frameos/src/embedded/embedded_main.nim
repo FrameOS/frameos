@@ -16,6 +16,9 @@ import pixie
 
 import embedded_scene
 import embedded_runtime
+# Compiled for its exportc entry point (fos_nim_cloud_verb_impl); nothing
+# here calls it.
+import embedded_cloud
 from frameos/apps import applyServiceSettings
 import frameos/utils/dither
 import frameos/utils/image as frameos_image

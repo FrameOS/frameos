@@ -1879,10 +1879,10 @@ describe("frame management API", () => {
   });
 
   it("accepts exactly the device's settings allowlist, in the device's spelling", async () => {
-    // Authoritative lists: CLOUD_SETTINGS_ALLOWLIST in
-    // frameos/src/frameos/cloud/hub_client.nim (the base six plus the
-    // 2026.8.30 Pi/Linux batch) plus the power keys only
-    // ws_handle_set_settings in embedded/esp32/main/fos_cloud.c applies,
+    // Authoritative lists: CLOUD_SETTINGS_ALLOWLIST and
+    // CLOUD_SETTINGS_ALLOWLIST_ESP32 in frameos/src/frameos/cloud/verbs.nim
+    // (the base six plus the 2026.8.30 Pi/Linux batch; the power keys only
+    // the firmware applies),
     // mirrored in docs/cloud-frames.md. The hub forwards keys verbatim and
     // each device refuses the whole verb on one unknown key, so this must
     // match exactly (the SPA only sends power keys to esp32, and the
@@ -1913,7 +1913,8 @@ describe("frame management API", () => {
         "battery_enable_pin",
       ].sort(),
     );
-    // The ESP32 profile: exactly what ws_handle_set_settings applies.
+    // The ESP32 profile: exactly CLOUD_SETTINGS_ALLOWLIST_ESP32 minus
+    // timezone_data (a command-payload key, never a stored setting).
     expect([...esp32SettableKeys].sort()).toEqual(
       [
         "interval",

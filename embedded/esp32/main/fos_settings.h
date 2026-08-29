@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include "esp_err.h"
+#include "cJSON.h"
 #include "fos_config.h"
 
 /* Pull declarative settings and apply them without a rebuild. Runs on the
@@ -19,6 +20,17 @@
  * Both feed frameos_nim_apply_service_settings, which replaces the groups the
  * payload carries and deletes the ones it does not. */
 esp_err_t fos_settings_sync(bool force);
+/* Apply a cloud `set_settings` object (docs/cloud-frames.md; the keys of
+ * CLOUD_SETTINGS_ALLOWLIST_ESP32 in frameos/cloud/verbs.nim, snake_case) to
+ * fos_config and persist it. The shared verb layer has already shape-checked
+ * every value; this is where they land in NVS, where a live key (interval,
+ * debug, scaling_mode, the power keys, timezone + its tzdata slice) takes
+ * effect and where the boot-time ones (rotate, battery sensing, the HTTP
+ * ceiling, GPIO buttons) set *reboot so the caller restarts the device.
+ * Failure: *err is "invalid_settings" (a value the device refuses — the
+ * config is left untouched in NVS) or "persist_failed". */
+esp_err_t fos_settings_apply_cloud_json(const cJSON *settings, const char **err,
+                                        bool *reboot);
 /* Which declarative settings differ between two config snapshots, as the
  * wire's snake_case keys with their new values ("deep_sleep_on_battery=false,
  * interval=900"), for the log line that confirms what a settings push or

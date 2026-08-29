@@ -585,17 +585,27 @@ suite "cloud hub verb dispatcher":
     let granted = handleCloudVerb(makeContext(recorded, @["frame:managed", "telemetry:logs"]),
       %*{"id": "8", "type": "get_logs", "since": "2026-08-02T00:00:00Z", "limit": 1})
     check granted.ack{"ok"}.getBool(false) == true
-    check granted.ack{"logs"}.len == 1
-    check granted.ack{"logs"}[0]{"line"}.getStr("") == "three"
+    # The wire shape: a bare ack, then a log_batch carrying the command id.
+    check granted.ack.hasKey("logs") == false
+    check granted.extra.len == 1
+    check granted.extra[0]{"type"}.getStr("") == "log_batch"
+    check granted.extra[0]{"id"}.getStr("") == "8"
+    check granted.extra[0]{"logs"}.len == 1
+    check granted.extra[0]{"logs"}[0]{"line"}.getStr("") == "three"
 
   test "get_metrics requires telemetry:metrics":
     let recorded = Recorded()
     check handleCloudVerb(makeContext(recorded), %*{"type": "get_metrics"})
       .ack{"error"}.getStr("") == "insufficient_scope"
     let granted = handleCloudVerb(makeContext(recorded, @["telemetry:metrics"]),
-      %*{"type": "get_metrics"})
+      %*{"id": "9", "type": "get_metrics"})
     check granted.ack{"ok"}.getBool(false) == true
-    check granted.ack{"metrics"}.kind == JArray
+    # One `metrics` message with the newest sample, like the periodic push.
+    check granted.ack.hasKey("metrics") == false
+    check granted.extra.len == 1
+    check granted.extra[0]{"type"}.getStr("") == "metrics"
+    check granted.extra[0]{"id"}.getStr("") == "9"
+    check granted.extra[0]{"metrics"}{"load"}.getFloat(0) == 0.5
 
   test "get_state replies with the hello-shaped state":
     let recorded = Recorded()

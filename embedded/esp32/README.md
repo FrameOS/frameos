@@ -22,7 +22,8 @@ main/                     boot orchestration + platform modules
   fos_http.c              esp_http_server route layer (portal + /status + actions)
   fos_client.c            render loop: Nim local render or thin-client fetch → blit
   fos_ota.c               OTA manifest check + esp_https_ota when an OTA partition exists
-  fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
+  fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS transport
+  fos_cloud_verbs.c       the firmware's callbacks for the shared Nim verb layer (frameos/cloud/verbs.nim)
   fos_console.c           serial REPL (UART0 + USB-Serial/JTAG): status / set / wifi / render / ota / ...
   fos_defaults.h          compile-time defaults; generated_config.h (from the
                           backend's per-frame build) overrides them

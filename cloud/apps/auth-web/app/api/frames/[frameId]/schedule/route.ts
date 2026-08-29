@@ -96,8 +96,8 @@ export async function POST(
   // The hub flattens the payload into the wire message
   // (apps/frame-hub/src/protocol.ts commandMessage), so the device sees
   // {"schedule": {...}, "utcOffsetMinutes"?: N, "id", "type": "set_schedule"}
-  // — the shape both the Nim handler (hub_client.nim handleSetSchedule) and
-  // the ESP32 handler (fos_cloud.c) read.
+  // — the shape the shared verb layer (frameos/cloud/verbs.nim
+  // handleSetSchedule, on the Pi and the ESP32 alike) reads.
   await supersedePendingCommands(db, frame.id, "set_schedule");
   // The stored schedule keeps the workspace's store scene uuids (it
   // round-trips them); the device gets the runtime ids its scenes.json

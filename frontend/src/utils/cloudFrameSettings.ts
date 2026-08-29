@@ -2,7 +2,7 @@
 //
 // This list is declared three times and all three must agree: here,
 // `allowedFrameSettings` in cloud/apps/auth-web/src/lib/frames.ts, and
-// CLOUD_SETTINGS_ALLOWLIST in frameos/src/frameos/cloud/hub_client.nim. The
+// CLOUD_SETTINGS_ALLOWLIST in frameos/src/frameos/cloud/verbs.nim. The
 // device refuses the WHOLE verb when it sees a key it does not know, so one
 // extra or misspelled key here silently drops every setting in the push —
 // cloud/apps/auth-web/src/test/shared-spa/cloud-frame-settings.test.ts pins

@@ -40,7 +40,7 @@ Three things carry most of the weight today, and they are good:
   (`cloud/apps/auth-web/src/lib/frames.ts`) is eight keys plus five ESP32 power
   keys. `serverHost`, `serverApiKey`, the whole `agent` block, network config
   and credentials are absent, and the device enforces the same list again in
-  `CLOUD_SETTINGS_ALLOWLIST` (`frameos/cloud/hub_client.nim`) and refuses the
+  `CLOUD_SETTINGS_ALLOWLIST` (`frameos/cloud/verbs.nim`) and refuses the
   *whole* verb on an unknown key. `allowedFrameCommandTypes` has no shell verb
   and never has.
 - **LAN access is default-deny with a presence ceremony.** A cloud-managed
