@@ -6,25 +6,9 @@ import { csrfResponse } from '../../../../../src/lib/csrf'
 import { jsonError, readJsonObject, requireDatabase } from '../../../../../src/lib/device-flow'
 import {
   enqueueFrameSettingsPush,
-  esp32BatteryEnablePinFrameSettingKeys,
-  esp32BatteryEnablePinFrameSettingsMinVersion,
-  esp32ExtendedFrameSettingKeys,
-  esp32ExtendedFrameSettingsMinVersion,
-  esp32MaxGpioButtons,
-  esp32OnlySettableKeys,
-  esp32SettableKeys,
-  esp32TimeZoneFrameSettingKeys,
-  esp32TimeZoneFrameSettingsMinVersion,
-  extendedFrameSettingKeys,
-  extendedFrameSettingsMinVersion,
   frameForAccount,
   frameHardwareIsEsp32,
-  frameSupportsExtendedSettings,
-  frameSupportsHardwareSettings,
-  frameSupportsSettingsFrom,
-  frameSupportsTimeZoneSetting,
-  hardwareFrameSettingKeys,
-  hardwareFrameSettingsMinVersion,
+  frameSettingsRefusal,
   mergeFrameSettings,
   validateFrameSettings,
 } from '../../../../../src/lib/frames'
@@ -73,82 +57,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const settings = validated.settings
 
   // The frame's NAME is provider-side data (frames.name, what frameSummary
-  // returns) — the device never has to accept it. The ESP32 firmware's
-  // set_settings applies only `interval`, `name` and `rotate` (its
-  // declarative subset; anything else it refuses whole-verb with
-  // setting_not_allowed), so a payload carrying other keys is refused up
-  // front and nothing is half-applied.
+  // returns) — the device never has to accept it. Everything else must be a
+  // key the device's profile takes, at a value its rules allow, on firmware
+  // that knows the key: the contract answers all three (frameSettingsRefusal),
+  // and a device refuses the WHOLE push on the first key it cannot take, so
+  // refuse here, up front, with a code the SPA turns into "update the frame
+  // first" — nothing is ever half-applied.
   const isEsp32 = frameHardwareIsEsp32(frame)
-  if (isEsp32 && Object.keys(settings).some((key) => !esp32SettableKeys.has(key))) {
-    return jsonError('settings_not_supported_by_device', 400)
-  }
-  // ESP32 firmware before 2026.8.31 refuses the whole verb on debug /
-  // max_http_response_bytes / gpio_buttons; and its button table holds
-  // fewer entries than the Pi's.
-  if (
-    isEsp32 &&
-    !frameSupportsSettingsFrom(esp32ExtendedFrameSettingsMinVersion, frame.frameosVersion) &&
-    Object.keys(settings).some((key) => esp32ExtendedFrameSettingKeys.has(key))
-  ) {
-    return jsonError('settings_need_newer_firmware', 400, {
-      min_frameos_version: esp32ExtendedFrameSettingsMinVersion,
-    })
-  }
-  // Same shape for the 2026.8.34 time zone key (frameSupportsTimeZoneSetting
-  // is the gate the enrollment seed shares).
-  if (
-    !frameSupportsTimeZoneSetting(frame) &&
-    Object.keys(settings).some((key) => esp32TimeZoneFrameSettingKeys.has(key))
-  ) {
-    return jsonError('settings_need_newer_firmware', 400, {
-      min_frameos_version: esp32TimeZoneFrameSettingsMinVersion,
-    })
-  }
-  // And for the 2026.8.39 battery enable pin.
-  if (
-    isEsp32 &&
-    !frameSupportsSettingsFrom(esp32BatteryEnablePinFrameSettingsMinVersion, frame.frameosVersion) &&
-    Object.keys(settings).some((key) => esp32BatteryEnablePinFrameSettingKeys.has(key))
-  ) {
-    return jsonError('settings_need_newer_firmware', 400, {
-      min_frameos_version: esp32BatteryEnablePinFrameSettingsMinVersion,
-    })
-  }
-  if (isEsp32 && Array.isArray(settings.gpio_buttons) && settings.gpio_buttons.length > esp32MaxGpioButtons) {
-    return jsonError('invalid_settings', 400)
-  }
-  // The inverse holds too: the power keys exist only in the ESP32 firmware's
-  // profile — the Pi runtime's CLOUD_SETTINGS_ALLOWLIST refuses the whole
-  // verb on any of them, so refuse up front instead of half-applying.
-  if (!isEsp32 && Object.keys(settings).some((key) => esp32OnlySettableKeys.has(key))) {
-    return jsonError('settings_not_supported_by_device', 400)
-  }
-  // The extended batch needs firmware that knows the keys. The frame reports
-  // its version on every hello; a Pi frame still on older firmware refuses
-  // the WHOLE push on the first key it does not recognise, taking `name`
-  // and `interval` down with it — so refuse here, with a code the SPA turns
-  // into "update the frame first". A frame that never reported a version
-  // (never connected) is refused too: see frameSupportsExtendedSettings.
-  if (
-    !isEsp32 &&
-    !frameSupportsExtendedSettings(frame.frameosVersion) &&
-    Object.keys(settings).some((key) => extendedFrameSettingKeys.has(key))
-  ) {
-    return jsonError('settings_need_newer_firmware', 400, {
-      min_frameos_version: extendedFrameSettingsMinVersion,
-    })
-  }
-  // The hardware batch (palette, partial refresh, GPIO buttons) has its own,
-  // later floor. Same failure mode below it: the whole push refused on the
-  // device, so refuse it here with the version the SPA should ask for.
-  if (
-    !isEsp32 &&
-    !frameSupportsHardwareSettings(frame.frameosVersion) &&
-    Object.keys(settings).some((key) => hardwareFrameSettingKeys.has(key))
-  ) {
-    return jsonError('settings_need_newer_firmware', 400, {
-      min_frameos_version: hardwareFrameSettingsMinVersion,
-    })
+  const refusal = frameSettingsRefusal(frame, settings)
+  if (refusal) {
+    return jsonError(
+      refusal.error,
+      400,
+      refusal.minFrameosVersion ? { min_frameos_version: refusal.minFrameosVersion } : undefined,
+    )
   }
 
   // Mirror what was pushed so the Settings panel hydrates on the next load

@@ -1,4 +1,5 @@
 #include "fos_cloud.h"
+#include "fos_cloud_contract.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -2252,32 +2253,15 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         ws_ack(id, false, "invalid_settings");
         return;
     }
-    static const char *settable_keys[] = {
-        "interval", "name", "rotate", "scaling_mode",
-        /* 2026.8.34: an IANA zone name plus that zone's tzdata slice
-         * (fos_tz.h), applied live. */
-        "timezone",
-        "timezone_data",
-        "deep_sleep", "deep_sleep_on_battery", "wake_check_seconds",
-        "battery_pin", "battery_divider", "battery_enable_pin",
-        /* 2026.8.31: what the local admin API and the console already set. */
-        "debug", "max_http_response_bytes", "gpio_buttons",
-    };
-    const cJSON *entry = NULL;
-    cJSON_ArrayForEach(entry, settings) {
-        const char *key = entry->string ? entry->string : "";
-        bool known = false;
-        for (size_t k = 0; k < sizeof(settable_keys) / sizeof(settable_keys[0]); k++) {
-            if (strcmp(key, settable_keys[k]) == 0) {
-                known = true;
-                break;
-            }
-        }
-        if (!known) {
-            ESP_LOGW(TAG, "ws: set_settings key \"%s\" not supported on the esp32 profile", key);
-            ws_ack(id, false, "setting_not_allowed");
-            return;
-        }
+    /* Which keys, which values: the contract (fos_cloud_contract.c, generated
+     * from docs/cloud-frames-contract.json — the same document the cloud and
+     * the Linux runtime validate against). One unknown key or bad value
+     * refuses the whole verb, so nothing is ever half-applied. What follows
+     * is application only: normalization, buffer fits, NVS. */
+    const char *contract_error = fos_cloud_contract_check_settings(settings);
+    if (contract_error != NULL) {
+        ws_ack(id, false, contract_error);
+        return;
     }
     fos_config_t *config = fos_config();
     /* Snapshot to diff against once persisted: the `settings:cloud` line
@@ -2291,11 +2275,6 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (before) memcpy(before, config, sizeof(*before));
     const cJSON *interval = cJSON_GetObjectItem(settings, "interval");
     if (interval != NULL) {
-        if (!cJSON_IsNumber(interval) || interval->valuedouble < 1 ||
-            interval->valuedouble > 86400) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
         uint32_t seconds = (uint32_t)interval->valuedouble;
         /* Same floor the local admin API applies (fos_http.c). */
         if (seconds < 5) seconds = 5;
@@ -2303,8 +2282,8 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     }
     const cJSON *name = cJSON_GetObjectItem(settings, "name");
     if (name != NULL) {
-        if (!cJSON_IsString(name) || !name->valuestring[0]) {
-            ws_ack(id, false, "invalid_settings");
+        if (strlen(name->valuestring) >= sizeof(config->hostname)) {
+            ws_ack(id, false, "invalid_settings"); /* the contract's 256 > this buffer */
             return;
         }
         strlcpy(config->hostname, name->valuestring, sizeof(config->hostname));
@@ -2316,8 +2295,7 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     const cJSON *rotate = cJSON_GetObjectItem(settings, "rotate");
     if (rotate != NULL) {
         uint16_t normalized = 0;
-        if (!cJSON_IsNumber(rotate) ||
-            !fos_config_normalize_rotate(rotate->valuedouble, &normalized)) {
+        if (!fos_config_normalize_rotate(rotate->valuedouble, &normalized)) {
             ws_ack(id, false, "invalid_settings");
             return;
         }
@@ -2327,8 +2305,7 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     const cJSON *scaling = cJSON_GetObjectItem(settings, "scaling_mode");
     if (scaling != NULL) {
         char normalized[16];
-        if (!cJSON_IsString(scaling) ||
-            !fos_config_normalize_scaling_mode(scaling->valuestring, normalized,
+        if (!fos_config_normalize_scaling_mode(scaling->valuestring, normalized,
                                                sizeof(normalized))) {
             ws_ack(id, false, "invalid_settings");
             return;
@@ -2340,12 +2317,8 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     const cJSON *timezone = cJSON_GetObjectItem(settings, "timezone");
     const cJSON *timezone_data = cJSON_GetObjectItem(settings, "timezone_data");
     if (timezone != NULL) {
-        if (!cJSON_IsString(timezone) || strlen(timezone->valuestring) >= sizeof(config->time_zone)) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-        if (timezone_data != NULL && !cJSON_IsNull(timezone_data) && !cJSON_IsObject(timezone_data)) {
-            ws_ack(id, false, "invalid_settings");
+        if (strlen(timezone->valuestring) >= sizeof(config->time_zone)) {
+            ws_ack(id, false, "invalid_settings"); /* the contract's 64 > this buffer */
             return;
         }
         /* No reboot: TZ is read on every localtime() call. The provider
@@ -2358,33 +2331,17 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         char *slice = cJSON_IsObject(timezone_data) ? cJSON_PrintUnformatted(timezone_data) : NULL;
         fos_tz_install(slice);
         free(slice);
-    } else if (timezone_data != NULL) {
-        ws_ack(id, false, "invalid_settings");
-        return;
     }
     const cJSON *deep_sleep = cJSON_GetObjectItem(settings, "deep_sleep");
     if (deep_sleep != NULL) {
-        if (!cJSON_IsBool(deep_sleep)) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
         config->deep_sleep = cJSON_IsTrue(deep_sleep);
     }
     const cJSON *sleep_on_battery = cJSON_GetObjectItem(settings, "deep_sleep_on_battery");
     if (sleep_on_battery != NULL) {
-        if (!cJSON_IsBool(sleep_on_battery)) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
         config->deep_sleep_on_battery = cJSON_IsTrue(sleep_on_battery);
     }
     const cJSON *wake_check = cJSON_GetObjectItem(settings, "wake_check_seconds");
     if (wake_check != NULL) {
-        if (!cJSON_IsNumber(wake_check) || wake_check->valuedouble < 0 ||
-            wake_check->valuedouble > 86400) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
         uint32_t seconds = (uint32_t)wake_check->valuedouble;
         /* Sub-minute check-ins would drain a battery for nothing; 0 stays 0
          * (only wake to render). Same floor as the backend settings poll. */
@@ -2396,22 +2353,12 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     bool battery_changed = false;
     const cJSON *battery_pin = cJSON_GetObjectItem(settings, "battery_pin");
     if (battery_pin != NULL) {
-        if (!cJSON_IsNumber(battery_pin) || battery_pin->valuedouble < -1 ||
-            battery_pin->valuedouble > 48) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
         int8_t pin = (int8_t)battery_pin->valuedouble;
         battery_changed = battery_changed || config->battery_pin != pin;
         config->battery_pin = pin;
     }
     const cJSON *battery_divider = cJSON_GetObjectItem(settings, "battery_divider");
     if (battery_divider != NULL) {
-        if (!cJSON_IsNumber(battery_divider) || battery_divider->valuedouble < 0.5 ||
-            battery_divider->valuedouble > 20.0) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
         float divider = (float)battery_divider->valuedouble;
         battery_changed = battery_changed || config->battery_divider != divider;
         config->battery_divider = divider;
@@ -2422,11 +2369,6 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
      * batteryEnablePin write. */
     const cJSON *battery_enable_pin = cJSON_GetObjectItem(settings, "battery_enable_pin");
     if (battery_enable_pin != NULL) {
-        if (!cJSON_IsNumber(battery_enable_pin) || battery_enable_pin->valuedouble < -1 ||
-            battery_enable_pin->valuedouble > 48) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
         int8_t pin = (int8_t)battery_enable_pin->valuedouble;
         battery_changed = battery_changed || config->battery_enable_pin != pin;
         config->battery_enable_pin = pin;
@@ -2435,10 +2377,6 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
      * Nim runtime every pass (fos_client.c), so this applies live. */
     const cJSON *debug = cJSON_GetObjectItem(settings, "debug");
     if (debug != NULL) {
-        if (!cJSON_IsBool(debug)) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
         config->debug_logging = cJSON_IsTrue(debug);
     }
     /* Per-request HTTP body ceiling: handed to frameos_nim_init once at boot
@@ -2448,11 +2386,6 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     bool restart_for_init = false;
     const cJSON *max_http = cJSON_GetObjectItem(settings, "max_http_response_bytes");
     if (max_http != NULL) {
-        if (!cJSON_IsNumber(max_http) || max_http->valuedouble < 1024 ||
-            max_http->valuedouble > 64.0 * 1024 * 1024) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
         uint32_t bytes = (uint32_t)max_http->valuedouble;
         restart_for_init = restart_for_init || config->max_http_response_bytes != bytes;
         config->max_http_response_bytes = bytes;
@@ -2463,22 +2396,14 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
      * one place. fos_buttons_init runs once at boot, hence the reboot. */
     const cJSON *buttons = cJSON_GetObjectItem(settings, "gpio_buttons");
     if (buttons != NULL) {
-        if (!cJSON_IsArray(buttons) || cJSON_GetArraySize(buttons) > FOS_GPIO_BUTTONS_MAX) {
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
         char spec[FOS_GPIO_BUTTONS_SPEC_LEN] = "";
         size_t used = 0;
         const cJSON *button = NULL;
         cJSON_ArrayForEach(button, buttons) {
             const cJSON *pin = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "pin") : NULL;
             const cJSON *label = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "label") : NULL;
-            if (!cJSON_IsNumber(pin) || pin->valuedouble < 0 || pin->valuedouble > 48 ||
-                pin->valuedouble != (double)(int)pin->valuedouble ||
-                !cJSON_IsString(label) || !label->valuestring[0] ||
-                strlen(label->valuestring) >= FOS_GPIO_BUTTON_LABEL_LEN ||
-                strchr(label->valuestring, '\n') != NULL || strchr(label->valuestring, ':') != NULL) {
-                ws_ack(id, false, "invalid_settings");
+            if (strlen(label->valuestring) >= FOS_GPIO_BUTTON_LABEL_LEN) {
+                ws_ack(id, false, "invalid_settings"); /* the contract's 32 == this buffer */
                 return;
             }
             int written = snprintf(spec + used, sizeof(spec) - used, "%s%d:%s",
@@ -2579,21 +2504,14 @@ static void ws_handle_message(const char *data, size_t len)
      * stale scene assignment overwrite the backend's set on every reconnect
      * — the hub re-pushes whenever its assigned checksum differs. Content
      * mutations defer to the backend; telemetry, assets and OTA still work. */
-    static const char *backend_owned_verbs[] = {
-        "set_scenes", "set_current_scene", "set_settings", "set_schedule",
-        /* Service settings too: the settings poll takes its payload from the
-         * backend whenever one is configured, so acking a provider's nudge
-         * `ok: true` would promise a fetch that never reads the provider. */
-        "refresh_service_settings",
-    };
-    if (fos_config()->backend_url[0] != '\0') {
-        for (size_t i = 0; i < sizeof(backend_owned_verbs) / sizeof(backend_owned_verbs[0]); i++) {
-            if (strcmp(type, backend_owned_verbs[i]) == 0) {
-                ESP_LOGW(TAG, "ws: refusing %s — this frame is backend-managed", type);
-                ws_ack(id, false, "backend_managed");
-                cJSON_Delete(root);
-                return;
-            }
+    {
+        bool content_verb = false;
+        if (fos_cloud_contract_verb(type, NULL, &content_verb) && content_verb &&
+            fos_config()->backend_url[0] != '\0') {
+            ESP_LOGW(TAG, "ws: refusing %s — this frame is backend-managed", type);
+            ws_ack(id, false, "backend_managed");
+            cJSON_Delete(root);
+            return;
         }
     }
 

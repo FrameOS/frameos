@@ -153,6 +153,14 @@ jobs:
                 bash embedded/esp32/ci_build_image.sh
               cp embedded/esp32/build-ci/firmware-size.json /firmware-size/esp32-s3.json || true
               cp embedded/esp32/build-ci-32mb/firmware-size.json /firmware-size/esp32-s3-32mb.json || true
+              # The cloud verb contract, as the firmware walks it, against the
+              # conformance corpus the Linux runtime and the cloud also run
+              # (docs/cloud-frames-fixtures.json). Host-built: pure cJSON, no IDF.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
+                embedded/esp32/main/fos_cloud_contract.c embedded/esp32/main/tests/test_fos_cloud_contract.c \
+                -lm -o /tmp/test_fos_cloud_contract
+              /tmp/test_fos_cloud_contract docs/cloud-frames-fixtures.json
               ccache --show-stats || true
             '
           # The container writes as root; actions/cache runs as the runner user.

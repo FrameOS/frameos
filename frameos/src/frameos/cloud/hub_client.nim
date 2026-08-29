@@ -68,6 +68,7 @@ import ./device_flow
 import ./enrollment
 import ./identity
 import ./link_state
+import ./contract
 import ./scene_guard
 import ./service_settings
 
@@ -157,55 +158,31 @@ const
   # of leaving the last line reading `starting` forever.
   HubUpgradeStallSeconds = 45 * 60.0
 
-# Declarative settings a provider may push; every key maps onto an existing
-# frame.json field through the same persist path the local admin uses. Must
-# stay in sync with docs/cloud-frames.md (`set_settings`), allowedFrameSettings
-# in cloud/apps/auth-web/src/lib/frames.ts and the SPA's
-# frontend/src/utils/cloudFrameSettings.ts.
-#
-# Three tiers, one list. The first six shipped with the cloud link and every
-# managed frame understands them. The next seven arrived in 2026.8.30 and the
-# hardware batch (palette, the partial-refresh subset of deviceConfig, GPIO
-# buttons) in 2026.8.31 — a provider gates each tier on the frame's reported
-# `frameos_version`, because a frame on older firmware refuses the WHOLE verb
-# on a key it does not know (see handleSetSettings): one new key in the push
-# would take `name` and `interval` down with it. Structured values are
-# shape-checked below (validateCloudSetting) before they reach the persist
-# path — the allowlist says which keys, the validators say which values, and
-# the provider's own validation is UX, not the boundary.
-const CLOUD_SETTINGS_ALLOWLIST* = [
-  "name", "rotate", "interval", "scaling_mode", "timezone", "debug",
-  "flip", "error_behavior", "control_code", "metrics_interval",
-  "max_http_response_bytes", "save_assets", "timezone_updater",
-  "palette", "device_config", "gpio_buttons",
-]
+# Declarative settings a provider may push, straight from the contract
+# (docs/cloud-frames-contract.json → contract_gen.nim): every key maps onto
+# an existing frame.json field through the same persist path the local admin
+# uses. The cloud, the SPA and the ESP32 firmware read the same document, so
+# "which keys, which ranges, from which firmware version" is declared once.
+# A provider gates each key on the frame's reported `frameos_version`
+# (`since` in the contract), because a frame on older firmware refuses the
+# WHOLE verb on a key it does not know (see handleSetSettings): one new key
+# in the push would take `name` and `interval` down with it.
+const CLOUD_SETTINGS_ALLOWLIST* = profileAllowlist(LinuxProfile)
 
-# The display drivers copy these three into their own context at init
+# The display drivers copy these into their own context at init
 # (drivers/drivers.nim): a palette, a partial-refresh policy or a button map
 # only takes effect on the next start. A push carrying one of them restarts
 # the runtime after persisting instead of reloading it — the process comes
 # straight back (systemd), the panel re-inits with the new values.
-const CLOUD_SETTINGS_RESTART_KEYS* = ["palette", "device_config", "gpio_buttons"]
+const CLOUD_SETTINGS_RESTART_KEYS* = profileRestartKeys(LinuxProfile)
 
-# Ceilings for the numeric extended settings. maxHttpResponseBytes is a
-# per-request memory bound on a Pi Zero as much as a policy knob, so the
-# provider cannot lift it past what the platform's default already allows.
-const
-  CloudMaxHttpResponseBytesFloor* = 64 * 1024
-  CloudMaxHttpResponseBytesCeiling* = DefaultMaxHttpResponseBytes
-  CloudMetricsIntervalCeilingSeconds* = 24 * 60 * 60.0
-  CloudErrorRetryCeilingSeconds* = 24 * 60 * 60.0
-  CloudErrorWindowCeilingMinutes* = 7 * 24 * 60.0
-  # A saveAssets object names apps by keyword; keep it small and simple.
-  CloudSaveAssetsMaxEntries* = 64
-  # Palettes are the panel's ink count (6 for Spectra, 7 for ACeP); 16 leaves
-  # room without letting a provider ship a lookup table.
-  CloudPaletteMaxColors* = 16
-  # BCM 0..27 on a Pi header, up to 48 on the ESP32 boards; the driver
-  # refuses (and logs) a line it cannot open, it never crashes on one.
-  CloudGpioButtonMaxPin* = 48
-  CloudGpioButtonsMax* = 16
-  CloudPartialRefreshMaxRefreshes* = 1000
+# maxHttpResponseBytes is a per-request memory bound on a Pi Zero as much as
+# a policy knob, so the provider cannot lift it past what the platform's
+# default already allows — the contract's ceiling must stay that default.
+const CloudMaxHttpResponseBytesCeiling* = DefaultMaxHttpResponseBytes
+static:
+  doAssert CLOUD_SETTINGS_ALLOWLIST.len > 0
+  doAssert "max_http_response_bytes" in CLOUD_SETTINGS_ALLOWLIST
 
 # CLOUD_REFUSED_APP_KEYWORDS / refusedCloudAppKeyword moved to
 # cloud/scene_guard.nim (re-exported below): the scene registry now re-checks
@@ -824,192 +801,14 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
 # set_settings value validation
 # ---------------------------------------------------------------------------
 
-proc isJsonNumber(node: JsonNode): bool =
-  node != nil and node.kind in {JInt, JFloat}
-
-proc numberInRange(node: JsonNode, low, high: float): bool =
-  isJsonNumber(node) and node.getFloat() >= low and node.getFloat() <= high
-
-proc intInRange(node: JsonNode, low, high: int): bool =
-  node != nil and node.kind == JInt and node.getInt() >= low and node.getInt() <= high
-
-proc isHtmlHexColor(node: JsonNode): bool =
-  ## "#rrggbb" only — the one spelling every producer of these values (the
-  ## SPA's ColorInput, the backend's frame.json writer) uses, and the one
-  ## loadControlCode's parseHtmlColor cannot choke on.
-  if node == nil or node.kind != JString:
-    return false
-  let value = node.getStr("")
-  if value.len != 7 or value[0] != '#':
-    return false
-  for ch in value[1 .. ^1]:
-    if ch notin {'0'..'9', 'a'..'f', 'A'..'F'}:
-      return false
-  true
-
-proc onlyKeys(node: JsonNode, allowed: openArray[string]): bool =
-  ## Object shape guard: every key present must be one of `allowed`. An
-  ## unknown sub-key is refused for the same reason an unknown top-level key
-  ## is — the provider does not get to invent fields the runtime never
-  ## validated, even inside an object it is allowed to set.
-  if node == nil or node.kind != JObject:
-    return false
-  for key in node.keys:
-    if key notin allowed:
-      return false
-  true
-
 proc validateCloudSetting*(key: string, value: JsonNode): bool =
-  ## Is `value` an acceptable value for allowlisted setting `key`? The device
-  ## is the security boundary, so every key on CLOUD_SETTINGS_ALLOWLIST has a
-  ## rule here — including the original six, whose provider-side validators
-  ## these mirror. Anything this rejects fails the WHOLE verb with
-  ## `invalid_settings` (docs/cloud-frames.md).
-  if value == nil:
-    return false
-  case key
-  of "name":
-    value.kind == JString and value.getStr("").len in 1 .. 256
-  of "rotate":
-    value.kind == JInt and value.getInt() in [0, 90, 180, 270]
-  of "interval":
-    numberInRange(value, 1, 24 * 60 * 60)
-  of "scaling_mode":
-    value.kind == JString and value.getStr("") in ["contain", "cover", "stretch", "center"]
-  of "timezone":
-    value.kind == JString and value.getStr("").len <= 64
-  of "debug":
-    value.kind == JBool
-  of "flip":
-    value.kind == JString and value.getStr("") in ["", "horizontal", "vertical", "both"]
-  of "error_behavior":
-    # The frontend/backend spelling; frontendErrorBehaviorToRuntime maps it
-    # onto errorBehavior in frame.json.
-    if not onlyKeys(value, ["mode", "retry_seconds", "silent_retry_seconds",
-                            "silent_retry_forever", "silent_window_minutes",
-                            "show_error_retry_seconds"]):
-      return false
-    for subKey in value.keys:
-      let ok = case subKey
-        of "mode":
-          value[subKey].kind == JString and
-            value[subKey].getStr("") in ["safe_mode", "show_error_retry", "silent_retry"]
-        of "silent_retry_forever":
-          value[subKey].kind == JBool
-        of "silent_window_minutes":
-          numberInRange(value[subKey], 1, CloudErrorWindowCeilingMinutes)
-        else:
-          numberInRange(value[subKey], 1, CloudErrorRetryCeilingSeconds)
-      if not ok:
-        return false
-    true
-  of "control_code":
-    # The runtime's controlCode shape (loadControlCode): a bool `enabled`,
-    # numbers, and #rrggbb colours — not the SPA form's string spellings.
-    if not onlyKeys(value, ["enabled", "position", "size", "padding",
-                            "offsetX", "offsetY", "qrCodeColor", "backgroundColor"]):
-      return false
-    for subKey in value.keys:
-      let ok = case subKey
-        of "enabled": value[subKey].kind == JBool
-        of "position":
-          value[subKey].kind == JString and value[subKey].getStr("") in
-            ["top-left", "top-right", "bottom-left", "bottom-right", "center"]
-        of "size": numberInRange(value[subKey], 1, 50)
-        of "padding": intInRange(value[subKey], 0, 50)
-        of "offsetX", "offsetY": intInRange(value[subKey], -4096, 4096)
-        else: isHtmlHexColor(value[subKey])
-      if not ok:
-        return false
-    true
-  of "metrics_interval":
-    # 0 disables the sampler (metrics.nim); anything else is a period.
-    numberInRange(value, 0, CloudMetricsIntervalCeilingSeconds)
-  of "max_http_response_bytes":
-    intInRange(value, CloudMaxHttpResponseBytesFloor, CloudMaxHttpResponseBytesCeiling)
-  of "save_assets":
-    # A single switch, or a per-app-keyword map of switches.
-    if value.kind == JBool:
-      return true
-    if value.kind != JObject or value.len > CloudSaveAssetsMaxEntries:
-      return false
-    for appKey in value.keys:
-      if appKey.len == 0 or appKey.len > 64 or value[appKey].kind != JBool:
-        return false
-    true
-  of "timezone_updater":
-    # enabled/hour only. The download URL is deliberately NOT accepted from a
-    # provider: the endpoint stays the FrameOS-owned default (or whatever the
-    # local admin set) — see handleSetSettings for how it is carried over.
-    if not onlyKeys(value, ["enabled", "hour"]):
-      return false
-    for subKey in value.keys:
-      let ok = case subKey
-        of "enabled": value[subKey].kind == JBool
-        else: intInRange(value[subKey], 0, 23)
-      if not ok:
-        return false
-    true
-  of "palette":
-    # The SPA's Palette shape (frame.json `palette`): "#rrggbb" colours plus
-    # the optional display name and per-colour names. An empty colour list is
-    # a valid value — it hands the panel back its built-in palette.
-    if not onlyKeys(value, ["name", "colors", "colorNames"]):
-      return false
-    let colors = value{"colors"}
-    if colors == nil or colors.kind != JArray or colors.len > CloudPaletteMaxColors:
-      return false
-    for color in colors.items:
-      if not isHtmlHexColor(color):
-        return false
-    if value.hasKey("name") and not (value["name"].kind == JString and value["name"].getStr("").len <= 64):
-      return false
-    if value.hasKey("colorNames"):
-      let names = value["colorNames"]
-      if names.kind != JArray or names.len != colors.len:
-        return false
-      for name in names.items:
-        if name.kind != JString or name.getStr("").len > 32:
-          return false
-    true
-  of "device_config":
-    # STRICTLY the partial-refresh policy. Everything else in deviceConfig is
-    # hardware wiring (VCOM, pins, upload URL and headers, SD card, render
-    # mode) and stays the device's own — the persist path patches, so what
-    # is not sent is not touched.
-    if not onlyKeys(value, ["partial", "partialMaxAreaPercent", "partialMaxRefreshesBeforeFull"]):
-      return false
-    if value.len == 0:
-      return false
-    for subKey in value.keys:
-      let ok = case subKey
-        of "partial": value[subKey].kind == JBool
-        of "partialMaxAreaPercent": numberInRange(value[subKey], 0, 100)
-        else: intInRange(value[subKey], 0, CloudPartialRefreshMaxRefreshes)
-      if not ok:
-        return false
-    true
-  of "gpio_buttons":
-    # [{pin, label}] — the whole list, replaced. An empty list unbinds every
-    # button; a pin appearing twice is refused (the driver would register
-    # the line twice).
-    if value.kind != JArray or value.len > CloudGpioButtonsMax:
-      return false
-    var seenPins: seq[int] = @[]
-    for button in value.items:
-      if not onlyKeys(button, ["pin", "label"]):
-        return false
-      if not intInRange(button{"pin"}, 0, CloudGpioButtonMaxPin):
-        return false
-      let label = button{"label"}
-      if label == nil or label.kind != JString or label.getStr("").strip().len notin 1 .. 32:
-        return false
-      if button["pin"].getInt() in seenPins:
-        return false
-      seenPins.add(button["pin"].getInt())
-    true
-  else:
-    false
+  ## Is `value` an acceptable value for allowlisted setting `key` on this
+  ## profile? The device is the security boundary, so every allowlisted key
+  ## has a rule in the contract — including the original six, whose
+  ## provider-side validators are generated from the same document. Anything
+  ## this rejects fails the WHOLE verb with `invalid_settings`
+  ## (docs/cloud-frames.md).
+  value != nil and validateContractSetting(LinuxProfile, key, value)
 
 proc applySystemTimeZone(timeZone: string) {.gcsafe.} =
   ## frame.json's timeZone drives the scheduler and the Nim apps, but QuickJS
@@ -1037,7 +836,10 @@ proc applyEnrollmentPersonalization(personalization: JsonNode) {.gcsafe.} =
 
 proc handleSetSettings(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   let settings = msg{"settings"}
-  if settings == nil or settings.kind != JObject:
+  # An empty object is a malformed push, not a no-op: the contract
+  # (checkContractSettings, and the cloud's validateFrameSettings) refuses it,
+  # so every device answers the same way.
+  if settings == nil or settings.kind != JObject or settings.len == 0:
     ctx.audit("set_settings", false, "invalid_settings")
     return CloudVerbReply(ack: ackError(id, "invalid_settings"))
   # One unknown key refuses the whole verb: the allowlist is the contract, and
