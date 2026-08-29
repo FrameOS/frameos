@@ -20,12 +20,13 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
-import { normalizeCategory } from "../../../../../src/lib/categories";
-import { moderateStoreContent } from "../../../../../src/lib/moderation";
+import {
+  moderateListingChanges,
+  parseListingChanges,
+} from "../../../../../src/lib/store-listing";
 import {
   maxSceneZipBytes,
   normalizeFrameosVersion,
-  normalizeTags,
   rebuildZipWithFrameosVersion,
   sceneSummary,
   sceneVisibilities,
@@ -198,30 +199,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     changes.visibility = visibility;
   }
 
-  if (typeof body.description === "string" || body.description === null) {
-    changes.description =
-      typeof body.description === "string"
-        ? body.description.slice(0, 2000)
-        : null;
+  const listing = parseListingChanges(body);
+  if ("error" in listing) {
+    return jsonError(listing.error, 400);
   }
-
-  if (body.tags !== undefined) {
-    const tags = normalizeTags(body.tags);
-    if (tags === undefined) {
-      return jsonError("invalid_tags", 400);
-    }
-    changes.tags = tags;
-  }
-
-  // Category is a fixed taxonomy slug (or null to clear), so unlike tags it
-  // needs no moderation pass.
-  if (body.category !== undefined) {
-    const category = normalizeCategory(body.category);
-    if (category === undefined) {
-      return jsonError("invalid_category", 400);
-    }
-    changes.category = category;
-  }
+  Object.assign(changes, listing.changes);
 
   let requestedFrameosVersion: string | null | undefined;
   if (Object.hasOwn(body, "frameosVersion")) {
@@ -245,40 +227,28 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   // re-checks the whole listing (name + description + preview image).
   const makingPublic =
     changes.visibility === "public" && scene.visibility !== "public";
-  const editedDescription = changes.description;
-  const editedTags = changes.tags?.length ? changes.tags.join(" ") : undefined;
-  if (makingPublic || typeof editedDescription === "string" || editedTags) {
-    const moderation = await moderateStoreContent({
-      texts: makingPublic
-        ? [scene.name, editedDescription ?? scene.description, editedTags]
-        : [editedDescription, editedTags],
-      ...(makingPublic && scene.previewImage
-        ? {
-            image: {
-              content: scene.previewImage,
-              contentType: scene.previewImageType ?? "image/jpeg",
-            },
-          }
-        : {}),
-    });
-    if (!moderation.ok) {
-      if (moderation.error === "content_rejected") {
-        await recordAuditEvent(db, {
+  const moderation = await moderateListingChanges({
+    changes: listing.changes,
+    makingPublic,
+    scene,
+  });
+  if (!moderation.ok) {
+    if (moderation.error === "content_rejected") {
+      await recordAuditEvent(db, {
+        accountId: session.accountId,
+        actor: {
           accountId: session.accountId,
-          actor: {
-            accountId: session.accountId,
-            providerSubject: session.providerSubject,
-          },
-          eventType: "store.publish_rejected",
-          metadata: { categories: moderation.categories, name: scene.name },
-          target: { sceneId: scene.id },
-        });
-        return jsonError("content_rejected", 422, {
-          categories: moderation.categories,
-        });
-      }
-      return jsonError("moderation_unavailable", 503);
+          providerSubject: session.providerSubject,
+        },
+        eventType: "store.publish_rejected",
+        metadata: { categories: moderation.categories, name: scene.name },
+        target: { sceneId: scene.id },
+      });
+      return jsonError("content_rejected", 422, {
+        categories: moderation.categories,
+      });
     }
+    return jsonError("moderation_unavailable", 503);
   }
 
   const frameosVersionChanged =

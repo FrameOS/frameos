@@ -286,6 +286,87 @@ describe("save_scene on a store scene", () => {
   });
 });
 
+describe("update_scene_listing", () => {
+  function listingCtx(accountId: string, storeSceneId: string | null): ToolContext {
+    return {
+      accountId,
+      db,
+      emitScenes: () => undefined,
+      prompt: "update the description",
+      storeSceneId,
+    };
+  }
+
+  it("writes the description of the scene in context, leaving tags and category alone", async () => {
+    const owner = await signIn(false);
+    const { scene } = await storeScene(owner.accountId, { name: "Visited world map" });
+
+    const result = JSON.parse(
+      await executeTool(
+        "update_scene_listing",
+        { description: "Every country I have set foot in, in ink." },
+        listingCtx(owner.accountId, scene.id),
+      ),
+    ) as { listing: { description: string }; note: string; ok: boolean };
+    expect(result.ok).toBe(true);
+    expect(result.note).toMatch(/does not need to press Save/);
+
+    const [row] = await db.select().from(storeScenes).where(eq(storeScenes.id, scene.id));
+    expect(row).toMatchObject({
+      category: "utilities",
+      description: "Every country I have set foot in, in ink.",
+      name: "Visited world map",
+      tags: ["counter"],
+    });
+
+    const [event] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.eventType, "store.listing_edited"));
+    expect(event?.metadata).toMatchObject({ fields: ["description"], via: "ai_chat" });
+  });
+
+  it("replaces tags and clears a category when asked", async () => {
+    const owner = await signIn(false);
+    const { scene } = await storeScene(owner.accountId, { name: "Visited world map" });
+
+    const result = JSON.parse(
+      await executeTool(
+        "update_scene_listing",
+        { category: null, scene_id: scene.id, tags: ["Maps", "travel"] },
+        listingCtx(owner.accountId, null),
+      ),
+    ) as { ok: boolean };
+    expect(result.ok).toBe(true);
+
+    const [row] = await db.select().from(storeScenes).where(eq(storeScenes.id, scene.id));
+    expect(row).toMatchObject({
+      category: null,
+      description: "Counts things",
+      tags: ["maps", "travel"],
+    });
+  });
+
+  it("will not touch a listing the user does not own", async () => {
+    const owner = await signIn(false);
+    const { scene } = await storeScene(owner.accountId, { name: "Visited world map" });
+    const visitor = await signIn(false);
+
+    const result = JSON.parse(
+      await executeTool(
+        "update_scene_listing",
+        { description: "mine now" },
+        listingCtx(visitor.accountId, scene.id),
+      ),
+    ) as { error: string; ok: boolean };
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/not in the user's account/);
+
+    const [row] = await db.select().from(storeScenes).where(eq(storeScenes.id, scene.id));
+    expect(row?.description).toBe("Counts things");
+  });
+});
+
 describe("scene delivery lint", () => {
   function ctxWith(overrides: Partial<ToolContext>, events: ScenesEvent[]): ToolContext {
     return {

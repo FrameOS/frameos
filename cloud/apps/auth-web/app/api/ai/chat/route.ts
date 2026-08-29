@@ -151,14 +151,22 @@ async function storeSceneContextBlock(
     "The user is on the scene store, looking at this store scene in its editor:",
     `- Store scene id: ${scene.id} (slug "${scene.slug}", version ${scene.latestVersion})`,
     `- Name: ${scene.name}`,
-    ...(scene.description ? [`- Description: ${scene.description}`] : []),
+    // Always stated, empty included: "update the description" on a scene
+    // with none must not read as an invitation to find one elsewhere.
+    `- Store listing description: ${scene.description || "(none yet)"}`,
     ...(scene.category ? [`- Category: ${scene.category}`] : []),
     ...(scene.tags.length > 0 ? [`- Tags: ${scene.tags.join(", ")}`] : []),
     `- Publisher: ${scene.publisher ?? "FrameOS user"}${owned ? " (this is the user's own scene)" : ""}`,
     `- Visibility: ${scene.visibility}`,
-    owned
-      ? "- Saving: the editor's \"Save as new version\" button publishes the edited scene as a new version of this listing; \"Fork & save copy\" makes a separate private copy. save_scene always makes a private copy (a fork of this store scene by default)."
-      : "- Saving: the user does not own this scene, so edits are saved as a FORK — the editor's \"Fork & save copy\" button or save_scene (which forks this store scene by default) creates a private copy in their account. Never suggest they can overwrite the original.",
+    ...(owned
+      ? [
+          "- Saving: the editor's \"Save as new version\" button publishes the edited scene as a new version of this listing; \"Fork & save copy\" makes a separate private copy. save_scene always makes a private copy (a fork of this store scene by default).",
+          "- The listing itself (description, tags, category) is theirs: update_scene_listing writes it straight to the store, no Save button involved.",
+        ]
+      : [
+          "- Saving: the user does not own this scene, so edits are saved as a FORK — the editor's \"Fork & save copy\" button or save_scene (which forks this store scene by default) creates a private copy in their account. Never suggest they can overwrite the original.",
+          "- The listing is not theirs to edit; update_scene_listing will refuse it.",
+        ]),
   ];
   return { block: lines.join("\n"), storeSceneId: scene.id };
 }
