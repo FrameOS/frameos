@@ -383,6 +383,12 @@ symlink, delete a request root queued (the sticky bit), or read the Wi-Fi
 PSK out of `state/NetworkManager/system-connections`. That last one closes
 §1's finding (c).
 
+The user-merge shell `patch-root.sh` embeds — the path that stamps the user
+into images composed from an older cached base — was run against a real ext4
+root partition through `debugfs`: it appends the three account lines (shadow
+back at 0600), is a no-op on the second run, and aborts the compose loudly
+when uid or gid 990 belongs to someone else.
+
 The two unit renderers (Nim and Python) were diffed and are byte-identical
 for all four user/NetworkManager combinations plus the door's units and the
 udev rule.
