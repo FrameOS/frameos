@@ -1,18 +1,52 @@
-// The declarative settings a FrameOS Cloud frame accepts, and nothing else.
+// The declarative settings a FrameOS Cloud frame accepts, per profile and
+// firmware version — read from the verb contract (docs/cloud-frames-contract.json
+// → cloudFramesContract.gen.ts). The cloud (cloud-frames-contract.gen.ts),
+// the Linux runtime and the ESP32 firmware read the same document, so the
+// SPA can never offer a key the device would refuse the whole push on.
 //
-// This list is declared three times and all three must agree: here,
-// `allowedFrameSettings` in cloud/apps/auth-web/src/lib/frames.ts, and
-// CLOUD_SETTINGS_ALLOWLIST in frameos/src/frameos/cloud/hub_client.nim. The
-// device refuses the WHOLE verb when it sees a key it does not know, so one
-// extra or misspelled key here silently drops every setting in the push —
-// cloud/apps/auth-web/src/test/shared-spa/cloud-frame-settings.test.ts pins
-// the agreement between the first two.
-//
-// Deliberately import-free: that test runs in node, and the SPA's type barrel
-// drags in reactflow and the whole device catalogue.
+// Deliberately import-free beyond the generated table: the cloud's shared-spa
+// tests run this in node, and the SPA's type barrel drags in reactflow and
+// the whole device catalogue.
+import { cloudFramesContractSettings } from './cloudFramesContract.gen'
 
-/** The original six: every managed frame, whatever its firmware, applies these. */
-export const cloudFrameSettingKeys = ['debug', 'interval', 'name', 'rotate', 'scaling_mode', 'timezone'] as const
+// The keys a client may SEND: companion keys (the ESP32's tzdata slice) are
+// attached by the cloud and never bound by the form, so they are not part of
+// the type either — every consumer types these as `keyof FrameType`.
+type SendableKey<P> = { [K in keyof P]: P[K] extends { companion: string } ? never : K }[keyof P]
+type LinuxKey = SendableKey<typeof cloudFramesContractSettings.linux>
+type Esp32Key = SendableKey<typeof cloudFramesContractSettings.esp32>
+export type CloudFrameSettingKey = LinuxKey | Esp32Key
+
+interface ContractEntry {
+  since: string | null
+  restart?: boolean
+  companion?: string
+}
+
+const linuxEntries = cloudFramesContractSettings.linux as Readonly<Record<string, ContractEntry>>
+const esp32Entries = cloudFramesContractSettings.esp32 as Readonly<Record<string, ContractEntry>>
+
+/**
+ * The keys a profile takes at exactly firmware floor `since` (null = every
+ * version), in contract order. Companion keys (the ESP32's tzdata slice) are
+ * never the SPA's to send — the cloud attaches them.
+ */
+function linuxKeysSince(since: string | null): LinuxKey[] {
+  return (Object.keys(linuxEntries) as LinuxKey[]).filter(
+    (key) => linuxEntries[key]?.since === since && !linuxEntries[key]?.companion
+  )
+}
+function esp32KeysSince(since: string | null): Esp32Key[] {
+  return (Object.keys(esp32Entries) as Esp32Key[]).filter(
+    (key) => esp32Entries[key]?.since === since && !esp32Entries[key]?.companion
+  )
+}
+
+/** The original six: every managed Linux frame, whatever its firmware, applies these. */
+export const cloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(null)
+
+/** Firmware from here on knows the extended keys. */
+export const extendedCloudFrameSettingsMinVersion = '2026.8.30'
 
 /**
  * The 2026.8.30 batch, Pi/Linux runtime only. Every key maps onto a field of
@@ -22,18 +56,10 @@ export const cloudFrameSettingKeys = ['debug', 'interval', 'name', 'rotate', 'sc
  * so callers gate on cloudFrameSupportsExtendedSettings(frame.frameos_version)
  * and only then include extendedCloudFrameSettingKeys.
  */
-export const extendedCloudFrameSettingKeys = [
-  'flip',
-  'error_behavior',
-  'control_code',
-  'metrics_interval',
-  'max_http_response_bytes',
-  'save_assets',
-  'timezone_updater',
-] as const
+export const extendedCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(extendedCloudFrameSettingsMinVersion)
 
-/** Firmware from here on knows the extended keys (CLOUD_SETTINGS_ALLOWLIST). */
-export const extendedCloudFrameSettingsMinVersion = '2026.8.30'
+/** Firmware from here on knows the hardware keys. */
+export const hardwareCloudFrameSettingsMinVersion = '2026.8.31'
 
 /**
  * The 2026.8.31 hardware batch, Pi/Linux runtime only: the display palette,
@@ -45,74 +71,51 @@ export const extendedCloudFrameSettingsMinVersion = '2026.8.30'
  * and callers gate on cloudFrameSupportsHardwareSettings(frame.frameos_version)
  * before including hardwareCloudFrameSettingKeys.
  */
-export const hardwareCloudFrameSettingKeys = ['palette', 'device_config', 'gpio_buttons'] as const
-
-/** Firmware from here on knows the hardware keys. */
-export const hardwareCloudFrameSettingsMinVersion = '2026.8.31'
+export const hardwareCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(hardwareCloudFrameSettingsMinVersion)
 
 /**
- * Power-management keys only the ESP32 firmware consumes. The Nim runtime's
- * CLOUD_SETTINGS_ALLOWLIST does not know them, so pushing them at a Pi frame
- * drops the whole verb — callers must include them only for esp32 frames
- * (frameLogic gates on isEsp32CloudFrame).
+ * Power-management keys only the ESP32 firmware consumes. The Linux runtime
+ * refuses the whole verb on them, so callers include them only for esp32
+ * frames (frameLogic gates on isEsp32CloudFrame). This is the list the frame
+ * form keys, diffs and normalizes on (frameLogic FRAME_KEYS / frameDiffKeys);
+ * what is actually SENT is esp32CloudFrameSettingKeysForVersion.
  */
-const esp32BasePowerSettingKeys = [
-  'deep_sleep',
-  'deep_sleep_on_battery',
-  'wake_check_seconds',
-  'battery_pin',
-  'battery_divider',
-] as const
+export const esp32PowerSettingKeys: readonly Esp32Key[] = (Object.keys(esp32Entries) as Esp32Key[]).filter(
+  (key) => !(key in linuxEntries) && !esp32Entries[key]?.companion
+)
 
 /**
  * 2026.8.39: the battery divider's enable GPIO (reTerminal E1004 switches
  * its divider on through GPIO 21 while sampling). Read at boot next to
  * battery_pin. Older firmware refuses the whole push on it — its own floor,
- * like the two tails below. Mirrors esp32BatteryEnablePinFrameSettingKeys
- * on the control plane.
+ * like the two tails below.
  */
-export const esp32BatteryEnablePinCloudFrameSettingKeys = ['battery_enable_pin'] as const
 export const esp32BatteryEnablePinCloudFrameSettingsMinVersion = '2026.8.39'
+export const esp32BatteryEnablePinCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  esp32BatteryEnablePinCloudFrameSettingsMinVersion
+)
 
 export function cloudFrameSupportsEsp32BatteryEnablePin(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(esp32BatteryEnablePinCloudFrameSettingsMinVersion, frameosVersion)
 }
 
 /**
- * Every power key the Power section binds — the ones every cloud-linked
- * firmware applies plus the gated enable pin. This is the list the frame
- * form keys, diffs and normalizes on (frameLogic FRAME_KEYS / frameDiffKeys);
- * what is actually SENT is esp32CloudFrameSettingKeysForVersion.
- */
-export const esp32PowerSettingKeys = [
-  ...esp32BasePowerSettingKeys,
-  ...esp32BatteryEnablePinCloudFrameSettingKeys,
-] as const
-
-/**
  * What every ESP32 firmware with the cloud link applies: four of the base
- * six (no timezone before 2026.8.34 — see esp32TimeZoneCloudFrameSettingKeys
- * — and no debug before 2026.8.31) plus the ungated power keys. Mirrors
- * esp32SettableKeys on the control plane minus its version-gated tails.
+ * six (no timezone before 2026.8.34, no debug before 2026.8.31) plus the
+ * ungated power keys.
  */
-export const esp32CloudFrameSettingKeys = [
-  'interval',
-  'name',
-  'rotate',
-  'scaling_mode',
-  ...esp32BasePowerSettingKeys,
-] as const
+export const esp32CloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(null)
 
 /**
  * What the ESP32 firmware learned in 2026.8.31: debug logging (live), the
  * per-request HTTP ceiling and the GPIO button map (both read at boot, so
  * the firmware reboots after persisting them). Older firmware refuses the
  * whole push on them — callers gate on cloudFrameSupportsEsp32ExtendedSettings.
- * `debug` and `max_http_response_bytes` are the same wire keys the Pi runtime
- * takes; the SPA's esp32 profile simply did not send them before.
  */
-export const esp32ExtendedCloudFrameSettingKeys = ['debug', 'max_http_response_bytes', 'gpio_buttons'] as const
 export const esp32ExtendedCloudFrameSettingsMinVersion = '2026.8.31'
+export const esp32ExtendedCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  esp32ExtendedCloudFrameSettingsMinVersion
+)
 export const esp32MaxCloudGpioButtons = 8
 
 export function cloudFrameSupportsEsp32ExtendedSettings(frameosVersion: string | null | undefined): boolean {
@@ -122,115 +125,112 @@ export function cloudFrameSupportsEsp32ExtendedSettings(frameosVersion: string |
 /**
  * 2026.8.34: the ESP32 firmware maps an IANA zone name onto a POSIX TZ rule
  * (fos_tz.c) and applies it live, so the Pi's `timezone` wire key reaches
- * the chip too — behind its own floor. Mirrors esp32TimeZoneFrameSettingKeys
- * on the control plane.
+ * the chip too — behind its own floor.
  */
-export const esp32TimeZoneCloudFrameSettingKeys = ['timezone'] as const
 export const esp32TimeZoneCloudFrameSettingsMinVersion = '2026.8.34'
+export const esp32TimeZoneCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  esp32TimeZoneCloudFrameSettingsMinVersion
+)
 
 export function cloudFrameSupportsEsp32TimeZone(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(esp32TimeZoneCloudFrameSettingsMinVersion, frameosVersion)
 }
 
-/** The keys an ESP32 cloud frame reporting `frameosVersion` can be sent. */
+/**
+ * The keys an ESP32 cloud frame reporting `frameosVersion` can be sent: the
+ * base set, then each gated batch its firmware knows, in floor order.
+ */
 export function esp32CloudFrameSettingKeysForVersion(
   frameosVersion: string | null | undefined
 ): CloudFrameSettingKey[] {
-  const keys: CloudFrameSettingKey[] = [...esp32CloudFrameSettingKeys]
-  if (cloudFrameSupportsEsp32ExtendedSettings(frameosVersion)) {
-    keys.push(...esp32ExtendedCloudFrameSettingKeys)
-  }
-  if (cloudFrameSupportsEsp32TimeZone(frameosVersion)) {
-    keys.push(...esp32TimeZoneCloudFrameSettingKeys)
-  }
-  if (cloudFrameSupportsEsp32BatteryEnablePin(frameosVersion)) {
-    keys.push(...esp32BatteryEnablePinCloudFrameSettingKeys)
-  }
-  return keys
+  return keysForVersion(esp32Entries, frameosVersion) as CloudFrameSettingKey[]
 }
 
-/** Every key any cloud frame can be sent — the superset the drift test pins. */
-export const allCloudFrameSettingKeys = [
-  ...cloudFrameSettingKeys,
-  ...extendedCloudFrameSettingKeys,
-  ...hardwareCloudFrameSettingKeys,
-  ...esp32PowerSettingKeys,
-] as const
-
-export type CloudFrameSettingKey = (typeof allCloudFrameSettingKeys)[number]
+/** Every key any profile takes: what the form binds and diffs on. */
+export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.from(
+  new Set<CloudFrameSettingKey>([
+    ...cloudFrameSettingKeys,
+    ...extendedCloudFrameSettingKeys,
+    ...hardwareCloudFrameSettingKeys,
+    ...esp32PowerSettingKeys,
+  ])
+)
 
 /**
  * The keys a Pi/Linux cloud frame reporting `frameosVersion` can be sent:
- * the base six, plus each later batch once the firmware knows it.
+ * the base six, then each gated batch its firmware knows, in floor order.
  */
 export function cloudFrameSettingKeysForVersion(frameosVersion: string | null | undefined): CloudFrameSettingKey[] {
-  const keys: CloudFrameSettingKey[] = [...cloudFrameSettingKeys]
-  if (cloudFrameSupportsExtendedSettings(frameosVersion)) {
-    keys.push(...extendedCloudFrameSettingKeys)
+  return keysForVersion(linuxEntries, frameosVersion) as CloudFrameSettingKey[]
+}
+
+function keysForVersion<K extends string>(
+  entries: Readonly<Record<K, ContractEntry>>,
+  frameosVersion: string | null | undefined
+): K[] {
+  const keys = Object.keys(entries) as K[]
+  const floors = Array.from(
+    new Set(keys.map((key) => entries[key]?.since ?? null).filter((since): since is string => since !== null))
+  ).sort(compareVersions)
+  const result: K[] = keys.filter((key) => entries[key]?.since === null && !entries[key]?.companion)
+  for (const floor of floors) {
+    if (!cloudFrameSupportsSettingsFrom(floor, frameosVersion)) continue
+    result.push(...keys.filter((key) => entries[key]?.since === floor && !entries[key]?.companion))
   }
-  if (cloudFrameSupportsHardwareSettings(frameosVersion)) {
-    keys.push(...hardwareCloudFrameSettingKeys)
-  }
-  return keys
+  return result
 }
 
 /**
  * Does firmware `frameosVersion` understand the extended batch? Mirrors
- * frameSupportsExtendedSettings in cloud/apps/auth-web/src/lib/frames.ts —
- * the two MUST agree, or the SPA offers fields the route then refuses:
- *  - a parseable version compares numerically against the minimum ("2026.10.0"
- *    is newer than "2026.9.0", so never compare as strings);
- *  - a non-empty but unparseable one ("unknown": a dev build) is trusted;
- *  - null/empty (never reported = never connected) is not.
+ * frameSupportsExtendedSettings on the control plane (cloud/apps/auth-web/
+ * src/lib/frames.ts) — the two must agree or the SPA offers fields the route
+ * refuses.
  */
 export function cloudFrameSupportsExtendedSettings(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(extendedCloudFrameSettingsMinVersion, frameosVersion)
 }
 
-/** Same three answers, against the hardware batch's floor. */
+/** Same for the hardware batch. */
 export function cloudFrameSupportsHardwareSettings(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(hardwareCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/**
+ * The one version rule every gate above shares:
+ *  - a parseable version compares numerically against the floor;
+ *  - a non-empty but unparseable one ("unknown", a dev build) is trusted —
+ *    dev builds carry the newest code;
+ *  - null/empty (the frame never reported one, i.e. never connected) is not.
+ */
 export function cloudFrameSupportsSettingsFrom(minVersion: string, frameosVersion: string | null | undefined): boolean {
   if (typeof frameosVersion !== 'string' || frameosVersion.trim().length === 0) {
     return false
   }
-  const target = frameosVersionKey(frameosVersion)
-  if (!target) {
+  const reported = parseVersion(frameosVersion)
+  if (!reported) {
     return true
   }
-  const minimum = frameosVersionKey(minVersion) ?? []
-  for (let index = 0; index < 4; index += 1) {
-    const diff = (target[index] ?? 0) - (minimum[index] ?? 0)
-    if (diff !== 0) {
-      return diff > 0
-    }
-  }
-  return true
+  return compareVersions(frameosVersion, minVersion) >= 0
 }
 
-/** "2026.8.30", "v2026.8.30+abc" → [2026, 8, 30, 0]; "unknown" → undefined. */
-function frameosVersionKey(value: string): number[] | undefined {
-  const match = /^[0-9]+(?:\.[0-9]+)*/.exec(value.trim().replace(/^v/i, ''))
+type VersionTriple = [number, number, number]
+
+function parseVersion(version: string): VersionTriple | null {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim())
   if (!match) {
-    return undefined
+    return null
   }
-  const key = match[0]
-    .split('.')
-    .slice(0, 4)
-    .map((part) => Number.parseInt(part, 10))
-  while (key.length < 4) {
-    key.push(0)
-  }
-  return key
+  return [Number(match[1]), Number(match[2]), Number(match[3])]
 }
 
-/**
- * The cloud settings edited through text inputs, so the form may hold "300"
- * where the wire wants 300. The payload builder coerces them, and frameLogic's
- * NUMERIC_FRAME_KEYS normalizes the same set before diffing the form.
- */
+function compareVersions(a: string, b: string): number {
+  const left: VersionTriple = parseVersion(a) ?? [0, 0, 0]
+  const right: VersionTriple = parseVersion(b) ?? [0, 0, 0]
+  if (left[0] !== right[0]) return left[0] - right[0]
+  if (left[1] !== right[1]) return left[1] - right[1]
+  return left[2] - right[2]
+}
+
 export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'interval',
   'rotate',

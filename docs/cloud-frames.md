@@ -407,11 +407,42 @@ included — the device carries its own across a push), and service API secrets.
 Raw `assets_path` and `log_to_file` paths are not exposed either; if they are
 ever wanted remotely they get redesigned as bounded toggles on fixed
 FrameOS-owned directories. Hardware identity reported by the frame stays
-authoritative. Adding a key is always the same four-list change (device
-allowlist + validator in `hub_client.nim`, the auth-web validator and version
-floor, `frontend/src/utils/cloudFrameSettings.ts`, this table) — and because
-the device refuses the WHOLE push on a key it does not recognise, nothing new
-goes out before the frames understand it.
+authoritative. Adding a key is ONE change: an entry in
+`docs/cloud-frames-contract.json` (its rule, which profiles take it, from
+which firmware version, whether it restarts the runtime), then
+`python3 frameos/tools/generate_cloud_contract.py` — see "The contract"
+below. Because the device refuses the WHOLE push on a key it does not
+recognise, nothing new goes out before the frames understand it: the
+provider gates each key on the frame's reported `frameos_version` against
+the contract's `since`.
+
+### The contract
+
+`docs/cloud-frames-contract.json` is the machine-readable half of this
+document: every `set_settings` key with a declarative value rule
+(`bool` / `int` / `number` / `string` with enums, bounds and formats /
+`object` with allowed keys / `array` / `map` / `anyOf`), which profile takes
+it and since which firmware version, restart flags, companion keys; the verb
+table with the scope each verb requires; and the wire limits per profile.
+`frameos/tools/generate_cloud_contract.py` turns it into committed tables —
+`frameos/src/frameos/cloud/contract_gen.nim` (Linux runtime),
+`embedded/esp32/main/fos_cloud_contract_gen.h` (ESP32, its profile only),
+`cloud/apps/auth-web/src/lib/cloud-frames-contract.gen.ts` (cloud) and
+`frontend/src/utils/cloudFramesContract.gen.ts` (SPA: keys, floors, restart
+flags) — and `--check` fails CI when they are stale. Each consumer keeps a
+~100-line walker of the table (`contract.nim`, `fos_cloud_contract.c`,
+`cloud-frames-contract.ts`); the two cross-field rules the language cannot
+say (a palette's `colorNames` count, duplicate GPIO pins) are listed under
+`extraChecks` and hand-written in each.
+
+`docs/cloud-frames-fixtures.json` is the conformance corpus: a
+`set_settings` object in, the verdict per profile out (`ok`, or the error
+token the push is refused with), plus verb-table cases. The Linux runtime
+(`test_cloud_contract.nim`, through the real handler), the firmware
+(`main/tests/test_fos_cloud_contract.c`, built on the host with cJSON) and
+the cloud (`cloud-frames-contract.test.ts`, also the SPA's lists) all run
+it — three implementations, one verdict per case. A rule that drifts fails
+in CI instead of on a customer's frame.
 
 | Profile | Implements | Answers `unsupported_verb` for |
 |---|---|---|
