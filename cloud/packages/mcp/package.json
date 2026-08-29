@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@posthog/mcp": "^0.12.0",
+    "posthog-node": "^5.51.4",
     "zod": "^4.4.3"
   },
   "devDependencies": {

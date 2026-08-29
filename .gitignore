@@ -113,3 +113,4 @@ frontend/editor-smoke.png
 # Pico firmware build trees (embedded/pico)
 embedded/pico/build*/
 cloud/.dev-firmware/
+.env.local
