@@ -29,6 +29,7 @@ const accountSectionRewrites = new Map([
   ["/backups", "/account/backups"],
   ["/activity", "/account/activity"],
   ["/security", "/account/security"],
+  ["/developer", "/account/developer"],
 ]);
 
 function pathMatchesPrefix(pathname: string, prefix: string) {
