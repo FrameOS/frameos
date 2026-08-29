@@ -303,6 +303,67 @@ export function lintCodeNodeJs(code: string, argNames: string[] = []): string[] 
 
 // JS apps run in the app sandbox: frameos.* helpers exist, the code-node time
 // helpers do not.
+const mainAppSourceFile = /^app\.(ts|tsx|js|jsx)$/;
+const importableAppFile = /\.(ts|tsx|js|jsx|json)$/;
+const importExtensions = [".ts", ".tsx", ".js", ".jsx", ".json"];
+// `import x from '…'`, `import { a } from '…'`, `import '…'`, `export { a } from '…'`.
+const importSpecifierPattern = /^\s*(?:import|export)\b[^'"\n]*?\bfrom\s*['"]([^'"\n]+)['"]|^\s*import\s*['"]([^'"\n]+)['"]/gm;
+
+export function importSpecifiers(source: string): string[] {
+  const specifiers: string[] = [];
+  for (const match of source.matchAll(importSpecifierPattern)) {
+    const specifier = match[1] ?? match[2];
+    if (specifier) {
+      specifiers.push(specifier);
+    }
+  }
+  return specifiers;
+}
+
+/** Mirrors the frame's loader: `./`/`../` relative to the importing file, then the usual extensions. */
+export function resolveAppImport(fromFile: string, specifier: string, files: string[]): string | undefined {
+  if (!specifier.startsWith(".")) {
+    return undefined;
+  }
+  const parts = fromFile.split("/").slice(0, -1);
+  for (const segment of specifier.split("/")) {
+    if (!segment || segment === ".") {
+      continue;
+    }
+    if (segment === ".." && parts.length > 0 && parts[parts.length - 1] !== "..") {
+      parts.pop();
+    } else {
+      parts.push(segment);
+    }
+  }
+  const joined = parts.join("/");
+  const candidates = [joined, ...importExtensions.map((ext) => joined + ext)];
+  if (joined.endsWith(".js")) {
+    candidates.push(joined.slice(0, -3) + ".ts", joined.slice(0, -3) + ".tsx");
+  } else if (joined.endsWith(".jsx")) {
+    candidates.push(joined.slice(0, -4) + ".tsx");
+  }
+  return candidates.find((candidate) => files.includes(candidate));
+}
+
+/** Import problems in one of an app's files: npm packages, or files the app does not have. */
+export function lintAppImports(file: string, source: string, files: string[]): string[] {
+  const problems: string[] = [];
+  const importable = files.filter((name) => importableAppFile.test(name));
+  for (const specifier of importSpecifiers(source)) {
+    if (!specifier.startsWith(".")) {
+      problems.push(
+        `imports "${specifier}" — npm packages are not available on a frame; an app can only import its own files (import { x } from "./helper", import data from "./data.json").`,
+      );
+    } else if (!resolveAppImport(file, specifier, importable)) {
+      problems.push(
+        `imports "${specifier}", but the app has no such file (its files: ${importable.join(", ") || "none"}). Add it to sources or fix the path.`,
+      );
+    }
+  }
+  return problems;
+}
+
 export function lintJsAppSource(source: string, category?: string): string[] {
   const problems: string[] = [];
   const exportsFn = (name: string) =>
@@ -460,11 +521,15 @@ export function lintScene(
         }
       }
       const sources = obj(obj(raw)?.sources) ?? {};
+      const fileNames = Object.keys(sources);
       for (const [file, content] of Object.entries(sources)) {
         if (typeof content !== "string" || !/\.(ts|js|tsx|jsx)$/.test(file)) {
           continue;
         }
-        for (const problem of [...lintJsAppSource(content, str(obj(raw)?.category)), ...lintSvgMarkup(content)]) {
+        // Only the main module must export get(); helpers export whatever
+        // app.ts imports from them.
+        const contract = mainAppSourceFile.test(file) ? lintJsAppSource(content, str(obj(raw)?.category)) : [];
+        for (const problem of [...contract, ...lintAppImports(file, content, fileNames), ...lintSvgMarkup(content)]) {
           push("error", `Scene app "${keyword}" (${file}): ${problem}`);
         }
         const fixed = hardcodedCanvasSize(content);

@@ -133,10 +133,41 @@ uses QuickJS only to execute the resulting JavaScript.
   - `getSetting(...path)`: read `frameConfig.settings` values (API keys etc.);
     only namespaces listed in the app config's `"settings"` array are
     accessible, so access travels visibly with the scene JSON.
+- Installs a QuickJS module loader so the main module can `import` the app's
+  other files (see Module Loading below).
 - Calls exported app lifecycle functions such as `init` and `get`.
 - Tracks persistent and transient image references so overwritten dynamic image
   fields can be released.
 - Maps app runtime errors through the same compact source-location mechanism.
+
+## Module Loading
+
+An app's `sources` map is the whole module graph. `app_runtime.nim` evaluates
+the main file (`app.ts`, `.tsx`, `.js` or `.jsx`) as a real ES module under
+its own file name and registers a normalize/loader pair on the QuickJS
+runtime (`burrito.setModuleLoader`):
+
+- `jsAppModuleNormalize` joins `./` and `../` specifiers against the importing
+  module's folder (`joinModulePath`, QuickJS's own rule) and canonicalises
+  the result to the file it names (`resolveAppModule`: as written, then
+  `.ts/.tsx/.js/.jsx/.json`, then `./x.js` → `x.ts`). Canonical names are
+  what QuickJS keys loaded modules by, so a file evaluates once however many
+  importers spell its path differently.
+- `jsAppModuleLoader` transpiles a script file (TypeScript erased, JSX only for
+  `.tsx`/`.jsx`) and compiles it with `JS_EVAL_FLAG_COMPILE_ONLY`; a `.json`
+  file becomes a synthetic C module whose default export is the parsed value.
+  Transpiled output is kept per file, like the main module's, so an evicted
+  and re-created interpreter does not transpile again.
+- Bare specifiers and files the app does not have fail with a ReferenceError
+  that says so; compile and JSON errors are re-thrown with the file name and
+  position in the message.
+- Every loaded file registers its own lazy line map under its file name, so
+  runtime stacks read `util.ts:5:3` in source lines. `rewriteQuickJsLocations`
+  matches names at path boundaries only (`util.ts:` never matches inside
+  `lib/util.ts:`).
+
+There is no package registry, no `require()`, and no dynamic `import()` (the
+app runtime is synchronous and does not pump the job queue).
 
 ## Native Transpiler Policy
 
@@ -146,7 +177,8 @@ or snippets, then preserve the rest for QuickJS.
 
 The current transform set is:
 
-- TypeScript erasure for common annotations, type-only declarations/imports,
+- TypeScript erasure for common annotations, type-only declarations/imports
+  (including inline `import { a, type B }` specifiers),
   interfaces, type aliases, assertions, `satisfies`, non-null assertions,
   modifiers, overloads, `declare`, abstract members, generics, constructor
   parameter properties, and enums.

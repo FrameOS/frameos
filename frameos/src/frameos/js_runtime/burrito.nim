@@ -212,6 +212,7 @@ proc JS_ThrowTypeError*(ctx: ptr JSContext, fmt: cstring): JSValue {.varargs.}
 proc JS_ThrowReferenceError*(ctx: ptr JSContext, fmt: cstring): JSValue {.varargs.}
 proc JS_ThrowRangeError*(ctx: ptr JSContext, fmt: cstring): JSValue {.varargs.}
 proc JS_ThrowInternalError*(ctx: ptr JSContext, fmt: cstring): JSValue {.varargs.}
+proc JS_ThrowSyntaxError*(ctx: ptr JSContext, fmt: cstring): JSValue {.varargs.}
 
 # Global object
 proc JS_GetGlobalObject*(ctx: ptr JSContext): JSValue
@@ -244,8 +245,9 @@ proc JS_FreeAtom*(ctx: ptr JSContext, atom: JSAtom)
 proc JS_AtomToString*(ctx: ptr JSContext, atom: JSAtom): JSValue
 
 # Module loading
-proc JS_SetModuleLoaderFunc*(rt: ptr JSRuntime, module_normalize: pointer, module_loader: proc(ctx: ptr JSContext,
-    moduleName: cstring, opaque: pointer): ptr JSModuleDef {.cdecl.}, opaque: pointer)
+# `module_loader` is a `JSModuleLoaderFunc *` (const char * module name); Nim's
+# cstring is char *, so the callback is passed as an untyped pointer.
+proc JS_SetModuleLoaderFunc*(rt: ptr JSRuntime, module_normalize: pointer, module_loader: pointer, opaque: pointer)
 proc JS_SetModuleLoaderFunc2*(rt: ptr JSRuntime, module_normalize: pointer, module_loader: proc(ctx: ptr JSContext,
     moduleName: cstring, opaque: pointer, attributes: JSValueConst): ptr JSModuleDef {.cdecl.},
     module_check_attrs: proc(ctx: ptr JSContext, opaque: pointer, attributes: JSValueConst): cint {.cdecl.},
@@ -257,6 +259,18 @@ proc JS_PromiseResult*(ctx: ptr JSContext, promise: JSValueConst): JSValue
 # Module-related functions
 proc JS_DetectModule*(input: cstring, inputLen: csize_t): cint
 proc JS_GetModuleNamespace*(ctx: ptr JSContext, m: ptr JSModuleDef): JSValue
+# Synthetic ("C") modules: a module whose exports are set from native code,
+# e.g. a JSON file exposed as `export default <parsed value>`.
+proc JS_NewCModule*(ctx: ptr JSContext, name: cstring,
+    initFunc: proc(ctx: ptr JSContext, m: ptr JSModuleDef): cint {.cdecl.}): ptr JSModuleDef
+proc JS_AddModuleExport*(ctx: ptr JSContext, m: ptr JSModuleDef, name: cstring): cint
+proc JS_SetModuleExport*(ctx: ptr JSContext, m: ptr JSModuleDef, name: cstring, val: JSValue): cint
+proc JS_SetModulePrivateValue*(ctx: ptr JSContext, m: ptr JSModuleDef, val: JSValue): cint
+proc JS_GetModulePrivateValue*(ctx: ptr JSContext, m: ptr JSModuleDef): JSValue
+proc JS_ParseJSON*(ctx: ptr JSContext, buf: cstring, bufLen: csize_t, filename: cstring): JSValue
+# For strings handed back to QuickJS that it will js_free — module names from
+# a normaliser callback.
+proc js_strdup*(ctx: ptr JSContext, str: cstring): cstring
 
 # Job execution (needed for proper module cleanup)
 proc JS_ExecutePendingJob*(rt: ptr JSRuntime, pctx: ptr ptr JSContext): cint
@@ -1340,6 +1354,45 @@ proc evalModule*(js: QuickJS, code: string, filename: string = "<module>"): stri
     if js.config.enableStdHandlers:
       js_std_loop(js.context)
 
+proc moduleDefOf*(compiled: JSValue): ptr JSModuleDef =
+  ## The module definition behind a value returned by a
+  ## `JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY` eval, or nil when the
+  ## value is not a module. The definition is owned by the context's loaded
+  ## module list, so the caller may JS_FreeValue the value and keep the pointer.
+  var moduleDef: ptr JSModuleDef = nil
+  {.emit: """
+  if (JS_VALUE_GET_TAG(`compiled`) == JS_TAG_MODULE) {
+    `moduleDef` = JS_VALUE_GET_PTR(`compiled`);
+  }
+  """.}
+  moduleDef
+
+proc compileModule*(ctx: ptr JSContext, code: string, filename: string): ptr JSModuleDef =
+  ## Compile `code` as an ES module named `filename` without running it — the
+  ## shape a module loader callback returns. On a syntax error the exception
+  ## is left pending on the context and nil comes back, which is exactly what
+  ## QuickJS expects from a loader.
+  let compiled = JS_Eval(ctx, code.cstring, code.len.csize_t, filename.cstring,
+                         (JS_EVAL_TYPE_MODULE or JS_EVAL_FLAG_COMPILE_ONLY).cint)
+  if JS_IsException(compiled) != 0:
+    return nil
+  result = moduleDefOf(compiled)
+  # The module is already referenced from the loaded-modules list.
+  JS_FreeValue(ctx, compiled)
+
+proc setModuleLoader*(js: QuickJS,
+    loader: proc(ctx: ptr JSContext, moduleName: cstring, opaque: pointer): ptr JSModuleDef {.cdecl.},
+    normalize: proc(ctx: ptr JSContext, baseName: cstring, name: cstring,
+                    opaque: pointer): cstring {.cdecl.} = nil,
+    opaque: pointer = nil) =
+  ## Install the callbacks behind `import`. QuickJS first asks `normalize` to
+  ## turn a specifier into the module's canonical name (with nil it applies
+  ## its own rule: `./` and `../` relative to the importing module, anything
+  ## else untouched), looks that name up among loaded modules, and only then
+  ## calls `loader` for a name it has not seen. `normalize` must return a
+  ## js_strdup'd string; QuickJS frees it.
+  JS_SetModuleLoaderFunc(js.runtime, cast[pointer](normalize), cast[pointer](loader), opaque)
+
 proc evalModuleNamespace*(js: QuickJS, code: string, filename: string = "<module>"): JSValue =
   ## Evaluate `code` as a real ES module and return its namespace object —
   ## the thing that carries its `export`s.
@@ -1363,15 +1416,8 @@ proc evalModuleNamespace*(js: QuickJS, code: string, filename: string = "<module
     JS_FreeValue(ctx, compiled)
     raise newException(JSException, errorMsg)
 
-  var moduleDef: ptr JSModuleDef = nil
-  var isModuleValue = false
-  {.emit: """
-  if (JS_VALUE_GET_TAG(`compiled`) == JS_TAG_MODULE) {
-    `isModuleValue` = NIM_TRUE;
-    `moduleDef` = JS_VALUE_GET_PTR(`compiled`);
-  }
-  """.}
-  if not isModuleValue or moduleDef == nil:
+  let moduleDef = moduleDefOf(compiled)
+  if moduleDef == nil:
     JS_FreeValue(ctx, compiled)
     raise newException(JSException, "Compiled source is not a module: " & filename)
 

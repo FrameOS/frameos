@@ -65,6 +65,11 @@ Rules:
   the API reference (frameos.fetchJson, frameos.fetchText, frameos.svg, frameos.image, ...), but NOT
   format/now/parseTs and NOT the scene's state — pass what they need through their fields. Their Date
   is UTC-only; feed local time in from a code node or data/clock field when the app needs it.
+- An app's sources may hold more than app.ts: helper .ts/.tsx/.js/.jsx files and .json data files
+  (e.g. "icons.tsx", "lib/format.ts", "data.json"), imported with relative paths — import { x } from
+  "./lib/format", import data from "./data.json". Only the app's own files resolve; there are no npm
+  packages. JSX is only lowered in .tsx/.jsx files. Split an app when app.ts grows past a few hundred
+  lines or when data (lookup tables, icon SVG strings) would swamp the code.
 - app.frame.width / app.frame.height / app.frame.timeZone are ALWAYS set in a JS app (the frame's real
   size, also in previews): size full-screen output from them directly, without "fallback" size fields
   or "|| 800" guesses. Explicit width/height fields are only for an app that must draw into a sub-area
