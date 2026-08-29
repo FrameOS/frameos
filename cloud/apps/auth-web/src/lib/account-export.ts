@@ -11,7 +11,8 @@ import {
   frames,
   linkedClients,
   sessions,
-  storeSceneImages,
+  storeImages,
+  storeSceneVersionImages,
   storeSceneVersions,
   storeScenes,
 } from "@frameos-cloud/db";
@@ -231,14 +232,21 @@ export async function buildAccountExport(
     sceneIds.length
       ? db
           .select({
-            contentType: storeSceneImages.contentType,
-            createdAt: storeSceneImages.createdAt,
-            id: storeSceneImages.id,
-            position: storeSceneImages.position,
-            sceneId: storeSceneImages.sceneId,
+            contentType: storeImages.contentType,
+            createdAt: storeImages.createdAt,
+            position: storeSceneVersionImages.position,
+            sceneId: storeSceneVersions.sceneId,
+            sha256: storeImages.sha256,
+            sizeBytes: storeImages.sizeBytes,
+            version: storeSceneVersions.version,
           })
-          .from(storeSceneImages)
-          .where(inArray(storeSceneImages.sceneId, sceneIds))
+          .from(storeSceneVersionImages)
+          .innerJoin(
+            storeSceneVersions,
+            eq(storeSceneVersions.id, storeSceneVersionImages.versionId),
+          )
+          .innerJoin(storeImages, eq(storeImages.sha256, storeSceneVersionImages.imageSha256))
+          .where(inArray(storeSceneVersions.sceneId, sceneIds))
       : [],
     chatIds.length
       ? db
@@ -287,16 +295,21 @@ export async function buildAccountExport(
     },
     scenes: scenes.map((scene) => ({
       ...scene,
+      // Every image any version of the scene links, once per (version,
+      // position): the same bytes reused across versions are one object
+      // with one download path.
       images: images
         .filter((image) => image.sceneId === scene.id)
         .map((image) => ({
           createdAt: image.createdAt,
           content: blobRef({
             contentType: image.contentType,
-            downloadPath: `/api/store/scenes/${scene.id}/images/${image.id}`,
-            sizeBytes: undefined,
+            downloadPath: `/api/store/scenes/${scene.id}/images/${image.sha256}`,
+            sha256: image.sha256,
+            sizeBytes: image.sizeBytes,
           }),
           position: image.position,
+          version: image.version,
         })),
       versions: versions
         .filter((version) => version.sceneId === scene.id)

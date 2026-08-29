@@ -30,6 +30,7 @@ import {
   type RefObject,
 } from "react";
 import { applyAiScenes, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
+import type { AiListingChanges } from "../lib/ai-chat-client";
 import {
   defaultSceneEditorPanels,
   onlyPanel,
@@ -42,7 +43,11 @@ import {
   type SceneEditorPanels,
 } from "../lib/scene-views";
 import { SceneAiPanel, type SceneAiPanelProps } from "./SceneAiPanel";
-import { SceneInfoPanel, type SceneInfoData } from "./SceneInfoPanel";
+import {
+  SceneInfoPanel,
+  type SceneInfoData,
+  type SceneListingData,
+} from "./SceneInfoPanel";
 import { SceneInstallDialog } from "./SceneInstallDialog";
 import { SceneLivePreviewPanel } from "./SceneLivePreview";
 import { SceneSaveDialog } from "./SceneSaveDialog";
@@ -549,6 +554,8 @@ export type SceneEditorPreviewOptions = {
    * (null while they load — the panel waits for them). */
   scenes: SceneJson[] | null;
   canSaveToGallery?: boolean | undefined;
+  /** A screenshot was registered; the workspace adds it to the draft. */
+  onImageRegistered?: ((sha256: string) => void) | undefined;
   /** The account settings page, linked from the panel's credentials hint. */
   settingsUrl?: string | undefined;
 };
@@ -1204,6 +1211,7 @@ export function SceneEditorWorkspace({
                 canSaveToGallery={preview.canSaveToGallery}
                 editorSceneId={sceneId ?? null}
                 height={height}
+                onImageRegistered={preview.onImageRegistered}
                 sceneId={preview.sceneId}
                 scenes={preview.scenes}
                 settingsUrl={preview.settingsUrl}
@@ -1233,6 +1241,25 @@ function cameFromOurPage(): boolean {
     return Boolean(previous?.url?.startsWith(origin));
   }
   return document.referrer.startsWith(origin) && window.history.length > 1;
+}
+
+/** The listing the page recorded for a version (null: the latest) — the
+ * version's own, or the latest's for versions published before listings
+ * were recorded; nothing without a page. */
+function listingOfVersion(info: SceneInfoData | undefined, version: number | null): SceneListingData {
+  const recorded = version === null ? undefined : info?.versions.find((entry) => entry.version === version);
+  const source = recorded?.listing ?? info?.scene;
+  return {
+    category: source?.category ?? null,
+    description: source?.description ?? null,
+    frameosVersion: source?.frameosVersion ?? null,
+    tags: source?.tags ?? [],
+  };
+}
+
+function imagesOfVersion(info: SceneInfoData | undefined, version: number | null): string[] {
+  const recorded = version === null ? undefined : info?.versions.find((entry) => entry.version === version);
+  return recorded?.images ?? info?.images ?? [];
 }
 
 /** The scenes.json URL for a version (null: the newest published one). */
@@ -1347,6 +1374,24 @@ export function SceneEditorModal({
   const [forking, setForking] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [scenes, setScenes] = useState<SceneJson[] | null>(null);
+  // The draft's listing and image set, next to the scenes: what the Info
+  // column shows and edits, what the AI reads, what Save publishes with
+  // the diagram. Loaded from the page's data for the version in the
+  // workspace; the initial refs are what "unchanged" means.
+  const [listing, setListing] = useState<SceneListingData>(() =>
+    listingOfVersion(info, pinnedVersion),
+  );
+  const [images, setImages] = useState<string[]>(() => imagesOfVersion(info, pinnedVersion));
+  const initialListingRef = useRef<string>(JSON.stringify(listing));
+  const initialImagesRef = useRef<string>(JSON.stringify(images));
+  const listingRef = useRef(listing);
+  listingRef.current = listing;
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  const listingDirty =
+    JSON.stringify(listing) !== initialListingRef.current ||
+    JSON.stringify(images) !== initialImagesRef.current;
+  const anyDirty = dirty || listingDirty;
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   // The selected scene's name, as the bar shows it; follows the editor's
   // edits (its own Rename included) and the scene tabs.
@@ -1435,6 +1480,12 @@ export function SceneEditorModal({
       baselinePendingRef.current = true;
       setScenes(loaded);
       setDirty(false);
+      const loadedListing = listingOfVersion(info, version);
+      const loadedImages = imagesOfVersion(info, version);
+      initialListingRef.current = JSON.stringify(loadedListing);
+      initialImagesRef.current = JSON.stringify(loadedImages);
+      setListing(loadedListing);
+      setImages(loadedImages);
       // Whatever the AI panel changed is gone with the edits.
       setSuggestedMessage(undefined);
       const defaultScene = loaded.find((scene) => scene.default === true) ?? loaded[0];
@@ -1474,7 +1525,7 @@ export function SceneEditorModal({
     if (version === selectedVersion) {
       return;
     }
-    if (dirty && !window.confirm(`Discard your unsaved changes and load v${version}?`)) {
+    if (anyDirty && !window.confirm(`Discard your unsaved changes and load v${version}?`)) {
       return;
     }
     setError(null);
@@ -1483,9 +1534,42 @@ export function SceneEditorModal({
     void loadVersion(version);
   }
 
+  // A screenshot the server registered (the preview panel's "Save to
+  // images", the editor's render check): into the draft's image set, at
+  // the end; Save publishes it.
+  function addImage(sha256: string) {
+    const current = imagesRef.current;
+    if (!current.includes(sha256)) {
+      setImages([...current, sha256]);
+    }
+  }
+
+  function applyListingChanges(changes: Partial<SceneListingData>) {
+    setListing({ ...listingRef.current, ...changes });
+  }
+
+  // The AI edited the listing: same draft, same Save.
+  function applyAiListing(changes: AiListingChanges) {
+    const next: Partial<SceneListingData> = {};
+    if (changes.description !== undefined) {
+      next.description = changes.description;
+    }
+    if (changes.category !== undefined) {
+      next.category = changes.category;
+    }
+    if (changes.frameosVersion !== undefined) {
+      next.frameosVersion = changes.frameosVersion;
+    }
+    if (changes.tags !== undefined) {
+      next.tags = changes.tags;
+    }
+    applyListingChanges(next);
+  }
+
   // The editor captured a frame (its render check, or the JSON panel's
-  // screenshot). Owners get it saved to the scene's image gallery; everyone
-  // else gets ok:false and the editor falls back to downloading the PNG.
+  // screenshot). Owners get it registered and added to the draft's images;
+  // everyone else gets ok:false and the editor falls back to downloading
+  // the PNG.
   async function saveScreenshot(dataUrl: string) {
     if (!canSave) {
       return { ok: false, error: "Only the scene owner can save to its images" };
@@ -1502,8 +1586,8 @@ export function SceneEditorModal({
         method: "POST",
       });
       const payload = await upload.json().catch(() => ({}));
-      if (upload.ok) {
-        router.refresh();
+      if (upload.ok && typeof payload.image?.sha256 === "string") {
+        addImage(payload.image.sha256 as string);
       }
       return {
         ok: upload.ok,
@@ -1681,8 +1765,15 @@ export function SceneEditorModal({
     setSaving(true);
     setError(null);
     try {
+      const draftListing = listingRef.current;
+      const draftImages = imagesRef.current;
       const response = await fetch(`/api/account/scenes/${sceneId}/content`, {
-        body: JSON.stringify({ message, scenes: latest }),
+        body: JSON.stringify({
+          images: draftImages,
+          listing: draftListing,
+          message,
+          scenes: latest,
+        }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -1696,8 +1787,12 @@ export function SceneEditorModal({
             : // The name and the note show on the public page, so both are
               // moderated; the note is the usual suspect.
               payload.error === "content_rejected"
-              ? "The scene's name or your note was flagged by moderation — please reword it."
-              : `Saving failed: ${payload.error ?? response.status}`,
+              ? "The scene's name, description, tags or your note was flagged by moderation — please reword it."
+              : payload.error === "invalid_tags"
+                ? "Up to 5 tags; lowercase letters, digits, dashes, max 24 characters each."
+                : payload.error === "invalid_frameos_version"
+                  ? "The minimum FrameOS version should look like 2026.7.5."
+                  : `Saving failed: ${payload.error ?? response.status}`,
         );
         return;
       }
@@ -1705,6 +1800,8 @@ export function SceneEditorModal({
       setSaveOpen(false);
       setSuggestedMessage(undefined);
       initialJsonRef.current = JSON.stringify(latest);
+      initialListingRef.current = JSON.stringify(draftListing);
+      initialImagesRef.current = JSON.stringify(draftImages);
       // The workspace now holds the version just published: the latest.
       const published = typeof payload.scene?.version === "number" ? (payload.scene.version as number) : null;
       if (published !== null) {
@@ -1784,7 +1881,7 @@ export function SceneEditorModal({
   if (canSave) {
     actions.push({
       Icon: Save,
-      disabled: saving || !dirty,
+      disabled: saving || !anyDirty,
       key: "save",
       label: saving ? "Saving…" : "Save as new version",
       onSelect: openSave,
@@ -1829,7 +1926,7 @@ export function SceneEditorModal({
       <SceneEditorBar
         actions={actions}
         leading={
-          (canSave || canFork) && dirty ? <UnsavedPill label="Unsaved changes" short="Unsaved" /> : null
+          (canSave || canFork) && anyDirty ? <UnsavedPill label="Unsaved changes" short="Unsaved" /> : null
         }
       >
         <SceneEditorBackButton label="Back" onClick={goBack} />
@@ -1878,23 +1975,38 @@ export function SceneEditorModal({
       </SceneEditorBar>
       <SceneEditorWorkspace
         info={
-          info ? <SceneInfoPanel {...info} heading={nameTitle} /> : undefined
+          info ? (
+            <SceneInfoPanel
+              {...info}
+              draft={
+                canSave
+                  ? {
+                      images,
+                      listing,
+                      onImagesChange: setImages,
+                      onListingChange: applyListingChanges,
+                    }
+                  : undefined
+              }
+              heading={nameTitle}
+              shown={{ images, listing }}
+            />
+          ) : undefined
         }
         ai={{
+          getListing: () => listingRef.current,
           getScenes: () => latestScenesRef.current,
           initialPrompt,
           loginUrl,
           mode: "existing",
-          // The listing write already landed server-side; the Info panel is
-          // rendered from the page's data, so it needs to re-fetch to show it.
-          onListingSaved: () => router.refresh(),
+          onListing: applyAiListing,
           onScenes: applyAiEvent,
           saveHint,
           settingsUrl,
           signedIn,
           storeSceneId: sceneId,
         }}
-        description={description || undefined}
+        description={listing.description ?? description ?? undefined}
         editorApiRef={editorApiRef}
         height={height || 480}
         onSaveScreenshot={saveScreenshot}
@@ -1925,6 +2037,7 @@ export function SceneEditorModal({
         panels={shown}
         preview={{
           canSaveToGallery: canSave,
+          onImageRegistered: addImage,
           sceneId,
           scenes: previewScenes,
           settingsUrl,

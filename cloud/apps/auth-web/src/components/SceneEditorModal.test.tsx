@@ -222,7 +222,7 @@ const versions = [
 // stubbed above; only the plumbing is under test here).
 const info = {
   framesUrl: "https://cloud.frameos.net/frames/",
-  imageIds: [],
+  images: [],
   installableFrames: null,
   isAdmin: false,
   isOwner: true,
@@ -233,7 +233,6 @@ const info = {
     description: null,
     downloadCount: 0,
     frameosVersion: null,
-    hasPreview: true,
     id: "scene-1",
     latestVersion: 2,
     name: "Clock",
@@ -250,6 +249,8 @@ const info = {
   versions: versions.map((version) => ({
     ...version,
     frameosVersion: null,
+    images: [],
+    listing: { category: null, description: null, frameosVersion: null, tags: [] },
     sha256: "0123456789abcdef0123456789abcdef",
     sizeBytes: 1024,
   })),
@@ -334,6 +335,7 @@ describe("SceneEditorModal landing", () => {
       "canSaveToGallery",
       "editorSceneId",
       "height",
+      "onImageRegistered",
       "sceneId",
       "scenes",
       "settingsUrl",
@@ -762,7 +764,11 @@ describe("SceneEditorModal save dialog", () => {
     fireEvent.change(field, { target: { value: "Bigger clock, warmer palette" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Publish" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // The whole draft goes: scenes, the listing and the image set are one
+    // version.
     expect(postedContent()).toEqual({
+      images: [],
+      listing: { category: null, description: null, frameosVersion: null, tags: [] },
       message: "Bigger clock, warmer palette",
       scenes: [{ id: "s1", name: "Edited" }],
     });

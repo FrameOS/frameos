@@ -47,13 +47,8 @@ import {
   supersedePendingCommands,
 } from "../frames";
 import { createAccountScene } from "../account-scene-create";
-import { recordAuditEvent } from "../audit";
 import { storeCategories } from "../categories";
-import {
-  maxSceneDescriptionChars,
-  moderateListingChanges,
-  parseListingChanges,
-} from "../store-listing";
+import { maxSceneDescriptionChars, parseListingChanges } from "../store-listing";
 import { forkStoreScene, sceneIdPattern } from "../store-fork";
 import { readBlob } from "../blobs";
 import { extractScenesFromZip } from "../scene-title";
@@ -65,6 +60,19 @@ export type ScenesEvent = {
   scenes: unknown[];
 };
 
+/** A listing edit delivered to the editor's draft — description, tags,
+ * category, minimum FrameOS version — published by the user's Save, like
+ * scenes. Only the fields named change. */
+export type ListingEvent = {
+  type: "listing";
+  listing: {
+    category?: string | null;
+    description?: string | null;
+    frameosVersion?: string | null;
+    tags?: string[];
+  };
+};
+
 export type ToolContext = {
   db: ReturnType<typeof createDb>;
   accountId: string;
@@ -73,6 +81,11 @@ export type ToolContext = {
   currentScene?: JsonObject | null;
   currentSceneId?: string | null;
   emitScenes: (event: ScenesEvent) => void;
+  // Delivers a listing edit to the editor's draft (update_scene_listing).
+  emitListing?: ((event: ListingEvent) => void) | undefined;
+  // The draft's listing as the editor holds it, unsaved edits included —
+  // what "the description" means to the user right now.
+  currentListing?: ListingEvent["listing"] | null;
   // Set when a create_scenes/update_scene call validated and was delivered;
   // the loop reports it as the overall "tool" of the turn.
   deliveredTool?: "build_scene" | "modify_scene";
@@ -474,11 +487,11 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
   },
   {
     description:
-      "Edit the STORE LISTING of a saved scene the user owns: the description shown on its store page, its " +
-      "tags and its category. Writes straight to the store — there is nothing for the user to save afterwards. " +
-      "This is what \"update the description\" means for a scene: the listing's own description, NOT an app's " +
-      "`description` field inside the scene (for those use patch_scene). Only fields you name change. Fails " +
-      "when the scene is not the user's — say so rather than editing the scene's contents instead.",
+      "Edit the scene's LISTING in the editor's draft: the description shown on its store page, its tags, " +
+      "its category and its minimum FrameOS version. Lands unsaved next to the diagram — the user's Save " +
+      "publishes it with the scene as one version, so say that. This is what \"update the description\" " +
+      "means for a scene: the listing's own description, NOT an app's `description` field inside the scene " +
+      "(for those use patch_scene). Only fields you name change. Works on the scene the user has open.",
     name: "update_scene_listing",
     parameters: {
       additionalProperties: false,
@@ -495,10 +508,9 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
             "Send the complete new text, not a diff.",
           type: ["string", "null"],
         },
-        scene_id: {
-          description:
-            "Store scene uuid. Omit for the scene the user has open (from search_store_scenes otherwise).",
-          type: "string",
+        frameos_version: {
+          description: "The oldest FrameOS release that can run the scene (e.g. 2026.7.5), or null to clear it.",
+          type: ["string", "null"],
         },
         tags: {
           description: "Up to 5 lowercase tags (letters, digits, hyphens). Replaces the current set.",
@@ -650,7 +662,7 @@ export const toolLabels: Record<string, string> = {
   search_examples: "Searching examples",
   search_store_scenes: "Searching the store",
   update_scene: "Updating scene",
-  update_scene_listing: "Updating store listing",
+  update_scene_listing: "Editing the listing",
   patch_scene: "Patching scene",
   edit_app_source: "Editing app source",
 };
@@ -1227,95 +1239,40 @@ function withChanges(delivered: string, changes: string[]): string {
   }
 }
 
-// Edit the store listing of a scene the user owns: description, tags,
-// category. Unlike everything else the chat writes, this lands immediately —
-// but it only touches the words on the store page, never a byte of the
-// scene, so there is no work of the user's it can destroy. Ownership, the
-// field rules and the moderation gate are the store's own, shared with the
-// PATCH route the web form posts to.
-async function updateSceneListing(
-  ctx: ToolContext,
-  args: JsonObject,
-): Promise<string> {
-  const sceneId = asString(args.scene_id) ?? ctx.storeSceneId ?? null;
-  if (!sceneId) {
+// Deliver a listing edit to the editor's draft. Like patch_scene it writes
+// nothing: the listing is part of a version, and the user's Save publishes
+// the draft — diagram, listing and images together. The field rules are the
+// store's own (shared with the content route through parseListingChanges),
+// so a bad tag bounces back here instead of at Save.
+function updateSceneListing(ctx: ToolContext, args: JsonObject): string {
+  if (!ctx.emitListing) {
     return JSON.stringify({
-      error:
-        "No scene to edit. The user has no store scene open here — find one with search_store_scenes and pass its scene_id.",
+      error: "There is no scene editor in this chat to hold a listing edit. Ask the user to open the scene on the store.",
       ok: false,
     });
   }
-  if (!sceneIdPattern.test(sceneId)) {
-    return JSON.stringify({ error: "scene_id must be a store scene uuid", ok: false });
-  }
-
-  const parsed = parseListingChanges(args);
+  const parsed = parseListingChanges({
+    ...(args.category !== undefined ? { category: args.category } : {}),
+    ...(args.description !== undefined ? { description: args.description } : {}),
+    ...(args.frameos_version !== undefined ? { frameosVersion: args.frameos_version } : {}),
+    ...(args.tags !== undefined ? { tags: args.tags } : {}),
+  });
   if ("error" in parsed) {
     return JSON.stringify({ error: parsed.error, ok: false });
   }
   const { changes } = parsed;
   if (Object.keys(changes).length === 0) {
     return JSON.stringify({
-      error: "nothing_to_update — pass at least one of description, tags or category.",
+      error: "nothing_to_update — pass at least one of description, tags, category or frameos_version.",
       ok: false,
     });
   }
-
-  // Owned scenes only. A visitor editing someone else's store page is the
-  // whole reason this check is not "can you read it".
-  const [scene] = await ctx.db
-    .select()
-    .from(storeScenes)
-    .where(and(eq(storeScenes.id, sceneId), eq(storeScenes.accountId, ctx.accountId)))
-    .limit(1);
-  if (!scene) {
-    return JSON.stringify({
-      error:
-        "This scene is not in the user's account, so its store listing is not theirs to edit. Tell them so — " +
-        "do not edit the scene's contents instead. They can fork it (save_scene) and describe their own copy.",
-      ok: false,
-    });
-  }
-
-  const moderation = await moderateListingChanges({ changes, scene });
-  if (!moderation.ok) {
-    return JSON.stringify({
-      error:
-        moderation.error === "content_rejected"
-          ? `The store's moderation refused this text (${(moderation.categories ?? []).join(", ") || "policy"}). Rewrite it.`
-          : "Moderation is unavailable right now; the listing was not changed.",
-      ok: false,
-    });
-  }
-
-  const [updated] = await ctx.db
-    .update(storeScenes)
-    .set({ ...changes, updatedAt: new Date() })
-    .where(eq(storeScenes.id, scene.id))
-    .returning();
-  if (!updated) {
-    return JSON.stringify({ error: "scene_update_failed", ok: false });
-  }
-  // The web form's PATCH audits only visibility and version changes; this
-  // one leaves a trail for every field, because nobody pressed a button.
-  await recordAuditEvent(ctx.db, {
-    accountId: ctx.accountId,
-    actor: { accountId: ctx.accountId, providerSubject: ctx.providerSubject ?? "" },
-    eventType: "store.listing_edited",
-    metadata: { fields: Object.keys(changes).sort(), name: scene.name, via: "ai_chat" },
-    target: { sceneId: scene.id },
-  });
+  ctx.emitListing({ listing: changes, type: "listing" });
   return JSON.stringify({
-    listing: {
-      category: updated.category,
-      description: updated.description,
-      name: updated.name,
-      tags: updated.tags,
-    },
+    listing: { ...(ctx.currentListing ?? {}), ...changes },
     note:
-      `Saved to the store listing already — this is live on the scene's ${updated.visibility} page now, and ` +
-      "the user does not need to press Save for it. It is listing text, not scene content: it made no new " +
-      "version, and their unsaved editor work is untouched. Say so.",
+      "Delivered to the editor's draft, unsaved — next to the diagram. The user's Save publishes it with the " +
+      "scene as one new version; nothing is on the store page until then. Tell them so, in one line.",
     ok: true,
   });
 }

@@ -48,7 +48,7 @@ How it plugs in (`src/lib/api-tokens.ts`):
 |---|---|
 | `GET /api/account/usage` | Account, the auth kind in use, usage against every quota (`accountUsage()`), and the fixed caps (`limits`). |
 | `GET /api/account/scenes` | The account's scenes as JSON (`?q=&visibility=&status=`), the rows `/my-scenes` renders. |
-| `GET /api/account/scenes/{id}` | One scene: summary, all versions, gallery images, preview/share URLs. |
+| `GET /api/account/scenes/{id}` | One scene: summary, every version with the listing and image digests it recorded, the latest version's images, preview/share URLs. |
 | `POST /api/scenes/lint` | `{scenes}` → `{ok, errors, warnings}`: the AI's delivery gate (shape, app keywords, deep lint). |
 | `POST /api/scenes/render` | `{scene_id\|scenes, version?, scene?, width?, height?, time_zone?, settings?, states?, format?}` → PNG (or JSON with `png_base64`, logs, errors, state). |
 
@@ -121,11 +121,14 @@ take `confirm: true`.
 - **scenes** — `scenes_list`, `scene_get`, `scene_get_content`,
   `scene_create` (JSON / zip URL / scenes.json URL; a store reference forks),
   `scene_update_content` (new version), `scene_update` (description, tags,
-  category, frameos_version), `scene_rename` (through a content save, which
-  is what renames the listing), `scene_publish`, `scene_delete`,
-  `scene_fork`, `scene_version_restore`, `scene_version_yank`,
-  `scene_image_get`, `scene_image_add`, `scene_image_remove`,
-  `scene_images_reorder`, `scene_render`, `scene_lint`.
+  category, frameos_version — the listing is part of a version, so this
+  publishes one), `scene_rename` (through a content save, which is what
+  renames the listing), `scene_publish`, `scene_delete`, `scene_fork`,
+  `scene_version_restore`, `scene_version_yank`, `scene_image_get`,
+  `scene_image_add`, `scene_image_remove`, `scene_images_reorder` (images
+  are content-addressed by sha256 and the ordered set is part of a version:
+  each of the last three publishes one; position 0 is the cover),
+  `scene_render`, `scene_lint`.
 - **store** — `store_browse`, `store_scene_get`, `store_scene_report`.
 - **ai** — `ai_scene_chat` (follows the NDJSON turn up to `wait_seconds`,
   then `apply`: none / new_scene / save_version), `ai_turn_wait`,

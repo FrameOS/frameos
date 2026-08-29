@@ -27,6 +27,7 @@ import {
   stopAiChatTurn,
   streamAiChat,
   type AiChatHistoryItem,
+  type AiListingChanges,
 } from "../lib/ai-chat-client";
 import type { AiScenesEvent, SceneJson } from "../lib/ai-scenes-apply";
 import { renderSceneCheck } from "../lib/scene-render-check";
@@ -118,10 +119,11 @@ export type SceneAiPanelProps = {
   loginUrl?: string | undefined;
   /** One line telling the user where their saves go. */
   saveHint?: string | undefined;
-  /** The AI wrote the scene's store listing (description/tags/category).
-   * That write is server-side and immediate, so the page's own copy of the
-   * listing — the Info panel — has to be told to catch up. */
-  onListingSaved?: (() => void) | undefined;
+  /** The draft's listing as the editor holds it, sent with each turn. */
+  getListing?: (() => AiListingChanges | null) | undefined;
+  /** The AI edited the listing (description, tags, category, minimum
+   * FrameOS version): applied to the draft like scenes, published by Save. */
+  onListing?: ((changes: AiListingChanges) => void) | undefined;
 };
 
 function newId(): string {
@@ -376,7 +378,8 @@ export function SceneAiPanel({
   settingsUrl,
   loginUrl = "/login",
   saveHint,
-  onListingSaved,
+  getListing,
+  onListing,
 }: SceneAiPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -398,12 +401,8 @@ export function SceneAiPanel({
   chatIdRef.current = chatId;
 
   // Always the freshest props for the in-flight turn (it spans awaits).
-  const propsRef = useRef({ getScenes, height, mode, onScenes, selectedSceneId, storeSceneId, width });
-  propsRef.current = { getScenes, height, mode, onScenes, selectedSceneId, storeSceneId, width };
-  // Same reason as propsRef: the turn spans awaits, so the callback has to
-  // be read when the tool reports, not captured when the turn started.
-  const listingSavedRef = useRef(onListingSaved);
-  listingSavedRef.current = onListingSaved;
+  const propsRef = useRef({ getListing, getScenes, height, mode, onListing, onScenes, selectedSceneId, storeSceneId, width });
+  propsRef.current = { getListing, getScenes, height, mode, onListing, onScenes, selectedSceneId, storeSceneId, width };
 
   useEffect(() => {
     setReturnTo(window.location.href);
@@ -460,6 +459,7 @@ export function SceneAiPanel({
       const { getScenes: readScenes, onScenes: applyScenes, selectedSceneId: selected, storeSceneId: storeId } =
         propsRef.current;
       const editorScenes = readScenes() ?? [];
+      const draftListing = propsRef.current.getListing?.() ?? null;
       const targetScene =
         editorScenes.find((scene) => scene.id === selected) ?? editorScenes[0];
 
@@ -477,6 +477,7 @@ export function SceneAiPanel({
             surface: propsRef.current.mode === "new" ? "store-new" : "store",
             ...(targetScene ? { scene: targetScene, sceneId: targetScene.id } : {}),
             ...(editorScenes.length > 0 ? { scenes: editorScenes } : {}),
+            ...(draftListing ? { listing: draftListing } : {}),
           },
           {
             onEvent: (event) => {
@@ -539,9 +540,9 @@ export function SceneAiPanel({
                     }
                     return { tools };
                   });
-                  if (event.name === "update_scene_listing" && event.status === "done") {
-                    listingSavedRef.current?.();
-                  }
+                  break;
+                case "listing":
+                  propsRef.current.onListing?.(event.listing);
                   break;
                 case "scenes": {
                   const applied = applyScenes(event);

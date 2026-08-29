@@ -19,6 +19,7 @@ import {
 } from "vitest";
 import { PATCH as adminPatchPublisher } from "../../../app/api/admin/publishers/[accountId]/route";
 import { PATCH as adminPatchReport } from "../../../app/api/admin/reports/[reportId]/route";
+import { POST as editSceneContent } from "../../../app/api/account/scenes/[sceneId]/content/route";
 import { PATCH as patchScene } from "../../../app/api/account/scenes/[sceneId]/route";
 import { GET as getDriveRepositoryJson } from "../../../app/api/store/account/repository.json/route";
 import { POST as publishScene } from "../../../app/api/store/publish/route";
@@ -293,10 +294,11 @@ describe("store moderation gate", () => {
     );
     expect(flipClean.status).toBe(200);
 
+    // The description is published with a version now; the gate is the same.
     moderationFetch(["hate"]);
-    const edit = await patchScene(
-      request(`/api/account/scenes/${scene.id}`, "PATCH", {
-        body: { description: "something vile" },
+    const edit = await editSceneContent(
+      request(`/api/account/scenes/${scene.id}/content`, "POST", {
+        body: { listing: { description: "something vile" } },
         headers: { origin: baseUrl },
       }),
       ctx({ sceneId: scene.id }),

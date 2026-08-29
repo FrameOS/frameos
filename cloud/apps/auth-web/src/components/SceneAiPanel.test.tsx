@@ -80,40 +80,29 @@ afterEach(() => {
 });
 
 describe("SceneAiPanel", () => {
-  it("tells the page to re-read the listing once the AI has written it", async () => {
+  it("applies a listing event to the draft and sends the draft listing with each turn", async () => {
     fetchMock.mockResolvedValueOnce(
       ndjson([
         { chatId: "chat-1", type: "chat" },
-        { label: "Updating store listing", name: "update_scene_listing", status: "start", type: "tool" },
-        { label: "Updating store listing", name: "update_scene_listing", status: "done", type: "tool" },
-        { reply: "Rewrote the description.", tool: "reply", type: "done" },
+        { label: "Editing the listing", name: "update_scene_listing", status: "start", type: "tool" },
+        { listing: { description: "A map of everywhere I have been." }, type: "listing" },
+        { label: "Editing the listing", name: "update_scene_listing", status: "done", type: "tool" },
+        { reply: "Rewrote the description — Save publishes it.", tool: "reply", type: "done" },
       ]),
     );
-    const onListingSaved = vi.fn();
-    renderPanel({ onListingSaved });
+    const onListing = vi.fn();
+    renderPanel({
+      getListing: () => ({ description: "Old text", tags: ["maps"] }),
+      onListing,
+    });
 
     sendPrompt("update the description");
 
-    await waitFor(() => expect(onListingSaved).toHaveBeenCalledOnce());
-  });
-
-  it("leaves the page alone while the listing write is still running", async () => {
-    fetchMock.mockResolvedValueOnce(
-      ndjson([
-        { chatId: "chat-1", type: "chat" },
-        { label: "Updating store listing", name: "update_scene_listing", status: "start", type: "tool" },
-        { label: "Searching apps", name: "search_apps", status: "done", type: "tool" },
-        { text: "Looking.", type: "delta" },
-        { reply: "Looking.", tool: "reply", type: "done" },
-      ]),
+    await waitFor(() =>
+      expect(onListing).toHaveBeenCalledWith({ description: "A map of everywhere I have been." }),
     );
-    const onListingSaved = vi.fn();
-    renderPanel({ onListingSaved });
-
-    sendPrompt("update the description");
-
-    await screen.findByText("Looking.");
-    expect(onListingSaved).not.toHaveBeenCalled();
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.listing).toEqual({ description: "Old text", tags: ["maps"] });
   });
 
   it("streams the reply, applies delivered scenes and reports the render check", async () => {

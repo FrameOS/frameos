@@ -14,9 +14,18 @@ import { SceneMarkdown } from "./SceneMarkdown";
 import { SceneTagsEditor } from "./SceneTagsEditor";
 import { StoreSceneActions } from "./StoreSceneActions";
 
+/** The listing a version records (and the workspace drafts): plain JSON. */
+export type SceneListingData = {
+  category: string | null;
+  description: string | null;
+  frameosVersion: string | null;
+  tags: string[];
+};
+
 /** The store scene as the Info panel shows it: plain JSON (ISO dates), so
- * the server page can hand it to the client-side editor modal as-is. */
-export type SceneInfoScene = {
+ * the server page can hand it to the client-side editor modal as-is. The
+ * listing fields here are the latest version's. */
+export type SceneInfoScene = SceneListingData & {
   id: string;
   slug: string;
   name: string;
@@ -25,16 +34,11 @@ export type SceneInfoScene = {
   downloadCount: number;
   /** ISO timestamp. */
   updatedAt: string;
-  frameosVersion: string | null;
-  category: string | null;
-  tags: string[];
-  description: string | null;
   visibility: string;
   status: string;
   pulledReason: string | null;
   riskFlags: string[];
   latestVersion: number;
-  hasPreview: boolean;
 };
 
 export type SceneInfoVersion = {
@@ -48,6 +52,11 @@ export type SceneInfoVersion = {
   sha256: string;
   /** ISO timestamp when unpublished (yanked), null otherwise. */
   yankedAt: string | null;
+  /** The listing this version shows (its own, or the latest for versions
+   * published before listings were recorded). */
+  listing: SceneListingData;
+  /** The version's image digests in order; the first is the cover. */
+  images: string[];
 };
 
 /** Everything the Info panel needs, prepared once by the scene page and
@@ -55,8 +64,8 @@ export type SceneInfoVersion = {
 export type SceneInfoData = {
   scene: SceneInfoScene;
   versions: SceneInfoVersion[];
-  /** Owner-uploaded gallery image ids (the zip's preview is `hasPreview`). */
-  imageIds: string[];
+  /** The latest version's image digests in order; the first is the cover. */
+  images: string[];
   isOwner: boolean;
   isAdmin: boolean;
   signedIn: boolean;
@@ -72,10 +81,25 @@ export type SceneInfoData = {
   framesUrl: string;
 };
 
+/** The owner's draft, as the workspace holds it: the listing and images
+ * shown are these, and edits go back through the callbacks — published by
+ * the bar's Save, like the diagram. */
+export type SceneInfoDraft = {
+  listing: SceneListingData;
+  images: string[];
+  onListingChange: (changes: Partial<SceneListingData>) => void;
+  onImagesChange: (images: string[]) => void;
+};
+
 export type SceneInfoPanelProps = SceneInfoData & {
   /** What heads the column: the workspace's scene name with its rename
    * pencil. */
   heading?: ReactNode;
+  /** The listing and images to show instead of the latest version's (a
+   * pinned version, or the owner's draft). */
+  shown?: { listing: SceneListingData; images: string[] } | undefined;
+  /** Owner editing: the draft the editors write into. */
+  draft?: SceneInfoDraft | undefined;
 };
 
 // Everything the scene page says about a scene: its name (the heading)
@@ -86,17 +110,22 @@ export type SceneInfoPanelProps = SceneInfoData & {
 // column.
 export function SceneInfoPanel({
   scene,
-  imageIds,
+  images: latestImages,
   isOwner,
   isAdmin,
   signedIn,
   share,
   heading,
+  shown,
+  draft,
 }: SceneInfoPanelProps) {
   const isPrivate = scene.visibility !== "public";
   const isActive = scene.status === "active";
+  const editing = draft !== undefined && isOwner && isActive;
+  const listing: SceneListingData = draft?.listing ?? shown?.listing ?? scene;
+  const images = draft?.images ?? shown?.images ?? latestImages;
 
-  const showTags = scene.category || scene.tags.length > 0 || isOwner;
+  const showTags = listing.category || listing.tags.length > 0 || editing;
 
   return (
     <div className="scene-info scene-info--panel">
@@ -107,7 +136,7 @@ export function SceneInfoPanel({
           <Link href={`/publishers/${scene.accountId}`}>{scene.publisher ?? "FrameOS user"}</Link>{" "}
           · {scene.downloadCount} download
           {scene.downloadCount === 1 ? "" : "s"} · updated {formatDate(new Date(scene.updatedAt))}
-          {scene.frameosVersion ? ` · requires FrameOS ${scene.frameosVersion} or newer` : ""}
+          {listing.frameosVersion ? ` · requires FrameOS ${listing.frameosVersion} or newer` : ""}
         </p>
       </header>
       {/* The description reads right under the title; ph-no-capture keeps
@@ -115,44 +144,64 @@ export function SceneInfoPanel({
           autocapture labels and attributes. */}
       <div className="section-block ph-no-capture">
         <div className="stack">
-          {isOwner ? (
-            <SceneDescriptionEditor description={scene.description} sceneId={scene.id} />
+          {editing ? (
+            <SceneDescriptionEditor
+              description={listing.description}
+              key={listing.description ?? ""}
+              onChange={(description) => draft.onListingChange({ description })}
+            />
           ) : (
-            <SceneMarkdown description={scene.description} />
+            <SceneMarkdown description={listing.description} />
           )}
         </div>
       </div>
       {/* ph-no-capture travels with the gallery too. A pulled scene is
-          frozen server-side (image edits answer scene_pulled), so the owner
-          gets no add/remove controls on it rather than failing ones. */}
+          frozen server-side, so the owner gets no add/remove controls on
+          it rather than failing ones. */}
       <SceneImageGallery
-        canEdit={isOwner && isActive}
-        hasPreview={scene.hasPreview}
-        imageIds={imageIds}
+        canEdit={editing}
+        images={images}
+        onChange={editing ? draft.onImagesChange : undefined}
         sceneId={scene.id}
         sceneName={scene.name}
         share={share}
       />
-      {isOwner ? (
-        <SceneFrameosVersionEditor frameosVersion={scene.frameosVersion} sceneId={scene.id} />
+      {editing ? (
+        <SceneFrameosVersionEditor
+          frameosVersion={listing.frameosVersion}
+          key={listing.frameosVersion ?? ""}
+          onChange={(frameosVersion) => draft.onListingChange({ frameosVersion })}
+        />
       ) : null}
       {showTags ? (
         <div className="tag-list">
-          {scene.category ? (
+          {listing.category ? (
             <Link
               className="tag-pill tag-pill--category"
-              href={`/?category=${encodeURIComponent(scene.category)}`}
+              href={`/?category=${encodeURIComponent(listing.category)}`}
             >
-              {getStoreCategory(scene.category)?.title ?? scene.category}
+              {getStoreCategory(listing.category)?.title ?? listing.category}
             </Link>
           ) : null}
-          {isOwner ? <SceneCategoryEditor category={scene.category} sceneId={scene.id} /> : null}
-          {scene.tags.map((tag) => (
+          {editing ? (
+            <SceneCategoryEditor
+              category={listing.category}
+              key={listing.category ?? ""}
+              onChange={(category) => draft.onListingChange({ category })}
+            />
+          ) : null}
+          {listing.tags.map((tag) => (
             <Link className="tag-pill" href={`/?tag=${encodeURIComponent(tag)}`} key={tag}>
               {tag}
             </Link>
           ))}
-          {isOwner ? <SceneTagsEditor sceneId={scene.id} tags={scene.tags} /> : null}
+          {editing ? (
+            <SceneTagsEditor
+              key={listing.tags.join(",")}
+              onChange={(tags) => draft.onListingChange({ tags })}
+              tags={listing.tags}
+            />
+          ) : null}
         </div>
       ) : null}
       {scene.visibility === "public" && isActive ? (

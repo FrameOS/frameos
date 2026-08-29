@@ -17,9 +17,12 @@ vi.mock("posthog-js", () => ({
   default: { capture: vi.fn() },
 }));
 
+const shaA = "a".repeat(64);
+const shaB = "b".repeat(64);
+
 const info: SceneInfoData = {
   framesUrl: "https://cloud.frameos.net/frames/",
-  imageIds: ["img-1"],
+  images: [shaA, shaB],
   installableFrames: null,
   isAdmin: false,
   isOwner: false,
@@ -30,7 +33,6 @@ const info: SceneInfoData = {
     description: "A **station** clock.",
     downloadCount: 12,
     frameosVersion: "2026.8.1",
-    hasPreview: true,
     id: "scene-1",
     latestVersion: 2,
     name: "Clock",
@@ -48,6 +50,13 @@ const info: SceneInfoData = {
     {
       createdAt: "2026-08-24T10:00:00.000Z",
       frameosVersion: "2026.8.1",
+      images: [shaA, shaB],
+      listing: {
+        category: "weather",
+        description: "A **station** clock.",
+        frameosVersion: "2026.8.1",
+        tags: ["clock", "e-ink"],
+      },
       message: null,
       sha256: "abcdef0123456789abcdef0123456789",
       sizeBytes: 2048,
@@ -57,6 +66,8 @@ const info: SceneInfoData = {
     {
       createdAt: "2026-08-10T10:00:00.000Z",
       frameosVersion: null,
+      images: [shaB],
+      listing: { category: null, description: "An old clock.", frameosVersion: null, tags: [] },
       message: null,
       sha256: "0123456789abcdef0123456789abcdef",
       sizeBytes: 1024,
@@ -123,16 +134,23 @@ describe("SceneInfoPanel", () => {
     );
     expect(
       screen.getByRole("button", { name: "View image 1 full size" }).querySelector("img")?.getAttribute("src"),
-    ).toBe("/api/store/scenes/scene-1/image?share=tok");
+    ).toBe(`/api/store/scenes/scene-1/images/${shaA}?share=tok`);
     expect(screen.getByText(/viewing it through a sharing link/)).toBeTruthy();
     // A private scene cannot be reported.
     expect(screen.queryByRole("button", { name: "Report scene" })).toBeNull();
   });
 
-  it("gives the owner the editors, the image controls and the visibility actions", () => {
+  it("gives the owner the editors, the image controls and the visibility actions — all writing the draft", () => {
+    const draft = {
+      images: info.images,
+      listing: { ...info.versions[0]!.listing },
+      onImagesChange: vi.fn(),
+      onListingChange: vi.fn(),
+    };
     render(
       <SceneInfoPanel
         {...info}
+        draft={draft}
         installableFrames={[{ connected: true, id: "f1", name: "Kitchen", status: "active" }]}
         isOwner
         scene={{ ...info.scene, visibility: "private" }}
@@ -140,9 +158,17 @@ describe("SceneInfoPanel", () => {
       />,
     );
     expect(screen.getAllByRole("button", { name: /Remove image \d/ })).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Add an image to this scene's page" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Add an image to this scene/ })).toBeTruthy();
+    // Removing goes to the draft, never to the server.
+    fireEvent.click(screen.getByRole("button", { name: "Remove image 2" }));
+    expect(draft.onImagesChange).toHaveBeenCalledWith([shaA]);
+    // So does a tag edit.
+    fireEvent.click(screen.getByRole("button", { name: "Edit tags" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Tags/ }), { target: { value: "clock, maps" } });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(draft.onListingChange).toHaveBeenCalledWith({ tags: ["clock", "maps"] });
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Edit tags" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit category" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Edit minimum FrameOS version/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Make public" })).toBeTruthy();
@@ -156,6 +182,12 @@ describe("SceneInfoPanel", () => {
     render(
       <SceneInfoPanel
         {...info}
+        draft={{
+          images: info.images,
+          listing: info.versions[0]!.listing,
+          onImagesChange: vi.fn(),
+          onListingChange: vi.fn(),
+        }}
         isOwner
         scene={{ ...info.scene, pulledReason: "malware report", status: "pulled" }}
         signedIn
@@ -169,7 +201,7 @@ describe("SceneInfoPanel", () => {
     // server refuses edits on a pulled scene, so no add/remove buttons.
     expect(document.querySelectorAll(".scene-gallery img")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /Remove image/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Add an image to this scene's page" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add an image to this scene/ })).toBeNull();
     // The way out is deleting the scene; visibility cannot be flipped.
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Make (public|private)/ })).toBeNull();
@@ -192,9 +224,17 @@ describe("SceneInfoPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "View image 2 full size" }));
     expect(
       screen.getByRole("dialog", { name: "Scene image" }).querySelector("img")?.getAttribute("src"),
-    ).toBe("/api/store/scenes/scene-1/images/img-1");
+    ).toBe(`/api/store/scenes/scene-1/images/${shaB}`);
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows a pinned version's own listing and images when told to", () => {
+    render(<SceneInfoPanel {...info} shown={{ images: info.versions[1]!.images, listing: info.versions[1]!.listing }} />);
+    expect(screen.getByText("An old clock.")).toBeTruthy();
+    expect(screen.queryByText(/requires FrameOS/)).toBeNull();
+    expect(screen.getAllByRole("button", { name: /View image \d full size/ })).toHaveLength(1);
+    expect(screen.queryByRole("link", { name: "Weather" })).toBeNull();
   });
 
   it("has no heading element when it is given none", () => {

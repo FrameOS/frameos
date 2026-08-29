@@ -1,19 +1,14 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { storeSceneImages } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { decodeBackupContent } from "../../../../../../src/lib/backups";
-import { blobNamespaces, readBlob, storeBlob } from "../../../../../../src/lib/blobs";
 import { jsonError, readJsonObject } from "../../../../../../src/lib/device-flow";
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import {
   detectImageContentType,
   isProvablyFullyTransparentImage,
-  maxImagesPerScene,
   maxPreviewImageBytes,
-  maxSceneZipBytes,
 } from "../../../../../../src/lib/store";
-import { syncLatestSceneZipPreview } from "../../../../../../src/lib/store-image-sync";
+import { registerStoreImage } from "../../../../../../src/lib/store-images";
 import { loadOwnedScene } from "../../../../../../src/lib/store-owner";
 import {
   maxPrivateSceneBytesPerAccount,
@@ -24,10 +19,13 @@ export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ sceneId: string }> };
 
-// Owner upload of an additional gallery image for a store scene. The bytes
-// are sniffed for a real image signature (they are served back with a fixed
-// content type) and pass the same moderation gate as the publish-time
-// preview image.
+// Owner upload of an image for a scene. This registers the bytes — sniffed
+// for a real image signature, refused when provably transparent, moderated
+// like the publish-time cover — and answers with their digest. It binds
+// nothing: which images a scene shows, and in what order, is part of a
+// version, so the digest goes into the editor's draft and the next Save
+// publishes it (POST …/content with `images`). An upload that never gets
+// bound is what the object-store sweep removes.
 export async function POST(request: NextRequest, context: RouteContext) {
   const { db, errorResponse, scene, session } = await loadOwnedScene(
     request,
@@ -61,18 +59,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return jsonError("preview_image_fully_transparent", 400);
   }
 
-  const [counted] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(storeSceneImages)
-    .where(eq(storeSceneImages.sceneId, scene.id));
-  if ((counted?.count ?? 0) >= maxImagesPerScene) {
-    return jsonError("image_quota_exceeded", 403, {
-      max_images: maxImagesPerScene,
-    });
-  }
-  // Gallery bytes count into the private-scene quota (they always did in the
-  // usage display; this write path just never checked). Public scenes are
-  // free (usage.ts).
+  // The bytes will count against the private-scene quota once a version
+  // links them; refusing here rather than at Save keeps the draft honest.
+  // Public scenes are free (usage.ts).
   if (scene.visibility !== "public") {
     const privateBytes = await privateSceneBytesForAccount(db, session.accountId!);
     if (privateBytes + content.length > maxPrivateSceneBytesPerAccount) {
@@ -106,42 +95,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return jsonError("moderation_unavailable", 503);
   }
 
-  const [maxPosition] = await db
-    .select({
-      position: sql<number>`coalesce(max(${storeSceneImages.position}), 0)::int`,
-    })
-    .from(storeSceneImages)
-    .where(eq(storeSceneImages.sceneId, scene.id));
-
-  const stored = await storeBlob(blobNamespaces.sceneImage, content, contentType);
-  const [created] = await db
-    .insert(storeSceneImages)
-    .values({
-      contentType,
-      objectKey: stored.objectKey,
-      position: (maxPosition?.position ?? 0) + 1,
-      sceneId: scene.id,
-      sizeBytes: stored.sizeBytes,
-    })
-    .returning({ id: storeSceneImages.id });
-  if (!created) {
-    return jsonError("image_create_failed", 500);
-  }
-
-  // With no publish-time primary image, the first gallery image is the lead
-  // preview. Append a version whose ZIP contains it, preserving all older
-  // versions exactly as published.
-  let version: number | undefined;
-  if (!scene.previewImage && !scene.previewObjectKey && (counted?.count ?? 0) === 0) {
-    const synced = await syncLatestSceneZipPreview(db, scene, content);
-    if (!synced.ok) {
-      await db
-        .delete(storeSceneImages)
-        .where(eq(storeSceneImages.id, created.id));
-      return syncError(synced.error);
-    }
-    version = synced.version;
-  }
+  const image = await registerStoreImage(db, content, contentType);
 
   await recordAuditEvent(db, {
     accountId: session.accountId,
@@ -150,126 +104,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
       providerSubject: session.providerSubject,
     },
     eventType: "store.image_added",
-    metadata: { imageId: created.id, sizeBytes: content.length, version },
+    metadata: { sha256: image.sha256, sizeBytes: content.length },
     target: { sceneId: scene.id },
   });
 
   return NextResponse.json({
-    image: { id: created.id },
-    status: "added",
-    ...(version ? { version } : {}),
-  });
-}
-
-function syncError(error: string) {
-  if (error === "version_not_found") {
-    return jsonError(error, 404);
-  }
-  if (error === "scene_too_large") {
-    return jsonError(error, 413, { max_bytes: maxSceneZipBytes });
-  }
-  return jsonError(error, 500);
-}
-
-// Owner reordering of the gallery: `order` is the complete list of the
-// scene's gallery image ids in their new sequence. Positions are rewritten
-// 1..n in one transaction, and — as with removal — when the scene has no
-// publish-time primary image and a different image now leads, a new ZIP
-// version carrying that lead is appended so the store tile, the ZIP and the
-// gallery keep agreeing.
-export async function PATCH(request: NextRequest, context: RouteContext) {
-  const { db, errorResponse, scene, session } = await loadOwnedScene(
-    request,
-    context,
-  );
-  if (!scene || !db || !session) {
-    return errorResponse;
-  }
-  if (scene.status === "pulled") {
-    return jsonError("scene_pulled", 403);
-  }
-
-  const body = await readJsonObject(request);
-  const order = Array.isArray(body.order) ? body.order : null;
-  if (
-    !order ||
-    order.length === 0 ||
-    order.length > maxImagesPerScene ||
-    !order.every(
-      (id): id is string => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id),
-    ) ||
-    new Set(order).size !== order.length
-  ) {
-    return jsonError("invalid_order", 400);
-  }
-
-  const existing = await db
-    .select({
-      content: storeSceneImages.content,
-      id: storeSceneImages.id,
-      objectKey: storeSceneImages.objectKey,
-    })
-    .from(storeSceneImages)
-    .where(eq(storeSceneImages.sceneId, scene.id))
-    .orderBy(asc(storeSceneImages.position), asc(storeSceneImages.createdAt));
-  const existingIds = new Set(existing.map((image) => image.id));
-  if (
-    existing.length !== order.length ||
-    order.some((id) => !existingIds.has(id))
-  ) {
-    return jsonError("invalid_order", 400);
-  }
-
-  const previousLead = existing[0]?.id;
-  const nextLead = order[0];
-  let version: number | undefined;
-  if (
-    previousLead !== nextLead &&
-    !scene.previewImage &&
-    !scene.previewObjectKey
-  ) {
-    const lead = existing.find((image) => image.id === nextLead);
-    const leadContent = await readBlob(lead);
-    const synced = await syncLatestSceneZipPreview(
-      db,
-      scene,
-      leadContent ? Buffer.from(leadContent) : undefined,
-    );
-    if (!synced.ok) {
-      return syncError(synced.error);
-    }
-    version = synced.version;
-  }
-
-  await db.transaction(async (tx) => {
-    for (const [index, id] of order.entries()) {
-      await tx
-        .update(storeSceneImages)
-        .set({ position: index + 1 })
-        .where(
-          and(
-            eq(storeSceneImages.id, id),
-            eq(storeSceneImages.sceneId, scene.id),
-            inArray(storeSceneImages.id, order),
-          ),
-        );
-    }
-  });
-
-  await recordAuditEvent(db, {
-    accountId: session.accountId,
-    actor: {
-      accountId: session.accountId,
-      providerSubject: session.providerSubject,
+    image: {
+      content_type: image.contentType,
+      height: image.height,
+      sha256: image.sha256,
+      size_bytes: image.sizeBytes,
+      url: `/api/store/scenes/${scene.id}/images/${image.sha256}`,
+      width: image.width,
     },
-    eventType: "store.images_reordered",
-    metadata: { order, version },
-    target: { sceneId: scene.id },
-  });
-
-  return NextResponse.json({
-    order,
-    status: "reordered",
-    ...(version ? { version } : {}),
+    status: "registered",
   });
 }

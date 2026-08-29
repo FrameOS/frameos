@@ -25,7 +25,6 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import {
   useEffect,
   useId,
@@ -60,6 +59,9 @@ type SceneLivePreviewPanelProps = {
   /** Owner-only: shows "Save to images", which uploads the current frame to
    * the scene's image gallery. "Download PNG" is there for everyone. */
   canSaveToGallery?: boolean | undefined;
+  /** A screenshot was registered with the server; the workspace adds its
+   * digest to the draft's image set (published by Save). */
+  onImageRegistered?: ((sha256: string) => void) | undefined;
   /** The account's settings page (where service keys are saved), linked from
    * the credentials hint when a scene needs keys. */
   settingsUrl?: string | undefined;
@@ -129,9 +131,9 @@ export function SceneLivePreviewPanel({
   width,
   height,
   canSaveToGallery = false,
+  onImageRegistered,
   settingsUrl,
 }: SceneLivePreviewPanelProps) {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [savingShot, setSavingShot] = useState(false);
@@ -806,12 +808,11 @@ export function SceneLivePreviewPanel({
         headers: { "content-type": "application/json" },
         method: "POST",
       });
-      if (response.ok) {
-        setNotice("Screenshot saved to the scene's images.");
-        // The gallery behind the editor shows it as soon as it closes.
-        router.refresh();
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && typeof payload.image?.sha256 === "string") {
+        setNotice("Screenshot added to the scene's images — Save publishes it.");
+        onImageRegistered?.(payload.image.sha256 as string);
       } else {
-        const payload = await response.json().catch(() => ({}));
         setError(`Saving screenshot failed: ${payload.error ?? response.status}`);
       }
     } finally {

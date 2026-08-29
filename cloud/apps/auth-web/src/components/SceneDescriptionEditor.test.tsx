@@ -4,15 +4,12 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SceneDescriptionEditor } from "./SceneDescriptionEditor";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn() }),
-}));
-
 afterEach(cleanup);
 
 describe("SceneDescriptionEditor", () => {
   it("formats selected text and previews the Markdown", () => {
-    render(<SceneDescriptionEditor description="bird journal" sceneId="scene-1" />);
+    const onChange = vi.fn();
+    render(<SceneDescriptionEditor description="bird journal" onChange={onChange} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     const textarea = screen.getByRole("textbox", {
@@ -27,5 +24,9 @@ describe("SceneDescriptionEditor", () => {
     expect(screen.getByText("bird").tagName).toBe("STRONG");
     expect(screen.queryByText("0 / 2000")).toBeNull();
     expect(screen.getByText("16 / 2000")).toBeTruthy();
+
+    // Done hands the text to the draft; nothing is fetched.
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(onChange).toHaveBeenCalledWith("**bird** journal");
   });
 });

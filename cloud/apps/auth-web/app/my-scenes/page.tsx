@@ -20,7 +20,7 @@ import {
 import { formatDate } from "../../src/lib/format";
 import { readSession } from "../../src/lib/session";
 import { accountIsSuperadmin } from "../../src/lib/superadmin";
-import { sceneHasAnyImageSql } from "../../src/lib/store-preview";
+import { sceneHasImageSql } from "../../src/lib/store-listing";
 
 export const metadata = { title: "My scenes" };
 
@@ -87,7 +87,7 @@ export default async function MyScenesPage({
           category: storeScenes.category,
           description: storeScenes.description,
           downloadCount: storeScenes.downloadCount,
-          hasPreview: sceneHasAnyImageSql,
+          hasPreview: sceneHasImageSql,
           featuredAt: storeScenes.featuredAt,
           id: storeScenes.id,
           latestVersion: storeScenes.latestVersion,

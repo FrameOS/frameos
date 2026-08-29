@@ -10,7 +10,7 @@ import { hasDatabaseUrl } from "../../../src/lib/env";
 import { formatDate } from "../../../src/lib/format";
 import { readSession } from "../../../src/lib/session";
 import { accountIsSuperadmin } from "../../../src/lib/superadmin";
-import { sceneHasAnyImageSql } from "../../../src/lib/store-preview";
+import { sceneHasImageSql } from "../../../src/lib/store-listing";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +64,7 @@ export default async function PublisherPage({
       description: storeScenes.description,
       downloadCount: storeScenes.downloadCount,
       frameosVersion: storeScenes.frameosVersion,
-      hasPreview: sceneHasAnyImageSql,
+      hasPreview: sceneHasImageSql,
       id: storeScenes.id,
       name: storeScenes.name,
       publisher: accounts.displayName,

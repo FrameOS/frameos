@@ -15,7 +15,7 @@ import { resolveAiCredentials } from "../../../../src/lib/ai/api-key";
 import { buildInitialInput, runAgentLoop } from "../../../../src/lib/ai/loop";
 import { formatAiException, type JsonObject } from "../../../../src/lib/ai/scene-utils";
 import { captureAiGeneration, captureAiTurn } from "../../../../src/lib/ai/telemetry";
-import type { ScenesEvent, ToolContext } from "../../../../src/lib/ai/tools";
+import type { ListingEvent, ScenesEvent, ToolContext } from "../../../../src/lib/ai/tools";
 import {
   activeTurnForChat,
   startTurn,
@@ -110,10 +110,34 @@ async function frameContextBlock(
 // rule as the get_store_scene tool: public+active, or the user's own. The
 // editor sends the scene JSON itself (it may already hold unsaved edits), so
 // this block carries the listing metadata and what saving means here.
+/** The editor's draft listing, when the client sent one: only the fields
+ * it named, and only in the shapes the listing has. */
+function parseDraftListing(value: unknown): ListingEvent["listing"] | null {
+  const record = objectOrNull(value);
+  if (!record) {
+    return null;
+  }
+  const draft: ListingEvent["listing"] = {};
+  if (typeof record.description === "string" || record.description === null) {
+    draft.description = record.description;
+  }
+  if (typeof record.category === "string" || record.category === null) {
+    draft.category = record.category;
+  }
+  if (typeof record.frameosVersion === "string" || record.frameosVersion === null) {
+    draft.frameosVersion = record.frameosVersion;
+  }
+  if (Array.isArray(record.tags) && record.tags.every((tag) => typeof tag === "string")) {
+    draft.tags = record.tags.slice(0, 5) as string[];
+  }
+  return Object.keys(draft).length > 0 ? draft : null;
+}
+
 async function storeSceneContextBlock(
   db: ReturnType<typeof createDb>,
   accountId: string,
   storeSceneId: string | null,
+  draft: ListingEvent["listing"] | null,
 ): Promise<{ block: string; storeSceneId: string | null }> {
   if (!storeSceneId || !/^[0-9a-f-]{36}$/i.test(storeSceneId)) {
     return { block: "", storeSceneId: null };
@@ -147,25 +171,30 @@ async function storeSceneContextBlock(
     return { block: "", storeSceneId: null };
   }
   const owned = scene.accountId === accountId;
+  // The listing as the user sees it: the editor's draft when it sent one
+  // (unsaved edits included), else the published one.
+  const description = draft?.description !== undefined ? draft.description : scene.description;
+  const category = draft?.category !== undefined ? draft.category : scene.category;
+  const tags = draft?.tags ?? scene.tags;
   const lines = [
     "The user is on the scene store, looking at this store scene in its editor:",
     `- Store scene id: ${scene.id} (slug "${scene.slug}", version ${scene.latestVersion})`,
     `- Name: ${scene.name}`,
     // Always stated, empty included: "update the description" on a scene
     // with none must not read as an invitation to find one elsewhere.
-    `- Store listing description: ${scene.description || "(none yet)"}`,
-    ...(scene.category ? [`- Category: ${scene.category}`] : []),
-    ...(scene.tags.length > 0 ? [`- Tags: ${scene.tags.join(", ")}`] : []),
+    `- Listing description${draft ? " (the editor's draft)" : ""}: ${description || "(none yet)"}`,
+    ...(category ? [`- Category: ${category}`] : []),
+    ...(tags.length > 0 ? [`- Tags: ${tags.join(", ")}`] : []),
     `- Publisher: ${scene.publisher ?? "FrameOS user"}${owned ? " (this is the user's own scene)" : ""}`,
     `- Visibility: ${scene.visibility}`,
     ...(owned
       ? [
           "- Saving: the editor's \"Save as new version\" button publishes the edited scene as a new version of this listing; \"Fork & save copy\" makes a separate private copy. save_scene always makes a private copy (a fork of this store scene by default).",
-          "- The listing itself (description, tags, category) is theirs: update_scene_listing writes it straight to the store, no Save button involved.",
+          "- The listing (description, tags, category, minimum FrameOS version) is part of a version: update_scene_listing edits the draft, and Save publishes it with the scene.",
         ]
       : [
           "- Saving: the user does not own this scene, so edits are saved as a FORK — the editor's \"Fork & save copy\" button or save_scene (which forks this store scene by default) creates a private copy in their account. Never suggest they can overwrite the original.",
-          "- The listing is not theirs to edit; update_scene_listing will refuse it.",
+          "- The listing can be edited in the draft (update_scene_listing) like the scene, but only a fork of their own can carry it.",
         ]),
   ];
   return { block: lines.join("\n"), storeSceneId: scene.id };
@@ -215,10 +244,12 @@ export async function POST(request: NextRequest) {
     accountId,
     stringOrNull(body.frameId),
   );
+  const draftListing = parseDraftListing(body.listing);
   const { block: storeBlock, storeSceneId } = await storeSceneContextBlock(
     db,
     accountId,
     stringOrNull(body.storeSceneId),
+    draftListing,
   );
   const editorScenes = Array.isArray(body.scenes)
     ? (body.scenes as unknown[]).filter((scene) => objectOrNull(scene) !== null).slice(0, 20)
@@ -320,13 +351,17 @@ export async function POST(request: NextRequest) {
   let roundsSeen = 0;
   let usageSeen = { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
   // The turn's emit, once it is running; emitScenes forwards through it.
-  let turnEmit: (event: ScenesEvent) => void = () => {};
+  let turnEmit: (event: ScenesEvent | ListingEvent) => void = () => {};
   const toolContext: ToolContext = {
     accountId,
+    currentListing: draftListing,
     currentScene: scenePayload,
     currentSceneId: sceneId ?? (stringOrNull(scenePayload?.id) || null),
     db,
     editorScenes,
+    emitListing: (event) => {
+      turnEmit(event);
+    },
     emitScenes: (event) => {
       scenesDelivered.push({
         count: event.scenes.length,

@@ -53,6 +53,8 @@ SELECT preview_object_key FROM store_scenes WHERE preview_object_key IS NOT NULL
 UNION
 SELECT object_key FROM store_scene_images WHERE object_key IS NOT NULL
 UNION
+SELECT object_key FROM store_images
+UNION
 SELECT object_key FROM frame_asset_files WHERE object_key IS NOT NULL;
 SQL
 LC_ALL=C sort -o "$work/referenced" "$work/referenced"
@@ -90,6 +92,7 @@ SELECT 1 WHERE EXISTS (
   SELECT 1 FROM store_scene_versions WHERE object_key = :'key'
   UNION ALL SELECT 1 FROM store_scenes WHERE preview_object_key = :'key'
   UNION ALL SELECT 1 FROM store_scene_images WHERE object_key = :'key'
+  UNION ALL SELECT 1 FROM store_images WHERE object_key = :'key'
   UNION ALL SELECT 1 FROM frame_asset_files WHERE object_key = :'key'
 );
 SQL

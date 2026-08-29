@@ -1,76 +1,33 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeTool, toolDefinitions, type ToolContext } from "./tools";
+import { describe, expect, it, vi } from "vitest";
+import { executeTool, toolDefinitions, type ListingEvent, type ToolContext } from "./tools";
 import type { JsonObject } from "./scene-utils";
 
-const moderate = vi.hoisted(() =>
-  vi.fn(async () => ({ checked: true, ok: true }) as never),
-);
-vi.mock("../moderation", () => ({ moderateStoreContent: moderate }));
-
-const audit = vi.hoisted(() => vi.fn(async () => undefined));
-vi.mock("../audit", () => ({ recordAuditEvent: audit }));
-
-const sceneId = "11111111-2222-3333-4444-555555555555";
-const owner = "acct-1";
-
-type Row = Record<string, unknown> | undefined;
-
-// The two drizzle chains the tool walks: one ownership select, one update.
-function fakeDb(row: Row) {
-  const set = vi.fn();
-  const db = {
-    select: () => ({
-      from: () => ({ where: () => ({ limit: async () => (row ? [row] : []) }) }),
-    }),
-    update: () => ({
-      set: (changes: Record<string, unknown>) => {
-        set(changes);
-        return {
-          where: () => ({ returning: async () => [{ ...row, ...changes }] }),
-        };
-      },
-    }),
-  };
-  return { db: db as unknown as ToolContext["db"], set };
-}
-
-function context(row: Row): ToolContext & { set: ReturnType<typeof vi.fn> } {
-  const { db, set } = fakeDb(row);
+// update_scene_listing delivers to the editor's draft, like patch_scene: it
+// never touches the database. The listing is part of a version, and the
+// user's Save publishes it.
+function context(overrides: Partial<ToolContext> = {}): ToolContext & { events: ListingEvent[] } {
+  const events: ListingEvent[] = [];
   return {
-    accountId: owner,
-    db,
+    accountId: "acct-1",
+    db: {} as ToolContext["db"],
+    emitListing: (event) => {
+      events.push(event);
+    },
     emitScenes: () => undefined,
+    events,
     prompt: "update the description",
-    set,
-    storeSceneId: sceneId,
-  } as unknown as ToolContext & { set: ReturnType<typeof vi.fn> };
+    storeSceneId: "11111111-2222-3333-4444-555555555555",
+    ...overrides,
+  };
 }
-
-const listing = {
-  accountId: owner,
-  visibility: "public",
-  category: "art",
-  description: "The old blurb",
-  id: sceneId,
-  name: "Visited world map",
-  tags: ["maps"],
-};
 
 async function call(args: JsonObject, ctx: ToolContext): Promise<JsonObject> {
   return JSON.parse(await executeTool("update_scene_listing", args, ctx)) as JsonObject;
 }
 
 describe("update_scene_listing", () => {
-  beforeEach(() => {
-    audit.mockClear();
-    moderate.mockClear();
-    moderate.mockResolvedValue({ checked: true, ok: true } as never);
-  });
-
   it("is registered with a label and an object schema", () => {
-    const definition = toolDefinitions.find(
-      (tool) => tool.name === "update_scene_listing",
-    );
+    const definition = toolDefinitions.find((tool) => tool.name === "update_scene_listing");
     expect(definition).toBeDefined();
     const parameters = definition!.parameters as {
       properties: Record<string, unknown>;
@@ -80,82 +37,59 @@ describe("update_scene_listing", () => {
     expect(Object.keys(parameters.properties).sort()).toEqual([
       "category",
       "description",
-      "scene_id",
+      "frameos_version",
       "tags",
     ]);
   });
 
-  it("writes the description of the scene the user has open, and says it is already saved", async () => {
-    const ctx = context(listing);
+  it("delivers the named fields to the draft and says Save publishes them", async () => {
+    const ctx = context({ currentListing: { description: "Old", tags: ["maps"] } });
     const output = await call({ description: "A map of everywhere I have been." }, ctx);
     expect(output.ok).toBe(true);
-    expect(ctx.set).toHaveBeenCalledWith(
-      expect.objectContaining({ description: "A map of everywhere I have been." }),
-    );
-    // Only what was named: tags and category are untouched.
-    expect(Object.keys(ctx.set.mock.calls[0]![0] as object).sort()).toEqual([
-      "description",
-      "updatedAt",
+    expect(ctx.events).toEqual([
+      { listing: { description: "A map of everywhere I have been." }, type: "listing" },
     ]);
-    expect(String(output.note)).toMatch(/does not need to press Save/);
-    // A user mid-draft must be told their unsaved editor work was untouched.
-    expect(String(output.note)).toMatch(/made no new version/);
-    expect((output.listing as JsonObject).description).toBe(
-      "A map of everywhere I have been.",
-    );
-    // Nobody pressed a button, so the edit leaves a trail.
-    expect(audit).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        eventType: "store.listing_edited",
-        metadata: expect.objectContaining({ fields: ["description"], via: "ai_chat" }),
-      }),
-    );
+    // What the draft holds now, as the model should describe it.
+    expect(output.listing).toEqual({ description: "A map of everywhere I have been.", tags: ["maps"] });
+    expect(String(output.note)).toMatch(/Save publishes it/);
+    expect(String(output.note)).toMatch(/unsaved/);
   });
 
-  it("refuses a scene the user does not own, and says not to edit the scene instead", async () => {
-    const output = await call({ description: "mine now" }, context(undefined));
-    expect(output.ok).toBe(false);
-    expect(String(output.error)).toMatch(/not in the user's account/);
-    expect(String(output.error)).toMatch(/do not edit the scene's contents/i);
-  });
-
-  it("needs a scene and something to change", async () => {
-    const ctx = context(listing);
-    expect((await call({}, ctx)).error).toMatch(/nothing_to_update/);
-    expect(ctx.set).not.toHaveBeenCalled();
-
-    const loose = context(listing);
-    (loose as { storeSceneId?: string | null }).storeSceneId = null;
-    expect(String((await call({ description: "x" }, loose)).error)).toMatch(
-      /search_store_scenes/,
+  it("normalizes tags, category and the FrameOS version the way the store does", async () => {
+    const ctx = context();
+    const output = await call(
+      { category: "art", frameos_version: "2026.7.5", tags: ["Maps", "maps", "travel"] },
+      ctx,
     );
-
-    expect(
-      String((await call({ description: "x", scene_id: "nope" }, ctx)).error),
-    ).toMatch(/uuid/);
+    expect(output.ok).toBe(true);
+    expect(ctx.events[0]!.listing).toEqual({
+      category: "art",
+      frameosVersion: "2026.7.5",
+      tags: ["maps", "travel"],
+    });
   });
 
-  it("bounces bad tags and categories back before touching the row", async () => {
-    const ctx = context(listing);
+  it("bounces bad tags, categories and versions back without delivering", async () => {
+    const ctx = context();
     expect((await call({ tags: ["not a tag"] }, ctx)).error).toBe("invalid_tags");
-    expect((await call({ category: "nonsense" }, ctx)).error).toBe(
-      "invalid_category",
-    );
-    expect(ctx.set).not.toHaveBeenCalled();
+    expect((await call({ category: "nonsense" }, ctx)).error).toBe("invalid_category");
+    expect((await call({ frameos_version: "not a version!" }, ctx)).error).toBe("invalid_frameos_version");
+    expect((await call({}, ctx)).error).toMatch(/nothing_to_update/);
+    expect(ctx.events).toEqual([]);
   });
 
-  it("passes the store's moderation refusal back instead of writing", async () => {
-    moderate.mockResolvedValue({
-      categories: ["hate"],
-      error: "content_rejected",
-      ok: false,
-    } as never);
-    const ctx = context(listing);
-    const output = await call({ description: "something vile" }, ctx);
+  it("refuses when there is no editor to hold the edit", async () => {
+    const ctx = context({ emitListing: undefined });
+    const output = await call({ description: "x" }, ctx);
     expect(output.ok).toBe(false);
-    expect(String(output.error)).toMatch(/moderation refused/i);
-    expect(String(output.error)).toMatch(/hate/);
-    expect(ctx.set).not.toHaveBeenCalled();
+    expect(String(output.error)).toMatch(/no scene editor/i);
+  });
+
+  it("never touches the database", async () => {
+    const db = { select: vi.fn(), update: vi.fn() };
+    const ctx = context({ db: db as unknown as ToolContext["db"] });
+    await call({ description: "x" }, ctx);
+    expect(db.select).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
   });
 });

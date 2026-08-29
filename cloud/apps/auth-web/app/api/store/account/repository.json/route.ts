@@ -14,7 +14,11 @@ import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 import { storePublishScope } from "../../../../../src/lib/store";
 import { storeRoute } from "../../../../../src/lib/store-cache";
-import { sceneHasAnyImageSql } from "../../../../../src/lib/store-preview";
+import {
+  sceneCoverHeightSql,
+  sceneCoverWidthSql,
+  sceneHasImageSql,
+} from "../../../../../src/lib/store-listing";
 
 export const runtime = "nodejs";
 
@@ -68,12 +72,12 @@ async function handleGet(request: NextRequest) {
       authorName: accounts.displayName,
       description: storeScenes.description,
       frameosVersion: storeScenes.frameosVersion,
-      hasPreview: sceneHasAnyImageSql,
+      hasPreview: sceneHasImageSql,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,
-      previewImageHeight: storeScenes.previewImageHeight,
-      previewImageWidth: storeScenes.previewImageWidth,
+      previewImageHeight: sceneCoverHeightSql,
+      previewImageWidth: sceneCoverWidthSql,
       riskFlags: storeScenes.riskFlags,
       slug: storeScenes.slug,
       status: storeScenes.status,

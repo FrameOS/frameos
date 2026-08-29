@@ -17,6 +17,7 @@ import {
   executeTool,
   toolDefinitions,
   toolLabels,
+  type ListingEvent,
   type ScenesEvent,
   type ToolContext,
 } from "./tools";
@@ -37,6 +38,7 @@ export type ChatStreamEvent =
       detail?: string;
     }
   | ScenesEvent
+  | ListingEvent
   | { type: "done"; tool: string; reply: string }
   | { type: "error"; detail: string }
   // Keepalive from the relay while nothing else is flowing; never buffered,

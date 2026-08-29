@@ -8,6 +8,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -574,6 +575,19 @@ export const storeSceneVersions = pgTable(
     // normalizeVersionMessage). Null for versions published without one —
     // everything before this column existed, and every zip upload.
     message: text("message"),
+    // The listing as it was when this version was published: description,
+    // tags and category travel with the version (and inside the zip's
+    // template.json) like frameosVersion always did, so a pinned version
+    // says what it said. The store_scenes columns of the same names are the
+    // projection of the latest version — what the store's SQL filters on.
+    description: text("description"),
+    tags: text("tags").array().default([]).notNull(),
+    category: text("category"),
+    // False on versions published before the listing and the image set were
+    // recorded per version (migration 0041 stamps the latest one true);
+    // readers fall back to the scene row for those. "No description, no
+    // images" is a legitimate recorded state, hence a flag and not nulls.
+    listingRecorded: boolean("listing_recorded").default(false).notNull(),
     publishedByLinkedClientId: uuid("published_by_linked_client_id").references(
       () => linkedClients.id,
       { onDelete: "set null" },
@@ -623,6 +637,45 @@ export const storeSceneImages = pgTable(
     sceneIdx: index("store_scene_images_scene_idx").on(
       table.sceneId,
       table.position,
+    ),
+  }),
+);
+
+// Every image the store holds, once: keyed by the digest of its bytes, which
+// is also the tail of its object key. Versions link to these
+// (storeSceneVersionImages) rather than carrying rows of their own, so a
+// screenshot reused across ten versions of a scene — or by a fork — is one
+// object and one row. Nothing here says which scene an image belongs to;
+// the links do, and an image nobody links is what the sweep script removes.
+export const storeImages = pgTable("store_images", {
+  sha256: text("sha256").primaryKey(),
+  objectKey: text("object_key").notNull(),
+  contentType: text("content_type").default("image/jpeg").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  width: integer("width"),
+  height: integer("height"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// The ordered image set of one version: position 0 is the cover the store
+// shows for it. Immutable with the version — reordering publishes a new one.
+export const storeSceneVersionImages = pgTable(
+  "store_scene_version_images",
+  {
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => storeSceneVersions.id, { onDelete: "cascade" }),
+    imageSha256: text("image_sha256")
+      .notNull()
+      .references(() => storeImages.sha256),
+    position: integer("position").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.versionId, table.position] }),
+    imageIdx: index("store_scene_version_images_image_idx").on(
+      table.imageSha256,
     ),
   }),
 );

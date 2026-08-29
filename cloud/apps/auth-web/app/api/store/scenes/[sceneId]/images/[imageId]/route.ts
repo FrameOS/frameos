@@ -1,5 +1,11 @@
-import { and, eq } from "drizzle-orm";
-import { storeSceneImages, storeScenes } from "@frameos-cloud/db";
+import { and, eq, exists, sql } from "drizzle-orm";
+import {
+  storeImages,
+  storeSceneImages,
+  storeSceneVersionImages,
+  storeSceneVersions,
+  storeScenes,
+} from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { publicBlobUrl, readBlob } from "../../../../../../../src/lib/blobs";
 import { detectImageContentType } from "../../../../../../../src/lib/store";
@@ -14,13 +20,16 @@ import {
 } from "../../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../../src/lib/rate-limit";
 import { storeRoute } from "../../../../../../../src/lib/store-cache";
+import { sha256Pattern } from "../../../../../../../src/lib/store-images";
 
 export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ sceneId: string; imageId: string }> };
 
-// An owner-uploaded gallery image; same visibility rules and fixed content
-// type as the primary preview image route.
+// One of a scene's images by its digest, provided some version of the scene
+// links it; same visibility rules and fixed content type as the cover route.
+// A legacy gallery row id (uuid) is still honoured for links minted before
+// images were content-addressed.
 async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:image", {
     limit: 1200,
@@ -36,39 +45,72 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   }
 
   const { imageId, sceneId } = await context.params;
-  if (!/^[0-9a-f-]{36}$/i.test(sceneId) || !/^[0-9a-f-]{36}$/i.test(imageId)) {
+  if (!/^[0-9a-f-]{36}$/i.test(sceneId)) {
     return jsonError("image_not_found", 404);
   }
 
-  const [row] = await db
+  const [scene] = await db
     .select({
       accountId: storeScenes.accountId,
-      content: storeSceneImages.content,
-      contentType: storeSceneImages.contentType,
-      objectKey: storeSceneImages.objectKey,
       shareToken: storeScenes.shareToken,
       status: storeScenes.status,
       visibility: storeScenes.visibility,
     })
-    .from(storeSceneImages)
-    .innerJoin(storeScenes, eq(storeScenes.id, storeSceneImages.sceneId))
-    .where(
-      and(
-        eq(storeSceneImages.id, imageId),
-        eq(storeSceneImages.sceneId, sceneId),
-      ),
-    )
+    .from(storeScenes)
+    .where(eq(storeScenes.id, sceneId))
     .limit(1);
-
-  if (!row) {
+  if (!scene) {
     return jsonError("image_not_found", 404);
   }
-  if (row.status === "pulled" && !(await canViewPulledScene(row.accountId))) {
+
+  let image: { content?: Buffer | null; contentType: string; objectKey: string | null } | undefined;
+  if (sha256Pattern.test(imageId)) {
+    const [row] = await db
+      .select({ contentType: storeImages.contentType, objectKey: storeImages.objectKey })
+      .from(storeImages)
+      .where(
+        and(
+          eq(storeImages.sha256, imageId),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(storeSceneVersionImages)
+              .innerJoin(
+                storeSceneVersions,
+                eq(storeSceneVersions.id, storeSceneVersionImages.versionId),
+              )
+              .where(
+                and(
+                  eq(storeSceneVersionImages.imageSha256, storeImages.sha256),
+                  eq(storeSceneVersions.sceneId, sceneId),
+                ),
+              ),
+          ),
+        ),
+      )
+      .limit(1);
+    image = row;
+  } else if (/^[0-9a-f-]{36}$/i.test(imageId)) {
+    const [row] = await db
+      .select({
+        content: storeSceneImages.content,
+        contentType: storeSceneImages.contentType,
+        objectKey: storeSceneImages.objectKey,
+      })
+      .from(storeSceneImages)
+      .where(and(eq(storeSceneImages.id, imageId), eq(storeSceneImages.sceneId, sceneId)))
+      .limit(1);
+    image = row;
+  }
+  if (!image) {
+    return jsonError("image_not_found", 404);
+  }
+  if (scene.status === "pulled" && !(await canViewPulledScene(scene.accountId))) {
     return jsonError("scene_pulled", 410);
   }
-  if (row.visibility !== "public") {
+  if (scene.visibility !== "public") {
     const shared = shareTokenGrantsAccess(
-      row.shareToken,
+      scene.shareToken,
       request.nextUrl.searchParams.get("share"),
     );
     if (
@@ -76,34 +118,39 @@ async function handleGet(request: NextRequest, context: RouteContext) {
       !(await canAccessPrivateScene(
         db,
         request.headers.get("authorization"),
-        row.accountId,
+        scene.accountId,
       ))
     ) {
       return jsonError("image_not_found", 404);
     }
   }
 
+  // The digest is the URL, so the bytes behind it never change.
+  const cacheControl =
+    scene.visibility === "public"
+      ? "public, max-age=86400, s-maxage=31536000, immutable"
+      : "private, max-age=3600";
   const cdnUrl =
-    row.visibility === "public" ? publicBlobUrl(row.objectKey) : undefined;
+    scene.visibility === "public" ? publicBlobUrl(image.objectKey) : undefined;
   if (cdnUrl) {
     return NextResponse.redirect(cdnUrl, {
-      headers: { "cache-control": "public, max-age=3600" },
+      headers: { "cache-control": cacheControl },
       status: 307,
     });
   }
 
-  const content = await readBlob(row);
+  const content = await readBlob(image);
   if (!content) {
     return jsonError("image_not_found", 404);
   }
 
   return new NextResponse(new Uint8Array(content), {
     headers: {
-      "cache-control": "public, max-age=3600",
+      "cache-control": cacheControl,
       "content-length": String(content.length),
-      // The stored content_type defaults to image/jpeg and older rows kept
-      // that default over PNG bytes; the bytes are authoritative.
-      "content-type": detectImageContentType(content) ?? row.contentType,
+      // The stored content_type is only as good as whatever wrote it; the
+      // bytes are authoritative.
+      "content-type": detectImageContentType(content) ?? image.contentType,
       "x-content-type-options": "nosniff",
     },
   });

@@ -19,7 +19,8 @@ import {
   clientBackups,
   frameLogs,
   frames,
-  storeSceneImages,
+  storeImages,
+  storeSceneVersionImages,
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
@@ -80,60 +81,53 @@ export interface SceneBytesBreakdown {
   publicBytes: number;
 }
 
-// Blob sizes now come from a column, because the bytes themselves have moved
-// to object storage and octet_length() has nothing left to measure. Rows
-// written before migration 0032 still hold their bytes in Postgres, so the
-// column falls back to measuring them — one expression, both eras.
-const sceneImageBytes = sql`coalesce(${storeSceneImages.sizeBytes}, octet_length(${storeSceneImages.content}), 0)`;
-const scenePreviewBytes = sql`coalesce(${storeScenes.previewImageSizeBytes}, octet_length(${storeScenes.previewImage}), 0)`;
+// Scene bytes are counted per distinct object, not per row: versions and
+// images are content-addressed, so a screenshot kept across ten versions or
+// shared by a fork is stored once and billed once. Public scenes are free;
+// an object is metered when any private scene of the account uses it.
+const distinctVersionBytes = sql`
+  select v.sha256, max(v.size_bytes) as size_bytes,
+         bool_or(s.visibility <> 'public') as metered
+    from ${storeSceneVersions} v
+    join ${storeScenes} s on s.id = v.scene_id
+   where s.account_id = `;
+const distinctImageBytes = sql`
+  select i.sha256, max(i.size_bytes) as size_bytes,
+         bool_or(s.visibility <> 'public') as metered
+    from ${storeImages} i
+    join ${storeSceneVersionImages} vi on vi.image_sha256 = i.sha256
+    join ${storeSceneVersions} v on v.id = vi.version_id
+    join ${storeScenes} s on s.id = v.scene_id
+   where s.account_id = `;
 
-const publicCase = (bytes: ReturnType<typeof sql>) =>
-  sql<number>`coalesce(sum(case when ${storeScenes.visibility} = 'public' then ${bytes} else 0 end), 0)::float8`;
-const privateCase = (bytes: ReturnType<typeof sql>) =>
-  sql<number>`coalesce(sum(case when ${storeScenes.visibility} <> 'public' then ${bytes} else 0 end), 0)::float8`;
+async function splitBytes(
+  db: FramesDatabase,
+  accountId: string,
+  distinct: ReturnType<typeof sql>,
+): Promise<SceneBytesBreakdown> {
+  const [row] = await db.execute<{ private_bytes: number; public_bytes: number }>(
+    sql`select coalesce(sum(case when metered then size_bytes else 0 end), 0)::float8 as private_bytes,
+               coalesce(sum(case when metered then 0 else size_bytes end), 0)::float8 as public_bytes
+          from (${distinct}${accountId} group by 1) as objects`,
+  );
+  return {
+    privateBytes: Number(row?.private_bytes ?? 0),
+    publicBytes: Number(row?.public_bytes ?? 0),
+  };
+}
 
-// A scene's bytes = its versions + gallery images + the primary preview
-// blob. Three flat join-aggregates (versions × images would cross-multiply
-// in a single join), each split by visibility so private (metered) and
-// public (free) stay apart.
+// A scene's bytes = its versions + the images its versions link.
 export async function sceneBytesForAccount(
   db: FramesDatabase,
   accountId: string,
 ): Promise<SceneBytesBreakdown> {
-  const [[versions], [images], [previews]] = await Promise.all([
-    db
-      .select({
-        privateBytes: privateCase(sql`${storeSceneVersions.sizeBytes}`),
-        publicBytes: publicCase(sql`${storeSceneVersions.sizeBytes}`),
-      })
-      .from(storeSceneVersions)
-      .innerJoin(storeScenes, eq(storeScenes.id, storeSceneVersions.sceneId))
-      .where(eq(storeScenes.accountId, accountId)),
-    db
-      .select({
-        privateBytes: privateCase(sceneImageBytes),
-        publicBytes: publicCase(sceneImageBytes),
-      })
-      .from(storeSceneImages)
-      .innerJoin(storeScenes, eq(storeScenes.id, storeSceneImages.sceneId))
-      .where(eq(storeScenes.accountId, accountId)),
-    db
-      .select({
-        privateBytes: privateCase(scenePreviewBytes),
-        publicBytes: publicCase(scenePreviewBytes),
-      })
-      .from(storeScenes)
-      .where(eq(storeScenes.accountId, accountId)),
+  const [versions, images] = await Promise.all([
+    splitBytes(db, accountId, distinctVersionBytes),
+    splitBytes(db, accountId, distinctImageBytes),
   ]);
   return {
-    privateBytes:
-      Number(versions?.privateBytes ?? 0) +
-      Number(images?.privateBytes ?? 0) +
-      Number(previews?.privateBytes ?? 0),
-    publicBytes:
-      Number(versions?.publicBytes ?? 0) +
-      Number(images?.publicBytes ?? 0) +
-      Number(previews?.publicBytes ?? 0),
+    privateBytes: versions.privateBytes + images.privateBytes,
+    publicBytes: versions.publicBytes + images.publicBytes,
   };
 }
 
@@ -145,36 +139,26 @@ export async function privateSceneBytesForAccount(
   return (await sceneBytesForAccount(db, accountId)).privateBytes;
 }
 
-/** One scene's total bytes (versions + gallery images + preview blob). */
+/** One scene's total bytes (distinct versions + distinct linked images). */
 export async function sceneBytesTotal(
   db: FramesDatabase,
   sceneId: string,
 ): Promise<number> {
-  const [[versions], [images], [preview]] = await Promise.all([
-    db
-      .select({
-        bytes: sql<number>`coalesce(sum(${storeSceneVersions.sizeBytes}), 0)::float8`,
-      })
-      .from(storeSceneVersions)
-      .where(eq(storeSceneVersions.sceneId, sceneId)),
-    db
-      .select({
-        bytes: sql<number>`coalesce(sum(${sceneImageBytes}), 0)::float8`,
-      })
-      .from(storeSceneImages)
-      .where(eq(storeSceneImages.sceneId, sceneId)),
-    db
-      .select({
-        bytes: sql<number>`coalesce(${scenePreviewBytes}, 0)::float8`,
-      })
-      .from(storeScenes)
-      .where(eq(storeScenes.id, sceneId)),
-  ]);
-  return (
-    Number(versions?.bytes ?? 0) +
-    Number(images?.bytes ?? 0) +
-    Number(preview?.bytes ?? 0)
+  const [row] = await db.execute<{ bytes: number }>(
+    sql`select (
+      (select coalesce(sum(size_bytes), 0) from (
+         select max(size_bytes) as size_bytes from ${storeSceneVersions}
+          where scene_id = ${sceneId} group by sha256) as versions)
+      +
+      (select coalesce(sum(size_bytes), 0) from (
+         select max(i.size_bytes) as size_bytes
+           from ${storeImages} i
+           join ${storeSceneVersionImages} vi on vi.image_sha256 = i.sha256
+           join ${storeSceneVersions} v on v.id = vi.version_id
+          where v.scene_id = ${sceneId} group by i.sha256) as images)
+    )::float8 as bytes`,
   );
+  return Number(row?.bytes ?? 0);
 }
 
 export async function backupBytesForAccount(

@@ -5,11 +5,7 @@ import {
 } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
-import {
-  blobNamespaces,
-  readBlob,
-  storeBlob,
-} from "../../../../../../src/lib/blobs";
+import { readBlob } from "../../../../../../src/lib/blobs";
 import { jsonError, readJsonObject } from "../../../../../../src/lib/device-flow";
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import { identityRateLimitResponse } from "../../../../../../src/lib/rate-limit";
@@ -23,11 +19,25 @@ import {
   maxSceneEditsPerHour,
   maxSceneZipBytes,
   normalizeVersionMessage,
-  rebuildZipWithScenes,
+  rebuildZip,
   sceneSummary,
   validateSceneZip,
 } from "../../../../../../src/lib/store";
+import {
+  imageSetForVersion,
+  resolveImageSet,
+  sameImageSet,
+} from "../../../../../../src/lib/store-images";
+import {
+  listingEquals,
+  parseListingChanges,
+  type SceneListing,
+} from "../../../../../../src/lib/store-listing";
 import { loadOwnedScene } from "../../../../../../src/lib/store-owner";
+import {
+  alignZipCover,
+  writeSceneVersion,
+} from "../../../../../../src/lib/store-version-write";
 import {
   maxPrivateSceneBytesPerAccount,
   privateSceneBytesForAccount,
@@ -37,11 +47,14 @@ export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ sceneId: string }> };
 
-// Owner web editing of a scene's contents: replaces scenes.json in the
-// latest version's zip and publishes the result as a new immutable version
-// (versions never mutate — decision 2). The manifest and preview image carry
-// over unchanged, so no moderation re-check is needed; risk flags are
-// recomputed from the new scenes.
+// Owner publishing of a new version from the web: the editor's Save. A
+// version is the whole scene — its scenes.json, its listing (description,
+// tags, category, minimum FrameOS version) and its ordered image set — and
+// this is the one route that writes one. Every part of the body is
+// optional; what is left out is inherited: scenes from the previous
+// version's zip, the listing from the scene row (the effective listing —
+// where moderators' category edits land), the image set from the latest
+// version. Versions never mutate; each Save appends.
 export async function POST(request: NextRequest, context: RouteContext) {
   const { db, errorResponse, scene, session } = await loadOwnedScene(
     request,
@@ -74,8 +87,24 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const body = await readJsonObject(request);
-  if (!Array.isArray(body.scenes) || body.scenes.length === 0) {
+  if (body.scenes !== undefined && (!Array.isArray(body.scenes) || body.scenes.length === 0)) {
     return jsonError("invalid_scenes", 400);
+  }
+  const listingInput =
+    body.listing !== undefined
+      ? typeof body.listing === "object" && body.listing !== null && !Array.isArray(body.listing)
+        ? parseListingChanges(body.listing as Record<string, unknown>)
+        : { error: "invalid_listing" }
+      : undefined;
+  if (listingInput && "error" in listingInput) {
+    return jsonError(listingInput.error, 400);
+  }
+  const imagesInput = body.images !== undefined ? await resolveImageSet(db, body.images) : undefined;
+  if (imagesInput && "error" in imagesInput) {
+    return jsonError(imagesInput.error, imagesInput.error === "image_not_found" ? 404 : 400);
+  }
+  if (body.scenes === undefined && listingInput === undefined && imagesInput === undefined) {
+    return jsonError("nothing_to_update", 400);
   }
   // The optional "what changed" note the save dialog asks for. It shows on
   // the public scene page, so it is moderated below with the name.
@@ -103,6 +132,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (!latestContent) {
     return jsonError("version_not_found", 404);
   }
+  const latestZip = Buffer.from(latestContent);
+
+  const previousScenes = extractScenesFromZip(latestZip);
+  const scenes = (body.scenes as unknown[] | undefined) ?? previousScenes;
+  if (!scenes || scenes.length === 0) {
+    return jsonError("version_not_found", 404);
+  }
 
   // The listing title lives in the zip's template.json (that is what publishing
   // reads into storeScenes.name, and what the /s/[slug] <h1>, the social card
@@ -114,12 +150,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // Only when the two were already in sync: a publisher who deliberately gave
   // the listing a different title from the scene keeps that title, and a
   // multi-scene pack is never retitled by an unrelated edit.
-  const previousSceneName = sceneDisplayName(
-    extractScenesFromZip(Buffer.from(latestContent)),
-  );
-  const nextSceneName = sceneDisplayName(body.scenes);
+  const previousSceneName = sceneDisplayName(previousScenes);
+  const nextSceneName = sceneDisplayName(scenes);
   let renameTo: string | undefined;
   if (
+    body.scenes !== undefined &&
     nextSceneName &&
     previousSceneName &&
     nextSceneName !== previousSceneName &&
@@ -145,12 +180,34 @@ export async function POST(request: NextRequest, context: RouteContext) {
     renameTo = nextSceneName;
   }
 
-  // Names and version messages show on public pages, so they pass the same
-  // gate publishing and description edits do — one call for both, and none
-  // at all for the usual save that carries neither.
-  if (renameTo || message) {
+  // The listing this version records: the effective one, with the edits.
+  const current: SceneListing = {
+    category: scene.category,
+    description: scene.description,
+    frameosVersion: scene.frameosVersion,
+    tags: scene.tags,
+  };
+  const listing: SceneListing = { ...current, ...(listingInput?.changes ?? {}) };
+  const listingChanged = !listingEquals(current, listing);
+
+  // The image set this version records: the draft's, or the latest's.
+  const previousImages = await imageSetForVersion(db, scene.id, null);
+  const images = imagesInput?.images ?? previousImages;
+  const imagesChanged = !sameImageSet(previousImages, images);
+
+  // Text that shows on public pages passes the same gate publishing does —
+  // one call for all of it, and none at all for the usual save that carries
+  // nothing new. Images were moderated when they were uploaded.
+  const descriptionChanged = listing.description !== current.description;
+  const tagsChanged = listing.tags.join(" ") !== current.tags.join(" ");
+  if (renameTo || message || descriptionChanged || tagsChanged) {
     const moderation = await moderateStoreContent({
-      texts: [renameTo, message],
+      texts: [
+        renameTo,
+        message,
+        descriptionChanged ? listing.description : undefined,
+        tagsChanged && listing.tags.length ? listing.tags.join(" ") : undefined,
+      ],
     });
     if (!moderation.ok) {
       if (moderation.error === "content_rejected") {
@@ -176,33 +233,53 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
-  // The manifest can also have fallen behind the listing the other way round:
-  // editor saves before 2026-08-26 never carried a scene rename into the
-  // template, and the listings that diverged that way were repaired on the
-  // row by hand — leaving template.json (what a download and a frame's
-  // Templates panel show) with the old title. So every save writes the
-  // listing's current name into the manifest, not only a rename. Never the
-  // reverse: the row is what the owner sees and what publishing resolves
-  // names against.
+  // The zip carries the listing too (an exported scene should say what its
+  // page says), and the manifest name follows the listing's — see the rename
+  // note above. Never the reverse: the row is what the owner sees and what
+  // publishing resolves names against.
   const listingName = renameTo ?? scene.name;
-  const manifestName = extractManifestNameFromZip(Buffer.from(latestContent));
-  const content = rebuildZipWithScenes(
-    Buffer.from(latestContent),
-    JSON.stringify(body.scenes, null, 2),
-    manifestName === listingName ? undefined : listingName,
-  );
-  if (!content) {
+  const manifestName = extractManifestNameFromZip(latestZip);
+  const rebuilt = rebuildZip(latestZip, {
+    manifest: {
+      category: listing.category,
+      description: listing.description,
+      frameosVersion: listing.frameosVersion,
+      ...(manifestName === listingName ? {} : { name: listingName }),
+      tags: listing.tags,
+    },
+    scenesJson: JSON.stringify(scenes, null, 2),
+  });
+  if (!rebuilt) {
     return jsonError("invalid_scene_zip", 500);
   }
-  if (content.length > maxSceneZipBytes) {
+  if (rebuilt.length > maxSceneZipBytes) {
     return jsonError("scene_too_large", 413, { max_bytes: maxSceneZipBytes });
   }
+  const validation = validateSceneZip(rebuilt);
+  if (!validation.ok) {
+    return jsonError(validation.error, 400);
+  }
+  // The zip's one cover is the set's position 0, so a download shows what
+  // the page shows.
+  const aligned = await alignZipCover(rebuilt, validation.value, images);
+  if ("error" in aligned) {
+    return jsonError(
+      aligned.error,
+      aligned.error === "scene_too_large" ? 413 : aligned.error === "image_not_found" ? 404 : 500,
+    );
+  }
+  const { content, validated } = aligned;
+
   // Every save appends an immutable version; without this check the editor
   // was the one write path that ignored the account byte quota entirely.
-  // Public scenes are free (usage.ts).
+  // Newly linked images count too. Public scenes are free (usage.ts).
   if (scene.visibility !== "public") {
+    const previousShas = new Set(previousImages.map((image) => image.sha256));
+    const newImageBytes = images
+      .filter((image) => !previousShas.has(image.sha256))
+      .reduce((sum, image) => sum + image.sizeBytes, 0);
     const privateBytes = await privateSceneBytesForAccount(db, session.accountId!);
-    if (privateBytes + content.length > maxPrivateSceneBytesPerAccount) {
+    if (privateBytes + content.length + newImageBytes > maxPrivateSceneBytesPerAccount) {
       return jsonError("storage_quota_exceeded", 403, {
         max_bytes: maxPrivateSceneBytesPerAccount,
         private_bytes: Math.round(privateBytes),
@@ -210,47 +287,23 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
-  const validated = validateSceneZip(content);
-  if (!validated.ok) {
-    return jsonError(validated.error, 400);
-  }
-
   const nextVersion = scene.latestVersion + 1;
-  const stored = await storeBlob(
-    blobNamespaces.sceneVersion,
+  const written = await writeSceneVersion(db, {
     content,
-    "application/zip",
-    { extension: "zip" },
-  );
-  await db.insert(storeSceneVersions).values({
-    contentType: "application/zip",
-    frameosVersion: validated.value.frameosVersion ?? latest.frameosVersion,
+    images,
+    listing,
     message,
-    objectKey: stored.objectKey,
-    riskFlags: validated.value.riskFlags,
+    // The slug is deliberately NOT re-derived: it is the URL people have
+    // shared, pasted into a frame's Templates panel and bookmarked.
+    ...(renameTo ? { rowChanges: { name: renameTo } } : {}),
     sceneId: scene.id,
-    sha256: stored.sha256,
-    sizeBytes: stored.sizeBytes,
+    validated,
     version: nextVersion,
   });
-  // Every editor save keeps its version; see the note in store-publish.ts on
-  // retiring the 20-version prune.
-
-  const [updated] = await db
-    .update(storeScenes)
-    .set({
-      latestVersion: nextVersion,
-      // The slug is deliberately NOT re-derived: it is the URL people have
-      // shared, pasted into a frame's Templates panel and bookmarked.
-      ...(renameTo ? { name: renameTo } : {}),
-      riskFlags: validated.value.riskFlags,
-      updatedAt: new Date(),
-    })
-    .where(eq(storeScenes.id, scene.id))
-    .returning();
-  if (!updated) {
-    return jsonError("scene_update_failed", 500);
+  if ("error" in written) {
+    return jsonError(written.error, 500);
   }
+  const { updated } = written;
 
   await recordAuditEvent(db, {
     accountId: session.accountId,
@@ -261,9 +314,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
     eventType: "store.scene_content_edited",
     metadata: {
       ...(message ? { message } : {}),
+      ...(imagesChanged ? { imageCount: images.length, imagesChanged: true } : {}),
+      ...(listingChanged
+        ? { listingChanged: Object.keys(listingInput?.changes ?? {}).sort() }
+        : {}),
       name: renameTo ?? scene.name,
       ...(renameTo ? { renamedFrom: scene.name } : {}),
-      sceneCount: validated.value.sceneCount,
+      sceneCount: validated.sceneCount,
+      ...(body.scenes !== undefined ? { scenesChanged: true } : {}),
       version: nextVersion,
     },
     target: { sceneId: scene.id },

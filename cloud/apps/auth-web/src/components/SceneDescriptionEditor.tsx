@@ -11,24 +11,21 @@ import {
   Pencil,
   X,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { SceneMarkdown } from "./SceneMarkdown";
 
-// Owner editing of a scene's description on the scene page, saved through the
-// account scene PATCH (moderated server-side like every public-page edit).
+// Owner editing of a scene's description in the workspace's draft. "Done"
+// hands the text to the draft; Save publishes it with the rest of the
+// version, where the server moderates it like every public-page edit.
 export function SceneDescriptionEditor({
   description,
-  sceneId,
+  onChange,
 }: {
   description: string | null;
-  sceneId: string;
+  onChange: (description: string | null) => void;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(description ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [editorTab, setEditorTab] = useState<"write" | "preview">("write");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -78,32 +75,9 @@ export function SceneDescriptionEditor({
     });
   }
 
-  async function save() {
-    setBusy(true);
-    setError(null);
-    const trimmed = value.trim();
-    const response = await fetch(`/api/account/scenes/${sceneId}`, {
-      body: JSON.stringify({ description: trimmed || null }),
-      headers: { "content-type": "application/json" },
-      method: "PATCH",
-    });
-    setBusy(false);
-    if (response.ok) {
-      setEditing(false);
-      router.refresh();
-      return;
-    }
-    const payload = await response.json().catch(() => ({}));
-    if (payload.error === "content_rejected") {
-      const categories = Array.isArray(payload.categories)
-        ? ` (${payload.categories.join(", ")})`
-        : "";
-      setError(`Rejected by content moderation${categories}`);
-    } else if (payload.error === "moderation_unavailable") {
-      setError("Moderation service unavailable — try again later");
-    } else {
-      setError(`Saving failed: ${payload.error ?? response.status}`);
-    }
+  function commit() {
+    setEditing(false);
+    onChange(value.trim() || null);
   }
 
   if (!editing) {
@@ -223,27 +197,18 @@ export function SceneDescriptionEditor({
         </div>
       </div>
       <div className="button-row">
-        <button
-          className="button"
-          disabled={busy}
-          onClick={() => void save()}
-          type="button"
-        >
-          <Check aria-hidden size={16} />
-          {busy ? "Saving…" : "Save"}
+        <button className="button" onClick={commit} type="button">
+          <Check aria-hidden size={14} />
+          Done
         </button>
         <button
           className="button button--subtle"
-          onClick={() => {
-            setEditing(false);
-            setError(null);
-          }}
+          onClick={() => setEditing(false)}
           type="button"
         >
-          <X aria-hidden size={16} />
+          <X aria-hidden size={14} />
           Cancel
         </button>
-        {error ? <span className="pill pill-warning">{error}</span> : null}
       </div>
     </div>
   );

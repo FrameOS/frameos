@@ -13,6 +13,7 @@ import {
 // scene_render and scene_lint work on anything the token may read.
 
 const sceneId = uuid().describe("Store scene id (uuid) from scenes_list or store_browse.");
+const imageSha = z.string().regex(/^[0-9a-f]{64}$/, "an image sha256 (64 hex characters)");
 const scenesJson = z
   .array(z.record(z.string(), z.unknown()))
   .describe("The scenes array (each with id, name, nodes, edges, fields, settings).");
@@ -83,7 +84,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "One of the account's scenes in full: summary, every version (number, message, size, yanked, risk flags), gallery images, preview and share URLs. For the scene JSON itself use scene_get_content.",
+        "One of the account's scenes in full: summary, every version (number, message, size, yanked, risk flags, the listing and image digests it recorded), the latest version's images, preview and share URLs. For the scene JSON itself use scene_get_content.",
       inputSchema: { scene_id: sceneId },
     },
     async ({ scene_id }) =>
@@ -180,26 +181,29 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
   server.registerTool(
     "scene_update",
     {
-      annotations: { idempotentHint: true },
       description:
-        "Edit a scene's listing: description, tags (max 5, lowercase a-z0-9-), category (photos|art|calendar|weather|ai|dashboards|fun|utilities|demos, null to clear), frameos_version (minimum FrameOS version; changing it appends a version). For the name use scene_rename; for publishing use scene_publish.",
+        "Edit a scene's listing — description, tags (max 5, lowercase a-z0-9-), category (photos|art|calendar|weather|ai|dashboards|fun|utilities|demos, null to clear), frameos_version (minimum FrameOS version, null to clear). The listing is part of a version: this publishes a new version carrying the edit with the scene's current content and images. For the name use scene_rename; for publishing use scene_publish.",
       inputSchema: {
         category: z.enum(storeCategories).nullable().optional(),
         description: z.string().max(2000).nullable().optional(),
         frameos_version: z.string().max(32).nullable().optional(),
+        message: z.string().max(200).optional().describe("The version's one-line \"what changed\" note."),
         scene_id: sceneId,
         tags: z.array(z.string().max(24)).max(5).optional(),
       },
     },
-    async ({ category, description, frameos_version, scene_id, tags }) =>
+    async ({ category, description, frameos_version, message, scene_id, tags }) =>
       run(async () =>
         text(
-          await api.json("PATCH", `/api/account/scenes/${scene_id}`, {
+          await api.json("POST", `/api/account/scenes/${scene_id}/content`, {
             body: {
-              ...(category !== undefined ? { category } : {}),
-              ...(description !== undefined ? { description } : {}),
-              ...(frameos_version !== undefined ? { frameosVersion: frameos_version } : {}),
-              ...(tags !== undefined ? { tags } : {}),
+              listing: {
+                ...(category !== undefined ? { category } : {}),
+                ...(description !== undefined ? { description } : {}),
+                ...(frameos_version !== undefined ? { frameosVersion: frameos_version } : {}),
+                ...(tags !== undefined ? { tags } : {}),
+              },
+              message: message ?? "Listing updated",
             },
           }),
         ),
@@ -341,18 +345,18 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "A scene's cover image (default) or one gallery image by image_id, as an image. Works for public store scenes too.",
-      inputSchema: { image_id: uuid().optional(), scene_id: sceneId },
+        "A scene's cover image (default) or one of its images by sha256, as an image. Works for public store scenes too.",
+      inputSchema: { scene_id: sceneId, sha256: imageSha.optional() },
     },
-    async ({ image_id, scene_id }) =>
+    async ({ scene_id, sha256 }) =>
       run(async () => {
         const { bytes, contentType } = await api.bytes(
           "GET",
-          image_id
-            ? `/api/store/scenes/${scene_id}/images/${image_id}`
+          sha256
+            ? `/api/store/scenes/${scene_id}/images/${sha256}`
             : `/api/store/scenes/${scene_id}/image`,
         );
-        return image(bytes, contentType, `Scene ${scene_id} ${image_id ? `image ${image_id}` : "cover"}`);
+        return image(bytes, contentType, `Scene ${scene_id} ${sha256 ? `image ${sha256}` : "cover"}`);
       }),
   );
 
@@ -360,17 +364,32 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     "scene_image_add",
     {
       description:
-        "Add a gallery image (jpeg/png/webp/gif, max 4 MiB) to one of the account's scenes; the first gallery image doubles as the cover when the scene has none. Tip: scene_render produces a PNG you can upload here.",
-      inputSchema: { content_base64: z.string(), scene_id: sceneId },
+        "Add an image (jpeg/png/webp/gif, max 4 MiB) to one of the account's scenes: registers the bytes and publishes a new version whose image set has it appended (position 0 is the cover — pass cover=true to make it lead). Images are content-addressed and shared; the same bytes are stored once. Tip: scene_render produces a PNG you can add here.",
+      inputSchema: {
+        content_base64: z.string(),
+        cover: z.boolean().optional(),
+        message: z.string().max(200).optional(),
+        scene_id: sceneId,
+      },
     },
-    async ({ content_base64, scene_id }) =>
-      run(async () =>
-        text(
-          await api.json("POST", `/api/account/scenes/${scene_id}/images`, {
-            body: { content_base64 },
-          }),
-        ),
-      ),
+    async ({ content_base64, cover, message, scene_id }) =>
+      run(async () => {
+        const registered = await api.json<{ image: { sha256: string } }>(
+          "POST",
+          `/api/account/scenes/${scene_id}/images`,
+          { body: { content_base64 } },
+        );
+        const detail = await api.json<{ images: { sha256: string }[] }>(
+          "GET",
+          `/api/account/scenes/${scene_id}`,
+        );
+        const rest = detail.images.map((entry) => entry.sha256).filter((sha) => sha !== registered.image.sha256);
+        const images = cover ? [registered.image.sha256, ...rest] : [...rest, registered.image.sha256];
+        const saved = await api.json("POST", `/api/account/scenes/${scene_id}/content`, {
+          body: { images, message: message ?? "Image added" },
+        });
+        return text({ image: registered.image, images, ...(saved as object) });
+      }),
   );
 
   server.registerTool(
@@ -378,34 +397,41 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { destructiveHint: true },
       description:
-        "Remove a gallery image (image_id) or, without image_id, the primary cover image of one of the account's scenes.",
-      inputSchema: { image_id: uuid().optional(), scene_id: sceneId },
+        "Remove an image (by sha256; without one, the cover) from one of the account's scenes: publishes a new version without it. Older versions keep it.",
+      inputSchema: { message: z.string().max(200).optional(), scene_id: sceneId, sha256: imageSha.optional() },
     },
-    async ({ image_id, scene_id }) =>
-      run(async () =>
-        text(
-          await api.json(
-            "DELETE",
-            image_id
-              ? `/api/account/scenes/${scene_id}/images/${image_id}`
-              : `/api/account/scenes/${scene_id}/image`,
-          ),
-        ),
-      ),
+    async ({ message, scene_id, sha256 }) =>
+      run(async () => {
+        const detail = await api.json<{ images: { sha256: string }[] }>(
+          "GET",
+          `/api/account/scenes/${scene_id}`,
+        );
+        const current = detail.images.map((entry) => entry.sha256);
+        const target = sha256 ?? current[0];
+        if (!target || !current.includes(target)) {
+          return failure("The scene's latest version has no such image.");
+        }
+        const images = current.filter((sha) => sha !== target);
+        return text(
+          await api.json("POST", `/api/account/scenes/${scene_id}/content`, {
+            body: { images, message: message ?? "Image removed" },
+          }),
+        );
+      }),
   );
 
   server.registerTool(
     "scene_images_reorder",
     {
-      annotations: { idempotentHint: true },
-      description: "Reorder a scene's gallery images: pass the complete list of image ids in the new order.",
-      inputSchema: { order: z.array(uuid()).max(10), scene_id: sceneId },
+      description:
+        "Reorder a scene's images: pass the complete list of sha256 digests in the new order (the first is the cover). Publishes a new version with that set.",
+      inputSchema: { message: z.string().max(200).optional(), order: z.array(imageSha).max(10), scene_id: sceneId },
     },
-    async ({ order, scene_id }) =>
+    async ({ message, order, scene_id }) =>
       run(async () =>
         text(
-          await api.json("PATCH", `/api/account/scenes/${scene_id}/images`, {
-            body: { order },
+          await api.json("POST", `/api/account/scenes/${scene_id}/content`, {
+            body: { images: order, message: message ?? "Images reordered" },
           }),
         ),
       ),

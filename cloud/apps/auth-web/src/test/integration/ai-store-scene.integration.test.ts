@@ -23,7 +23,7 @@ import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSession, sessionCookieName } from "../../lib/session";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
-import { executeTool, type ScenesEvent, type ToolContext } from "../../lib/ai/tools";
+import { executeTool, type ListingEvent, type ScenesEvent, type ToolContext } from "../../lib/ai/tools";
 import type { ResponseInputItem } from "../../lib/ai/openai";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
@@ -287,84 +287,59 @@ describe("save_scene on a store scene", () => {
 });
 
 describe("update_scene_listing", () => {
-  function listingCtx(accountId: string, storeSceneId: string | null): ToolContext {
-    return {
-      accountId,
-      db,
-      emitScenes: () => undefined,
-      prompt: "update the description",
-      storeSceneId,
-    };
-  }
-
-  it("writes the description of the scene in context, leaving tags and category alone", async () => {
+  it("delivers a listing edit to the draft and writes nothing to the store", async () => {
     const owner = await signIn(false);
     const { scene } = await storeScene(owner.accountId, { name: "Visited world map" });
+    const events: ListingEvent[] = [];
 
     const result = JSON.parse(
       await executeTool(
         "update_scene_listing",
-        { description: "Every country I have set foot in, in ink." },
-        listingCtx(owner.accountId, scene.id),
+        { description: "Every country I have set foot in, in ink.", tags: ["Maps", "travel"] },
+        {
+          accountId: owner.accountId,
+          currentListing: { description: "Counts things", tags: ["counter"] },
+          db,
+          emitListing: (event) => {
+            events.push(event);
+          },
+          emitScenes: () => undefined,
+          prompt: "update the description",
+          storeSceneId: scene.id,
+        },
       ),
-    ) as { listing: { description: string }; note: string; ok: boolean };
+    ) as { listing: Record<string, unknown>; note: string; ok: boolean };
     expect(result.ok).toBe(true);
-    expect(result.note).toMatch(/does not need to press Save/);
-    expect(result.note).toMatch(/made no new version/);
+    expect(events).toEqual([
+      {
+        listing: { description: "Every country I have set foot in, in ink.", tags: ["maps", "travel"] },
+        type: "listing",
+      },
+    ]);
+    expect(result.note).toMatch(/Save publishes it/);
 
+    // The store is untouched until the user saves.
     const [row] = await db.select().from(storeScenes).where(eq(storeScenes.id, scene.id));
-    expect(row).toMatchObject({
-      category: "utilities",
-      description: "Every country I have set foot in, in ink.",
-      name: "Visited world map",
-      tags: ["counter"],
-    });
-
-    const [event] = await db
-      .select()
-      .from(auditEvents)
-      .where(eq(auditEvents.eventType, "store.listing_edited"));
-    expect(event?.metadata).toMatchObject({ fields: ["description"], via: "ai_chat" });
+    expect(row).toMatchObject({ description: "Counts things", tags: ["counter"] });
   });
 
-  it("replaces tags and clears a category when asked", async () => {
-    const owner = await signIn(false);
+  it("shows the model the draft's listing, not the published one", async () => {
+    const owner = await signIn();
     const { scene } = await storeScene(owner.accountId, { name: "Visited world map" });
 
-    const result = JSON.parse(
-      await executeTool(
-        "update_scene_listing",
-        { category: null, scene_id: scene.id, tags: ["Maps", "travel"] },
-        listingCtx(owner.accountId, null),
-      ),
-    ) as { ok: boolean };
-    expect(result.ok).toBe(true);
-
-    const [row] = await db.select().from(storeScenes).where(eq(storeScenes.id, scene.id));
-    expect(row).toMatchObject({
-      category: null,
-      description: "Counts things",
-      tags: ["maps", "travel"],
+    const { response } = await chat({
+      listing: { description: "Draft text nobody saved yet", tags: ["maps"] },
+      prompt: "improve the description",
+      scene: renderScene("editor-1", "Visited world map"),
+      sceneId: "editor-1",
+      storeSceneId: scene.id,
     });
-  });
-
-  it("will not touch a listing the user does not own", async () => {
-    const owner = await signIn(false);
-    const { scene } = await storeScene(owner.accountId, { name: "Visited world map" });
-    const visitor = await signIn(false);
-
-    const result = JSON.parse(
-      await executeTool(
-        "update_scene_listing",
-        { description: "mine now" },
-        listingCtx(visitor.accountId, scene.id),
-      ),
-    ) as { error: string; ok: boolean };
-    expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/not in the user's account/);
-
-    const [row] = await db.select().from(storeScenes).where(eq(storeScenes.id, scene.id));
-    expect(row?.description).toBe("Counts things");
+    expect(response.status).toBe(200);
+    const context = contextShownToModel();
+    expect(context).toContain("Listing description (the editor's draft): Draft text nobody saved yet");
+    expect(context).toContain("Tags: maps");
+    expect(context).not.toContain("Counts things");
+    expect(context).toContain("update_scene_listing edits the draft, and Save publishes it");
   });
 });
 
