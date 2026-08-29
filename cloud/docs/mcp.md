@@ -90,10 +90,10 @@ FRAMEOS_CLOUD_TOKEN=fc_api_… pnpm --filter @frameos-cloud/mcp start
 `app/api/mcp/route.ts` authenticates the bearer, builds a `McpServer` and a
 stateless `WebStandardStreamableHTTPServerTransport` (JSON responses, no
 sessions, no SSE) per request, and hands the request to it. Tool calls go
-back to this same process's own JSON routes over loopback (`request.url`'s
-origin, or `FRAMEOS_MCP_INTERNAL_ORIGIN`), carrying the caller's token and
-the forwarded-for chain so per-IP rate limits key on the real client. `GET`
-and `DELETE` answer 405: there is nothing to stream or end.
+back to this same process's own JSON routes over loopback
+(`http://127.0.0.1:$PORT`, or `FRAMEOS_MCP_INTERNAL_ORIGIN`), carrying the
+caller's token and the forwarded-for chain so per-IP rate limits key on the
+real client. `GET` and `DELETE` answer 405: there is nothing to stream or end.
 
 ### Tools
 

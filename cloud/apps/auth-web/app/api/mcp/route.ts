@@ -38,12 +38,20 @@ const forwardedHeaders = [
   "x-real-ip",
 ];
 
-function internalOrigin(request: NextRequest): string {
+// Where this process answers HTTP, for the tool calls' self-fetch. NOT
+// `new URL(request.url).origin`: behind nginx Next reports that as
+// `https://localhost:3000` (see getPublicOrigin in src/lib/env.ts), and a TLS
+// handshake against the plain-HTTP Node port fails every tool call with
+// "fetch failed". The systemd unit starts the server with PORT=<instance> and
+// HOSTNAME=127.0.0.1, so plain http on the loopback address and that port is
+// the address that actually works; FRAMEOS_MCP_INTERNAL_ORIGIN overrides it.
+function internalOrigin(): string {
   const configured = process.env.FRAMEOS_MCP_INTERNAL_ORIGIN?.trim();
   if (configured) {
     return configured.replace(/\/+$/, "");
   }
-  return new URL(request.url).origin;
+  const port = process.env.PORT?.trim() || "3000";
+  return `http://127.0.0.1:${port}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -85,7 +93,7 @@ export async function POST(request: NextRequest) {
   }
   const publicOrigin = getCloudBaseUrl().replace(/\/+$/, "");
   const server = createFrameosMcpServer({
-    baseUrl: internalOrigin(request),
+    baseUrl: internalOrigin(),
     fetchExternal: (input, init) => guardedFetch(input, init),
     headers,
     publicOrigin,
