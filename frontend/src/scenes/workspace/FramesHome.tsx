@@ -22,7 +22,7 @@ import { PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
-import { FrameSidebarBattery } from './FrameBatteryIndicator'
+import { FrameSidebarBattery, frameLastBatteryPercent } from './FrameBatteryIndicator'
 import { FrameImage } from '../../components/FrameImage'
 import { Modal } from '../../components/Modal'
 import { Spinner } from '../../components/Spinner'
@@ -290,8 +290,13 @@ function FrameTreeRow({
             <span className="block truncate text-xs text-slate-400">{frameActivityDescription(frame)}</span>
           </button>
           <FrameMetricAlertIndicator frame={frame} />
-          <FrameSidebarBattery frame={frame} />
-          <SidebarStatusDots frame={frame} inactive={inactive} />
+          {frameLastBatteryPercent(frame) !== null ? (
+            // A battery-powered frame's charge stands in for the status dot:
+            // the row already says "asleep · wakes in 10 min" underneath.
+            <FrameSidebarBattery frame={frame} />
+          ) : (
+            <SidebarStatusDots frame={frame} inactive={inactive} />
+          )}
         </div>
       </div>
       {expanded ? <FrameToolLinks frame={frame} /> : null}
