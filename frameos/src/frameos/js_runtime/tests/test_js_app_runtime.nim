@@ -2,6 +2,7 @@ import std/[base64, json, net, os, sequtils, strutils, tables, unittest]
 import pixie
 
 import frameos/js_runtime/app_runtime
+import frameos/js_runtime/burrito
 import frameos/types
 import frameos/utils/http_client
 import frameos/values
@@ -366,7 +367,7 @@ suite "js app runtime":
     discard runtime.get(owner, %*{}, context)
     let stackLogs = logged.filterIt("jsApp:error" in it{"event"}.getStr())
     check stackLogs.len == 1
-    check ">:3:" in stackLogs[0]{"stack"}.getStr()
+    check "app.ts:3:" in stackLogs[0]{"stack"}.getStr()
 
   test "asset management bindings":
     let assetsDir = getTempDir() / "frameos-js-assets-test"
@@ -805,3 +806,248 @@ export const get = () => helper()""",
     let value = runtime.get(owner, %*{}, context)
     check value.kind == fkString
     check value.asString() == "default:render"
+
+suite "js app imports":
+  # An app is a set of files, not one: `import` pulls in the app's own .ts,
+  # .tsx, .js, .jsx, and .json files through a QuickJS module loader that
+  # knows only the sources map. Nothing else is importable on a frame.
+
+  proc importScene(id: string): (FrameScene, AppRoot, ExecutionContext) =
+    let config = testConfig()
+    let scene = FrameScene(id: id.SceneId, frameConfig: config, state: %*{},
+                           logger: testLogger(config))
+    let owner = AppRoot(nodeId: 5.NodeId, nodeName: "imports", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+                                   hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    (scene, owner, context)
+
+  proc loadFailure(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext): string =
+    try:
+      discard runtime.get(owner, %*{}, context)
+      ""
+    except JSException as error:
+      error.msg
+
+  test "joins specifiers the way QuickJS does":
+    check joinModulePath("app.ts", "./util") == "util"
+    check joinModulePath("app.ts", "./lib/sum.ts") == "lib/sum.ts"
+    check joinModulePath("lib/sum.ts", "./numbers") == "lib/numbers"
+    check joinModulePath("lib/sum.ts", "../scale.js") == "scale.js"
+    check joinModulePath("lib/deep/x.ts", "../../y") == "y"
+    check joinModulePath("app.ts", "../outside") == "../outside"
+    check joinModulePath("app.ts", "dayjs") == "dayjs"
+    check joinModulePath("app.ts", "data.json") == "data.json"
+
+  test "resolves specifiers against the app's files":
+    let files = %*{"app.ts": "", "util.ts": "", "icon.tsx": "", "data.json": "",
+                   "lib/a.ts": "", "lib/b.js": "", "plain.js": ""}
+    check resolveAppModule(files, "util") == "util.ts"
+    check resolveAppModule(files, "util.ts") == "util.ts"
+    check resolveAppModule(files, "util.js") == "util.ts"      # TS spelling
+    check resolveAppModule(files, "icon") == "icon.tsx"
+    check resolveAppModule(files, "icon.jsx") == "icon.tsx"
+    check resolveAppModule(files, "data.json") == "data.json"
+    check resolveAppModule(files, "data") == "data.json"
+    check resolveAppModule(files, "lib/a") == "lib/a.ts"
+    check resolveAppModule(files, "lib/b") == "lib/b.js"
+    check resolveAppModule(files, "plain") == "plain.js"
+    check resolveAppModule(files, "missing") == ""
+    check resolveAppModule(files, "react") == ""
+    check resolveAppModule(files, "") == ""
+    check resolveAppModule(nil, "util") == ""
+
+  test "imports named, default, JSX and JSON exports from sibling files":
+    let (_, owner, context) = importScene("tests/js-imports")
+    let sources = %*{
+      "app.ts": """
+        import { label, type Labelled } from './util'
+        import greet from './greet'
+        import { icon } from './icon'
+        import data from './data.json'
+        export const get = (app: FrameOSApp, context: FrameOSContext): string => {
+          const item: Labelled = { name: data.name }
+          const image = icon(3)
+          return `${label(item)}|${greet(data.greeting)}|${image.props.width}|${data.sizes.length}`
+        }
+      """,
+      "util.ts": """
+        export interface Labelled { name: string }
+        export const label = (item: Labelled): string => `<${item.name}>`
+      """,
+      "greet.ts": """
+        export default function greet(word: string): string { return word.toUpperCase() }
+      """,
+      "icon.tsx": """
+        export const icon = (width: number) => <image width={width} height={2} color="#000000" />
+      """,
+      "data.json": """{"name": "frame", "greeting": "hi", "sizes": [1, 2, 3]}""",
+      "config.json": """{"name": "imports", "category": "data"}""",
+    }
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text", source = sources["app.ts"].getStr(),
+      sourceName = "app.ts", sources = sources)
+    let value = runtime.get(owner, %*{}, context)
+    check value.kind == fkString
+    check value.asString() == "<frame>|HI|3|3"
+
+  test "imports chain through folders, and ../ climbs back out":
+    let (_, owner, context) = importScene("tests/js-imports-nested")
+    let sources = %*{
+      "app.ts": """
+        import { total } from './lib/sum'
+        export const get = () => String(total())
+      """,
+      "lib/sum.ts": """
+        import { numbers } from './numbers'
+        import { scale } from '../scale.js'
+        export const total = () => numbers.reduce((a, b) => a + b, 0) * scale
+      """,
+      "lib/numbers.ts": "export const numbers = [1, 2, 3]",
+      "scale.ts": "export const scale = 10",
+    }
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text", source = sources["app.ts"].getStr(),
+      sourceName = "app.ts", sources = sources)
+    check runtime.get(owner, %*{}, context).asString() == "60"
+
+  test "a module is evaluated once, however many files import it":
+    let (_, owner, context) = importScene("tests/js-imports-once")
+    let sources = %*{
+      "app.ts": """
+        import { counter } from './counter'
+        import { fromA } from './a'
+        import { fromB } from './b'
+        export const get = () => `${fromA()},${fromB()},${counter.evaluations}`
+      """,
+      "counter.ts": """
+        export const counter = { evaluations: 0, ticks: 0 }
+        counter.evaluations += 1
+      """,
+      "a.ts": "import { counter } from './counter'\nexport const fromA = () => ++counter.ticks",
+      "b.ts": "import { counter } from './counter'\nexport const fromB = () => ++counter.ticks",
+    }
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text", source = sources["app.ts"].getStr(),
+      sourceName = "app.ts", sources = sources)
+    check runtime.get(owner, %*{}, context).asString() == "1,2,1"
+
+  test "a helper may import the main module back":
+    let (_, owner, context) = importScene("tests/js-imports-cycle")
+    let sources = %*{
+      "app.ts": """
+        import { describe } from './helper'
+        export const NAME = 'main'
+        export const get = () => describe()
+      """,
+      "helper.ts": """
+        import { NAME } from './app'
+        export const describe = () => `helper of ${NAME}`
+      """,
+    }
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text", source = sources["app.ts"].getStr(),
+      sourceName = "app.ts", sources = sources)
+    check runtime.get(owner, %*{}, context).asString() == "helper of main"
+
+  test "a bare specifier fails with a message that says why":
+    let (_, owner, context) = importScene("tests/js-imports-bare")
+    let sources = %*{
+      "app.ts": """
+        import dayjs from 'dayjs'
+        export const get = () => dayjs()
+      """,
+    }
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text", source = sources["app.ts"].getStr(),
+      sourceName = "app.ts", sources = sources)
+    let failure = loadFailure(runtime, owner, context)
+    check "Cannot import 'dayjs'" in failure
+    check "npm packages are not available" in failure
+
+  test "a missing file fails by name":
+    let (_, owner, context) = importScene("tests/js-imports-missing")
+    let sources = %*{
+      "app.ts": """
+        import { x } from './helpers/missing'
+        export const get = () => x
+      """,
+    }
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text", source = sources["app.ts"].getStr(),
+      sourceName = "app.ts", sources = sources)
+    check "Cannot import 'helpers/missing'" in loadFailure(runtime, owner, context)
+
+  test "invalid JSON fails naming the file":
+    let (_, owner, context) = importScene("tests/js-imports-badjson")
+    let sources = %*{
+      "app.ts": """
+        import data from './data.json'
+        export const get = () => data.x
+      """,
+      "data.json": "{\"x\": 1,}",
+    }
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text", source = sources["app.ts"].getStr(),
+      sourceName = "app.ts", sources = sources)
+    check "data.json" in loadFailure(runtime, owner, context)
+
+  test "a syntax error in an imported file names that file and line":
+    let (_, owner, context) = importScene("tests/js-imports-syntax")
+    let sources = %*{
+      "app.ts": """
+        import { broken } from './broken'
+        export const get = () => broken()
+      """,
+      "broken.ts": "export const broken = () => {\n  return 1 +\n}\n",
+    }
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text", source = sources["app.ts"].getStr(),
+      sourceName = "app.ts", sources = sources)
+    let failure = loadFailure(runtime, owner, context)
+    check "broken.ts" in failure
+
+  test "a runtime error inside an imported file maps to that file's source line":
+    # The helper's `throw` sits on line 5 of util.ts as written; the interface
+    # above it is erased, so the generated code has it earlier. The message
+    # must still say util.ts:5.
+    let config = testConfig()
+    var logged: seq[JsonNode] = @[]
+    var logger = testLogger(config)
+    logger.log = proc(payload: JsonNode) =
+      logged.add(payload)
+    let scene = FrameScene(id: "tests/js-imports-runtime-error".SceneId, frameConfig: config,
+                           state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 6.NodeId, nodeName: "importErr", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+                                   hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let sources = %*{
+      "app.ts": "import { explode } from './util'\nexport const get = () => explode()\n",
+      "util.ts": "export interface Unused {\n  a: number\n}\nexport function explode(): string {\n  throw new Error(\"imported boom\")\n}\n",
+    }
+    let runtime = newJsAppRuntime(
+      category = "data", outputType = "text", source = sources["app.ts"].getStr(),
+      sourceName = "app.ts", sources = sources)
+    discard runtime.get(owner, %*{}, context)
+    var stack = ""
+    for entry in logged:
+      if "jsApp:error" in entry{"event"}.getStr():
+        stack = entry{"stack"}.getStr()
+    check "util.ts:5:" in stack
+    check "app.ts:2:" in stack
+
+  test "a scene node's sources map feeds the loader":
+    let config = testConfig()
+    let scene = FrameScene(id: "tests/js-imports-node".SceneId, frameConfig: config, state: %*{},
+                           logger: testLogger(config))
+    let node = DiagramNode(id: 9.NodeId, data: %*{"name": "withHelper"})
+    let sources = %*{
+      "config.json": """{"name": "withHelper", "category": "data", "output": [{"name": "text", "type": "string"}]}""",
+      "app.ts": "import { text } from './helper'\nexport const get = () => text",
+      "helper.ts": "export const text = 'from helper'",
+    }
+    let app = initDynamicJsApp("withHelper", node, scene, sources)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+                                   hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let value = app.getDynamicJsApp(context)
+    check value.kind == fkString
+    check value.asString() == "from helper"

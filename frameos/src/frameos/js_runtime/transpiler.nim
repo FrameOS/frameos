@@ -1276,6 +1276,52 @@ proc looksLikeInterfaceDeclarationAt(code: string, i: int): bool =
   skipSpaces(code, j)
   j < code.len and code[j] == '{'
 
+proc stripInlineTypeImportSpecifiers(code: string, start: int): (int, string) =
+  ## `import { a, type B, type C as D } from './x'` — TypeScript 4.5's inline
+  ## type-only specifiers. Returns where the statement ends and what to emit in
+  ## its place: the import without those specifiers, or (when nothing but
+  ## types was imported) just the statement's newlines so lines stay put.
+  ## A statement with no inline `type` specifiers comes back as (-1, "").
+  let stop = findStatementEnd(code, start)
+  let stmt = code[start ..< stop]
+  let fromAt = stmt.find(" from ")
+  let brace = stmt.find('{')
+  if brace < 0 or (fromAt >= 0 and brace > fromAt):
+    return (-1, "")
+  let close = findMatching(stmt, brace, '{', '}')
+  if close < 0 or (fromAt >= 0 and close > fromAt):
+    return (-1, "")
+  var kept: seq[string] = @[]
+  var dropped = false
+  for part in stmt[brace + 1 ..< close].split(','):
+    let specifier = part.strip()
+    if specifier.len == 0:
+      continue
+    if startsWordAt(specifier, 0, "type"):
+      var after = "type".len
+      skipSpaces(specifier, after)
+      # `type` alone is a legal import name; only `type Name` is a modifier.
+      if after < specifier.len and isIdentStart(specifier[after]):
+        dropped = true
+        continue
+    kept.add(specifier)
+  if not dropped:
+    return (-1, "")
+  if kept.len > 0:
+    return (stop, stmt[0 .. brace] & " " & kept.join(", ") & " " & stmt[close .. ^1])
+  # Nothing left inside the braces. A default binding before them survives
+  # on its own; otherwise the whole statement was type-only.
+  var head = stmt["import".len ..< brace].strip()
+  if head.endsWith(","):
+    head = head[0 ..< head.len - 1].strip()
+  if head.len > 0 and fromAt >= 0:
+    return (stop, "import " & head & stmt[fromAt .. ^1])
+  var newlines = ""
+  for ch in stmt:
+    if ch == '\n':
+      newlines.add(ch)
+  (stop, newlines)
+
 proc stripTypeOnlyStatements(code: string): string =
   result = newStringOfCap(code.len)
   var i = 0
@@ -1314,6 +1360,12 @@ proc stripTypeOnlyStatements(code: string): string =
       if startsWordAt(code, j, "type"):
         i = findStatementEnd(code, i)
         continue
+      if j < code.len and code[j] != '(':
+        let (stop, replacement) = stripInlineTypeImportSpecifiers(code, i)
+        if stop >= 0:
+          result.add(replacement)
+          i = stop
+          continue
 
     result.add(code[i])
     inc i

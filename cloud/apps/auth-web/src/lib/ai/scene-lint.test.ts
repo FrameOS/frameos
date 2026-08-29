@@ -335,6 +335,49 @@ describe("lintScenes", () => {
     expect(messages([app]).errors).toEqual([expect.stringContaining("JS apps have no format()/now()/parseTs()")]);
   });
 
+  it("lets a scene-local app import its own files, and nothing else", () => {
+    const withApp = (sources: Record<string, string>) =>
+      scene({
+        apps: {
+          multi: {
+            category: "data",
+            fields: [],
+            name: "Multi-file app",
+            output: [{ name: "out", type: "string" }],
+            sources,
+          },
+        },
+        edges: [
+          { id: "e1", source: "ev", sourceHandle: "next", target: "text", targetHandle: "prev", type: "appNodeEdge" },
+          { id: "e2", source: "my", sourceHandle: "fieldOutput", target: "text", targetHandle: "fieldInput/text", type: "codeNodeEdge" },
+        ],
+        nodes: [
+          { data: { keyword: "render" }, id: "ev", type: "event" },
+          { data: { config: {}, keyword: "render/text" }, id: "text", type: "app" },
+          { data: { config: {}, keyword: "multi" }, id: "my", type: "app" },
+        ],
+      });
+
+    // Helpers are not held to the get() contract, and ./, ../ and .json resolve like on the frame.
+    const fine = withApp({
+      "app.ts": "import { label } from './lib/util'\nimport data from './data.json'\nexport function get() { return label(data.name) }",
+      "lib/util.ts": "import { prefix } from '../prefix.js'\nexport const label = (name: string) => prefix + name",
+      "prefix.ts": "export const prefix = '> '",
+      "data.json": '{"name": "frame"}',
+      "config.json": "{}",
+    });
+    expect(messages([fine]).errors).toEqual([]);
+
+    const broken = withApp({
+      "app.ts": "import dayjs from 'dayjs'\nimport { x } from './missing'\nexport function get() { return x }",
+      "config.json": "{}",
+    });
+    expect(messages([broken]).errors).toEqual([
+      expect.stringContaining('Scene app "multi" (app.ts): imports "dayjs" — npm packages are not available'),
+      expect.stringContaining('Scene app "multi" (app.ts): imports "./missing", but the app has no such file'),
+    ]);
+  });
+
   it("rejects code nodes that claim to output an image", () => {
     const { errors } = messages([
       scene({
