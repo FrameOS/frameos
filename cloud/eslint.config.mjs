@@ -37,6 +37,7 @@ export default tseslint.config(
       "**/src/test/shared-spa/cloud-frame-change-details.test.ts",
       // Same exclusion, same reason: imports frameLogic's sanitizeScene.
       "**/src/test/shared-spa/cloud-scene-persist-equality.test.ts",
+      "**/src/test/shared-spa/scene-origin.test.ts",
       // Same exclusion, same reason: sanitizeIncomingScenes is a thin wrapper
       // over that same sanitizeScene.
       "**/src/test/shared-spa/embedded-editor-scene-sanitize.test.ts",

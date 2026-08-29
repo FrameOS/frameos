@@ -6,6 +6,10 @@ export function sceneOriginForTemplate(
   templateSceneId: string
 ): SceneOrigin {
   return {
+    // Store-backed repositories (the FrameOS Cloud store, "my cloud scenes")
+    // name the scene's page and uuid in the index; plain repositories don't.
+    ...(template.url ? { href: template.url } : {}),
+    ...(template.sceneId ? { storeSceneId: template.sceneId } : {}),
     ...(repository.id ? { repositoryId: repository.id } : {}),
     repositoryUrl: repository.url,
     ...(template.id ? { templateId: template.id } : {}),
@@ -34,6 +38,10 @@ export function sameTemplateOrigin(a?: SceneOrigin, b?: SceneOrigin): boolean {
   if (!a || !b) {
     return false
   }
+  // A store scene is the same scene whichever repository index listed it.
+  if (a.storeSceneId && b.storeSceneId) {
+    return a.storeSceneId === b.storeSceneId
+  }
   const repositoryMatch =
     a.repositoryId && b.repositoryId
       ? a.repositoryId === b.repositoryId
@@ -57,6 +65,16 @@ export function findTemplateForOrigin(
 ): OriginTemplateMatch | null {
   if (!origin) {
     return null
+  }
+  // A store scene (a zip downloaded from scenes.frameos.net, a cloud-pushed
+  // scene) is matched by its uuid in whichever repository index lists it.
+  if (origin.storeSceneId) {
+    for (const repository of repositories) {
+      const template = (repository.templates ?? []).find((candidate) => candidate.sceneId === origin.storeSceneId)
+      if (template) {
+        return { repository, template }
+      }
+    }
   }
   for (const repository of repositories) {
     const repositoryMatch =

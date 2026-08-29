@@ -44,6 +44,7 @@ export async function GET(
   }
   const rows = await db
     .select({
+      latestVersion: storeScenes.latestVersion,
       position: frameSceneAssignments.position,
       sceneId: frameSceneAssignments.sceneId,
       sceneName: storeScenes.name,
@@ -58,6 +59,10 @@ export async function GET(
   return NextResponse.json({
     assigned_checksum: frame.assignedChecksum,
     scenes: rows.map((row) => ({
+      // The store's newest version next to the pinned one (null = follows
+      // the latest at push time), so the workspace can tell when a frame's
+      // copy is behind.
+      latest_version: row.latestVersion,
       name: row.sceneName,
       position: row.position,
       scene_id: row.sceneId,

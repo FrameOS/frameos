@@ -13,6 +13,7 @@ import {
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { withStoreSceneOrigin } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
@@ -49,6 +50,7 @@ async function handleGet(request: NextRequest, context: RouteContext) {
       accountId: storeScenes.accountId,
       id: storeScenes.id,
       shareToken: storeScenes.shareToken,
+      slug: storeScenes.slug,
       status: storeScenes.status,
       visibility: storeScenes.visibility,
     })
@@ -120,7 +122,18 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     return jsonError("invalid_scene_zip", 500);
   }
 
-  return new NextResponse(scenes, {
+  // Each scene leaves with its `origin` (store page, uuid, THIS version) —
+  // the workspace hydrates cloud frames from here and keeps the stamp as the
+  // record of what the frame is running. See scene-origin.ts.
+  const body = JSON.stringify(
+    withStoreSceneOrigin(scenes, {
+      id: scene.id,
+      slug: scene.slug,
+      version: version.version,
+    }),
+  );
+
+  return new NextResponse(body, {
     headers: {
       "cache-control": isPublic ? "public, max-age=300" : "no-store",
       "content-type": "application/json",
@@ -142,7 +155,7 @@ function versionParam(request: NextRequest): number | undefined | null {
 
 // The zip was validated at publish (validateSceneZip); this re-extract only
 // inflates the one file it returns.
-function extractScenesJson(content: Buffer): string | undefined {
+function extractScenesJson(content: Buffer): unknown[] | undefined {
   try {
     const files = unzipSync(new Uint8Array(content), {
       filter: (file) => /(^|\/)scenes\.json$/.test(file.name),
@@ -154,8 +167,8 @@ function extractScenesJson(content: Buffer): string | undefined {
     if (!bytes) {
       return undefined;
     }
-    const text = Buffer.from(bytes).toString("utf8");
-    return Array.isArray(JSON.parse(text)) ? text : undefined;
+    const parsed: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
+    return Array.isArray(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
@@ -12,6 +13,7 @@ import {
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { rebuildZipWithSceneOrigins } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
@@ -117,9 +119,21 @@ async function handleGet(request: NextRequest, context: RouteContext) {
       () => undefined,
     );
 
-  const content = await readBlob(version);
-  if (!content) {
+  const stored = await readBlob(version);
+  if (!stored) {
     return jsonError("version_not_found", 404);
+  }
+  // The stored zip is the publisher's bytes; what a frame installs from it
+  // must say where it came from, so every scene in the served scenes.json
+  // carries this scene's `origin` (see scene-origin.ts). The digest header
+  // describes the bytes actually served.
+  const content = rebuildZipWithSceneOrigins(Buffer.from(stored), {
+    id: scene.id,
+    slug: scene.slug,
+    version: version.version,
+  });
+  if (!content) {
+    return jsonError("invalid_scene_zip", 500);
   }
 
   return new NextResponse(new Uint8Array(content), {
@@ -128,7 +142,7 @@ async function handleGet(request: NextRequest, context: RouteContext) {
       "content-disposition": `attachment; filename="${scene.slug}-v${version.version}.zip"`,
       "content-length": String(content.length),
       "content-type": version.contentType,
-      "x-scene-sha256": version.sha256,
+      "x-scene-sha256": createHash("sha256").update(content).digest("hex"),
       "x-scene-version": String(version.version),
     },
   });

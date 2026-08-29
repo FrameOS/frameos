@@ -31,12 +31,22 @@ describe("cloud frame scene hydration helpers", () => {
   });
 
   it("stub tile falls back name -> slug -> 'Untitled scene' and stays renderable", () => {
+    // Even without the payload the stub knows which store scene it stands
+    // for (and the version, when the assignment pins one or the store's
+    // newest is known) — the page link only comes with the real scenes.json.
     expect(cloudSceneStub({ scene_id: "s1", name: "Clock", slug: "clock" })).toEqual({
       id: "s1",
       name: "Clock",
       nodes: [],
       edges: [],
+      origin: { storeSceneId: "s1" },
     });
+    expect(
+      cloudSceneStub({ scene_id: "s1", name: "Clock", slug: "clock", scene_version: 3, latest_version: 5 }).origin,
+    ).toEqual({ storeSceneId: "s1", version: "3" });
+    expect(
+      cloudSceneStub({ scene_id: "s1", name: "Clock", slug: "clock", scene_version: null, latest_version: 5 }).origin,
+    ).toEqual({ storeSceneId: "s1", version: "5" });
     expect(cloudSceneStub({ scene_id: "s2", name: null, slug: "weather" }).name).toBe(
       "weather",
     );

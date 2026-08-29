@@ -20,6 +20,8 @@ export interface CloudFrameSceneRow {
   scene_id: string
   /** null/undefined = the assignment tracks the latest published version. */
   scene_version?: number | null
+  /** The store's newest version of this scene. */
+  latest_version?: number | null
   name?: string | null
   slug?: string | null
   position?: number | null
@@ -54,11 +56,16 @@ export function scenesFromStoreSceneJson(json: unknown): FrameScene[] | null {
  * scene, it just cannot light the Active badge or count nodes.
  */
 export function cloudSceneStub(row: CloudFrameSceneRow): FrameScene {
+  const version = row.scene_version ?? row.latest_version
   return {
     id: row.scene_id,
     name: row.name || row.slug || 'Untitled scene',
     nodes: [],
     edges: [],
+    // What the assignment knows without the payload: the store scene and,
+    // when pinned (or the store's newest, which an unpinned push resolves
+    // to), its version. The page link only comes with the real scenes.json.
+    origin: { storeSceneId: row.scene_id, ...(version ? { version: String(version) } : {}) },
   }
 }
 

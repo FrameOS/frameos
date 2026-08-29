@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { strToU8, zipSync, zlibSync } from "fflate";
 import { eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
@@ -153,6 +154,25 @@ async function linkClient(scopes: string[]) {
   expect(pollResponse.status).toBe(200);
   const { access_token: accessToken } = await readJson(pollResponse);
   return { accessToken: accessToken as string, accountId };
+}
+
+// Every scene the store serves — scenes.json, the zip download, a frame
+// push — carries its `origin` stamp (src/lib/scene-origin.ts): the scene's
+// page, uuid and the version those bytes came from.
+function stamped(
+  scenes: Record<string, unknown>[],
+  storeSceneId: string,
+  version: number,
+) {
+  return scenes.map((scene) => ({
+    ...scene,
+    origin: {
+      href: expect.stringMatching(/^http:\/\/localhost:3000\/s\/[a-z0-9-]+$/),
+      sceneId: scene.id,
+      storeSceneId,
+      version: String(version),
+    },
+  }));
 }
 
 function bearer(token: string) {
@@ -1515,7 +1535,7 @@ describe("store publish and distribution", () => {
       ctx(sceneId),
     );
     expect(publicResponse.status).toBe(200);
-    expect(await publicResponse.json()).toEqual(scenes);
+    expect(await publicResponse.json()).toEqual(stamped(scenes, sceneId, 1));
 
     // Private scene: anonymous 404, owner bearer token works.
     const privateScene = (
@@ -1576,10 +1596,10 @@ describe("store publish and distribution", () => {
     const latest = await get();
     expect(latest.headers.get("x-scene-version")).toBe("2");
     expect(latest.headers.get("cache-control")).toBe("public, max-age=300");
-    expect(await latest.json()).toEqual(scenesV2);
+    expect(await latest.json()).toEqual(stamped(scenesV2, sceneId, 2));
     const first = await get("?version=1");
     expect(first.headers.get("x-scene-version")).toBe("1");
-    expect(await first.json()).toEqual(scenesV1);
+    expect(await first.json()).toEqual(stamped(scenesV1, sceneId, 1));
 
     // Yank v2: the default falls back to v1, ?version=2 still serves it.
     const yank = await patchVersion(
@@ -1593,11 +1613,11 @@ describe("store publish and distribution", () => {
     cookieJar.clear();
     const fallback = await get();
     expect(fallback.headers.get("x-scene-version")).toBe("1");
-    expect(await fallback.json()).toEqual(scenesV1);
+    expect(await fallback.json()).toEqual(stamped(scenesV1, sceneId, 1));
     const yanked = await get("?version=2");
     expect(yanked.status).toBe(200);
     expect(yanked.headers.get("x-scene-version")).toBe("2");
-    expect(await yanked.json()).toEqual(scenesV2);
+    expect(await yanked.json()).toEqual(stamped(scenesV2, sceneId, 2));
 
     expect((await get("?version=9")).status).toBe(404);
     expect((await get("?version=abc")).status).toBe(400);
@@ -1654,13 +1674,19 @@ describe("store publish and distribution", () => {
     expect(download.status).toBe(200);
     expect(download.headers.get("x-scene-version")).toBe("2");
     const { unzipSync } = await import("fflate");
-    const files = unzipSync(new Uint8Array(await download.arrayBuffer()));
+    const zipBytes = await download.arrayBuffer();
+    const files = unzipSync(new Uint8Array(zipBytes));
     const scenesPath = Object.keys(files).find((name) =>
       name.endsWith("scenes.json"),
     )!;
+    // The served zip's scenes carry the download's own origin stamp; the
+    // digest header describes those served bytes.
     expect(
       JSON.parse(Buffer.from(files[scenesPath]!).toString("utf8")),
-    ).toEqual(editedScenes);
+    ).toEqual(stamped(editedScenes, sceneId, 2));
+    expect(download.headers.get("x-scene-sha256")).toBe(
+      createHash("sha256").update(new Uint8Array(zipBytes)).digest("hex"),
+    );
     expect(
       Object.keys(files).some((name) => name.endsWith("template.json")),
     ).toBe(true);

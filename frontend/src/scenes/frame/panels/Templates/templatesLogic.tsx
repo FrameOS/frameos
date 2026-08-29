@@ -1045,17 +1045,12 @@ export const templatesLogic = kea<templatesLogicType>([
       // re-ided local copy therefore showed a permanently blank tile and got
       // saved a second time as a private scene of its own.
       const preserveSceneIds = isCloudMode() && Boolean(storeSceneId)
-      // The origin stamp is the backend's "update from repository" bookkeeping.
-      // A cloud store install has no use for it — the assignment tracks the
-      // store scene (and its version) server-side — and persisting it made
-      // every install a perpetual edit: the stamp's version lagged the
-      // published version by one forever, so each save published (or forked)
-      // again. See cloudFrameScenesSave.ts.
-      actions.applyTemplate(
-        preserveSceneIds ? { ...template, scenes } : templateWithSceneOrigins({ ...template, scenes }, repository),
-        openDrawer,
-        preserveSceneIds
-      )
+      // Every installed scene records where it came from (`origin`: the
+      // store page + uuid + version for store scenes, repository/template
+      // otherwise). On the cloud the server stamps the same fields onto
+      // everything it serves and the stamp is stripped again before any
+      // publish (cloudFrameScenesSave.ts), so it can never lag the store.
+      actions.applyTemplate(templateWithSceneOrigins({ ...template, scenes }, repository), openDrawer, preserveSceneIds)
 
       // On the cloud control plane the scene list that actually reaches the
       // device is the server-side store-scene assignment (set_scenes over the

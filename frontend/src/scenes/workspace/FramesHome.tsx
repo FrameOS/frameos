@@ -36,7 +36,8 @@ import {
   frameStatusDescription,
 } from '../../decorators/frame'
 import { urls } from '../../urls'
-import { FrameScene, FrameType, FrameId } from '../../types'
+import { FrameScene, FrameType, FrameId, SceneOrigin } from '../../types'
+import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { FrameosShell } from './FrameosShell'
 import { isMobileWorkspaceViewport, sceneMatchesSearch, workspaceLogic } from './workspaceLogic'
 import type { OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
@@ -976,6 +977,34 @@ function resolveSceneControlSelection(
   return { scene: uploadedScene, sceneId, saved: false }
 }
 
+/** "Installed from scenes.frameos.net/s/… · v4": the scene's origin stamp, when it has one. */
+function SceneOriginLine({ origin }: { origin: SceneOrigin }): JSX.Element | null {
+  const label = origin.href
+    ? origin.href.replace(/^https?:\/\//, '')
+    : origin.templateName || origin.templateId || (origin.storeSceneId ? 'FrameOS Cloud store' : '')
+  if (!label) {
+    return null
+  }
+  return (
+    <div className="frameos-muted mb-4 truncate text-xs text-slate-500" title={origin.href}>
+      Installed from{' '}
+      {origin.href ? (
+        <a
+          href={origin.href}
+          target="_blank"
+          rel="noreferrer"
+          className="underline decoration-slate-300 underline-offset-2 hover:text-slate-800"
+        >
+          {label}
+        </a>
+      ) : (
+        label
+      )}
+      {origin.version ? ` · v${shortSceneVersion(origin.version)}` : null}
+    </div>
+  )
+}
+
 function SceneControlPanelContent({
   sceneControlSelection,
 }: {
@@ -1133,6 +1162,7 @@ function SceneControlPanelContent({
                   ) : null}
                 </div>
               ) : null}
+              {scene.origin ? <SceneOriginLine origin={scene.origin} /> : null}
               <SceneControlPanelModeTitle />
               <SceneControlChangeNotice
                 busy={isFrameFormSubmitting}

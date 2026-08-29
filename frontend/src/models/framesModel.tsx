@@ -175,7 +175,10 @@ async function fetchCloudFrameScenes(
     let sceneJson = cloudSceneJsonCache.get(cacheKey)
     if (!sceneJson) {
       try {
-        const response = await apiFetch(`/api/store/scenes/${row.scene_id}/scenes.json`)
+        // A pinned assignment shows the pinned version's content — the
+        // device runs that one, not the store's latest.
+        const version = row.scene_version ? `?version=${row.scene_version}` : ''
+        const response = await apiFetch(`/api/store/scenes/${row.scene_id}/scenes.json${version}`)
         const parsed = response.ok ? scenesFromStoreSceneJson(await response.json()) : null
         if (parsed) {
           cloudSceneJsonCache.set(cacheKey, parsed)

@@ -47,14 +47,16 @@ import type { FrameId } from './frameId'
 //     `sources` (runtime id → assignment, recorded at hydration) claims them
 //     instead, and the assignment stays untouched.
 //
-// A third: the `origin` stamp the Templates panel puts on an installed scene
-// (repository, template, version — the backend's "update from repository"
-// bookkeeping) never belongs in a cloud scene. On the cloud the assignment IS
-// the origin, and persisting the stamp turned every install into a
-// perpetual edit: the stored copy carried origin.version N-1, the form the
-// freshly stamped N, so each save published a new version (or a new fork)
-// whose stamp then lagged again. It is dropped from both the comparison and
-// the payloads here, whatever the caller's equality does.
+// A third: the `origin` stamp on an installed scene (store page, uuid and
+// version — what the frame is running) never belongs INSIDE a published
+// scene. The store stamps every scene it serves from the version row that
+// produced it (scenes.json, the zip, the device push), so the stored zip
+// stays the publisher's bytes and the stamp can never lag. Persisting it
+// used to turn every install into a perpetual edit: the stored copy carried
+// origin.version N-1, the form the freshly stamped N, so each save published
+// a new version (or a new fork) whose stamp then lagged again. It is dropped
+// from both the comparison and the payloads here, whatever the caller's
+// equality does.
 //
 // Saves for one frame are also serialized: two clicks in one second used to
 // run the flow twice from the same starting list and fork twice ("7" and

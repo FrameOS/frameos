@@ -154,6 +154,41 @@ async def test_create_template_from_scene_page_url(async_client, db, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_create_template_from_zip_keeps_scene_origin(async_client, db):
+    """A zip downloaded from the FrameOS Cloud store carries each scene's
+    `origin` (page href, store uuid, version). The import keeps it verbatim:
+    it is how the Templates panel later knows where an installed scene came
+    from and that a newer version exists."""
+    origin = {
+        "href": "https://scenes.frameos.net/s/visited-world-map",
+        "storeSceneId": "0f3d1c2a-1111-4222-8333-444455556666",
+        "version": "4",
+        "sceneId": "visited-world-map",
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr(
+            "Visited World Map/template.json",
+            json.dumps({"name": "Visited World Map", "scenes": "./scenes.json"}),
+        )
+        zf.writestr(
+            "Visited World Map/scenes.json",
+            json.dumps([{"id": "visited-world-map", "name": "Visited World Map", "nodes": [], "origin": origin}]),
+        )
+
+    response = await async_client.post(
+        "/api/templates",
+        files={"file": ("visited-world-map-v4.zip", buffer.getvalue(), "application/zip")},
+    )
+    assert response.status_code == 201, response.text
+    template_id = response.json()["id"]
+
+    fetched = await async_client.get(f"/api/templates/{template_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["scenes"][0]["origin"] == origin
+
+
+@pytest.mark.asyncio
 async def test_create_template_from_url_rejects_pages_without_meta(async_client, db, monkeypatch):
     class FakeResponse:
         content = b"<html><head><title>Not a scene</title></head></html>"

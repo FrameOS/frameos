@@ -949,8 +949,18 @@ export interface FrameSceneSettings {
   splitScreenLayout?: Record<string, any>
 }
 
-/** Where an installed scene came from, so we can offer updates when the source template changes. */
+/**
+ * Where an installed scene came from, so we can say so and offer updates when
+ * the source moves on. Store installs carry `href` + `storeSceneId` + `version`
+ * (the FrameOS Cloud store stamps every scene it serves — scenes.json, the zip
+ * download and the cloud frame push all agree); repository template installs
+ * carry the repository/template fields.
+ */
 export interface SceneOrigin {
+  /** The source's page, e.g. "https://scenes.frameos.net/s/visited-world-map". */
+  href?: string
+  /** FrameOS Cloud store scene uuid. */
+  storeSceneId?: string
   /** Repository id, e.g. "system-gallery" or a database uuid. */
   repositoryId?: string
   repositoryUrl?: string
@@ -959,7 +969,7 @@ export interface SceneOrigin {
   templateName?: string
   /** The scene's id inside the template's scenes.json, used to re-link scenes on update. */
   sceneId?: string
-  /** Template version at install time. */
+  /** Source version at install time: a store version number ("4") or a template version/content hash. */
   version?: string
 }
 

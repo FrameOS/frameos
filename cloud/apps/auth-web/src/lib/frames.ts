@@ -29,6 +29,7 @@ import {
 } from "./blobs";
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { requiredSettingsForScenes } from "./preview-settings";
+import { withStoreSceneOrigin } from "./scene-origin";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
 import { frameosVersionSatisfies } from "./store-versions";
 import { fetchTzSlice } from "./tz-slice";
@@ -1399,6 +1400,7 @@ export async function buildScenesPayloadForFrame(
     .select({
       sceneId: frameSceneAssignments.sceneId,
       sceneName: storeScenes.name,
+      sceneSlug: storeScenes.slug,
       sceneStatus: storeScenes.status,
       sceneVersion: frameSceneAssignments.sceneVersion,
     })
@@ -1460,14 +1462,22 @@ export async function buildScenesPayloadForFrame(
     if (rawBytes > maxScenesPayloadBytes) {
       return { error: "scenes_payload_too_large" };
     }
-    scenes.push(...extracted.scenes);
+    // Every pushed scene says where it came from (`origin`: store page,
+    // scene uuid, the version these bytes are) — the frame's copy is the
+    // record of its install, and the workspace reads it back from there.
+    const stamped = withStoreSceneOrigin(extracted.scenes, {
+      id: assignment.sceneId,
+      slug: assignment.sceneSlug,
+      version: versionRow.version,
+    });
+    scenes.push(...stamped);
     sceneNames.push(assignment.sceneName);
     // The digest of just this assignment's slice of the payload. Comparing
     // it against the copy stored at the last device-acked push is what lets
     // the workspace flag the one edited scene instead of all of them.
     sceneStates[assignment.sceneId] = {
       checksum: createHash("sha256")
-        .update(JSON.stringify(extracted.scenes))
+        .update(JSON.stringify(stamped))
         .digest("hex"),
       version: versionRow.version,
     };

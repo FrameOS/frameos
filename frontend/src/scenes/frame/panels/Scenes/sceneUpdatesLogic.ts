@@ -87,12 +87,11 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
         repositories: sceneUpdatesLogicValues['repositories']
       ): Record<string, string> => {
         const versions: Record<string, string> = {}
-        // Cloud frames track store scenes through their assignments (unpinned
-        // ones follow the latest version by themselves); the origin stamp is
-        // not written on the cloud any more, and the legacy stamps still
-        // embedded in some stored copies lag the published version by one
-        // forever — a badge on them was a perpetual "update available" whose
-        // update republished the scene one more time.
+        // Cloud frames track store scenes through their assignments; the
+        // origin stamp on their scenes is server-derived (the version the
+        // frame actually runs) and the "update" is a server-side re-pin +
+        // redeploy, not a template re-apply — that path is not wired into
+        // this logic yet, so no badge on the cloud for now.
         if (isCloudMode()) {
           return versions
         }
