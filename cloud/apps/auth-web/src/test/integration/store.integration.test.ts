@@ -959,6 +959,52 @@ describe("store publish and distribution", () => {
     });
   });
 
+  it("flattens markdown into the social description and names the publisher when there is none", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const described = (
+      await readJson(
+        await publish(accessToken, {
+          description:
+            "# Monthly\n\nA **monthly** calendar with [ics](https://example.com) support.\n\n- light\n- dark",
+          visibility: "public",
+        }),
+      )
+    ).scene as Record<string, unknown>;
+    const describedMetadata = (await generateSceneMetadata({
+      params: Promise.resolve({ slug: described.slug as string }),
+      searchParams: Promise.resolve({}),
+    })) as { description?: string; openGraph?: { description?: string } };
+    expect(describedMetadata.description).toBe(
+      "Monthly A monthly calendar with ics support. light dark",
+    );
+    expect(describedMetadata.openGraph?.description).toBe(
+      describedMetadata.description,
+    );
+
+    // The zip's manifest always carries a description; scenes without one
+    // exist (older uploads, cleared in the editor), so blank it directly.
+    const blank = (
+      await readJson(
+        await publish(accessToken, {
+          content_base64: templateZip({ name: "Blank Card" }).toString("base64"),
+          name: "Blank Card",
+          visibility: "public",
+        }),
+      )
+    ).scene as Record<string, unknown>;
+    await db
+      .update(storeScenes)
+      .set({ description: null })
+      .where(eq(storeScenes.id, blank.id as string));
+    const blankMetadata = (await generateSceneMetadata({
+      params: Promise.resolve({ slug: blank.slug as string }),
+      searchParams: Promise.resolve({}),
+    })) as { description?: string };
+    expect(blankMetadata.description).toMatch(
+      /^A FrameOS scene by Store Tester \d+\. Preview it in your browser/,
+    );
+  });
+
   it("shows a gallery screenshot as the store tile once the primary preview is gone", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scene = (

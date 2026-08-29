@@ -31,6 +31,10 @@ import {
   shareTokenGrantsAccess,
 } from "../../../src/lib/store-auth";
 import { accountIsSuperadmin } from "../../../src/lib/superadmin";
+import {
+  defaultSceneDescription,
+  socialDescription,
+} from "../../../src/lib/social-description";
 import { sceneHasPrimaryPreviewSql } from "../../../src/lib/store-preview";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +43,14 @@ type ScenePageProps = {
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ version?: string; share?: string }>;
 };
+
+// Discord paints a link embed's left edge in the page's theme-color; the
+// FrameOS green (--primary in globals.css) makes a shared scene card read as
+// ours at a glance. Declared here rather than in the root layout so the
+// account pages keep the browser's default chrome tint.
+export function generateViewport() {
+  return { themeColor: "#1c7c66" };
+}
 
 // Full social-card metadata (OpenGraph + Twitter) for scenes anyone may see:
 // public ones, and private ones opened through their ?share= token. Other
@@ -61,11 +73,13 @@ export async function generateMetadata({
       name: storeScenes.name,
       previewImageHeight: storeScenes.previewImageHeight,
       previewImageWidth: storeScenes.previewImageWidth,
+      publisher: accounts.displayName,
       shareToken: storeScenes.shareToken,
       status: storeScenes.status,
       visibility: storeScenes.visibility,
     })
     .from(storeScenes)
+    .innerJoin(accounts, eq(accounts.id, storeScenes.accountId))
     .where(and(eq(storeScenes.slug, slug), eq(storeScenes.status, "active")))
     .limit(1);
   if (!scene) {
@@ -81,8 +95,11 @@ export async function generateMetadata({
     `/s/${slug}${shareSuffix}`,
     getScenesBaseUrl(),
   ).toString();
-  const description =
-    scene.description ?? "A scene for FrameOS smart displays.";
+  // Markdown flattened to the one plain paragraph a link card can show.
+  const description = socialDescription(
+    scene.description,
+    defaultSceneDescription(scene.publisher),
+  );
   const [galleryImage] = scene.hasPreview
     ? []
     : await db
