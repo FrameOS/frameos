@@ -1415,6 +1415,26 @@ describe("SceneEditorModal bar overflow", () => {
     expect((within(screen.getByRole("menu")).getByRole("menuitem", { name: "Save as new version" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("offers a signed-out visitor a sign-in link back to this page", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(barRects());
+    stubBarWidth(1400);
+    render(<SceneEditorModal info={info} loginUrl="https://cloud.example/login" sceneId="scene-1" />);
+    const link = screen.getByRole("link", { name: /Sign in to edit/ }) as HTMLAnchorElement;
+    expect(link.href).toBe(
+      `https://cloud.example/login?return_to=${encodeURIComponent(window.location.href)}`,
+    );
+    expect(screen.getByText("Playground — changes are not saved")).toBeTruthy();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  });
+
+  it("does not offer sign-in to a visitor who can fork", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(barRects());
+    stubBarWidth(1400);
+    render(<SceneEditorModal canFork info={info} sceneId="scene-1" />);
+    expect(screen.queryByRole("link", { name: /Sign in to edit/ })).toBeNull();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  });
+
   it("puts Fork first in the menu for a visitor who cannot save", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(barRects());
     stubBarWidth(700);
