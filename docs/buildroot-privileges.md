@@ -9,7 +9,9 @@ Two questions, audited together on 2026-08-16 because they share an answer:
    Cloud-managed frames?
 
 **No code changed for this audit.** What follows is the state of the tree and
-what the choices cost.
+what the choices cost. §1–§3 are the audit as written on 2026-08-16; **§4 is
+what has shipped since** (the `frameos` user, the privileged door, no Remote on
+generic images) and is the part to read for how a Buildroot frame works today.
 
 ---
 
@@ -137,6 +139,9 @@ Three observations, in order of how much they matter:
 
 ### So: does Buildroot need it?
 
+*(Since 2026-08-29 generic images ship without the remote entirely — see §4.
+The reasoning below is what led there.)*
+
 **Backend-managed Buildroot: yes.** Removing it means requiring SSH on images
 that do not ship an SSH server, on networks the backend often cannot reach.
 Not a trade worth making.
@@ -223,3 +228,164 @@ framebuffer device) and run the OTA path end to end → widen to the SPI panels
 once the group/udev story is proven on hardware.
 
 None of it is blocked on a decision; all of it is blocked on hardware time.
+
+---
+
+## 4. What shipped (2026-08-29)
+
+The §3 split is implemented for the two NetworkManager platforms
+(`raspberry-pi-64`, `raspberry-pi-5`). This section is the reference for how
+it works; §1–§3 above are left as the audit that motivated it.
+
+### The service
+
+Generic Buildroot images — standalone and FrameOS Cloud frames, the ones that
+only ever install signed releases — run `frameos.service` as the **`frameos`**
+user (uid/gid 990, fixed, `/bin/false`). The unit is rendered from
+`frameos/frameos.service` with `frameos/frameos.service.unprivileged` spliced in:
+`NoNewPrivileges`, `ProtectSystem=strict` (+ `ReadWritePaths=/srv/frameos
+/srv/assets`), `ProtectHome`, `PrivateTmp`, `ProtectKernelModules/Logs`,
+`ProtectControlGroups`, `RestrictSUIDSGID`, `RestrictRealtime`,
+`RestrictNamespaces`, `LockPersonality`, `SystemCallArchitectures=native`,
+`RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK`, and a bounding
+set of exactly `CAP_SYS_TTY_CONFIG` (the framebuffer driver's `KDSETMODE`).
+`SupplementaryGroups=video input tty` covers the nodes udev already groups;
+an `ExecStartPre=+` step (root) hands `/dev/spidev*`, `/dev/gpiochip*`,
+`/dev/i2c-*`, `/dev/vchiq`, `/dev/fb*`, `/dev/tty0-1` and the two sysfs
+knobs the driver pokes (`fbcon/cursor_blink`, `fb0/blank`) to the service
+group, and makes sure the door's directories exist with the right owners.
+`60-frameos-devices.rules` does the same through udev for the future.
+
+Two renderers produce that unit and must stay byte-identical, or an upgrade
+would rewrite the read-only rootfs on every run:
+`render_buildroot_frameos_service` (`backend/app/tasks/buildroot_image.py`)
+at image-compose time, and `renderBuildrootFrameosService`
+(`frameos/src/frameos/buildroot_privileges.nim`) in `frameos setup` on the
+device. Both read the same two template files.
+
+**Who stays root.** `buildrootServiceUser` (Nim) /
+`buildroot_frameos_service_user_for_platform` (Python) decide:
+
+- `raspberry-pi-32` (no NetworkManager): root. `network/supplicant.nim`
+  drives wpa_supplicant, hostapd, udhcpc and dnsmasq itself, from the
+  runtime — a root network daemon by nature. Moving that orchestration behind
+  the door is the remaining §3 work.
+- Backend-personalized images (`serverHost` set, or `agent.agentEnabled`):
+  root. The self-hosted backend deploys unsigned custom builds over SSH /
+  Remote as root and writes release directories as root; a `frameos`
+  runtime could not open its own `frame.json` there. Its own trust model.
+- `FRAMEOS_BUILDROOT_SERVICE_USER` overrides both, for recovery over a
+  console.
+
+### The door
+
+`frameos/src/frameos/privileged.nim` is the whole contract. The runtime writes
+one JSON file per request into `/srv/frameos/privileged/queue/` (`root:frameos
+1770`); `frameos-privileged.path` (`DirectoryNotEmpty=`) starts
+`frameos-privileged.service`, a root oneshot running
+`/srv/frameos/current/frameos privileged-worker`
+(`frameos/src/frameos/privileged_worker.nim`), which drains the queue, executes,
+writes `results/<id>.json` and exits after 3 s of quiet. A request is an
+**enum verb plus validated arguments** — never a command string, never a
+path outside `/srv/frameos/staging`:
+
+| Verb | Arguments | Does |
+| --- | --- | --- |
+| `reboot` | `delaySeconds` 0–300 | `systemctl reboot` after the delay |
+| `apply-setup`, `apply-driver-setup` | `rebootIfRequired` | `setupFrameOS` / `setupFrameOSDrivers` in-process as root (boot config, units, timezone, watchdog, ownership) |
+| `install-release` | `archive` (under `/srv/frameos/staging`, no symlinks), `signature` (minisig text), `version` | copies the archive to a root-owned dir, **re-verifies the minisign signature against the key in this binary**, unpacks, activates, runs setup, restarts or reboots |
+| `set-hostname` | `hostname` (sanitized again on the root side) | `/etc/hostname`, `/boot/frameos-hostname`, `hostname` |
+| `sync-clock` | — | `systemctl restart systemd-timesyncd` / `ntpd -gq` / `sntp` |
+| `nm-device-status`, `nm-wifi-list`, `nm-connections` (`active`) | — | fixed `nmcli` queries |
+| `nm-radio-on`, `nm-device-managed` (`device`) | interface name `[A-Za-z0-9_.:-]{1,15}` | `rfkill unblock wifi`, `nmcli radio wifi on`, `nmcli device set … managed yes` |
+| `nm-hotspot-start` (`device`, `ssid`, `psk`), `nm-hotspot-stop` | SSID 1–32 bytes no control chars; PSK 8–63 printable or 64 hex | the add / modify / up sequence for `frameos-hotspot`, as argv, never through a shell |
+| `nm-wifi-connect` (`ssid`, `psk`, `device`), `nm-forget` (`wifi`/`hotspot`) | as above; `psk` may be empty (open network) | `nmcli device wifi connect …` for `frameos-wifi` |
+
+Unknown keys are refused, oversized or unparsable request files are deleted
+and answered with an error, and a request the worker never picks up is
+withdrawn by the client after its timeout. `requestPrivileged` and
+`privilegedDoorAvailable` are the only two calls the rest of the runtime
+uses (`device_setup.nim` for reboots, `portal.nim` for everything network,
+`upgrade.nim` for the install); when the process is root the door reports
+itself absent and the old in-process paths run unchanged, so Raspberry Pi OS
+installs and root Buildroot frames behave exactly as before.
+
+**Why root may execute `/srv/frameos/current/frameos` at all.** The
+`frameos` user cannot replace it: `/srv/frameos` and `releases/` are
+`root:root 0755`, each release directory is `root:frameos 1775` (sticky —
+the runtime may add `frame.json`, scene payloads and its session salt, but
+cannot unlink root's `frameos` binary or `drivers/`), and `current` is a
+root-owned symlink in a root-owned directory. Only `install-release` writes
+there, and only after the signature check on a root-owned copy. The layout is
+stamped by the image composer (`render_frameos_partition_ownership_commands`,
+via `debugfs sif` on the finished ext4), by `PARTITION_POST_BUILD_SCRIPT` for
+base images, and by `buildrootOwnershipScript` in `frameos setup` /
+`install-release` on the device.
+
+### OTA and migration
+
+`frameos upgrade` as the `frameos` user: check GitHub, download the archive
+and its `.minisig` into `/srv/frameos/staging/<ts>/`, verify locally (for a
+clear early failure), then `install-release`. The worker owns
+`upgrade-status.json` from that point — the runtime that asked is restarted
+(and its detached upgrade child with it) once the release is in place. The
+`systemd-run` transient unit the root path uses is replaced by a plain
+`nohup` child; it needs no privilege because the install is not its job.
+
+A frame **upgraded from a root-only release** migrates on that upgrade: the
+old runtime installs the new release as root and runs its `frameos setup`,
+which renders the hardened unit, creates the user and group by appending
+the fixed lines to `/etc/passwd`, `/etc/group` and `/etc/shadow` (refusing,
+not duplicating, a taken id), installs and enables the door units and the
+udev rule, and applies the ownership layout. The next start of
+`frameos.service` is unprivileged. Freshly composed images carry the user
+already: `patch-root.sh` merges it into the cached base's account files
+(`backend/app/tasks/buildroot_user_merge.py`, embedded so it runs inside the
+composer container), and base images built from now on get it from a
+Buildroot users table (`BR2_ROOTFS_USERS_TABLES`).
+
+### FrameOS Remote
+
+Generic release images **do not ship it**: no `/srv/frameos/remote`, no
+`frameos-remote.service`, and an upgrade only carries the remote forward
+where one is installed. Nothing on a cloud or standalone frame ever talked
+to it. Where it still runs — Raspberry Pi OS installs and backend-personalized
+Buildroot images — its verb surface lost the interactive PTY
+(`terminal_open` / `terminal_input` / `terminal_close`; the backend's
+Terminal panel is SSH-only now) and the one-shot `file_write`. What remains
+(`version`, `http`, `shell`, streamed `file_write_open/chunk/close`,
+`file_read/md5/delete/mkdir/rename`, `assets_list`) is what a backend deploy
+is built from; `shell` in particular is the deploy transport, and retiring it
+means teaching the backend structured deploy verbs — a separate piece of
+work, tracked in `docs/todo.md`.
+
+### What was verified off-hardware
+
+The permission model is not a design note; it was run. `mke2fs -d` builds a
+FRAMEOS-shaped ext4 the way the composer does, the generated `debugfs sif`
+commands are applied to it, and `e2fsck` passes: release directory
+`root:frameos 1775`, `frameos` binary `root:root 0755` untouched, `frame.json`
+`frameos 0600`, `state` `frameos 0750` with `state/NetworkManager` left
+`root 0700`, `privileged/queue` `root:frameos 1770`. The same layout, built by
+`buildrootOwnershipScript` itself, was then exercised in a container with a
+real uid 990: as `frameos` the runtime can queue a request, write its state,
+logs and staged OTA, and write `frame.json` and scene payloads into its
+release directory — and cannot replace or unlink the `frameos` binary, write
+or add a driver `.so`, create a release directory, swap the `current`
+symlink, delete a request root queued (the sticky bit), or read the Wi-Fi
+PSK out of `state/NetworkManager/system-connections`. That last one closes
+§1's finding (c).
+
+The two unit renderers (Nim and Python) were diffed and are byte-identical
+for all four user/NetworkManager combinations plus the door's units and the
+udev rule.
+
+### Not yet verified on hardware
+
+Everything above is covered by unit tests (`frameos/src/frameos/tests/
+test_privileged.nim`, `backend/app/tasks/tests/test_buildroot_privileges.py`)
+and the compose pipeline, but no panel has run under the unprivileged unit
+yet. `docs/manual-testing-todo.md` lists what to watch: SPI panels
+(Waveshare, Inky) and the Pi 5 framebuffer under `DevicePolicy`-free but
+group-gated nodes, the hotspot / portal flow through the door, an OTA from a
+root-only release, and the `frameos-privileged` journal.

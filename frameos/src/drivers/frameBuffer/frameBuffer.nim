@@ -29,7 +29,13 @@ proc runDisplayCommand(command: string): int =
   runShellWithParentStreams(command, timeoutMs = DISPLAY_COMMAND_TIMEOUT_MS).exitCode
 
 proc runPrivilegedDisplayShell(command: string): int =
-  runDisplayCommand(privilegedCommand("sh -c " & shellQuote(command)))
+  ## The sysfs knobs (cursor_blink, fb0/blank) are handed to the service
+  ## group by frameos.service's ExecStartPre on Buildroot, so a plain write
+  ## works there for the unprivileged runtime; root frames and sudo-capable
+  ## Raspberry Pi OS users fall through to the privileged form.
+  result = runDisplayCommand("sh -c " & shellQuote(command) & " 2>/dev/null")
+  if result != 0:
+    result = runDisplayCommand(privilegedCommand("sh -c " & shellQuote(command)))
 
 type ScreenInfo* = object
   width*: uint32
@@ -457,7 +463,7 @@ proc turnOn*(self: Driver) =
   try:
     let response = runDisplayCommand("vcgencmd display_power 1")
     if response != 0:
-      discard runDisplayCommand("sudo sh -c 'echo 0 > /sys/class/graphics/fb0/blank'")
+      discard runPrivilegedDisplayShell("echo 0 > /sys/class/graphics/fb0/blank")
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to turn display on"})
@@ -466,7 +472,7 @@ proc turnOff*(self: Driver) =
   try:
     let response = runDisplayCommand("vcgencmd display_power 0")
     if response != 0:
-      discard runDisplayCommand("sudo sh -c 'echo 1 > /sys/class/graphics/fb0/blank'")
+      discard runPrivilegedDisplayShell("echo 1 > /sys/class/graphics/fb0/blank")
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to turn display off"})

@@ -1,10 +1,13 @@
 [Unit]
 Description=FrameOS Service
 After=network.target
+RequiresMountsFor=/srv/frameos /srv/assets
 
 [Service]
 User=%I
 WorkingDirectory=/srv/frameos/current
+Environment=FRAMEOS_HOME=/srv/frameos/current
+Environment=LD_LIBRARY_PATH=/srv/frameos/current/drivers:/srv/frameos/current/scenes:/usr/lib:/usr/local/lib
 ExecStart=/srv/frameos/current/frameos
 Restart=always
 RestartSec=5
@@ -20,7 +23,7 @@ WatchdogSec=900
 MemoryHigh=80%
 MemoryMax=90%
 MemorySwapMax=64M
-ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf "serviceResult=%%s\nexitCode=%%s\nexitStatus=%%s\n" "$SERVICE_RESULT" "$EXIT_CODE" "$EXIT_STATUS" > /srv/frameos/runtime/frameos-last-exit'
+__FRAMEOS_UNPRIVILEGED_SERVICE__ExecStopPost=-+/bin/sh -lc 'mkdir -p /srv/frameos/runtime; umask 022; printf "serviceResult=%%s\nexitCode=%%s\nexitStatus=%%s\n" "$SERVICE_RESULT" "$EXIT_CODE" "$EXIT_STATUS" > /srv/frameos/runtime/frameos-last-exit'
 
 [Install]
 WantedBy=multi-user.target

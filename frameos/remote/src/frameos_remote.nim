@@ -1,6 +1,6 @@
-import std/[algorithm, segfaults, strformat, strutils, asyncdispatch, asyncfile,
-            terminal, times, os, sysrand, httpclient, osproc, streams, unicode,
-            monotimes, tables, posix]
+import std/[algorithm, segfaults, strformat, strutils, asyncdispatch,
+            terminal, times, os, httpclient, osproc, streams, unicode,
+            monotimes]
 import checksums/md5
 import json, jsony
 import ws
@@ -67,31 +67,7 @@ type
     compression: string
     bytesWritten: int
 
-  TerminalSession = ref object
-    id: string
-    masterFd: cint
-    pid: Pid
-    file: AsyncFile
-    active: bool
-
-  WinSize {.importc: "struct winsize", header: "<sys/ioctl.h>".} = object
-    ws_row: cushort
-    ws_col: cushort
-    ws_xpixel: cushort
-    ws_ypixel: cushort
-
 var currentUpload: UploadSession
-var terminalSessions = initTable[string, TerminalSession]()
-
-when defined(linux):
-  # forkpty lives in libutil on glibc < 2.34; newer glibc and musl ship an
-  # empty libutil stub, so linking it unconditionally is safe everywhere.
-  {.passL: "-lutil".}
-  proc forkpty(amaster: ptr cint; name: cstring; termp: pointer; winp: ptr WinSize): Pid {.
-    importc, header: "<pty.h>", sideEffect.}
-elif defined(macosx) or defined(freebsd) or defined(openbsd) or defined(netbsd):
-  proc forkpty(amaster: ptr cint; name: cstring; termp: pointer; winp: ptr WinSize): Pid {.
-    importc, header: "<util.h>", sideEffect.}
 
 # ----------------------------------------------------------------------------
 # Config IO (fails hard if unreadable)
@@ -266,136 +242,6 @@ proc execShellSimple(rawCmd: string;
   let rc = p.waitForExit() # closes pipe & reaps the child
   await sendResp(ws, cfg, id, rc == 0, %*{"exit": rc})
 
-proc waitStatusExitCode(status: cint): int =
-  let signal = status and 0x7f
-  if signal == 0:
-    return int((status shr 8) and 0xff)
-  return 128 + int(signal)
-
-proc waitForTerminalPid(pid: Pid): Future[int] {.async.} =
-  var status: cint = 0
-  for attempt in 0 .. 30:
-    let res = waitpid(pid, status, WNOHANG)
-    if res == pid:
-      return waitStatusExitCode(status)
-    if attempt == 10:
-      discard kill(pid, SIGKILL)
-    await sleepAsync(100)
-  return 1
-
-proc setNonBlocking(fd: cint) =
-  let flags = fcntl(fd, F_GETFL)
-  if flags >= 0:
-    discard fcntl(fd, F_SETFL, flags or O_NONBLOCK)
-
-proc shellPath(): string =
-  result = getEnv("SHELL")
-  if result.len == 0 or not fileExists(result):
-    result = if fileExists("/bin/bash"): "/bin/bash" else: "/bin/sh"
-
-proc closeTerminalSession(session: TerminalSession; terminate: bool = true) =
-  if session.isNil or not session.active:
-    return
-  session.active = false
-  if terminate:
-    discard kill(session.pid, SIGTERM)
-  echo &"🖥️  closing terminal session {session.id}"
-  try:
-    session.file.close()
-  except CatchableError:
-    try:
-      discard posix.close(session.masterFd)
-    except CatchableError:
-      discard
-
-proc terminalReader(session: TerminalSession;
-                    ws: WebSocket;
-                    cfg: FrameConfig): Future[void] {.async.} =
-  var exitCode = 0
-  try:
-    while session.active:
-      let data = await session.file.read(4096)
-      if data.len == 0:
-        break
-      await streamRawChunk(ws, cfg, session.id, "stdout", data)
-  except CatchableError as e:
-    discard e
-  finally:
-    session.active = false
-    if terminalSessions.hasKey(session.id):
-      terminalSessions.del(session.id)
-    try:
-      session.file.close()
-    except CatchableError:
-      discard
-    exitCode = await waitForTerminalPid(session.pid)
-    await sendResp(ws, cfg, session.id, exitCode == 0, %*{"exit": exitCode})
-
-proc startTerminalSession(ws: WebSocket;
-                          cfg: FrameConfig;
-                          id: string;
-                          args: JsonNode): Future[void] {.async.} =
-  when not (defined(linux) or defined(macosx) or defined(freebsd) or defined(openbsd) or defined(netbsd)):
-    await sendResp(ws, cfg, id, false, %*{"error": "PTY terminal is not supported on this platform"})
-  else:
-    if terminalSessions.hasKey(id):
-      await sendResp(ws, cfg, id, false, %*{"error": "terminal already exists"})
-      return
-
-    let term = args{"term"}.getStr("xterm-256color")
-    let cols = max(args{"cols"}.getInt(120), 1)
-    let rows = max(args{"rows"}.getInt(30), 1)
-
-    putEnv("TERM", term)
-    putEnv("COLORTERM", getEnv("COLORTERM", "truecolor"))
-
-    let shell = shellPath()
-    let shellName = lastPathPart(shell)
-    var shellArgs = allocCStringArray([shellName, "-i"])
-    var win = WinSize(ws_row: cushort(rows), ws_col: cushort(cols), ws_xpixel: 0, ws_ypixel: 0)
-    var master: cint = -1
-    let pid = forkpty(addr master, nil, nil, addr win)
-    if pid < 0:
-      deallocCStringArray(shellArgs)
-      await sendResp(ws, cfg, id, false, %*{"error": "forkpty failed"})
-      return
-
-    if pid == 0:
-      discard execvp(shell.cstring, shellArgs)
-      exitnow(127)
-
-    deallocCStringArray(shellArgs)
-    setNonBlocking(master)
-    let session = TerminalSession(
-      id: id,
-      masterFd: master,
-      pid: pid,
-      file: newAsyncFile(AsyncFD(master)),
-      active: true,
-    )
-    terminalSessions[id] = session
-    echo &"🖥️  terminal session {id} started with pid {pid}"
-    asyncCheck terminalReader(session, ws, cfg)
-
-proc writeTerminalSession(id: string; data: string): bool =
-  if not terminalSessions.hasKey(id):
-    return false
-  let session = terminalSessions[id]
-  if session.isNil or not session.active:
-    return false
-  if data.len == 0:
-    return true
-  let written = posix.write(session.masterFd, unsafeAddr data[0], data.len)
-  return written >= 0
-
-proc stopTerminalSession(id: string): bool =
-  if not terminalSessions.hasKey(id):
-    return false
-  let session = terminalSessions[id]
-  terminalSessions.del(id)
-  closeTerminalSession(session)
-  return true
-
 # ----------------------------------------------------------------------------
 # All command handlers
 # ----------------------------------------------------------------------------
@@ -470,25 +316,6 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
       else:
         asyncCheck execShellSimple(args["cmd"].getStr(), ws, cfg, id)
 
-    of "terminal_open":
-      await startTerminalSession(ws, cfg, id, args)
-
-    of "terminal_input":
-      let terminalId = args{"terminal_id"}.getStr("")
-      if terminalId.len == 0:
-        await sendResp(ws, cfg, id, false, %*{"error": "`terminal_id` missing"})
-      elif writeTerminalSession(terminalId, args{"data"}.getStr("")):
-        await sendResp(ws, cfg, id, true, %*{})
-      else:
-        await sendResp(ws, cfg, id, false, %*{"error": "terminal not found"})
-
-    of "terminal_close":
-      let terminalId = args{"terminal_id"}.getStr("")
-      if terminalId.len == 0:
-        await sendResp(ws, cfg, id, false, %*{"error": "`terminal_id` missing"})
-      else:
-        await sendResp(ws, cfg, id, stopTerminalSession(terminalId), %*{})
-
     of "file_md5":
       let path = args{"path"}.getStr("")
       if path.len == 0:
@@ -517,36 +344,6 @@ proc handleCmd(cmd: JsonNode; ws: WebSocket; cfg: FrameConfig): Future[void] {.a
           await ws.send(zipped[sent ..< chunkEnd], OpCode.Binary)
           sent = chunkEnd
         await sendResp(ws, cfg, id, true, %*{"size": raw.len})
-
-    of "file_write":
-      let path = args{"path"}.getStr("")
-      let size = args{"size"}.getInt(0) # COMPRESSED size!
-      if path.len == 0 or size <= 0:
-        await sendResp(ws, cfg, id, false,
-                      %*{"error": "`path`/`size` missing"})
-        return
-
-      try:
-        var buf = newStringUninit(size) # len == size (un‑init)
-        var pos = 0
-
-        while pos < size:
-          let frame = await recvBinary(ws) # raw WS frame (bytes)
-          copyMem(addr buf[pos], unsafeAddr frame[0], frame.len)
-          pos += frame.len
-
-        let compression = args{"compression"}.getStr("gzip")
-        let payload =
-          if compression == "none":
-            buf
-          else:
-            uncompress(buf) # zippy supports the gzip/zlib formats we send
-
-        createDir(parentDir(path))
-        writeFile(path, payload)
-        await sendResp(ws, cfg, id, true, %*{"written": payload.len})
-      except CatchableError as e:
-        await sendResp(ws, cfg, id, false, %*{"error": e.msg})
 
     of "file_write_open":
       let path = args["path"].getStr("")

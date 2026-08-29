@@ -1,0 +1,32 @@
+# --- unprivileged service (User is not root) --------------------------------
+# Spliced into frameos.service (at the unprivileged-service marker) whenever the
+# service user is not root (docs/buildroot-privileges.md §3). Root frames keep
+# the plain unit: NoNewPrivileges plus an empty bounding set would strip root
+# of the capabilities its own setup code needs.
+#
+# Panels are character devices with no udev rule of their own on a Buildroot
+# image (spidev, gpiochip, i2c, vchiq), so the root-side ExecStartPre hands
+# them to the service group before privileges drop; fb/input/tty/dri already
+# carry the video/input/tty groups via 50-udev-default.rules. The same
+# step makes sure the privileged door's queue is writable by the runtime.
+Group=%I
+SupplementaryGroups=video input tty
+ExecStartPre=+/bin/sh -c 'for n in /dev/gpiochip* /dev/spidev* /dev/i2c-* /dev/vchiq /dev/fb* /dev/tty0 /dev/tty1 /sys/class/graphics/fbcon/cursor_blink /sys/class/graphics/fb0/blank; do [ -e "$n" ] || continue; chgrp %I "$n" 2>/dev/null; chmod g+rw "$n" 2>/dev/null; done; mkdir -p /srv/frameos/privileged/queue /srv/frameos/privileged/results /srv/frameos/staging /srv/frameos/runtime /srv/frameos/logs /srv/frameos/tmp /srv/frameos/state; chown root:%I /srv/frameos/privileged; chmod 0755 /srv/frameos/privileged; chown root:%I /srv/frameos/privileged/queue; chmod 1770 /srv/frameos/privileged/queue; chown %I:%I /srv/frameos/privileged/results /srv/frameos/staging /srv/frameos/runtime /srv/frameos/logs /srv/frameos/tmp /srv/frameos/state; chmod 0770 /srv/frameos/privileged/results; exit 0'
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/frameos /srv/assets
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# KDSETMODE on the framebuffer console (drivers/frameBuffer) is the one ioctl
+# that still needs a capability without a controlling tty.
+CapabilityBoundingSet=CAP_SYS_TTY_CONFIG
+AmbientCapabilities=CAP_SYS_TTY_CONFIG

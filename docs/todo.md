@@ -47,27 +47,34 @@ before the next release; delete it when empty.
 
 ## Frame privileges and FrameOS Remote
 
-Audited 2026-08-16; findings and the full reasoning in
-`docs/buildroot-privileges.md`. The short version: a stolen cloud account
-already cannot get a shell, cannot reach the LAN from the frame (default-deny
-lifted only by a code read off the panel) and cannot install unsigned software.
-What is left is that everything on the device runs as root. FrameOS Remote —
-the root agent with `shell`, a PTY and arbitrary file write — no longer ships
-enabled on images that have no backend to talk to.
+Audited 2026-08-16, shipped 2026-08-29; `docs/buildroot-privileges.md` §4 is
+the reference. Generic Buildroot images (`raspberry-pi-64`, `raspberry-pi-5`)
+run `frameos.service` as the `frameos` user behind a hardened unit; root work
+goes through the privileged door (`frameos/src/frameos/privileged.nim`: enum
+verbs, validated arguments, a `.path`-triggered root oneshot); OTA re-verifies
+the minisign signature on the root side; the images ship no FrameOS Remote at
+all, and the remote lost its PTY verbs everywhere. Left:
 
-- **Verify on hardware that a generic card still adopts.** Release images now
-  ship `agentEnabled: false` (the audit's §2 recommendation), so a Buildroot
-  frame flashed from a generic image and *then* adopted by a backend needs the
-  one `systemctl enable` that the backend's first deploy already does through
-  `frameos setup`. The cost looks like zero, and that is worth seeing on a real
-  card before believing it.
-- **Run `frameos.service` as a `frameos` user.** The plan, the privileged call
-  sites and the suggested sequencing are in `docs/buildroot-privileges.md` §3.
-  Privileged work moves behind one narrow enum-only door (`apply-setup`,
-  `apply-network-profile`, `reboot`, `install-ota <staged-dir>`) so OTA stays
-  smooth: download and signature verification are already unprivileged, and
-  only the final install crosses the line. Blocked on hardware time, not on a
-  decision. The SPI/GPIO panel drivers are the part to measure first.
+- **Verify on hardware** — nothing has rendered under the unprivileged unit
+  yet. The checklist is in `docs/manual-testing-todo.md` ("Privilege
+  separation"): SPI panels and the Pi 5 framebuffer as `frameos`, the
+  hotspot/portal flow through the door, an OTA from a root-only release (the
+  migration path), and a generic card adopted by a self-hosted backend
+  afterwards.
+- **`raspberry-pi-32` stays root.** `network/supplicant.nim` runs
+  wpa_supplicant/hostapd/udhcpc/dnsmasq from the runtime (39 privileged call
+  sites); it is a root network daemon and needs to become one behind the door
+  (or NetworkManager needs to build for ARMv6) before that image can drop
+  privileges.
+- **Backend-personalized Buildroot images stay root**, and the remote keeps
+  `shell`: the self-hosted deploy path (`backend/app/tasks/_frame_deployer.py`,
+  `deploy_remote.py`, `restart_frame.py`, the asset manager) is built out of
+  it. Retiring `shell` means structured deploy verbs on the remote (`stage
+  release`, `activate`, `restart`) plus the backend `chown`ing what it writes,
+  after which those images can use the same unit and door.
+- **Tighten the unit further once hardware says the groups work:**
+  `DevicePolicy=closed` with an explicit `DeviceAllow` list, and
+  `ProtectKernelTunables` with the two sysfs knobs re-exposed.
 
 ---
 

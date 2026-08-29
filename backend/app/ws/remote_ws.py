@@ -226,15 +226,6 @@ async def file_read_on_frame(frame_id: int, path: str, timeout: int = 60,
     raise RuntimeError("bad response from remote file_read")
 
 
-async def file_write_on_frame(frame_id: int, path: str, data: bytes,
-                              timeout: int = 60, redis: Optional[Redis] = None):
-    blob    = gzip.compress(data)
-    payload = {"type": "cmd", "name": "file_write",
-               "args": {"path": path, "size": len(blob)}}
-    async with _redis_for_command(redis) as command_redis:
-        return await send_cmd(command_redis, frame_id, payload, blob=blob, timeout=timeout)
-
-
 async def file_delete_on_frame(frame_id: int, path: str, timeout: int = 60,
                                redis: Optional[Redis] = None):
     payload = {"type": "cmd", "name": "file_delete", "args": {"path": path}}

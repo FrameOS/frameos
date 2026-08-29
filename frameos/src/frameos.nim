@@ -10,6 +10,7 @@ from ./frameos/frameos import startFrameOS, describeFatalStartupError, fatalStar
 from ./frameos/setup import setupFrameOS, setupFrameOSDrivers, scheduleSetupRebootIfRequired,
   startFrameOSSystemdServices, writeSetupReleasePayload
 from ./frameos/upgrade import runFrameOSUpgrade, parseFrameOSUpgradeOptions
+from ./frameos/privileged_worker import runPrivilegedWorker
 from ./frameos/display_patch import runSetDisplay
 from ./frameos/version import compiledFrameOSVersion
 
@@ -32,6 +33,9 @@ proc printHelp() =
   echo "  upgrade Upgrade this installed frame to the latest GitHub release"
   echo "          --dry-run to validate and print the upgrade plan without changing files"
   echo "          --no-reboot to stop after staging when the new release needs a reboot"
+  echo "  privileged-worker"
+  echo "          Root side of the privileged door on Buildroot frames: drain"
+  echo "          /srv/frameos/privileged/queue and exit (started by frameos-privileged.path)"
   echo "  help    Show this help"
 
 when isMainModule:
@@ -93,6 +97,8 @@ when isMainModule:
     elif args.len > 0 and args[0] == "upgrade":
       let upgradeArgs = if args.len > 1: args[1 .. ^1] else: @[]
       quit(runFrameOSUpgrade(parseFrameOSUpgradeOptions(upgradeArgs)))
+    elif args.len > 0 and args[0] == "privileged-worker":
+      quit(runPrivilegedWorker())
     elif args.len == 0 or args[0] == "start" or args[0].startsWith("--"):
       var firstFatalFailureAt = 0.0
       while true:

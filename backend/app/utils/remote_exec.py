@@ -7,7 +7,6 @@ import json
 import time
 import uuid
 import asyncssh
-import gzip
 import tempfile
 import os
 import shlex
@@ -135,46 +134,6 @@ async def _exec_via_remote(
         if not reply.get("ok"):
             raise RuntimeError(reply.get("error", "remote error"))
 
-
-async def _file_write_via_remote(
-    redis: Redis,
-    frame: Frame,
-    remote_path: str,
-    data: bytes,
-    timeout: int,
-) -> None:
-    async with frame_command_slot(frame.id):
-        cmd_id = str(uuid.uuid4())
-        zipped = gzip.compress(data)
-        payload = {
-            "type": "cmd",
-            "name": "file_write",
-            "args": {"path": remote_path, "size": len(zipped), "compression": "gzip"},
-        }
-
-        message = {
-            "id": cmd_id,
-            "frame_id": frame.id,
-            "payload": payload,
-            "timeout": timeout,
-            "blob": base64.b64encode(zipped).decode(),
-        }
-
-        await redis.rpush(f"remote:cmd:{frame.id}", json.dumps(message).encode())
-
-        resp_key = f"remote:resp:{cmd_id}"
-        res = await redis.blpop(resp_key, timeout=timeout)
-        if res is None:  # ⬅︎ handle timeout
-            raise TimeoutError(
-                f"file_write via remote timed-out after {timeout}s "
-                f"(frame {frame.id}, path {remote_path})"
-            )
-
-        _key, raw = res
-        reply = json.loads(raw)
-
-        if not reply.get("ok"):
-            raise RuntimeError(reply.get("error", "remote error"))
 
 async def _stream_file_via_remote(db, redis, frame, remote_path, data, timeout: int = 120):
     size = len(data)

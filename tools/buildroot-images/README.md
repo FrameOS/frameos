@@ -139,6 +139,39 @@ cached base image from `https://archive.frameos.net/buildroot-images/manifest.js
 then patches the BOOT partition with per-frame setup files and replaces only the
 `FRAMEOS` and `ASSETS` partitions.
 
+### Privilege separation
+
+Generic images run `frameos.service` as the unprivileged **`frameos`** user
+(uid/gid 990) and put the few root actions behind the privileged door — a
+`.path` unit watching `/srv/frameos/privileged/queue` that starts a root
+oneshot running `frameos privileged-worker`. `docs/buildroot-privileges.md` §4
+is the reference; the moving parts here are:
+
+- `render_buildroot_frameos_service(uses_network_manager, user=...)` renders
+  `frameos/frameos.service` plus, for a non-root user,
+  `frameos/frameos.service.unprivileged`. **The device renders the same unit
+  from the same two files** (`renderBuildrootFrameosService` in
+  `frameos/src/frameos/buildroot_privileges.nim`); if the two ever disagree,
+  every upgrade tries to rewrite the read-only rootfs.
+- `buildroot_frameos_service_user_for_platform` picks the user:
+  `frameos` for generic images on NetworkManager platforms, `root` for
+  `raspberry-pi-32` (the runtime drives wpa_supplicant itself) and for
+  backend-personalized images (the backend deploys into them as root).
+- The user is created three ways, all agreeing on uid 990:
+  `BR2_ROOTFS_USERS_TABLES` for new base builds,
+  `backend/app/tasks/buildroot_user_merge.py` (embedded into `patch-root.sh`)
+  for images composed from an older cached base, and `frameos setup` on a
+  frame upgrading from a root-only release.
+- `render_frameos_partition_ownership_commands` stamps the `/srv/frameos`
+  layout onto the finished ext4 with `debugfs sif`: root owns the code
+  (`releases/<r>/frameos`, `drivers/`), `frameos` owns state, logs, assets
+  and the door's results, and each release directory is sticky (`1775`) so
+  the runtime can add files but cannot replace root's binary.
+
+Generic release images also ship **no FrameOS Remote** — no
+`/srv/frameos/remote`, no unit. A self-hosted backend that adopts the card
+installs its own copy on its first deploy.
+
 The base rootfs contains first-boot setup plumbing and mount configuration. The
 setup payload is written to the BOOT partition as `frameos-setup.json`, and the
 first-boot setup service runs
@@ -210,7 +243,8 @@ disposable.
 
 Release images are composed after all precompiled release binaries have been
 built. They use the cached base image plus the platform's precompiled
-FrameOS/Remote artifacts, ship without WiFi credentials, and keep
+FrameOS binary (the Remote binary in the artifact is ignored — see
+"Privilege separation" above), ship without WiFi credentials, and keep
 `wifiHotspot=bootOnly` so the board starts the `FrameOS-Setup` hotspot when it
 cannot reach the network. The first-boot setup service is present but dormant:
 `frameos-setup.json` (self-hosted personalization) is absent, and

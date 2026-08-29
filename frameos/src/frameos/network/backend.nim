@@ -199,5 +199,10 @@ proc probeNetworkTools*(ctx: NetworkContext): NetworkToolProbe =
   let (output, _) = ctx.run(toolProbeCommand(), "")
   result = parseToolProbe(output)
   if result.hasNmcli:
-    let (nmOutput, _) = ctx.run("sudo nmcli -t -f RUNNING general status 2>/dev/null || true", "")
+    # `general status` is a D-Bus property read NetworkManager allows every
+    # user, so try it plainly first: the Buildroot runtime is not root and
+    # has no sudo, and a probe that silently failed there used to send an
+    # NM image down the wpa_supplicant path.
+    let (nmOutput, _) = ctx.run(
+      "(nmcli -t -f RUNNING general status 2>/dev/null || sudo -n nmcli -t -f RUNNING general status 2>/dev/null) || true", "")
     result.nmRunning = parseNmRunning(nmOutput)

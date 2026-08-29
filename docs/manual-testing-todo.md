@@ -93,11 +93,50 @@ flow (changes first-boot behavior for every new user).
   (not just reloads) and the settings apply. Also confirm the panel only
   shows fields the reported hardware can use, and shows disabled-with-reason
   on pre-2026.8.31 firmware.
-- [ ] **Generic image still adopts with Remote off (#362, `docs/todo.md`):**
-  release images ship `agentEnabled: false` — flash a *generic* Buildroot
-  card, adopt it into a self-hosted backend, verify the backend's first
-  deploy transparently enables FrameOS Remote (`frameos setup` does the
-  `systemctl enable`) and everything works after.
+- [ ] **Generic image still adopts with no Remote on it (`docs/buildroot-privileges.md` §4):**
+  release images no longer ship FrameOS Remote at all — flash a *generic*
+  Buildroot card, adopt it into a self-hosted backend, and verify the
+  backend's first deploy installs and enables the remote itself
+  (`deploy_remote` uploads the binary and unit; `frameos setup` enables it)
+  and that everything works after. The deploy also flips the frame back to
+  a root `frameos.service`, so check the unit's `User=` before and after.
+
+## 2b. Privilege separation bench (`docs/buildroot-privileges.md` §4)
+
+Nothing below has run on hardware. Flash a **fresh generic
+`raspberry-pi-64` release image** unless a step says otherwise.
+
+- [ ] **It boots and renders as `frameos`.** `systemctl show -p User
+  frameos.service` says `frameos`, `ps -o user= -C frameos` agrees, and a
+  scene renders. Check the panel you have: framebuffer (Pi 5 / HDMI) and at
+  least one SPI e-ink (Waveshare 7.5" or 13.3E, Inky) — the SPI path is the
+  one most likely to trip on `/dev/spidev*` or `/dev/gpiochip*` permissions.
+  `DEV_Config.c` falls back to *bit-banged* SPI when it cannot open spidev,
+  so a panel that works but refreshes slowly means the group is wrong; look
+  for that, do not just trust a picture.
+- [ ] **The GPIO button and evdev input still fire** (groups `frameos` /
+  `input`), and the framebuffer console is claimed (no getty text over the
+  image — that is `CAP_SYS_TTY_CONFIG` working).
+- [ ] **The door answers.** `journalctl -u frameos-privileged` after a
+  reboot from the cloud/admin ("Reboot" button): one `executing reboot` line,
+  then the reboot. `systemctl status frameos-privileged.path` is active.
+- [ ] **Hotspot and portal through the door.** Boot with no Wi-Fi
+  credentials → `FrameOS-Setup` hotspot appears, the portal lists networks,
+  joining one works and survives a reboot. Every one of those is an
+  `nm-*` verb now; the journal shows them.
+- [ ] **OTA from a root-only release (the migration).** Flash an image from
+  the *previous* release, let it enroll, then trigger "Upgrade FrameOS".
+  Expect: the upgrade succeeds, `/etc/passwd` gains `frameos:x:990:990`,
+  the installed unit becomes the hardened one, `/srv/frameos` ownership is
+  root-code/`frameos`-state, and the frame renders after the restart.
+- [ ] **OTA on an already-migrated frame** (unprivileged → door →
+  `install-release`): the status file goes `running` → `success`, the log
+  shows the signature verified *twice* (once unprivileged, once as root),
+  and the frame comes back on the new version.
+- [ ] **The runtime cannot escalate.** As `frameos` on the device (`su -s
+  /bin/sh frameos`): writing `/srv/frameos/current/frameos` fails, writing
+  `/etc/systemd/system/frameos.service` fails, and a queue file with
+  `{"verb": "shell"}` is refused in the journal rather than run.
 
 ## 3. Backend (self-hosted) bench
 

@@ -1,8 +1,10 @@
 import std/[json, os, sets, strutils]
 import zippy
 import assets/apps as appsAsset
+import frameos/buildroot_privileges
 import frameos/config
 import frameos/device_setup
+import frameos/privileged
 import frameos/samba_mounts
 import frameos/types
 import drivers/drivers as drivers
@@ -234,9 +236,28 @@ proc installFrameOSServiceFile(consoleOutput = false, framebufferConsole = false
     frameosServiceContents(frameosServiceUser(), consoleOutput, framebufferConsole = framebufferConsole),
   )
 
+proc buildrootServiceUserForSetup*(frameOS: FrameOS): string =
+  buildrootServiceUser(frameOS.frameConfig, installedServiceUser(), buildrootUsesNetworkManager())
+
 proc installFrameOSServiceFile(frameOS: FrameOS) =
-  if frameOS.frameConfig.mode == "buildroot" and fileExists("/srv/frameos/current/frameos.service"):
-    installServiceFile("/srv/frameos/current/frameos.service", "/etc/systemd/system/frameos.service")
+  if frameOS.frameConfig.mode == "buildroot":
+    # Rendered, not copied from the release directory: the unit decides
+    # which user the runtime is (docs/buildroot-privileges.md §3), and a
+    # frame upgraded from a root-only release must pick up the hardened one.
+    # writePrivilegedFile compares first, so an image composed from the same
+    # template costs no rootfs write here.
+    let user = buildrootServiceUserForSetup(frameOS)
+    let rendered = renderBuildrootFrameosService(user, buildrootUsesNetworkManager())
+    setupLog("FrameOS setup: systemd services: frameos.service runs as " & user)
+    writePrivilegedFile("/etc/systemd/system/frameos.service", rendered)
+    # Keep the release directory's copy in step for older upgrade code that
+    # still copies it over the installed unit.
+    try:
+      if fileExists("/srv/frameos/current/frameos.service") and
+          readFile("/srv/frameos/current/frameos.service") != rendered:
+        writeFile("/srv/frameos/current/frameos.service", rendered)
+    except CatchableError as e:
+      setupLog("FrameOS setup: systemd services: could not refresh the release copy of frameos.service: " & e.msg)
   else:
     installFrameOSServiceFile(
       frameOS.frameConfig.mode == "buildroot",
@@ -245,7 +266,8 @@ proc installFrameOSServiceFile(frameOS: FrameOS) =
 
 proc systemdServiceNames(frameOS: FrameOS): seq[string] =
   result = @["frameos.service"]
-  if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled:
+  if frameOS.frameConfig.agent != nil and frameOS.frameConfig.agent.agentEnabled and
+      (frameOS.frameConfig.mode != "buildroot" or fileExists("/srv/frameos/remote/current/frameos-remote.service")):
     result.add("frameos-remote.service")
 
 proc ensureSystemdServiceDirectories() =
@@ -307,6 +329,13 @@ proc setupSystemdServices*(frameOS: FrameOS): SetupResult =
       installServiceFile("/srv/frameos/remote/current/frameos-remote.service", "/etc/systemd/system/frameos-remote.service")
     else:
       discard runSetupCommand(privilegedCommand("systemctl disable frameos-remote.service"), raiseOnError = false)
+
+    if frameOS.frameConfig.mode == "buildroot":
+      let user = buildrootServiceUserForSetup(frameOS)
+      setupLog("FrameOS setup: systemd services: installing the privileged door units")
+      if user != "root" and not ensureBuildrootServiceUser(user):
+        raise newException(OSError, "FrameOS setup: cannot create the " & user & " user for frameos.service")
+      installBuildrootPrivilegedUnits(user)
 
     discard runSetupCommand(privilegedCommand("systemctl daemon-reload"))
     discard runSetupCommand(privilegedCommand("systemctl enable " & systemdServiceNames(frameOS).join(" ")))
@@ -502,7 +531,10 @@ proc startFrameOSSystemdServices*(configPath = "") =
   let frameOS = FrameOS(frameConfig: loadConfig(configPath))
   # First-boot setup runs in a oneshot ordered Before=frameos*. Queue the starts
   # so systemd can run them after the setup unit exits instead of waiting here.
-  discard runSetupCommand(privilegedCommand("systemctl --no-block start " & systemdServiceNames(frameOS).join(" ")))
+  var names = systemdServiceNames(frameOS)
+  if frameOS.frameConfig.mode == "buildroot" and buildrootServiceUserForSetup(frameOS) != "root":
+    names.add(BuildrootPrivilegedPathUnitName)
+  discard runSetupCommand(privilegedCommand("systemctl --no-block start " & names.join(" ")))
 
 proc setupAppAptPackages*(): SetupResult =
   setupAptPackages(appAptPackagesFromScenes(loadAllScenesPayload(), loadAppsPayload()))
@@ -571,6 +603,13 @@ proc setupFrameOS*(configPath = ""): SetupResult =
       "to keep the remote connection alive")
   addSetupResult(result, runSetupStep("system hardening", proc(): SetupResult = setupSystemHardening(liveApply)))
   addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
+  if frameOS.frameConfig.mode == "buildroot":
+    # Last, after everything above may have created root-owned files under
+    # /srv/frameos: the runtime user must own its state before it restarts.
+    addSetupResult(result, runSetupStep("privilege separation ownership", proc(): SetupResult =
+      applyBuildrootOwnership(buildrootServiceUserForSetup(frameOS))
+      setupOk()
+    ))
   if result.rebootRequired:
     setupLog("FrameOS setup: reboot required")
   setupLog("FrameOS setup: complete")
@@ -584,6 +623,8 @@ proc setupFrameOSDrivers*(configPath = ""): SetupResult =
     discard writeFrameConfigDimensions(configPath, frameOS.frameConfig)
     setupOk()
   ))
+  if frameOS.frameConfig.mode == "buildroot" and runningAsRoot():
+    applyBuildrootOwnership(buildrootServiceUserForSetup(frameOS))
   if result.rebootRequired:
     setupLog("FrameOS setup: driver setup: reboot required")
   setupLog("FrameOS setup: driver setup: complete")

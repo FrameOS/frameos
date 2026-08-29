@@ -1,9 +1,11 @@
-import std/[base64, httpclient, json, os, strutils, tables, times]
+import std/[base64, httpclient, json, os, sequtils, strutils, tables, times]
 import zippy
 
+import frameos/buildroot_privileges
 import frameos/cloud/identity
 import frameos/config
 import frameos/ota_pubkey
+import frameos/privileged
 import frameos/utils/blake2b
 import frameos/device_setup
 from frameos/setup import frameosServiceContents, frameosServiceUser
@@ -464,8 +466,10 @@ proc ensureCompatibleInstalledLayout(release: FrameOSReleaseInfo) =
     raise newException(ValueError, "FrameOS upgrade requires systemd/systemctl")
   if not commandExists("tar"):
     raise newException(ValueError, "FrameOS upgrade requires tar")
-  if not commandSucceeds("test \"$(id -u)\" = 0 || sudo -n true >/dev/null 2>&1"):
-    raise newException(ValueError, "FrameOS upgrade must run as root or with passwordless sudo")
+  if not privilegedDoorAvailable() and
+      not commandSucceeds("test \"$(id -u)\" = 0 || sudo -n true >/dev/null 2>&1"):
+    raise newException(ValueError,
+      "FrameOS upgrade must run as root, with passwordless sudo, or behind the privileged door")
   discard release
 
 proc downloadReleaseArchive*(release: FrameOSReleaseInfo, destination: string) =
@@ -558,16 +562,18 @@ proc writeFrameConfigForUpgrade(configPath, destination, version: string) =
   writeFile(destination, pretty(payload, indent = 4) & "\n")
 
 proc serviceUserFromFile(path: string): string =
-  try:
-    if fileExists(path):
-      for line in readFile(path).splitLines():
-        if line.startsWith("User="):
-          let user = line["User=".len .. ^1].strip()
-          if user.len > 0:
-            return user
-  except CatchableError:
-    discard
+  let installed = installedServiceUser(path)
+  if installed.len > 0:
+    return installed
   frameosServiceUser()
+
+proc buildrootRemoteInstalled*(): bool =
+  ## Generic Buildroot images no longer ship FrameOS Remote at all
+  ## (docs/buildroot-privileges.md §2): no /srv/frameos/remote, no unit. An
+  ## upgrade only carries the remote forward where an image (or a backend
+  ## deploy) put it in the first place.
+  dirExists(frameosRemoteInstallDir() / "current") or
+    fileExists("/etc/systemd/system/frameos-remote.service")
 
 proc remoteServiceContents(user: string): string =
   "[Unit]\n" &
@@ -598,28 +604,123 @@ proc copyFirstExistingFile(sources: openArray[string], destination: string) =
       copyFile(source, destination)
       return
 
+proc newStagedReleaseName(release: FrameOSReleaseInfo, timestamp: string): string =
+  "release_upgrade_" & timestamp & "_" & release.version.replace(".", "_")
+
+proc assembleReleaseFromArchive(release: FrameOSReleaseInfo, archivePath, workDir: string,
+                                staged: var StagedFrameOSRelease) =
+  ## Everything after the signature check: unpack, lay out the release
+  ## directories, carry the frame's config and scene payloads over, and
+  ## settle ownership. `archivePath` must already be verified — this proc
+  ## trusts it, so callers verify before calling (both do).
+  let mode = currentFrameConfig(){"mode"}.getStr("rpios")
+  let withRemote = mode != "buildroot" or buildrootRemoteInstalled()
+  createDir(workDir / "extract")
+  createDir(staged.frameosReleaseDir)
+  if withRemote:
+    createDir(staged.remoteReleaseDir)
+    createDir(frameosRemoteInstallDir() / "logs")
+  createDir(frameosInstallDir() / "logs")
+  createDir(frameosStateDir())
+  createDir(frameosAssetsDir())
+
+  discard runSetupCommand("tar -xzf " & shellQuote(archivePath) & " -C " & shellQuote(workDir / "extract"))
+
+  let frameosBinary = findFileNamed(workDir / "extract", "frameos")
+  var remoteBinary = findFileNamed(workDir / "extract", "frameos_remote")
+  if remoteBinary.len == 0:
+    remoteBinary = findFileNamed(workDir / "extract", "frameos_agent")
+  if frameosBinary.len == 0:
+    raise newException(ValueError, "The FrameOS release did not contain a frameos binary for " & release.target)
+  if withRemote and remoteBinary.len == 0:
+    raise newException(ValueError, "The FrameOS release did not contain a frameos_remote binary for " & release.target)
+
+  let artifactRoot = parentDir(frameosBinary)
+  discard runSetupCommand("install -m 0755 " & shellQuote(frameosBinary) & " " & shellQuote(staged.frameosReleaseDir / "frameos"))
+  if withRemote:
+    discard runSetupCommand("install -m 0755 " & shellQuote(remoteBinary) & " " & shellQuote(staged.remoteReleaseDir / "frameos_remote"))
+
+  copyDirIfExists(artifactRoot / "drivers", staged.frameosReleaseDir / "drivers")
+  # No `scenes/` any more: release archives never carried scene `.so`s, and
+  # the modes that built them are gone. The stale `current/scenes` entry in
+  # LD_LIBRARY_PATH stays — a directory that does not exist costs a linker
+  # nothing, and rewriting it would rewrite the installed unit (and the
+  # published base images' hashes) for no gain.
+  if dirExists(artifactRoot / "vendor"):
+    createDir(frameosInstallDir() / "vendor")
+    discard runSetupCommand("cp -R " & shellQuote(artifactRoot / "vendor" / ".") & " " & shellQuote(frameosInstallDir() / "vendor" / ""))
+
+  let oldReleaseDir = realPath(frameosInstallDir() / "current")
+  let oldRemoteReleaseDir = realPath(frameosRemoteInstallDir() / "current")
+  writeFrameConfigForUpgrade(currentFrameConfigPath(), staged.frameosReleaseDir / "frame.json", release.version)
+  if withRemote:
+    copyFile(staged.frameosReleaseDir / "frame.json", staged.remoteReleaseDir / "frame.json")
+  copyScenePayloads(staged.frameosReleaseDir, oldReleaseDir)
+
+  copyAdminSessionSaltForUpgrade(staged.frameosReleaseDir)
+
+  let serviceUser = serviceUserFromFile("/etc/systemd/system/frameos.service")
+  staged.serviceUser = serviceUser
+  if mode == "buildroot":
+    # Buildroot units are rendered by `frameos setup` from the template in
+    # this binary (buildroot_privileges.nim); the copy in the release
+    # directory only exists for older code that copied it. Stage the
+    # rendering setup is about to install so the two agree.
+    let user = buildrootServiceUser(loadConfig(staged.frameosReleaseDir / "frame.json"),
+                                    serviceUser, buildrootUsesNetworkManager())
+    writeFile(staged.frameosReleaseDir / "frameos.service",
+              renderBuildrootFrameosService(user, buildrootUsesNetworkManager()))
+    if withRemote:
+      copyFirstExistingFile(
+        ["/etc/systemd/system/frameos-remote.service", oldRemoteReleaseDir / "frameos-remote.service"],
+        staged.remoteReleaseDir / "frameos-remote.service",
+      )
+  if not fileExists(staged.frameosReleaseDir / "frameos.service"):
+    writeFile(
+      staged.frameosReleaseDir / "frameos.service",
+      frameosServiceContents(serviceUser, framebufferConsole = currentFrameConfig(){"device"}.getStr("") == "framebuffer"),
+    )
+  if withRemote and not fileExists(staged.remoteReleaseDir / "frameos-remote.service"):
+    writeFile(staged.remoteReleaseDir / "frameos-remote.service", remoteServiceContents(serviceUser))
+
+  if mode == "buildroot" and runningAsRoot():
+    # Root owns the code, the runtime user owns its state; `frameos setup`
+    # repeats this after activation, but the release directory must be
+    # right before the new binary is first executed.
+    applyBuildrootOwnership(
+      buildrootServiceUser(loadConfig(staged.frameosReleaseDir / "frame.json"), serviceUser,
+                           buildrootUsesNetworkManager()),
+      frameosInstallDir())
+  else:
+    var chownTargets = @[staged.frameosReleaseDir, frameosStateDir(), frameosInstallDir() / "logs", frameosAssetsDir()]
+    if withRemote:
+      chownTargets.add(staged.remoteReleaseDir)
+      chownTargets.add(frameosRemoteInstallDir() / "logs")
+    discard runSetupCommand(
+      privilegedCommand(
+        "chown -R " & shellQuote(serviceUser) & " " & chownTargets.mapIt(shellQuote(it)).join(" ")
+      ),
+      raiseOnError = false,
+    )
+
+proc upgradeWorkBase(mode: string): string =
+  ## /tmp is a small tmpfs on Buildroot; stage the download and extraction on
+  ## the SD-backed data partition instead of RAM.
+  if mode == "buildroot": frameosInstallDir() / "tmp" else: getTempDir()
+
 proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
+  ## The root path: download, verify, unpack and lay out the release.
   let timestamp = format(now(), "yyyyMMddHHmmss")
-  result.name = "release_upgrade_" & timestamp & "_" & release.version.replace(".", "_")
+  result.name = newStagedReleaseName(release, timestamp)
   result.frameosReleaseDir = frameosInstallDir() / "releases" / result.name
   result.remoteReleaseDir = frameosRemoteInstallDir() / "releases" / result.name
   if dirExists(result.frameosReleaseDir) or dirExists(result.remoteReleaseDir):
     raise newException(ValueError, "Release directory already exists: " & result.name)
 
   let mode = currentFrameConfig(){"mode"}.getStr("rpios")
-  # /tmp is a small tmpfs on Buildroot; stage the download and extraction on
-  # the SD-backed data partition instead of RAM.
-  let workBase = if mode == "buildroot": frameosInstallDir() / "tmp" else: getTempDir()
-  let workDir = workBase / ("frameos-upgrade-" & $getCurrentProcessId() & "-" & timestamp)
+  let workDir = upgradeWorkBase(mode) / ("frameos-upgrade-" & $getCurrentProcessId() & "-" & timestamp)
   try:
     createDir(workDir)
-    createDir(workDir / "extract")
-    createDir(result.frameosReleaseDir)
-    createDir(result.remoteReleaseDir)
-    createDir(frameosInstallDir() / "logs")
-    createDir(frameosRemoteInstallDir() / "logs")
-    createDir(frameosStateDir())
-    createDir(frameosAssetsDir())
 
     setupLog("FrameOS upgrade: downloading " & release.assetName)
     if releaseArchiveFetcher.isNil:
@@ -639,81 +740,7 @@ proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
     verifyReleaseArchiveSignature(workDir / "frameos.tar.gz", minisig)
     setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & ")")
 
-    discard runSetupCommand("tar -xzf " & shellQuote(workDir / "frameos.tar.gz") & " -C " & shellQuote(workDir / "extract"))
-
-    let frameosBinary = findFileNamed(workDir / "extract", "frameos")
-    var remoteBinary = findFileNamed(workDir / "extract", "frameos_remote")
-    if remoteBinary.len == 0:
-      remoteBinary = findFileNamed(workDir / "extract", "frameos_agent")
-    if frameosBinary.len == 0:
-      raise newException(ValueError, "The FrameOS release did not contain a frameos binary for " & release.target)
-    if remoteBinary.len == 0:
-      raise newException(ValueError, "The FrameOS release did not contain a frameos_remote binary for " & release.target)
-
-    let artifactRoot = parentDir(frameosBinary)
-    discard runSetupCommand("install -m 0755 " & shellQuote(frameosBinary) & " " & shellQuote(result.frameosReleaseDir / "frameos"))
-    discard runSetupCommand("install -m 0755 " & shellQuote(remoteBinary) & " " & shellQuote(result.remoteReleaseDir / "frameos_remote"))
-
-    copyDirIfExists(artifactRoot / "drivers", result.frameosReleaseDir / "drivers")
-    # No `scenes/` any more: release archives never carried scene `.so`s, and
-    # the modes that built them are gone. The stale `current/scenes` entry in
-    # LD_LIBRARY_PATH stays — a directory that does not exist costs a linker
-    # nothing, and rewriting it would rewrite the installed unit (and the
-    # published base images' hashes) for no gain.
-    if dirExists(artifactRoot / "vendor"):
-      createDir(frameosInstallDir() / "vendor")
-      discard runSetupCommand("cp -R " & shellQuote(artifactRoot / "vendor" / ".") & " " & shellQuote(frameosInstallDir() / "vendor" / ""))
-
-    let oldReleaseDir = realPath(frameosInstallDir() / "current")
-    let oldRemoteReleaseDir = realPath(frameosRemoteInstallDir() / "current")
-    writeFrameConfigForUpgrade(currentFrameConfigPath(), result.frameosReleaseDir / "frame.json", release.version)
-    copyFile(result.frameosReleaseDir / "frame.json", result.remoteReleaseDir / "frame.json")
-    copyScenePayloads(result.frameosReleaseDir, oldReleaseDir)
-
-    copyAdminSessionSaltForUpgrade(result.frameosReleaseDir)
-
-    let serviceUser = serviceUserFromFile("/etc/systemd/system/frameos.service")
-    result.serviceUser = serviceUser
-    if mode == "buildroot":
-      # Buildroot service files carry image-specific settings (User=root,
-      # FRAMEOS_HOME and LD_LIBRARY_PATH pointing into the release); carry them
-      # over instead of generating the Raspberry Pi OS variants.
-      #
-      # The INSTALLED unit is the source of truth, not the release directory's
-      # copy: images built before this was fixed staged the two from different
-      # renderers, and the release copy is missing the NetworkManager
-      # Wants=/After= lines that the installed one has. Preferring the release
-      # copy made the upgrade rewrite /etc/systemd/system/frameos.service on
-      # every single run — a write the read-only Buildroot rootfs refuses, and
-      # a needless downgrade of the unit even where it succeeds.
-      copyFirstExistingFile(
-        ["/etc/systemd/system/frameos.service", oldReleaseDir / "frameos.service"],
-        result.frameosReleaseDir / "frameos.service",
-      )
-      copyFirstExistingFile(
-        ["/etc/systemd/system/frameos-remote.service", oldRemoteReleaseDir / "frameos-remote.service"],
-        result.remoteReleaseDir / "frameos-remote.service",
-      )
-    if not fileExists(result.frameosReleaseDir / "frameos.service"):
-      writeFile(
-        result.frameosReleaseDir / "frameos.service",
-        frameosServiceContents(serviceUser, framebufferConsole = currentFrameConfig(){"device"}.getStr("") == "framebuffer"),
-      )
-    if not fileExists(result.remoteReleaseDir / "frameos-remote.service"):
-      writeFile(result.remoteReleaseDir / "frameos-remote.service", remoteServiceContents(serviceUser))
-
-    discard runSetupCommand(
-      privilegedCommand(
-        "chown -R " & shellQuote(serviceUser) & " " &
-        shellQuote(result.frameosReleaseDir) & " " &
-        shellQuote(result.remoteReleaseDir) & " " &
-        shellQuote(frameosStateDir()) & " " &
-        shellQuote(frameosInstallDir() / "logs") & " " &
-        shellQuote(frameosRemoteInstallDir() / "logs") & " " &
-        shellQuote(frameosAssetsDir())
-      ),
-      raiseOnError = false,
-    )
+    assembleReleaseFromArchive(release, workDir / "frameos.tar.gz", workDir, result)
   finally:
     if dirExists(workDir):
       removeDir(workDir)
@@ -737,7 +764,8 @@ proc runStagedSetup(staged: var StagedFrameOSRelease) =
 
 proc remoteEnabled(): bool =
   let config = currentFrameConfig()
-  config{"agent"}{"agentEnabled"}.getBool(false)
+  config{"agent"}{"agentEnabled"}.getBool(false) and
+    (config{"mode"}.getStr("rpios") != "buildroot" or buildrootRemoteInstalled())
 
 proc upgradeFinishAction*(rebootRequired, mayReboot: bool): UpgradeFinishAction =
   ## How a staged-and-activated release is put into service.
@@ -769,17 +797,19 @@ proc finishFrameOSUpgrade(action: UpgradeFinishAction) =
     discard runSetupCommand(privilegedCommand("systemctl --no-block restart " & services.join(" ")), raiseOnError = false)
 
 proc activateStagedRelease(staged: var StagedFrameOSRelease) =
+  let withRemote = dirExists(staged.remoteReleaseDir)
   let previousFrameosCurrent = realPath(frameosInstallDir() / "current")
-  let previousRemoteCurrent = realPath(frameosRemoteInstallDir() / "current")
+  let previousRemoteCurrent = if withRemote: realPath(frameosRemoteInstallDir() / "current") else: ""
   try:
     switchCurrentSymlink(frameosInstallDir() / "current", staged.frameosReleaseDir)
-    switchCurrentSymlink(frameosRemoteInstallDir() / "current", staged.remoteReleaseDir)
+    if withRemote:
+      switchCurrentSymlink(frameosRemoteInstallDir() / "current", staged.remoteReleaseDir)
     runStagedSetup(staged)
   except CatchableError:
     setupLog("FrameOS upgrade: activation failed; rolling back current symlinks")
     if previousFrameosCurrent.len > 0:
       switchCurrentSymlink(frameosInstallDir() / "current", previousFrameosCurrent)
-    if previousRemoteCurrent.len > 0:
+    if withRemote and previousRemoteCurrent.len > 0:
       switchCurrentSymlink(frameosRemoteInstallDir() / "current", previousRemoteCurrent)
     raise
 
@@ -795,6 +825,149 @@ proc statusPayload(status, message: string, release: FrameOSReleaseInfo, exitCod
   if release.version.len > 0:
     result["latest_version"] = %release.version
     result["latest_release"] = releaseJson(release)
+
+proc releaseInfoForVersion(version: string): FrameOSReleaseInfo =
+  ## What install-release knows about the archive it was handed: the version
+  ## the caller claims (it is re-checked against frameos.service's needs only
+  ## by the signature — a signed archive of any version is a genuine release)
+  ## and this device's target.
+  result.version = normalizeReleaseVersion(version)
+  result.tagName = "v" & result.version
+  result.target = detectUpgradeTarget()
+  result.assetName = "frameos-" & result.version & "-" & result.target & ".tar.gz"
+
+proc stagedArchiveInsideStagingDir(archivePath: string): bool =
+  ## The worker only accepts a regular file directly inside a staging
+  ## sub-directory the unprivileged upgrade created; symlinks anywhere on
+  ## the path are refused so the runtime cannot point root at another file.
+  let stagingDir = privilegedStagingDir(frameosInstallDir())
+  if not archivePath.startsWith(stagingDir & "/"):
+    return false
+  if symlinkExists(archivePath) or not fileExists(archivePath):
+    return false
+  var dir = parentDir(archivePath)
+  while dir.len > stagingDir.len:
+    if symlinkExists(dir):
+      return false
+    dir = parentDir(dir)
+  true
+
+proc installStagedReleaseArchive*(archivePath, minisig, version: string): JsonNode =
+  ## Root side of the privileged door's `install-release` verb: the second
+  ## half of an upgrade whose first half — download and signature check —
+  ## ran as the `frameos` user. Copies the archive somewhere the runtime
+  ## cannot touch, verifies the minisign signature AGAIN against the key in
+  ## this binary (root trusts nothing the runtime says about the bytes),
+  ## unpacks, activates, runs setup and restarts or reboots. Writes
+  ## upgrade-status.json throughout, exactly like performFrameOSUpgrade,
+  ## because the runtime that asked may be restarted before it can.
+  var release = FrameOSReleaseInfo()
+  try:
+    if not runningAsRoot():
+      raise newException(ValueError, "install-release must run as root")
+    release = releaseInfoForVersion(version)
+    if not stagedArchiveInsideStagingDir(archivePath):
+      raise newException(ValueError, "Refusing to install an archive outside " &
+        privilegedStagingDir(frameosInstallDir()) & ": " & archivePath)
+    if getFileSize(archivePath) > MaxReleaseArchiveBytes:
+      raise newException(ValueError, "Staged release archive is larger than " & $MaxReleaseArchiveBytes & " bytes")
+    ensureCompatibleInstalledLayout(release)
+
+    let timestamp = format(now(), "yyyyMMddHHmmss")
+    var staged = StagedFrameOSRelease()
+    staged.name = newStagedReleaseName(release, timestamp)
+    staged.frameosReleaseDir = frameosInstallDir() / "releases" / staged.name
+    staged.remoteReleaseDir = frameosRemoteInstallDir() / "releases" / staged.name
+    if dirExists(staged.frameosReleaseDir) or dirExists(staged.remoteReleaseDir):
+      raise newException(ValueError, "Release directory already exists: " & staged.name)
+
+    result = statusPayload("running", "FrameOS is installing the staged release " & release.version & ".", release)
+    result["started_at"] = %nowIso()
+    writeUpgradeStatus(result)
+
+    # Root-owned work directory (0700) on the same partition: the copy is
+    # what gets verified and unpacked, so a runtime that swaps the staged
+    # file after handing it over changes nothing.
+    let workDir = frameosInstallDir() / "releases" / (".install-" & timestamp)
+    try:
+      createDir(workDir)
+      setFilePermissions(workDir, {fpUserRead, fpUserWrite, fpUserExec})
+      copyFile(archivePath, workDir / "frameos.tar.gz")
+      setupLog("FrameOS upgrade: verifying the staged release signature as root")
+      verifyReleaseArchiveSignature(workDir / "frameos.tar.gz", minisig)
+      setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & ")")
+      assembleReleaseFromArchive(release, workDir / "frameos.tar.gz", workDir, staged)
+    finally:
+      if dirExists(workDir):
+        removeDir(workDir)
+      try:
+        removeDir(parentDir(archivePath))
+      except CatchableError:
+        discard
+
+    activateStagedRelease(staged)
+
+    let rebootRequired = staged.setupStatus == 2
+    let finishAction = upgradeFinishAction(rebootRequired, mayReboot = true)
+    result = statusPayload(
+      if rebootRequired: "reboot_required" else: "success",
+      if finishAction == rebootDevice:
+        "FrameOS upgraded to " & release.version & ". Rebooting to finish."
+      else:
+        "FrameOS upgraded to " & release.version & ". Restarting services.",
+      release,
+    )
+    result["release_dir"] = %staged.frameosReleaseDir
+    result["finished_at"] = %nowIso()
+    result["update_available"] = %false
+    writeUpgradeStatus(result)
+    setupLog(result["message"].getStr())
+    finishFrameOSUpgrade(finishAction)
+  except CatchableError as error:
+    result = statusPayload("failed", error.msg, release, exitCode = 1)
+    result["finished_at"] = %nowIso()
+    writeUpgradeStatus(result)
+    setupLog("FrameOS upgrade failed: " & error.msg)
+
+proc performFrameOSUpgradeThroughDoor(release: FrameOSReleaseInfo, currentVersion: string): JsonNode =
+  ## The unprivileged half: fetch and verify as the runtime user, then ask
+  ## root to install. The worker owns upgrade-status.json from the moment it
+  ## accepts the request; this side only records the outcome if it is still
+  ## alive to see one (a successful install restarts frameos.service, which
+  ## takes this process with it).
+  let timestamp = format(now(), "yyyyMMddHHmmss")
+  let stagingDir = privilegedStagingDir(frameosInstallDir()) / ("frameos-upgrade-" & timestamp)
+  createDir(stagingDir)
+  let archivePath = stagingDir / "frameos.tar.gz"
+  try:
+    setupLog("FrameOS upgrade: downloading " & release.assetName)
+    if releaseArchiveFetcher.isNil:
+      downloadReleaseArchive(release, archivePath)
+    else:
+      releaseArchiveFetcher(release, archivePath)
+    setupLog("FrameOS upgrade: verifying the release signature")
+    let minisig =
+      if releaseSignatureFetcher.isNil: downloadReleaseSignature(release)
+      else: releaseSignatureFetcher(release)
+    verifyReleaseArchiveSignature(archivePath, minisig)
+    setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & "); asking the privileged door to install")
+    let res = requestPrivileged(pvInstallRelease, %*{
+      "archive": archivePath,
+      "signature": minisig,
+      "version": release.version,
+    }, timeoutMs = 30 * 60 * 1000, pollMs = 500)
+    if res.data != nil and res.data.kind == JObject and res.data.hasKey("status"):
+      result = res.data
+    elif res.ok:
+      result = statusPayload("success", "FrameOS upgraded to " & release.version & ".", release)
+    else:
+      result = statusPayload("failed", res.error, release, exitCode = max(res.exitCode, 1))
+      result["finished_at"] = %nowIso()
+      writeUpgradeStatus(result)
+      setupLog("FrameOS upgrade failed: " & res.error)
+  finally:
+    if dirExists(stagingDir):
+      removeDir(stagingDir)
 
 proc performFrameOSUpgrade*(options: FrameOSUpgradeOptions): JsonNode =
   var release = FrameOSReleaseInfo()
@@ -827,6 +1000,9 @@ proc performFrameOSUpgrade*(options: FrameOSUpgradeOptions): JsonNode =
     result["started_at"] = %nowIso()
     result["update_available"] = %true
     writeUpgradeStatus(result)
+
+    if privilegedDoorAvailable():
+      return performFrameOSUpgradeThroughDoor(release, currentVersion)
 
     var staged = stageFrameOSRelease(release)
     activateStagedRelease(staged)
@@ -892,7 +1068,13 @@ proc scheduleFrameOSUpgrade*(): JsonNode =
   })
   let childCommand = shellQuote(binary) & " upgrade --yes"
   let redirected = childCommand & " >> " & shellQuote(logPath) & " 2>&1"
-  if commandExists("systemd-run"):
+  if privilegedDoorAvailable():
+    # Not root: no transient unit to hide in. The child runs as this user
+    # inside frameos.service's cgroup; the download and signature check are
+    # its work, the install is the root worker's, and the worker restarts
+    # this service (and with it, the child) once the release is in place.
+    discard runSetupCommand("sh -c " & shellQuote("nohup " & redirected & " &"))
+  elif commandExists("systemd-run"):
     discard runSetupCommand(privilegedCommand(
       "systemd-run --quiet --unit=frameos-upgrade --collect /bin/sh -lc " & shellQuote(redirected)
     ))

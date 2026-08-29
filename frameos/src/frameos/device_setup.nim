@@ -1,5 +1,6 @@
-import std/[os, sequtils, sets, strutils, times]
+import std/[json, os, sequtils, sets, strutils, times]
 import frameos/utils/process
+import frameos/privileged
 
 when not defined(windows):
   import posix
@@ -78,10 +79,23 @@ proc systemRebootCommand*(delaySeconds = 2): string =
   ## fallback for an init without systemd.
   privilegedShell("(sleep " & $delaySeconds & "; systemctl reboot || reboot) >/dev/null 2>&1 &")
 
+proc rebootThroughPrivilegedDoor(delaySeconds: int): bool =
+  ## On a Buildroot frame the runtime is not root and cannot reboot; the root
+  ## worker does it (frameos/privileged.nim, verb `reboot`). Returns false
+  ## when there is no door, so the caller falls back to its own command.
+  if not privilegedDoorAvailable():
+    return false
+  let res = requestPrivileged(pvReboot, %*{"delaySeconds": delaySeconds}, timeoutMs = 15_000)
+  if not res.ok:
+    setupLog("FrameOS reboot: privileged door refused: " & res.error)
+  res.ok
+
 proc scheduleSystemReboot*(delaySeconds = 2) =
   ## Reboot the device shortly after the caller returns. The delay exists so the
   ## caller can finish writing its status file (and, over HTTP, flush a
   ## response) before init tears the process down. Logs through the setup log.
+  if rebootThroughPrivilegedDoor(delaySeconds):
+    return
   discard runSetupCommand(systemRebootCommand(delaySeconds), raiseOnError = false)
 
 proc rebootSystemDetached*(delaySeconds = 2) =
@@ -89,6 +103,8 @@ proc rebootSystemDetached*(delaySeconds = 2) =
   ## and a scheduled `reboot` event — where the caller does its own logging.
   ## Goes through `commandRunner` so tests can intercept it instead of
   ## rebooting the developer's machine.
+  if rebootThroughPrivilegedDoor(delaySeconds):
+    return
   discard commandRunner(systemRebootCommand(delaySeconds))
 
 # --- writing to a read-only root filesystem --------------------------------

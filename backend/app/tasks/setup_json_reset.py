@@ -622,6 +622,14 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     fi
     umask "$old_umask"
     chmod 600 "$pending_file"
+    # frameos.service runs as the `frameos` user on generic images
+    # (docs/buildroot-privileges.md §3); the runtime must be able to read
+    # the claim token it is about to redeem. No-op where the user does not
+    # exist (backend-personalized root images).
+    if grep -q '^frameos:' "$ETC_DIR"/passwd 2>/dev/null; then
+      chown frameos:frameos "$pending_file" 2>/dev/null || chown frameos "$pending_file" 2>/dev/null || true
+      chown frameos:frameos "$pending_dir" 2>/dev/null || true
+    fi
     cloud_enrolled=1
     echo "Wrote cloud enrollment state to $pending_file"
   fi

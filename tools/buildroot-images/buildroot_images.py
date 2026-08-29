@@ -59,6 +59,9 @@ from app.tasks.buildroot_image import (  # noqa: E402
     _gzip_file,
     _sha256,
     stage_buildroot_network_manager_state,
+    BUILDROOT_USERS_TABLE_WORK_PATH,
+    buildroot_frameos_service_user_for_platform,
+    stage_buildroot_privileged_units,
 )
 from app.tasks.buildroot_platforms import (  # noqa: E402
     BuildrootPlatform,
@@ -462,7 +465,17 @@ def write_base_bootstrap_overlay(overlay: Path, platform: BuildrootPlatform | No
     script_path.parent.mkdir(parents=True, exist_ok=True)
     script_path.write_text(render_setup_json_reset_script("/boot/frameos-setup.json"), encoding="utf-8")
     os.chmod(script_path, 0o755)
-    stage_buildroot_frameos_service(overlay, platform is None or platform.uses_network_manager)
+    uses_network_manager = platform is None or platform.uses_network_manager
+    # Base images are generic by definition: frameos.service runs as the
+    # `frameos` user wherever NetworkManager exists (docs/buildroot-privileges.md §3).
+    stage_buildroot_frameos_service(
+        overlay,
+        uses_network_manager,
+        user=buildroot_frameos_service_user_for_platform(platform, generic_image=True)
+        if platform is not None
+        else "frameos",
+    )
+    stage_buildroot_privileged_units(overlay)
     (systemd / SETUP_JSON_RESET_SERVICE_NAME).write_text(
         render_setup_json_reset_service(
             "/boot/frameos-setup.json",
@@ -536,7 +549,9 @@ def build(args: argparse.Namespace) -> None:
         post_image_path = tmp_path / "post-image.sh"
         boot_logo_path = tmp_path / "frameos-boot-logo.png"
         build_script_path = tmp_path / "buildroot-build.sh"
+        users_table_path = tmp_path / Path(BUILDROOT_USERS_TABLE_WORK_PATH).name
         BuildrootImageBuilder._write_buildroot_config(config_path, platform)
+        BuildrootImageBuilder._write_users_table(users_table_path)
         BuildrootImageBuilder._write_kernel_config_fragment(kernel_fragment_path, platform)
         BuildrootImageBuilder._write_post_build_script(post_build_path, platform)
         BuildrootImageBuilder._write_partition_post_build_script(partition_post_build_path)
@@ -555,6 +570,7 @@ def build(args: argparse.Namespace) -> None:
                 post_image_path,
                 boot_logo_path,
                 build_script_path,
+                users_table_path,
             ],
             platform=platform,
             docker_image=BUILDROOT_DOCKER_IMAGE,
@@ -710,22 +726,11 @@ def _safe_extract(tar: tarfile.TarFile, path: Path) -> None:
     tar.extractall(path=path, filter="data")
 
 
-def _remote_binary_path(root: Path) -> Path:
-    remote_binary = root / "frameos_remote"
-    if remote_binary.is_file():
-        return remote_binary
-    return root / "frameos_agent"
-
-
-def _has_remote_binary(root: Path) -> bool:
-    return _remote_binary_path(root).is_file()
-
-
 def _find_precompiled_artifact_root(extract_dir: Path, target: str) -> Path:
     candidates: list[Path] = []
     for metadata_path in extract_dir.rglob("metadata.json"):
         root = metadata_path.parent
-        if not (root / "frameos").is_file() or not _has_remote_binary(root):
+        if not (root / "frameos").is_file():
             continue
         try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -736,7 +741,7 @@ def _find_precompiled_artifact_root(extract_dir: Path, target: str) -> Path:
         candidates.append(root)
 
     legacy = extract_dir / "prebuilt-cross" / target
-    if (legacy / "frameos").is_file() and _has_remote_binary(legacy):
+    if (legacy / "frameos").is_file():
         return legacy
     if len(candidates) == 1:
         return candidates[0]
@@ -745,7 +750,7 @@ def _find_precompiled_artifact_root(extract_dir: Path, target: str) -> Path:
 
 def _precompiled_archive_path(prebuilt_cross_dir: Path, target: str, version: str) -> Path:
     target_dir = prebuilt_cross_dir / target
-    if (target_dir / "frameos").is_file() and _has_remote_binary(target_dir):
+    if (target_dir / "frameos").is_file():
         return target_dir
 
     candidates = sorted(prebuilt_cross_dir.glob(f"frameos-*-{target}.tar.gz"))
@@ -771,6 +776,13 @@ def _copy_release_vendor_folders(artifact_root: Path, release_dir: Path) -> None
 
 
 class ReleaseBuildrootImageBuilder(BuildrootImageBuilder):
+    @property
+    def frameos_service_user(self) -> str:
+        # A generic release image has no backend deploying as root into it,
+        # so the runtime drops to the `frameos` user where the platform
+        # allows (docs/buildroot-privileges.md §3).
+        return buildroot_frameos_service_user_for_platform(self.platform, generic_image=True)
+
     async def _log(self, type: str, line: str) -> None:
         print(f"[{type}] {line}")
 
@@ -846,7 +858,11 @@ async def build_release_image(args: argparse.Namespace) -> None:
             bootstrap_frame=frame,
             setup_payload=get_frame_json(None, frame),
             frameos_build=frameos_build,
-            remote_binary=str(_remote_binary_path(artifact_root)),
+            # FrameOS Remote — the root agent with `shell` and file verbs —
+            # does not ship on generic images at all (docs/buildroot-privileges.md
+            # §2): nothing here talks to it, and a self-hosted backend that
+            # adopts the card installs its own copy with its first deploy.
+            remote_binary=None,
         )
         release_dir = overlay_dir / "srv" / "frameos" / "releases" / f"release_{build_id}"
         _copy_release_vendor_folders(artifact_root, release_dir)
