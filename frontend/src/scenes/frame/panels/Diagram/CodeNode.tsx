@@ -23,9 +23,10 @@ import {
 
 export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.Element {
   const updateNodeInternals = useUpdateNodeInternals()
-  const { frameId, sceneId } = useValues(diagramLogic)
+  const { frameId, sceneId, convertingSceneId } = useValues(diagramLogic)
   const { theme } = useValues(workspaceLogic)
-  const { updateNodeData, updateEdge, copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
+  const { updateNodeData, updateEdge, copyAppJSON, duplicateNode, deleteApp, convertSceneToInterpreted } =
+    useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const { isSelected, node, nodeEdges, codeNodeLanguage, sceneIsCompiled, runtimeNodeError } = useValues(
     appNodeLogic(appNodeLogicProps)
@@ -257,10 +258,21 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
         >
           {codeNodeLanguage === 'nim' ? (
             <div
-              className="text-[10px] leading-tight px-1 py-0.5 rounded bg-amber-200 text-amber-950"
-              title="A Nim code node only runs in a compiled scene (legacy: needs a source build on every deploy). Convert the scene to an interpreted scene at scenes.frameos.net/nim-converter, or rewrite the node here as JavaScript once the scene is interpreted."
+              className="text-[10px] leading-tight px-1 py-0.5 rounded bg-amber-200 text-amber-950 flex items-center gap-1.5"
+              title="A Nim code node only runs in a compiled scene (legacy: a whole-frame recompilation on every deploy). Convert converts the whole scene — this node and every other Nim node and app in it — to an interpreted scene, in place, unsaved."
             >
-              Legacy Nim — convert the scene to interpreted
+              <span className="flex-1 min-w-0 truncate">Legacy Nim code node</span>
+              <button
+                type="button"
+                className="shrink-0 rounded bg-amber-950 px-1.5 py-px font-semibold text-amber-50 hover:bg-amber-800 disabled:opacity-60"
+                disabled={convertingSceneId === sceneId}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  convertSceneToInterpreted(sceneId)
+                }}
+              >
+                {convertingSceneId === sceneId ? 'Converting…' : 'Convert scene'}
+              </button>
             </div>
           ) : sceneIsCompiled ? (
             <div

@@ -36,6 +36,14 @@ from the released binaries, previewable in the browser.
   login; rate limited per address, and the platform's key has a daily budget —
   `429` says when to retry. `GET` on the same URL returns the usage notes.
   The reply is `{ok, scene | scenes, reports, lint, render?, model}`.
+- **In the editor** (self-hosted and cloud): a legacy Nim code node or Nim
+  app shows an amber chip with **Convert scene**; it converts the editor's
+  unsaved copy of the whole scene in place (`frameLogic.convertSceneToInterpreted`,
+  `utils/sceneConvert.ts`) and shows a summary. Cloud mode calls the cloud's
+  own API; a self-hosted backend forwards through
+  `POST /api/frames/{id}/scenes/{sceneId}/convert`, adding the operator's
+  OpenAI key from Settings → OpenAI when set so the model pass is paid for by
+  them rather than the shared budget. Nothing is saved until the user saves.
 - **CLI:** `pnpm --filter @frameos-cloud/scene-convert convert scene.json --out converted.json [--openai-key …] [--dry-run]`
   — the same package offline, on your own key (`OPENAI_API_KEY`), for
   self-hosters and for the fixture suite.

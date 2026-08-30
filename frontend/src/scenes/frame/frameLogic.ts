@@ -41,6 +41,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
+import { describeConversion, requestSceneConversion } from '../../utils/sceneConvert'
 import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import {
   cloudFrameSettingKeys,
@@ -1835,6 +1836,7 @@ export interface frameLogicValues {
   frames: Record<FrameId, FrameType> // framesModel
   latestPublishedRelease: string | null // publishedReleaseModel
   changedScenes: Set<string>
+  convertingSceneId: string | null
   defaultInterval: number
   defaultScene: string
   deployChangeDetails: ChangeDetail[]
@@ -1916,6 +1918,9 @@ export interface frameLogicActions {
   }
   clearNextAction: () => {
     value: true
+  }
+  convertSceneToInterpreted: (sceneId: string) => {
+    sceneId: string
   }
   createBlankScene: (
     name?: string,
@@ -2007,6 +2012,13 @@ export interface frameLogicActions {
   }
   saveFrame: () => {
     value: true
+  }
+  sceneConversionFinished: (
+    sceneId: string,
+    ok: boolean
+  ) => {
+    ok: boolean
+    sceneId: string
   }
   sendEvent: (
     event: string,
@@ -2200,6 +2212,10 @@ export const frameLogic = kea<frameLogicType>([
   })),
   actions({
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
+    // The Nim → interpreted converter, applied to the editor's unsaved copy of
+    // the scene; the result replaces it in the form (utils/sceneConvert.ts).
+    convertSceneToInterpreted: (sceneId: string) => ({ sceneId }),
+    sceneConversionFinished: (sceneId: string, ok: boolean) => ({ sceneId, ok }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
     saveAndDeployFrame: true,
@@ -2319,6 +2335,13 @@ export const frameLogic = kea<frameLogicType>([
     },
   })),
   reducers({
+    convertingSceneId: [
+      null as string | null,
+      {
+        convertSceneToInterpreted: (_, { sceneId }) => sceneId,
+        sceneConversionFinished: () => null,
+      },
+    ],
     nextAction: [
       null as FrameNextAction,
       {
@@ -2481,7 +2504,33 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
   }),
-  listeners(({ asyncActions, actions, values }) => ({
+  listeners(({ asyncActions, actions, values, props }) => ({
+    convertSceneToInterpreted: async ({ sceneId }) => {
+      const scene = values.frameForm.scenes?.find((s) => s.id === sceneId)
+      if (!scene) {
+        actions.sceneConversionFinished(sceneId, false)
+        return
+      }
+      const result = await requestSceneConversion(props.frameId, scene)
+      if (!result.ok || !result.scene) {
+        actions.sceneConversionFinished(sceneId, false)
+        const lines = describeConversion(result.report)
+        window.alert(
+          result.error ?? `The scene could not be converted completely.${lines.length ? `\n\n${lines.join('\n')}` : ''}`
+        )
+        return
+      }
+      // In place and unsaved: the diagram, apps and settings follow the
+      // form, and Save or Deploy is the user's call.
+      actions.updateScene(sceneId, result.scene)
+      actions.sceneConversionFinished(sceneId, true)
+      const lines = describeConversion(result.report)
+      window.alert(
+        `Converted "${scene.name || 'scene'}" to an interpreted scene.${
+          lines.length ? `\n\n${lines.join('\n')}` : ''
+        }\n\nIt is not saved yet — check it, then save or deploy.`
+      )
+    },
     resetUnsavedChanges: () => {
       if (!values.frame) {
         return

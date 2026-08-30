@@ -453,8 +453,15 @@ plan refuses.
 - [x] **CLI** `pnpm --filter @frameos-cloud/scene-convert convert scene.json
   --openai-key … --out converted.json [--dry-run] [--types ai-context.json]`.
   **Still to do:** `--baseline`.
-- [ ] **Backend route** `POST /api/frames/{id}/scenes/{scene_id}/convert`
-  with `{via: "cloud" | "cli", openaiApiKey?}`. `cloud` = `cloud_request()`
+- [x] **Backend route** `POST /api/frames/{id}/scenes/{scene_id}/convert` —
+  shipped (Stage 1 branch) as a stateless forward to the cloud's public
+  converter: body `{scene?}` (the editor's unsaved copy wins), the
+  operator's `openAI.backendApiKey` forwarded when set, the cloud's reply
+  passed through; the editor applies the result in place
+  (`frameLogic.convertSceneToInterpreted`, chips on Nim code nodes and Nim
+  apps). **Still to do:** `via: "cli"`, writing back to `frame.scenes`
+  server-side ("Convert all"), baseline image/state. The original wording:
+  `{via: "cloud" | "cli", openaiApiKey?}`. `cloud` = `cloud_request()`
   with the link token (scope approval dance once), forwarding the frame's
   current image and state as baseline; `cli` = shell out to the package
   through `utils/process` when `node` is on the host (documented,
