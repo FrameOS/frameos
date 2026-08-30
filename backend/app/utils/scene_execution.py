@@ -9,11 +9,16 @@ the key (templates, imports, chat-built scenes, cloud pulls) silently forced
 a source build and, on Home Assistant installs with no Docker socket, a
 failed one.
 
-The migration ``c3d5e7f9a1b2`` stamps existing frames and templates once
-using :func:`normalize_scene_execution`; the ingest paths call the same
+The migration ``c3d5e7f9a1b2`` stamped existing frames and templates once
+using :func:`normalize_scene_execution` (which, at the time, inferred
+``compiled`` for scenes carrying Nim); the ingest paths call the same
 function so scenes from outside the database get a key the moment they
-enter. Readers use :func:`scene_execution`, which never guesses beyond
-"absent = interpreted".
+enter. Since 2026-08-30 nothing infers ``compiled`` any more: an unstamped
+scene is stamped ``interpreted``, and one that still carries Nim the
+interpreter cannot run is flagged by the editor (``sceneRequiresCompilation``)
+and converted, not silently put on the legacy source-build path. Readers
+use :func:`scene_execution`, which never guesses beyond "absent =
+interpreted".
 """
 from __future__ import annotations
 
@@ -94,8 +99,15 @@ def scene_is_interpreted(scene: object) -> bool:
 
 
 def infer_scene_execution(scene: object) -> str:
-    """What an unstamped scene should be stamped with."""
-    return "compiled" if scene_requires_compilation(scene) else DEFAULT_SCENE_EXECUTION
+    """What an unstamped scene should be stamped with: always interpreted.
+
+    Compiled is the legacy path and is only ever chosen explicitly (Scene
+    Settings, or the confirm the editor shows when Nim-only sources are
+    installed). Mirrors ``normalizeSceneExecution`` in
+    frontend/src/utils/sceneExecution.ts.
+    """
+    del scene
+    return DEFAULT_SCENE_EXECUTION
 
 
 def normalize_scene_execution(scene: Any) -> bool:

@@ -51,6 +51,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     isSceneApp,
     isJavaScriptSceneApp,
     isNimAppInInterpretedScene,
+    isLegacyNimApp,
     isDataApp,
     configJsonError,
     output,
@@ -142,9 +143,19 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
               }}
             />
           ) : null}
-          <div className="flex-1">
-            {name}
-            {isSceneApp ? ' (scene)' : isCustomApp ? ' (edited)' : ''}
+          <div className="flex-1 flex items-center gap-2 min-w-0">
+            <span className="truncate">
+              {name}
+              {isSceneApp ? ' (scene)' : isCustomApp ? ' (edited)' : ''}
+            </span>
+            {isLegacyNimApp ? (
+              <span
+                className="text-[10px] leading-tight px-1 py-0.5 rounded bg-amber-200 text-amber-950 whitespace-nowrap"
+                title="This app only has Nim sources, which run only in a compiled scene (legacy: a source build on every deploy). Convert the scene to an interpreted scene at scenes.frameos.net/nim-converter."
+              >
+                Legacy Nim
+              </span>
+            ) : null}
           </div>
           <DropdownMenu
             className="w-fit"

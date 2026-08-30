@@ -201,43 +201,51 @@ export function run(app: FrameOSApp, context: FrameOSContext): void {
 Goal: after this stage no click in the editor creates a compiled scene; a
 compiled scene can still be edited, but new nodes in it are JavaScript.
 
-- [ ] New code nodes seed `codeJS: ''`, not `code` — `newNodePickerLogic.tsx:
+**Shipped 2026-08-30 (branch `convergence-stage-1`, stacked on
+`nim-converter`).** Every box below is ticked; the per-app converter
+button and "Fork App through the converter" wait for the editor hook-up.
+
+- [x] New code nodes seed `codeJS: ''`, not `code` — `newNodePickerLogic.tsx:
   822`, `diagramLogic.tsx:1551`. In a compiled scene that is still correct:
   `code` with a `codeJS` sibling is interpretable, and the compiled codegen
   ignores `codeJS`, so the node simply does nothing until converted — say so
   in the node ("JavaScript code node in a compiled scene: runs after
   conversion").
-- [ ] Code editor language **per node**: `codeNodeLanguage` (`diagramLogic.
-  tsx:1119-1122`) becomes a function of the node — `nim` only when
+- [x] Code editor language **per node**: `codeNodeLanguage` moved from
+  `diagramLogic` to `appNodeLogic` and is a function of the node — `nim` only when
   `data.code` is set and `data.codeJS` is not. `CodeNode.tsx:255-295`: the
   Nim textarea gets a "legacy Nim — convert" chip and loses the
   `Rewrite to Nim:` placeholder (`:291`); the Monaco editor is the default.
-- [ ] `normalizeSceneExecution` (`sceneExecution.ts:37-45`) stops inferring
+- [x] `normalizeSceneExecution` (`sceneExecution.ts`) stops inferring
   `compiled`: an explicit value wins, otherwise `interpreted`. Scenes that
   *require* compilation and have no explicit value keep working because the
   backend twin `infer_scene_execution` (`scene_execution.py:96-98`) still
   stamps them at save — change it in the same PR to stamp `interpreted` and
   rely on the Stage 2 banner instead. (The migration already stamped every
   existing row explicitly, so this only affects pasted/imported JSON.)
-- [ ] The two silent flips to `compiled` become explicit: `editAppLogic.tsx:
-  434-437` (`requiresCompiledOnSave`) and `sceneApps.ts:274-296`
-  (`forceCompiled`). Keep the behaviour, add a confirm ("This makes the scene
+- [x] The two silent flips to `compiled` become explicit
+  (`confirmSceneBecomesCompiled` in `sceneExecution.ts`, called from
+  `editAppLogic` and the three `forceCompiled` call sites; the message names
+  the converter page): `editAppLogic.tsx` (`requiresCompiledOnSave`) and
+  `sceneApps.ts` (`forceCompiled`). Keep the behaviour, add a confirm ("This makes the scene
   compiled — it will need a source build on every deploy. Convert it to
   JavaScript instead?") with the converter as the primary button once
   Stage 3 exists; until then the confirm alone.
-- [ ] "Fork App" on a Nim-only scene app (`AppNode.tsx:165-173`) forks
-  through the converter once it exists (Stage 3c); until then it stays but
-  the forked copy gets the same legacy chip as the original.
-- [ ] `legacy_app_migration.py`: `legacy/resize` and `legacy/rotate` stop
-  inlining Nim. Map them onto `render/image` scaling modes where the built-in
+- [x] "Fork App" on a Nim-only scene app (`AppNode.tsx`) stays; the
+  "Legacy Nim" chip (`isLegacyNimApp`) is on the original and the fork alike.
+  Forking *through* the converter waits for the editor hook-up (Stage 3c).
+- [x] `legacy_app_migration.py`: `legacy/resize` and `legacy/rotate` stop
+  inlining Nim — the node keeps keyword and config and gets
+  `data.needsConversion` (neither maps onto `render/image`: both replace the
+  canvas mid-chain). Map them onto `render/image` scaling modes where the built-in
   covers it; where it does not, emit a `code`-less node with a
   `data.needsConversion` note that the converter (Stage 3) picks up. No new
   compiled scene may be *manufactured* by a migration.
-- [ ] Scene Settings (`SceneSettings.tsx:79-145`): one Select, inside
+- [x] Scene Settings (`SceneSettings.tsx`): one Select, inside
   `AdvancedSection` always; the `compiled` option reads "Compiled (legacy —
   needs a source build on every deploy)". The inline copy at `:79-111` and
   the tooltip "Choose between compiled and interpreted execution modes" go.
-- [ ] `frameos/src/apps/README` (create) and `docs/js-apps-and-code-nodes.md`:
+- [x] `frameos/src/apps/README.md` (created) and `docs/js-apps-and-code-nodes.md`:
   one paragraph each — Nim apps are the built-in catalog, not a thing users
   write; JavaScript is the loadable format. Fix the "apps do not see scene
   state" sentence (they do: `app.state`, `frameos.setState`).

@@ -55,7 +55,11 @@ import {
   sceneAppWithOrigin,
   updateSceneAppsInScenes,
 } from '../../../../utils/sceneApps'
-import { sceneExecutionForFrame, sceneIsCompiledForFrame } from '../../../../utils/sceneExecution'
+import {
+  sceneExecutionForFrame,
+  sceneIsCompiledForFrame,
+  confirmSceneBecomesCompiled,
+} from '../../../../utils/sceneExecution'
 import { frameEventForScene } from '../../../../utils/frameEvents'
 import { logsLogic } from '../Logs/logsLogic'
 import { runtimeNodeErrorsByNodeId } from '../../../../utils/frameRuntimeErrors'
@@ -633,7 +637,6 @@ export interface diagramLogicValues {
   logs: LogType[] // logsLogic
   canRedo: boolean
   canUndo: boolean
-  codeNodeLanguage: CodeNodeLanguage
   cursorPosition: XYPosition | null
   edges: DiagramEdge[]
   edgesForNode: Record<string, DiagramEdge[]>
@@ -828,7 +831,6 @@ export interface diagramLogicMeta {
     nodesWithStyle: (nodes: DiagramNode[]) => DiagramNode[]
     nodeTreeItems: (nodes: DiagramNode[], edges: DiagramEdge[]) => DiagramNodeTreeItem[]
     sceneOptions: (editingFrame: Partial<FrameType>) => Option[]
-    codeNodeLanguage: (scene: FrameScene | null, editingFrame: Partial<FrameType>) => CodeNodeLanguage
     runtimeNodeErrorsByNodeId: (
       logs: LogType[],
       editingFrame: Partial<FrameType>,
@@ -1114,11 +1116,6 @@ export const diagramLogic = kea<diagramLogicType>([
         ...(frame.scenes ?? []).map((s) => ({ label: s.name || 'Unnamed Scene', value: s.id || '' })),
       ],
       { resultEqualityCheck: equal },
-    ],
-    codeNodeLanguage: [
-      (s) => [s.scene, s.editingFrame],
-      (scene: FrameScene | null, editingFrame: diagramLogicValues['editingFrame']): CodeNodeLanguage =>
-        sceneExecutionForFrame(scene, editingFrame?.mode) === 'interpreted' ? 'js' : 'nim',
     ],
     runtimeNodeErrorsByNodeId: [
       (s) => [s.logs, s.editingFrame, s.sceneId],
@@ -1508,7 +1505,7 @@ export const diagramLogic = kea<diagramLogicType>([
         const installed = await installSceneAppForKeyword(values.sceneApps, keyword, app)
         const sceneApps = installed.sceneApps
         if (sceneApps !== values.sceneApps) {
-          actions.setSceneApps(sceneApps, true)
+          actions.setSceneApps(sceneApps, confirmSceneBecomesCompiled(values.scene, sceneApps))
           app = installed.app ?? app
         }
         const newNode: DiagramNode = {
@@ -1548,7 +1545,7 @@ export const diagramLogic = kea<diagramLogicType>([
           type: type,
           position,
           style: { width: 300, height: 119 },
-          data: { code: keyword, codeArgs: [], codeOutputs: [] } satisfies CodeNodeData,
+          data: { codeJS: keyword, codeArgs: [], codeOutputs: [] } satisfies CodeNodeData,
         }
         actions.setNodes([...values.nodes, newNode])
       }
@@ -1642,7 +1639,12 @@ export const diagramLogic = kea<diagramLogicType>([
         cache.ignoreHistory = true
         if (!equal(nextSceneApps, values.sceneApps)) {
           actions.setFrameFormValues({
-            scenes: updateSceneAppsInScenes(values.editingFrame.scenes, props.sceneId, nextSceneApps, true),
+            scenes: updateSceneAppsInScenes(
+              values.editingFrame.scenes,
+              props.sceneId,
+              nextSceneApps,
+              confirmSceneBecomesCompiled(values.scene, nextSceneApps)
+            ),
           })
         }
         actions.setNodes(nextNodes)

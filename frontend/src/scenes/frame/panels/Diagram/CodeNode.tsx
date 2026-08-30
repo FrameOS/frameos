@@ -27,7 +27,9 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
   const { theme } = useValues(workspaceLogic)
   const { updateNodeData, updateEdge, copyAppJSON, duplicateNode, deleteApp } = useActions(diagramLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { isSelected, node, nodeEdges, codeNodeLanguage, runtimeNodeError } = useValues(appNodeLogic(appNodeLogicProps))
+  const { isSelected, node, nodeEdges, codeNodeLanguage, sceneIsCompiled, runtimeNodeError } = useValues(
+    appNodeLogic(appNodeLogicProps)
+  )
   const data: CodeNodeData = (node?.data as CodeNodeData) ?? ({ code: '' } satisfies CodeNodeData)
   const { select, editCodeField } = useActions(appNodeLogic(appNodeLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
@@ -246,49 +248,66 @@ export function CodeNode({ id, isConnectable }: NodeProps<CodeNodeData>): JSX.El
           />
         </div>
         <div
-          className="p-1 flex-1 min-h-0 min-w-0 nodrag nopan"
+          className="p-1 flex-1 min-h-0 min-w-0 nodrag nopan flex flex-col gap-1"
           data-editable="true"
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
           onCopy={(e) => e.stopPropagation()}
           onPaste={(e) => e.stopPropagation()}
         >
+          {codeNodeLanguage === 'nim' ? (
+            <div
+              className="text-[10px] leading-tight px-1 py-0.5 rounded bg-amber-200 text-amber-950"
+              title="A Nim code node only runs in a compiled scene (legacy: needs a source build on every deploy). Convert the scene to an interpreted scene at scenes.frameos.net/nim-converter, or rewrite the node here as JavaScript once the scene is interpreted."
+            >
+              Legacy Nim — convert the scene to interpreted
+            </div>
+          ) : sceneIsCompiled ? (
+            <div
+              className="text-[10px] leading-tight px-1 py-0.5 rounded bg-sky-200 text-sky-950"
+              title="This scene is compiled, and the compiled build ignores JavaScript code nodes. The node runs once the scene is converted to interpreted."
+            >
+              JavaScript code node in a compiled scene: runs after conversion
+            </div>
+          ) : null}
           {codeNodeLanguage === 'js' ? (
-            <Editor
-              height="100%"
-              language="typescript"
-              path={`inmemory://code-node/${id}.tsx`}
-              value={data.codeJS ?? ''}
-              theme={theme === 'dark' ? 'darkframe-node' : 'lightframe-node'}
-              beforeMount={beforeMount}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 12,
-                lineNumbers: 'off',
-                lineDecorationsWidth: 0,
-                glyphMargin: false,
-                folding: false,
-                renderLineHighlight: 'none',
-                overviewRulerLanes: 0,
-                hideCursorInOverviewRuler: true,
-                scrollbar: {
-                  verticalScrollbarSize: 6,
-                  horizontalScrollbarSize: 6,
-                  alwaysConsumeMouseWheel: false,
-                  handleMouseWheel: false,
-                },
-                scrollBeyondLastLine: false,
-                wordWrap: 'on',
-                automaticLayout: true,
-              }}
-              onMount={(editor, monaco) => handleEditorMount(editor, monaco)}
-              onChange={(value) => updateNodeData(id, { codeJS: value ?? '' })}
-            />
+            <div className="flex-1 min-h-0 min-w-0">
+              <Editor
+                height="100%"
+                language="typescript"
+                path={`inmemory://code-node/${id}.tsx`}
+                value={data.codeJS ?? ''}
+                theme={theme === 'dark' ? 'darkframe-node' : 'lightframe-node'}
+                beforeMount={beforeMount}
+                options={{
+                  minimap: { enabled: false },
+                  fontSize: 12,
+                  lineNumbers: 'off',
+                  lineDecorationsWidth: 0,
+                  glyphMargin: false,
+                  folding: false,
+                  renderLineHighlight: 'none',
+                  overviewRulerLanes: 0,
+                  hideCursorInOverviewRuler: true,
+                  scrollbar: {
+                    verticalScrollbarSize: 6,
+                    horizontalScrollbarSize: 6,
+                    alwaysConsumeMouseWheel: false,
+                    handleMouseWheel: false,
+                  },
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  automaticLayout: true,
+                }}
+                onMount={(editor, monaco) => handleEditorMount(editor, monaco)}
+                onChange={(value) => updateNodeData(id, { codeJS: value ?? '' })}
+              />
+            </div>
           ) : (
             <TextArea
               theme="node"
-              className="w-full h-full font-mono resize-none"
-              placeholder={data.codeJS ? 'Rewrite to Nim: ' + data.codeJS : `e.g: state{"magic3"}.getStr()`}
+              className="w-full flex-1 min-h-0 font-mono resize-none"
+              placeholder={`e.g: state{"magic3"}.getStr()`}
               value={data.code ?? ''}
               rows={2}
               onChange={(value) => updateNodeData(id, { code: value.replaceAll('\n', '') })}

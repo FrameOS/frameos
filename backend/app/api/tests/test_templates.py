@@ -40,7 +40,8 @@ async def test_create_template_stamps_scene_execution(async_client, db):
     response = await async_client.post("/api/templates", json=payload)
     assert response.status_code == 201
     template = db.get(Template, response.json()["id"])
-    assert [scene["settings"]["execution"] for scene in template.scenes] == ["interpreted", "compiled", "interpreted"]
+    # Absent means interpreted, Nim or not; an explicit value is kept.
+    assert [scene["settings"]["execution"] for scene in template.scenes] == ["interpreted", "interpreted", "interpreted"]
 
 
 @pytest.mark.asyncio
