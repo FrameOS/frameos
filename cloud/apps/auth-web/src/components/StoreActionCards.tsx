@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRightLeft, Sparkles, Upload } from "lucide-react";
+import { Sparkles, Upload } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { CreateSceneWithAiBox } from "./CreateSceneWithAiBox";
 import { SceneZipUpload } from "./SceneZipUpload";
@@ -12,15 +12,12 @@ type ActionKey = "ai" | "zip";
 // overlay, a soft glow, the icon ghosted large in the corner and again as
 // a small badge. Pressing a card opens its form right below the row;
 // pressing it again folds it away. The store front only offers the AI
-// card (the ZIP upload and the Nim converter link live on "My scenes").
+// card (the ZIP upload lives on "My scenes").
 export function StoreActionCards({
   aiAction,
-  convertUrl,
   showUpload,
 }: {
   aiAction: string;
-  /** The Nim → JavaScript converter page; drawn as a link card when given. */
-  convertUrl?: string;
   showUpload: boolean;
 }) {
   const [open, setOpen] = useState<ActionKey | null>(null);
@@ -48,29 +45,6 @@ export function StoreActionCards({
             tint="teal"
             title="Upload a scene ZIP"
           />
-        ) : null}
-        {convertUrl ? (
-          <a
-            className="action-card action-card--teal"
-            data-testid="action-card-convert"
-            href={convertUrl}
-          >
-            <span aria-hidden className="action-card__grain" />
-            <span aria-hidden className="action-card__glow" />
-            <span aria-hidden className="action-card__ghost">
-              <ArrowRightLeft aria-hidden />
-            </span>
-            <span className="action-card__badge">
-              <ArrowRightLeft aria-hidden />
-            </span>
-            <span className="action-card__text">
-              <span className="action-card__title">Convert a compiled scene</span>
-              <span className="action-card__description">
-                Turn a legacy compiled scene — Nim code nodes, Nim apps — into an
-                interpreted scene that runs without a source build.
-              </span>
-            </span>
-          </a>
         ) : null}
       </div>
       {open === "ai" ? (

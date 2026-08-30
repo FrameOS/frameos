@@ -1321,6 +1321,39 @@ a.tag-pill--active:hover {
   margin-top: 0;
 }
 
+/* The "…" at the right end of the store tabs (StoreTabsMenu). */
+.subnav__menu {
+  margin-left: auto;
+  align-self: center;
+}
+
+.row-menu__panel--wide {
+  min-width: 280px;
+  max-width: 340px;
+}
+
+.row-menu__item--link {
+  text-decoration: none;
+  align-items: flex-start;
+}
+
+.row-menu__item--link:hover {
+  text-decoration: none;
+}
+
+.row-menu__label {
+  display: block;
+  font-weight: 600;
+}
+
+.row-menu__hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .subnav__link {
   border-radius: 999px;
   padding: 6px 14px;
