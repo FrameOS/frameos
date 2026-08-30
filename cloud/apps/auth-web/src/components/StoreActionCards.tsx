@@ -64,10 +64,10 @@ export function StoreActionCards({
               <ArrowRightLeft aria-hidden />
             </span>
             <span className="action-card__text">
-              <span className="action-card__title">Convert a Nim scene</span>
+              <span className="action-card__title">Convert a compiled scene</span>
               <span className="action-card__description">
-                Turn a legacy compiled scene — Nim code nodes, Nim apps — into a
-                JavaScript scene that runs without a source build.
+                Turn a legacy compiled scene — Nim code nodes, Nim apps — into an
+                interpreted scene that runs without a source build.
               </span>
             </span>
           </a>

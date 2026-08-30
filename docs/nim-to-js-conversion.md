@@ -22,9 +22,13 @@ from the released binaries, previewable in the browser.
 ## Where to run it
 
 - **Page:** https://scenes.frameos.net/nim-converter — drop a `scene.json` (one
-  scene, a `scenes.json` array, or an export with `{"scenes": [...]}`), get the
-  JavaScript version back as a download; signed in, also "Save to my scenes".
-  No account needed for the conversion itself.
+  scene, a `scenes.json` array, or an export with `{"scenes": [...]}`), then
+  **Open in the editor** — the result opens unsaved in the scene editor
+  (`/my-scenes/new?from=converter`, handed over through this tab's
+  sessionStorage), where it can be previewed, tweaked, installed on a frame,
+  saved or downloaded — or download the JSON directly. No account needed for
+  the conversion itself; saving asks for one. The UI says "convert to an
+  interpreted scene": JavaScript is the how, interpreted is the what.
 - **API:** `POST https://scenes.frameos.net/api/scenes/convert` with the same
   JSON body shapes (`{"scene": {...}}` or `{"scenes": [...]}`), optional
   `"dryRun": true` (deterministic pass only), optional `"openaiApiKey"` to

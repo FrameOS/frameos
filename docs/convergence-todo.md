@@ -438,8 +438,9 @@ plan refuses.
 - [ ] **MCP tool** `scene_convert` in `packages/mcp` (same body).
 - [x] **On scenes.frameos.net**: shipped as `app/nim-converter/page.tsx`
   (public, not under `my-scenes`): drop or paste JSON, one button, the
-  report, a download, "Save to my scenes" when signed in. **Still to do:**
-  zip input, opening the result in the editor.
+  report, "Open in the editor" (the result, unsaved, in `/my-scenes/new`
+  via a sessionStorage hand-off), a download, "Save to my scenes" when
+  signed in. **Still to do:** zip input.
 - [x] **CLI** `pnpm --filter @frameos-cloud/scene-convert convert scene.json
   --openai-key … --out converted.json [--dry-run] [--types ai-context.json]`.
   **Still to do:** `--baseline`.

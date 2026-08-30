@@ -5,10 +5,21 @@ import { NimConverter } from "./NimConverter";
 
 afterEach(cleanup);
 
-// jsdom has no Blob URLs; the download link only needs a string.
+// jsdom has no Blob URLs; the download link only needs a string. Its
+// sessionStorage is absent on this origin too, so a Map stands in.
+const storage = new Map<string, string>();
 beforeEach(() => {
   URL.createObjectURL = vi.fn(() => "blob:converted");
   URL.revokeObjectURL = vi.fn();
+  storage.clear();
+  Object.defineProperty(window, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      removeItem: (key: string) => void storage.delete(key),
+      setItem: (key: string, value: string) => void storage.set(key, value),
+    },
+  });
 });
 
 const scene = { id: "s1", name: "Heater", nodes: [], edges: [], settings: { execution: "compiled" } };
@@ -54,7 +65,7 @@ describe("NimConverter", () => {
     render(<NimConverter {...props()} />);
     fireEvent.click(screen.getByText("Paste JSON instead"));
     fireEvent.change(screen.getByLabelText("Scene JSON"), { target: { value: JSON.stringify(scene) } });
-    fireEvent.click(screen.getByText("Convert to JavaScript"));
+    fireEvent.click(screen.getByText("Convert to an interpreted scene"));
 
     await waitFor(() => expect(screen.getByTestId("nim-converter-result")).toBeTruthy());
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -66,6 +77,11 @@ describe("NimConverter", () => {
     expect(download?.getAttribute("href")).toBe("blob:converted");
     expect(download?.getAttribute("download")).toBe("Heater.js.json");
     expect(screen.getByText(/1 model call \(fake-model, on us\)/)).toBeTruthy();
+    // "Open in the editor" hands the result to /my-scenes/new through sessionStorage.
+    const open = screen.getByText("Open in the editor").closest("a")!;
+    expect(open.getAttribute("href")).toBe("https://scenes.example/my-scenes/new?from=converter");
+    fireEvent.click(open);
+    expect(JSON.parse(storage.get("frameos:converted-scenes")!)).toEqual([{ ...scene, settings: { execution: "interpreted" } }]);
     // Signed out: no save, a sign-in link instead.
     expect(screen.getByText("Sign in to save it to my scenes").closest("a")?.getAttribute("href")).toBe("https://cloud.example/login");
   });
@@ -79,7 +95,7 @@ describe("NimConverter", () => {
     fireEvent.click(screen.getByText("Paste JSON instead"));
     fireEvent.change(screen.getByLabelText("Scene JSON"), { target: { value: JSON.stringify(scene) } });
     fireEvent.change(screen.getByLabelText("OpenAI API key"), { target: { value: "sk-mine-0123456789abcdef" } });
-    fireEvent.click(screen.getByText("Convert to JavaScript"));
+    fireEvent.click(screen.getByText("Convert to an interpreted scene"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({ openaiApiKey: "sk-mine-0123456789abcdef", scene });
   });
@@ -89,11 +105,11 @@ describe("NimConverter", () => {
     render(<NimConverter {...props()} />);
     fireEvent.click(screen.getByText("Paste JSON instead"));
     fireEvent.change(screen.getByLabelText("Scene JSON"), { target: { value: "not json" } });
-    fireEvent.click(screen.getByText("Convert to JavaScript"));
+    fireEvent.click(screen.getByText("Convert to an interpreted scene"));
     expect((await screen.findByRole("alert")).textContent).toContain("not valid JSON");
 
     fireEvent.change(screen.getByLabelText("Scene JSON"), { target: { value: JSON.stringify(scene) } });
-    fireEvent.click(screen.getByText("Convert to JavaScript"));
+    fireEvent.click(screen.getByText("Convert to an interpreted scene"));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("out of budget"));
   });
 
@@ -109,7 +125,7 @@ describe("NimConverter", () => {
     render(<NimConverter {...props({ signedIn: true })} />);
     fireEvent.click(screen.getByText("Paste JSON instead"));
     fireEvent.change(screen.getByLabelText("Scene JSON"), { target: { value: JSON.stringify([scene]) } });
-    fireEvent.click(screen.getByText("Convert to JavaScript"));
+    fireEvent.click(screen.getByText("Convert to an interpreted scene"));
     await waitFor(() => expect(screen.getByText("Save to my scenes")).toBeTruthy());
     fireEvent.click(screen.getByText("Save to my scenes"));
     await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Saved as a private scene"));
@@ -135,7 +151,7 @@ describe("NimConverter", () => {
     render(<NimConverter {...props({ sharedModelPass: false })} />);
     fireEvent.click(screen.getByText("Paste JSON instead"));
     fireEvent.change(screen.getByLabelText("Scene JSON"), { target: { value: JSON.stringify(scene) } });
-    fireEvent.click(screen.getByText("Convert to JavaScript"));
+    fireEvent.click(screen.getByText("Convert to an interpreted scene"));
     expect(await screen.findByText("Partly converted — the rest needs the AI pass.")).toBeTruthy();
     expect(screen.getByText(/No AI pass ran/)).toBeTruthy();
   });

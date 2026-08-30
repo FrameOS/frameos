@@ -9,7 +9,7 @@ import { readSession } from "../../src/lib/session";
 import { accountIsSuperadmin } from "../../src/lib/superadmin";
 import { sharedConverterKey } from "../api/scenes/convert/route";
 
-export const metadata = { title: "Nim → JavaScript scene converter" };
+export const metadata = { title: "Convert a compiled scene" };
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +27,7 @@ export default async function NimConverterPage() {
       isSuperadmin={isSuperadmin}
       noCapture
       signedIn={Boolean(session)}
-      title="Nim → JavaScript scene converter"
+      title="Convert a compiled scene"
     >
       <NimConverter
         loginUrl={loginUrl.toString()}

@@ -3,6 +3,7 @@
 import { Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { applyAiScenes, blankScene, prepareForEditor, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
+import { takeHandoffScenes } from "../lib/scene-handoff";
 import { singlePanelFor, type SceneEditorPanelName, type SceneEditorPanels } from "../lib/scene-views";
 import {
   readDocumentTheme,
@@ -35,6 +36,9 @@ type NewSceneWithAiProps = {
   loginUrl?: string | undefined;
   /** Where "Back" goes. */
   myScenesUrl: string;
+  /** sessionStorage key holding scenes to open instead of a blank one (the
+   *  converter's "Open in the editor"); read once on mount, then removed. */
+  handoffKey?: string | undefined;
 };
 
 // Headless automation hook (src/lib/ai/eval/realign.ts drives it through
@@ -72,7 +76,7 @@ const createErrors: Record<string, string> = {
 // A full-page editor for a brand-new scene, AI panel open: start from one
 // blank scene, describe what you want, then "Save to my scenes" creates it
 // as a private scene and jumps to its page.
-export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesUrl }: NewSceneWithAiProps) {
+export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesUrl, handoffKey }: NewSceneWithAiProps) {
   // Scenes are minted on the client (crypto ids) after mount, so the server
   // render and the hydration pass agree.
   const [scenes, setScenes] = useState<SceneJson[] | null>(null);
@@ -137,7 +141,22 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
 
   useEffect(() => {
     setTheme(readDocumentTheme());
-    const initial = [blankScene()];
+    // Handed-off scenes (the converter's "Open in the editor") open as they
+    // are, unsaved, with the preview beside the editor instead of the AI
+    // panel: the user came to look at a result, not to describe a new one.
+    const handedOff = handoffKey ? takeHandoffScenes(handoffKey) : null;
+    const initial = handedOff
+      ? handedOff.map((scene) =>
+          prepareForEditor({
+            ...scene,
+            id: typeof scene.id === "string" && scene.id ? scene.id : crypto.randomUUID(),
+          }),
+        )
+      : [blankScene()];
+    if (handedOff) {
+      setPanels({ ai: false, editor: true, info: false, preview: true });
+      setTouched(true);
+    }
     latestScenesRef.current = initial;
     setPreviewScenes(initial);
     setScenes(initial);

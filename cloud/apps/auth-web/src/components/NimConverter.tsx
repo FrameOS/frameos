@@ -1,8 +1,9 @@
 "use client";
 
 import { describeReport, type ConversionReport } from "@frameos-cloud/scene-convert";
-import { ArrowRightLeft, Download, Save, Upload } from "lucide-react";
+import { ArrowRightLeft, Download, PencilRuler, Save, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { convertedScenesHandoffKey, storeHandoffScenes } from "../lib/scene-handoff";
 
 // env.ts's myScenesPath, repeated here so this client component does not pull
 // the server-side env module into the browser bundle.
@@ -70,6 +71,12 @@ export function NimConverter({
   const [saved, setSaved] = useState<{ name: string; url: string } | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // The terminal example names this origin; read after mount so the server
+  // render and the hydration pass agree.
+  const [origin, setOrigin] = useState("");
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   const converted = useMemo(() => {
     if (!reply) {
@@ -178,16 +185,19 @@ export function NimConverter({
     }
   }
 
+  const convertedScenes = reply ? (reply.scene !== undefined ? [reply.scene] : (reply.scenes ?? [])) : [];
+  const editorUrl = `${myScenesUrl.replace(/\/$/, "")}/new?from=converter`;
   const needsModel = reply ? reply.reports.reduce((n, report) => n + report.needsModel.length, 0) : 0;
   const needsManualPort = reply ? reply.reports.reduce((n, report) => n + report.needsManualPort.length, 0) : 0;
 
   return (
     <div className="nim-converter stack-lg">
       <p className="section-description">
-        A scene with <code>execution: compiled</code> — Nim code nodes, a scene-local Nim app — needs a source build
-        on every deploy. Drop its JSON here and get the same scene in JavaScript, which runs on the released
-        binaries and previews in the browser. The Nim stays in the file next to the JavaScript, so switching the
-        scene back to compiled undoes it. Nothing is stored.
+        A scene with <code>execution: compiled</code> — Nim code nodes, a scene-local Nim app — needs a FrameOS
+        source build on every deploy. Drop its JSON here and get the same scene as an <strong>interpreted scene</strong>
+        (its Nim ported to JavaScript), which runs on the released binaries and previews in the browser. The Nim
+        stays in the file next to the JavaScript, so switching the scene back to compiled undoes it. Nothing is
+        stored.
         {sharedModelPass ? " The AI pass is on us, within a daily budget." : " Bring an OpenAI key for the AI pass; without one only the deterministic pass runs."}
       </p>
 
@@ -271,7 +281,7 @@ export function NimConverter({
       <div className="button-row">
         <button className="button button-primary" disabled={busy || !text.trim()} onClick={() => void convert()} type="button">
           <ArrowRightLeft aria-hidden size={16} />
-          {busy ? "Converting…" : "Convert to JavaScript"}
+          {busy ? "Converting…" : "Convert to an interpreted scene"}
         </button>
         {busy ? <span className="nim-converter__busy">The AI pass can take a minute per app.</span> : null}
       </div>
@@ -292,6 +302,7 @@ export function NimConverter({
                 : "Partly converted — some parts need a manual port."}
           </h3>
           <p className="section-description">
+            Open it in the editor to preview, tweak, install on a frame or save it — or download the JSON.{" "}
             {reply.model.calls > 0
               ? `${reply.model.calls} model call${reply.model.calls === 1 ? "" : "s"} (${reply.model.name ?? "model"}, ${reply.model.source === "shared" ? "on us" : reply.model.source === "request" ? "your key" : "your account's key"}). `
               : needsModel > 0
@@ -308,8 +319,23 @@ export function NimConverter({
             {needsManualPort > 0 ? ` ${needsManualPort} item${needsManualPort === 1 ? "" : "s"} carry a needsConversion note in the JSON.` : null}
           </p>
           <div className="button-row">
+            <a
+              className="button button-primary"
+              href={editorUrl}
+              onClick={(event) => {
+                // Hand the unsaved result to the editor page in this tab;
+                // nothing goes to a server until "Save" there.
+                if (!storeHandoffScenes(convertedScenesHandoffKey, convertedScenes)) {
+                  event.preventDefault();
+                  setError("Could not hand the scene to the editor (browser storage is unavailable) — download it instead.");
+                }
+              }}
+            >
+              <PencilRuler aria-hidden size={16} />
+              Open in the editor
+            </a>
             {downloadUrl ? (
-              <a className="button button-primary" download={downloadName} href={downloadUrl}>
+              <a className="button" download={downloadName} href={downloadUrl}>
                 <Download aria-hidden size={16} />
                 Download {downloadName}
               </a>
@@ -381,7 +407,7 @@ export function NimConverter({
 
       <details className="nim-converter__api">
         <summary>The same thing from a terminal</summary>
-        <pre className="code-block">{`curl -sS -X POST ${typeof window === "undefined" ? "" : window.location.origin}/api/scenes/convert \\
+        <pre className="code-block">{`curl -sS -X POST ${origin}/api/scenes/convert \\
   -H 'content-type: application/json' \\
   --data-binary @scene.json > scene.js.json
 

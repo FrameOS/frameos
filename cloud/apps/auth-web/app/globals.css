@@ -3996,6 +3996,14 @@ html.theme-dark .action-card__ghost {
   cursor: pointer;
 }
 
+.nim-converter__key summary {
+  font-weight: 600;
+}
+
+.nim-converter__key > .section-description {
+  margin: 10px 0;
+}
+
 .nim-converter__key .input {
   max-width: 420px;
 }

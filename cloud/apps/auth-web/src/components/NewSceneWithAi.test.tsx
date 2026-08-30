@@ -60,6 +60,29 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("NewSceneWithAi hand-off", () => {
+  it("opens handed-off scenes as they are, unsaved, preview beside the editor", async () => {
+    const storage = new Map<string, string>([
+      ["frameos:converted-scenes", JSON.stringify([{ id: "s1", name: "Heater", nodes: [], edges: [], settings: { execution: "interpreted" } }])],
+    ]);
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        removeItem: (key: string) => void storage.delete(key),
+        setItem: (key: string, value: string) => void storage.set(key, value),
+      },
+    });
+    render(<NewSceneWithAi handoffKey="frameos:converted-scenes" myScenesUrl="/scenes" />);
+    await waitFor(() => expect(screen.getByTestId("editor")).toBeTruthy());
+    expect(screen.getByText("Heater")).toBeTruthy();
+    expect(screen.getByText("Not saved yet")).toBeTruthy();
+    // Read once: a reload starts blank rather than re-opening a stale copy.
+    expect(storage.has("frameos:converted-scenes")).toBe(false);
+    expect(screen.queryByTestId("ai-panel")).toBeNull();
+  });
+});
+
 describe("NewSceneWithAi scene name", () => {
   it("names the new scene from the bar, and Save to my scenes sends that name", async () => {
     render(<NewSceneWithAi myScenesUrl="/scenes" />);
