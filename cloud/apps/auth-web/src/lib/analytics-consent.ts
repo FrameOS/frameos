@@ -13,6 +13,15 @@
 
 export type ConsentChoice = "denied" | "granted";
 
+// Whether this deployment has analytics at all. The key is optional —
+// .env.example ships it blank and self-hosted installs run without it — and
+// posthog-js refuses an empty token anyway (it logs a console error and never
+// initializes). So a blank key must switch off everything consent-related:
+// no SDK init, no banner, no "Cookie settings" footer entry.
+export function analyticsConfigured(): boolean {
+  return Boolean(process.env.NEXT_PUBLIC_POSTHOG_KEY?.trim());
+}
+
 export const consentCookieName = "frameos_analytics_consent";
 
 // One year. Long enough not to nag, short enough that consent is refreshed

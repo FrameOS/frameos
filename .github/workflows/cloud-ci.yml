@@ -74,6 +74,21 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# NEXT_PUBLIC_* values are inlined into the browser bundle when `next build`
+# runs — which is here, on the runner, not on the server. The key in
+# /etc/frameos-cloud/auth-web.env only reaches the server-side uses
+# (error-tracking.ts, signup-notifications.ts); without this, the deployed
+# bundle calls posthog.init("") and analytics is silently off. A repository
+# variable, not a secret: the token is public by design (it ships in the
+# served JS). Workflow-level so verify builds with the same value and the
+# deploy job's turbo cache replay stays warm — turbo.json declares the
+# variable as an env input of @frameos-cloud/auth-web#build, so a keyed
+# build can never replay a keyless cache. NEXT_PUBLIC_POSTHOG_HOST is not
+# set here: the code defaults to https://eu.i.posthog.com; add it the same
+# way if that ever changes.
+env:
+  NEXT_PUBLIC_POSTHOG_KEY: ${{ vars.NEXT_PUBLIC_POSTHOG_KEY }}
+
 jobs:
   verify:
     # A failed release publishes nothing to deploy, so do not spend a full

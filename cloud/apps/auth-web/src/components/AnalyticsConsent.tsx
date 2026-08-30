@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  analyticsConfigured,
   clearConsentInDocument,
   consentChangeEvent,
   readConsentFromDocument,
@@ -35,7 +36,9 @@ export function AnalyticsConsentBanner({
     return () => window.removeEventListener(consentChangeEvent, onChange);
   }, []);
 
-  if (!ready || choice) {
+  // No analytics on this deployment means there is nothing to consent to —
+  // asking anyway would be a cookie banner for cookies that cannot exist.
+  if (!ready || choice || !analyticsConfigured()) {
     return null;
   }
 
@@ -93,6 +96,9 @@ export function CookieSettingsButton({
 }: {
   cookieDomain?: string | undefined;
 }) {
+  if (!analyticsConfigured()) {
+    return null;
+  }
   return (
     <button
       className="footer-link-button"

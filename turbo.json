@@ -73,6 +73,7 @@
     },
     "@frameos-cloud/auth-web#build": {
       "dependsOn": ["^build"],
+      "env": ["NEXT_PUBLIC_POSTHOG_KEY", "NEXT_PUBLIC_POSTHOG_HOST"],
       "outputs": [
         ".next/**",
         "!.next/cache/**",
