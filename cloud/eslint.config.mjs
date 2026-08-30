@@ -28,6 +28,9 @@ export default tseslint.config(
       "**/src/test/shared-spa/embedded-web-flasher.test.tsx",
       // Same exclusion, same reason: mounts EmbeddedReleaseFlasher.
       "**/src/test/shared-spa/embedded-release-flasher.test.tsx",
+      // Same exclusion, same reason: builds every logic the embedded editor
+      // mounts; workspaceLogic reaches the legacy workspace components.
+      "**/src/test/shared-spa/embedded-editor-logics.test.ts",
       // Same exclusion, same reason: frameStatusGroups's import graph
       // reaches decorators/frame.tsx and the legacy components.
       "**/src/test/shared-spa/frame-status-groups.test.ts",
