@@ -28,8 +28,10 @@ type RouteContext = { params: Promise<{ sceneId: string; imageId: string }> };
 
 // One of a scene's images by its digest, provided some version of the scene
 // links it; same visibility rules and fixed content type as the cover route.
-// A legacy gallery row id (uuid) is still honoured for links minted before
-// images were content-addressed.
+// The scene's owner also reads digests no version links yet: an upload is
+// registered before Save binds it, and the editor shows the thumbnail right
+// away. A legacy gallery row id (uuid) is still honoured for links minted
+// before images were content-addressed.
 async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:image", {
     limit: 1200,
@@ -64,6 +66,7 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   }
 
   let image: { content?: Buffer | null; contentType: string; objectKey: string | null } | undefined;
+  let unbound = false;
   if (sha256Pattern.test(imageId)) {
     const [row] = await db
       .select({ contentType: storeImages.contentType, objectKey: storeImages.objectKey })
@@ -90,6 +93,26 @@ async function handleGet(request: NextRequest, context: RouteContext) {
       )
       .limit(1);
     image = row;
+    // The binding requirement is the public capability boundary — without it
+    // any public scene URL could serve any registered digest. The owner's
+    // draft sits on the other side of it: uploaded, not yet published by
+    // Save, and theirs to see.
+    if (
+      !image &&
+      (await canAccessPrivateScene(
+        db,
+        request.headers.get("authorization"),
+        scene.accountId,
+      ))
+    ) {
+      const [draft] = await db
+        .select({ contentType: storeImages.contentType, objectKey: storeImages.objectKey })
+        .from(storeImages)
+        .where(eq(storeImages.sha256, imageId))
+        .limit(1);
+      image = draft;
+      unbound = draft !== undefined;
+    }
   } else if (/^[0-9a-f-]{36}$/i.test(imageId)) {
     const [row] = await db
       .select({
@@ -125,13 +148,17 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     }
   }
 
-  // The digest is the URL, so the bytes behind it never change.
+  // The digest is the URL, so the bytes behind it never change. An unbound
+  // draft image is an owner-only read whatever the scene's visibility, so it
+  // must never sit at the edge or hand out the public CDN capability.
   const cacheControl =
-    scene.visibility === "public"
+    scene.visibility === "public" && !unbound
       ? "public, max-age=86400, s-maxage=31536000, immutable"
       : "private, max-age=3600";
   const cdnUrl =
-    scene.visibility === "public" ? publicBlobUrl(image.objectKey) : undefined;
+    scene.visibility === "public" && !unbound
+      ? publicBlobUrl(image.objectKey)
+      : undefined;
   if (cdnUrl) {
     return NextResponse.redirect(cdnUrl, {
       headers: { "cache-control": cacheControl },

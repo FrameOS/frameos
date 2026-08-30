@@ -29,6 +29,7 @@ import { POST as publishScene } from "../../../app/api/store/publish/route";
 import { GET as getRepositoryJson } from "../../../app/api/store/repository.json/route";
 import { GET as downloadScene } from "../../../app/api/store/scenes/[sceneId]/download/route";
 import { GET as getSceneImage } from "../../../app/api/store/scenes/[sceneId]/image/route";
+import { GET as getGalleryImage } from "../../../app/api/store/scenes/[sceneId]/images/[imageId]/route";
 import { GET as getScenesJson } from "../../../app/api/store/scenes/[sceneId]/scenes.json/route";
 import { POST as previewProxy } from "../../../app/api/store/preview-proxy/route";
 import { POST as editSceneContent } from "../../../app/api/account/scenes/[sceneId]/content/route";
@@ -712,6 +713,50 @@ describe("store publish and distribution", () => {
     cookieJar.clear();
     const anonymous = await saveVersion(sceneId, { images: [first] });
     expect(anonymous.status).toBe(401);
+  });
+  it("serves an unbound draft image to its owner only, until Save binds it", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const scene = (
+      await readJson(await publish(accessToken, { visibility: "public" }))
+    ).scene as Record<string, unknown>;
+    const sceneId = scene.id as string;
+    const draftBytes = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 3, 1, 4, 1,
+    ]);
+    const sha = await registerImage(sceneId, draftBytes);
+    const imageCtx = { params: Promise.resolve({ imageId: sha, sceneId }) };
+
+    // The editor shows the thumbnail the moment the upload registers: the
+    // owner's session reads the digest before any version links it — served
+    // privately, never through the public CDN redirect.
+    const draft = await getGalleryImage(
+      request(`/api/store/scenes/${sceneId}/images/${sha}`, "GET"),
+      imageCtx,
+    );
+    expect(draft.status).toBe(200);
+    expect(Buffer.from(await draft.arrayBuffer())).toEqual(draftBytes);
+    expect(draft.headers.get("cache-control")).toContain("private");
+
+    // The binding requirement stays the public capability boundary: nobody
+    // else reads an unbound digest through the scene's URL.
+    const ownerSession = cookieJar.get(sessionCookieName)!;
+    cookieJar.clear();
+    const anonymous = await getGalleryImage(
+      request(`/api/store/scenes/${sceneId}/images/${sha}`, "GET"),
+      imageCtx,
+    );
+    expect(anonymous.status).toBe(404);
+
+    // Save publishes a version with the image; now the read is public.
+    cookieJar.set(sessionCookieName, ownerSession);
+    expect((await saveVersion(sceneId, { images: [sha] })).status).toBe(200);
+    cookieJar.clear();
+    const published = await getGalleryImage(
+      request(`/api/store/scenes/${sceneId}/images/${sha}`, "GET"),
+      imageCtx,
+    );
+    expect(published.status).toBe(200);
+    expect(published.headers.get("cache-control")).toContain("public");
   });
   it("inherits the image set when a republished ZIP has no cover, and leads with the cover when it has one", async () => {
     const { accessToken } = await linkClient(publishScopes);
