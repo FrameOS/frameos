@@ -195,9 +195,8 @@ export function NimConverter({
       <p className="section-description">
         A scene with <code>execution: compiled</code> — Nim code nodes, a scene-local Nim app — needs a FrameOS
         source build on every deploy. Drop its JSON here and get the same scene as an <strong>interpreted scene</strong>
-        (its Nim ported to JavaScript), which runs on the released binaries and previews in the browser. The Nim
-        stays in the file next to the JavaScript, so switching the scene back to compiled undoes it. Nothing is
-        stored.
+        (its Nim ported to JavaScript), which runs on the released binaries and previews in the browser. The Nim is
+        gone from the result; keep your original file if you want it back. Nothing is stored here.
         {sharedModelPass ? " The AI pass is on us, within a daily budget." : " Bring an OpenAI key for the AI pass; without one only the deterministic pass runs."}
       </p>
 

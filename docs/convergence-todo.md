@@ -324,18 +324,19 @@ judge-against-baseline loop, detached jobs, the frontend hooks (3c's
 per-app buttons, "Fork App" through the converter), 3d's declaration
 fixes.
 
-### 3a. Conversion is additive and reversible
+### 3a. Conversion drops the Nim
 
-The converted scene keeps everything the compiled one had. `data.code` stays
-beside the new `data.codeJS`; `app.nim`/`config.nim` stay beside the new
-`app.ts`/`config.json`. All three planes already treat the JS sibling as
-authoritative, so the scene is interpreted the moment `settings.execution`
-flips — and flipping it back to `compiled` restores the old behaviour
-byte-for-byte (the codegen reads `code` and `app.nim`, ignores the JS). No
-backup format, no "original" blob to store: the original *is* still there.
-Stamp `settings.convertedFrom = { execution: "compiled", at, tool:
-"cloud"|"cli", model, jobId }` so the UI can offer "Revert to compiled" and
-so Stage 5 can find every converted scene and strip the Nim after the date.
+Decided 2026-08-30 while testing the converter (it replaces the earlier
+"additive and reversible" design): the converted scene carries **no Nim**.
+`data.code` goes when `data.codeJS` is written, `app.nim`/`config.nim` go
+when `app.ts` is, and a scene that already had both loses its leftover Nim
+too. Two reasons: the editor cannot tell "Nim with a JS sibling" from "Nim
+app" (`hasCompiledAppSource` vs `hasCompiledNimAppSource` — fixed in Stage 1
+as well), and nothing downstream needs the old code — the original file is
+the backup. Only Nim that nothing replaced (`needsManualPort`) stays, so the
+scene still says what is missing. `settings.convertedFrom = { execution:
+"compiled", at, tool, model }` is still stamped so Stage 5 can find every
+converted scene.
 
 ### 3b. Two passes, one package
 

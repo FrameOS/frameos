@@ -102,13 +102,14 @@ For every "no equivalent" the model must say so through `unsupported` — never 
 stub. The node then carries `data.needsConversion = {reason, source, at}`, the
 report lists it under `needsManualPort`, and the scene stays `compiled`.
 
-**Additive and reversible.** `data.code` stays beside the new `data.codeJS`;
-`app.nim` stays beside the new `app.ts`. All three planes prefer the JavaScript
-sibling, so the scene is interpreted the moment `settings.execution` flips — and
-flipping it back to `compiled` restores the old behaviour byte for byte (the
-codegen reads `code` and `app.nim` and ignores the JS). The converter stamps
-`settings.convertedFrom = {execution, at, tool, model}` so a UI can offer
-"revert" and a later cleanup can find every converted scene.
+**The Nim does not survive.** `data.code` is removed the moment `data.codeJS`
+is written and `app.nim`/`config.nim` the moment `app.ts` is; a scene that
+already carried both loses the leftover Nim the same way (reported as
+`already_javascript`). A converted scene carries no Nim at all — the original
+file is the backup. Only Nim that nothing replaced (`needsManualPort`) stays,
+so the scene still says what is missing. The converter stamps
+`settings.convertedFrom = {execution, at, tool, model}` so a later cleanup can
+find every converted scene.
 
 **Verification on the cloud.** After conversion the route runs the full
 structural linter (`lintScenes`) and, when the wasm runtime is installed, one

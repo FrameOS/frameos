@@ -11,10 +11,12 @@
 // instructions and the node's wiring as the input; the small lint in
 // lint.ts feeds problems back for up to `maxAttempts` tries.
 //
-// Conversion is additive: data.code stays next to data.codeJS, app.nim next
-// to app.ts. All three planes prefer the JS sibling, so flipping
-// settings.execution back to "compiled" restores the old behaviour exactly.
-// settings.convertedFrom records that it happened.
+// The Nim does not survive the conversion: data.code goes the moment
+// data.codeJS is written, app.nim/config.nim go the moment app.ts is — a
+// converted scene carries no Nim at all (and a scene that already had both
+// loses its leftover Nim the same way). Nim that nothing replaced
+// (needs_manual_port) stays, so the scene still says what is missing.
+// settings.convertedFrom records that the conversion happened.
 
 import { lintConvertedApp, lintConvertedCodeNode } from "./lint";
 import type { ModelPort } from "./model";
@@ -328,6 +330,7 @@ class SceneConverter {
         continue;
       }
       if (hasText(data.codeJS)) {
+        delete data.code;
         this.items.push({ kind: "code", nodeId: node.id, status: "already_javascript" });
         continue;
       }
@@ -337,6 +340,7 @@ class SceneConverter {
       try {
         const js = nimExpressionToJs(nim, { args, rename });
         data.codeJS = js;
+        delete data.code;
         this.items.push({ js, kind: "code", nim, nodeId: node.id, status: "converted", via: "deterministic" });
       } catch (error) {
         if (!(error instanceof NimConvertError)) {
@@ -445,6 +449,11 @@ class SceneConverter {
       }
       const data = nodeData(node);
       const sources = sourcesOf(data.sources);
+      if (sources && hasJavaScriptAppSource(sources) && stripNimSources(sources)) {
+        data.sources = sources;
+        this.items.push({ id: node.id, kind: "app", name: appName(sources, keywordOf(node)), status: "already_javascript" });
+        continue;
+      }
       if (sources && hasNimOnlyAppSource(sources)) {
         nodesWithInline.add(node.id);
         data.sources = sources;
@@ -460,6 +469,11 @@ class SceneConverter {
     }
     for (const [key, app] of Object.entries(apps)) {
       const sources = sourcesOf((app as SceneApp | undefined)?.sources);
+      if (sources && hasJavaScriptAppSource(sources) && stripNimSources(sources)) {
+        (app as SceneApp).sources = sources;
+        this.items.push({ id: `apps/${key}`, kind: "app", name: appName(sources, key), status: "already_javascript" });
+        continue;
+      }
       if (!sources || !hasNimOnlyAppSource(sources)) {
         continue;
       }
@@ -566,6 +580,7 @@ class SceneConverter {
       for (const [name, content] of Object.entries(merged)) {
         app.target[name] = content;
       }
+      stripNimSources(app.target);
       const insertedRenderImageNodeId = app.wiring.isRender && app.wiring.inChain ? this.insertRenderImage(app) : undefined;
       this.items.push({
         attempts: attempt,
@@ -778,6 +793,7 @@ class SceneConverter {
         continue;
       }
       data.codeJS = codeJS;
+      delete data.code;
       this.items.push({ attempts: attempt, js: codeJS, kind: "code", nim, nodeId: node.id, status: "converted", via: "model" });
       return;
     }
@@ -788,6 +804,18 @@ class SceneConverter {
     nodeData(node).needsConversion = { at: (this.options.now?.() ?? new Date()).toISOString(), reason, source: "code" };
     this.items.push({ kind: "code", nim, nodeId: node.id, reason, status: "needs_manual_port" });
   }
+}
+
+/** Remove app.nim / config.nim; true when there was any. */
+function stripNimSources(sources: Record<string, string>): boolean {
+  let stripped = false;
+  for (const name of ["app.nim", "config.nim"]) {
+    if (name in sources) {
+      delete sources[name];
+      stripped = true;
+    }
+  }
+  return stripped;
 }
 
 function itemId(item: ConversionItem): string {
@@ -849,7 +877,7 @@ export function describeReport(report: ConversionReport): string[] {
         if (item.status === "converted") {
           lines.push(`code ${short(item.nodeId)}: ${item.via} — ${item.nim.replace(/\s+/g, " ")} → ${item.js.replace(/\s+/g, " ")}`);
         } else if (item.status === "already_javascript") {
-          lines.push(`code ${short(item.nodeId)}: already has codeJS`);
+          lines.push(`code ${short(item.nodeId)}: already has codeJS — leftover Nim removed`);
         } else {
           lines.push(`code ${short(item.nodeId)}: ${item.status.replace(/_/g, " ")} — ${item.reason}`);
         }
@@ -859,6 +887,8 @@ export function describeReport(report: ConversionReport): string[] {
           lines.push(
             `app "${item.name}": converted by the model (${item.files.join(", ")}, ${item.attempts} attempt${item.attempts === 1 ? "" : "s"})${item.insertedRenderImageNodeId ? `, render/image ${short(item.insertedRenderImageNodeId)} inserted` : ""}`,
           );
+        } else if (item.status === "already_javascript") {
+          lines.push(`app "${item.name}": already JavaScript — leftover Nim sources removed`);
         } else {
           lines.push(`app "${item.name}": ${item.status.replace(/_/g, " ")} — ${item.reason}`);
         }

@@ -86,6 +86,13 @@ export type ConversionItem =
       reason: string;
     }
   | {
+      /** Already had JavaScript sources; only its leftover Nim was removed. */
+      kind: "app";
+      id: string;
+      name: string;
+      status: "already_javascript";
+    }
+  | {
       kind: "source";
       nodeId: string;
       status: "needs_manual_port";

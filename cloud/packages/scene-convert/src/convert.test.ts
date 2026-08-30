@@ -74,8 +74,9 @@ describe("vannituba — fixture #1", () => {
     expect(node(scene, "2d164791").data?.codeJS).toBe('stateValue === "heat"');
     expect(node(scene, "91949e79").data?.codeJS).toBe('stateValue === "heat"');
     expect(node(scene, "964cf503").data?.codeJS).toBe('stateValue === "heat" ? -40 : 0');
-    // The Nim stays beside the JavaScript.
-    expect(node(scene, "964cf503").data?.code).toBe('if state == "heat": -40 else: 0');
+    // The Nim is gone: a converted scene carries none.
+    expect(node(scene, "964cf503").data?.code).toBeUndefined();
+    expect(scene.nodes?.every((entry) => entry.type !== "code" || entry.data?.code === undefined)).toBe(true);
 
     // The reserved `state` argument was renamed, and its edges follow.
     for (const id of ["2d164791", "91949e79", "964cf503"]) {
@@ -97,7 +98,8 @@ describe("vannituba — fixture #1", () => {
     const app = node(scene, "dfacd0d4");
     const sources = app.data?.sources as Record<string, string>;
     expect(sources["app.ts"]).toBe(heatTimerTs);
-    expect(sources["app.nim"]).toContain("proc run*");
+    expect(sources["app.nim"]).toBeUndefined();
+    expect(Object.keys(sources).sort()).toEqual(["app.ts", "config.json"]);
     const config = JSON.parse(sources["config.json"]!) as { category: string; name: string };
     expect(config.category).toBe("logic");
     expect(config.name).toBe("Heat timer");
@@ -151,7 +153,8 @@ describe("vannituba — fixture #1", () => {
     const again = await convertScene(first.scene, { model, now: () => new Date(0) });
     expect(again.report.modelCalls).toBe(0);
     expect(again.scene).toEqual(first.scene);
-    expect(again.report.items.filter((item) => item.status === "already_javascript")).toHaveLength(5);
+    // Nothing left to touch: the first run removed every trace of Nim.
+    expect(again.report.items).toEqual([]);
   });
 
   it("marks the app for a manual port when the model says it cannot", async () => {
@@ -164,7 +167,9 @@ describe("vannituba — fixture #1", () => {
       source: "app.nim",
     });
     expect(scene.settings?.execution).toBe("compiled");
+    // Nothing replaced the Nim, so it stays — the scene still says what is missing.
     expect((node(scene, "dfacd0d4").data?.sources as Record<string, string>)["app.ts"]).toBeUndefined();
+    expect((node(scene, "dfacd0d4").data?.sources as Record<string, string>)["app.nim"]).toContain("proc run*");
   });
 
   it("feeds lint problems back and accepts the corrected attempt", async () => {
@@ -202,7 +207,11 @@ describe("dataCodeFloat — fixture #0", () => {
     const { scene, report } = await convertScene(fixture("dataCodeFloat.json"), { now: () => new Date(0) });
     expect(report.modelCalls).toBe(0);
     expect(node(scene, "3849fd98").data?.codeJS).toBe("arg + 50.0");
+    expect(node(scene, "3849fd98").data?.code).toBeUndefined();
+    // Already JavaScript, but still carrying its old Nim: cleaned too.
     expect(node(scene, "624b8ce0").data?.codeJS).toBe("50.0");
+    expect(node(scene, "624b8ce0").data?.code).toBeUndefined();
+    expect(report.items.find((item) => item.kind === "code" && item.nodeId.startsWith("624b8ce0"))).toMatchObject({ status: "already_javascript" });
     expect(report.executionBefore).toBe("compiled");
     expect(scene.settings?.execution).toBe("interpreted");
     expect(scene.settings?.convertedFrom).toMatchObject({ execution: "compiled" });
@@ -353,7 +362,8 @@ describe("edge cases", () => {
     const config = JSON.parse(out.apps!.redFill!.sources!["config.json"]!) as Record<string, unknown>;
     expect(config.category).toBe("data");
     expect(config.output).toEqual([{ name: "image", type: "image" }]);
-    expect(out.apps!.redFill!.sources!["app.nim"]).toBe(nim);
+    expect(out.apps!.redFill!.sources!["app.nim"]).toBeUndefined();
+    expect(Object.keys(out.apps!.redFill!.sources!).sort()).toEqual(["app.ts", "config.json"]);
     expect(sceneRequiresCompilation(out)).toBe(false);
     expect(out.settings?.execution).toBe("interpreted");
   });
@@ -434,6 +444,21 @@ describe("edge cases", () => {
     expect(model.requests[0]?.input).toContain('Node a1 config: {"city":"Brussels"}');
     expect(out.apps!.city!.sources!["app.ts"]).toContain("app.config.city");
     expect(JSON.parse(out.apps!.city!.sources!["config.json"]!)).toMatchObject({ category: "data", output: [{ name: "city", type: "string" }] });
+    expect(out.settings?.execution).toBe("interpreted");
+  });
+
+  it("removes leftover Nim from an app that already has JavaScript", async () => {
+    const scene: Scene = {
+      apps: { both: { sources: { "app.nim": "proc get*() = discard", "app.ts": "export function get() { return 1 }", "config.json": "{}" } } },
+      edges: [],
+      id: "s1",
+      nodes: [renderEvent, { data: { config: {}, keyword: "both" }, id: "a1", type: "app" }],
+      settings: { execution: "compiled" },
+    };
+    const { scene: out, report } = await convertScene(scene);
+    expect(report.modelCalls).toBe(0);
+    expect(Object.keys(out.apps!.both!.sources!).sort()).toEqual(["app.ts", "config.json"]);
+    expect(report.items).toEqual([{ id: "apps/both", kind: "app", name: "both", status: "already_javascript" }]);
     expect(out.settings?.execution).toBe("interpreted");
   });
 
