@@ -16,7 +16,7 @@ from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.drivers.devices import drivers_for_frame
-from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, normalize_compilation_mode
+from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, frame_compilation_mode
 from app.models.assets import sync_assets
 from app.models.frame import Frame, normalize_https_proxy, normalize_reboot_crontab, update_frame
 from app.models.log import new_log as log
@@ -505,6 +505,11 @@ class FrameDeployWorkflow:
 
     async def plan(self, mode: str) -> FrameDeployPlan:
         frame_dict = self.frame.to_dict()
+        # A fast deploy leaves the installed binary alone, so the build kind
+        # of the last full deploy still describes it.
+        previous_deploy = getattr(self.frame, "last_successful_deploy", None)
+        if isinstance(previous_deploy, dict) and previous_deploy.get("build_kind"):
+            frame_dict["build_kind"] = previous_deploy["build_kind"]
         frame_dict.pop("last_successful_deploy", None)
         frame_dict.pop("last_successful_deploy_at", None)
         previous_frameos_version = (self.frame.last_successful_deploy or {}).get("frameos_version")
@@ -719,8 +724,9 @@ class FrameDeployWorkflow:
 
         settings = _get_frame_settings(self.db, self.frame)
         build_environment_provider = selected_build_environment_provider(settings)
-        compile_settings = (self.frame.buildroot if is_buildroot else self.frame.rpios) or {}
-        compilation_mode = normalize_compilation_mode(compile_settings.get("compilationMode"))
+        # `precompiled` unless the frame's legacy source-build door is open
+        # (docs/convergence-todo.md, Stage 4); only then the stored mode.
+        compilation_mode = frame_compilation_mode(self.frame)
         buildroot_precompiled_requested = is_buildroot and compilation_mode == COMPILATION_MODE_PRECOMPILED
         cross_compilation_setting = "always" if is_buildroot and not buildroot_precompiled_requested else "global"
 
@@ -741,6 +747,10 @@ class FrameDeployWorkflow:
             allow_on_device_fallback=allow_on_device_fallback,
             compilation_mode=compilation_mode,
         )
+        # Recorded in `last_successful_deploy` so "how many frames still get a
+        # source build" is one query (docs/convergence-todo.md, Stage 4).
+        frame_dict["build_kind"] = binary_plan.build_kind
+        frame_dict["legacy_source_build"] = binary_plan.legacy_source_build
         if is_buildroot and not binary_plan.will_attempt_precompiled:
             binary_plan.force_cross_compile = True
             if not binary_plan.cross_compile_supported:
@@ -869,7 +879,12 @@ class FrameDeployWorkflow:
             f"Compilation mode: {compilation_mode}",
         ]
         if compilation_mode == COMPILATION_MODE_PRECOMPILED:
-            if binary_plan.will_attempt_precompiled:
+            if binary_plan.will_attempt_precompiled and binary_plan.compiled_scene_warning:
+                notes.append(
+                    "Precompiled FrameOS release will be used; the legacy source build is off for this frame. "
+                    + binary_plan.compiled_scene_warning
+                )
+            elif binary_plan.will_attempt_precompiled:
                 notes.append("Precompiled FrameOS release will be used because all scenes are interpreted.")
             else:
                 notes.append(

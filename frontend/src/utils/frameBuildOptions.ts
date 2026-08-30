@@ -32,3 +32,20 @@ export function normalizeFrameCompilationMode(value: unknown): FrameCompilationM
   }
   return value === 'static' || value === 'precompiled' ? value : 'precompiled'
 }
+
+interface FrameLegacySourceBuildSource {
+  mode?: string | null
+  rpios?: { legacySourceBuild?: boolean } | null
+  buildroot?: { legacySourceBuild?: boolean } | null
+}
+
+/**
+ * The one door to a per-frame Nim build (docs/convergence-todo.md, Stage 4;
+ * backend twin `frame_legacy_source_build`). Shut by default: the frame gets
+ * the released binary and compiled scenes simply do not run. Open: the
+ * installation mode applies and compiled scenes force a source build.
+ */
+export function frameLegacySourceBuild(frame?: FrameLegacySourceBuildSource | null): boolean {
+  const settings = frame?.mode === 'buildroot' ? frame?.buildroot : frame?.rpios
+  return settings?.legacySourceBuild === true
+}

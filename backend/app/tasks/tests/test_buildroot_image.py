@@ -1006,6 +1006,7 @@ def test_base_composed_sd_image_is_not_marked_stale_by_version_pin(tmp_path):
         mode="buildroot",
         buildroot={
             "compilationMode": "shared",
+            "legacySourceBuild": True,
             "sdImage": {
                 "status": "ready",
                 "path": str(image_path),
@@ -1120,7 +1121,7 @@ async def test_buildroot_run_rejects_source_sd_image_without_build_environment(m
         id=1,
         project_id=7,
         mode="buildroot",
-        buildroot={"compilationMode": "static"},
+        buildroot={"compilationMode": "static", "legacySourceBuild": True},
         scenes=[],
     )
     builder = BuildrootImageBuilder(db=None, redis=None, frame=frame)

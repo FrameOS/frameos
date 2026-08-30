@@ -505,6 +505,47 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
   );
 
   server.registerTool(
+    "scene_convert",
+    {
+      annotations: { idempotentHint: true },
+      description:
+        "Convert a legacy compiled scene (Nim code nodes, Nim app sources) into an interpreted scene the release binary runs: a deterministic pass rewrites what it can, an OpenAI call ports the rest, the result is linted and rendered once. Pass scenes JSON or a scene_id (store scene, optional version). dry_run reports what would change without calling the model; openai_api_key pays for the model call yourself. The reply carries the converted scenes, a per-scene report (converted / substituted / needsManualPort), lint and render results. Save it with scene_update_content or scene_create.",
+      inputSchema: {
+        dry_run: z.boolean().optional(),
+        openai_api_key: z.string().max(256).optional(),
+        render: z.boolean().optional().describe("Render the converted scene server-side (default true)."),
+        scene_id: z.string().optional(),
+        scenes: scenesJson.optional(),
+        version: z.number().int().min(1).optional(),
+      },
+    },
+    async ({ dry_run, openai_api_key, render, scene_id, scenes, version }) =>
+      run(async () => {
+        let payload = scenes;
+        if (!payload) {
+          if (!scene_id) {
+            return failure("Provide scene_id or scenes.");
+          }
+          const id = await resolveStoreSceneId(ctx, scene_id);
+          if (!id) {
+            return failure(`No store scene matches "${scene_id}".`);
+          }
+          payload = await fetchContent(id, version);
+        }
+        return text(
+          await api.json("POST", "/api/scenes/convert", {
+            body: {
+              dryRun: dry_run,
+              openaiApiKey: openai_api_key,
+              render,
+              scenes: payload,
+            },
+          }),
+        );
+      }),
+  );
+
+  server.registerTool(
     "scene_lint",
     {
       annotations: { readOnlyHint: true },

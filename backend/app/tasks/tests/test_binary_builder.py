@@ -147,7 +147,12 @@ async def test_plan_build_force_cross_compile_skips_precompiled(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
-async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypatch: pytest.MonkeyPatch):
+async def test_plan_build_keeps_precompiled_when_compiled_scenes_exist_and_the_legacy_door_is_shut(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Stage 4 (docs/convergence-todo.md): a compiled scene no longer forces a
+    # source build by itself. The release binary is installed and the plan
+    # says which scenes will not run.
     async def fake_resolve_prebuilt_entry(**_kwargs):
         return None, "debian-trixie-arm64"
 
@@ -160,7 +165,50 @@ async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypat
         frame=SimpleNamespace(
             device="framebuffer",
             gpio_buttons=[],
-            rpios={"compilationMode": "precompiled"},
+            rpios={"compilationMode": "static"},
+            scenes=[{"settings": {"execution": "compiled"}}, {"settings": {"execution": "interpreted"}}],
+        ),
+        deployer=FakeDeployer(),
+        temp_dir="/tmp",
+    )
+
+    plan = await builder.plan_build(
+        target_override=TargetMetadata(arch="aarch64", distro="debian", version="trixie")
+    )
+
+    assert plan.legacy_source_build is False
+    assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
+    assert plan.compilation_mode == COMPILATION_MODE_PRECOMPILED
+    assert plan.will_attempt_precompiled is True
+    assert plan.will_attempt_cross_compile is False
+    assert plan.precompiled_skip_reason is None
+    assert plan.compiled_scene_count == 1
+    assert plan.compiled_scene_warning == (
+        "1 compiled scene will not run on the precompiled release. "
+        "Convert them to JavaScript, or enable the legacy source build for this frame."
+    )
+    assert plan.build_kind == "precompiled"
+    assert plan.to_dict()["compiled_scene_warning"] == plan.compiled_scene_warning
+    assert plan.to_dict()["build_kind"] == "precompiled"
+
+
+@pytest.mark.asyncio
+async def test_plan_build_skips_precompiled_when_compiled_scenes_exist_and_the_legacy_door_is_open(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_resolve_prebuilt_entry(**_kwargs):
+        return None, "debian-trixie-arm64"
+
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db, _project_id=None: None)
+    monkeypatch.setattr("app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
+
+    builder = FrameBinaryBuilder(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(
+            device="framebuffer",
+            gpio_buttons=[],
+            rpios={"compilationMode": "precompiled", "legacySourceBuild": True},
             scenes=[{"settings": {"execution": "compiled"}}],
         ),
         deployer=FakeDeployer(),
@@ -171,11 +219,47 @@ async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypat
         target_override=TargetMetadata(arch="aarch64", distro="debian", version="trixie")
     )
 
+    assert plan.legacy_source_build is True
     assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
     assert plan.compilation_mode == COMPILATION_MODE_STATIC
     assert plan.will_attempt_precompiled is False
     assert plan.will_attempt_cross_compile is True
     assert plan.precompiled_skip_reason == "1 compiled scene is configured"
+    assert plan.compiled_scene_warning is None
+    assert plan.build_kind == "cross"
+
+
+@pytest.mark.asyncio
+async def test_plan_build_ignores_an_explicit_static_mode_while_the_legacy_door_is_shut(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def fake_resolve_prebuilt_entry(**_kwargs):
+        return None, "debian-trixie-arm64"
+
+    monkeypatch.setattr("app.tasks.binary_builder.get_build_host_config", lambda _db, _project_id=None: None)
+    monkeypatch.setattr("app.tasks.binary_builder.resolve_prebuilt_entry", fake_resolve_prebuilt_entry)
+
+    builder = FrameBinaryBuilder(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(
+            device="framebuffer",
+            gpio_buttons=[],
+            rpios={"compilationMode": "static"},
+            scenes=[],
+        ),
+        deployer=FakeDeployer(),
+        temp_dir="/tmp",
+    )
+
+    plan = await builder.plan_build(
+        compilation_mode="static",
+        target_override=TargetMetadata(arch="aarch64", distro="debian", version="trixie"),
+    )
+
+    assert plan.requested_compilation_mode == COMPILATION_MODE_PRECOMPILED
+    assert plan.will_attempt_precompiled is True
+    assert plan.compiled_scene_warning is None
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,7 @@ from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json,
 from app.redis import get_redis
 from app.schemas.frames import FrameBootstrapResponse
 from app.tasks.deploy_remote import legacy_remote_cleanup_script
+from app.codegen.drivers_nim import frame_legacy_source_build
 from app.tasks.precompiled_frameos import RELEASE_BASE_URL, frame_compiled_scene_count, release_version
 from app.utils.token import secure_token
 
@@ -165,6 +166,7 @@ def _frame_bootstrap_script(db: Session, frame: Frame) -> str:
     scenes_json = _frame_bootstrap_scenes_json(frame)
     all_scenes_json = _frame_bootstrap_all_scenes_json(frame)
     compiled_scene_count = frame_compiled_scene_count(frame)
+    legacy_source_build = 1 if frame_legacy_source_build(frame) else 0
     frameos_service_after = "After=network.target"
     frameos_service_conflicts = ""
     frameos_service_tty = ""
@@ -189,6 +191,7 @@ FRAMEOS_RELEASE_BASE_URL={shlex.quote(RELEASE_BASE_URL)}
 FRAMEOS_DIR=/srv/frameos
 FRAMEOS_REMOTE_DIR=/srv/frameos/remote
 FRAMEOS_COMPILED_SCENE_COUNT={compiled_scene_count}
+FRAMEOS_LEGACY_SOURCE_BUILD={legacy_source_build}
 
 need_cmd() {{
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -450,7 +453,11 @@ ln -s "$remote_release_dir" "$FRAMEOS_REMOTE_DIR/current"
 chown -R "$remote_user" "$FRAMEOS_DIR"
 
 if [ "$FRAMEOS_COMPILED_SCENE_COUNT" -gt 0 ]; then
-  echo "This script installed the precompiled FrameOS runtime. $FRAMEOS_COMPILED_SCENE_COUNT compiled scene(s) still require a full deploy after FrameOS Remote connects."
+  if [ "$FRAMEOS_LEGACY_SOURCE_BUILD" -gt 0 ]; then
+    echo "This script installed the precompiled FrameOS runtime. $FRAMEOS_COMPILED_SCENE_COUNT legacy compiled scene(s) still require a full deploy (source build) after FrameOS Remote connects."
+  else
+    echo "This script installed the precompiled FrameOS runtime. $FRAMEOS_COMPILED_SCENE_COUNT legacy compiled scene(s) will not run on it: convert them to JavaScript (docs/nim-to-js-conversion.md), or enable the legacy source build in the frame's advanced settings."
+  fi
 fi
 
 set +e

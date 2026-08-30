@@ -219,6 +219,7 @@ interface FrameOSImageRef { __frameosType: "imageRef"; id: number; width: number
 interface FrameOSNodeRef { __frameosType: "node"; nodeId: number; }
 interface FrameOSSceneRef { __frameosType: "scene"; sceneId: string; }
 interface FrameOSColorRef { __frameosType: "color"; color: string; }
+interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
 
 interface FrameOSApp {
   nodeId: number;
@@ -257,6 +258,33 @@ declare const frameos: {
   setNextSleep(seconds: number): void;
   fetchText(url: string): string;
   fetchJson(url: string): any;
+  httpRequest(
+    url: string,
+    options?: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string;
+      bodyBase64?: string;
+      base64?: boolean;
+      timeoutMs?: number;
+    }
+  ): { status: number; body?: string; bodyBase64?: string; error?: string };
+  listAssets(dir?: string): string[];
+  assetExists(path: string): boolean;
+  assetSize(path: string): number;
+  readAsset(path: string, options?: { offset?: number; length?: number }): string | null;
+  writeAsset(path: string, base64: string): boolean;
+  appendAsset(path: string, base64: string): boolean;
+  deleteAsset(path: string): boolean;
+  loadAssetImage(path: string): FrameOSImageRef | null;
+  openAssetStream(path: string, mode?: "r" | "w" | "a"): FrameOSStreamRef | null;
+  createStream(base64: string): FrameOSStreamRef | null;
+  streamRead(stream: FrameOSStreamRef | number, length: number): string | null;
+  streamWrite(stream: FrameOSStreamRef | number, base64: string): boolean;
+  streamAtEnd(stream: FrameOSStreamRef | number): boolean;
+  streamRewind(stream: FrameOSStreamRef | number): boolean;
+  streamClose(stream: FrameOSStreamRef | number): boolean;
+  getSetting(...path: string[]): any;
   setState(key: string, value: FrameOSJson): void;
 };
 `

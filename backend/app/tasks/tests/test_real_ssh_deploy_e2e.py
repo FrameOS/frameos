@@ -492,7 +492,7 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
             db,
             ssh_target,
             name="DeployE2ERemote",
-            rpios={"compilationMode": COMPILATION_MODE_STATIC},
+            rpios={"compilationMode": COMPILATION_MODE_STATIC, "legacySourceBuild": True},
         )
         _set_build_environment_provider(db, remote_frame, "none")
         remote_plan = await _run_full_deploy(
@@ -525,7 +525,7 @@ async def test_real_ssh_full_fast_cross_and_precompiled_deploy(
             db,
             ssh_target,
             name="DeployE2ECross",
-            rpios={"compilationMode": COMPILATION_MODE_STATIC},
+            rpios={"compilationMode": COMPILATION_MODE_STATIC, "legacySourceBuild": True},
         )
         cross_plan = await _run_full_deploy(
             db,

@@ -416,7 +416,9 @@ function CloudServiceSettingsSection(): JSX.Element {
                 {groups.map((group) => {
                   const details = settingsDetails[group]
                   const saved = details
-                    ? details.fields.every((field) => hasSettingsFieldValue(getSettingsValue(savedSettings, field.path)))
+                    ? details.fields.every((field) =>
+                        hasSettingsFieldValue(getSettingsValue(savedSettings, field.path))
+                      )
                     : false
                   return (
                     <Tag key={group} color={saved ? 'teal' : 'yellow'}>
@@ -1154,7 +1156,11 @@ const ESP32_PIN_LAYOUT_PRESETS: { value: string; label: string; pins: Esp32PinLa
     pins: ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT,
   },
   { value: 'xteink-x4', label: 'XTEINK X4 (ESP32-C3)', pins: ESP32_XTEINK_X4_PIN_LAYOUT },
-  { value: 'seeed-reterminal-sticky', label: 'Seeed reTerminal Sticky', pins: ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT },
+  {
+    value: 'seeed-reterminal-sticky',
+    label: 'Seeed reTerminal Sticky',
+    pins: ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT,
+  },
   {
     value: 'seeed-reterminal-e10xx',
     label: 'Seeed reTerminal E1001/E1002',
@@ -1860,9 +1866,7 @@ export function FrameSettings({
                 <Switch value={enabled} onChange={onChange} />
                 {enabled ? (
                   <details className="min-w-0 flex-1">
-                    <summary className="frameos-link cursor-pointer list-none text-sm font-semibold">
-                      advanced
-                    </summary>
+                    <summary className="frameos-link cursor-pointer list-none text-sm font-semibold">advanced</summary>
                     <div className="mt-3 w-full space-y-2">
                       <div className="space-y-1 @md:flex @md:gap-2">
                         <Label className="@md:w-1/3">
@@ -1911,24 +1915,21 @@ export function FrameSettings({
       tooltip={
         <>
           <p>
-            The most bytes one HTTP response may carry for any app download — images, calendar feeds, APIs.
-            Enforced on the device at download time: a response that announces a larger size is refused
-            before the first byte, a stream that grows past it is cut off. Raise it for bigger sources.
+            The most bytes one HTTP response may carry for any app download — images, calendar feeds, APIs. Enforced on
+            the device at download time: a response that announces a larger size is refused before the first byte, a
+            stream that grows past it is cut off. Raise it for bigger sources.
           </p>
           <p className="mt-2">
-            ESP32 frames default to 4 MiB. There the body is buffered in PSRAM chunks, and when free PSRAM would
-            drop below the runtime&apos;s reserve the rest of the body spills to storage instead of failing — the SD
+            ESP32 frames default to 4 MiB. There the body is buffered in PSRAM chunks, and when free PSRAM would drop
+            below the runtime&apos;s reserve the rest of the body spills to storage instead of failing — the SD
             card&apos;s <code>.cache</code> folder when one is mounted, otherwise the internal <code>/state</code>
-            partition (capped by its free space, at most 8 MiB). A spilled image is decoded straight from the file
-            with the same streaming decoder that renders SD-card assets, so a multi-MB JPEG never has to fit in
-            memory: this limit, not PSRAM, is the ceiling. Spilled bodies must be baseline JPEGs (progressive
-            JPEG and PNG cannot be streamed from a file yet), and text/JSON responses never spill — they need to
-            fit in memory. With no SD card and no free <code>/state</code> space, spilling is off and the download
-            fails once PSRAM is exhausted.
+            partition (capped by its free space, at most 8 MiB). A spilled image is decoded straight from the file with
+            the same streaming decoder that renders SD-card assets, so a multi-MB JPEG never has to fit in memory: this
+            limit, not PSRAM, is the ceiling. Spilled bodies must be baseline JPEGs (progressive JPEG and PNG cannot be
+            streamed from a file yet), and text/JSON responses never spill — they need to fit in memory. With no SD card
+            and no free <code>/state</code> space, spilling is off and the download fails once PSRAM is exhausted.
           </p>
-          <p className="mt-2">
-            The ESP32 reads this value at boot, so saving a change reboots the frame.
-          </p>
+          <p className="mt-2">The ESP32 reads this value at boot, so saving a change reboots the frame.</p>
         </>
       }
     >
@@ -2223,8 +2224,8 @@ export function FrameSettings({
                       cloudEsp32TimeZoneSupported
                         ? 'The time zone the frame keeps its clock in: scene times, the weather forecast and the schedule. Applied live — no reboot.'
                         : frame.frameos_version
-                          ? `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
-                          : `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+                        ? `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+                        : `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
                     }
                   >
                     <Select name="timezone" options={frameTimezoneOptions} />
@@ -2458,472 +2459,478 @@ export function FrameSettings({
             cloud cannot save any of it. */}
         {!cloudProfile ? (
           <>
-        {inFrameAdminMode ? <FrameAdminUpgradeSection /> : null}
-        {inFrameAdminMode ? <FrameAdminServiceSecretsSection /> : null}
-        {showFrameInfo ? (
-          <H6 id="frame-settings-device" className="mt-2">
-            Device settings
-          </H6>
-        ) : (
-          <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
-            <H6 id="frame-settings-device">Device settings</H6>
-            {frameActionsMenu}
-          </div>
-        )}
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Field name="name" label="Name">
-            <TextInput name="name" placeholder="Hallway frame" required />
-          </Field>
-          {!hideDeploymentMode ? (
-            <Field name="mode" label="Deployment mode">
-              {({ value, onChange }) => (
-                <Select
-                  name="mode"
-                  value={(value as string) || 'rpios'}
-                  options={modes}
-                  disabled={inFrameAdminMode}
-                  onChange={(nextMode) => {
-                    onChange(nextMode)
-                    if (nextMode === 'embedded') {
-                      const nextValues: Partial<FrameType> = {}
-                      if (!frameForm.embedded?.platform) {
-                        nextValues.embedded = {
-                          ...(frameForm.embedded ?? {}),
-                          platform: EMBEDDED_ESP32_S3,
-                          flashSize: frameForm.embedded?.flashSize ?? '8MB',
-                        }
-                      } else if (!frameForm.embedded?.flashSize) {
-                        nextValues.embedded = { ...(frameForm.embedded ?? {}), flashSize: '8MB' }
-                      }
-                      if (
-                        !frameForm.max_http_response_bytes ||
-                        frameForm.max_http_response_bytes === DEFAULT_MAX_HTTP_RESPONSE_BYTES
-                      ) {
-                        nextValues.max_http_response_bytes = EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
-                      }
-                      nextValues.device_config = {
-                        ...(frameForm.device_config ?? {}),
-                        pins: normalizeEsp32PinLayout(
-                          frameForm.device_config?.pins,
-                          frameForm.device,
-                          embeddedHardwarePreset
-                        ),
-                      }
-                      setFrameFormValues({
-                        ...nextValues,
-                      })
-                    }
-                  }}
-                />
-              )}
-            </Field>
-          ) : null}
-          {isVirtualPlatform ? null : (
-          <Field name="device" label="Display driver">
-            {({ value, onChange }) => (
-              <Select
-                name="device"
-                value={(value as string) || ''}
-                options={
-                  // Embedded frames can be headless: device "none" maps to the
-                  // firmware's panel "none", so surface it as a real choice.
-                  isEmbeddedMode ? [{ value: 'none', label: 'No display panel' }, ...devices] : devices
-                }
-                onChange={(nextDevice) => {
-                  const previousDevice = (value as string) || ''
-                  onChange(nextDevice)
-                  if (isEmbeddedMode) {
-                    const currentPins = frameForm.device_config?.pins
-                    const currentPresetConfig = esp32HardwarePresetConfig(embeddedHardwarePreset)
-                    const nextHardwarePreset =
-                      currentPresetConfig && nextDevice !== currentPresetConfig.device
-                        ? 'custom'
-                        : embeddedHardwarePreset
-                    const previousPins = normalizeEsp32PinLayout(currentPins, previousDevice, embeddedHardwarePreset)
-                    const nextDeviceConfig: NonNullable<FrameType['device_config']> = {
-                      ...(frameForm.device_config ?? {}),
-                    }
-                    const nextValues: Partial<FrameType> = {}
-                    let shouldUpdateDeviceConfig = false
-                    if (
-                      !currentPins ||
-                      esp32PinLayoutsEqual(
-                        previousPins,
-                        esp32RecommendedPinLayout(previousDevice, embeddedHardwarePreset)
-                      )
-                    ) {
-                      nextDeviceConfig.pins = esp32RecommendedPinLayout(nextDevice, nextHardwarePreset)
-                      shouldUpdateDeviceConfig = true
-                    }
-                    if (nextHardwarePreset === 'custom' && embeddedHardwarePreset !== 'custom') {
-                      nextValues.embedded = {
-                        ...(frameForm.embedded ?? {}),
-                        hardwarePreset: 'custom',
-                      }
-                      nextDeviceConfig.hardwarePreset = 'custom'
-                      shouldUpdateDeviceConfig = true
-                    }
-                    if (shouldUpdateDeviceConfig) {
-                      nextValues.device_config = nextDeviceConfig
-                    }
-                    if (Object.keys(nextValues).length > 0) {
-                      setFrameFormValues({
-                        ...nextValues,
-                      })
-                    }
-                  }
-                }}
-              />
+            {inFrameAdminMode ? <FrameAdminUpgradeSection /> : null}
+            {inFrameAdminMode ? <FrameAdminServiceSecretsSection /> : null}
+            {showFrameInfo ? (
+              <H6 id="frame-settings-device" className="mt-2">
+                Device settings
+              </H6>
+            ) : (
+              <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
+                <H6 id="frame-settings-device">Device settings</H6>
+                {frameActionsMenu}
+              </div>
             )}
-          </Field>
-          )}
-          {frameForm.device === 'waveshare.EPD_10in3' ? (
-            <Group name="device_config">
-              <Field name="vcom" label="VCOM">
-                <TextInput name="vcom" placeholder="-1.48" required />
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field name="name" label="Name">
+                <TextInput name="name" placeholder="Hallway frame" required />
               </Field>
-            </Group>
-          ) : null}
-          {partialRefreshDevices.has(frameForm.device ?? '') ? (
-            <Field name="device_config">
-              {({ value, onChange }) => (
-                <PartialRefreshSettingsFields
-                  value={value as FrameType['device_config']}
-                  onChange={onChange}
-                  variant="settings"
-                  panelDefaults={partialRefreshDefaultsByDevice[frameForm.device ?? '']}
-                />
-              )}
-            </Field>
-          ) : null}
-          {frameForm.device === 'http.upload' ? (
-            <div className="">
-              <Group name="device_config">
-                <Field
-                  name="uploadUrl"
-                  label="Upload URL"
-                  tooltip="Upload the rendered image here as PNG in the POST body. Only upload when the image changes."
-                >
-                  {({ value, onChange }) => (
-                    <TextInput
-                      value={(value as string) ?? ''}
-                      onChange={onChange}
-                      placeholder="https://example.com/upload"
-                      required
-                    />
-                  )}
-                </Field>
-                <Field
-                  name="uploadHeaders"
-                  label="HTTP headers"
-                  tooltip="Optional headers (for example Authorization) to send with every upload."
-                >
-                  {({ value, onChange }) => {
-                    const headers = Array.isArray(value) ? [...value] : []
-                    const updateHeader = (index: number, key: 'name' | 'value', newValue: string) => {
-                      const next = headers.map((header: { name?: string; value?: string }, idx: number) =>
-                        idx === index
-                          ? { name: header?.name ?? '', value: header?.value ?? '', [key]: newValue }
-                          : header
-                      )
-                      onChange(next)
-                    }
-                    const addHeader = () => onChange([...headers, { name: '', value: '' }])
-                    const removeHeader = (index: number) => {
-                      onChange(headers.filter((_: unknown, idx: number) => idx !== index))
-                    }
-                    return (
-                      <div className="space-y-2">
-                        {headers.map((header: { name?: string; value?: string }, index: number) => (
-                          <div key={index} className="flex flex-col gap-2 @md:flex-row @md:items-center">
-                            <TextInput
-                              value={header?.name ?? ''}
-                              onChange={(val) => updateHeader(index, 'name', val)}
-                              placeholder="Header name"
-                            />
-                            <TextInput
-                              value={header?.value ?? ''}
-                              onChange={(val) => updateHeader(index, 'value', val)}
-                              placeholder="Header value"
-                            />
-                            <Button color="gray" size="small" onClick={() => removeHeader(index)}>
-                              Remove
-                            </Button>
-                          </div>
-                        ))}
-                        <Button color="secondary" size="small" onClick={addHeader}>
-                          Add header
-                        </Button>
-                      </div>
-                    )
-                  }}
-                </Field>
-              </Group>
-            </div>
-          ) : null}
-          <Field name="rotate" label="Rotation">
-            {({ value, onChange }) => (
-              <Select
-                value={value || '0'}
-                onChange={(v) => onChange(parseInt(v))}
-                name="rotate"
-                options={[
-                  { value: 0, label: '0 degrees' },
-                  { value: 90, label: '90 degrees' },
-                  { value: 180, label: '180 degrees' },
-                  { value: 270, label: '270 degrees' },
-                ]}
-              />
-            )}
-          </Field>
-          {flipField}
-          {isBuildrootMode ? (
-            <Group name="buildroot">
-              <Field name="platform" label="Platform">
-                {({ value, onChange }) => (
-                  // Frames saved before the platform consolidation still store
-                  // 'raspberry-pi-zero-w' / 'raspberry-pi-zero-2-w', which match
-                  // no option and render the select blank. Show the platform
-                  // whose image actually boots that board (the backend resolves
-                  // the legacy keys the same way), so the field reads as the
-                  // truth instead of as "unset".
-                  <Select
-                    name="buildroot.platform"
-                    options={buildrootPlatforms}
-                    value={normalizeBuildrootPlatform(value)}
-                    onChange={(v) => onChange(v)}
-                  />
-                )}
-              </Field>
-              <AdvancedSection
-                open={normalizeFrameCompilationModeOption(frameForm.buildroot?.compilationMode) === 'static'}
-              >
-                <Field
-                  name="compilationMode"
-                  label="Installation mode"
-                  tooltip={
-                    <div className="space-y-2">
-                      <p>
-                        Choose whether the SD image uses a published FrameOS release or compiles this checkout for
-                        the image.
-                      </p>
-                      <p>
-                        Use a build mode when testing local development changes that are not in a published release
-                        yet.
-                      </p>
-                    </div>
-                  }
-                >
-                  <Select name="buildroot.compilationMode" options={frameCompilationModeOptions} />
-                </Field>
-              </AdvancedSection>
-            </Group>
-          ) : null}
-          {isEmbeddedMode ? (
-            <>
-              <Group name="embedded">
-                <Field name="platform" label="Platform">
-                  <Select name="embedded.platform" options={embeddedPlatforms} />
-                </Field>
-                {isVirtualPlatform ? null : (
-                <>
-                <Field
-                  name="hardwarePreset"
-                  label="Hardware preset"
-                  tooltip="Board presets apply flash, PSRAM, display GPIO, and SD-card asset wiring together."
-                >
-                  {({ value }) => (
-                    <Select
-                      name="embedded.hardwarePreset"
-                      value={normalizeEsp32HardwarePreset(value ?? frameForm.device_config?.hardwarePreset)}
-                      options={ESP32_HARDWARE_PRESET_OPTIONS}
-                      onChange={(nextPreset) => setEsp32HardwarePreset(normalizeEsp32HardwarePreset(nextPreset))}
-                    />
-                  )}
-                </Field>
-                <Field
-                  name="flashSize"
-                  label="Flash size"
-                  tooltip="ESP32 module flash size. 4MB builds use a single app slot and cannot update over the air."
-                >
+              {!hideDeploymentMode ? (
+                <Field name="mode" label="Deployment mode">
                   {({ value, onChange }) => (
                     <Select
-                      name="embedded.flashSize"
-                      value={(value as FrameEmbeddedFlashSize | undefined) ?? '8MB'}
-                      options={ESP32_FLASH_SIZE_OPTIONS}
-                      onChange={(nextFlashSize) => {
-                        const flashSize = nextFlashSize as FrameEmbeddedFlashSize
-                        const presetConfig = esp32HardwarePresetConfig(embeddedHardwarePreset)
-                        if (presetConfig && flashSize !== presetConfig.flashSize) {
-                          setEsp32HardwarePresetCustom({
-                            embedded: { ...(frameForm.embedded ?? {}), flashSize },
+                      name="mode"
+                      value={(value as string) || 'rpios'}
+                      options={modes}
+                      disabled={inFrameAdminMode}
+                      onChange={(nextMode) => {
+                        onChange(nextMode)
+                        if (nextMode === 'embedded') {
+                          const nextValues: Partial<FrameType> = {}
+                          if (!frameForm.embedded?.platform) {
+                            nextValues.embedded = {
+                              ...(frameForm.embedded ?? {}),
+                              platform: EMBEDDED_ESP32_S3,
+                              flashSize: frameForm.embedded?.flashSize ?? '8MB',
+                            }
+                          } else if (!frameForm.embedded?.flashSize) {
+                            nextValues.embedded = { ...(frameForm.embedded ?? {}), flashSize: '8MB' }
+                          }
+                          if (
+                            !frameForm.max_http_response_bytes ||
+                            frameForm.max_http_response_bytes === DEFAULT_MAX_HTTP_RESPONSE_BYTES
+                          ) {
+                            nextValues.max_http_response_bytes = EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
+                          }
+                          nextValues.device_config = {
+                            ...(frameForm.device_config ?? {}),
+                            pins: normalizeEsp32PinLayout(
+                              frameForm.device_config?.pins,
+                              frameForm.device,
+                              embeddedHardwarePreset
+                            ),
+                          }
+                          setFrameFormValues({
+                            ...nextValues,
                           })
-                        } else {
-                          onChange(flashSize)
                         }
                       }}
                     />
                   )}
                 </Field>
-                </>
-                )}
-              </Group>
+              ) : null}
               {isVirtualPlatform ? null : (
-              <Group name="device_config">
-                <Field
-                  name="pins"
-                  label="ESP32 GPIO pin layout"
-                  tooltip="GPIO numbers for the e-paper SPI wiring. Use -1 for optional pins that are not connected."
-                >
-                  {({ value, onChange }) => {
-                    const pins = normalizeEsp32PinLayout(
-                      value as Esp32Pins | undefined,
-                      frameForm.device,
-                      embeddedHardwarePreset
-                    )
-                    const preset = esp32PinLayoutPresetValue(pins)
-                    const recommended = esp32RecommendedPinLayout(frameForm.device, embeddedHardwarePreset)
-                    return (
-                      <div className="space-y-3">
-                        <Select
-                          value={preset}
-                          options={esp32PinLayoutPresetOptions(frameForm.device)}
-                          onChange={(nextPreset) => {
-                            if (nextPreset === 'waveshare-photopainter') {
-                              setEsp32HardwarePreset(ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET)
-                              return
+                <Field name="device" label="Display driver">
+                  {({ value, onChange }) => (
+                    <Select
+                      name="device"
+                      value={(value as string) || ''}
+                      options={
+                        // Embedded frames can be headless: device "none" maps to the
+                        // firmware's panel "none", so surface it as a real choice.
+                        isEmbeddedMode ? [{ value: 'none', label: 'No display panel' }, ...devices] : devices
+                      }
+                      onChange={(nextDevice) => {
+                        const previousDevice = (value as string) || ''
+                        onChange(nextDevice)
+                        if (isEmbeddedMode) {
+                          const currentPins = frameForm.device_config?.pins
+                          const currentPresetConfig = esp32HardwarePresetConfig(embeddedHardwarePreset)
+                          const nextHardwarePreset =
+                            currentPresetConfig && nextDevice !== currentPresetConfig.device
+                              ? 'custom'
+                              : embeddedHardwarePreset
+                          const previousPins = normalizeEsp32PinLayout(
+                            currentPins,
+                            previousDevice,
+                            embeddedHardwarePreset
+                          )
+                          const nextDeviceConfig: NonNullable<FrameType['device_config']> = {
+                            ...(frameForm.device_config ?? {}),
+                          }
+                          const nextValues: Partial<FrameType> = {}
+                          let shouldUpdateDeviceConfig = false
+                          if (
+                            !currentPins ||
+                            esp32PinLayoutsEqual(
+                              previousPins,
+                              esp32RecommendedPinLayout(previousDevice, embeddedHardwarePreset)
+                            )
+                          ) {
+                            nextDeviceConfig.pins = esp32RecommendedPinLayout(nextDevice, nextHardwarePreset)
+                            shouldUpdateDeviceConfig = true
+                          }
+                          if (nextHardwarePreset === 'custom' && embeddedHardwarePreset !== 'custom') {
+                            nextValues.embedded = {
+                              ...(frameForm.embedded ?? {}),
+                              hardwarePreset: 'custom',
                             }
-                            if (nextPreset === 'waveshare-13in3e6') {
-                              setEsp32HardwarePreset(ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET)
-                              return
-                            }
-                            const layout = esp32PinLayoutForPreset(nextPreset, frameForm.device, embeddedHardwarePreset)
-                            if (layout) {
-                              if (embeddedHardwarePreset !== 'custom') {
-                                setEsp32HardwarePresetCustom({
-                                  device_config: { ...(frameForm.device_config ?? {}), pins: layout },
-                                })
-                              } else {
-                                onChange(layout)
-                              }
-                            }
-                          }}
-                        />
-                        <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
-                          {ESP32_PIN_FIELDS.map(({ key, label }) => (
-                            <label key={key} className="space-y-1">
-                              <span className="frame-tool-muted block text-xs font-semibold">{label}</span>
-                              <NumberTextInput
-                                value={pins[key]}
-                                placeholder={String(recommended[key])}
-                                onChange={(nextValue) => {
-                                  const fallback = key === 'cs2' || key === 'pwr' ? -1 : pins[key]
-                                  const nextPins = {
-                                    ...pins,
-                                    [key]: normalizeEsp32PinNumber(nextValue, fallback),
-                                  }
-                                  if (embeddedHardwarePreset !== 'custom') {
-                                    setEsp32HardwarePresetCustom({
-                                      device_config: { ...(frameForm.device_config ?? {}), pins: nextPins },
-                                    })
-                                  } else {
-                                    onChange(nextPins)
-                                  }
-                                }}
-                              />
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  }}
+                            nextDeviceConfig.hardwarePreset = 'custom'
+                            shouldUpdateDeviceConfig = true
+                          }
+                          if (shouldUpdateDeviceConfig) {
+                            nextValues.device_config = nextDeviceConfig
+                          }
+                          if (Object.keys(nextValues).length > 0) {
+                            setFrameFormValues({
+                              ...nextValues,
+                            })
+                          }
+                        }
+                      }}
+                    />
+                  )}
                 </Field>
-                <Field
-                  name="sdCardAssets"
-                  label="SD card assets"
-                  tooltip="Mount a FAT32 SD card at /srv/assets so local image and font assets work on ESP32 frames."
-                >
-                  {({ value, onChange }) => {
-                    const sdCardAssets = normalizeEsp32SdCardAssets(value as Esp32SdCardAssets | undefined)
-                    const preset = esp32SdCardPresetValue(sdCardAssets)
-                    const updateSdCardAssets = (nextValues: Partial<Esp32SdCardAssets>) => {
-                      onChange({
-                        ...sdCardAssets,
-                        ...nextValues,
-                        mountPath: '/srv/assets',
-                      })
-                    }
-                    return (
-                      <div className="space-y-3">
-                        <Switch
-                          label="Mount FAT32 SD card at /srv/assets"
-                          value={sdCardAssets.enabled}
-                          onChange={(enabled) => {
-                            if (embeddedHardwarePreset !== 'custom' && !enabled) {
-                              setEsp32HardwarePresetCustom({
-                                device_config: {
-                                  ...(frameForm.device_config ?? {}),
-                                  sdCardAssets: { ...sdCardAssets, enabled, mountPath: '/srv/assets' },
-                                },
-                              })
-                            } else {
-                              updateSdCardAssets({ enabled })
-                            }
-                          }}
-                          fullWidth
+              )}
+              {frameForm.device === 'waveshare.EPD_10in3' ? (
+                <Group name="device_config">
+                  <Field name="vcom" label="VCOM">
+                    <TextInput name="vcom" placeholder="-1.48" required />
+                  </Field>
+                </Group>
+              ) : null}
+              {partialRefreshDevices.has(frameForm.device ?? '') ? (
+                <Field name="device_config">
+                  {({ value, onChange }) => (
+                    <PartialRefreshSettingsFields
+                      value={value as FrameType['device_config']}
+                      onChange={onChange}
+                      variant="settings"
+                      panelDefaults={partialRefreshDefaultsByDevice[frameForm.device ?? '']}
+                    />
+                  )}
+                </Field>
+              ) : null}
+              {frameForm.device === 'http.upload' ? (
+                <div className="">
+                  <Group name="device_config">
+                    <Field
+                      name="uploadUrl"
+                      label="Upload URL"
+                      tooltip="Upload the rendered image here as PNG in the POST body. Only upload when the image changes."
+                    >
+                      {({ value, onChange }) => (
+                        <TextInput
+                          value={(value as string) ?? ''}
+                          onChange={onChange}
+                          placeholder="https://example.com/upload"
+                          required
                         />
-                        {sdCardAssets.enabled ? (
-                          <>
+                      )}
+                    </Field>
+                    <Field
+                      name="uploadHeaders"
+                      label="HTTP headers"
+                      tooltip="Optional headers (for example Authorization) to send with every upload."
+                    >
+                      {({ value, onChange }) => {
+                        const headers = Array.isArray(value) ? [...value] : []
+                        const updateHeader = (index: number, key: 'name' | 'value', newValue: string) => {
+                          const next = headers.map((header: { name?: string; value?: string }, idx: number) =>
+                            idx === index
+                              ? { name: header?.name ?? '', value: header?.value ?? '', [key]: newValue }
+                              : header
+                          )
+                          onChange(next)
+                        }
+                        const addHeader = () => onChange([...headers, { name: '', value: '' }])
+                        const removeHeader = (index: number) => {
+                          onChange(headers.filter((_: unknown, idx: number) => idx !== index))
+                        }
+                        return (
+                          <div className="space-y-2">
+                            {headers.map((header: { name?: string; value?: string }, index: number) => (
+                              <div key={index} className="flex flex-col gap-2 @md:flex-row @md:items-center">
+                                <TextInput
+                                  value={header?.name ?? ''}
+                                  onChange={(val) => updateHeader(index, 'name', val)}
+                                  placeholder="Header name"
+                                />
+                                <TextInput
+                                  value={header?.value ?? ''}
+                                  onChange={(val) => updateHeader(index, 'value', val)}
+                                  placeholder="Header value"
+                                />
+                                <Button color="gray" size="small" onClick={() => removeHeader(index)}>
+                                  Remove
+                                </Button>
+                              </div>
+                            ))}
+                            <Button color="secondary" size="small" onClick={addHeader}>
+                              Add header
+                            </Button>
+                          </div>
+                        )
+                      }}
+                    </Field>
+                  </Group>
+                </div>
+              ) : null}
+              <Field name="rotate" label="Rotation">
+                {({ value, onChange }) => (
+                  <Select
+                    value={value || '0'}
+                    onChange={(v) => onChange(parseInt(v))}
+                    name="rotate"
+                    options={[
+                      { value: 0, label: '0 degrees' },
+                      { value: 90, label: '90 degrees' },
+                      { value: 180, label: '180 degrees' },
+                      { value: 270, label: '270 degrees' },
+                    ]}
+                  />
+                )}
+              </Field>
+              {flipField}
+              {isBuildrootMode ? (
+                <Group name="buildroot">
+                  <Field name="platform" label="Platform">
+                    {({ value, onChange }) => (
+                      // Frames saved before the platform consolidation still store
+                      // 'raspberry-pi-zero-w' / 'raspberry-pi-zero-2-w', which match
+                      // no option and render the select blank. Show the platform
+                      // whose image actually boots that board (the backend resolves
+                      // the legacy keys the same way), so the field reads as the
+                      // truth instead of as "unset".
+                      <Select
+                        name="buildroot.platform"
+                        options={buildrootPlatforms}
+                        value={normalizeBuildrootPlatform(value)}
+                        onChange={(v) => onChange(v)}
+                      />
+                    )}
+                  </Field>
+                  <AdvancedSection
+                    open={
+                      frameForm.buildroot?.legacySourceBuild === true ||
+                      normalizeFrameCompilationModeOption(frameForm.buildroot?.compilationMode) === 'static'
+                    }
+                  >
+                    <Field
+                      name="legacySourceBuild"
+                      label="Legacy source build"
+                      tooltip={
+                        <div className="space-y-2">
+                          <p>
+                            Off (the default): every deploy installs the released FrameOS binary and never compiles
+                            anything. Scenes still on the legacy compiled path do not run on it.
+                          </p>
+                          <p>
+                            On: the installation mode below applies, and legacy compiled scenes force a full FrameOS
+                            source build on every deploy, which needs a build environment. Deprecated — convert the
+                            scenes to JavaScript instead.
+                          </p>
+                        </div>
+                      }
+                    >
+                      <Switch fullWidth />
+                    </Field>
+                    {frameForm.buildroot?.legacySourceBuild === true ? (
+                      <Field
+                        name="compilationMode"
+                        label="Installation mode"
+                        tooltip={
+                          <div className="space-y-2">
+                            <p>
+                              Choose whether the SD image uses a published FrameOS release or compiles this checkout for
+                              the image.
+                            </p>
+                            <p>
+                              Use a build mode when testing local development changes that are not in a published
+                              release yet.
+                            </p>
+                          </div>
+                        }
+                      >
+                        <Select name="buildroot.compilationMode" options={frameCompilationModeOptions} />
+                      </Field>
+                    ) : null}
+                  </AdvancedSection>
+                </Group>
+              ) : null}
+              {isEmbeddedMode ? (
+                <>
+                  <Group name="embedded">
+                    <Field name="platform" label="Platform">
+                      <Select name="embedded.platform" options={embeddedPlatforms} />
+                    </Field>
+                    {isVirtualPlatform ? null : (
+                      <>
+                        <Field
+                          name="hardwarePreset"
+                          label="Hardware preset"
+                          tooltip="Board presets apply flash, PSRAM, display GPIO, and SD-card asset wiring together."
+                        >
+                          {({ value }) => (
                             <Select
-                              value={preset}
-                              options={[
-                                { value: 'custom', label: 'Custom pins' },
-                                {
-                                  value: 'waveshare_esp32_s3_photopainter',
-                                  label: 'Waveshare ESP32-S3 PhotoPainter',
-                                },
-                                {
-                                  value: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
-                                  label: 'Waveshare ESP32-S3 ePaper 13.3E6',
-                                },
-                              ]}
-                              onChange={(nextPreset) => {
-                                const nextSdCardAssets = {
-                                  preset: nextPreset as Esp32SdCardAssets['preset'],
-                                  pins: esp32SdCardPinsForPreset(nextPreset),
-                                }
-                                if (embeddedHardwarePreset !== 'custom' && nextPreset !== embeddedHardwarePreset) {
+                              name="embedded.hardwarePreset"
+                              value={normalizeEsp32HardwarePreset(value ?? frameForm.device_config?.hardwarePreset)}
+                              options={ESP32_HARDWARE_PRESET_OPTIONS}
+                              onChange={(nextPreset) =>
+                                setEsp32HardwarePreset(normalizeEsp32HardwarePreset(nextPreset))
+                              }
+                            />
+                          )}
+                        </Field>
+                        <Field
+                          name="flashSize"
+                          label="Flash size"
+                          tooltip="ESP32 module flash size. 4MB builds use a single app slot and cannot update over the air."
+                        >
+                          {({ value, onChange }) => (
+                            <Select
+                              name="embedded.flashSize"
+                              value={(value as FrameEmbeddedFlashSize | undefined) ?? '8MB'}
+                              options={ESP32_FLASH_SIZE_OPTIONS}
+                              onChange={(nextFlashSize) => {
+                                const flashSize = nextFlashSize as FrameEmbeddedFlashSize
+                                const presetConfig = esp32HardwarePresetConfig(embeddedHardwarePreset)
+                                if (presetConfig && flashSize !== presetConfig.flashSize) {
                                   setEsp32HardwarePresetCustom({
-                                    device_config: {
-                                      ...(frameForm.device_config ?? {}),
-                                      sdCardAssets: {
-                                        ...sdCardAssets,
-                                        ...nextSdCardAssets,
-                                        mountPath: '/srv/assets',
-                                      },
-                                    },
+                                    embedded: { ...(frameForm.embedded ?? {}), flashSize },
                                   })
                                 } else {
-                                  updateSdCardAssets(nextSdCardAssets)
+                                  onChange(flashSize)
                                 }
                               }}
                             />
-                            <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
-                              {ESP32_SD_CARD_PIN_FIELDS.map(({ key, label }) => (
-                                <label key={key} className="space-y-1">
-                                  <span className="frame-tool-muted block text-xs font-semibold">{label}</span>
-                                  <NumberTextInput
-                                    value={sdCardAssets.pins[key]}
-                                    placeholder={String(esp32SdCardPinsForPreset(preset)[key])}
-                                    onChange={(nextValue) => {
+                          )}
+                        </Field>
+                      </>
+                    )}
+                  </Group>
+                  {isVirtualPlatform ? null : (
+                    <Group name="device_config">
+                      <Field
+                        name="pins"
+                        label="ESP32 GPIO pin layout"
+                        tooltip="GPIO numbers for the e-paper SPI wiring. Use -1 for optional pins that are not connected."
+                      >
+                        {({ value, onChange }) => {
+                          const pins = normalizeEsp32PinLayout(
+                            value as Esp32Pins | undefined,
+                            frameForm.device,
+                            embeddedHardwarePreset
+                          )
+                          const preset = esp32PinLayoutPresetValue(pins)
+                          const recommended = esp32RecommendedPinLayout(frameForm.device, embeddedHardwarePreset)
+                          return (
+                            <div className="space-y-3">
+                              <Select
+                                value={preset}
+                                options={esp32PinLayoutPresetOptions(frameForm.device)}
+                                onChange={(nextPreset) => {
+                                  if (nextPreset === 'waveshare-photopainter') {
+                                    setEsp32HardwarePreset(ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET)
+                                    return
+                                  }
+                                  if (nextPreset === 'waveshare-13in3e6') {
+                                    setEsp32HardwarePreset(ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET)
+                                    return
+                                  }
+                                  const layout = esp32PinLayoutForPreset(
+                                    nextPreset,
+                                    frameForm.device,
+                                    embeddedHardwarePreset
+                                  )
+                                  if (layout) {
+                                    if (embeddedHardwarePreset !== 'custom') {
+                                      setEsp32HardwarePresetCustom({
+                                        device_config: { ...(frameForm.device_config ?? {}), pins: layout },
+                                      })
+                                    } else {
+                                      onChange(layout)
+                                    }
+                                  }
+                                }}
+                              />
+                              <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
+                                {ESP32_PIN_FIELDS.map(({ key, label }) => (
+                                  <label key={key} className="space-y-1">
+                                    <span className="frame-tool-muted block text-xs font-semibold">{label}</span>
+                                    <NumberTextInput
+                                      value={pins[key]}
+                                      placeholder={String(recommended[key])}
+                                      onChange={(nextValue) => {
+                                        const fallback = key === 'cs2' || key === 'pwr' ? -1 : pins[key]
+                                        const nextPins = {
+                                          ...pins,
+                                          [key]: normalizeEsp32PinNumber(nextValue, fallback),
+                                        }
+                                        if (embeddedHardwarePreset !== 'custom') {
+                                          setEsp32HardwarePresetCustom({
+                                            device_config: { ...(frameForm.device_config ?? {}), pins: nextPins },
+                                          })
+                                        } else {
+                                          onChange(nextPins)
+                                        }
+                                      }}
+                                    />
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          )
+                        }}
+                      </Field>
+                      <Field
+                        name="sdCardAssets"
+                        label="SD card assets"
+                        tooltip="Mount a FAT32 SD card at /srv/assets so local image and font assets work on ESP32 frames."
+                      >
+                        {({ value, onChange }) => {
+                          const sdCardAssets = normalizeEsp32SdCardAssets(value as Esp32SdCardAssets | undefined)
+                          const preset = esp32SdCardPresetValue(sdCardAssets)
+                          const updateSdCardAssets = (nextValues: Partial<Esp32SdCardAssets>) => {
+                            onChange({
+                              ...sdCardAssets,
+                              ...nextValues,
+                              mountPath: '/srv/assets',
+                            })
+                          }
+                          return (
+                            <div className="space-y-3">
+                              <Switch
+                                label="Mount FAT32 SD card at /srv/assets"
+                                value={sdCardAssets.enabled}
+                                onChange={(enabled) => {
+                                  if (embeddedHardwarePreset !== 'custom' && !enabled) {
+                                    setEsp32HardwarePresetCustom({
+                                      device_config: {
+                                        ...(frameForm.device_config ?? {}),
+                                        sdCardAssets: { ...sdCardAssets, enabled, mountPath: '/srv/assets' },
+                                      },
+                                    })
+                                  } else {
+                                    updateSdCardAssets({ enabled })
+                                  }
+                                }}
+                                fullWidth
+                              />
+                              {sdCardAssets.enabled ? (
+                                <>
+                                  <Select
+                                    value={preset}
+                                    options={[
+                                      { value: 'custom', label: 'Custom pins' },
+                                      {
+                                        value: 'waveshare_esp32_s3_photopainter',
+                                        label: 'Waveshare ESP32-S3 PhotoPainter',
+                                      },
+                                      {
+                                        value: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
+                                        label: 'Waveshare ESP32-S3 ePaper 13.3E6',
+                                      },
+                                    ]}
+                                    onChange={(nextPreset) => {
                                       const nextSdCardAssets = {
-                                        preset: 'custom',
-                                        pins: {
-                                          ...sdCardAssets.pins,
-                                          [key]: normalizeEsp32PinNumber(nextValue, sdCardAssets.pins[key]),
-                                        },
-                                      } as Partial<Esp32SdCardAssets>
-                                      if (embeddedHardwarePreset !== 'custom') {
+                                        preset: nextPreset as Esp32SdCardAssets['preset'],
+                                        pins: esp32SdCardPinsForPreset(nextPreset),
+                                      }
+                                      if (
+                                        embeddedHardwarePreset !== 'custom' &&
+                                        nextPreset !== embeddedHardwarePreset
+                                      ) {
                                         setEsp32HardwarePresetCustom({
                                           device_config: {
                                             ...(frameForm.device_config ?? {}),
@@ -2939,375 +2946,1134 @@ export function FrameSettings({
                                       }
                                     }}
                                   />
-                                </label>
-                              ))}
+                                  <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
+                                    {ESP32_SD_CARD_PIN_FIELDS.map(({ key, label }) => (
+                                      <label key={key} className="space-y-1">
+                                        <span className="frame-tool-muted block text-xs font-semibold">{label}</span>
+                                        <NumberTextInput
+                                          value={sdCardAssets.pins[key]}
+                                          placeholder={String(esp32SdCardPinsForPreset(preset)[key])}
+                                          onChange={(nextValue) => {
+                                            const nextSdCardAssets = {
+                                              preset: 'custom',
+                                              pins: {
+                                                ...sdCardAssets.pins,
+                                                [key]: normalizeEsp32PinNumber(nextValue, sdCardAssets.pins[key]),
+                                              },
+                                            } as Partial<Esp32SdCardAssets>
+                                            if (embeddedHardwarePreset !== 'custom') {
+                                              setEsp32HardwarePresetCustom({
+                                                device_config: {
+                                                  ...(frameForm.device_config ?? {}),
+                                                  sdCardAssets: {
+                                                    ...sdCardAssets,
+                                                    ...nextSdCardAssets,
+                                                    mountPath: '/srv/assets',
+                                                  },
+                                                },
+                                              })
+                                            } else {
+                                              updateSdCardAssets(nextSdCardAssets)
+                                            }
+                                          }}
+                                        />
+                                      </label>
+                                    ))}
+                                  </div>
+                                  <label className="space-y-1 block">
+                                    <span className="frame-tool-muted block text-xs font-semibold">
+                                      Max frequency (kHz)
+                                    </span>
+                                    <NumberTextInput
+                                      value={sdCardAssets.maxFrequencyKHz}
+                                      placeholder="20000"
+                                      onChange={(nextValue) => {
+                                        const maxFrequencyKHz = normalizeEsp32SdCardFrequency(nextValue)
+                                        if (embeddedHardwarePreset !== 'custom' && maxFrequencyKHz !== 20000) {
+                                          setEsp32HardwarePresetCustom({
+                                            device_config: {
+                                              ...(frameForm.device_config ?? {}),
+                                              sdCardAssets: {
+                                                ...sdCardAssets,
+                                                maxFrequencyKHz,
+                                                mountPath: '/srv/assets',
+                                              },
+                                            },
+                                          })
+                                        } else {
+                                          updateSdCardAssets({ maxFrequencyKHz })
+                                        }
+                                      }}
+                                    />
+                                  </label>
+                                </>
+                              ) : null}
                             </div>
-                            <label className="space-y-1 block">
-                              <span className="frame-tool-muted block text-xs font-semibold">Max frequency (kHz)</span>
-                              <NumberTextInput
-                                value={sdCardAssets.maxFrequencyKHz}
-                                placeholder="20000"
-                                onChange={(nextValue) => {
-                                  const maxFrequencyKHz = normalizeEsp32SdCardFrequency(nextValue)
-                                  if (embeddedHardwarePreset !== 'custom' && maxFrequencyKHz !== 20000) {
-                                    setEsp32HardwarePresetCustom({
-                                      device_config: {
-                                        ...(frameForm.device_config ?? {}),
-                                        sdCardAssets: {
-                                          ...sdCardAssets,
-                                          maxFrequencyKHz,
-                                          mountPath: '/srv/assets',
-                                        },
-                                      },
-                                    })
-                                  } else {
-                                    updateSdCardAssets({ maxFrequencyKHz })
-                                  }
-                                }}
-                              />
-                            </label>
-                          </>
-                        ) : null}
-                      </div>
-                    )
-                  }}
-                </Field>
-              </Group>
-              )}
-            </>
-          ) : null}
-          {/* {frameForm.mode === 'rpios' || !frameForm.mode ? (
+                          )
+                        }}
+                      </Field>
+                    </Group>
+                  )}
+                </>
+              ) : null}
+              {/* {frameForm.mode === 'rpios' || !frameForm.mode ? (
             <Group name="rpios">
               <Field name="platform" label="Platform">
                 <Select name="rpios.platform" options={rpiOSPlatforms} />
               </Field>
             </Group>
           ) : null} */}
-          {!hideForCloud &&
-          ((!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode)) ? (
-            <Group name="rpios">
-              <AdvancedSection
-                open={normalizeFrameCompilationModeOption(frameForm.rpios?.compilationMode) === 'static'}
-              >
-                <Field
-                  name="compilationMode"
-                  label="Installation mode"
-                  tooltip={
-                    <div className="space-y-2">
-                      <p>
-                        Choose how FrameOS is installed on this frame. Install binaries uses the published FrameOS
-                        release for the current version when the frame only uses interpreted scenes.
-                      </p>
-                      <p>
-                        Building from source is only needed for compiled scenes or for testing local changes that are
-                        not in a published release yet.
-                      </p>
-                    </div>
-                  }
-                >
-                  <Select name="rpios.compilationMode" options={frameCompilationModeOptions} />
-                </Field>
-              </AdvancedSection>
-            </Group>
-          ) : null}
-          <Field name="debug" label="Debug mode (noisy)">
-            <Select
-              name="debug"
-              options={[
-                { value: 'false', label: 'Disabled' },
-                { value: 'true', label: 'Enabled' },
-              ]}
-            />
-          </Field>
-          {mode === 'buildroot' || mode === 'rpios' ? (
-            <Field
-              name="timezone"
-              label="Timezone"
-              tooltip={
-                mode === 'buildroot'
-                  ? 'IANA timezone applied to the Buildroot operating system during setup.'
-                  : 'IANA timezone applied to Raspberry Pi OS during setup. Leave unchanged to keep a detected timezone.'
-              }
-            >
-              <Select name="timezone" options={frameTimezoneOptions} />
-            </Field>
-          ) : null}
-        </div>
-
-        {isVirtualPlatform ? (
-          <>
-            <H6 id="frame-settings-virtual" className="mt-2">
-              Virtual frame
-            </H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <p className="frameos-muted text-sm">
-                The backend renders this frame and serves it at the URLs below. The token only grants viewing this
-                frame's image — still, treat the URLs as semi-private; save a new view token to invalidate them.
-              </p>
-              {!virtualViewToken ? (
-                <p className="text-sm font-semibold text-amber-600">
-                  No view token is set for this frame yet. Save the frame once and the URLs will fill in.
-                </p>
-              ) : null}
-              <VirtualFrameUrlRow label="Image URL (PNG, rendered on request)" url={virtualImageUrl} />
-              <VirtualFrameUrlRow
-                label={`Kiosk page URL (refreshes every ${frameForm.interval ?? frame.interval ?? 300} seconds)`}
-                url={virtualPageUrl}
-              />
-              <Field name="width" label="Width">
-                <TextInput name="width" placeholder="800" />
-              </Field>
-              <Field name="height" label="Height">
-                <TextInput name="height" placeholder="480" />
-              </Field>
-              <Group name="device_config">
-                <Field
-                  name="colorMode"
-                  label="Color mode"
-                  tooltip="How the backend quantizes the rendered image — pick an e-ink palette to preview how a scene would look on a physical panel."
-                >
-                  {({ value, onChange }) => (
-                    <Select
-                      name="device_config.colorMode"
-                      value={(value as string) || 'rgb'}
-                      options={virtualColorModes}
-                      onChange={onChange}
-                    />
-                  )}
-                </Field>
-                <Field
-                  name="assetsQuotaMb"
-                  label="Assets quota (MB)"
-                  tooltip="How much disk space this frame's assets may use on the backend — uploads and images scenes save (OpenAI, Wikimedia, ...). Leave empty for the default of 100 MB."
-                >
-                  {({ value, onChange }) => (
-                    <TextInput
-                      name="device_config.assetsQuotaMb"
-                      type="number"
-                      placeholder="100"
-                      value={value === undefined || value === null ? '' : String(value)}
-                      onChange={(newValue) => {
-                        const parsed = parseFloat(String(newValue))
-                        onChange(Number.isFinite(parsed) && parsed > 0 ? parsed : undefined)
-                      }}
-                    />
-                  )}
-                </Field>
-              </Group>
-            </div>
-          </>
-        ) : null}
-
-        {/* Power management for a backend-managed ESP32. Same knobs the cloud
-            pushes over set_settings, stored in device_config here: the
-            firmware build bakes them as defaults and the device's settings
-            poll re-reads them, so a change takes effect without a reflash.
-            Before this, backend users had to set them over the USB console. */}
-        {showEmbeddedPowerSection ? (
-          <>
-            <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
-              <H6 id="frame-settings-power">Power</H6>
-            </div>
-            <div className="pl-2 @md:pl-8">
-              <PowerSettingsFields
-                value={embeddedPowerSettings}
-                onChange={setEmbeddedPowerSettings}
-                footnote="These reach the board on its next settings poll, and are baked into the next firmware build as its defaults. Firmware from 2026.8.21 on applies them live; older firmware picks them up when you reflash."
-              />
-            </div>
-          </>
-        ) : null}
-
-        {hideForCloud && !esp32CloudProfile ? (
-          <>
-            <H6 id="frame-settings-ssh" className="mt-2">
-              SSH keys
-            </H6>
-            <Box className="p-2 space-y-2">
-              <p className="text-sm leading-relaxed">
-                The cloud never logs in to a frame itself. These keys go on the SD card when you write one for this
-                frame (&ldquo;Write another SD card&rdquo; in the deploy panel), as root&apos;s authorized keys.
-              </p>
-              <SshKeysSection />
-            </Box>
-          </>
-        ) : null}
-        {!inFrameAdminMode && !hideForCloud ? (
-          <>
-            <H6 id="frame-settings-ssh" className="mt-2">
-              {isEmbeddedMode ? (
-                <>Frame host</>
-              ) : (
-                <>
-                  SSH <span className="text-gray-500">(backend &#8594; frame)</span>
-                </>
-              )}
-            </H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Field
-                name="frame_host"
-                label="Frame host"
-                tooltip={
-                  <div className="space-y-2">
-                    {isEmbeddedMode ? (
-                      <>
-                        <p>
-                          The hostname to bake into the ESP32 firmware. A value like frame.local sets the device
-                          hostname to frame.
-                        </p>
-                        <p>Leave it blank to use the generated frame hostname.</p>
-                      </>
-                    ) : (
-                      <>
-                        <p>
-                          The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.
-                        </p>
-                        <p>You can leave it blank if you only use FrameOS Remote to communicate.</p>
-                      </>
-                    )}
-                  </div>
-                }
-              >
-                <TextInput name="frame_host" placeholder={`frame${frame.id}.local`} required />
-              </Field>
-              {!isEmbeddedMode ? (
-                <>
-                  <Field name="ssh_user" label="SSH user">
-                    <TextInput name="ssh_user" placeholder="pi" required />
-                  </Field>
-                  <Field
-                    name="ssh_pass"
-                    label="SSH pass"
-                    tooltip={
-                      <p>
-                        Leave empty to use a SSH key. Configure it under{' '}
-                        <A href="/settings" className="frameos-link hover:underline">
-                          global settings.
-                        </A>
-                      </p>
+              {!hideForCloud &&
+              ((!inFrameAdminMode && frameForm.mode === 'rpios') || (!inFrameAdminMode && !frameForm.mode)) ? (
+                <Group name="rpios">
+                  <AdvancedSection
+                    open={
+                      frameForm.rpios?.legacySourceBuild === true ||
+                      normalizeFrameCompilationModeOption(frameForm.rpios?.compilationMode) === 'static'
                     }
                   >
-                    <TextInput
-                      name="ssh_pass"
-                      onClick={() => touchFrameFormField('ssh_pass')}
-                      type={frameFormTouches.ssh_pass ? 'text' : 'password'}
-                      placeholder="no password, using SSH key"
-                    />
-                  </Field>
-                  <Field name="ssh_port" label="SSH port">
-                    <TextInput name="ssh_port" placeholder="22" required />
-                  </Field>
-                  <div className="@md:flex @md:gap-2">
-                    <Label className="@md:w-1/3">SSH Keys</Label>
-                    <div className="w-full space-y-2">
-                      <SshKeysSection
-                        selectedIds={frameForm.ssh_keys ?? frame.ssh_keys ?? []}
-                        onSelectionChange={(ids) => setFrameFormValues({ ssh_keys: ids })}
-                      />
-                      {mode === 'rpios' ? (
-                        <div className="flex gap-2">
-                          <Button
-                            size="small"
-                            color={hasSshKeyChangesToDeploy ? 'primary' : 'secondary'}
-                            onClick={() => {
-                              updateDeployedSshKeys()
-                              openLogs()
-                            }}
-                            disabled={(frameForm.ssh_keys ?? frame.ssh_keys ?? []).length === 0}
-                          >
-                            Save changes & update deployed keys
-                          </Button>
-                        </div>
-                      ) : null}
-                      <p className="text-xs text-gray-500">
-                        At least one previously installed key must remain when updating deployed keys.
-                      </p>
-                    </div>
-                  </div>
-                </>
-              ) : null}
-            </div>
-
-            {!isEmbeddedMode ? (
-              <>
-                <H6 id="frame-settings-agent">
-                  Remote control - beta <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
-                </H6>
-                <div className="pl-2 @md:pl-8 space-y-2">
-                  <Group name="agent">
                     <Field
-                      name="agentEnabled"
-                      label="Remote enabled"
+                      name="legacySourceBuild"
+                      label="Legacy source build"
                       tooltip={
                         <div className="space-y-2">
                           <p>
-                            FrameOS Remote opens a websocket connection from the frame to the backend, which is then
-                            used by the backend to control the frame. This allows you to control the frame even if it's
-                            behind a firewall. The backend must be publicly accessible for this to work.
+                            Off (the default): every deploy installs the released FrameOS binary and never compiles
+                            anything. Scenes still on the legacy compiled path do not run on it.
                           </p>
                           <p>
-                            This is still beta. Enable both toggles, then save and deploy the frame. FrameOS Remote will
-                            then connect to the backend to await further commands.
-                          </p>
-                          <p>
-                            Note: after enabling FrameOS Remote, you must manually deploy it from the "..." -&gt;
-                            "Deploy Remote" menu in the top.
+                            On: the installation mode below applies, and legacy compiled scenes force a full FrameOS
+                            source build on every deploy, which needs a build environment. Deprecated — convert the
+                            scenes to JavaScript instead.
                           </p>
                         </div>
                       }
                     >
-                      <Switch name="agentEnabled" fullWidth />
+                      <Switch fullWidth />
                     </Field>
-                    {frameForm.agent?.agentEnabled && (
-                      <>
+                    {frameForm.rpios?.legacySourceBuild === true ? (
+                      <Field
+                        name="compilationMode"
+                        label="Installation mode"
+                        tooltip={
+                          <div className="space-y-2">
+                            <p>
+                              Choose how FrameOS is installed on this frame. Install binaries uses the published FrameOS
+                              release for the current version when the frame only uses interpreted scenes.
+                            </p>
+                            <p>
+                              Building from source is only needed for compiled scenes or for testing local changes that
+                              are not in a published release yet.
+                            </p>
+                          </div>
+                        }
+                      >
+                        <Select name="rpios.compilationMode" options={frameCompilationModeOptions} />
+                      </Field>
+                    ) : null}
+                  </AdvancedSection>
+                </Group>
+              ) : null}
+              <Field name="debug" label="Debug mode (noisy)">
+                <Select
+                  name="debug"
+                  options={[
+                    { value: 'false', label: 'Disabled' },
+                    { value: 'true', label: 'Enabled' },
+                  ]}
+                />
+              </Field>
+              {mode === 'buildroot' || mode === 'rpios' ? (
+                <Field
+                  name="timezone"
+                  label="Timezone"
+                  tooltip={
+                    mode === 'buildroot'
+                      ? 'IANA timezone applied to the Buildroot operating system during setup.'
+                      : 'IANA timezone applied to Raspberry Pi OS during setup. Leave unchanged to keep a detected timezone.'
+                  }
+                >
+                  <Select name="timezone" options={frameTimezoneOptions} />
+                </Field>
+              ) : null}
+            </div>
+
+            {isVirtualPlatform ? (
+              <>
+                <H6 id="frame-settings-virtual" className="mt-2">
+                  Virtual frame
+                </H6>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  <p className="frameos-muted text-sm">
+                    The backend renders this frame and serves it at the URLs below. The token only grants viewing this
+                    frame's image — still, treat the URLs as semi-private; save a new view token to invalidate them.
+                  </p>
+                  {!virtualViewToken ? (
+                    <p className="text-sm font-semibold text-amber-600">
+                      No view token is set for this frame yet. Save the frame once and the URLs will fill in.
+                    </p>
+                  ) : null}
+                  <VirtualFrameUrlRow label="Image URL (PNG, rendered on request)" url={virtualImageUrl} />
+                  <VirtualFrameUrlRow
+                    label={`Kiosk page URL (refreshes every ${frameForm.interval ?? frame.interval ?? 300} seconds)`}
+                    url={virtualPageUrl}
+                  />
+                  <Field name="width" label="Width">
+                    <TextInput name="width" placeholder="800" />
+                  </Field>
+                  <Field name="height" label="Height">
+                    <TextInput name="height" placeholder="480" />
+                  </Field>
+                  <Group name="device_config">
+                    <Field
+                      name="colorMode"
+                      label="Color mode"
+                      tooltip="How the backend quantizes the rendered image — pick an e-ink palette to preview how a scene would look on a physical panel."
+                    >
+                      {({ value, onChange }) => (
+                        <Select
+                          name="device_config.colorMode"
+                          value={(value as string) || 'rgb'}
+                          options={virtualColorModes}
+                          onChange={onChange}
+                        />
+                      )}
+                    </Field>
+                    <Field
+                      name="assetsQuotaMb"
+                      label="Assets quota (MB)"
+                      tooltip="How much disk space this frame's assets may use on the backend — uploads and images scenes save (OpenAI, Wikimedia, ...). Leave empty for the default of 100 MB."
+                    >
+                      {({ value, onChange }) => (
+                        <TextInput
+                          name="device_config.assetsQuotaMb"
+                          type="number"
+                          placeholder="100"
+                          value={value === undefined || value === null ? '' : String(value)}
+                          onChange={(newValue) => {
+                            const parsed = parseFloat(String(newValue))
+                            onChange(Number.isFinite(parsed) && parsed > 0 ? parsed : undefined)
+                          }}
+                        />
+                      )}
+                    </Field>
+                  </Group>
+                </div>
+              </>
+            ) : null}
+
+            {/* Power management for a backend-managed ESP32. Same knobs the cloud
+            pushes over set_settings, stored in device_config here: the
+            firmware build bakes them as defaults and the device's settings
+            poll re-reads them, so a change takes effect without a reflash.
+            Before this, backend users had to set them over the USB console. */}
+            {showEmbeddedPowerSection ? (
+              <>
+                <div className="frame-settings-heading-row mt-2 flex items-center justify-between gap-3">
+                  <H6 id="frame-settings-power">Power</H6>
+                </div>
+                <div className="pl-2 @md:pl-8">
+                  <PowerSettingsFields
+                    value={embeddedPowerSettings}
+                    onChange={setEmbeddedPowerSettings}
+                    footnote="These reach the board on its next settings poll, and are baked into the next firmware build as its defaults. Firmware from 2026.8.21 on applies them live; older firmware picks them up when you reflash."
+                  />
+                </div>
+              </>
+            ) : null}
+
+            {hideForCloud && !esp32CloudProfile ? (
+              <>
+                <H6 id="frame-settings-ssh" className="mt-2">
+                  SSH keys
+                </H6>
+                <Box className="p-2 space-y-2">
+                  <p className="text-sm leading-relaxed">
+                    The cloud never logs in to a frame itself. These keys go on the SD card when you write one for this
+                    frame (&ldquo;Write another SD card&rdquo; in the deploy panel), as root&apos;s authorized keys.
+                  </p>
+                  <SshKeysSection />
+                </Box>
+              </>
+            ) : null}
+            {!inFrameAdminMode && !hideForCloud ? (
+              <>
+                <H6 id="frame-settings-ssh" className="mt-2">
+                  {isEmbeddedMode ? (
+                    <>Frame host</>
+                  ) : (
+                    <>
+                      SSH <span className="text-gray-500">(backend &#8594; frame)</span>
+                    </>
+                  )}
+                </H6>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  <Field
+                    name="frame_host"
+                    label="Frame host"
+                    tooltip={
+                      <div className="space-y-2">
+                        {isEmbeddedMode ? (
+                          <>
+                            <p>
+                              The hostname to bake into the ESP32 firmware. A value like frame.local sets the device
+                              hostname to frame.
+                            </p>
+                            <p>Leave it blank to use the generated frame hostname.</p>
+                          </>
+                        ) : (
+                          <>
+                            <p>
+                              The hostname or IP address that the backend uses to connect to the frame for SSH and HTTP.
+                            </p>
+                            <p>You can leave it blank if you only use FrameOS Remote to communicate.</p>
+                          </>
+                        )}
+                      </div>
+                    }
+                  >
+                    <TextInput name="frame_host" placeholder={`frame${frame.id}.local`} required />
+                  </Field>
+                  {!isEmbeddedMode ? (
+                    <>
+                      <Field name="ssh_user" label="SSH user">
+                        <TextInput name="ssh_user" placeholder="pi" required />
+                      </Field>
+                      <Field
+                        name="ssh_pass"
+                        label="SSH pass"
+                        tooltip={
+                          <p>
+                            Leave empty to use a SSH key. Configure it under{' '}
+                            <A href="/settings" className="frameos-link hover:underline">
+                              global settings.
+                            </A>
+                          </p>
+                        }
+                      >
+                        <TextInput
+                          name="ssh_pass"
+                          onClick={() => touchFrameFormField('ssh_pass')}
+                          type={frameFormTouches.ssh_pass ? 'text' : 'password'}
+                          placeholder="no password, using SSH key"
+                        />
+                      </Field>
+                      <Field name="ssh_port" label="SSH port">
+                        <TextInput name="ssh_port" placeholder="22" required />
+                      </Field>
+                      <div className="@md:flex @md:gap-2">
+                        <Label className="@md:w-1/3">SSH Keys</Label>
+                        <div className="w-full space-y-2">
+                          <SshKeysSection
+                            selectedIds={frameForm.ssh_keys ?? frame.ssh_keys ?? []}
+                            onSelectionChange={(ids) => setFrameFormValues({ ssh_keys: ids })}
+                          />
+                          {mode === 'rpios' ? (
+                            <div className="flex gap-2">
+                              <Button
+                                size="small"
+                                color={hasSshKeyChangesToDeploy ? 'primary' : 'secondary'}
+                                onClick={() => {
+                                  updateDeployedSshKeys()
+                                  openLogs()
+                                }}
+                                disabled={(frameForm.ssh_keys ?? frame.ssh_keys ?? []).length === 0}
+                              >
+                                Save changes & update deployed keys
+                              </Button>
+                            </div>
+                          ) : null}
+                          <p className="text-xs text-gray-500">
+                            At least one previously installed key must remain when updating deployed keys.
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+
+                {!isEmbeddedMode ? (
+                  <>
+                    <H6 id="frame-settings-agent">
+                      Remote control - beta <span className="text-gray-500">(frame &#8594; backend &#8594; frame)</span>
+                    </H6>
+                    <div className="pl-2 @md:pl-8 space-y-2">
+                      <Group name="agent">
                         <Field
-                          name="agentRunCommands"
-                          label="Allow remote control"
+                          name="agentEnabled"
+                          label="Remote enabled"
                           tooltip={
                             <div className="space-y-2">
-                              <p>Can FrameOS Remote actually run commands and execute updates?</p>
                               <p>
-                                This is a second "are you really sure?" toggle, as this comes with risk when enabled on
-                                an unsecure connection.
+                                FrameOS Remote opens a websocket connection from the frame to the backend, which is then
+                                used by the backend to control the frame. This allows you to control the frame even if
+                                it's behind a firewall. The backend must be publicly accessible for this to work.
                               </p>
                               <p>
-                                Make sure you're either aware of the risks, or that the backend is only accessible over
-                                HTTPS before enabling this.
+                                This is still beta. Enable both toggles, then save and deploy the frame. FrameOS Remote
+                                will then connect to the backend to await further commands.
+                              </p>
+                              <p>
+                                Note: after enabling FrameOS Remote, you must manually deploy it from the "..." -&gt;
+                                "Deploy Remote" menu in the top.
                               </p>
                             </div>
                           }
                         >
-                          {({ value, onChange }) => (
-                            <div className="w-full">
-                              <Switch name="agentRunCommands" value={value} onChange={onChange} />
-                            </div>
-                          )}
+                          <Switch name="agentEnabled" fullWidth />
                         </Field>
-                        <Field
-                          name="agentSharedSecret"
-                          label={<div>Remote shared secret</div>}
-                          labelRight={
-                            <Button
-                              color="secondary"
-                              size="small"
-                              onClick={() => {
-                                setFrameFormValues({
-                                  agent: { ...(frameForm.agent ?? {}), agentSharedSecret: secureToken(20) },
-                                })
-                                touchFrameFormField('agent.agentSharedSecret')
-                              }}
+                        {frameForm.agent?.agentEnabled && (
+                          <>
+                            <Field
+                              name="agentRunCommands"
+                              label="Allow remote control"
+                              tooltip={
+                                <div className="space-y-2">
+                                  <p>Can FrameOS Remote actually run commands and execute updates?</p>
+                                  <p>
+                                    This is a second "are you really sure?" toggle, as this comes with risk when enabled
+                                    on an unsecure connection.
+                                  </p>
+                                  <p>
+                                    Make sure you're either aware of the risks, or that the backend is only accessible
+                                    over HTTPS before enabling this.
+                                  </p>
+                                </div>
+                              }
                             >
-                              Regenerate
-                            </Button>
+                              {({ value, onChange }) => (
+                                <div className="w-full">
+                                  <Switch name="agentRunCommands" value={value} onChange={onChange} />
+                                </div>
+                              )}
+                            </Field>
+                            <Field
+                              name="agentSharedSecret"
+                              label={<div>Remote shared secret</div>}
+                              labelRight={
+                                <Button
+                                  color="secondary"
+                                  size="small"
+                                  onClick={() => {
+                                    setFrameFormValues({
+                                      agent: { ...(frameForm.agent ?? {}), agentSharedSecret: secureToken(20) },
+                                    })
+                                    touchFrameFormField('agent.agentSharedSecret')
+                                  }}
+                                >
+                                  Regenerate
+                                </Button>
+                              }
+                              tooltip="This key is used as part of the handshake when communicating with the frame over websockets."
+                            >
+                              <TextInput
+                                name="agentSharedSecret"
+                                onClick={() => touchFrameFormField('agent.agentSharedSecret')}
+                                type={frameFormTouches['agent.agentSharedSecret'] ? 'text' : 'password'}
+                                placeholder=""
+                                required
+                              />
+                            </Field>
+                          </>
+                        )}
+                      </Group>
+                    </div>
+                  </>
+                ) : null}
+              </>
+            ) : null}
+
+            {/* "frame -> backend" reporting: a cloud frame talks only to the hub,
+            so the section is absent there (and so is its nav anchor — see
+            allowedFrameSettingsSections in workspaceSurfaces.ts). */}
+            {showBackendSection ? (
+              <>
+                <H6 id="frame-settings-backend" className="mt-2">
+                  Backend access <span className="text-gray-500">(frame &#8594; backend)</span>
+                </H6>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  <Field
+                    name="server_host"
+                    label="Backend host"
+                    tooltip={
+                      <>
+                        The public host of your FrameOS backend server (this webserver). This is what the frame uses to
+                        reach the backend.
+                      </>
+                    }
+                  >
+                    <TextInput name="server_host" placeholder="localhost" required />
+                  </Field>
+                  <Field
+                    name="server_port"
+                    label="Backend port"
+                    tooltip="The port the backend server is running on. Everything ending in 443 is assumed to be HTTPS."
+                  >
+                    <TextInput name="server_port" placeholder="8989" required />
+                  </Field>
+                  <Field
+                    name="server_api_key"
+                    label={<div>Backend API key</div>}
+                    labelRight={
+                      <Button
+                        color="secondary"
+                        size="small"
+                        onClick={() => {
+                          setFrameFormValues({ server_api_key: secureToken(32) })
+                          touchFrameFormField('server_api_key')
+                        }}
+                      >
+                        Regenerate
+                      </Button>
+                    }
+                    tooltip="This key is used by the frame to access the backend server's API. For example to send logs. It should be kept secret."
+                  >
+                    <TextInput
+                      name="server_api_key"
+                      onClick={() => touchFrameFormField('server_api_key')}
+                      type={frameFormTouches.server_api_key ? 'text' : 'password'}
+                      placeholder=""
+                      required
+                    />
+                  </Field>
+                  <Field
+                    name="server_send_logs"
+                    label="Send logs to backend"
+                    tooltip="When disabled, the frame will not upload logs to the backend API."
+                  >
+                    {({ value, onChange }) => (
+                      <Switch name="server_send_logs" value={value ?? true} onChange={onChange} fullWidth />
+                    )}
+                  </Field>
+                </div>
+              </>
+            ) : null}
+
+            <H6 id="frame-http-api-section">
+              HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field
+                name="frame_port"
+                label="HTTP port on frame"
+                tooltip={
+                  <div className="space-y-2">
+                    <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
+                    <p>
+                      {isEmbeddedMode
+                        ? 'ESP32 keeps HTTP available for provisioning and recovery. Enable HTTPS below for backend-to-frame traffic.'
+                        : 'Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure communication.'}
+                    </p>
+                  </div>
+                }
+              >
+                <TextInput name="frame_port" placeholder={isEmbeddedMode ? '80' : '8787'} required />
+              </Field>
+              {!isEmbeddedMode ? (
+                <>
+                  <Field
+                    name="frame_access"
+                    label="HTTP access level"
+                    tooltip={
+                      <div className="space-y-2">
+                        <p>
+                          <strong>Private (default):</strong> You need a key to both view and administer the frame.
+                        </p>
+                        <p>
+                          <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key
+                          to administer content.
+                        </p>
+                        <p>
+                          <strong>Public:</strong> Everyone can view or administer the frame without a key.
+                        </p>
+                      </div>
+                    }
+                  >
+                    <Select
+                      name="frame_access"
+                      options={[
+                        { value: 'private', label: 'Private (key needed to view and administer)' },
+                        { value: 'protected', label: 'Protected (no key needed to view, key needed to administer)' },
+                        { value: 'public', label: 'Public (no key needed to view or administer)' },
+                      ]}
+                    />
+                  </Field>
+                  <Field
+                    name="frame_access_key"
+                    label={<div>HTTP access key</div>}
+                    labelRight={
+                      <Button
+                        color="secondary"
+                        size="small"
+                        onClick={() => {
+                          setFrameFormValues({ frame_access_key: secureToken(20) })
+                          touchFrameFormField('frame_access_key')
+                        }}
+                      >
+                        Regenerate
+                      </Button>
+                    }
+                    tooltip="This key is used when communicating with the frame over HTTP."
+                  >
+                    <TextInput
+                      name="frame_access_key"
+                      onClick={() => touchFrameFormField('frame_access_key')}
+                      type={frameFormTouches.frame_access_key ? 'text' : 'password'}
+                      placeholder=""
+                      required
+                    />
+                  </Field>
+                </>
+              ) : null}
+            </div>
+
+            <>
+              <H6 id="frame-settings-admin">{isEmbeddedMode ? 'Frame setup access' : 'Frame admin panel (BETA)'}</H6>
+              <p className="pl-2 @md:pl-8 text-sm text-gray-500">
+                {isEmbeddedMode ? (
+                  <>
+                    Protects the ESP32 setup and control URL on normal Wi-Fi. Hotspot provisioning stays open so a new
+                    device can be configured.
+                  </>
+                ) : (
+                  <>
+                    Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is
+                    still in beta: you can't save any changes.{' '}
+                  </>
+                )}
+              </p>
+              <div className="pl-2 @md:pl-8 space-y-2">
+                {embeddedAdminAuthMissing ? (
+                  <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                    <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
+                    <div>
+                      Set an admin username and password before deploying ESP32 firmware. Without it, the on-frame setup
+                      URL is locked outside hotspot mode.
+                    </div>
+                  </div>
+                ) : null}
+                <Field
+                  name="frame_admin_auth.enabled"
+                  label={isEmbeddedMode ? 'Require username/password' : 'Admin panel enabled'}
+                  labelRight={
+                    !isEmbeddedMode && adminUrl ? (
+                      <A
+                        href={adminUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="frameos-link text-sm hover:underline"
+                      >
+                        Open
+                      </A>
+                    ) : (
+                      <></>
+                    )
+                  }
+                >
+                  <Switch />
+                </Field>
+                {frameForm.frame_admin_auth?.enabled ? (
+                  <>
+                    <Field name="frame_admin_auth.user" label="Username">
+                      <TextInput />
+                    </Field>
+                    <Field
+                      name="frame_admin_auth.pass"
+                      label="Password"
+                      labelRight={
+                        <Button color="secondary" size="small" onClick={() => generateFrameAdminCredentials()}>
+                          Generate
+                        </Button>
+                      }
+                    >
+                      <TextInput
+                        onClick={() => touchFrameFormField('frame_admin_auth.pass')}
+                        type={frameFormTouches['frame_admin_auth.pass'] ? 'text' : 'password'}
+                        placeholder=""
+                        required
+                      />
+                    </Field>
+                  </>
+                ) : null}
+              </div>
+            </>
+
+            <H6 id="frame-http-proxy-section">
+              {isEmbeddedMode ? 'HTTPS on frame' : 'HTTPS proxy'}{' '}
+              <span className="text-gray-500">(backend &#8594; frame)</span>
+            </H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field
+                name="https_proxy.enable"
+                label={isEmbeddedMode ? 'Native HTTPS API' : 'HTTPS proxy via Caddy'}
+                tooltip={
+                  isEmbeddedMode
+                    ? 'Serve the ESP32 frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. Requires a frame-specific firmware build after changing certificates.'
+                    : 'Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this.'
+                }
+              >
+                {({ value, onChange }) => (
+                  <Switch
+                    name="https_proxy.enable"
+                    value={value}
+                    onChange={(enableTls) => {
+                      if (enableTls) {
+                        verifyTlsCertificates()
+                      }
+                      onChange(enableTls)
+                    }}
+                    fullWidth
+                  />
+                )}
+              </Field>
+              {tlsEnabled ? (
+                <>
+                  <Field
+                    name="https_proxy.port"
+                    label="HTTPS port"
+                    tooltip={
+                      <div className="space-y-2">
+                        <p>
+                          {isEmbeddedMode
+                            ? 'The port the ESP32 HTTPS server listens on.'
+                            : 'The port Caddy listens on for HTTPS connections.'}
+                        </p>
+                        <p>It's best if this ends with *443.</p>
+                      </div>
+                    }
+                  >
+                    <NumberTextInput name="https_proxy.port" placeholder="8443" />
+                  </Field>
+                  {!isEmbeddedMode ? (
+                    <Field
+                      name="https_proxy.expose_only_port"
+                      label="Expose only HTTPS port"
+                      tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
+                    >
+                      <Switch name="https_proxy.expose_only_port" fullWidth />
+                    </Field>
+                  ) : null}
+                  <Field
+                    name="https_proxy.certs.client_ca"
+                    label="HTTPS backend CA certificate"
+                    labelRight={
+                      <Button color="secondary" size="small" onClick={() => generateTlsCertificates()}>
+                        Regenerate
+                      </Button>
+                    }
+                    tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
+                    secret={
+                      !frameFormTouches['https_proxy.certs.client_ca'] && !!frameForm.https_proxy?.certs?.client_ca
+                    }
+                    hint={getCertificateHint(
+                      'Root CA certificate',
+                      frameForm.https_proxy?.client_ca_cert_not_valid_after ??
+                        frame.https_proxy?.client_ca_cert_not_valid_after
+                    )}
+                  >
+                    <TextArea name="https_proxy.certs.client_ca" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+                  </Field>
+                  <Field
+                    name="https_proxy.certs.server"
+                    label="HTTPS frame certificate"
+                    tooltip={
+                      isEmbeddedMode
+                        ? 'PEM certificate baked into the ESP32 firmware for native HTTPS on this frame.'
+                        : 'PEM certificate used by Caddy for HTTPS on this frame.'
+                    }
+                    secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
+                    hint={getCertificateHint(
+                      'Server certificate',
+                      frameForm.https_proxy?.server_cert_not_valid_after ??
+                        frame.https_proxy?.server_cert_not_valid_after
+                    )}
+                  >
+                    <TextArea name="https_proxy.certs.server" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
+                  </Field>
+
+                  <Field
+                    name="https_proxy.certs.server_key"
+                    label={<div>HTTPS frame private key</div>}
+                    tooltip={
+                      isEmbeddedMode
+                        ? 'PEM private key baked into the ESP32 firmware for native HTTPS on this frame. Keep this secret.'
+                        : 'PEM private key used by Caddy for HTTPS on this frame. Keep this secret.'
+                    }
+                    secret={
+                      !frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key
+                    }
+                  >
+                    <TextArea
+                      name="https_proxy.certs.server_key"
+                      rows={4}
+                      placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                    />
+                  </Field>
+                </>
+              ) : null}
+            </div>
+
+            <H6 id="frame-settings-network">Network</H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Group name="network">
+                {showWifiCredentials ? (
+                  <>
+                    <Field name="wifiSSID" label="WiFi network">
+                      <TextInput name="wifiSSID" placeholder="Home WiFi" autoComplete="off" />
+                    </Field>
+                    <Field
+                      name="wifiPassword"
+                      label="WiFi password"
+                      secret={!frameFormTouches['network.wifiPassword'] && !!frameForm.network?.wifiPassword}
+                    >
+                      <TextInput
+                        name="wifiPassword"
+                        type={frameFormTouches['network.wifiPassword'] ? 'text' : 'password'}
+                        placeholder="Network password"
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                  </>
+                ) : null}
+                <Field name="networkCheck" label="Wait for network before rendering">
+                  <Switch name="networkCheck" fullWidth />
+                </Field>
+                {frameForm.network?.networkCheck && (
+                  <>
+                    <Field name="networkCheckUrl" label="Network check URL">
+                      {({ onChange, value }) => (
+                        <TextInput
+                          name="networkCheckUrl"
+                          placeholder="https://networkcheck.frameos.net/"
+                          onChange={onChange}
+                          value={value ?? 'https://networkcheck.frameos.net/'}
+                        />
+                      )}
+                    </Field>
+                    <Field name="networkCheckTimeoutSeconds" label="Network check timeout in seconds">
+                      {({ onChange, value }) => (
+                        <NumberTextInput
+                          name="networkCheckTimeoutSeconds"
+                          placeholder="30"
+                          onChange={onChange}
+                          value={value ?? 30}
+                        />
+                      )}
+                    </Field>
+                    {!isEmbeddedMode ? (
+                      <>
+                        <Field
+                          name="wifiHotspot"
+                          label="Wifi Hotspot Setup"
+                          tooltip={
+                            <div className="space-y-2">
+                              <p>
+                                When your frame can't connect to the internet on boot, it can spin up its own wifi
+                                access point that you can connect to. This is useful for setting up a frame in a new
+                                location.
+                              </p>
+                              <p>
+                                Just connect to 'FrameOS-Setup' with the password 'frame1234', open http://10.42.0.1/
+                                and enter your wifi credentials. The hotspot will only be active for 10 minutes by
+                                default.
+                              </p>
+                            </div>
                           }
-                          tooltip="This key is used as part of the handshake when communicating with the frame over websockets."
                         >
-                          <TextInput
-                            name="agentSharedSecret"
-                            onClick={() => touchFrameFormField('agent.agentSharedSecret')}
-                            type={frameFormTouches['agent.agentSharedSecret'] ? 'text' : 'password'}
-                            placeholder=""
-                            required
+                          <Select
+                            options={[
+                              { value: 'disabled', label: 'Disabled' },
+                              { value: 'bootOnly', label: 'Enabled on boot if no network connection' },
+                            ]}
+                          />
+                        </Field>
+                        {frameForm.network?.wifiHotspot === 'bootOnly' && (
+                          <>
+                            <Field name="wifiHotspotSsid" label="Wifi Hotspot SSID">
+                              {({ onChange, value }) => (
+                                <TextInput
+                                  name="wifiHotspotSsid"
+                                  placeholder="FrameOS-Setup"
+                                  onChange={onChange}
+                                  value={value ?? 'FrameOS-Setup'}
+                                />
+                              )}
+                            </Field>
+                            <Field name="wifiHotspotPassword" label="Wifi Hotspot Password">
+                              {({ onChange, value }) => (
+                                <TextInput
+                                  name="wifiHotspotPassword"
+                                  placeholder="frame1234"
+                                  onChange={onChange}
+                                  value={value ?? 'frame1234'}
+                                />
+                              )}
+                            </Field>
+                            <Field
+                              name="wifiHotspotTimeoutSeconds"
+                              label="Wifi Hotspot Timeout in seconds"
+                              tooltip="How long to keep the hotspot active after boot. After this timeout it won't turn on again without a reboot."
+                            >
+                              {({ onChange, value }) => (
+                                <NumberTextInput
+                                  name="wifiHotspotTimeoutSeconds"
+                                  placeholder="300"
+                                  onChange={onChange}
+                                  value={value ?? 300}
+                                />
+                              )}
+                            </Field>
+                          </>
+                        )}
+                      </>
+                    ) : null}
+                  </>
+                )}
+              </Group>
+            </div>
+
+            {!isEmbeddedMode ? (
+              <>
+                <H6 id="frame-settings-mountpoints" className="flex items-center gap-2">
+                  Mountpoints
+                  <Button size="small" color="secondary" onClick={addMountpoint} className="flex items-center gap-1">
+                    <PlusIcon className="w-4 h-4" />
+                    Add mountpoint
+                  </Button>
+                </H6>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  <Group name="mountpoints">
+                    <Field
+                      name="enabled"
+                      label="Samba mounts"
+                      tooltip="FrameOS installs CIFS support, manages its fstab block, and mounts these shares during setup."
+                    >
+                      <Switch name="enabled" fullWidth />
+                    </Field>
+                    {frameForm.mountpoints?.enabled ? (
+                      <div className="space-y-4">
+                        {mountpointItems.length === 0 ? (
+                          <div className="text-sm text-gray-500">No mountpoints configured.</div>
+                        ) : null}
+                        {mountpointItems.map((mountpoint, index) => (
+                          <Group key={index} name={`items.${index}`}>
+                            <div className="space-y-2 border-l border-gray-700 pl-3">
+                              <Field
+                                name="source"
+                                label="SMB share"
+                                labelRight={
+                                  <Button
+                                    color="secondary"
+                                    size="small"
+                                    className="flex items-center gap-1"
+                                    onClick={() => removeMountpoint(index)}
+                                  >
+                                    <TrashIcon className="w-4 h-4" />
+                                    Remove
+                                  </Button>
+                                }
+                              >
+                                <TextInput name="source" placeholder="//server/share" />
+                              </Field>
+                              <Field name="target" label="Mount path">
+                                <TextInput name="target" placeholder="/mnt/share" />
+                              </Field>
+                              <Field name="enabled" label="Enabled">
+                                {({ value, onChange }) => (
+                                  <Switch value={value !== false} onChange={onChange} fullWidth />
+                                )}
+                              </Field>
+                              <Field name="username" label="Username">
+                                <TextInput name="username" placeholder="guest" />
+                              </Field>
+                              <Field name="password" label="Password">
+                                <TextInput
+                                  name="password"
+                                  onClick={() => touchFrameFormField(`mountpoints.items.${index}.password`)}
+                                  type={frameFormTouches[`mountpoints.items.${index}.password`] ? 'text' : 'password'}
+                                  placeholder="guest access if empty"
+                                />
+                              </Field>
+                              <Field name="domain" label="Domain">
+                                <TextInput name="domain" placeholder="optional" />
+                              </Field>
+                              <Field
+                                name="options"
+                                label="Options"
+                                tooltip="Additional comma-separated mount.cifs options."
+                              >
+                                <TextInput name="options" placeholder="vers=3.0,uid=pi,gid=pi" />
+                              </Field>
+                            </div>
+                          </Group>
+                        ))}
+                      </div>
+                    ) : null}
+                  </Group>
+                </div>
+              </>
+            ) : null}
+
+            <H6 id="frame-settings-defaults">Defaults</H6>
+            <div className="pl-2 @md:pl-8 space-y-2">
+              <Field name="width" label="Width">
+                <TextInput name="width" placeholder="1920" />
+              </Field>
+              <Field name="height" label="Height">
+                <TextInput name="height" placeholder="1080" />
+              </Field>
+              <Field
+                name="interval"
+                label="Default refresh interval in seconds for new scenes"
+                tooltip={
+                  <>
+                    How often do we trigger a refresh, in seconds. Pass a large number like "60" or even more for e-ink
+                    frames. A number below 1 activates realtime mode (0.041s = 24fps, 0.016s = 60fps). This should be
+                    used when you're certain of your setup and only if your hardware supports it.
+                  </>
+                }
+              >
+                <TextInput name="interval" placeholder="300" />
+              </Field>
+              {metricsIntervalField}
+              {timezoneUpdaterFields}
+              {maxHttpResponseBytesField}
+              <Field name="scaling_mode" label="Scaling mode">
+                <Select
+                  name="scaling_mode"
+                  options={[
+                    { value: 'contain', label: 'Contain' },
+                    { value: 'cover', label: 'Cover' },
+                    { value: 'stretch', label: 'Stretch' },
+                    { value: 'center', label: 'Center' },
+                  ]}
+                />
+              </Field>
+            </div>
+
+            <H6 id="frame-settings-error-behavior">Global errors</H6>
+            <div className="pl-2 @md:pl-8 space-y-3">{errorBehaviorFields}</div>
+
+            <H6 id="frame-settings-palette">Palette</H6>
+            {palette ? (
+              <div className="pl-2 @md:pl-8 space-y-2">{paletteField}</div>
+            ) : (
+              <div>This frame does not support changing the palette</div>
+            )}
+
+            <H6 id="frame-settings-qr">QR Control Code</H6>
+            <div className="pl-2 @md:pl-8 space-y-2">{controlCodeFields}</div>
+            {!isEmbeddedMode ? (
+              <>
+                <H6 id="frame-settings-assets">Assets</H6>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  <Field
+                    name="assets_path"
+                    label={<div>Assets path</div>}
+                    labelRight={
+                      !isBuildrootMode ? (
+                        <Button
+                          color="secondary"
+                          size="small"
+                          onClick={() => {
+                            setFrameFormValues({ assets_path: '/srv/assets' })
+                            touchFrameFormField('assets_path')
+                          }}
+                        >
+                          Set default
+                        </Button>
+                      ) : undefined
+                    }
+                    tooltip="Path on frame where to store assets like images, videos, and custom fonts."
+                  >
+                    {({ value, onChange }) => (
+                      <TextInput
+                        name="assets_path"
+                        value={isBuildrootMode ? '/srv/assets' : value ?? ''}
+                        onChange={onChange}
+                        onClick={() => touchFrameFormField('assets_path')}
+                        type="text"
+                        placeholder="/srv/assets"
+                        disabled={isBuildrootMode}
+                        required
+                      />
+                    )}
+                  </Field>
+                  {saveAssetsField}
+                  {!inFrameAdminMode && !hideForCloud ? (
+                    <Field
+                      name="upload_fonts"
+                      label="Upload fonts"
+                      tooltip="When deploying a frame, FrameOS uploads fonts to /srv/assets/fonts. You can disable this here"
+                    >
+                      <Select
+                        name="upload_fonts"
+                        options={[
+                          { value: '', label: 'All' },
+                          { value: 'none', label: 'None' },
+                        ]}
+                      />
+                    </Field>
+                  ) : null}
+                </div>
+                <H6 id="frame-settings-logs">Logs</H6>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  <Field
+                    name="log_to_file"
+                    label={<div>Save logs to file</div>}
+                    labelRight={
+                      <Button
+                        color="secondary"
+                        size="small"
+                        onClick={() => {
+                          setFrameFormValues({ log_to_file: '/srv/frameos/logs/frame-{date}.log' })
+                          touchFrameFormField('log_to_file')
+                        }}
+                      >
+                        Set default
+                      </Button>
+                    }
+                    tooltip="This is disabled by default to save the SD card from wear. This is ALSO disabled because there is no log rotation, so the file will grow indefinitely. Use with caution. The string {date} will be replaced with the current date."
+                  >
+                    <TextInput
+                      name="log_to_file"
+                      onClick={() => touchFrameFormField('log_to_file')}
+                      type="text"
+                      placeholder="e.g. /srv/frameos/logs/frame-{date}.log"
+                      required
+                    />
+                  </Field>
+                </div>
+                <H6 id="frame-settings-reboot">Reboot</H6>
+                <div className="pl-2 @md:pl-8 space-y-2">
+                  <Group name="reboot">
+                    <Field name="enabled" label="Automatic reboot">
+                      <Select
+                        name="enabled"
+                        options={[
+                          { value: 'false', label: 'Disabled' },
+                          { value: 'true', label: 'Enabled' },
+                        ]}
+                      />
+                    </Field>
+                    {String(frameForm.reboot?.enabled) === 'true' && (
+                      <>
+                        <Field name="crontab" label="Reboot time">
+                          <Select
+                            name="crontab"
+                            options={[...Array(24).keys()].map((hour) => ({
+                              value: `0 ${hour} * * *`,
+                              label: `${hour.toString().padStart(2, '0')}:00`,
+                            }))}
+                          />
+                        </Field>
+                        <Field name="type" label="What to reboot">
+                          <Select
+                            name="type"
+                            options={[
+                              { value: 'frameos', label: 'FrameOS' },
+                              { value: 'raspberry', label: 'System reboot' },
+                            ]}
                           />
                         </Field>
                       </>
@@ -3316,700 +4082,7 @@ export function FrameSettings({
                 </div>
               </>
             ) : null}
-          </>
-        ) : null}
-
-        {/* "frame -> backend" reporting: a cloud frame talks only to the hub,
-            so the section is absent there (and so is its nav anchor — see
-            allowedFrameSettingsSections in workspaceSurfaces.ts). */}
-        {showBackendSection ? (
-          <>
-            <H6 id="frame-settings-backend" className="mt-2">
-              Backend access <span className="text-gray-500">(frame &#8594; backend)</span>
-            </H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Field
-                name="server_host"
-                label="Backend host"
-                tooltip={
-                  <>
-                    The public host of your FrameOS backend server (this webserver). This is what the frame uses to
-                    reach the backend.
-                  </>
-                }
-              >
-                <TextInput name="server_host" placeholder="localhost" required />
-              </Field>
-              <Field
-                name="server_port"
-                label="Backend port"
-                tooltip="The port the backend server is running on. Everything ending in 443 is assumed to be HTTPS."
-              >
-                <TextInput name="server_port" placeholder="8989" required />
-              </Field>
-              <Field
-                name="server_api_key"
-                label={<div>Backend API key</div>}
-                labelRight={
-                  <Button
-                    color="secondary"
-                    size="small"
-                    onClick={() => {
-                      setFrameFormValues({ server_api_key: secureToken(32) })
-                      touchFrameFormField('server_api_key')
-                    }}
-                  >
-                    Regenerate
-                  </Button>
-                }
-                tooltip="This key is used by the frame to access the backend server's API. For example to send logs. It should be kept secret."
-              >
-                <TextInput
-                  name="server_api_key"
-                  onClick={() => touchFrameFormField('server_api_key')}
-                  type={frameFormTouches.server_api_key ? 'text' : 'password'}
-                  placeholder=""
-                  required
-                />
-              </Field>
-              <Field
-                name="server_send_logs"
-                label="Send logs to backend"
-                tooltip="When disabled, the frame will not upload logs to the backend API."
-              >
-                {({ value, onChange }) => (
-                  <Switch name="server_send_logs" value={value ?? true} onChange={onChange} fullWidth />
-                )}
-              </Field>
-            </div>
-          </>
-        ) : null}
-
-        <H6 id="frame-http-api-section">
-          HTTP API on frame <span className="text-gray-500">(backend &#8594; frame)</span>
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Field
-            name="frame_port"
-            label="HTTP port on frame"
-            tooltip={
-              <div className="space-y-2">
-                <p>The port on which the frame accepts HTTP API requests and serves a simple control interface.</p>
-                <p>
-                  {isEmbeddedMode
-                    ? 'ESP32 keeps HTTP available for provisioning and recovery. Enable HTTPS below for backend-to-frame traffic.'
-                    : 'Traffic on this port is UNSECURED! Please also enable the HTTPS proxy service for secure communication.'}
-                </p>
-              </div>
-            }
-          >
-            <TextInput name="frame_port" placeholder={isEmbeddedMode ? '80' : '8787'} required />
-          </Field>
-          {!isEmbeddedMode ? (
-            <>
-              <Field
-                name="frame_access"
-                label="HTTP access level"
-                tooltip={
-                  <div className="space-y-2">
-                    <p>
-                      <strong>Private (default):</strong> You need a key to both view and administer the frame.
-                    </p>
-                    <p>
-                      <strong>Protected:</strong> Everyone can view the frame's image, but you need the access key to
-                      administer content.
-                    </p>
-                    <p>
-                      <strong>Public:</strong> Everyone can view or administer the frame without a key.
-                    </p>
-                  </div>
-                }
-              >
-                <Select
-                  name="frame_access"
-                  options={[
-                    { value: 'private', label: 'Private (key needed to view and administer)' },
-                    { value: 'protected', label: 'Protected (no key needed to view, key needed to administer)' },
-                    { value: 'public', label: 'Public (no key needed to view or administer)' },
-                  ]}
-                />
-              </Field>
-              <Field
-                name="frame_access_key"
-                label={<div>HTTP access key</div>}
-                labelRight={
-                  <Button
-                    color="secondary"
-                    size="small"
-                    onClick={() => {
-                      setFrameFormValues({ frame_access_key: secureToken(20) })
-                      touchFrameFormField('frame_access_key')
-                    }}
-                  >
-                    Regenerate
-                  </Button>
-                }
-                tooltip="This key is used when communicating with the frame over HTTP."
-              >
-                <TextInput
-                  name="frame_access_key"
-                  onClick={() => touchFrameFormField('frame_access_key')}
-                  type={frameFormTouches.frame_access_key ? 'text' : 'password'}
-                  placeholder=""
-                  required
-                />
-              </Field>
-            </>
-          ) : null}
-        </div>
-
-        <>
-          <H6 id="frame-settings-admin">{isEmbeddedMode ? 'Frame setup access' : 'Frame admin panel (BETA)'}</H6>
-          <p className="pl-2 @md:pl-8 text-sm text-gray-500">
-            {isEmbeddedMode ? (
-              <>
-                Protects the ESP32 setup and control URL on normal Wi-Fi. Hotspot provisioning stays open so a new
-                device can be configured.
-              </>
-            ) : (
-              <>
-                Hosted on the frame at <code>/admin</code>, similar to the interface you&apos;re using now. This is
-                still in beta: you can't save any changes.{' '}
-              </>
-            )}
-          </p>
-          <div className="pl-2 @md:pl-8 space-y-2">
-            {embeddedAdminAuthMissing ? (
-              <div className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 flex-none" />
-                <div>
-                  Set an admin username and password before deploying ESP32 firmware. Without it, the on-frame setup URL
-                  is locked outside hotspot mode.
-                </div>
-              </div>
-            ) : null}
-            <Field
-              name="frame_admin_auth.enabled"
-              label={isEmbeddedMode ? 'Require username/password' : 'Admin panel enabled'}
-              labelRight={
-                !isEmbeddedMode && adminUrl ? (
-                  <A
-                    href={adminUrl}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="frameos-link text-sm hover:underline"
-                  >
-                    Open
-                  </A>
-                ) : (
-                  <></>
-                )
-              }
-            >
-              <Switch />
-            </Field>
-            {frameForm.frame_admin_auth?.enabled ? (
-              <>
-                <Field name="frame_admin_auth.user" label="Username">
-                  <TextInput />
-                </Field>
-                <Field
-                  name="frame_admin_auth.pass"
-                  label="Password"
-                  labelRight={
-                    <Button color="secondary" size="small" onClick={() => generateFrameAdminCredentials()}>
-                      Generate
-                    </Button>
-                  }
-                >
-                  <TextInput
-                    onClick={() => touchFrameFormField('frame_admin_auth.pass')}
-                    type={frameFormTouches['frame_admin_auth.pass'] ? 'text' : 'password'}
-                    placeholder=""
-                    required
-                  />
-                </Field>
-              </>
-            ) : null}
-          </div>
-        </>
-
-        <H6 id="frame-http-proxy-section">
-          {isEmbeddedMode ? 'HTTPS on frame' : 'HTTPS proxy'}{' '}
-          <span className="text-gray-500">(backend &#8594; frame)</span>
-        </H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Field
-            name="https_proxy.enable"
-            label={isEmbeddedMode ? 'Native HTTPS API' : 'HTTPS proxy via Caddy'}
-            tooltip={
-              isEmbeddedMode
-                ? 'Serve the ESP32 frame API over HTTPS with the same per-frame certificate material used by other FrameOS frames. Requires a frame-specific firmware build after changing certificates.'
-                : 'Enable Caddy as a local HTTPS proxy for the FrameOS HTTP API. You may need to do a full deploy if this is your first time enabling this.'
-            }
-          >
-            {({ value, onChange }) => (
-              <Switch
-                name="https_proxy.enable"
-                value={value}
-                onChange={(enableTls) => {
-                  if (enableTls) {
-                    verifyTlsCertificates()
-                  }
-                  onChange(enableTls)
-                }}
-                fullWidth
-              />
-            )}
-          </Field>
-          {tlsEnabled ? (
-            <>
-              <Field
-                name="https_proxy.port"
-                label="HTTPS port"
-                tooltip={
-                  <div className="space-y-2">
-                    <p>
-                      {isEmbeddedMode
-                        ? 'The port the ESP32 HTTPS server listens on.'
-                        : 'The port Caddy listens on for HTTPS connections.'}
-                    </p>
-                    <p>It's best if this ends with *443.</p>
-                  </div>
-                }
-              >
-                <NumberTextInput name="https_proxy.port" placeholder="8443" />
-              </Field>
-              {!isEmbeddedMode ? (
-                <Field
-                  name="https_proxy.expose_only_port"
-                  label="Expose only HTTPS port"
-                  tooltip="Bind the HTTP port to 127.0.0.1 so only the HTTPS proxy is accessible externally."
-                >
-                  <Switch name="https_proxy.expose_only_port" fullWidth />
-                </Field>
-              ) : null}
-              <Field
-                name="https_proxy.certs.client_ca"
-                label="HTTPS backend CA certificate"
-                labelRight={
-                  <Button color="secondary" size="small" onClick={() => generateTlsCertificates()}>
-                    Regenerate
-                  </Button>
-                }
-                tooltip="Used by the backend to validate HTTPS connections to this frame when TLS is enabled."
-                secret={!frameFormTouches['https_proxy.certs.client_ca'] && !!frameForm.https_proxy?.certs?.client_ca}
-                hint={getCertificateHint(
-                  'Root CA certificate',
-                  frameForm.https_proxy?.client_ca_cert_not_valid_after ??
-                    frame.https_proxy?.client_ca_cert_not_valid_after
-                )}
-              >
-                <TextArea name="https_proxy.certs.client_ca" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
-              </Field>
-              <Field
-                name="https_proxy.certs.server"
-                label="HTTPS frame certificate"
-                tooltip={
-                  isEmbeddedMode
-                    ? 'PEM certificate baked into the ESP32 firmware for native HTTPS on this frame.'
-                    : 'PEM certificate used by Caddy for HTTPS on this frame.'
-                }
-                secret={!frameFormTouches['https_proxy.certs.server'] && !!frameForm.https_proxy?.certs?.server}
-                hint={getCertificateHint(
-                  'Server certificate',
-                  frameForm.https_proxy?.server_cert_not_valid_after ?? frame.https_proxy?.server_cert_not_valid_after
-                )}
-              >
-                <TextArea name="https_proxy.certs.server" rows={4} placeholder="-----BEGIN CERTIFICATE-----" />
-              </Field>
-
-              <Field
-                name="https_proxy.certs.server_key"
-                label={<div>HTTPS frame private key</div>}
-                tooltip={
-                  isEmbeddedMode
-                    ? 'PEM private key baked into the ESP32 firmware for native HTTPS on this frame. Keep this secret.'
-                    : 'PEM private key used by Caddy for HTTPS on this frame. Keep this secret.'
-                }
-                secret={!frameFormTouches['https_proxy.certs.server_key'] && !!frameForm.https_proxy?.certs?.server_key}
-              >
-                <TextArea name="https_proxy.certs.server_key" rows={4} placeholder="-----BEGIN RSA PRIVATE KEY-----" />
-              </Field>
-            </>
-          ) : null}
-        </div>
-
-        <H6 id="frame-settings-network">Network</H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Group name="network">
-            {showWifiCredentials ? (
-              <>
-                <Field name="wifiSSID" label="WiFi network">
-                  <TextInput name="wifiSSID" placeholder="Home WiFi" autoComplete="off" />
-                </Field>
-                <Field
-                  name="wifiPassword"
-                  label="WiFi password"
-                  secret={!frameFormTouches['network.wifiPassword'] && !!frameForm.network?.wifiPassword}
-                >
-                  <TextInput
-                    name="wifiPassword"
-                    type={frameFormTouches['network.wifiPassword'] ? 'text' : 'password'}
-                    placeholder="Network password"
-                    autoComplete="new-password"
-                  />
-                </Field>
-              </>
-            ) : null}
-            <Field name="networkCheck" label="Wait for network before rendering">
-              <Switch name="networkCheck" fullWidth />
-            </Field>
-            {frameForm.network?.networkCheck && (
-              <>
-                <Field name="networkCheckUrl" label="Network check URL">
-                  {({ onChange, value }) => (
-                    <TextInput
-                      name="networkCheckUrl"
-                      placeholder="https://networkcheck.frameos.net/"
-                      onChange={onChange}
-                      value={value ?? 'https://networkcheck.frameos.net/'}
-                    />
-                  )}
-                </Field>
-                <Field name="networkCheckTimeoutSeconds" label="Network check timeout in seconds">
-                  {({ onChange, value }) => (
-                    <NumberTextInput
-                      name="networkCheckTimeoutSeconds"
-                      placeholder="30"
-                      onChange={onChange}
-                      value={value ?? 30}
-                    />
-                  )}
-                </Field>
-                {!isEmbeddedMode ? (
-                  <>
-                    <Field
-                      name="wifiHotspot"
-                      label="Wifi Hotspot Setup"
-                      tooltip={
-                        <div className="space-y-2">
-                          <p>
-                            When your frame can't connect to the internet on boot, it can spin up its own wifi access
-                            point that you can connect to. This is useful for setting up a frame in a new location.
-                          </p>
-                          <p>
-                            Just connect to 'FrameOS-Setup' with the password 'frame1234', open http://10.42.0.1/ and
-                            enter your wifi credentials. The hotspot will only be active for 10 minutes by default.
-                          </p>
-                        </div>
-                      }
-                    >
-                      <Select
-                        options={[
-                          { value: 'disabled', label: 'Disabled' },
-                          { value: 'bootOnly', label: 'Enabled on boot if no network connection' },
-                        ]}
-                      />
-                    </Field>
-                    {frameForm.network?.wifiHotspot === 'bootOnly' && (
-                      <>
-                        <Field name="wifiHotspotSsid" label="Wifi Hotspot SSID">
-                          {({ onChange, value }) => (
-                            <TextInput
-                              name="wifiHotspotSsid"
-                              placeholder="FrameOS-Setup"
-                              onChange={onChange}
-                              value={value ?? 'FrameOS-Setup'}
-                            />
-                          )}
-                        </Field>
-                        <Field name="wifiHotspotPassword" label="Wifi Hotspot Password">
-                          {({ onChange, value }) => (
-                            <TextInput
-                              name="wifiHotspotPassword"
-                              placeholder="frame1234"
-                              onChange={onChange}
-                              value={value ?? 'frame1234'}
-                            />
-                          )}
-                        </Field>
-                        <Field
-                          name="wifiHotspotTimeoutSeconds"
-                          label="Wifi Hotspot Timeout in seconds"
-                          tooltip="How long to keep the hotspot active after boot. After this timeout it won't turn on again without a reboot."
-                        >
-                          {({ onChange, value }) => (
-                            <NumberTextInput
-                              name="wifiHotspotTimeoutSeconds"
-                              placeholder="300"
-                              onChange={onChange}
-                              value={value ?? 300}
-                            />
-                          )}
-                        </Field>
-                      </>
-                    )}
-                  </>
-                ) : null}
-              </>
-            )}
-          </Group>
-        </div>
-
-        {!isEmbeddedMode ? (
-          <>
-            <H6 id="frame-settings-mountpoints" className="flex items-center gap-2">
-              Mountpoints
-              <Button size="small" color="secondary" onClick={addMountpoint} className="flex items-center gap-1">
-                <PlusIcon className="w-4 h-4" />
-                Add mountpoint
-              </Button>
-            </H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Group name="mountpoints">
-                <Field
-                  name="enabled"
-                  label="Samba mounts"
-                  tooltip="FrameOS installs CIFS support, manages its fstab block, and mounts these shares during setup."
-                >
-                  <Switch name="enabled" fullWidth />
-                </Field>
-                {frameForm.mountpoints?.enabled ? (
-                  <div className="space-y-4">
-                    {mountpointItems.length === 0 ? (
-                      <div className="text-sm text-gray-500">No mountpoints configured.</div>
-                    ) : null}
-                    {mountpointItems.map((mountpoint, index) => (
-                      <Group key={index} name={`items.${index}`}>
-                        <div className="space-y-2 border-l border-gray-700 pl-3">
-                          <Field
-                            name="source"
-                            label="SMB share"
-                            labelRight={
-                              <Button
-                                color="secondary"
-                                size="small"
-                                className="flex items-center gap-1"
-                                onClick={() => removeMountpoint(index)}
-                              >
-                                <TrashIcon className="w-4 h-4" />
-                                Remove
-                              </Button>
-                            }
-                          >
-                            <TextInput name="source" placeholder="//server/share" />
-                          </Field>
-                          <Field name="target" label="Mount path">
-                            <TextInput name="target" placeholder="/mnt/share" />
-                          </Field>
-                          <Field name="enabled" label="Enabled">
-                            {({ value, onChange }) => <Switch value={value !== false} onChange={onChange} fullWidth />}
-                          </Field>
-                          <Field name="username" label="Username">
-                            <TextInput name="username" placeholder="guest" />
-                          </Field>
-                          <Field name="password" label="Password">
-                            <TextInput
-                              name="password"
-                              onClick={() => touchFrameFormField(`mountpoints.items.${index}.password`)}
-                              type={frameFormTouches[`mountpoints.items.${index}.password`] ? 'text' : 'password'}
-                              placeholder="guest access if empty"
-                            />
-                          </Field>
-                          <Field name="domain" label="Domain">
-                            <TextInput name="domain" placeholder="optional" />
-                          </Field>
-                          <Field
-                            name="options"
-                            label="Options"
-                            tooltip="Additional comma-separated mount.cifs options."
-                          >
-                            <TextInput name="options" placeholder="vers=3.0,uid=pi,gid=pi" />
-                          </Field>
-                        </div>
-                      </Group>
-                    ))}
-                  </div>
-                ) : null}
-              </Group>
-            </div>
-          </>
-        ) : null}
-
-        <H6 id="frame-settings-defaults">Defaults</H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          <Field name="width" label="Width">
-            <TextInput name="width" placeholder="1920" />
-          </Field>
-          <Field name="height" label="Height">
-            <TextInput name="height" placeholder="1080" />
-          </Field>
-          <Field
-            name="interval"
-            label="Default refresh interval in seconds for new scenes"
-            tooltip={
-              <>
-                How often do we trigger a refresh, in seconds. Pass a large number like "60" or even more for e-ink
-                frames. A number below 1 activates realtime mode (0.041s = 24fps, 0.016s = 60fps). This should be used
-                when you're certain of your setup and only if your hardware supports it.
-              </>
-            }
-          >
-            <TextInput name="interval" placeholder="300" />
-          </Field>
-          {metricsIntervalField}
-          {timezoneUpdaterFields}
-          {maxHttpResponseBytesField}
-          <Field name="scaling_mode" label="Scaling mode">
-            <Select
-              name="scaling_mode"
-              options={[
-                { value: 'contain', label: 'Contain' },
-                { value: 'cover', label: 'Cover' },
-                { value: 'stretch', label: 'Stretch' },
-                { value: 'center', label: 'Center' },
-              ]}
-            />
-          </Field>
-        </div>
-
-        <H6 id="frame-settings-error-behavior">Global errors</H6>
-        <div className="pl-2 @md:pl-8 space-y-3">
-          {errorBehaviorFields}
-        </div>
-
-        <H6 id="frame-settings-palette">Palette</H6>
-        {palette ? (
-          <div className="pl-2 @md:pl-8 space-y-2">{paletteField}</div>
-        ) : (
-          <div>This frame does not support changing the palette</div>
-        )}
-
-        <H6 id="frame-settings-qr">QR Control Code</H6>
-        <div className="pl-2 @md:pl-8 space-y-2">
-          {controlCodeFields}
-        </div>
-        {!isEmbeddedMode ? (
-          <>
-            <H6 id="frame-settings-assets">Assets</H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Field
-                name="assets_path"
-                label={<div>Assets path</div>}
-                labelRight={
-                  !isBuildrootMode ? (
-                    <Button
-                      color="secondary"
-                      size="small"
-                      onClick={() => {
-                        setFrameFormValues({ assets_path: '/srv/assets' })
-                        touchFrameFormField('assets_path')
-                      }}
-                    >
-                      Set default
-                    </Button>
-                  ) : undefined
-                }
-                tooltip="Path on frame where to store assets like images, videos, and custom fonts."
-              >
-                {({ value, onChange }) => (
-                  <TextInput
-                    name="assets_path"
-                    value={isBuildrootMode ? '/srv/assets' : value ?? ''}
-                    onChange={onChange}
-                    onClick={() => touchFrameFormField('assets_path')}
-                    type="text"
-                    placeholder="/srv/assets"
-                    disabled={isBuildrootMode}
-                    required
-                  />
-                )}
-              </Field>
-              {saveAssetsField}
-              {!inFrameAdminMode && !hideForCloud ? (
-                <Field
-                  name="upload_fonts"
-                  label="Upload fonts"
-                  tooltip="When deploying a frame, FrameOS uploads fonts to /srv/assets/fonts. You can disable this here"
-                >
-                  <Select
-                    name="upload_fonts"
-                    options={[
-                      { value: '', label: 'All' },
-                      { value: 'none', label: 'None' },
-                    ]}
-                  />
-                </Field>
-              ) : null}
-            </div>
-            <H6 id="frame-settings-logs">Logs</H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Field
-                name="log_to_file"
-                label={<div>Save logs to file</div>}
-                labelRight={
-                  <Button
-                    color="secondary"
-                    size="small"
-                    onClick={() => {
-                      setFrameFormValues({ log_to_file: '/srv/frameos/logs/frame-{date}.log' })
-                      touchFrameFormField('log_to_file')
-                    }}
-                  >
-                    Set default
-                  </Button>
-                }
-                tooltip="This is disabled by default to save the SD card from wear. This is ALSO disabled because there is no log rotation, so the file will grow indefinitely. Use with caution. The string {date} will be replaced with the current date."
-              >
-                <TextInput
-                  name="log_to_file"
-                  onClick={() => touchFrameFormField('log_to_file')}
-                  type="text"
-                  placeholder="e.g. /srv/frameos/logs/frame-{date}.log"
-                  required
-                />
-              </Field>
-            </div>
-            <H6 id="frame-settings-reboot">Reboot</H6>
-            <div className="pl-2 @md:pl-8 space-y-2">
-              <Group name="reboot">
-                <Field name="enabled" label="Automatic reboot">
-                  <Select
-                    name="enabled"
-                    options={[
-                      { value: 'false', label: 'Disabled' },
-                      { value: 'true', label: 'Enabled' },
-                    ]}
-                  />
-                </Field>
-                {String(frameForm.reboot?.enabled) === 'true' && (
-                  <>
-                    <Field name="crontab" label="Reboot time">
-                      <Select
-                        name="crontab"
-                        options={[...Array(24).keys()].map((hour) => ({
-                          value: `0 ${hour} * * *`,
-                          label: `${hour.toString().padStart(2, '0')}:00`,
-                        }))}
-                      />
-                    </Field>
-                    <Field name="type" label="What to reboot">
-                      <Select
-                        name="type"
-                        options={[
-                          { value: 'frameos', label: 'FrameOS' },
-                          { value: 'raspberry', label: 'System reboot' },
-                        ]}
-                      />
-                    </Field>
-                  </>
-                )}
-              </Group>
-            </div>
-          </>
-        ) : null}
-        {gpioButtonsSection}
+            {gpioButtonsSection}
           </>
         ) : null}
       </Form>

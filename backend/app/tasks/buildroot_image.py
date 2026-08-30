@@ -29,6 +29,7 @@ from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import (
     COMPILATION_MODE_PRECOMPILED,
     frame_compilation_mode,
+    frame_legacy_source_build,
     normalize_compilation_mode,
 )
 from app.models.assets import Assets
@@ -1015,7 +1016,12 @@ async def refresh_buildroot_sd_image_status(
 
 
 def can_use_precompiled_buildroot_sd_image(frame: Frame) -> bool:
-    return frame_compilation_mode(frame) == COMPILATION_MODE_PRECOMPILED and frame_compiled_scene_count(frame) == 0
+    # With the legacy source-build door shut the release binary is the only
+    # option, compiled scenes or not; with it open, compiled scenes still
+    # force a source build of the image.
+    if frame_compilation_mode(frame) != COMPILATION_MODE_PRECOMPILED:
+        return False
+    return not frame_legacy_source_build(frame) or frame_compiled_scene_count(frame) == 0
 
 
 def buildroot_sd_image_no_build_environment_message(requirement: str) -> str:

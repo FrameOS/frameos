@@ -56,14 +56,15 @@ The FrameOS backend is where you set up your frames. You can run it continuously
 Read more in [the documentation](https://frameos.net/guide/backend).
 
 **Compiled scenes are deprecated.** FrameOS ships as released binaries and a
-deploy never compiles anything — unless a scene is still on the legacy
-_compiled_ path (Nim code nodes or Nim app sources), which forces a full source
-build on every deploy. Convert such scenes to interpreted scenes at
+deploy never compiles anything. A scene still on the legacy _compiled_ path
+(Nim code nodes or Nim app sources) does not run on that binary: convert it to
+an interpreted scene at
 [scenes.frameos.net/nim-converter](https://scenes.frameos.net/nim-converter)
-(or with the CLI in `cloud/packages/scene-convert`; see
-`docs/nim-to-js-conversion.md`). The source-build path stays available behind
-"Advanced: legacy source builds" in Settings until one release after the
-converter ships, then goes away.
+(or in the editor, or with the CLI in `cloud/packages/scene-convert`; see
+`docs/nim-to-js-conversion.md`). A per-frame "legacy source build" switch
+still exists for frames that need the old whole-frame build in the meantime —
+`docs/legacy-source-builds.md` — and goes away one release after the
+converter shipped (2026-08-30).
 
 ### Quick install
 
@@ -87,9 +88,9 @@ docker run -d -p 8989:8989 \
     frameos/frameos
 
 # SD card image generation works in the default container without Docker privileges.
-# If you want to speed up source builds with cross-compilation, enable Docker access.
-# This lets FrameOS spin up containers for the various build environments.
-# Alternatively, skip this, and configure a remote build server, or build on devices directly.
+# Deploys install released binaries and never compile, so the plain container above
+# is all a normal install needs. The variant below additionally hands the backend the
+# Docker socket for the deprecated per-frame source build (docs/legacy-source-builds.md).
 SECRET_KEY=$(openssl rand -base64 32)
 mkdir -p db
 mkdir -p /tmp/frameos-cross

@@ -41,12 +41,45 @@ def normalize_compilation_mode(value: str | None) -> str:
     return normalized
 
 
-def frame_compilation_mode(frame) -> str:
+# The one door to a per-frame Nim build (docs/convergence-todo.md, Stage 4).
+# Off by default: a frame installs the released binary and its compiled
+# scenes simply do not run (the deploy plan says so). On — set by the
+# 2026-08-30 migration for every frame that had a compiled scene or an
+# explicit `static` mode, or by hand in the advanced frame settings — the
+# stored `compilationMode` applies and compiled scenes force a `static`
+# build, exactly as before. Slated for removal with the compiler (Stage 5).
+LEGACY_SOURCE_BUILD_KEY = "legacySourceBuild"
+
+
+def _frame_mode_settings(frame) -> dict:
     if getattr(frame, "mode", None) == "buildroot":
-        buildroot_settings = getattr(frame, "buildroot", None) or {}
-        return normalize_compilation_mode(buildroot_settings.get("compilationMode"))
-    rpios_settings = getattr(frame, "rpios", None) or {}
-    return normalize_compilation_mode(rpios_settings.get("compilationMode"))
+        return getattr(frame, "buildroot", None) or {}
+    return getattr(frame, "rpios", None) or {}
+
+
+def frame_legacy_source_build(frame) -> bool:
+    """True when the operator opened the legacy source-build door for this frame."""
+    value = _frame_mode_settings(frame).get(LEGACY_SOURCE_BUILD_KEY)
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on"}
+    return bool(value)
+
+
+def stored_compilation_mode(frame) -> str:
+    """The frame's `compilationMode` as stored (normalized), door or no door."""
+    return normalize_compilation_mode(_frame_mode_settings(frame).get("compilationMode"))
+
+
+def frame_compilation_mode(frame) -> str:
+    """The compilation mode a deploy will actually use.
+
+    `precompiled` unless the legacy source-build door is open; only then does
+    the stored value (`static`, or `precompiled` with the compiled-scene
+    fallback) count.
+    """
+    if not frame_legacy_source_build(frame):
+        return COMPILATION_MODE_PRECOMPILED
+    return stored_compilation_mode(frame)
 
 
 def compilation_mode_uses_shared_drivers(value: str | None) -> bool:

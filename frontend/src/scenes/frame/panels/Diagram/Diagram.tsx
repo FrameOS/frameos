@@ -43,6 +43,7 @@ import { NewNodePicker } from './NewNodePicker'
 import { CANVAS_NODE_ID, getNewFieldName, newNodePickerLogic } from './newNodePickerLogic'
 import { scenesLogic } from '../Scenes/scenesLogic'
 import { CompiledSceneTag } from '../Scenes/CompiledSceneTag'
+import { frameLegacySourceBuild } from '../../../../utils/frameBuildOptions'
 import { controlLogic } from '../Scenes/controlLogic'
 import { livePreviewLogic } from '../Scenes/livePreviewLogic'
 import { LivePreviewModal } from '../Scenes/LivePreviewModal'
@@ -263,7 +264,7 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const selectionDragGuardActive = useRef(false)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
-  const { frameId } = useValues(frameLogic)
+  const { frameId, frame } = useValues(frameLogic)
   const { theme } = useValues(workspaceLogic)
   const updateNodeInternals = useUpdateNodeInternals()
   const flowStore = useStoreApi()
@@ -571,7 +572,7 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
           />
           {isCompiledScene ? (
             <div className="absolute top-3 left-2 z-10">
-              <CompiledSceneTag />
+              <CompiledSceneTag legacySourceBuild={frameLegacySourceBuild(frame)} />
             </div>
           ) : null}
           {showToolbar ? (
