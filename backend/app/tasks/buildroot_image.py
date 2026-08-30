@@ -720,6 +720,34 @@ def stage_buildroot_resolved_dropin(root: Path) -> None:
     os.chmod(path, 0o644)
 
 
+BUILDROOT_NETWORK_SERVICE_DROPIN_PATH = "/etc/systemd/system/network.service.d/10-frameos.conf"
+BUILDROOT_NETWORK_SERVICE_DROPIN = """# FrameOS: no phantom "Network Connectivity" failure on Wi-Fi-only boards.
+#
+# BR2_SYSTEM_DHCP="eth0" makes Buildroot's ifupdown network.service run
+# `ifup -a` over an /etc/network/interfaces that lists eth0. Boards without
+# an Ethernet port (Pi Zero W, Zero 2 W) have no eth0, so the unit failed on
+# every boot and `systemctl --failed` put "network.service ... Network
+# Connectivity" into the post-boot snapshot. Wi-Fi is managed by
+# NetworkManager or frameos's wpa_supplicant backend - this unit plays no
+# part in it - but that red line reads exactly like the reason a frame has
+# no internet, and sent a real debugging session (2026-08-30, Pi Zero W)
+# chasing it. Skip ifup when there is no eth0; run it for real when there
+# is one (Pi 1 B/B+ share the armv6 image and do use it).
+[Service]
+ExecStart=
+ExecStart=/bin/sh -c 'if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifup -a; fi'
+ExecStop=
+ExecStop=/bin/sh -c 'if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifdown -a; fi'
+"""
+
+
+def stage_buildroot_network_service_dropin(root: Path) -> None:
+    path = root / BUILDROOT_NETWORK_SERVICE_DROPIN_PATH.lstrip("/")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(BUILDROOT_NETWORK_SERVICE_DROPIN, encoding="utf-8")
+    os.chmod(path, 0o644)
+
+
 def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[str, bool]:
     lines = content.splitlines()
     changed = False
@@ -1698,6 +1726,7 @@ class BuildrootImageBuilder:
             directory.mkdir(parents=True, exist_ok=True)
         stage_buildroot_network_manager_state(overlay_dir)
         stage_buildroot_resolved_dropin(overlay_dir)
+        stage_buildroot_network_service_dropin(overlay_dir)
         stage_postboot_log(overlay_dir)
 
         if not frameos_build.binary_path:
@@ -2618,6 +2647,15 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         compose_dir.mkdir(parents=True, exist_ok=True)
         stage_buildroot_frameos_service(service_root, self.platform.uses_network_manager)
         stage_postboot_log(service_root)
+        # These drop-ins shipped inside the base rootfs long after many cached
+        # base images were built. An SD composed from an old base without them
+        # boots with DNSSEC validation on — every lookup fails "no-signature"
+        # against routers that answer DO-flagged queries without RRSIGs, so the
+        # frame has Wi-Fi and a route but resolves nothing (Pi Zero W,
+        # 2026-08-30) — and with a red "Network Connectivity" systemd unit
+        # that derails the diagnosis. Refresh them here like the units above.
+        stage_buildroot_resolved_dropin(service_root)
+        stage_buildroot_network_service_dropin(service_root)
         (service_root / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
         # Refresh the first-boot setup script/unit and fstab on the root
         # partition so images composed from older cached base images pick up

@@ -45,6 +45,8 @@ from app.tasks.buildroot_image import (
     precompiled_buildroot_sd_image_release_url,
     render_buildroot_frameos_service,
     stage_buildroot_frameos_service,
+    stage_buildroot_network_service_dropin,
+    stage_buildroot_resolved_dropin,
     render_expand_sd_card_script,
     render_expand_sd_card_service,
     render_post_build_script,
@@ -1852,8 +1854,20 @@ async def test_partition_patches_stay_local_when_this_host_has_the_tools(tmp_pat
     async def fake_log(*_args, **_kwargs):
         return None
 
+    staged_dropins: dict[str, str] = {}
+
     async def fake_run_local(command, **_kwargs):
         local_commands.append(command)
+        # The compose dir is rmtree'd when _patch_root_partition returns, so
+        # capture what was staged while the patch script would still see it.
+        service_root = output_image.parent / f".{output_image.stem}-root-patch" / "root-service"
+        for dropin in (
+            "etc/systemd/resolved.conf.d/10-frameos.conf",
+            "etc/systemd/system/network.service.d/10-frameos.conf",
+        ):
+            path = service_root / dropin
+            if path.is_file():
+                staged_dropins[dropin] = path.read_text(encoding="utf-8")
         return 0, "", ""
 
     monkeypatch.setattr(builder, "_log", fake_log)
@@ -1876,6 +1890,35 @@ async def test_partition_patches_stay_local_when_this_host_has_the_tools(tmp_pat
     # container mount point that only exists on the build host.
     assert str(output_image.parent) in local_commands[0]
     assert str(output_image.parent) in local_commands[1]
+
+    # The patch path is how cached base images built before these drop-ins
+    # existed pick them up: without the refresh a composed SD boots with
+    # DNSSEC validation on (every lookup fails "no-signature" behind consumer
+    # routers) and a phantom failed "Network Connectivity" unit on Wi-Fi-only
+    # boards.
+    assert "[Resolve]\nDNSSEC=no\n" in staged_dropins["etc/systemd/resolved.conf.d/10-frameos.conf"]
+    assert "/sys/class/net/eth0" in staged_dropins["etc/systemd/system/network.service.d/10-frameos.conf"]
+
+
+def test_stage_buildroot_network_service_dropin(tmp_path):
+    stage_buildroot_network_service_dropin(tmp_path)
+
+    dropin = tmp_path / "etc" / "systemd" / "system" / "network.service.d" / "10-frameos.conf"
+    text = dropin.read_text(encoding="utf-8")
+    # Buildroot's ifupdown unit runs `ifup -a` over an interfaces file that
+    # lists eth0; boards without an Ethernet port must not fail the unit,
+    # while boards with one (Pi 1 B/B+) must still really run ifup.
+    assert "[Service]\n" in text
+    assert "ExecStart=\n" in text
+    assert "if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifup -a; fi" in text
+    assert "if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifdown -a; fi" in text
+
+
+def test_stage_buildroot_resolved_dropin(tmp_path):
+    stage_buildroot_resolved_dropin(tmp_path)
+
+    dropin = tmp_path / "etc" / "systemd" / "resolved.conf.d" / "10-frameos.conf"
+    assert "[Resolve]\nDNSSEC=no\n" in dropin.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
