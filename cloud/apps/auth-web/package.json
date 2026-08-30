@@ -21,6 +21,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc --noEmit",
     "ai:eval": "tsx evals/run.ts",
+    "ai:eval:models": "tsx evals/compare-models.ts",
     "ai:build-scenes": "tsx evals/build-todo-scenes.ts",
     "ai:realign": "tsx evals/realign-scenes.ts",
     "ai:refresh-previews": "tsx evals/refresh-previews.ts"

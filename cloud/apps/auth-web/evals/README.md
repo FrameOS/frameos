@@ -26,6 +26,8 @@ pnpm --filter @frameos-cloud/auth-web ai:eval                 # everything
 pnpm --filter @frameos-cloud/auth-web ai:eval --filter modify # by tag
 pnpm --filter @frameos-cloud/auth-web ai:eval --only create-word-clock --no-judge
 pnpm --filter @frameos-cloud/auth-web ai:eval --compare evals/results/<older>/report.json
+pnpm --filter @frameos-cloud/auth-web ai:eval:models             # QUICK_SET × default models
+pnpm --filter @frameos-cloud/auth-web ai:eval:models --models gpt-5.6-terra,gpt-5.6-luna --all
 pnpm --filter @frameos-cloud/auth-web ai:render weather --out /tmp/weather.png
 pnpm --filter @frameos-cloud/auth-web ai:build-scenes --filter S --limit 5
 ```
@@ -51,6 +53,13 @@ moved.
   → render → judge → design-review turns until the score clears `--min-score`
   (default 4) or attempts run out, then publishes each as a private store
   scene with the render as preview.
+
+`ai:eval:models` runs the same cases against several models (default:
+gpt-5.5 vs the three gpt-5.6 tiers) with the judge pinned to one model, and
+writes `evals/results/models-<runId>/compare.md` — a metric × model table
+with estimated cost — plus a full per-model report each. It defaults to
+`QUICK_SET` (9 cases, one per capability) to keep a 4-model run affordable;
+`--all` runs the whole suite.
 
 ## Reading a report
 
