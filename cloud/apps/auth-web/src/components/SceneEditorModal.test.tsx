@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sceneDraftKey, writeSceneDraft } from "../lib/scene-draft";
 import { singlePanelFor } from "../lib/scene-views";
 import {
   PANELS_STORAGE_KEY,
@@ -1570,5 +1571,89 @@ describe("SceneEditorModal single-panel mode", () => {
     expect(singlePanelFor(set(["editor", "ai"]), null)).toBe("editor");
     expect(singlePanelFor(set(["ai"]), null)).toBe("ai");
     expect(singlePanelFor(set([]), null)).toBeNull();
+  });
+});
+
+describe("SceneEditorModal draft persistence", () => {
+  function storedDraft() {
+    const raw = window.localStorage.getItem(sceneDraftKey("scene-1"));
+    return raw
+      ? (JSON.parse(raw) as { baseVersion: number | null; images: string[]; scenes: { name: string }[] })
+      : null;
+  }
+
+  it("persists edits to localStorage and restores them on the next visit, with a Discard", async () => {
+    const { unmount } = render(<SceneEditorModal canSave info={info} sceneId="scene-1" versions={versions} />);
+    await screen.findByTestId("editor");
+    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
+    fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
+    // The draft lands after the debounce, stamped with the loaded version.
+    await waitFor(() => expect(storedDraft()).not.toBeNull());
+    expect(storedDraft()).toMatchObject({ baseVersion: 2, scenes: [{ id: "s1", name: "Edited" }] });
+    unmount();
+
+    // The next visit picks the draft up: the editor opens on the edited
+    // scenes, unsaved, with the restored pill and its Discard.
+    render(<SceneEditorModal canSave info={info} sceneId="scene-1" versions={versions} />);
+    const editor = await screen.findByTestId("editor");
+    expect(editor.dataset.scenes).toBe(JSON.stringify([{ id: "s1", name: "Edited" }]));
+    expect(screen.getByText("Restored unsaved edits")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Save as new version" }) as HTMLButtonElement).disabled).toBe(false);
+
+    // Discard: back to the published scenes, the draft gone, the pill gone.
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(confirm).toHaveBeenCalledWith("Discard your unsaved changes and reload the published version?");
+    await waitFor(() => expect(screen.getByTestId("editor").dataset.scenes).toBe(JSON.stringify(loadedScenes)));
+    expect(storedDraft()).toBeNull();
+    expect(screen.queryByText("Restored unsaved edits")).toBeNull();
+  });
+
+  it("leaves a draft made on another version alone, loading clean", async () => {
+    writeSceneDraft("scene-1", {
+      baseVersion: 1,
+      images: [],
+      listing: { category: null, description: null, frameosVersion: null, tags: [] },
+      savedAt: new Date().toISOString(),
+      scenes: [{ id: "s1", name: "Edited on v1" }],
+    });
+    render(<SceneEditorModal canSave info={info} sceneId="scene-1" versions={versions} />);
+    const editor = await screen.findByTestId("editor");
+    expect(editor.dataset.scenes).toBe(JSON.stringify(loadedScenes));
+    expect(screen.queryByText("Restored unsaved edits")).toBeNull();
+    // Kept for its own version.
+    expect(storedDraft()).toMatchObject({ baseVersion: 1 });
+  });
+
+  it("flushes an edit still inside the debounce window when the workspace unmounts", async () => {
+    const { unmount } = render(<SceneEditorModal canSave info={info} sceneId="scene-1" versions={versions} />);
+    await screen.findByTestId("editor");
+    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
+    fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
+    unmount();
+    expect(storedDraft()).toMatchObject({ scenes: [{ id: "s1", name: "Edited" }] });
+  });
+
+  it("clears the draft when a save publishes it", async () => {
+    render(<SceneEditorModal canSave info={info} sceneId="scene-1" versions={versions} />);
+    await screen.findByTestId("editor");
+    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
+    fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
+    await waitFor(() => expect(storedDraft()).not.toBeNull());
+    await saveVersion("Bigger clock");
+    await waitFor(() => expect(screen.queryByText("Unsaved changes")).toBeNull());
+    expect(storedDraft()).toBeNull();
+  });
+
+  it("clears the draft when a version load discards the edits", async () => {
+    render(<SceneEditorModal canSave info={info} sceneId="scene-1" versions={versions} />);
+    await screen.findByTestId("editor");
+    fireEvent.click(screen.getByRole("button", { name: "emit echo" }));
+    fireEvent.click(screen.getByRole("button", { name: "emit edit" }));
+    await waitFor(() => expect(storedDraft()).not.toBeNull());
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.change(versionSelect(), { target: { value: "1" } });
+    await waitFor(() => expect(screen.getByTestId("editor").dataset.scenes).toBe(JSON.stringify(v1Scenes)));
+    expect(storedDraft()).toBeNull();
   });
 });

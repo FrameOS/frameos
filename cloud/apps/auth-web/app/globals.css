@@ -2651,6 +2651,18 @@ a.stat-tile:hover {
   white-space: nowrap;
 }
 
+/* The restored-draft pill's Discard: a link-style button inside the pill. */
+.editor-modal__discard {
+  margin-left: 6px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* The bar's version dropdown, right after the panel toggles. */
 .editor-modal__version-select.input {
   flex: 0 1 auto;
