@@ -82,6 +82,20 @@ class FrameBinaryPlan:
     will_attempt_precompiled: bool = False
     precompiled_release_url: str | None = None
     precompiled_skip_reason: str | None = None
+    compiled_scene_count: int = 0
+
+    @property
+    def build_kind(self) -> str:
+        """`precompiled` (release tarball), `cross` (server-side source build) or `on_device`.
+
+        Recorded in `last_successful_deploy` so "how many frames still get a
+        source build" is one query (docs/legacy-source-builds.md).
+        """
+        if self.will_attempt_precompiled:
+            return "precompiled"
+        if self.will_attempt_cross_compile:
+            return "cross"
+        return "on_device"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -105,6 +119,8 @@ class FrameBinaryPlan:
             "will_attempt_precompiled": self.will_attempt_precompiled,
             "precompiled_release_url": self.precompiled_release_url,
             "precompiled_skip_reason": self.precompiled_skip_reason,
+            "compiled_scene_count": self.compiled_scene_count,
+            "build_kind": self.build_kind,
         }
 
 
@@ -200,6 +216,7 @@ class FrameBinaryBuilder:
             compilation_mode or frame_compilation_mode(self.frame)
         )
         resolved_compilation_mode = requested_compilation_mode
+        compiled_scene_count = frame_compiled_scene_count(self.frame)
         prebuilt_entry, prebuilt_target = await resolve_prebuilt_entry(
             distro=target.distro,
             distro_version=target.version,
@@ -213,7 +230,6 @@ class FrameBinaryBuilder:
             resolved_compilation_mode = COMPILATION_MODE_STATIC
             precompiled_skip_reason = "cross compilation is required"
         elif requested_compilation_mode == COMPILATION_MODE_PRECOMPILED:
-            compiled_scene_count = frame_compiled_scene_count(self.frame)
             precompiled_url = precompiled_frameos_release_url(prebuilt_target or "")
             if compiled_scene_count > 0:
                 precompiled_skip_reason = (
@@ -262,6 +278,7 @@ class FrameBinaryBuilder:
             will_attempt_precompiled=will_attempt_precompiled,
             precompiled_release_url=precompiled_url,
             precompiled_skip_reason=precompiled_skip_reason,
+            compiled_scene_count=compiled_scene_count,
         )
 
     async def build(

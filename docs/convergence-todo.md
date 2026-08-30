@@ -455,7 +455,9 @@ plan refuses.
   `scenes:convert` link scope for backends, detached jobs with a progress
   stream (a scene with many apps can outlive one request), nginx's
   `proxy_read_timeout` checked against the 300 s.
-- [ ] **MCP tool** `scene_convert` in `packages/mcp` (same body).
+- [x] **MCP tool** `scene_convert` in `packages/mcp` (2026-08-30, Stage 4
+  branch): `{scene_id | scenes, version?, dry_run?, openai_api_key?,
+  render?}` → the route's reply verbatim; save with `scene_update_content`.
 - [x] **On scenes.frameos.net**: shipped as `app/nim-converter/page.tsx`
   (public, not under `my-scenes`): drop or paste JSON, one button, the
   report, "Open in the editor" (the result, unsaved, in `/my-scenes/new`
@@ -483,17 +485,21 @@ plan refuses.
 
 ### 3d. Fix the model's view of the runtime first
 
-- [ ] `scripts/generate-ai-context.mjs` and `frontend/src/utils/
-  appTypeDeclarations.ts`: add `httpRequest`, the asset and stream calls,
-  `getSetting`, `app.state`, `context.imageWidth/imageHeight` to the
-  declarations; regenerate `ai-context.json`. Without this every port that
-  fetches or reads an asset fails the type check.
-- [ ] `docs/js-apps-and-code-nodes.md`: the `app.state` correction; the
-  reserved code-node names; the "render-category scene apps draw nothing"
-  rule stated as a rule, not a note.
-- [ ] `docs/nim-to-js-conversion.md`: the two mapping tables above are
-  maintained *there* and loaded into the prompt at build time — one source,
-  like `docs/cloud-frames-contract.json` is for the verbs.
+**Shipped 2026-08-30 (Stage 4 branch).**
+
+- [x] `scripts/generate-ai-context.mjs` and `frontend/src/utils/
+  appTypeDeclarations.ts` declare the whole bridge: `httpRequest`, the
+  eight asset calls, the seven stream calls (`FrameOSStreamRef`),
+  `getSetting`; `app.state` and `context.imageWidth/imageHeight` were
+  already there. `ai-context.json` regenerated; `context.test.ts` pins the
+  names. The two copies are still kept in step by hand.
+- [x] `docs/js-apps-and-code-nodes.md`: `app.state` was corrected in
+  Stage 1; the reserved code-node argument names and the full helper list
+  are in now; "render-category scene apps draw nothing" is stated as a
+  rule ("Do **not**…").
+- [x] `docs/nim-to-js-conversion.md` carries the mapping tables;
+  `prompt.test.ts` in the package fails when `prompt.ts` and the doc
+  disagree — one source, checked rather than loaded at build time.
 
 ### 3e. Fixtures and exit criteria
 
@@ -509,43 +515,55 @@ plan refuses.
   original and accepts the converted scene; the CLI produces the same
   output as the route for the same input and key.
 
-## Stage 4 — Binaries by default, source builds behind a door
+## Stage 4 — Binaries by default, source builds documented and off the PR path
 
-Goal: after this stage the backend compiles Nim only when a user with a
-compiled scene explicitly asks for the legacy path, and never for a fresh
-frame. Nothing is deleted yet.
+Goal: nothing new; make the holding pattern explicit. The default was
+already the binary: a fresh frame of any kind never compiles, and the only
+ways to a source build are a compiled scene (which needs a confirm to
+create and warns everywhere) or the `static` installation mode chosen by
+hand. Both keep working until Stage 5. Nothing is deleted yet.
 
-- [ ] `binary_builder.py:212-246`: when `compiled_scene_count > 0` the plan
-  no longer silently resolves to `STATIC`. It resolves to **precompiled
-  with a warning** ("N compiled scenes will not run — convert them, or
-  enable the legacy source build for this frame") unless the frame has
-  `<mode>.legacySourceBuild = true` (new key on `rpios` / `buildroot`, off
-  by default, only visible in the advanced section). Existing frames that
-  have compiled scenes get the key set to `true` by a migration so nothing
-  breaks on upgrade; the Stage 2 chip tells them it is on.
-- [ ] Buildroot (`frame_deploy_workflow.py:727-756`): same key gates
-  `force_cross_compile`; with the key off, a Buildroot frame is always
-  precompiled — which is what every SD-image frame already is.
-- [ ] `frame_bootstrap.py:191, 452` (the curl installer): keep installing the
-  release; the "compiled scene(s) still require a full deploy" line points
-  at the converter.
-- [ ] `frameos setup` / `scripts/frameos-setup.sh` and the HA add-on docs:
-  "install a release" is the only documented path; the from-source build
-  paragraph moves to `docs/legacy-source-builds.md` with the date.
-- [ ] CI: the per-frame compile paths (`frameos-cross.yml` driver-variant
-  builds, the `make cross-%` matrix) go behind `workflow_dispatch` — still
-  runnable, no longer on every PR. The release job, the cross-toolchain
-  image job and the driver-library build (they build *the* binary) stay on
-  PRs.
-- [ ] Telemetry: `deploy_finished` gains `build_kind: precompiled | static |
-  on_device`; the number of `static` builds per week is the metric this
-  whole plan is judged by. Target before Stage 5: zero for a full release
-  cycle, except frames with `legacySourceBuild`.
+**Shipped 2026-08-30 (branch `convergence-stage-4`, PR #421).** An
+earlier cut of this stage added a per-frame `legacySourceBuild` switch
+that made a compiled scene install the release and go dark, and made an
+explicit `static` inert; Marius pulled it the same evening ("no
+compilation anymore without removing the compilation code? seems silly;
+still allow static builds") — a path that exists should work when asked
+for. So:
 
-Exit: a fresh frame of any kind — Pi image, x86, Buildroot SD card, curl
-install, ESP32 — never triggers a Nim compile, with or without a build
-environment configured; `precompiled_skip_reason` is never "compiled scenes"
-for a frame without the legacy key.
+- [x] `binary_builder.py`: behaviour unchanged (compiled scenes under
+  `precompiled` → "N compiled scenes are configured" → `static`; explicit
+  `static` → `static`). The plan now carries `compiled_scene_count` and
+  `build_kind: precompiled | cross | on_device`.
+- [x] Buildroot: unchanged.
+- [x] `frame_bootstrap.py` (the curl installer): still installs the
+  release; the closing line says the compiled scenes will not run until a
+  full deploy, and points at the converter as the way to skip the build.
+- [x] `scripts/frameos-setup.sh` was already release-only; the README's
+  Docker-socket paragraph now says the plain container is all a normal
+  install needs and points at `docs/legacy-source-builds.md`, the one page
+  for the path. The HA add-on docs live in
+  `frameos/frameos-home-assistant-addon` — **not done here**, edit there.
+- [x] CI: `frameos-cross.yml` (both jobs are per-frame builds against the
+  checked-in `frame.json`) runs on pushes to `main` and on dispatch, not
+  on pull requests — main keeps a toolchain-regression net without a
+  compile per PR. The release (`docker-publish-multi.yml`) and the
+  toolchain image (`frameos-cross-toolchain.yml`) were never on PRs.
+  **Not moved:** `pull-request-tests.yml`'s `deploy-e2e` still compiles a
+  frame on the device and via docker on every PR — it is the test of the
+  legacy path itself; gate it when the path is deleted.
+- [x] Telemetry, corrected: there was no `deploy_finished` event and the
+  backend only reports to PostHog under two explicit opt-ins (error
+  tracking, LLM analytics), so no new event was added. Instead the full
+  deploy plan stamps `build_kind` into `frame_dict`, which lands in
+  `last_successful_deploy` (a fast deploy carries the previous value
+  forward). The metric: `SELECT count(*) FROM frame WHERE
+  last_successful_deploy->>'build_kind' <> 'precompiled'` on a backend.
+  Target before Stage 5: zero for a full release cycle.
+
+Exit: unchanged from before this stage and checked by the unit tests — a
+frame with only interpreted scenes plans `precompiled`; a compiled scene
+plans `static` with the skip reason; `build_kind` says which.
 
 ## Stage 5 — Delete the compiler (after the deprecation date)
 
@@ -553,6 +571,14 @@ Goal: the repo no longer contains a way to compile a scene or build a
 per-frame binary. Ordered so `main` stays releasable at every step. This
 stage does **not** touch SSH, the terminal, deploys, Remote, image
 builders, HA, virtual frames or thin clients.
+
+**Not before:** one release after 2026-08-30, and a full release cycle in
+which no backend reports a `build_kind` other than `precompiled`. Until
+then everything below stays put, hidden, warned about, and working. Still open from Stage 3 and worth
+doing while waiting, none of it blocking: `baselineImage`/`frameState` and
+the judge loop, detached conversion jobs, zip input on the converter page,
+`via: "cli"` and a server-side "Convert all" on the backend route, the
+`scenes:convert` link scope, nginx `proxy_read_timeout` vs the 300 s.
 
 - [ ] Data first: every scene with `settings.convertedFrom` loses its Nim
   siblings (`data.code`, `app.nim`, `config.nim`) in a backend migration;
@@ -564,7 +590,7 @@ builders, HA, virtual frames or thin clients.
   `binary_builder.py`'s source-build branch, `utils/cross_compile.py` (1,261),
   `build_executor.py`, `build_host.py`, `modal_sandbox.py`,
   `prebuilt_deps.py`, `utils/scene_execution.py`'s compiled half, the
-  `legacySourceBuild` key, `frames.py:2374-2385` `/scene_source`,
+  `frames.py` `/scene_source`,
   `apps.py:112-158` `validate_nim`, settings `buildHost` / `modalSandbox` /
   `buildEnvironment` / toolchain digests. `_frame_deployer.py:380-436`
   (codegen writes into the source tree) goes; the deployer copies a
@@ -583,8 +609,11 @@ builders, HA, virtual frames or thin clients.
   precompiled-skip logic, Settings' legacy build section, `NewFrame.tsx`'s
   `compilationMode`. `sceneRequiresCompilation` survives as a lint ("this
   scene carries Nim that nothing runs") on both planes.
-- [ ] Exit: `grep -rn "write_scene_nim\|compilationMode\|nim check\|
-  legacySourceBuild" backend frontend frameos` returns nothing outside
+- [ ] CI: `frameos-cross.yml` (per-frame builds) goes entirely; the
+  `deploy-e2e` compile phases in `pull-request-tests.yml` go with the path
+  they test. `docs/legacy-source-builds.md` is deleted with them.
+- [ ] Exit: `grep -rn "write_scene_nim\|compilationMode\|nim check"
+  backend frontend frameos` returns nothing outside
   `docs/`; CI has no job that compiles Nim on a user's behalf.
 
 ## Parked — decided later, not by this plan

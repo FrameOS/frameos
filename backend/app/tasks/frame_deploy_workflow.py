@@ -505,6 +505,11 @@ class FrameDeployWorkflow:
 
     async def plan(self, mode: str) -> FrameDeployPlan:
         frame_dict = self.frame.to_dict()
+        # A fast deploy leaves the installed binary alone, so the build kind
+        # of the last full deploy still describes it.
+        previous_deploy = getattr(self.frame, "last_successful_deploy", None)
+        if isinstance(previous_deploy, dict) and previous_deploy.get("build_kind"):
+            frame_dict["build_kind"] = previous_deploy["build_kind"]
         frame_dict.pop("last_successful_deploy", None)
         frame_dict.pop("last_successful_deploy_at", None)
         previous_frameos_version = (self.frame.last_successful_deploy or {}).get("frameos_version")
@@ -741,6 +746,9 @@ class FrameDeployWorkflow:
             allow_on_device_fallback=allow_on_device_fallback,
             compilation_mode=compilation_mode,
         )
+        # Lands in `last_successful_deploy`, so "which frames still get a
+        # source build" is one query (docs/legacy-source-builds.md).
+        frame_dict["build_kind"] = binary_plan.build_kind
         if is_buildroot and not binary_plan.will_attempt_precompiled:
             binary_plan.force_cross_compile = True
             if not binary_plan.cross_compile_supported:

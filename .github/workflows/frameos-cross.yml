@@ -13,7 +13,17 @@ on:
         required: false
         default: ""
         type: string
-  pull_request:
+  # Per-frame source builds are the legacy path (docs/convergence-todo.md,
+  # Stage 4; docs/legacy-source-builds.md): this workflow compiles a frame's
+  # checked-in frame.json against every target and five driver variants, which
+  # is exactly what the backend no longer does by default. It runs on merges
+  # to main so a toolchain regression still surfaces before a release, and on
+  # demand — no longer on every pull request. The release itself is built by
+  # docker-publish-multi.yml (`make release-%`), the toolchain image by
+  # frameos-cross-toolchain.yml.
+  push:
+    branches:
+      - main
     paths:
       - frameos/**
       - backend/app/codegen/release_drivers_nim.py
@@ -24,11 +34,11 @@ on:
       - backend/tools/cross-toolchain.Dockerfile
       - .github/workflows/frameos-cross.yml
 
-# Superseded runs on the same PR are cancelled; manual dispatches always run
-# to completion.
+# Superseded runs on the same branch are cancelled; manual dispatches always
+# run to completion.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   determine-matrix:

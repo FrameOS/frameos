@@ -80,6 +80,26 @@ describe("bundled AI context", () => {
     expect(jsTypeDeclarations()).toContain("FrameOSContext");
     expect(jsTypeDeclarations()).toContain("declare const frameos");
   });
+
+  it("declares the whole runtime bridge, not just the drawing half", () => {
+    // Every `frameos.*` the prelude in app_runtime.nim exposes. A port that
+    // fetches or touches assets fails the type check without these.
+    for (const name of [
+      "httpRequest(",
+      "listAssets(",
+      "readAsset(",
+      "writeAsset(",
+      "loadAssetImage(",
+      "openAssetStream(",
+      "streamRead(",
+      "getSetting(",
+      "setState(",
+    ]) {
+      expect(jsTypeDeclarations()).toContain(name);
+    }
+    expect(jsTypeDeclarations()).toContain("state: Record<string, any>");
+    expect(jsTypeDeclarations()).toContain("imageWidth?: number");
+  });
 });
 
 describe("buildSystemPrompt", () => {
