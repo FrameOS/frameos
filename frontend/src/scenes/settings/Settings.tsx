@@ -55,7 +55,7 @@ const allSettingsNavSections: readonly SettingsNavSection[] = [
     items: [
       ['Defaults', '#settings-defaults'],
       ['SSH Keys', '#settings-ssh'],
-      ['Build environment', '#settings-build-environment'],
+      ['Advanced: legacy source builds', '#settings-build-environment'],
       ['Custom fonts', '#settings-fonts'],
     ],
   },
@@ -359,8 +359,8 @@ function DockerDaemonStatus(): JSX.Element {
         {systemInfo?.docker?.daemonAvailable
           ? 'Docker daemon is reachable.'
           : systemInfo?.docker?.cliAvailable
-          ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
-          : 'Docker CLI is not installed.'}
+            ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
+            : 'Docker CLI is not installed.'}
       </p>
       <Button size="tiny" color="secondary" onClick={loadSystemInfo}>
         Recheck
@@ -421,6 +421,7 @@ export function Settings() {
   const defaultSshKeyIds = getDefaultSshKeyIds(settings?.ssh_keys)
   const buildEnvironmentProvider = settings?.buildEnvironment?.provider || (inHassioAddon() ? 'none' : 'docker')
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>(settingsNavItems[0][1])
+  const [showLegacySourceBuilds, setShowLegacySourceBuilds] = useState(false)
   const settingsNavLinkRefs = useRef<Record<string, HTMLAnchorElement | null>>({})
   const framesUsingKey = (keyId: string) =>
     framesList.filter((frame) => (frame.ssh_keys ?? defaultSshKeyIds).includes(keyId))
@@ -770,151 +771,170 @@ export function Settings() {
                       </Box>
                     </Group>
                     <H6 id="settings-build-environment" className="pt-4">
-                      Build environment
+                      Advanced: legacy source builds
                     </H6>
-                    <Box className="p-3 space-y-3">
-                      <p className="text-sm leading-loose">
-                        To compile FrameOS from source, we need access to a Linux shell where we can run commands
-                        through Docker. There are a few options for that.
-                      </p>
-                      <Group name="buildEnvironment">
-                        <Field name="provider" label="Build system">
-                          <Select
-                            options={[
-                              { value: 'none', label: 'Compile on device' },
-                              { value: 'docker', label: 'Docker (privileged mode)' },
-                              { value: 'buildHost', label: 'Build host via SSH' },
-                              { value: 'modal', label: 'Modal sandboxes' },
-                            ]}
-                          />
-                        </Field>
-                      </Group>
-                      {buildEnvironmentProvider === 'none' ? (
-                        <div className="frameos-inset flex items-start gap-2 rounded-lg border p-3 text-sm leading-loose">
-                          You can still use prebuilt images and binaries for quick deploys. FrameOS source
-                          cross-compilation on the backend is disabled. Raspberry Pi OS frames will compile custom code
-                          on device (might be very slow).
+                    {showLegacySourceBuilds ? (
+                      <Box className="p-3 space-y-3">
+                        <div className="app-compiled-warning rounded-xl p-3 text-sm leading-loose">
+                          FrameOS is distributed as released binaries; a normal deploy never compiles anything. A source
+                          build is only needed for <strong>legacy compiled scenes</strong> (Nim code nodes, Nim apps) —
+                          convert those to interpreted scenes at scenes.frameos.net/nim-converter and this section stops
+                          mattering.
                         </div>
-                      ) : null}
-                      {buildEnvironmentProvider === 'docker' ? (
-                        <div className="frameos-inset rounded-lg border p-3 text-sm leading-loose">
-                          <p>
-                            FrameOS will use Docker from the backend host. If this backend runs in a container, the
-                            container needs Docker CLI access and a reachable Docker daemon, usually by running
-                            privileged Docker-in-Docker or mounting the host Docker socket. See the{' '}
-                            <A
-                              href="https://github.com/FrameOS/frameos#running-via-docker-manually"
-                              target="_blank"
-                              className="frameos-link hover:underline"
-                            >
-                              readme
-                            </A>{' '}
-                            for details.
-                          </p>
-                          <DockerDaemonStatus />
-                        </div>
-                      ) : null}
-                      {buildEnvironmentProvider === 'buildHost' ? (
-                        <Group name="buildHost">
-                          <div className="space-y-2">
-                            <p className="text-sm leading-loose">
-                              Connect to a host over SSH. Install Docker and the Docker Buildx plugin on that host.
+                        <p className="text-sm leading-loose">
+                          To compile FrameOS from source, we need access to a Linux shell where we can run commands
+                          through Docker. There are a few options for that.
+                        </p>
+                        <Group name="buildEnvironment">
+                          <Field name="provider" label="Build system">
+                            <Select
+                              options={[
+                                { value: 'none', label: 'Compile on device' },
+                                { value: 'docker', label: 'Docker (privileged mode)' },
+                                { value: 'buildHost', label: 'Build host via SSH' },
+                                { value: 'modal', label: 'Modal sandboxes' },
+                              ]}
+                            />
+                          </Field>
+                        </Group>
+                        {buildEnvironmentProvider === 'none' ? (
+                          <div className="frameos-inset flex items-start gap-2 rounded-lg border p-3 text-sm leading-loose">
+                            You can still use prebuilt images and binaries for quick deploys. FrameOS source
+                            cross-compilation on the backend is disabled. Raspberry Pi OS frames will compile custom
+                            code on device (might be very slow).
+                          </div>
+                        ) : null}
+                        {buildEnvironmentProvider === 'docker' ? (
+                          <div className="frameos-inset rounded-lg border p-3 text-sm leading-loose">
+                            <p>
+                              FrameOS will use Docker from the backend host. If this backend runs in a container, the
+                              container needs Docker CLI access and a reachable Docker daemon, usually by running
+                              privileged Docker-in-Docker or mounting the host Docker socket. See the{' '}
+                              <A
+                                href="https://github.com/FrameOS/frameos#running-via-docker-manually"
+                                target="_blank"
+                                className="frameos-link hover:underline"
+                              >
+                                readme
+                              </A>{' '}
+                              for details.
                             </p>
-                            <Field name="host" label="Build host address">
-                              <TextInput placeholder="builder.example.com" />
-                            </Field>
-                            <Field name="port" label="SSH port">
-                              <NumberTextInput placeholder="22" />
-                            </Field>
-                            <Field name="user" label="SSH user">
-                              <TextInput placeholder="ubuntu" />
-                            </Field>
-                            <Field name="sshKey" label="Private SSH key" secret={!!savedSettings?.buildHost?.sshKey}>
-                              <TextArea rows={3} />
-                            </Field>
-                            <Field
-                              name="sshPublicKey"
-                              label="Public SSH key"
-                              secret={!!savedSettings?.buildHost?.sshPublicKey}
-                            >
-                              <TextArea rows={3} />
-                            </Field>
-                            <div className="flex flex-wrap gap-2">
+                            <DockerDaemonStatus />
+                          </div>
+                        ) : null}
+                        {buildEnvironmentProvider === 'buildHost' ? (
+                          <Group name="buildHost">
+                            <div className="space-y-2">
+                              <p className="text-sm leading-loose">
+                                Connect to a host over SSH. Install Docker and the Docker Buildx plugin on that host.
+                              </p>
+                              <Field name="host" label="Build host address">
+                                <TextInput placeholder="builder.example.com" />
+                              </Field>
+                              <Field name="port" label="SSH port">
+                                <NumberTextInput placeholder="22" />
+                              </Field>
+                              <Field name="user" label="SSH user">
+                                <TextInput placeholder="ubuntu" />
+                              </Field>
+                              <Field name="sshKey" label="Private SSH key" secret={!!savedSettings?.buildHost?.sshKey}>
+                                <TextArea rows={3} />
+                              </Field>
+                              <Field
+                                name="sshPublicKey"
+                                label="Public SSH key"
+                                secret={!!savedSettings?.buildHost?.sshPublicKey}
+                              >
+                                <TextArea rows={3} />
+                              </Field>
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  onClick={testBuildHost}
+                                  color="secondary"
+                                  size="small"
+                                  disabled={isTestingBuildHost}
+                                >
+                                  {isTestingBuildHost ? 'Checking...' : 'Check connection'}
+                                </Button>
+                                <Button
+                                  onClick={newBuildHostKey}
+                                  color={savedSettings?.buildHost?.sshKey ? 'secondary' : 'primary'}
+                                  size="small"
+                                >
+                                  Generate new keypair
+                                </Button>
+                              </div>
+                            </div>
+                          </Group>
+                        ) : null}
+                        {buildEnvironmentProvider === 'modal' ? (
+                          <Group name="modalSandbox">
+                            <div className="space-y-2">
+                              <p className="text-sm leading-loose">
+                                FrameOS will run build commands in clean Modal sandboxes and use target-specific cross
+                                compilation containers directly.
+                              </p>
+                              <Field name="tokenId" label="Token ID" secret={!!savedSettings?.modalSandbox?.tokenId}>
+                                <TextInput placeholder="ak-..." />
+                              </Field>
+                              <Field
+                                name="tokenSecret"
+                                label="Token secret"
+                                secret={!!savedSettings?.modalSandbox?.tokenSecret}
+                              >
+                                <TextInput placeholder="as-..." />
+                              </Field>
+                              <Field name="appName" label="Modal app name">
+                                <TextInput placeholder="frameos-build" />
+                              </Field>
+                              <Field name="image" label="Source-generation image">
+                                <TextInput placeholder="frameos/frameos:latest" />
+                              </Field>
+                              <Field name="timeout" label="Sandbox timeout (seconds)">
+                                <NumberTextInput placeholder="21600" />
+                              </Field>
+                              <Field name="idleTimeout" label="Idle timeout (seconds)">
+                                <NumberTextInput placeholder="900" />
+                              </Field>
+                              <Field name="cpu" label="CPU cores">
+                                <NumberTextInput placeholder="4" />
+                              </Field>
+                              <Field name="memory" label="Memory (MiB)">
+                                <NumberTextInput placeholder="8192" />
+                              </Field>
+                              <Field name="region" label="Region">
+                                <TextInput placeholder="us-east-1" />
+                              </Field>
+                              <Field name="cloud" label="Cloud">
+                                <TextInput placeholder="aws" />
+                              </Field>
+                              <Field name="environmentName" label="Environment">
+                                <TextInput placeholder="main" />
+                              </Field>
                               <Button
-                                onClick={testBuildHost}
+                                onClick={testModalSandbox}
                                 color="secondary"
                                 size="small"
-                                disabled={isTestingBuildHost}
+                                disabled={isTestingModalSandbox}
                               >
-                                {isTestingBuildHost ? 'Checking...' : 'Check connection'}
-                              </Button>
-                              <Button
-                                onClick={newBuildHostKey}
-                                color={savedSettings?.buildHost?.sshKey ? 'secondary' : 'primary'}
-                                size="small"
-                              >
-                                Generate new keypair
+                                {isTestingModalSandbox ? 'Testing...' : 'Test Modal sandbox'}
                               </Button>
                             </div>
-                          </div>
-                        </Group>
-                      ) : null}
-                      {buildEnvironmentProvider === 'modal' ? (
-                        <Group name="modalSandbox">
-                          <div className="space-y-2">
-                            <p className="text-sm leading-loose">
-                              FrameOS will run build commands in clean Modal sandboxes and use target-specific cross
-                              compilation containers directly.
-                            </p>
-                            <Field name="tokenId" label="Token ID" secret={!!savedSettings?.modalSandbox?.tokenId}>
-                              <TextInput placeholder="ak-..." />
-                            </Field>
-                            <Field
-                              name="tokenSecret"
-                              label="Token secret"
-                              secret={!!savedSettings?.modalSandbox?.tokenSecret}
-                            >
-                              <TextInput placeholder="as-..." />
-                            </Field>
-                            <Field name="appName" label="Modal app name">
-                              <TextInput placeholder="frameos-build" />
-                            </Field>
-                            <Field name="image" label="Source-generation image">
-                              <TextInput placeholder="frameos/frameos:latest" />
-                            </Field>
-                            <Field name="timeout" label="Sandbox timeout (seconds)">
-                              <NumberTextInput placeholder="21600" />
-                            </Field>
-                            <Field name="idleTimeout" label="Idle timeout (seconds)">
-                              <NumberTextInput placeholder="900" />
-                            </Field>
-                            <Field name="cpu" label="CPU cores">
-                              <NumberTextInput placeholder="4" />
-                            </Field>
-                            <Field name="memory" label="Memory (MiB)">
-                              <NumberTextInput placeholder="8192" />
-                            </Field>
-                            <Field name="region" label="Region">
-                              <TextInput placeholder="us-east-1" />
-                            </Field>
-                            <Field name="cloud" label="Cloud">
-                              <TextInput placeholder="aws" />
-                            </Field>
-                            <Field name="environmentName" label="Environment">
-                              <TextInput placeholder="main" />
-                            </Field>
-                            <Button
-                              onClick={testModalSandbox}
-                              color="secondary"
-                              size="small"
-                              disabled={isTestingModalSandbox}
-                            >
-                              {isTestingModalSandbox ? 'Testing...' : 'Test Modal sandbox'}
-                            </Button>
-                          </div>
-                        </Group>
-                      ) : null}
-                    </Box>
+                          </Group>
+                        ) : null}
+                      </Box>
+                    ) : (
+                      <Box className="p-3 text-sm leading-loose">
+                        Only needed for legacy compiled scenes.{' '}
+                        <button
+                          type="button"
+                          onClick={() => setShowLegacySourceBuilds(true)}
+                          className="frameos-link hover:underline"
+                        >
+                          Show
+                        </button>
+                      </Box>
+                    )}
                   </Form>
                   <div className="space-y-4 mt-4">
                     <H6 id="settings-fonts" className="pt-4">

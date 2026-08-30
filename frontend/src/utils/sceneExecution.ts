@@ -46,9 +46,18 @@ export function normalizeSceneExecution(
   return 'interpreted'
 }
 
+/** The hosted Nim → JavaScript converter (docs/nim-to-js-conversion.md). */
+export const nimConverterUrl = 'https://scenes.frameos.net/nim-converter'
+
+/** The preview banner every surface shows when it runs a compiled scene through the interpreter. */
+export const previewSkipsNimMessage =
+  "Preview runs the interpreter: this scene's Nim code nodes and Nim apps are not executed here. Convert the scene to JavaScript to see it whole."
+
 export const compiledSceneConfirmMessage =
   'This makes the scene compiled (legacy): it will need a full FrameOS source build on every deploy.\n\n' +
-  'Keep it interpreted instead and convert it to an interpreted scene at scenes.frameos.net/nim-converter?\n\n' +
+  `Keep it interpreted instead and convert it to an interpreted scene at ${nimConverterUrl}?
+
+` +
   'OK = make the scene compiled. Cancel = keep it interpreted.'
 
 /**

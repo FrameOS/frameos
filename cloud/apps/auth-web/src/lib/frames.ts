@@ -30,6 +30,7 @@ import {
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { withStoreSceneOrigin } from "./scene-origin";
+import { compiledSceneNames } from "./store";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
 import { frameosVersionSatisfies } from "./store-versions";
 import {
@@ -1215,6 +1216,16 @@ export async function buildScenesPayloadForFrame(
     const extracted = extractScenesJson(versionContent);
     if (!extracted) {
       return { error: "invalid_scene_payload" };
+    }
+    // A cloud frame runs the interpreter only: a legacy compiled scene would
+    // deploy and then log `not_interpreted`. Refuse here, before anything is
+    // committed, and count it.
+    if (compiledSceneNames(extracted.scenes).length > 0) {
+      logWarn("frames.assign.refused_compiled_scene", {
+        frameId,
+        sceneId: assignment.sceneId,
+      });
+      return { error: "scene_requires_compilation" };
     }
     // Running bound on the raw scenes.json bytes, so 20 scenes at the store's
     // 32 MiB per-zip ceiling can never all be held at once. The exact check on

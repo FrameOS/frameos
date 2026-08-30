@@ -268,6 +268,8 @@ export interface FrameType {
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]
+  /** How many scenes are on the legacy compiled path (a source build on every deploy). */
+  compiled_scene_count?: number
   debug?: boolean
   last_log_at?: string
   log_to_file?: string

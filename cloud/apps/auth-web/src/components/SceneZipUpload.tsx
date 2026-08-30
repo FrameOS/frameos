@@ -18,6 +18,8 @@ const uploadErrors: Record<string, string> = {
   moderation_unavailable: "Moderation service unavailable — try again later",
   scene_pulled: "This scene was pulled and cannot be republished",
   scene_quota_exceeded: "Scene limit reached",
+  scene_requires_compilation:
+    "This is a legacy compiled scene (Nim code nodes or Nim apps). Convert it to an interpreted scene at /nim-converter first.",
   scene_too_large: "ZIP is too large (max 8 MB)",
   storage_quota_exceeded: "Cloud scene storage limit reached",
   store_banned: "This account cannot publish scenes",

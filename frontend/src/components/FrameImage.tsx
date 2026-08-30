@@ -8,6 +8,8 @@ import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 import { wasmPreviewModel } from '../models/wasmPreviewModel'
 import { urls } from '../urls'
 import { isFrameControlMode } from '../utils/frameControlMode'
+import { sceneRequiresCompilation } from '../utils/sceneApps'
+import { previewSkipsNimMessage } from '../utils/sceneExecution'
 import { wasmPreviewCacheKey } from '../utils/wasmScenePreview'
 import type { FrameId, FrameType } from '../types'
 
@@ -88,6 +90,9 @@ function WasmScenePreviewFallback({
   const { requestScenePreview } = useActions(wasmPreviewModel)
   const [requested, setRequested] = useState(false)
   const cacheKey = wasmPreviewCacheKey(frame, sceneId)
+  // Honesty first: the browser runs the interpreter, so a legacy compiled
+  // scene's Nim parts are simply missing from this picture.
+  const skipsNim = sceneRequiresCompilation(frame.scenes?.find((scene) => scene.id === sceneId) ?? {})
   const dataUrl = scenePreviews[cacheKey]
   // A null entry is a tombstone (failed render): show nothing, don't retry.
   const rendered = cacheKey in scenePreviews
@@ -104,6 +109,14 @@ function WasmScenePreviewFallback({
           <span className="pointer-events-none absolute bottom-1 right-1 z-10 rounded bg-white/75 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-500 shadow-sm backdrop-blur-sm">
             Preview
           </span>
+          {skipsNim ? (
+            <span
+              className="pointer-events-none absolute bottom-1 left-1 z-10 max-w-[70%] truncate rounded bg-amber-100/90 px-1 py-px text-[9px] font-semibold text-amber-800 shadow-sm backdrop-blur-sm"
+              title={previewSkipsNimMessage}
+            >
+              Nim not executed
+            </span>
+          ) : null}
         </>
       ) : !rendered ? (
         <button

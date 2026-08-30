@@ -7,6 +7,7 @@ import {
 import { NextResponse } from "next/server";
 import { recordAuditEvent } from "./audit";
 import { jsonError } from "./device-flow";
+import { logWarn } from "./log";
 import { getScenesBaseUrl } from "./env";
 import { moderateStoreContent } from "./moderation";
 import { classifyStoreScene } from "./store-classify";
@@ -19,6 +20,7 @@ import {
   slugifyName,
   slugSuffix,
   validateSceneZip,
+  compiledSceneHint,
 } from "./store";
 import {
   imageSetForVersion,
@@ -82,6 +84,18 @@ export async function publishStoreScene(
     return jsonError(validation.error, 400);
   }
   const validated = validation.value;
+  if (validated.compiledScenes.length > 0) {
+    // Counted: the number of refusals is how many people still hit the
+    // legacy path from the cloud side.
+    logWarn("store.publish.refused_compiled_scene", {
+      accountId,
+      scenes: validated.compiledScenes.length,
+    });
+    return jsonError("scene_requires_compilation", 400, {
+      hint: compiledSceneHint,
+      scenes: validated.compiledScenes,
+    });
+  }
   const uploadedPreview = validated.previewImage;
 
   const name = (input.name ?? validated.manifestName)

@@ -11,7 +11,7 @@ export interface FrameBuildOption<T extends string = string> {
 export const frameCompilationModeOptions: FrameBuildOption<FrameCompilationModeOptionValue>[] = [
   { value: '', label: 'Prefer binaries, build from source if needed' },
   { value: 'precompiled', label: `Install precompiled binaries (version ${versions.frameos.split('+')[0]})` },
-  { value: 'static', label: 'Build from source - single binary' },
+  { value: 'static', label: 'Build from source - single binary (legacy: needs a build environment)' },
 ]
 
 /** Same mapping for the select, where an empty value ("prefer binaries") is a real choice. */
