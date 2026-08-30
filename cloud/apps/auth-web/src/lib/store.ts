@@ -1,3 +1,4 @@
+import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
 import { randomBytes } from "node:crypto";
 import { strToU8, unzipSync, unzlibSync, zipSync } from "fflate";
 import { normalizeCategory } from "./categories";
@@ -116,6 +117,32 @@ const shellAppKeywordPattern =
   /(shell|exec|terminal|command|chromiumscreenshot|rstpsnapshot)/i;
 const shellCodePattern =
   /\b(execShellCmd|execCmdEx|execCmd|execProcess|startProcess|runShellWithParentStreams|runShellCapture|osproc|quoteShell|child_process)\b/;
+
+// The scenes that would force a source build on a self-hosted frame and that
+// no cloud frame can run at all: Nim code nodes with no codeJS, Nim app
+// sources with no JS sibling, source nodes, or an explicit
+// settings.execution = "compiled". The store refuses them at publish and at
+// assign, naming the converter (docs/nim-to-js-conversion.md).
+export function compiledSceneNames(scenes: unknown): string[] {
+  if (!Array.isArray(scenes)) {
+    return [];
+  }
+  const names: string[] = [];
+  for (const scene of scenes) {
+    if (!scene || typeof scene !== "object" || typeof (scene as { id?: unknown }).id !== "string") {
+      continue;
+    }
+    const record = scene as { id: string; name?: unknown; settings?: unknown };
+    const explicit = (record.settings as { execution?: unknown } | undefined)?.execution;
+    if (explicit === "compiled" || sceneRequiresCompilation(record as Parameters<typeof sceneRequiresCompilation>[0])) {
+      names.push(typeof record.name === "string" && record.name.trim() ? record.name.trim() : record.id);
+    }
+  }
+  return names;
+}
+
+export const compiledSceneHint =
+  "Legacy compiled scenes (Nim code nodes, Nim apps) cannot run on a cloud frame. Convert it to an interpreted scene at /nim-converter (docs/nim-to-js-conversion.md) and publish the result.";
 
 export function detectRiskFlags(scenes: unknown): string[] {
   const flags = new Set<string>();
@@ -417,6 +444,8 @@ export function slugSuffix() {
 
 export type ValidatedSceneZip = {
   appKeywords: string[];
+  /** Names of scenes on the legacy compiled path (Nim the interpreter cannot run). */
+  compiledScenes: string[];
   frameosVersion: string | undefined;
   imageHeight: number | undefined;
   imageWidth: number | undefined;
@@ -509,6 +538,7 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
     ok: true,
     value: {
       appKeywords: extractAppKeywords(scenes),
+      compiledScenes: compiledSceneNames(scenes),
       frameosVersion: normalizeFrameosVersion(record.frameosVersion),
       imageHeight: dimension(record.imageHeight),
       imageWidth: dimension(record.imageWidth),

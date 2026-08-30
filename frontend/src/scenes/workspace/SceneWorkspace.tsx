@@ -335,8 +335,12 @@ function SceneSelector({
                       <span className="frameos-muted mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-slate-400">
                         <span className="truncate">{scene.nodes?.length ?? 0} nodes</span>
                         {compiled ? (
-                          <Tag color="none" className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case">
-                            compiled
+                          <Tag
+                            color="orange"
+                            title="Legacy compiled scene — needs a whole-frame recompilation on every deploy. Convert it to an interpreted scene at scenes.frameos.net/nim-converter."
+                            className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
+                          >
+                            legacy compiled
                           </Tag>
                         ) : null}
                         {active ? (

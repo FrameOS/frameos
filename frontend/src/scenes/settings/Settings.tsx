@@ -55,7 +55,7 @@ const allSettingsNavSections: readonly SettingsNavSection[] = [
     items: [
       ['Defaults', '#settings-defaults'],
       ['SSH Keys', '#settings-ssh'],
-      ['Build environment', '#settings-build-environment'],
+      ['Advanced: legacy source builds', '#settings-build-environment'],
       ['Custom fonts', '#settings-fonts'],
     ],
   },
@@ -770,9 +770,15 @@ export function Settings() {
                       </Box>
                     </Group>
                     <H6 id="settings-build-environment" className="pt-4">
-                      Build environment
+                      Advanced: legacy source builds
                     </H6>
                     <Box className="p-3 space-y-3">
+                      <div className="app-compiled-warning rounded-xl p-3 text-sm leading-loose">
+                        FrameOS is distributed as released binaries; a normal deploy never compiles anything. A source
+                        build is only needed for <strong>legacy compiled scenes</strong> (Nim code nodes, Nim apps) —
+                        convert those to interpreted scenes at scenes.frameos.net/nim-converter and this section stops
+                        mattering.
+                      </div>
                       <p className="text-sm leading-loose">
                         To compile FrameOS from source, we need access to a Linux shell where we can run commands
                         through Docker. There are a few options for that.

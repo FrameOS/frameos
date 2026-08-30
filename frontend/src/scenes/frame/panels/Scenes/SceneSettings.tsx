@@ -10,7 +10,11 @@ import { Select } from '../../../../components/Select'
 import { TextArea } from '../../../../components/TextArea'
 import { AdvancedSection } from '../../../../components/AdvancedSection'
 import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
-import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../../../utils/sceneExecution'
+import {
+  frameRunsScenesInterpreted,
+  openNimConverterWithScene,
+  sceneExecutionForFrame,
+} from '../../../../utils/sceneExecution'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -103,18 +107,30 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 </Field>
               </AdvancedSection>
             )}
-            {hasInterpretedCompiledOnlyContent ? (
-              <div className="app-compiled-warning rounded-xl p-3 text-sm">
+            {hasCompiledOnlyContent || execution === 'compiled' ? (
+              <div className="app-compiled-warning rounded-xl p-3 text-sm space-y-2">
                 <div className="font-semibold">
                   {frameRunsInterpreted
-                    ? 'This scene uses compiled-only content that ESP32 frames cannot run.'
-                    : 'This compiled scene will not work in interpreted mode.'}
+                    ? 'This scene carries Nim that ESP32 frames cannot run.'
+                    : hasInterpretedCompiledOnlyContent
+                    ? 'This scene carries Nim that interpreted mode will not run.'
+                    : 'Legacy compiled scene — needs a FrameOS source build on every deploy.'}
                 </div>
                 <div>
-                  {frameRunsInterpreted
-                    ? 'It still contains Nim app source, Nim code nodes, or source nodes. Move the customization into JavaScript apps or inline code nodes.'
-                    : 'It still contains Nim app source, Nim code nodes, or source nodes that interpreted mode cannot run. Keep execution set to compiled, or move the customization into JavaScript apps or inline code nodes.'}
+                  {hasCompiledOnlyContent
+                    ? 'It still contains Nim app sources, Nim code nodes, or source nodes. Convert it to an interpreted scene: the converter ports the code nodes and apps to JavaScript, and the scene deploys from the released binaries.'
+                    : 'Nothing in it needs the compiler any more — switch execution to Interpreted.'}
                 </div>
+                {hasCompiledOnlyContent ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button size="small" color="primary" onClick={() => void openNimConverterWithScene(scene)}>
+                      Convert to an interpreted scene…
+                    </Button>
+                    <span className="frameos-muted text-xs">
+                      Copies the scene JSON and opens scenes.frameos.net/nim-converter to paste it into.
+                    </span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </Group>

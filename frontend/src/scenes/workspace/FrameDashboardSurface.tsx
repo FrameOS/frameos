@@ -343,6 +343,9 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
               </h2>
             </A>
             <FrameMetricAlertIndicator frame={frame} className="h-5 w-5" />
+            {(frame.compiled_scene_count ?? 0) > 0 ? (
+              <CompiledSceneTag count={frame.compiled_scene_count} className="!px-2 !py-0.5 !text-[11px] normal-case" />
+            ) : null}
             {archived ? (
               <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
                 Archived

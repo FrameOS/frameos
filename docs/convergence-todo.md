@@ -259,7 +259,12 @@ Goal: a user with compiled scenes sees, on every surface that touches them,
 that they are on a legacy path and where the exit is. The exit button is
 Stage 3's; this stage wires the places, with a "coming soon" until then.
 
-- [ ] **Frame list and dashboard.** `GET /api/frames` gains
+**Shipped 2026-08-30 (branch `convergence-stage-2`, stacked on stage 1).**
+The exit everywhere is `openNimConverterWithScene` (copy the scene JSON,
+open scenes.frameos.net/nim-converter) until the converter is called from
+the editor itself. Every box below is ticked; what each left open is noted.
+
+- [x] **Frame list and dashboard.** `GET /api/frames` gains
   `compiled_scene_count` (from `frame_compiled_scene_count`,
   `precompiled_frameos.py:46-51` — already computed for the deploy plan,
   never persisted, no schema change). `FramesHome.tsx:1120`,
@@ -267,38 +272,45 @@ Stage 3's; this stage wires the places, with a "coming soon" until then.
   existing `CompiledSceneTag.tsx` copy changes from "All changes require a
   full FrameOS recompilation" to "Legacy compiled scene — needs a source
   build on every deploy. Convert to JavaScript."
-- [ ] **Deploy drawer** (`frameDeployUtils.ts:269-287, 302, 503-505,
+- [x] **Deploy drawer** (`frameDeployUtils.ts`;
   640-647`): "precompiled release skipped (N compiled scenes configured)"
   becomes the headline of the plan, amber, with the count and the names, and
   "Convert" as the recommended action ahead of "Full deploy". The
   recommendation copy "changes that require rebuilding FrameOS" gains
   "(legacy path)".
-- [ ] **Scene surfaces.** `SceneWorkspace.tsx:295, 337-342` sidebar tag,
+- [x] **Scene surfaces.** `SceneWorkspace.tsx` sidebar tag,
   `Diagram.tsx:574` header chip, `WorkspaceSceneDropDown.tsx` (no compiled
   awareness today) gets a "Convert to JavaScript…" item shown only for
   compiled scenes; `SceneSettings.tsx:146-159`'s warning box ("This compiled
   scene will not work in interpreted mode") becomes the converter's home:
   same box, primary button.
-- [ ] **EditApp** `ReadOnlyNimAppNotice` (`EditApp.tsx:100-125`): keep for
+- [x] **EditApp** `ReadOnlyNimAppNotice` (`EditApp.tsx`): keep for
   catalog apps ("built-in, edit on GitHub"); for a *scene-local* Nim app the
   notice says "Legacy Nim app — convert to JavaScript" with the per-app
   button. `AppsWorkspace.tsx:430-440, 706-713` same wording.
-- [ ] **Preview honesty.** `livePreviewLogic.tsx:655`, `FrameImage.tsx:
-  228-229`, `wasmSceneRenderCheck.ts`: when `sceneRequiresCompilation(scene)`
+- [x] **Preview honesty.** `LivePreviewModal.tsx`, `FrameImage.tsx`
+  (`wasmSceneRenderCheck.ts` untouched — it only runs for interpreted
+  scenes' render checks): when `sceneRequiresCompilation(scene)`
   the preview shows a banner "Preview runs the interpreter; this scene's Nim
   code nodes / Nim apps are not executed here" instead of a silently wrong
   image. Templates already do this (`Template.tsx:138, 238-246`).
-- [ ] **Cloud.** `publishStoreScene` / `assignScenesToFrame` never check
+- [x] **Cloud.** (`compiledSceneNames` in `store.ts`; refused with
+  `scene_requires_compilation` at publish — every create path funnels
+  through `validateSceneZip` — and in `buildScenesPayloadForFrame` at
+  assign; both `logWarn` a counter.) `publishStoreScene` / `assignScenesToFrame` never checked
   interpretability, and `not_interpreted` appears in no web app — port
   `sceneRequiresCompilation` to `cloud/apps/auth-web/src/lib/` and refuse at
   publish/assign with a message that names the converter (the cloud side of
   Stage 3b). Count refusals.
-- [ ] **Settings.** `Settings.tsx` build-environment section (build host,
+- [x] **Settings.** (`NewFrame` has no compilation select; the deploy
+  drawer's is already under an advanced toggle, and the buildroot
+  "installation mode" select labels `static` as legacy.) `Settings.tsx` build-environment section (build host,
   Modal, docker cross-compile, toolchain digests) moves under "Advanced:
   legacy source builds" with the same amber note. `NewFrame.tsx` hides
   `compilationMode` unless the advanced toggle is on; the default stays
   `precompiled`.
-- [ ] **Announce.** README, release notes, `docs/todo.md`: compiled scenes
+- [x] **Announce.** (README + `docs/todo.md`; there is no release-notes
+  file — the next release's notes carry the same paragraph.) README, release notes, `docs/todo.md`: compiled scenes
   are deprecated; the converter ships before the date; date = one release
   after Stage 3 lands. The "Both control planes" rule in `docs/todo.md`
   **stands** (the earlier draft repealed it; this plan does not).

@@ -286,7 +286,19 @@ function FrameTreeRow({
             className="min-w-0 flex-1 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <span className="flex min-w-0 items-center gap-1.5">
-              <span className={clsx('block min-w-0 truncate', !archived && 'text-base font-medium')}>{frameName}</span>
+              <span className={clsx('block min-w-0 truncate', !archived && 'text-base font-medium')}>
+                {frameName}
+                {(frame.compiled_scene_count ?? 0) > 0 ? (
+                  <span
+                    className="ml-1.5 align-middle text-[10px] font-semibold text-amber-600"
+                    title={`${frame.compiled_scene_count} legacy compiled scene${
+                      frame.compiled_scene_count === 1 ? '' : 's'
+                    } — needs a source build on every deploy. Convert to JavaScript.`}
+                  >
+                    ⚠ {frame.compiled_scene_count}
+                  </span>
+                ) : null}
+              </span>
             </span>
             <span className="block truncate text-xs text-slate-400">{frameActivityDescription(frame)}</span>
           </button>

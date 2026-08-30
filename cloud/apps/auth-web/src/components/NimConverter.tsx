@@ -174,7 +174,11 @@ export function NimConverter({
       });
       const payload = (await response.json().catch(() => ({}))) as { error?: string; scene?: { name?: string; id?: string } };
       if (!response.ok) {
-        setSaveError(`Could not save: ${payload.error ?? response.status}`);
+        setSaveError(
+          payload.error === "scene_requires_compilation"
+            ? "Not saved: the scene still carries Nim the cloud cannot run — convert the parts listed as needing the model or a manual port first."
+            : `Could not save: ${payload.error ?? response.status}`,
+        );
         return;
       }
       setSaved({ name: payload.scene?.name ?? name, url: myScenesUrl });

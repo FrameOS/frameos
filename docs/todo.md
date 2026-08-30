@@ -6,6 +6,13 @@ missing from it. Reference material — principles, permission scopes, threat
 models, wire protocols, measurements — lives in the linked docs; this file only
 carries the work. **When an item ships, delete it.**
 
+**Compiled scenes are deprecated (2026-08-30).** No editor action produces
+new Nim (`docs/convergence-todo.md` Stage 1), every surface that shows a
+compiled scene warns and points at the converter (Stage 2), and the converter
+is live at scenes.frameos.net/nim-converter (Stage 3, no-frills). Removal of
+the source-build path is one release after the converter ships. The "Both
+control planes" rule below stands.
+
 Two rules that shape most entries:
 
 - **Both control planes.** FrameOS frames are managed either by a self-hosted

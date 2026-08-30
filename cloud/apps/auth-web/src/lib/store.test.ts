@@ -4,6 +4,7 @@ import {
   isProvablyFullyTransparentImage,
   maxVersionMessageLength,
   normalizeVersionMessage,
+  compiledSceneNames,
   validateSceneZip,
 } from "./store";
 
@@ -308,5 +309,22 @@ describe("normalizeVersionMessage", () => {
   it("caps a long message rather than rejecting the save", () => {
     const message = normalizeVersionMessage("x".repeat(500));
     expect(message).toHaveLength(maxVersionMessageLength);
+  });
+});
+
+describe("compiledSceneNames", () => {
+  const renderEvent = { data: { keyword: "render" }, id: "e1", type: "event" };
+  it("names scenes on the legacy compiled path and nothing else", () => {
+    const scenes = [
+      { id: "js", name: "Fine", nodes: [renderEvent], settings: { execution: "interpreted" } },
+      { id: "explicit", name: "Old", nodes: [renderEvent], settings: { execution: "compiled" } },
+      { id: "nimnode", name: "Nim node", nodes: [renderEvent, { data: { code: "1 + 1", codeArgs: [] }, id: "c1", type: "code" }] },
+      { id: "nimapp", apps: { x: { sources: { "app.nim": "proc run*() = discard" } } }, nodes: [renderEvent] },
+      { id: "jsapp", apps: { x: { sources: { "app.nim": "…", "app.ts": "export function get() {}" } } }, nodes: [renderEvent] },
+      { id: "source", nodes: [renderEvent, { data: {}, id: "s1", type: "source" }] },
+      "junk",
+    ];
+    expect(compiledSceneNames(scenes)).toEqual(["Old", "Nim node", "nimapp", "source"]);
+    expect(compiledSceneNames("nope")).toEqual([]);
   });
 });

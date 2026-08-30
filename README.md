@@ -55,6 +55,16 @@ The FrameOS backend is where you set up your frames. You can run it continuously
 
 Read more in [the documentation](https://frameos.net/guide/backend).
 
+**Compiled scenes are deprecated.** FrameOS ships as released binaries and a
+deploy never compiles anything — unless a scene is still on the legacy
+_compiled_ path (Nim code nodes or Nim app sources), which forces a full source
+build on every deploy. Convert such scenes to interpreted scenes at
+[scenes.frameos.net/nim-converter](https://scenes.frameos.net/nim-converter)
+(or with the CLI in `cloud/packages/scene-convert`; see
+`docs/nim-to-js-conversion.md`). The source-build path stays available behind
+"Advanced: legacy source builds" in Settings until one release after the
+converter ships, then goes away.
+
 ### Quick install
 
 The easiest way to install the FrameOS backend on a Mac or Debian/Ubuntu Linux is to run the following installation script:
