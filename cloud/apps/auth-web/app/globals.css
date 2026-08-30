@@ -3081,6 +3081,14 @@ a.stat-tile:hover {
   font-size: 13px;
 }
 
+/* The device simulation ran out of memory: the frame on screen is a degraded
+   render (an image decoded smaller and upscaled), flagged in amber. */
+.live-preview__degraded {
+  border-color: color-mix(in srgb, var(--warning), transparent 55%);
+  color: var(--text);
+  font-size: 13px;
+}
+
 /* The preview's "this scene wants to go faster" prompt, and the toggle it
    turns into once answered. */
 .live-preview__fast {

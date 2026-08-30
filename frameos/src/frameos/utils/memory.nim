@@ -39,9 +39,10 @@ elif defined(linux) and not defined(frameosWasm):
       discard
     0
 
-when defined(testing):
-  # Lets tests simulate a memory-constrained device (e.g. ESP32 PSRAM
-  # headroom) on a development host. 0 disables the override.
+when defined(testing) or defined(frameosWasm):
+  # Lets tests — and the wasm preview's device simulation — pretend to be a
+  # memory-constrained device (e.g. ESP32 PSRAM headroom) on a host with
+  # plenty. 0 disables the override.
   var availableRenderBytesOverride* = 0
 
 when defined(memProbe):
@@ -81,7 +82,7 @@ proc renderMemoryInUse*(): tuple[known: bool, bytes: int] =
 proc availableRenderBytes*(): int =
   ## Best-effort estimate of memory currently available for image-sized
   ## render allocations. 0 means "unknown"; callers treat that as unlimited.
-  when defined(testing):
+  when defined(testing) or defined(frameosWasm):
     if availableRenderBytesOverride > 0:
       return availableRenderBytesOverride
   when defined(frameosEmbedded):
@@ -107,7 +108,7 @@ proc availableRenderHeadroomBytes*(): int =
   ## image-sized allocation; measured on the 7.3" bench frame, the largest
   ## contiguous block sits near 1.7MB while over 5MB is free, and a headroom
   ## question asked against the block answer refuses everything.
-  when defined(testing):
+  when defined(testing) or defined(frameosWasm):
     if availableRenderBytesOverride > 0:
       return availableRenderBytesOverride
   when defined(frameosEmbedded):

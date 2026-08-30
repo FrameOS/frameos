@@ -3,6 +3,7 @@
 // and drives renders; this class owns the worker lifecycle, paints frames onto
 // a canvas, and exposes events/state as callbacks.
 import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
+import type { DeviceLimits } from './devices'
 import type { FrameOSScene, PreviewAssetEntry, PreviewAssetsInfo, PreviewFrame, SceneInfo } from './types'
 
 export interface FrameOSPreviewOptions {
@@ -38,6 +39,13 @@ export interface FrameOSPreviewOptions {
   /** Set to false to run with an empty in-memory /srv/assets instead of the
    * browser's persistent folder. */
   browserAssets?: boolean
+  /** Simulate a constrained device: render-memory budget, QuickJS ceilings
+   * and HTTP cap (compute one with `deviceLimitsFor` from ./devices). Unlike
+   * `panelPalette` this changes how scenes actually render — big images
+   * degrade or fail like on the device — and is fixed for the life of the
+   * runtime: create a new preview to change it. Null/undefined simulates
+   * nothing. */
+  deviceLimits?: DeviceLimits | null
   /** Show frames the way an e-ink panel would: dithered to that panel's
    * inks or greys (see ./dither). Display only — the scene renders in full
    * colour either way. Null (the default) paints the frame as rendered. */
@@ -115,6 +123,7 @@ export class FrameOSPreview {
       fastMode: this.fastMode,
       saveAssets: options.saveAssets === undefined ? true : options.saveAssets,
       browserAssets: options.browserAssets === undefined ? true : options.browserAssets,
+      deviceLimits: options.deviceLimits ?? null,
     })
   }
 

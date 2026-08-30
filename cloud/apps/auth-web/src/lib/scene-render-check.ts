@@ -8,6 +8,8 @@
 // account (GET /api/settings) and CORS-blocked fetches go through the
 // store's preview proxy.
 
+import type { DeviceLimits } from "frameos-wasm";
+
 export const RENDER_CHECK_SETTLE_MS = 2000;
 export const RENDER_CHECK_TIMEOUT_MS = 30_000;
 const MAX_COLLECTED_LOGS = 100;
@@ -26,6 +28,10 @@ export interface SceneRenderCheckOptions {
   /** Pre-fetched account settings; fetched from /api/settings when omitted. */
   settings?: Record<string, Record<string, string>> | undefined;
   timeZone?: string | undefined;
+  /** Simulated device limits (render-memory budget, JS ceilings, HTTP cap) —
+   * the check then fails the way the chosen device would. Null/omitted runs
+   * without limits (see frameos-wasm's deviceLimitsFor). */
+  deviceLimits?: DeviceLimits | null | undefined;
 }
 
 export interface SceneRenderCheckResult {
@@ -225,6 +231,7 @@ export async function renderSceneCheck({
   height,
   settings,
   timeZone,
+  deviceLimits,
 }: SceneRenderCheckOptions): Promise<SceneRenderCheckResult> {
   const errors: string[] = [];
   const logs: string[] = [];
@@ -333,6 +340,7 @@ export async function renderSceneCheck({
       settingsJson,
       proxyUrl: RENDER_CHECK_PROXY_URL,
       sceneId: scene.id,
+      deviceLimits: deviceLimits ?? null,
     });
   });
   const frame = lastFrame as RawFrame | null;

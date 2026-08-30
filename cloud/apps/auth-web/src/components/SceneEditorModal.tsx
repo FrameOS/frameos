@@ -50,7 +50,8 @@ import {
   type SceneListingData,
 } from "./SceneInfoPanel";
 import { SceneInstallDialog } from "./SceneInstallDialog";
-import { SceneLivePreviewPanel } from "./SceneLivePreview";
+import { DEVICE_STORAGE_KEY, SceneLivePreviewPanel } from "./SceneLivePreview";
+import { devicePresets, type DevicePresetKey } from "frameos-wasm";
 import { SceneSaveDialog } from "./SceneSaveDialog";
 import { SceneVersionsDialog } from "./SceneVersionsDialog";
 
@@ -577,7 +578,7 @@ type SceneEditorWorkspaceProps = {
   /** Filled with the mounted editor's API (rename in place). */
   editorApiRef?: { current: EmbeddedSceneEditorApi | null } | undefined;
   panels: SceneEditorPanels;
-  ai: Omit<SceneAiPanelProps, "width" | "height" | "selectedSceneId">;
+  ai: Omit<SceneAiPanelProps, "width" | "height" | "selectedSceneId" | "devicePreset">;
   preview: SceneEditorPreviewOptions;
   /** The Info column's content (left of the diagram); none for a scene
    * that has no page yet. */
@@ -1053,6 +1054,21 @@ export function SceneEditorWorkspace({
     info: useResizableWidth(panelWidths.info),
     preview: useResizableWidth(panelWidths.preview),
   };
+  // The device being simulated (an ESP32's memory limits, a Pi, ...). The
+  // Preview panel owns the control and the localStorage key; the workspace
+  // mirrors it (hydrating itself, so the AI panel runs its render checks
+  // under the same limits even while the Preview panel is closed).
+  const [devicePreset, setDevicePreset] = useState<DevicePresetKey>("browser");
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(DEVICE_STORAGE_KEY);
+      if (stored && devicePresets.some((entry) => entry.key === stored)) {
+        setDevicePreset(stored as DevicePresetKey);
+      }
+    } catch {
+      // Storage blocked: the session simply starts on "browser".
+    }
+  }, []);
   const open: SceneEditorPanels = { ...panels, info: panels.info && info !== undefined };
   const layout = sceneEditorPanelNames.filter((name) => open[name]);
   // The editor is heavy (kea, Monaco, wasm): mounted the first time its
@@ -1197,7 +1213,13 @@ export function SceneEditorWorkspace({
         <>
           {resizerBefore("ai")}
           <aside aria-label="AI assistant" className="editor-modal__ai">
-            <SceneAiPanel {...ai} height={height} selectedSceneId={sceneId ?? null} width={width} />
+            <SceneAiPanel
+              {...ai}
+              devicePreset={devicePreset}
+              height={height}
+              selectedSceneId={sceneId ?? null}
+              width={width}
+            />
           </aside>
         </>
       ) : null}
@@ -1212,6 +1234,7 @@ export function SceneEditorWorkspace({
                 canSaveToGallery={preview.canSaveToGallery}
                 editorSceneId={sceneId ?? null}
                 height={height}
+                onDevicePresetChange={setDevicePreset}
                 onImageRegistered={preview.onImageRegistered}
                 sceneId={preview.sceneId}
                 scenes={preview.scenes}

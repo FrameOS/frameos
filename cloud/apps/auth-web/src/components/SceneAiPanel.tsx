@@ -31,6 +31,12 @@ import {
 } from "../lib/ai-chat-client";
 import type { AiScenesEvent, SceneJson } from "../lib/ai-scenes-apply";
 import { renderSceneCheck } from "../lib/scene-render-check";
+import {
+  describeDeviceLimits,
+  deviceLimitsFor,
+  devicePresetFor,
+  type DevicePresetKey,
+} from "frameos-wasm";
 
 export const RENDER_CHECK_PREFIX = "[Automatic render check]";
 export const MAX_RENDER_CHECK_ROUNDS = 2;
@@ -124,6 +130,10 @@ export type SceneAiPanelProps = {
   /** The AI edited the listing (description, tags, category, minimum
    * FrameOS version): applied to the draft like scenes, published by Save. */
   onListing?: ((changes: AiListingChanges) => void) | undefined;
+  /** The device the preview panel simulates ("browser" = none). Render
+   * checks run under the same limits, and the model is told what it is
+   * building for. */
+  devicePreset?: DevicePresetKey | undefined;
 };
 
 function newId(): string {
@@ -139,10 +149,10 @@ function historyFromMessages(messages: ChatMessage[]): AiChatHistoryItem[] {
     .slice(-MAX_HISTORY_ITEMS);
 }
 
-function formatCheckFeedback(errors: string[], rendered: boolean): string {
+function formatCheckFeedback(errors: string[], rendered: boolean, deviceLabel?: string | null): string {
   const reported = errors.slice(0, 8);
   return (
-    `${RENDER_CHECK_PREFIX} The scene rendered${rendered ? "" : " no image and"} with these errors:\n` +
+    `${RENDER_CHECK_PREFIX} The scene rendered${rendered ? "" : " no image and"}${deviceLabel ? ` under simulated "${deviceLabel}" device limits` : ""} with these errors:\n` +
     reported.map((error) => `- ${error}`).join("\n") +
     (errors.length > reported.length ? `\n(and ${errors.length - reported.length} more)` : "") +
     "\nPlease fix the scene so it renders without errors and deliver the corrected version."
@@ -380,6 +390,7 @@ export function SceneAiPanel({
   saveHint,
   getListing,
   onListing,
+  devicePreset = "browser",
 }: SceneAiPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -401,8 +412,8 @@ export function SceneAiPanel({
   chatIdRef.current = chatId;
 
   // Always the freshest props for the in-flight turn (it spans awaits).
-  const propsRef = useRef({ getListing, getScenes, height, mode, onListing, onScenes, selectedSceneId, storeSceneId, width });
-  propsRef.current = { getListing, getScenes, height, mode, onListing, onScenes, selectedSceneId, storeSceneId, width };
+  const propsRef = useRef({ devicePreset, getListing, getScenes, height, mode, onListing, onScenes, selectedSceneId, storeSceneId, width });
+  propsRef.current = { devicePreset, getListing, getScenes, height, mode, onListing, onScenes, selectedSceneId, storeSceneId, width };
 
   useEffect(() => {
     setReturnTo(window.location.href);
@@ -462,6 +473,16 @@ export function SceneAiPanel({
       const draftListing = propsRef.current.getListing?.() ?? null;
       const targetScene =
         editorScenes.find((scene) => scene.id === selected) ?? editorScenes[0];
+      // The device the preview simulates: the model is told what hardware
+      // (and which ceilings) the scene must live within.
+      const devicePresetInfo = devicePresetFor(propsRef.current.devicePreset);
+      const deviceLimits = devicePresetInfo
+        ? deviceLimitsFor(devicePresetInfo.key, propsRef.current.width, propsRef.current.height)
+        : null;
+      const devicePayload =
+        devicePresetInfo && deviceLimits
+          ? { details: describeDeviceLimits(deviceLimits), label: devicePresetInfo.label }
+          : null;
 
       let content = "";
       let streamError: string | null = null;
@@ -478,6 +499,7 @@ export function SceneAiPanel({
             ...(targetScene ? { scene: targetScene, sceneId: targetScene.id } : {}),
             ...(editorScenes.length > 0 ? { scenes: editorScenes } : {}),
             ...(draftListing ? { listing: draftListing } : {}),
+            ...(devicePayload ? { device: devicePayload } : {}),
           },
           {
             onEvent: (event) => {
@@ -638,8 +660,11 @@ export function SceneAiPanel({
         // hand runtime errors straight back to the agent — a scene that
         // validated as JSON can still fail at render time.
         setStatus("Checking that the scene renders…");
-        const { getScenes: readLatest, height: checkHeight, width: checkWidth } = propsRef.current;
+        const { devicePreset: checkDevice, getScenes: readLatest, height: checkHeight, width: checkWidth } = propsRef.current;
         const check = await renderSceneCheck({
+          // The same simulated limits the preview panel runs under, so an
+          // ESP32-only failure (memory, JS heap, HTTP cap) reaches the agent.
+          deviceLimits: deviceLimitsFor(checkDevice, checkWidth, checkHeight),
           height: checkHeight,
           sceneId: deliveredSceneId,
           scenes: readLatest() ?? editorScenes,
@@ -679,7 +704,10 @@ export function SceneAiPanel({
           if (round < MAX_RENDER_CHECK_ROUNDS) {
             busyRef.current = false;
             setBusy(false);
-            await submit(formatCheckFeedback(uniqueErrors, check.rendered), round + 1);
+            await submit(
+              formatCheckFeedback(uniqueErrors, check.rendered, devicePresetFor(checkDevice)?.label ?? null),
+              round + 1,
+            );
             return;
           }
         }

@@ -324,6 +324,23 @@ export async function POST(request: NextRequest) {
       );
     }
   }
+  // The device the user's preview simulates (an ESP32's memory limits, a
+  // Pi, ...). Client-declared and advisory: it only steers the design, while
+  // the client's render checks enforce the actual limits.
+  const device = objectOrNull(body.device);
+  const deviceLabel =
+    device && typeof device.label === "string" ? device.label.slice(0, 120).trim() : "";
+  if (deviceLabel) {
+    const deviceDetails =
+      device && typeof device.details === "string" ? device.details.slice(0, 400).trim() : "";
+    contextParts.push(
+      `The user is previewing this scene as it would run on: ${deviceLabel}` +
+        (deviceDetails ? ` (${deviceDetails})` : "") +
+        ". The automatic render checks run under this device's simulated limits, so keep images, JS data " +
+        "structures and fetched payloads within them — precompute compact data instead of large object literals, " +
+        "and prefer image sources that fit the memory budget.",
+    );
+  }
   const selectedNodes = Array.isArray(body.selectedNodes) ? body.selectedNodes : [];
   const selectedEdges = Array.isArray(body.selectedEdges) ? body.selectedEdges : [];
   if (selectedNodes.length > 0 || selectedEdges.length > 0) {

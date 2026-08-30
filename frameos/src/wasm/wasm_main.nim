@@ -165,6 +165,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     renderRequested = false
     lastImage = nil
     pendingSceneStates = initTable[string, JsonNode]()
+    availableRenderBytesOverride = 0
 
     var settings = %*{}
     let settingsText = $settingsJson
@@ -317,6 +318,43 @@ proc frameos_wasm_set_scene_state(sceneId: cstring, stateJson: cstring): bool {.
     true
   except Exception as e:
     setLastError("setSceneState failed: " & e.msg)
+    false
+
+proc frameos_wasm_set_device_limits(payloadJson: cstring): bool {.exportc, cdecl.} =
+  ## Simulate a memory-constrained device (an ESP32-class frame) in the
+  ## preview. JSON object with any of:
+  ##   availableRenderBytes  render-memory budget; feeds the same decode
+  ##                         budgets and degrade ladder the device uses
+  ##   jsMemoryLimitMb       QuickJS heap ceiling per scene context
+  ##   jsMaxStackKb          QuickJS stack ceiling
+  ##   maxHttpResponseBytes  HTTP response cap (the ESP32 spill cap)
+  ## Missing keys (or 0 / -1) keep the browser defaults; an empty object
+  ## resets everything. Call after init and before scenes load, so scene JS
+  ## contexts are created under the ceilings.
+  try:
+    if frameConfig.isNil:
+      setLastError("setDeviceLimits: init not called")
+      return false
+    let parsed = parseJson($payloadJson)
+    if parsed.kind != JObject:
+      setLastError("setDeviceLimits: payload must be a JSON object")
+      return false
+    availableRenderBytesOverride = max(0, parsed{"availableRenderBytes"}.getInt(0))
+    let jsMemoryLimitMb = parsed{"jsMemoryLimitMb"}.getInt(-1)
+    let jsMaxStackKb = parsed{"jsMaxStackKb"}.getInt(-1)
+    if jsMemoryLimitMb >= 0 or jsMaxStackKb >= 0:
+      frameConfig.js = JsRuntimeConfig(executionTimeoutMs: -1,
+        memoryLimitMb: jsMemoryLimitMb, maxStackKb: jsMaxStackKb,
+        assetSandbox: "frame")
+    else:
+      frameConfig.js = nil
+    let maxHttp = parsed{"maxHttpResponseBytes"}.getInt(0)
+    frameConfig.maxHttpResponseBytes =
+      if maxHttp > 0: maxHttp else: DefaultMaxHttpResponseBytes
+    refreshDecodeBudget()
+    true
+  except Exception as e:
+    setLastError("setDeviceLimits failed: " & e.msg)
     false
 
 proc frameos_wasm_set_fusion(enabled: bool) {.exportc, cdecl.} =

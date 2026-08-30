@@ -1194,6 +1194,13 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
     proc fos_js_new_runtime(): ptr JSRuntime {.importc: "fos_js_new_runtime",
         header: "fos_qjs_glue.h".}
     let rt = fos_js_new_runtime()
+  elif defined(frameosWasm):
+    # tools/wasm/fos_quickjs_mem.c: QuickJS's default allocator with a real
+    # usable-size probe. QuickJS's own is `return 0` under emscripten, which
+    # disables JS_SetMemoryLimit — and with it the preview's simulated
+    # device JS-heap ceiling (frameos_wasm_set_device_limits).
+    proc fos_js_new_runtime_wasm(): ptr JSRuntime {.importc, cdecl.}
+    let rt = fos_js_new_runtime_wasm()
   else:
     let rt = JS_NewRuntime()
   if rt == nil:

@@ -96,7 +96,11 @@ if ! grep -q 'localtime_r(&ti, &tm);' "$QJS_SRC/quickjs.c"; then
     exit 1
 fi
 QJS_TZ_SHIM="$FRAMEOS_DIR/tools/wasm/fos_quickjs_tz.c"
-if [[ "$qjs_needs_build" == "0" && ( "$QJS_TZ_SHIM" -nt "$QJS_BUILD/libquickjs.a" || "${QJS_TZ_SHIM%.c}.h" -nt "$QJS_BUILD/libquickjs.a" ) ]]; then
+# Allocator glue: QuickJS's own usable-size probe is `return 0` under
+# emscripten, which silently disables JS_SetMemoryLimit — the preview's
+# device simulation needs the real accounting.
+QJS_MEM_SHIM="$FRAMEOS_DIR/tools/wasm/fos_quickjs_mem.c"
+if [[ "$qjs_needs_build" == "0" && ( "$QJS_TZ_SHIM" -nt "$QJS_BUILD/libquickjs.a" || "${QJS_TZ_SHIM%.c}.h" -nt "$QJS_BUILD/libquickjs.a" || "$QJS_MEM_SHIM" -nt "$QJS_BUILD/libquickjs.a" ) ]]; then
     qjs_needs_build=1
 fi
 if [[ "$qjs_needs_build" == "1" || ! -f "$QJS_BUILD/libquickjs.a" ]]; then
@@ -111,6 +115,7 @@ if [[ "$qjs_needs_build" == "1" || ! -f "$QJS_BUILD/libquickjs.a" ]]; then
             "$QJS_SRC/$src" -o "$QJS_BUILD/${src%.c}.o"
     done
     emcc -c -O2 -w "$QJS_TZ_SHIM" -o "$QJS_BUILD/fos_quickjs_tz.o"
+    emcc -c -O2 -w -I "$QJS_SRC" "$QJS_MEM_SHIM" -o "$QJS_BUILD/fos_quickjs_mem.o"
     rm -f "$QJS_BUILD/libquickjs.a"
     emar rcs "$QJS_BUILD/libquickjs.a" "$QJS_BUILD"/*.o
 fi
@@ -121,7 +126,7 @@ FRAMEOS_VERSION="$(python3 tools/frameos_version.py ../versions.json)"
 # _main keeps Nim's generated main() alive: emscripten calls it on module
 # startup and that runs NimMain (all Nim module initializers, e.g. the
 # baked-in font asset tables).
-EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_tz_offset_seconds
+EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_device_limits,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_tz_offset_seconds
 # FS lets the render harness preload a virtual frame's assets into MEMFS;
 # IDBFS (linked below with -lidbfs.js) backs the browser preview's
 # /srv/assets folder with IndexedDB (see tools/wasm/preview-worker.js).

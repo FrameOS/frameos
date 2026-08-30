@@ -7,7 +7,10 @@
 //
 // Messages in:
 //   {type: 'init', width, height, timeZone, scenesJson, sceneId, settingsJson, proxyUrl,
-//    fastMode?, saveAssets?, browserAssets?}
+//    fastMode?, saveAssets?, browserAssets?, deviceLimits?}
+//     deviceLimits: {availableRenderBytes?, jsMemoryLimitMb?, jsMaxStackKb?,
+//     maxHttpResponseBytes?} — simulate a constrained device (ESP32-class);
+//     omit for the browser's own (unconstrained) limits.
 //   {type: 'render'}                       force a render now
 //   {type: 'event', name, payload}         dispatch a scene event
 //   {type: 'selectScene', sceneId}
@@ -658,6 +661,16 @@ async function init(msg) {
     )
     if (!ok) {
       throw new Error('init failed: ' + lastError())
+    }
+    // Device simulation: cap render memory / JS heap / HTTP responses the way
+    // the chosen device would. Must land before scenes load so scene JS
+    // contexts are created under the ceilings.
+    if (msg.deviceLimits && typeof msg.deviceLimits === 'object') {
+      try {
+        call('frameos_wasm_set_device_limits', 'boolean', ['string'], [JSON.stringify(msg.deviceLimits)])
+      } catch (e) {
+        log('device simulation unavailable (older wasm bundle); previewing without limits')
+      }
     }
     // Apps may save into the browser folder (a device's saveAssets setting;
     // on by default here — it's the visitor's own browser storage). Pass

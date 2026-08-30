@@ -336,6 +336,7 @@ describe("SceneEditorModal landing", () => {
       "canSaveToGallery",
       "editorSceneId",
       "height",
+      "onDevicePresetChange",
       "onImageRegistered",
       "sceneId",
       "scenes",

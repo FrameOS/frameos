@@ -2,11 +2,14 @@
 
 import {
   coerceStateFieldValue,
+  deviceLimitsFor,
+  devicePresets,
   evaluateShowIf,
   FrameOSPreview,
   panelPalettes,
   sceneEventButtons,
   stateFieldShowIfValues,
+  type DevicePresetKey,
   type FrameOSScene,
   type PanelPaletteKey,
   type SceneInfo,
@@ -65,6 +68,10 @@ type SceneLivePreviewPanelProps = {
   /** The account's settings page (where service keys are saved), linked from
    * the credentials hint when a scene needs keys. */
   settingsUrl?: string | undefined;
+  /** The workspace is told which device is being simulated (also on the
+   * initial localStorage restore), so the AI panel's render checks run under
+   * the same limits. */
+  onDevicePresetChange?: ((key: DevicePresetKey) => void) | undefined;
 };
 
 type SceneJsonLike = { id: string } & Record<string, unknown>;
@@ -90,6 +97,9 @@ const PANEL_STORAGE_KEY = "frameos.preview.panel";
 /** Which panel the dither checkbox turns on first — the newest colour e-ink,
  * and what the 13.3" boards FrameOS ships for use. */
 const DEFAULT_PANEL: PanelPaletteKey = "spectra6";
+/** Where the device simulation is remembered (this browser). "browser" (or
+ * anything unknown) means no simulation. */
+export const DEVICE_STORAGE_KEY = "frameos.preview.device";
 
 /** "every 42 ms (about 24 times a second)" for the fast-render prompt. */
 export function describeRenderRate(intervalMs: number): string {
@@ -133,6 +143,7 @@ export function SceneLivePreviewPanel({
   canSaveToGallery = false,
   onImageRegistered,
   settingsUrl,
+  onDevicePresetChange,
 }: SceneLivePreviewPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -305,6 +316,40 @@ export function SceneLivePreviewPanel({
     }
   }
 
+  // "Device": run the scene under a real device's limits — render-memory
+  // budget, JS heap/stack ceilings, HTTP cap. Unlike Dither this changes how
+  // the scene actually renders (a big photo degrades or fails like on an
+  // ESP32), so switching reboots the runtime. Remembered per browser.
+  const [devicePreset, setDevicePreset] = useState<DevicePresetKey>("browser");
+  const onDevicePresetChangeRef = useRef(onDevicePresetChange);
+  onDevicePresetChangeRef.current = onDevicePresetChange;
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(DEVICE_STORAGE_KEY);
+      if (stored && devicePresets.some((entry) => entry.key === stored)) {
+        setDevicePreset(stored as DevicePresetKey);
+        onDevicePresetChangeRef.current?.(stored as DevicePresetKey);
+      }
+    } catch {
+      // Storage blocked: the controls still work for this session.
+    }
+  }, []);
+  function chooseDevice(next: DevicePresetKey) {
+    setDevicePreset(next);
+    onDevicePresetChangeRef.current?.(next);
+    try {
+      window.localStorage.setItem(DEVICE_STORAGE_KEY, next);
+    } catch {
+      // See above.
+    }
+  }
+  // "Memory crunch" feedback: the runtime logs render:degraded when an image
+  // had to be decoded smaller (and upscaled) to fit the simulated budget.
+  // Tracked per render — set while a degraded render is on screen, cleared
+  // once a render completes without one.
+  const [degradedNotice, setDegradedNotice] = useState<string | null>(null);
+  const degradedThisRenderRef = useRef(false);
+
   // Runtime plumbing: the canvas the worker paints onto, the live preview
   // handle, and what the runtime has reported so far.
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -429,6 +474,27 @@ export function SceneLivePreviewPanel({
       if (cancelled) {
         return;
       }
+      // The degraded chip follows the runtime's own memory events: shown
+      // while the frame on screen was rendered degraded, gone once a render
+      // completes at full quality again.
+      if (line.includes('"render:scene"')) {
+        degradedThisRenderRef.current = false;
+      } else if (line.includes('"render:degraded"')) {
+        degradedThisRenderRef.current = true;
+        let divisor = 0;
+        try {
+          divisor = Number(JSON.parse(line)?.divisor) || 0;
+        } catch {
+          // Not JSON after all; the generic message still tells the story.
+        }
+        setDegradedNotice(
+          divisor > 1
+            ? `The simulated device ran low on memory: an image was decoded at 1/${divisor} size and upscaled, like it would be on the real frame.`
+            : "The simulated device ran low on memory: an image was decoded smaller and upscaled, like it would be on the real frame.",
+        );
+      } else if (line.includes('"render:done"') && !degradedThisRenderRef.current) {
+        setDegradedNotice(null);
+      }
       logQueue.push({ id: logIdRef.current++, line, receivedAt: Date.now() });
       scheduleFlush("log", () => {
         const lines = logQueue;
@@ -442,6 +508,8 @@ export function SceneLivePreviewPanel({
         });
       });
     };
+    degradedThisRenderRef.current = false;
+    setDegradedNotice(null);
     try {
       preview = new FrameOSPreview({
         canvas: canvasRef.current,
@@ -455,6 +523,7 @@ export function SceneLivePreviewPanel({
         proxyUrl: "/api/store/preview-proxy",
         fastMode,
         panelPalette: panelRef.current,
+        deviceLimits: deviceLimitsFor(devicePreset, viewport.width, viewport.height),
         onFastRenderRequest: (intervalMs) => {
           if (cancelled) {
             return;
@@ -561,7 +630,7 @@ export function SceneLivePreviewPanel({
     };
     // fastMode reaches a running runtime through setFastMode below; only a
     // fresh runtime reads it from the options, so it is no dependency here.
-  }, [scenes, viewport, storedSettings, previewSettings, restartCount, previewGated]);
+  }, [scenes, viewport, storedSettings, previewSettings, restartCount, previewGated, devicePreset]);
 
   function answerFastRender(enabled: boolean) {
     setFastMode(enabled);
@@ -1184,6 +1253,34 @@ export function SceneLivePreviewPanel({
           ))}
         </select>
       </div>
+      {/* Which hardware the runtime pretends to be. Dither shows what the
+          panel makes of the picture; this changes what the runtime can do at
+          all — an ESP32's few MB of render memory, its 4 MB JS heap, its
+          HTTP cap. The AI panel's render checks run under the same limits. */}
+      <div className="viewport-controls">
+        <label className="viewport-controls__label" htmlFor={`${fieldIdPrefix}-device`}>
+          Device
+        </label>
+        <select
+          aria-label="Device to simulate"
+          className="viewport-controls__select"
+          id={`${fieldIdPrefix}-device`}
+          onChange={(event) => chooseDevice(event.target.value as DevicePresetKey)}
+          title={devicePresets.find((entry) => entry.key === devicePreset)?.description}
+          value={devicePreset}
+        >
+          {devicePresets.map((entry) => (
+            <option key={entry.key} title={entry.description} value={entry.key}>
+              {entry.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {degradedNotice ? (
+        <p className="notice live-preview__degraded" role="status">
+          {degradedNotice}
+        </p>
+      ) : null}
       {assetsOpen ? (
         <PreviewAssetsDialog
           assetsVersion={assetsVersion}

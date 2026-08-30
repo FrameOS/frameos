@@ -14,10 +14,17 @@ type PreviewCallbacks = {
   onReady?: (info: unknown) => void;
   onFrame?: (frame: { width: number; height: number; renderMs: number }) => void;
   onState?: (state: Record<string, unknown>) => void;
+  onLog?: (message: string) => void;
   onFastRenderRequest?: (intervalMs: number) => void;
   onAssetsChanged?: () => void;
   fastMode?: boolean;
   panelPalette?: string | null;
+  deviceLimits?: {
+    availableRenderBytes: number;
+    jsMemoryLimitMb: number;
+    jsMaxStackKb: number;
+    maxHttpResponseBytes: number;
+  } | null;
 };
 
 // The wasm runtime is a worker + emscripten bundle — not something jsdom can
@@ -633,6 +640,80 @@ describe("SceneLivePreviewPanel panel dither", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     await waitFor(() => expect(previews).toHaveLength(2));
     expect(previews[1]!.options.panelPalette).toBe("blackWhite");
+  });
+});
+
+describe("SceneLivePreviewPanel device simulation", () => {
+  async function open(onDevicePresetChange?: (key: string) => void) {
+    render(
+      <SceneLivePreviewPanel
+        onDevicePresetChange={onDevicePresetChange}
+        sceneId="scene-1"
+        scenes={[clockScene]}
+      />,
+    );
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() =>
+      previews[0]!.options.onReady!({
+        currentSceneId: "scene-runtime-1",
+        scenes: [{ id: "scene-runtime-1", name: "Clock", refreshInterval: 60 }],
+      }),
+    );
+  }
+
+  it("runs without limits by default", async () => {
+    await open();
+    expect(
+      (screen.getByRole("combobox", { name: "Device to simulate" }) as HTMLSelectElement).value,
+    ).toBe("browser");
+    expect(previews[0]!.options.deviceLimits ?? null).toBeNull();
+  });
+
+  it("reboots the runtime under the chosen device's limits, remembers it, and tells the workspace", async () => {
+    const onChange = vi.fn();
+    await open(onChange);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Device to simulate" }), {
+      target: { value: "esp32" },
+    });
+    // Unlike Dither, the device changes what the runtime can do: a reboot.
+    await waitFor(() => expect(previews).toHaveLength(2));
+    const limits = previews[1]!.options.deviceLimits!;
+    // The firmware math for an 8 MB board at the default 800×480: a few MB
+    // of render memory, the ESP32's JS heap/stack and HTTP ceilings.
+    expect(limits.availableRenderBytes).toBeGreaterThan(2 * 1024 * 1024);
+    expect(limits.availableRenderBytes).toBeLessThan(6 * 1024 * 1024);
+    expect(limits.jsMemoryLimitMb).toBe(4);
+    expect(limits.jsMaxStackKb).toBe(20);
+    expect(limits.maxHttpResponseBytes).toBe(6 * 1024 * 1024);
+    expect(window.localStorage.getItem("frameos.preview.device")).toBe("esp32");
+    expect(onChange).toHaveBeenLastCalledWith("esp32");
+  });
+
+  it("boots straight into the device it was left on, and reports it to the workspace", async () => {
+    window.localStorage.setItem("frameos.preview.device", "piZero");
+    const onChange = vi.fn();
+    await open(onChange);
+
+    expect(
+      (screen.getByRole("combobox", { name: "Device to simulate" }) as HTMLSelectElement).value,
+    ).toBe("piZero");
+    expect(previews[0]!.options.deviceLimits?.availableRenderBytes).toBe(256 * 1024 * 1024);
+    expect(onChange).toHaveBeenCalledWith("piZero");
+  });
+
+  it("flags a degraded render while it is on screen, and clears once a full render lands", async () => {
+    window.localStorage.setItem("frameos.preview.device", "esp32");
+    await open();
+
+    const log = (line: string) => act(() => previews[0]!.options.onLog!(line));
+    log(JSON.stringify({ event: "render:scene", height: 480, width: 800 }));
+    log(JSON.stringify({ divisor: 2, event: "render:degraded" }));
+    expect(screen.getByRole("status").textContent).toContain("1/2 size");
+
+    log(JSON.stringify({ event: "render:scene", height: 480, width: 800 }));
+    log(JSON.stringify({ event: "render:done", ms: 12 }));
+    expect(screen.queryByText(/ran low on memory/)).toBeNull();
   });
 });
 

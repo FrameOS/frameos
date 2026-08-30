@@ -63,6 +63,9 @@ export type AiChatRequest = {
    * so the assistant edits what the user sees, not what was published. */
   listing?: AiListingChanges | undefined;
   history?: AiChatHistoryItem[] | undefined;
+  /** The device the preview simulates (label + a one-line description of its
+   * limits); the model designs within them and render checks enforce them. */
+  device?: { label: string; details?: string } | undefined;
 };
 
 // A non-2xx answer before the stream started: `code` is the server's
