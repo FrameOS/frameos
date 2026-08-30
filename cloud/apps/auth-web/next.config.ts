@@ -217,6 +217,7 @@ function createNextConfig(phase: string): NextConfig {
       "@frameos-cloud/auth-client",
       "@frameos-cloud/db",
       "@frameos-cloud/mcp",
+      "@frameos-cloud/scene-convert",
     ],
   };
 }

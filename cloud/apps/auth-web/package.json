@@ -29,6 +29,7 @@
     "@frameos-cloud/auth-client": "workspace:*",
     "@frameos-cloud/db": "workspace:*",
     "@frameos-cloud/mcp": "workspace:*",
+    "@frameos-cloud/scene-convert": "workspace:*",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.2",
     "aws4fetch": "^1.0.20",

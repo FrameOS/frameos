@@ -15,6 +15,7 @@ import { StoreActionCards } from "../../src/components/StoreActionCards";
 import {
   getCloudBaseUrl,
   getMyScenesUrl,
+  getNimConverterUrl,
   getStoreUrl,
 } from "../../src/lib/env";
 import { formatDate } from "../../src/lib/format";
@@ -140,7 +141,11 @@ export default async function MyScenesPage({
           </div>
         </div>
         {accountId ? (
-          <StoreActionCards aiAction={`${myScenesUrl}/new`} showUpload />
+          <StoreActionCards
+            aiAction={`${myScenesUrl}/new`}
+            convertUrl={getNimConverterUrl()}
+            showUpload
+          />
         ) : null}
         <MyScenesView
           grouped={grouped}

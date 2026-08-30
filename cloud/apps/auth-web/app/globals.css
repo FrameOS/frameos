@@ -3951,3 +3951,71 @@ html.theme-dark .action-card__ghost {
   overflow-x: auto;
   white-space: pre;
 }
+
+/* Nim → JavaScript scene converter (app/nim-converter). */
+.nim-converter {
+  max-width: 860px;
+}
+
+.nim-converter__drop {
+  border: 2px dashed var(--border);
+  text-align: center;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.nim-converter__drop--active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.nim-converter__drop-copy {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.nim-converter__drop-copy .button-row {
+  justify-content: center;
+}
+
+.nim-converter__paste {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.nim-converter__key summary,
+.nim-converter__api summary,
+.nim-converter__report summary {
+  cursor: pointer;
+}
+
+.nim-converter__key .input {
+  max-width: 420px;
+}
+
+.nim-converter__busy {
+  align-self: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.nim-converter__lines {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.nim-converter__lines code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

@@ -307,6 +307,23 @@ substitute built from catalog nodes, or a clear per-node "needs a manual
 port" with the reason. We pay when it runs on the cloud; a self-hoster can
 bring their own OpenAI key or run it offline.
 
+**Shipped 2026-08-30, the no-frills cut (branch `nim-converter`,
+`docs/nim-to-js-conversion.md` is the reference):**
+`cloud/packages/scene-convert` (pass 1 grammar + structural fixes, pass 2
+via one forced tool, the small lint loop, render-app → data-app +
+`render/image` substitution, `settings.convertedFrom`, fixtures #0 and #1);
+`POST /api/scenes/convert` — public, no login, per-address limits, the
+platform key behind an hourly/daily budget, `openaiApiKey` to pay yourself,
+full `lintScenes` + one server-side wasm render in the reply;
+`scenes.frameos.net/nim-converter` (drop/paste → download, "Save to my
+scenes" when signed in) linked from "My scenes"; the CLI
+(`pnpm --filter @frameos-cloud/scene-convert convert`). `vannituba`
+converts with zero model calls for its code nodes and one for the app, and
+renders headless. Still open below: the MCP tool, the backend route, the
+judge-against-baseline loop, detached jobs, the frontend hooks (3c's
+per-app buttons, "Fork App" through the converter), 3d's declaration
+fixes.
+
 ### 3a. Conversion is additive and reversible
 
 The converted scene keeps everything the compiled one had. `data.code` stays
@@ -407,27 +424,25 @@ a CLI.** The AI loop, lint, headless renderer and judge already live in the
 cloud; nothing of that exists in Python, and porting it is the rewrite this
 plan refuses.
 
-- [ ] **Cloud route** `POST /api/scenes/convert` — body `{scenes: [...],
-  baselineImage?, openaiApiKey?, frameState?}`, auth = session, `fc_api_`
-  token, or a backend link token carrying the new scope `scenes:convert`.
-  Returns a job id; `GET /api/scenes/convert/{job}` streams progress the
-  way `/api/ai/chat/turns/{id}` does (NDJSON, resumable). Runs on
-  `turn-runner.ts` detached turns for now (15-min ceiling is ample for one
-  scene; a restart loses the job — retry is free). Cost: platform key when
-  `FRAMEOS_AI_SHARED_KEY_ACCESS` admits the account, else the account's
-  own key, else the `openaiApiKey` in the request (used for this job,
-  never stored, only over TLS). Cap `maxConversionsPerDay` in `usage.ts`,
-  a PostHog span per job. UI copy says "on us".
+- [x] **Cloud route** `POST /api/scenes/convert` — shipped synchronous and
+  public (see above): `{scene | scenes, openaiApiKey?, dryRun?, render?}`,
+  no session needed, `maxDuration = 300`. Key order is request key →
+  signed-in account key (same-origin only) → platform key gated by
+  `FRAMEOS_SCENE_CONVERT_SHARED_KEY_ACCESS` (default on) with
+  `FRAMEOS_SCENE_CONVERT_PER_ADDRESS_PER_HOUR` (6) and
+  `FRAMEOS_SCENE_CONVERT_PER_DAY` (200) budgets; a `scene_convert` PostHog
+  event per request. **Still to do:** `baselineImage`/`frameState`, the
+  `scenes:convert` link scope for backends, detached jobs with a progress
+  stream (a scene with many apps can outlive one request), nginx's
+  `proxy_read_timeout` checked against the 300 s.
 - [ ] **MCP tool** `scene_convert` in `packages/mcp` (same body).
-- [ ] **On scenes.frameos.net**: `app/my-scenes/import/page.tsx` next to
-  `my-scenes/new` — paste JSON or drop a zip (`validateSceneZip` handles
-  the zip; `POST /api/account/scenes` handles the JSON), "what will
-  change" list from pass 1's dry run, one button, result lands as a private
-  account scene (`createAccountScene`) and opens in the editor with the
-  report. Login-safe like `?prompt=`.
-- [ ] **CLI** `pnpm --filter scene-convert run convert scene.json
-  --openai-key … [--baseline image.png] --out converted.json`, for
-  self-hosters and for the fixture suite. Same code, no cloud account.
+- [x] **On scenes.frameos.net**: shipped as `app/nim-converter/page.tsx`
+  (public, not under `my-scenes`): drop or paste JSON, one button, the
+  report, a download, "Save to my scenes" when signed in. **Still to do:**
+  zip input, opening the result in the editor.
+- [x] **CLI** `pnpm --filter @frameos-cloud/scene-convert convert scene.json
+  --openai-key … --out converted.json [--dry-run] [--types ai-context.json]`.
+  **Still to do:** `--baseline`.
 - [ ] **Backend route** `POST /api/frames/{id}/scenes/{scene_id}/convert`
   with `{via: "cloud" | "cli", openaiApiKey?}`. `cloud` = `cloud_request()`
   with the link token (scope approval dance once), forwarding the frame's
@@ -454,7 +469,8 @@ plan refuses.
 
 ### 3e. Fixtures and exit criteria
 
-- [ ] `cloud/packages/scene-convert/fixtures/`: `vannituba` first, then
+- [x] `cloud/packages/scene-convert/fixtures/`: `vannituba` and
+  `dataCodeFloat` are in, with pass-1 expectations in `convert.test.ts`. Then
   every compiled scene we can get from users who ask for the conversion
   (with permission, stripped of secrets), each with the expected pass-1
   output and, where a baseline exists, the image. The e2e
