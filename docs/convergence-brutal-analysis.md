@@ -1,188 +1,208 @@
 # FrameOS — a deep, brutal analysis
 
-*Written 2026-08-29 against `cloud-mcp` (main at `78346daf`). The question asked:
-"the goal is to build a canvas onto which software can be loaded, which would
-run on an ESP32 and a Pi, to show images on an e-ink display or HDMI/etc. Is
-this the best way to do that?"*
+*Written 2026-08-30, with PR #421 merged: compiled scenes are deprecated on
+every surface, the converter is live, deploys install released binaries, and
+nothing has been deleted yet. The question, as originally asked: "the goal
+is to build a canvas onto which software can be loaded, which would run on
+an ESP32 and a Pi, to show images on an e-ink display or HDMI/etc. Is this
+the best way to do that?" Everything below is measured on this tree; the
+work it implies lives in `docs/convergence-todo.md`.*
 
 ## What this project actually is (numbers)
 
-Tracked source, excluding assets and the 44k-line vendored Waveshare C:
+Tracked source, excluding assets, `repo/` and the 35k-line vendored
+Waveshare C:
 
 | Plane | Size | Language |
 |---|---|---|
-| `frameos/` runtime (Pi + ESP32 core) | ~90k | Nim (+ forked pixie) |
-| `embedded/esp32/` | ~30k | C (ESP-IDF), 0 Nim |
-| `backend/` control plane | ~86k | Python/FastAPI |
-| `frontend/` | ~100k | TS/React/kea |
-| `cloud/` (auth-web + frame-hub) | ~136k | TS/Next.js |
-| `e2e/` | ~23k | TS |
+| `frameos/src/frameos` runtime | 59k | Nim |
+| `frameos/src/apps` built-in catalog | 11k | Nim (40 apps) |
+| `frameos/src/drivers` | 15k | Nim (+35k vendored C) |
+| `embedded/esp32` | 30k | C (ESP-IDF) |
+| `embedded/pico` | 2k | C |
+| `backend/` control plane | 85k | Python/FastAPI |
+| `frontend/` | 96k | TS/React/kea |
+| `cloud/apps/auth-web` | 104k | TS/Next.js |
+| `cloud/` hub + packages + wrapper | 20k | TS |
+| `e2e/` | 12k | Nim + TS |
 
-Roughly **half a million lines, five languages, one committer**, 319 commits
-in August 2026 alone (the 40 `build-codex-*` / `build-fable-*` directories in
-`embedded/esp32` say most of that is agent-assisted). The stated goal fits in
-one sentence: *load software onto a canvas, show it on e-ink or HDMI, on an
-ESP32 or a Pi.*
+Roughly half a million lines, five languages. 1,536 commits, **341 of them
+in August 2026**; the only human committer since June is Marius (338), the
+rest are snapshot bots. Bus factor is exactly 1, and the August rate says
+most of the writing is agent-assisted — which makes the *reading* burden,
+not the writing, the binding constraint. Two parallel schema histories: 74
+Alembic migrations (backend) and 42 Drizzle migrations (cloud), for two
+databases that both describe frames and scenes.
+
+The stated goal still fits in one sentence. Half a million lines is not a
+sentence.
 
 ## The honest verdict
 
-No, this is not the best way to reach that goal. It is the **accumulated** way.
-Nothing in the repo is individually stupid — most decisions were reasonable
-when made — but almost nothing has been deleted, so every generation of the
-design is maintained simultaneously. The cost is not any one subsystem; it is
-the multiplication factor.
+Still no — this is not the best way to reach that goal; it is the
+accumulated way. The last two days fenced off the oldest layer instead of
+maintaining it as a peer, which is real progress. But fencing is not
+deletion, and the count of parallel systems has not gone down anywhere.
+By subsystem:
 
-### 1. Three-and-a-half ways to execute one scene
+### 1. Four ways to execute one scene, still
 
-- Compiled Nim scenes via Python codegen (`backend/app/codegen`, ~5k lines) —
-  already declared legacy.
-- The node-graph interpreter (`frameos/src/frameos/interpreter.nim`, ~1.8k) —
-  the default.
-- JS apps: QuickJS plus a **homegrown TypeScript transpiler written in Nim**
-  (`transpiler.nim` 2.2k + `burrito.nim` 1.7k + `app_runtime.nim` 1.7k +
-  `tokens.nim` 1k ≈ 7k lines of compiler we own).
-- A wasm build of the above for the browser preview — which has already
-  diverged from what frames run (the `radialGradient` → "No image provided"
-  incident: browser wasm = main, frame = last release).
+- Python→Nim codegen: 4,367 lines (`backend/app/codegen/`, +725 of tests)
+  — deprecated, warned about, off by default, **fully present**.
+- The node-graph interpreter: 1,800 lines (`interpreter.nim`) — the default.
+- The JS runtime: **8,802 lines of Nim that implement a TypeScript
+  compiler** (`transpiler.nim` 2,219, `burrito.nim` 1,699, `app_runtime.nim`
+  1,674, `runtime.nim` 1,088, `tokens.nim` 1,056, parser + source maps),
+  over a QuickJS fetched as a tarball from bellard.org at build time.
+- The wasm build of all that for the browser — which is **not in the
+  repo**: `scene-render.ts` expects `public/frameos-wasm/frameos.wasm` to
+  have been installed on the server and errors otherwise. The renderer
+  every thin client and every browser preview depends on is a deploy-time
+  side-load with no version stamp in the tree.
 
-Plus two app ecosystems: 41 Nim apps under `frameos/src/apps/` that need a
-firmware release to add one, and JS apps that are actually loadable. If the
-goal is loadable software, the Nim app catalog is the wrong primitive, and
-every new feature (the path field type, select `{value,label}` options — the
-memory notes literally list "the six lists any option shape must touch") lands
-in all of them.
+And the "loadable software" story the canvas exists for: **40 apps exist
+only as Nim** (compiled into the firmware, a release to change one) and
+**7 exist as JS** (actually loadable). A cloud push refuses any scene
+carrying Nim an interpreter can't run — so the loadable catalog is seven
+apps deep, and every scene beyond that leans on built-ins dispatched by
+keyword into the binary. The deprecation removed the fourth way of
+*writing* scenes; it added a 3.5k-line converter; it deleted nothing.
 
-### 2. Four control planes for one device
+### 2. Four control planes, and each device answers N/A to half of it
 
-`docs/api-triality.md` documents it in our own words: backend API, Pi local
-admin, ESP32 local admin — and the cloud is a fourth with its own hub protocol
-(166 verb strings in `cloud/apps/frame-hub`, 44 handled in
-`frameos/src/frameos/cloud/hub_client.nim`, and a **second, independent**
-implementation in `embedded/esp32/main/fos_cloud.c` at 3.3k lines vs
-`hub_client.nim` at 2.2k). The ESP32 firmware is not "FrameOS on an MCU"; it is
-a second FrameOS written in C with a Nim renderer bolted on. `fos_http.c`
-(2.9k), `fos_scenes.c`, `fos_settings.c`, `fos_ota.c`, `fos_console.c` all have
-Nim twins on the Pi side. Bugs like "activate sent store uuids the device never
-had" and "cloud Power form reset because a key wasn't in the diff list" are the
-direct tax of that duplication.
+Measured this week:
 
-### 3. Rendering strategy is undecided, so both are built
+| Surface | Endpoints |
+|---|---|
+| Backend FastAPI (28 files) | 155 routes |
+| Pi on-device server (7 route files, 2.4k lines) | 74 paths |
+| ESP32 `fos_http.c` (2.9k lines) | 27 paths |
+| Cloud auth-web | 120 `route.ts` files |
 
-There is a thin-client path (`backend/app/api/embedded_device.py` renders and
-dithers on the backend and ships FOSB packed bitmaps; the Pico is a pure thin
-client) **and** a fat-client path (pixie on Xtensa: RGB565 canvas reserved at
-boot, strip fills to dodge 9 MB gradient masks, streaming socket decode,
-degrade-to-blur ladders, ~80 KB internal RAM free with 24/12 KB cloud-link
-floors). The fat path is genuinely impressive engineering — and it is a fight
-between a desktop floating-point vector rasterizer and a chip that cannot
-afford a TLS handshake and a JPEG at the same time. Every board (E1004, 13.3E6,
-PhotoPainter, TRMNL) has re-opened that fight. Meanwhile the README promises
-"60 frames per second", which the ESP32 will never do and the thin-client path
-cannot do either. Pick the customer.
+`docs/api-triality.md` says it plainly — "the long-term contract is not
+three independent APIs" — and then its own 61-row capability table shows
+27 N/A cells in the Pi column and ~24 in the ESP32 column. The cloud link
+is better contained than it was: 20 verbs, all dispatched on both device
+planes, with per-key version gating from one generated contract
+(`docs/cloud-frames-contract.json`). But the contract's fine print records
+the real state: of 23 settings keys, **8 work on both planes, 8 are
+Linux-only, 7 are ESP32-only** — a 65% divergence in what "configure a
+frame" even means. And the second FrameOS is alive and growing:
+`fos_cloud.c` is 3,259 lines of C beside `hub_client.nim`'s 2,049 lines of
+Nim, doing the same job twice, with three hand-maintained validators
+(242 Nim + 259 C + 255 TS) kept honest only by generated tables and shared
+fixtures. That layer was the *settled* answer (a Nim port was measured and
+rejected at +57 KB flash) — settled is not the same as cheap.
 
-### 4. Nim is the moat and the cage
+### 3. Two rendering architectures on one microcontroller family
 
-Nim is a defensible choice for "Python-feel, compiles to C, runs on a Pi *and*
-an MCU". But the tax is in the project's own notes: a forked pixie with a
-growing patch set (EXIF endianness, gradient OOM strip fills, cyclic
-`Image.root` under ORC that **segfaulted the host from any driver .so**),
-nimble segfaulting on the network, the compiler crashing on macOS,
-`ws`/`mummy`/`linuxfb` deps with tiny maintainer pools. Bus factor is 1 and the
-language guarantees it stays 1. The JS-apps direction is the right escape
-hatch; the mistake would be to keep growing the Nim surface (interpreter,
-transpiler) in parallel.
+`localRenderSupported` in `embedded_firmware.py` is the fork: **esp32-s3
+renders locally** (17.5k lines of `fos_*.c` plus 2.6k of Nim glue, RGB565
+canvases, dither, strip fills, streaming socket decode — heroic,
+genuinely impressive memory engineering), **esp32-c3 and both Picos are
+thin clients** (539 lines of `embedded_device.py` serving FOSB bitmaps
+plus 2k of Pico C). The Pi is a third architecture. The thin path is a
+fraction of the code, produces pixel-identical output at full quality, and
+is blocked from the cloud by an unanswered pricing question ("free cloud
+rendering forever" — `docs/todo.md`), while every 8 MB board keeps
+re-fighting the fat path board by board. Nobody has ruled whether
+hub-rendering a *scene* violates the "no image proxies, ever" principle
+(it doesn't — that principle is about external images — but the ruling has
+never been written down). This is the largest undecided question in the
+repo, and it is a decision, not a project.
 
-### 5. The cloud is a SaaS company, not a canvas
+### 4. Nim is the moat and the cage — unchanged
 
-136k lines of Next.js: 2FA + WebAuthn, sudo-mode re-auth, API tokens, an MCP
-host, a scene store with link previews, AI chat v2 with a detached agentic tool
-loop, an activity feed, SSH key management, R2 object storage, pgBackRest PITR,
-rate limiting behind Cloudflare. None of that advances "put loaded software on
-a panel"; all of it is security surface and support load carried alone. That
-is fine if the actual goal is a business — but then say so, because it changes
-what "best" means.
+One dependency is a fork: **pixie, the render core**, patched for EXIF
+endianness, gradient strip fills, and an ORC cycle that segfaulted every
+HDMI frame from inside a driver `.so`. The rest of the lock file is two
+maintainers' ecosystems (treeform, guzba) plus a framebuffer binding with
+one contributor. The 8.8k-line homegrown TS compiler exists *because* the
+runtime is Nim and must embed its own JS. None of this got worse this
+week, and none of it got better: the converter reduces the Nim users
+write to zero and the Nim we maintain by zero. The escape hatch (JS apps)
+is real but seven apps wide.
 
-### 6. Velocity is outrunning verification
+### 5. The cloud is a second company
 
-The working notes say "hardware unverified" or "hardware verification pending"
-for roughly ten shipped features (dual console, sleep forecast, E1004 OTA hold,
-13.3e SPI fix, gradient strip fills, panel link code, …). There are 695 test
-files, but the paths that matter — a real panel refreshing after a real OTA —
-are tested by one person, by hand, sometimes. At 300+ commits a month that is
-not sustainable; it is a queue of latent regressions.
+104k lines of Next.js, 120 API routes, 42 migrations, WebAuthn + 2FA +
+sudo re-auth, a 72-tool MCP host, a scene store with immutable versions, a
+streaming AI loop, R2 + PITR backups — and, since this week, a **public,
+unauthenticated endpoint that spends the platform's OpenAI key**
+(`/api/scenes/convert`, rate-limited per address, budgeted per day). Every
+piece is individually defensible; the sum is a SaaS run by one person as a
+side effect of a picture frame. The question the first version of this
+analysis asked is still open: is the goal the canvas or the company? The
+converter endpoint sharpens it — it should not stay public past the
+deprecation window.
+
+### 6. Verification is pointed at the wrong end
+
+420 test files where the risk is lowest: 109 backend Python, 146 cloud TS,
+159 Nim. Where the risk is highest: **six** ESP32 C unit tests, **zero**
+frontend tests of any kind, ten Playwright specs, firmware exercised only
+under QEMU, the Pico compiled but never booted by CI, and **no
+hardware-in-the-loop anything** — the self-hosted runners are EPYC build
+boxes, not benches. `docs/manual-testing-todo.md` currently holds 14 open
+hardware checkboxes across the Pi and ESP32 benches. At 341 commits a
+month, the gap between "merged" and "works on a panel" is the project's
+largest accumulating liability — bigger than any line count above.
+
+### 7. The deprecation is now a debt with a date
+
+Stages 1–4 are done: no new Nim from the editor, warnings on every
+surface, a working converter, binaries by default, `build_kind` recording
+which frames still build from source. What remains is the only part with
+payoff: **deleting ~9k lines** of codegen, cross-compile, build-host and
+Modal machinery, plus their frontend and CI. The gate is honest (one
+release plus a clean `build_kind` cycle) and **blind** — `build_kind`
+lives in each self-hoster's own database, so the calendar, the cloud's
+converter telemetry, and GitHub issues are the only observable signals.
+If the date slips, the project keeps the worst of both: the maintenance
+of the old path and the complexity of the fence around it.
 
 ## What is genuinely right (do not throw it out)
 
-- The principles in `CLOUD-TODO.md`: outbound-only, scoped tokens,
-  local-first, paid = explicit. Keep.
-- Interpreted scenes as default (no per-scene compile). Right call.
-- The scene graph as a portable data format, with the same code running in
-  browser wasm and on device. Rare and valuable.
-- Signed OTA on both halves; vendor-C-only panel drivers; process spawning
-  through one timeout-wrapped module. Adult engineering.
-- The pixie streaming/budgeted decode work. It is the "no image proxies on
-  frames" rule honoured in hardware.
+- The scene graph as portable data, one interpreter semantics from browser
+  wasm to a Pi to an ESP32. Rare and valuable.
+- Interpreted-by-default, release binaries, deploys that never compile.
+- The contract discipline where it exists: one generated
+  `cloud-frames-contract` consumed by Nim, C and TS, with shared fixtures.
+  It is the pattern everything in §2 should converge on.
+- The principles: outbound-only devices, scoped tokens, no shell verbs in
+  the cloud, no image proxies on frames, paid = explicit.
+- Deprecation done as warnings + converter + date, with the legacy path
+  left *working* until deleted — not disabled-but-present.
+- Vendor-C-only panel drivers; one timeout-wrapped process spawner; signed
+  OTA on both halves.
 
 ## What "best" would look like from here
 
-Not a rewrite — a **deletion program** with a target shape:
+In order, and mostly by deleting or deciding rather than building —
+the concrete items are `docs/convergence-todo.md`:
 
-1. **One loadable-software format: JS.** Freeze the Nim app catalog, port the
-   41 apps to JS apps (the AI eval harness can do the grunt work), delete
-   compiled scenes and `backend/app/codegen`. The graph stays as data/UI; the
-   interpreter becomes a thin scheduler around JS nodes rather than a second
-   execution engine.
-2. **One renderer, placed per device by capability, one protocol.** Boards
-   that can render locally do; boards that cannot get a FOSB bitmap from the
-   hub. Stop making every 8 MB board earn local rendering with heroic memory
-   work — the hub can render at full quality in milliseconds. Both halves
-   already exist; make it a device flag, not two architectures.
-3. **One control plane.** The Python backend is the odd one out: the cloud and
-   the frame both implement frame management in their own language, and the
-   backend does it a third time plus Buildroot image building. The
-   "cloud-as-future-backend" direction is right — say it out loud: freeze
-   `backend/` to bugfixes + image building, and make the self-hosted product
-   be the cloud stack run locally.
-4. **ESP32: shrink `fos_*.c` toward transport + panel + power**, and route
-   verbs through one shared layer. The C→Nim study says a wholesale port costs
-   60–130 KB of flash; fine — but 3.3k lines of a second hub client is the
-   wrong 3.3k to keep.
-5. **A hardware-in-the-loop bench** (one Pi, one E1004, one 7-colour
-   Waveshare) that runs on every release tag. Until that exists, "shipped"
-   does not mean "works".
-6. **Scope the cloud honestly.** If the goal is the canvas, the store + hub +
-   auth is enough; AI chat, API tokens, WebAuthn are features for a company
-   with a second engineer.
+1. **Keep the deletion date.** Stage 5 is where the last two days' work
+   pays off; everything else waits behind it.
+2. **Build the bench before the next feature.** One Pi, one E1004, one
+   colour Waveshare, flashed on every release tag. It converts §6 from a
+   liability into a habit, and it is gated on nothing.
+3. **Decide thin-vs-fat once**, as policy: capability flag picks the
+   renderer, hub renders for boards below the line, and the pricing
+   question gets an answer instead of blocking the architecture.
+4. **Treat the wasm renderer as a release artifact** with a version stamp,
+   and publish the browser-vs-firmware skew table. Preview lying about
+   what a frame will draw is a quiet trust leak.
+5. **Grow the JS catalog toward the Nim one**, converter-telemetry first:
+   every "no JS equivalent" hit names the next bridge primitive or port.
+6. **Stop growing the cloud's surface** until there is a second person or
+   a stated business goal. Close the public converter endpoint when the
+   deprecation window closes.
 
 ## Bottom line
 
-The repo already contains the best design for the stated goal — JS-loadable
-scenes, hub-rendered bitmaps for weak boards, a cloud-shaped control plane,
-wasm preview. It is buried under three earlier designs that were never
-removed. The best next move is not building; it is choosing, and then deleting.
-
-## Postscript — what was decided (2026-08-30)
-
-The analysis stands as written. The treatment in `docs/convergence-todo.md`
-takes a narrower cut than "What best would look like from here" above, on
-purpose — one deletion at a time, no rewrite:
-
-- **§1, three-and-a-half ways to execute a scene → taken, in part.**
-  Compiled Nim scenes are sidelined now (no new operation produces one,
-  every surface warns, an AI converter ports them) and the codegen +
-  per-frame compile machinery is deleted after a deprecation date. Porting
-  the 40 Nim built-ins to JS is *not* taken: they stay in the binary, the
-  interpreter dispatches to them by keyword, and the converter's "no JS
-  equivalent" column is the running list of what a port would need.
-- **§2, four control planes → not taken now.** The backend (Python,
-  self-hosted, with SSH/terminal/Remote) and the cloud stay two products.
-  Whether SSH moves into the cloud or the backend retires is parked.
-- **§3, rendering strategy → not decided.** Thin clients keep
-  `/embedded/render`; the hub-renders question stays open.
-- **§4, ESP32 verb duplication → settled by measurement** (PR #412 scrapped,
-  PR #413's shared contract merged). A scene `.so` mechanism was also
-  measured, in 2026-08-16's `shared`/`shared-scenes` modes, and deleted:
-  Nim refs across a `.so` boundary under ORC crash the host.
-- **§5 and §6, the cloud's scope and the hardware bench → unchanged and
-  still owed.** Nothing in the current plan touches device code, so
-  neither gates the other.
+The repo now contains its best design *and* a fence around its oldest one,
+with a dated demolition permit. Nothing has been deleted, no architecture
+count has gone down, and the biggest risks are unchanged: one person, no
+bench, and a rendering decision nobody has made. The next unit of progress
+is not a feature. It is a deletion, a decision, and a test rig — in that
+order.

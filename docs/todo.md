@@ -7,11 +7,15 @@ models, wire protocols, measurements — lives in the linked docs; this file onl
 carries the work. **When an item ships, delete it.**
 
 **Compiled scenes are deprecated (2026-08-30).** No editor action produces
-new Nim (`docs/convergence-todo.md` Stage 1), every surface that shows a
-compiled scene warns and points at the converter (Stage 2), and the converter
-is live at scenes.frameos.net/nim-converter (Stage 3, no-frills). Removal of
-the source-build path is one release after the converter ships. The "Both
-control planes" rule below stands.
+new Nim, every surface that shows a compiled scene warns and points at the
+converter (scenes.frameos.net/nim-converter, the editor button, MCP
+`scene_convert`, the CLI), deploys install release binaries, and
+`last_successful_deploy.build_kind` records which frames still build from
+source (`docs/legacy-source-builds.md`). Deleting the source-build path is
+item 1 of `docs/convergence-todo.md` — no earlier than one release after
+2026-08-30, once `build_kind` shows a clean cycle; until then the legacy
+path keeps working when asked for. The "Both control planes" rule below
+stands.
 
 Two rules that shape most entries:
 
