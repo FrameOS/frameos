@@ -93,6 +93,14 @@ ShowIfCondition = Union[ConfigFieldCondition, ConfigFieldConditionAnd]
 #
 # Schema for config fields
 #
+class SelectFieldOption(BaseModel):
+    """
+    A select option whose stored value and displayed label differ
+    """
+    value: str = Field(..., description="Value stored in the config")
+    label: str = Field(..., description="Text shown in the editor")
+
+
 class AppConfigField(BaseModel):
     """
     A single input field in the 'fields' array
@@ -100,9 +108,9 @@ class AppConfigField(BaseModel):
     name: str = Field(..., description="Unique config field keyword")
     label: str = Field(..., description="Human-readable label")
     type: FieldTypeEnum = Field(..., description="Type of this field (string, boolean, select, etc.)")
-    options: Optional[List[str]] = Field(
+    options: Optional[List[Union[str, SelectFieldOption]]] = Field(
         None,
-        description="List of options if the field type is 'select'"
+        description="List of options if the field type is 'select'; plain strings or {value, label} pairs"
     )
     required: bool = Field(False, description="Whether the field is required")
     secret: bool = Field(False, description="If true, hide the field content (for passwords, tokens, etc.)")

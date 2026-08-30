@@ -93,3 +93,33 @@ async def test_validate_ts_frame_source_invalid(async_client):
     errors = response.json().get('errors')
     assert len(errors) > 0
     assert 'error' in errors[0]
+
+
+@pytest.mark.asyncio
+async def test_api_apps_accepts_labelled_select_options(async_client, monkeypatch):
+    """
+    Select options are either plain strings or {value, label} pairs (the frontend, the
+    loader generator and the cloud linter all accept both). The response model must too,
+    or one such app takes the whole /api/apps listing down with a validation error.
+    """
+    from app.api import apps as apps_api
+
+    config = {
+        "name": "Labelled",
+        "category": "data",
+        "fields": [
+            {
+                "name": "language",
+                "label": "Language",
+                "type": "select",
+                "options": ["auto", {"value": "et", "label": "Eesti"}],
+                "value": "auto",
+            }
+        ],
+    }
+    monkeypatch.setattr(apps_api, "get_app_configs", lambda: {"data/labelled": config})
+
+    response = await async_client.get('/api/apps')
+    assert response.status_code == 200, response.text
+    field = response.json()['apps']['data/labelled']['fields'][0]
+    assert field['options'] == ["auto", {"value": "et", "label": "Eesti"}]
