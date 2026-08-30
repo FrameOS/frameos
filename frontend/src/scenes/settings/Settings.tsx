@@ -1052,7 +1052,7 @@ export function Settings() {
                                 label="Chat model"
                                 tooltip="OpenAI model the workspace chat runs on. Leave empty for the default."
                               >
-                                <TextInput name="chatModel" placeholder="gpt-5.5" />
+                                <TextInput name="chatModel" placeholder="gpt-5.6-terra" />
                               </Field>
                               <Field
                                 name="chatReasoningEffort"
