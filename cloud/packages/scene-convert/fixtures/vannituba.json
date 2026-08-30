@@ -1,0 +1,575 @@
+{
+  "id": "0360b893-ffe4-4f25-a16e-4bf2b81c90fa",
+  "name": "Default Scene",
+  "settings": {
+    "backgroundColor": "#000000",
+    "refreshInterval": 0.08,
+    "execution": "compiled"
+  },
+  "fields": [
+    {
+      "name": "font",
+      "label": "Font",
+      "type": "font",
+      "persist": "disk",
+      "access": "public"
+    }
+  ],
+  "nodes": [
+    {
+      "data": {
+        "keyword": "render"
+      },
+      "id": "94acae14-173e-413c-8ac6-645f33f2b9f1",
+      "position": {
+        "x": -181.22522999663073,
+        "y": 354.26239002591814
+      },
+      "type": "event"
+    },
+    {
+      "data": {
+        "config": {},
+        "keyword": "code",
+        "sources": {
+          "app.nim": "import json, strformat, times\nimport pixie\nimport frameos/apps\nimport frameos/types\n\ntype\n  AppConfig* = object\n    keyword*: string\n\n  App* = ref object of AppRoot\n    appConfig*: AppConfig\n\nproc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =\n  result = App(\n    nodeId: nodeId,\n    scene: scene,\n    frameConfig: scene.frameConfig,\n    appConfig: appConfig,\n  )\n\nproc run*(self: App, context: ExecutionContext) =\n  if self.scene.state{\"water_heater\"}{\"state\"}.getStr == \"heat\":\n    if self.scene.state{\"heatStart\"}.getFloat == 0.0:\n      self.scene.state[\"heatStart\"] = %*(epochTime())\n  else: \n    if self.scene.state{\"heatStart\"}.getFloat != 0.0:\n      self.scene.state[\"heatStart\"] = %*(0.0)\n\n  let heatStart = self.scene.state{\"heatStart\"}.getFloat\n  if heatStart == 0.0:\n    self.scene.state[\"heatTimer\"] = %*(\"\")\n  else:\n    let timeRunning = (epochTime() - heatStart)\n    let timeLeft = 30.0 * 60.0 - timeRunning\n\n    if timeLeft < 0:\n      self.scene.state[\"heatTimer\"] = %*\"Still HOT\"\n    else:\n      let minutesLeft = (timeLeft / 60.0).int\n      let secondsLeft = timeLeft.int mod 60\n      let timeLeftString = \"\" &\n        (if minutesLeft < 10: \"0\" else: \"\") &\n        $minutesLeft & \":\" &\n        (if secondsLeft < 10: \"0\" else: \"\") &\n        $secondsLeft\n      self.scene.state[\"heatTimer\"] = %*(timeLeftString)\n",
+          "config.json": "{\n  \"name\": \"Heat timer\",\n  \"description\": \"\",\n  \"category\": \"boilerplate\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\"markdown\": \"scene.state{\\\"heatTimer\\\"}.getStr\"}\n  ]\n}"
+        }
+      },
+      "id": "dfacd0d4-cb93-4119-ac69-e4f2059add27",
+      "position": {
+        "x": 671.36636397117,
+        "y": 401.0127227121344
+      },
+      "type": "app"
+    },
+    {
+      "data": {
+        "config": {},
+        "keyword": "logic/ifElse"
+      },
+      "id": "ab40e1a9-d725-4c43-affd-8b0b82242681",
+      "position": {
+        "x": 2114.653574125793,
+        "y": 398.82181936923797
+      },
+      "type": "app"
+    },
+    {
+      "data": {
+        "config": {
+          "borderColor": "#000000",
+          "fontColor": "#ff0000",
+          "fontSize": "60",
+          "offsetY": "70"
+        },
+        "keyword": "render/text"
+      },
+      "id": "41c11341-cd61-44e9-b588-45a6cbeec920",
+      "position": {
+        "x": 2401.047431406994,
+        "y": 352.35799740449767
+      },
+      "type": "app"
+    },
+    {
+      "id": "964cf503-84eb-4269-ac1b-d0898db70db1",
+      "position": {
+        "x": 1604.9913844253367,
+        "y": 170.0820751140277
+      },
+      "data": {
+        "code": "if state == \"heat\": -40 else: 0",
+        "codeArgs": [
+          {
+            "name": "state",
+            "type": "string"
+          }
+        ],
+        "codeOutputs": [
+          {
+            "name": "offsetY",
+            "type": "float"
+          }
+        ]
+      },
+      "type": "code",
+      "style": {
+        "width": 232,
+        "height": 155
+      },
+      "width": 232,
+      "height": 155
+    },
+    {
+      "id": "37255a86-f44f-40e8-8fe7-804e9103982d",
+      "position": {
+        "x": 979.1499984399941,
+        "y": -164.55510214460202
+      },
+      "data": {
+        "code": "$scene.state{\"water_heater\"}{\"state\"}.getStr",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "state",
+            "type": "string"
+          }
+        ]
+      },
+      "type": "code",
+      "style": {
+        "width": 300,
+        "height": 130
+      },
+      "width": 300,
+      "height": 130
+    },
+    {
+      "id": "2d164791-03fc-4c54-856a-896ce1167e79",
+      "position": {
+        "x": 2056.1249709155086,
+        "y": 191.22146670700675
+      },
+      "data": {
+        "code": "state == \"heat\"",
+        "codeArgs": [
+          {
+            "name": "state",
+            "type": "string"
+          }
+        ],
+        "codeOutputs": [
+          {
+            "name": "condition",
+            "type": "boolean"
+          }
+        ]
+      },
+      "type": "code",
+      "style": {
+        "width": 250,
+        "height": 130
+      },
+      "width": 250,
+      "height": 130
+    },
+    {
+      "id": "5bf6d3cd-01bb-4d60-8de0-a40d68b2c586",
+      "position": {
+        "x": 2353.1350607675217,
+        "y": 159.23947713131582
+      },
+      "data": {
+        "code": "scene.state{\"heatTimer\"}.getStr",
+        "codeArgs": [],
+        "codeOutputs": [
+          {
+            "name": "text",
+            "type": "string"
+          }
+        ]
+      },
+      "type": "code",
+      "style": {
+        "width": 342,
+        "height": 130
+      },
+      "width": 342,
+      "height": 130
+    },
+    {
+      "id": "1f2e39fc-55f5-4d63-8a2a-11f94da5b1c0",
+      "type": "app",
+      "position": {
+        "x": 1013.9360306338876,
+        "y": 400.61473435259086
+      },
+      "data": {
+        "keyword": "logic/ifElse",
+        "config": {}
+      }
+    },
+    {
+      "id": "91949e79-1ceb-4d0f-a627-558fe911e36b",
+      "position": {
+        "x": 978.0104509642792,
+        "y": 151.38167784238084
+      },
+      "data": {
+        "code": "state == \"heat\"",
+        "codeArgs": [
+          {
+            "name": "state",
+            "type": "string"
+          }
+        ],
+        "codeOutputs": [
+          {
+            "name": "condition",
+            "type": "boolean"
+          }
+        ]
+      },
+      "type": "code",
+      "style": {
+        "width": 300,
+        "height": 130
+      },
+      "width": 300,
+      "height": 130
+    },
+    {
+      "id": "78d286a7-0915-4cac-8c91-df4f26910d1f",
+      "position": {
+        "x": 170.92274929934064,
+        "y": 358.43124994004097
+      },
+      "data": {
+        "keyword": "logic/setAsState",
+        "config": {
+          "stateKey": "water_heater"
+        }
+      },
+      "type": "app"
+    },
+    {
+      "id": "b8b9e1e9-ca71-45b0-8445-05739f2d17f2",
+      "position": {
+        "x": 99.55502221825961,
+        "y": 64.38328973907073
+      },
+      "data": {
+        "keyword": "data/haSensor",
+        "config": {
+          "entityId": "water_heater.hot_water",
+          "debug": "true"
+        },
+        "cache": {
+          "duration": "1",
+          "durationEnabled": true,
+          "enabled": true,
+          "inputEnabled": true
+        }
+      },
+      "type": "app"
+    },
+    {
+      "id": "9f020763-c023-4d41-b9de-fc35029d572a",
+      "type": "app",
+      "position": {
+        "x": 1640.0251322506736,
+        "y": 370.1891979235154
+      },
+      "data": {
+        "keyword": "render/text",
+        "config": {
+          "fontSize": "80"
+        },
+        "cache": {}
+      }
+    },
+    {
+      "id": "5b93dfee-08da-4f69-b099-82cc482cda8d",
+      "position": {
+        "x": 1624.3014869274955,
+        "y": -156.41006061743875
+      },
+      "data": {
+        "keyword": "data/clock",
+        "config": {}
+      },
+      "type": "app"
+    },
+    {
+      "id": "3267f710-7296-4537-aedc-fe942bc4a179",
+      "position": {
+        "x": 1209.0794520559336,
+        "y": 975.6083522765367
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {}
+      },
+      "type": "app"
+    },
+    {
+      "id": "f2d66cc9-66de-4d13-a0b6-9919b35d4a03",
+      "position": {
+        "x": 1234.4716582359763,
+        "y": 782.3891697686186
+      },
+      "data": {
+        "keyword": "data/unsplash",
+        "config": {
+          "search": "snow"
+        },
+        "cache": {
+          "duration": "3600",
+          "durationEnabled": true,
+          "enabled": true,
+          "inputEnabled": true
+        }
+      },
+      "type": "app"
+    },
+    {
+      "id": "286deece-2490-40cc-b5ce-c449205e34aa",
+      "position": {
+        "x": 1256.274444692118,
+        "y": 609.1312964384836
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {}
+      },
+      "type": "app"
+    },
+    {
+      "id": "46e5a1de-ce54-449f-ae72-252e620b37dd",
+      "position": {
+        "x": 1235.7966033743098,
+        "y": 438.20491964054304
+      },
+      "data": {
+        "keyword": "data/unsplash",
+        "config": {
+          "search": "fire"
+        },
+        "cache": {
+          "duration": "3600",
+          "durationEnabled": true,
+          "enabled": true,
+          "inputEnabled": true
+        }
+      },
+      "type": "app"
+    },
+    {
+      "id": "13e11608-42f2-40e6-b4cd-0c1827a16bb1",
+      "position": {
+        "x": 1582.9052798432358,
+        "y": -213.5637507388036
+      },
+      "data": {
+        "keyword": "font"
+      },
+      "type": "state"
+    },
+    {
+      "id": "383d9627-b504-4c0d-bc4e-9f775b5a1302",
+      "position": {
+        "x": 2321.285969434821,
+        "y": 92.05000900151981
+      },
+      "data": {
+        "keyword": "font"
+      },
+      "type": "state"
+    }
+  ],
+  "edges": [
+    {
+      "id": "0a3f0d1e-b8d8-4d2f-b9a9-78f060545959",
+      "source": "ab40e1a9-d725-4c43-affd-8b0b82242681",
+      "sourceHandle": "field/thenNode",
+      "target": "41c11341-cd61-44e9-b588-45a6cbeec920",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "3f00f3f1-d5e3-4235-b106-efb7fa308bf8",
+      "target": "964cf503-84eb-4269-ac1b-d0898db70db1",
+      "targetHandle": "codeArg/arg",
+      "source": "37255a86-f44f-40e8-8fe7-804e9103982d",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "48df907c-a70e-42f7-a4c7-2486a8852b4b",
+      "source": "37255a86-f44f-40e8-8fe7-804e9103982d",
+      "sourceHandle": "fieldOutput",
+      "target": "964cf503-84eb-4269-ac1b-d0898db70db1",
+      "targetHandle": "codeField/arg",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "ce193af8-5522-4f5f-93b3-f3b9ed41bab8",
+      "target": "ab40e1a9-d725-4c43-affd-8b0b82242681",
+      "targetHandle": "fieldInput/condition",
+      "source": "2d164791-03fc-4c54-856a-896ce1167e79",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "7a6e6aad-1cb8-4bf7-9cf5-91be26d03eef",
+      "source": "37255a86-f44f-40e8-8fe7-804e9103982d",
+      "sourceHandle": "fieldOutput",
+      "target": "2d164791-03fc-4c54-856a-896ce1167e79",
+      "targetHandle": "codeField/arg",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "bea4ba83-e993-4703-8672-c7c110e4e806",
+      "target": "41c11341-cd61-44e9-b588-45a6cbeec920",
+      "targetHandle": "fieldInput/text",
+      "source": "5bf6d3cd-01bb-4d60-8de0-a40d68b2c586",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "2a99f602-e37f-4446-ac9e-9d1f552edee1",
+      "source": "37255a86-f44f-40e8-8fe7-804e9103982d",
+      "sourceHandle": "fieldOutput",
+      "target": "2d164791-03fc-4c54-856a-896ce1167e79",
+      "targetHandle": "codeField/state",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "5e82c334-d9b0-4227-a519-fa835b9458ee",
+      "source": "37255a86-f44f-40e8-8fe7-804e9103982d",
+      "sourceHandle": "fieldOutput",
+      "target": "964cf503-84eb-4269-ac1b-d0898db70db1",
+      "targetHandle": "codeField/state",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "ce066c46-fb00-48cf-8368-17dc7976b4dc",
+      "source": "dfacd0d4-cb93-4119-ac69-e4f2059add27",
+      "sourceHandle": "next",
+      "target": "1f2e39fc-55f5-4d63-8a2a-11f94da5b1c0",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "11cf1d5a-a49b-4c5a-9058-5c66aa018f4e",
+      "target": "1f2e39fc-55f5-4d63-8a2a-11f94da5b1c0",
+      "targetHandle": "fieldInput/condition",
+      "source": "91949e79-1ceb-4d0f-a627-558fe911e36b",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "52e626e8-a314-40f1-a2f2-f21f58c6ce20",
+      "source": "37255a86-f44f-40e8-8fe7-804e9103982d",
+      "sourceHandle": "fieldOutput",
+      "target": "91949e79-1ceb-4d0f-a627-558fe911e36b",
+      "targetHandle": "codeField/arg",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "7d2d0c5e-ccfa-449f-8d36-a3e119d44753",
+      "source": "37255a86-f44f-40e8-8fe7-804e9103982d",
+      "sourceHandle": "fieldOutput",
+      "target": "91949e79-1ceb-4d0f-a627-558fe911e36b",
+      "targetHandle": "codeField/state",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "4058e242-5b37-42d5-8187-ddf2d1cc0687",
+      "source": "94acae14-173e-413c-8ac6-645f33f2b9f1",
+      "sourceHandle": "next",
+      "target": "78d286a7-0915-4cac-8c91-df4f26910d1f",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "557bde7e-da13-42a4-9f38-67db90365cea",
+      "target": "78d286a7-0915-4cac-8c91-df4f26910d1f",
+      "targetHandle": "fieldInput/valueJson",
+      "source": "b8b9e1e9-ca71-45b0-8445-05739f2d17f2",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "a9019009-4d5d-4ba5-85f8-d8126b611fe5",
+      "source": "78d286a7-0915-4cac-8c91-df4f26910d1f",
+      "sourceHandle": "next",
+      "target": "dfacd0d4-cb93-4119-ac69-e4f2059add27",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "837cea3a-041d-42bc-b634-da6a72fd8e64",
+      "source": "964cf503-84eb-4269-ac1b-d0898db70db1",
+      "sourceHandle": "fieldOutput",
+      "target": "9f020763-c023-4d41-b9de-fc35029d572a",
+      "targetHandle": "fieldInput/offsetY",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "df42f212-9228-46b9-a2b3-a7f497c4f8f8",
+      "target": "9f020763-c023-4d41-b9de-fc35029d572a",
+      "targetHandle": "fieldInput/text",
+      "source": "5b93dfee-08da-4f69-b099-82cc482cda8d",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "b38f4c06-01cd-4300-97ed-237644544444",
+      "source": "1f2e39fc-55f5-4d63-8a2a-11f94da5b1c0",
+      "sourceHandle": "next",
+      "target": "9f020763-c023-4d41-b9de-fc35029d572a",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "a3fdfffa-f083-4d91-9f42-cc97f681dc32",
+      "source": "9f020763-c023-4d41-b9de-fc35029d572a",
+      "sourceHandle": "next",
+      "target": "ab40e1a9-d725-4c43-affd-8b0b82242681",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "1d6a307a-1980-49ff-b1a9-9f9a2abc537b",
+      "source": "1f2e39fc-55f5-4d63-8a2a-11f94da5b1c0",
+      "sourceHandle": "field/elseNode",
+      "target": "3267f710-7296-4537-aedc-fe942bc4a179",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "e1a10a93-6fff-4a53-a638-ca2d58be7d38",
+      "target": "3267f710-7296-4537-aedc-fe942bc4a179",
+      "targetHandle": "fieldInput/image",
+      "source": "f2d66cc9-66de-4d13-a0b6-9919b35d4a03",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "fa73b809-5a11-4a31-89f5-4c51deffe59b",
+      "source": "1f2e39fc-55f5-4d63-8a2a-11f94da5b1c0",
+      "sourceHandle": "field/thenNode",
+      "target": "286deece-2490-40cc-b5ce-c449205e34aa",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "9673e754-a7a4-4107-a74f-02c3751b8c4e",
+      "target": "286deece-2490-40cc-b5ce-c449205e34aa",
+      "targetHandle": "fieldInput/image",
+      "source": "46e5a1de-ce54-449f-ae72-252e620b37dd",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "4fef1106-fc43-406d-935b-c284e5cd61c1",
+      "source": "13e11608-42f2-40e6-b4cd-0c1827a16bb1",
+      "sourceHandle": "fieldOutput",
+      "target": "9f020763-c023-4d41-b9de-fc35029d572a",
+      "targetHandle": "fieldInput/font",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "abab7f36-8ff2-48c4-93a8-5cc35a910927",
+      "source": "383d9627-b504-4c0d-bc4e-9f775b5a1302",
+      "sourceHandle": "fieldOutput",
+      "target": "41c11341-cd61-44e9-b588-45a6cbeec920",
+      "targetHandle": "fieldInput/font",
+      "type": "codeNodeEdge"
+    }
+  ],
+  "apps": {},
+  "customEvents": []
+}

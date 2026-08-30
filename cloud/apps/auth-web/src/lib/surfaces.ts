@@ -4,6 +4,7 @@ import {
   getCloudBaseUrl,
   getScenesBaseUrl,
   myScenesPath,
+  nimConverterPath,
 } from "./env";
 
 const authPagePrefixes = [
@@ -69,9 +70,13 @@ export function isPublicScenePath(pathname: string) {
 }
 
 // Everything the scenes host serves besides its store front: public scene
-// pages plus the signed-in "My scenes" tab.
+// pages, the signed-in "My scenes" tab and the Nim → JavaScript converter.
 function isScenesHostPath(pathname: string) {
-  return isPublicScenePath(pathname) || pathname === myScenesPath;
+  return (
+    isPublicScenePath(pathname) ||
+    pathname === myScenesPath ||
+    pathname === nimConverterPath
+  );
 }
 
 // The old homes of the private scene list — /account/scenes and its clean

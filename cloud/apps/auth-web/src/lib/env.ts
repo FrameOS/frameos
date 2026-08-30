@@ -155,6 +155,14 @@ export function getMyScenesUrl() {
   return new URL(myScenesPath, getScenesBaseUrl()).toString();
 }
 
+// The Nim → JavaScript scene converter: a public page on the scenes host
+// (docs/nim-to-js-conversion.md), next to the store and "My scenes".
+export const nimConverterPath = "/nim-converter";
+
+export function getNimConverterUrl() {
+  return new URL(nimConverterPath, getScenesBaseUrl()).toString();
+}
+
 export function getSessionCookieDomain() {
   const configured = optionalEnv("FRAMEOS_SESSION_COOKIE_DOMAIN");
   if (!configured) {
