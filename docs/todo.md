@@ -9,9 +9,9 @@ carries the work. **When an item ships, delete it.**
 **Compiled scenes are deprecated (2026-08-30).** No editor action produces
 new Nim (`docs/convergence-todo.md` Stage 1), every surface that shows a
 compiled scene warns and points at the converter (Stage 2), the converter
-is live at scenes.frameos.net/nim-converter (Stage 3, no-frills), and a
-deploy installs the release binary unless the frame's `legacySourceBuild`
-switch is on (Stage 4; `docs/legacy-source-builds.md`). Removal of the
+is live at scenes.frameos.net/nim-converter (Stage 3, no-frills), and the
+source-build path is documented in one place and off every pull request
+(Stage 4; `docs/legacy-source-builds.md`). Removal of the
 source-build path (Stage 5) is one release after the converter shipped, once
 `build_kind` shows no source builds for a release cycle. The "Both control
 planes" rule below stands.

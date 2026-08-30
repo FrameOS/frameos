@@ -42,13 +42,13 @@ The part this program is about, measured on the branch:
 | `cloud/packages/scene-convert` (grammar, model pass, lint loop, CLI) | 3,506 |
 | converter route + page + editor hook-up + MCP tool | ~1,200 |
 | Stage 1–2 warnings, chips, confirms, `sceneRequiresCompilation` twins | ~600 |
-| Stage 4 door, migration, plan fields, UI switch | ~400 |
+| Stage 4 plan fields, installer copy, docs | ~100 |
 
-So: **about 9k lines are now behind a switch that is off by default, and
-about 5.7k lines were written to make that switch safe to flip off.** Net,
-the repo is larger than it was two days ago. That is the correct shape for
-a deprecation — but only if Stage 5 actually happens. A deprecation that
-never reaches its deletion is just a feature with worse UX.
+So: **about 9k lines are now deprecated, documented on one page and off the
+PR path, and about 5.4k lines were written to make deleting them safe.**
+Net, the repo is larger than it was two days ago. That is the correct shape
+for a deprecation — but only if Stage 5 actually happens. A deprecation
+that never reaches its deletion is just a feature with worse UX.
 
 ## What changed in 36 hours
 
@@ -61,11 +61,15 @@ never reaches its deletion is just a feature with worse UX.
   have: zero model calls for its five Nim code nodes, one for its Nim app,
   lint-clean, renders headless. Public route, page, CLI, MCP tool, and a
   button in the editor (Stage 3, no-frills).
-- **The default is the binary, full stop.** A compiled scene no longer
-  forces a source build; the release installs and the plan says which
-  scenes will not run. One key, `legacySourceBuild`, is the only way to a
-  Nim build; the migration opened it for every frame that needed it. CI no
-  longer compiles a frame per pull request (Stage 4).
+- **The default is the binary, and the legacy path is fenced, not cut.**
+  A fresh frame never compiles; a compiled scene or an explicit `static`
+  mode still gets the old source build, on purpose — a path that exists
+  should work when asked for. `build_kind` records which frames still take
+  it; CI no longer compiles a frame per pull request; one page documents
+  the path (Stage 4). An earlier cut of Stage 4 gated the build behind a
+  per-frame switch and made an explicit `static` inert; it was pulled the
+  same evening as silly — disabling code that is still shipped is the worst
+  of both.
 
 That is the whole of the plan short of deletion. What follows is what is
 *still* true.
@@ -74,13 +78,14 @@ That is the whole of the plan short of deletion. What follows is what is
 
 ### 1. Three-and-a-half ways to execute a scene → still three-and-a-half
 
-Nothing was deleted. Compiled scenes are hidden, discouraged, warned about,
-convertible, and gated — and every line that runs them is in the tree,
-tested, and shipped in every release. The multiplication factor the first
-analysis named is unchanged: this very branch had to change the plan logic
-in `binary_builder.py`, mirror it in `frameDeployUtils.ts`, repeat it in the
+Nothing was deleted. Compiled scenes are hidden, discouraged, warned about
+and convertible — and every line that runs them is in the tree, tested,
+and shipped in every release. The multiplication factor the first analysis
+named is unchanged: the pulled Stage 4 cut had to change the plan logic in
+`binary_builder.py`, mirror it in `frameDeployUtils.ts`, repeat it in the
 Buildroot twin in `frame_deploy_workflow.py`, and touch the SD-image
-eligibility check — four places for one rule, which is exactly the tax.
+eligibility check — four places for one rule, which is exactly the tax,
+and exactly why a holding pattern should change as little as possible.
 Meanwhile the JS side grew a 3.5k-line converter that is, for now, a fifth
 way to *produce* a scene. The right reading: the program is half done, and
 the second half — Stage 5 — is where all the payoff is. The date is set
@@ -88,10 +93,9 @@ the second half — Stage 5 — is where all the payoff is. The date is set
 
 ### 2. Four control planes → four, on purpose, and the bill arrived on time
 
-Parked by decision, and the decision stands. But note what Stage 4 cost
-because of it: the backend and the frontend each carry
-`frame_compilation_mode` / `frameCompilationMode`,
-`frame_legacy_source_build` / `frameLegacySourceBuild`,
+Parked by decision, and the decision stands. But note the tax: the backend
+and the frontend each carry `frame_compilation_mode` /
+`frameCompilationMode`, `precompiled_skip_reason` / `precompiledSkipReason`,
 `scene_requires_compilation` / `sceneRequiresCompilation`, and the cloud
 carries a third `compiledSceneNames`. They agree today because one person
 wrote them the same afternoon. There is no test that pins the Python and
@@ -112,9 +116,8 @@ The converter reduces the Nim *users* write to zero. It reduces the Nim
 (1.7k), `app_runtime.nim` (1.7k), the interpreter (1.8k) and the built-in
 catalog are exactly where they were. That is the intended scope — "no
 rewrite" — and it is right for now. But the first analysis's warning
-stands: do not grow the Nim surface in parallel with the JS one. Stage 4's
-`build_kind` and door are Python and TypeScript; the runtime did not change
-at all. Good.
+stands: do not grow the Nim surface in parallel with the JS one. Stages
+1–4 are Python and TypeScript; the runtime did not change at all. Good.
 
 ### 5. The cloud is a SaaS company → and it just grew a public, unauthenticated compute endpoint
 
@@ -131,13 +134,12 @@ and a signed-in feature.
 
 ### 6. Velocity is outrunning verification → yes, and this branch is an example
 
-Stage 4 ships with unit tests for the plan, the migration and the mode
-helper, and a passing type check. It ships **without** a single real
-deploy of a door-shut frame that has a compiled scene — the one behaviour
-it changes for users. The deploy e2e in CI covers the door-*open* path (its
-frames were edited to open the door). The migration was run against SQLite
-in a test, not against a backend with real frames. "Hardware unverified"
-grew by one entry today. The list from 2026-08-29 (dual console, sleep
+Stages 1–4 ship with unit tests and passing type checks, and with exactly
+one real-world compiled scene ever run through the converter. No converted
+scene has been deployed to a panel from this repo's CI; the deploy e2e
+still tests the legacy path (good — it is the path most likely to rot
+unnoticed) and nothing tests the converted output on hardware. The list
+from 2026-08-29 (dual console, sleep
 forecast, E1004 OTA hold, 13.3e SPI, panel link code, …) has not shrunk.
 The hardware-in-the-loop bench is still the most valuable thing nobody has
 built.
@@ -156,25 +158,25 @@ event (conversions attempted, model calls, failures), converter page
 visits, and GitHub issues. Decide now that those are the proxy, or accept
 that the deletion date is a calendar date, not a measured one.
 
-### 8. New: what the door does to a scene that arrives late
+### 8. New: the holding pattern has no forcing function
 
-A frame restored from a cloud backup or synced from a device *after* the
-migration ran, carrying compiled scenes, gets the door shut. Its next full
-deploy installs the release and those scenes go dark with an amber row in
-the plan and a chip on the frame — no dialog, no refusal. That is the
-designed behaviour and it is defensible (the alternative was to keep the
-silent source build alive), but it is the one place a self-hoster can be
-surprised, and the warning is the only thing standing between them and a
-blank panel. If a report comes in, the answer is one switch, and the
-answer should be in the FAQ before the report does.
+Because nothing changed for the frames that still compile, nothing pushes
+their owners to convert except the amber chips and the release notes. That
+is deliberate — a self-hoster upgrading in six months must not find a
+blank panel — but it means the deletion date will arrive with some frames
+still on the path, and Stage 5's "data first" step (stamp them
+`interpreted`, leave `needsConversion` notes) is what those frames will
+actually experience. Say so in the release notes now, twice, so the
+deletion is not the first they hear of it.
 
 ## What is genuinely right (keep)
 
 Everything the first analysis listed still holds, plus:
 
-- **The door is one key with one reader on each plane.** Not a mode, not a
-  matrix; a boolean the migration set and Stage 5 deletes. That is how a
-  deprecation switch should look.
+- **Pulling the switch.** The first Stage 4 cut was clever and wrong:
+  hidden code that refuses to run is a bug report waiting to happen, not a
+  deprecation. The fence is the warnings, the converter and the date;
+  the machinery stays working until the day it is deleted.
 - **Conversion drops the Nim** rather than keeping it as a sibling. The
   editor could not tell the two apart, and nobody needs the old code — the
   original file is the backup. Additive-and-reversible sounded safer and
@@ -191,11 +193,11 @@ Shorter than last time, because most of it is now "wait, then delete":
 1. **Sit on it.** No further convergence work until one release has
    shipped with Stage 4 in it. Use the time on the hardware bench, not on
    Stage 3's optional leftovers.
-2. **Write the FAQ entry now** ("my scene stopped rendering after the
-   update" → the chip, the converter, the switch), and put the converter
-   link in the release notes. §8 is the support ticket that will come.
+2. **Write the release-notes entry now** ("compiled scenes are deprecated,
+   here is the converter, here is the date"), and repeat it in every
+   release until Stage 5. §8 is the surprise that will otherwise come.
 3. **Pin the twins.** One fixture file of scenes with expected
-   `requiresCompilation` / `execution` / door outcomes, run by the Python
+   `requiresCompilation` / `execution` / skip-reason outcomes, run by the Python
    tests, the frontend tests and the cloud tests — the
    `cloud-frames-fixtures.json` pattern, applied to this rule. Cheap, and
    it makes §2's drift a test failure instead of a bug report.
@@ -207,8 +209,9 @@ Shorter than last time, because most of it is now "wait, then delete":
 ## Bottom line
 
 Two days ago the repo contained its best design buried under three older
-ones. Today the oldest of the three is fenced off, labelled, and has an
-exit ramp; nothing has been removed. That is progress of the only kind
+ones. Today the oldest of the three is labelled on every surface, has an
+exit ramp, a date, and a page of its own; nothing has been removed and
+nothing has been disabled. That is progress of the only kind
 this codebase can afford — reversible, small, tested — and it is worth
 nothing until the fence is replaced by an empty lot. The date is written
 down. Keep it.

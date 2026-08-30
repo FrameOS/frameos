@@ -515,76 +515,55 @@ plan refuses.
   original and accepts the converted scene; the CLI produces the same
   output as the route for the same input and key.
 
-## Stage 4 — Binaries by default, source builds behind a door
+## Stage 4 — Binaries by default, source builds documented and off the PR path
 
-Goal: after this stage the backend compiles Nim only when a user with a
-compiled scene explicitly asks for the legacy path, and never for a fresh
-frame. Nothing is deleted yet.
+Goal: nothing new; make the holding pattern explicit. The default was
+already the binary: a fresh frame of any kind never compiles, and the only
+ways to a source build are a compiled scene (which needs a confirm to
+create and warns everywhere) or the `static` installation mode chosen by
+hand. Both keep working until Stage 5. Nothing is deleted yet.
 
-**Shipped 2026-08-30 (branch `convergence-stage-4`).** The door is one
-key, `rpios.legacySourceBuild` / `buildroot.legacySourceBuild`
-(`frame_legacy_source_build`, `drivers_nim.py`), and it gates *everything*:
-with it shut `frame_compilation_mode()` returns `precompiled` whatever the
-frame stores, so an explicit `static` is inert too — the key is the only
-way to a Nim build. `docs/legacy-source-builds.md` is the one page that
-documents the path while it waits.
+**Shipped 2026-08-30 (branch `convergence-stage-4`, PR #421).** An
+earlier cut of this stage added a per-frame `legacySourceBuild` switch
+that made a compiled scene install the release and go dark, and made an
+explicit `static` inert; Marius pulled it the same evening ("no
+compilation anymore without removing the compilation code? seems silly;
+still allow static builds") — a path that exists should work when asked
+for. So:
 
-- [x] `binary_builder.py`: with the door shut, `compiled_scene_count > 0`
-  no longer resolves to `STATIC`; the plan attempts the release and carries
-  `compiled_scene_warning` ("N compiled scenes will not run on the
-  precompiled release. Convert them to JavaScript, or enable the legacy
-  source build for this frame."), `compiled_scene_count`,
-  `legacy_source_build` and `build_kind`. With the door open the old
-  behaviour is byte-for-byte the same (`precompiled_skip_reason` = "N
-  compiled scenes are configured" → `static`). Migration `d4e6f8a0b2c4`
-  opens the door for every frame that had a compiled scene or an explicit
-  `static`/`shared`/`shared-scenes` mode (embedded frames skipped;
-  `test_legacy_source_build_migration.py`). The frontend: a "Legacy source
-  build" switch first under "advanced: installation mode" in Frame Settings
-  and both deploy-drawer variants (the installation-mode select only shows
-  with it on); `frameLegacySourceBuild()` mirrors the backend in
-  `frameDeployUtils` (skip reason, `canUsePrecompiledFrameos`, a "Legacy
-  compiled scenes" plan row, a door-shut recommendation); `CompiledSceneTag`
-  says "does not run on the released binary" or "needs a source build"
-  depending on the door.
-- [x] Buildroot: `frame_deploy_workflow.py` reads
-  `frame_compilation_mode()` (door-aware), so `force_cross_compile` only
-  happens with the door open; `can_use_precompiled_buildroot_sd_image()`
-  ignores compiled scenes while it is shut.
-- [x] `frame_bootstrap.py` (the curl installer): still installs the release;
-  the closing line now says the compiled scenes will not run and points at
-  the converter, or says they need a full deploy when the door is open.
+- [x] `binary_builder.py`: behaviour unchanged (compiled scenes under
+  `precompiled` → "N compiled scenes are configured" → `static`; explicit
+  `static` → `static`). The plan now carries `compiled_scene_count` and
+  `build_kind: precompiled | cross | on_device`.
+- [x] Buildroot: unchanged.
+- [x] `frame_bootstrap.py` (the curl installer): still installs the
+  release; the closing line says the compiled scenes will not run until a
+  full deploy, and points at the converter as the way to skip the build.
 - [x] `scripts/frameos-setup.sh` was already release-only; the README's
   Docker-socket paragraph now says the plain container is all a normal
-  install needs and points at `docs/legacy-source-builds.md`. The HA add-on
-  docs live in `frameos/frameos-home-assistant-addon` — **not done here**,
-  edit there.
+  install needs and points at `docs/legacy-source-builds.md`, the one page
+  for the path. The HA add-on docs live in
+  `frameos/frameos-home-assistant-addon` — **not done here**, edit there.
 - [x] CI: `frameos-cross.yml` (both jobs are per-frame builds against the
-  checked-in `frame.json`) now runs on pushes to `main` and on dispatch,
-  not on pull requests — main keeps a toolchain-regression net without a
-  compile per PR. The release (`docker-publish-multi.yml`) and the toolchain
-  image (`frameos-cross-toolchain.yml`) were never on PRs. **Not moved:**
-  `pull-request-tests.yml`'s `deploy-e2e` still compiles a frame on the
-  device and via docker on every PR — it is the test of the legacy path
-  itself (its frames open the door explicitly now); gate it when the path
-  is deleted.
+  checked-in `frame.json`) runs on pushes to `main` and on dispatch, not
+  on pull requests — main keeps a toolchain-regression net without a
+  compile per PR. The release (`docker-publish-multi.yml`) and the
+  toolchain image (`frameos-cross-toolchain.yml`) were never on PRs.
+  **Not moved:** `pull-request-tests.yml`'s `deploy-e2e` still compiles a
+  frame on the device and via docker on every PR — it is the test of the
+  legacy path itself; gate it when the path is deleted.
 - [x] Telemetry, corrected: there was no `deploy_finished` event and the
   backend only reports to PostHog under two explicit opt-ins (error
   tracking, LLM analytics), so no new event was added. Instead the full
-  deploy plan stamps `build_kind: precompiled | cross | on_device` and
-  `legacy_source_build` into `frame_dict`, which lands in
+  deploy plan stamps `build_kind` into `frame_dict`, which lands in
   `last_successful_deploy` (a fast deploy carries the previous value
   forward). The metric: `SELECT count(*) FROM frame WHERE
   last_successful_deploy->>'build_kind' <> 'precompiled'` on a backend.
-  Target before Stage 5: zero for a full release cycle outside frames with
-  the door open.
+  Target before Stage 5: zero for a full release cycle.
 
-Exit, checked by the unit tests: a frame with a compiled scene and the
-door shut plans `precompiled` with the warning; an explicit `static` with
-the door shut plans `precompiled`; the door open restores the skip reason
-and the `static` build. Not exercised on hardware: a real full deploy of a
-door-shut frame with a compiled scene (the deploy e2e covers the door-open
-path).
+Exit: unchanged from before this stage and checked by the unit tests — a
+frame with only interpreted scenes plans `precompiled`; a compiled scene
+plans `static` with the skip reason; `build_kind` says which.
 
 ## Stage 5 — Delete the compiler (after the deprecation date)
 
@@ -594,9 +573,8 @@ stage does **not** touch SSH, the terminal, deploys, Remote, image
 builders, HA, virtual frames or thin clients.
 
 **Not before:** one release after 2026-08-30, and a full release cycle in
-which no backend reports a `build_kind` other than `precompiled` for a
-frame without `legacySourceBuild`. Until then everything below stays put,
-off by default and behind the door. Still open from Stage 3 and worth
+which no backend reports a `build_kind` other than `precompiled`. Until
+then everything below stays put, hidden, warned about, and working. Still open from Stage 3 and worth
 doing while waiting, none of it blocking: `baselineImage`/`frameState` and
 the judge loop, detached conversion jobs, zip input on the converter page,
 `via: "cli"` and a server-side "Convert all" on the backend route, the
@@ -612,9 +590,7 @@ the judge loop, detached conversion jobs, zip input on the converter page,
   `binary_builder.py`'s source-build branch, `utils/cross_compile.py` (1,261),
   `build_executor.py`, `build_host.py`, `modal_sandbox.py`,
   `prebuilt_deps.py`, `utils/scene_execution.py`'s compiled half, the
-  `legacySourceBuild` key (and migration `d4e6f8a0b2c4`, the switch in
-  Frame Settings and both deploy-drawer variants, `frameLegacySourceBuild`
-  in `frameBuildOptions.ts`), `frames.py` `/scene_source`,
+  `frames.py` `/scene_source`,
   `apps.py:112-158` `validate_nim`, settings `buildHost` / `modalSandbox` /
   `buildEnvironment` / toolchain digests. `_frame_deployer.py:380-436`
   (codegen writes into the source tree) goes; the deployer copies a
@@ -636,8 +612,8 @@ the judge loop, detached conversion jobs, zip input on the converter page,
 - [ ] CI: `frameos-cross.yml` (per-frame builds) goes entirely; the
   `deploy-e2e` compile phases in `pull-request-tests.yml` go with the path
   they test. `docs/legacy-source-builds.md` is deleted with them.
-- [ ] Exit: `grep -rn "write_scene_nim\|compilationMode\|nim check\|
-  legacySourceBuild" backend frontend frameos` returns nothing outside
+- [ ] Exit: `grep -rn "write_scene_nim\|compilationMode\|nim check"
+  backend frontend frameos` returns nothing outside
   `docs/`; CI has no job that compiles Nim on a user's behalf.
 
 ## Parked — decided later, not by this plan

@@ -1,10 +1,6 @@
 import type { FrameType } from '../../types'
 import versions from '../../../../versions.json'
-import {
-  type FrameCompilationMode,
-  frameLegacySourceBuild,
-  normalizeFrameCompilationMode,
-} from '../../utils/frameBuildOptions'
+import { type FrameCompilationMode, normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 
 export interface ChangeDetail {
@@ -53,10 +49,6 @@ export interface FullDeployPlanResponse {
     has_prebuilt_entry?: boolean
     precompiled_release_url?: string | null
     precompiled_skip_reason?: string | null
-    legacy_source_build?: boolean
-    compiled_scene_count?: number
-    compiled_scene_warning?: string | null
-    build_kind?: 'precompiled' | 'cross' | 'on_device' | string
   }
   packages: {
     name: string
@@ -212,12 +204,6 @@ function pluralize(count: number, singular: string): string {
 }
 
 function frameCompilationMode(frame?: Partial<FrameType> | null): FrameCompilationMode {
-  // Mirror of the backend's `frame_compilation_mode`: with the legacy
-  // source-build door shut the stored mode is inert and the release binary
-  // is the only outcome.
-  if (!frameLegacySourceBuild(frame)) {
-    return 'precompiled'
-  }
   return normalizeFrameCompilationMode(
     frame?.mode === 'buildroot' ? frame?.buildroot?.compilationMode : frame?.rpios?.compilationMode
   )
@@ -289,9 +275,6 @@ function frameCompiledSceneNames(frame?: Partial<FrameType> | null): string[] {
 }
 
 function precompiledSkipReason(frame?: Partial<FrameType> | null): string | null {
-  if (!frameLegacySourceBuild(frame)) {
-    return null
-  }
   const compiledSceneCount = frameCompiledSceneCount(frame)
   return compiledSceneCount > 0
     ? `${pluralize(compiledSceneCount, 'legacy compiled scene')} configured: ${frameCompiledSceneNames(frame).join(
@@ -300,25 +283,8 @@ function precompiledSkipReason(frame?: Partial<FrameType> | null): string | null
     : null
 }
 
-/**
- * What the deploy plan says about compiled scenes when the legacy door is
- * shut: they are installed with the release binary and do not run. Mirrors
- * `compiled_scene_warning` in backend/app/tasks/binary_builder.py.
- */
-function compiledSceneWarning(frame?: Partial<FrameType> | null): string | null {
-  const compiledSceneCount = frameCompiledSceneCount(frame)
-  if (compiledSceneCount === 0 || frameLegacySourceBuild(frame)) {
-    return null
-  }
-  return `${pluralize(compiledSceneCount, 'legacy compiled scene')} (${frameCompiledSceneNames(frame).join(
-    ', '
-  )}) will not run on the precompiled release. Convert ${
-    compiledSceneCount === 1 ? 'it' : 'them'
-  } to JavaScript, or enable the legacy source build for this frame.`
-}
-
 function canUsePrecompiledFrameos(frame?: Partial<FrameType> | null, plan?: DeployPlanResponse | null): boolean {
-  if (frameLegacySourceBuild(frame) && frameCompiledSceneCount(frame) > 0) {
+  if (frameCompiledSceneCount(frame) > 0) {
     return false
   }
   if (plan?.full_deploy?.binary?.will_attempt_precompiled !== undefined) {
@@ -551,10 +517,6 @@ export function buildFullDeployPlanSummary(
           }`,
     }
   }
-  const legacyCompiledScenes = fullPlan.binary.compiled_scene_warning ?? compiledSceneWarning(frame)
-  if (legacyCompiledScenes) {
-    items.push({ label: 'Legacy compiled scenes', value: legacyCompiledScenes })
-  }
   if (packagesToInstall.length > 0) {
     items.push({ label: 'Packages to install', value: stringifyList(packagesToInstall) })
   }
@@ -688,21 +650,6 @@ export function buildDeployRecommendation(
   if (fullDeployChanges.length > 0) {
     const usesPrecompiledFrameos = canUsePrecompiledFrameos(frame, plan)
     const compiledSceneCount = frameCompiledSceneCount(frame)
-    if (compiledSceneCount > 0 && !frameLegacySourceBuild(frame)) {
-      // The door is shut: the release installs, the compiled scenes stay
-      // dark. Converting them is the move; opening the door is the fallback.
-      const names = frameCompiledSceneNames(frame).join(', ')
-      return {
-        mode: 'full',
-        title: 'Suggested: convert the legacy compiled scenes, then deploy',
-        description: `${pluralize(
-          compiledSceneCount,
-          'legacy compiled scene'
-        )} (${names}) will not run on the precompiled FrameOS release this deploy installs — the legacy source build is off for this frame. Convert ${
-          compiledSceneCount === 1 ? 'it' : 'them'
-        } to interpreted scenes at scenes.frameos.net/nim-converter, or turn on the legacy source build in the frame's advanced settings.`,
-      }
-    }
     if (!usesPrecompiledFrameos && compiledSceneCount > 0) {
       // The legacy path is the headline: the compiled scenes are why this
       // deploy builds from source, and converting them is the recommended

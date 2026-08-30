@@ -29,7 +29,6 @@ import { scheduledEventTitle } from '../../utils/scheduleEvents'
 import { frameLogic } from '../frame/frameLogic'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
-import { frameLegacySourceBuild } from '../../utils/frameBuildOptions'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
@@ -345,11 +344,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
             </A>
             <FrameMetricAlertIndicator frame={frame} className="h-5 w-5" />
             {(frame.compiled_scene_count ?? 0) > 0 ? (
-              <CompiledSceneTag
-                count={frame.compiled_scene_count}
-                legacySourceBuild={frameLegacySourceBuild(frame)}
-                className="!px-2 !py-0.5 !text-[11px] normal-case"
-              />
+              <CompiledSceneTag count={frame.compiled_scene_count} className="!px-2 !py-0.5 !text-[11px] normal-case" />
             ) : null}
             {archived ? (
               <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
@@ -528,10 +523,7 @@ function FrameSceneTile({
         <div className="pointer-events-none absolute left-1 top-1 z-10 flex flex-col items-start gap-1">
           {compiled ? (
             <div className="pointer-events-auto">
-              <CompiledSceneTag
-                legacySourceBuild={frameLegacySourceBuild(frame)}
-                className="!bg-white/95 !border-slate-500/45 !px-1.5 !py-0 !text-[9px] !font-semibold !leading-4 !text-slate-700 shadow-sm backdrop-blur-sm"
-              />
+              <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !px-1.5 !py-0 !text-[9px] !font-semibold !leading-4 !text-slate-700 shadow-sm backdrop-blur-sm" />
             </div>
           ) : null}
           {active ? (

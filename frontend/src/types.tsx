@@ -1247,8 +1247,6 @@ export interface Palette {
 export interface FrameBuildrootConfig {
   platform?: string
   compilationMode?: FrameCompilationModeOptionValue
-  /** The legacy source-build door (docs/convergence-todo.md, Stage 4). Off: the release binary, always. */
-  legacySourceBuild?: boolean
   sdImage?: {
     status?: 'idle' | 'queued' | 'building' | 'ready' | 'error' | 'missing' | 'stale'
     buildId?: string
@@ -1278,8 +1276,6 @@ export interface FrameRpiOSConfig {
   platform?: string
   crossCompilation?: '' | 'auto' | 'always' | 'never'
   compilationMode?: FrameCompilationModeOptionValue
-  /** The legacy source-build door (docs/convergence-todo.md, Stage 4). Off: the release binary, always. */
-  legacySourceBuild?: boolean
 }
 
 export interface FrameEmbeddedConfig {

@@ -61,10 +61,9 @@ deploy never compiles anything. A scene still on the legacy _compiled_ path
 an interpreted scene at
 [scenes.frameos.net/nim-converter](https://scenes.frameos.net/nim-converter)
 (or in the editor, or with the CLI in `cloud/packages/scene-convert`; see
-`docs/nim-to-js-conversion.md`). A per-frame "legacy source build" switch
-still exists for frames that need the old whole-frame build in the meantime —
-`docs/legacy-source-builds.md` — and goes away one release after the
-converter shipped (2026-08-30).
+`docs/nim-to-js-conversion.md`). Until then such a scene still forces the
+old whole-frame source build on every deploy — `docs/legacy-source-builds.md`
+— which goes away one release after the converter shipped (2026-08-30).
 
 ### Quick install
 

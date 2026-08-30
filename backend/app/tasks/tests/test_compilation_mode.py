@@ -8,8 +8,6 @@ from app.codegen.drivers_nim import (
     compilation_mode_uses_shared_drivers,
     driver_library_filename,
     frame_compilation_mode,
-    frame_legacy_source_build,
-    stored_compilation_mode,
     normalize_compilation_mode,
     write_driver_library_nim,
     write_shared_drivers_nim,
@@ -35,16 +33,16 @@ def test_retired_shared_modes_become_a_single_binary():
     """
     assert normalize_compilation_mode("shared") == COMPILATION_MODE_STATIC
     assert normalize_compilation_mode("shared-scenes") == COMPILATION_MODE_STATIC
-    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared", "legacySourceBuild": True})) == COMPILATION_MODE_STATIC
+    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared"})) == COMPILATION_MODE_STATIC
     assert (
-        frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared-scenes", "legacySourceBuild": True}))
+        frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "shared-scenes"}))
         == COMPILATION_MODE_STATIC
     )
 
 
 def test_compilation_mode_static_is_valid():
     assert normalize_compilation_mode("static") == COMPILATION_MODE_STATIC
-    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "static", "legacySourceBuild": True})) == COMPILATION_MODE_STATIC
+    assert frame_compilation_mode(SimpleNamespace(rpios={"compilationMode": "static"})) == COMPILATION_MODE_STATIC
 
 
 def test_buildroot_compilation_mode_uses_buildroot_settings():
@@ -52,36 +50,12 @@ def test_buildroot_compilation_mode_uses_buildroot_settings():
         frame_compilation_mode(
             SimpleNamespace(
                 mode="buildroot",
-                buildroot={"compilationMode": "static", "legacySourceBuild": True},
+                buildroot={"compilationMode": "static"},
                 rpios={"compilationMode": "precompiled"},
             )
         )
         == COMPILATION_MODE_STATIC
     )
-
-
-def test_the_legacy_source_build_door_gates_the_stored_mode():
-    # Stage 4 (docs/convergence-todo.md): shut, the frame gets the release
-    # binary whatever it stores; open, the stored mode counts again.
-    shut = SimpleNamespace(rpios={"compilationMode": "static"})
-    assert frame_legacy_source_build(shut) is False
-    assert frame_compilation_mode(shut) == COMPILATION_MODE_PRECOMPILED
-    assert stored_compilation_mode(shut) == COMPILATION_MODE_STATIC
-
-    for truthy in (True, "true", "1", "yes"):
-        opened = SimpleNamespace(rpios={"compilationMode": "static", "legacySourceBuild": truthy})
-        assert frame_legacy_source_build(opened) is True
-        assert frame_compilation_mode(opened) == COMPILATION_MODE_STATIC
-    for falsy in (False, "false", "0", "", None):
-        assert frame_legacy_source_build(SimpleNamespace(rpios={"legacySourceBuild": falsy})) is False
-
-    buildroot = SimpleNamespace(
-        mode="buildroot",
-        buildroot={"compilationMode": "static"},
-        rpios={"compilationMode": "static", "legacySourceBuild": True},
-    )
-    assert frame_legacy_source_build(buildroot) is False, "the rpios key does not open a buildroot frame's door"
-    assert frame_compilation_mode(buildroot) == COMPILATION_MODE_PRECOMPILED
 
 
 def test_only_precompiled_ships_driver_libraries():

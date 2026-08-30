@@ -649,64 +649,42 @@ function DeployBuildOptionsSection({
     ...(frameForm.buildroot ?? {}),
   }
   const compilationMode = String((isBuildroot ? buildroot.compilationMode : rpios.compilationMode) ?? '')
-  const legacySourceBuild = (isBuildroot ? buildroot.legacySourceBuild : rpios.legacySourceBuild) === true
   const selectClassName =
     'frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30'
 
-  const updateRpios = (field: keyof NonNullable<FrameType['rpios']>, value: string | boolean): void => {
+  const updateRpios = (field: keyof NonNullable<FrameType['rpios']>, value: string): void => {
     const nextRpios = { ...rpios, [field]: value }
     delete nextRpios.crossCompilation
     setFrameFormValues({ rpios: nextRpios })
     touchFrameFormField(`rpios.${field}`)
   }
 
-  const updateBuildroot = (field: keyof NonNullable<FrameType['buildroot']>, value: string | boolean): void => {
+  const updateBuildroot = (field: keyof NonNullable<FrameType['buildroot']>, value: string): void => {
     setFrameFormValues({ buildroot: { ...buildroot, [field]: value } })
     touchFrameFormField(`buildroot.${field}`)
   }
 
   return (
     <section className="space-y-2">
-      <AdvancedSection label="advanced: installation mode" open={legacySourceBuild || compilationMode === 'static'}>
+      <AdvancedSection label="advanced: installation mode" open={compilationMode === 'static'}>
         <DrawerHeading action={<FrameSettingsLink frameId={frame.id} />}>Installation mode</DrawerHeading>
-        <label className="flex items-start gap-3 rounded-xl border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-sm text-slate-800">
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={legacySourceBuild}
+        <label className="block space-y-1">
+          <select
+            className={selectClassName}
+            value={compilationMode}
             onChange={(event) =>
               isBuildroot
-                ? updateBuildroot('legacySourceBuild', event.target.checked)
-                : updateRpios('legacySourceBuild', event.target.checked)
+                ? updateBuildroot('compilationMode', event.target.value)
+                : updateRpios('compilationMode', event.target.value)
             }
-          />
-          <span>
-            <span className="font-semibold">Legacy source build</span>
-            <span className="frame-tool-muted block text-xs">
-              Off: every deploy installs the released FrameOS binary; legacy compiled scenes do not run. On: the
-              installation mode below applies and compiled scenes force a full source build (deprecated).
-            </span>
-          </span>
+          >
+            {frameCompilationModeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </label>
-        {legacySourceBuild ? (
-          <label className="block space-y-1">
-            <select
-              className={selectClassName}
-              value={compilationMode}
-              onChange={(event) =>
-                isBuildroot
-                  ? updateBuildroot('compilationMode', event.target.value)
-                  : updateRpios('compilationMode', event.target.value)
-              }
-            >
-              {frameCompilationModeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
       </AdvancedSection>
     </section>
   )
@@ -1256,7 +1234,6 @@ function BuildrootSdCardSection({
   const timezone = normalizedTimezone(frameForm.timezone ?? frame.timezone, defaultTimezone)
   const platform = normalizeBuildrootPlatform(buildroot.platform)
   const compilationMode = String(buildroot.compilationMode ?? '')
-  const legacySourceBuild = buildroot.legacySourceBuild === true
   const rootPassword = frameForm.ssh_pass ?? frame.ssh_pass ?? ''
   const selectedSshKeys = new Set(effectiveSshKeyIds(frame, frameForm, savedSettings))
   const updateFrameValue = <K extends keyof FrameType>(field: K, value: FrameType[K]): void => {
@@ -1267,7 +1244,7 @@ function BuildrootSdCardSection({
     setFrameFormValues({ network: { ...network, [field]: value } })
     touchFrameFormField(`network.${field}`)
   }
-  const updateBuildroot = (field: keyof NonNullable<FrameType['buildroot']>, value: string | boolean): void => {
+  const updateBuildroot = (field: keyof NonNullable<FrameType['buildroot']>, value: string): void => {
     setFrameFormValues({ buildroot: { ...buildroot, [field]: value } })
     touchFrameFormField(`buildroot.${field}`)
   }
@@ -1441,40 +1418,21 @@ function BuildrootSdCardSection({
               ))}
             </select>
           </label>
-          <AdvancedSection label="advanced: installation mode" open={legacySourceBuild || compilationMode === 'static'}>
-            <label className="flex items-start gap-3 rounded-xl border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-sm text-slate-800">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={legacySourceBuild}
-                onChange={(event) => updateBuildroot('legacySourceBuild', event.target.checked)}
-              />
-              <span>
-                <span className="font-semibold">Legacy source build</span>
-                <span className="frame-tool-muted block text-xs">
-                  Off: the SD image carries the released FrameOS binary; legacy compiled scenes do not run. On: the
-                  installation mode below applies and compiled scenes force a source build of the image (deprecated).
-                </span>
-              </span>
+          <AdvancedSection label="advanced: installation mode" open={compilationMode === 'static'}>
+            <label className="block space-y-1">
+              <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Installation mode</span>
+              <select
+                className="frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30"
+                value={compilationMode}
+                onChange={(event) => updateBuildroot('compilationMode', event.target.value)}
+              >
+                {frameCompilationModeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </label>
-            {legacySourceBuild ? (
-              <label className="block space-y-1">
-                <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">
-                  Installation mode
-                </span>
-                <select
-                  className="frameos-form-control h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-400/30"
-                  value={compilationMode}
-                  onChange={(event) => updateBuildroot('compilationMode', event.target.value)}
-                >
-                  {frameCompilationModeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
           </AdvancedSection>
           <label className="block space-y-1">
             <span className="text-xs font-semibold uppercase tracking-wide">

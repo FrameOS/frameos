@@ -14,7 +14,6 @@ from app.models.log import new_log as log
 from app.tasks._frame_deployer import FrameDeployer
 from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import (
-    frame_legacy_source_build,
     COMPILATION_MODE_PRECOMPILED,
     COMPILATION_MODE_STATIC,
     frame_compilation_mode,
@@ -83,15 +82,15 @@ class FrameBinaryPlan:
     will_attempt_precompiled: bool = False
     precompiled_release_url: str | None = None
     precompiled_skip_reason: str | None = None
-    # Stage 4 (docs/convergence-todo.md): the legacy source-build door and
-    # what the plan has to say about compiled scenes when it is shut.
-    legacy_source_build: bool = False
     compiled_scene_count: int = 0
-    compiled_scene_warning: str | None = None
 
     @property
     def build_kind(self) -> str:
-        """`precompiled` (release tarball), `cross` (server-side source build) or `on_device`."""
+        """`precompiled` (release tarball), `cross` (server-side source build) or `on_device`.
+
+        Recorded in `last_successful_deploy` so "how many frames still get a
+        source build" is one query (docs/legacy-source-builds.md).
+        """
         if self.will_attempt_precompiled:
             return "precompiled"
         if self.will_attempt_cross_compile:
@@ -120,9 +119,7 @@ class FrameBinaryPlan:
             "will_attempt_precompiled": self.will_attempt_precompiled,
             "precompiled_release_url": self.precompiled_release_url,
             "precompiled_skip_reason": self.precompiled_skip_reason,
-            "legacy_source_build": self.legacy_source_build,
             "compiled_scene_count": self.compiled_scene_count,
-            "compiled_scene_warning": self.compiled_scene_warning,
             "build_kind": self.build_kind,
         }
 
@@ -215,24 +212,11 @@ class FrameBinaryBuilder:
         compilation_mode: str | None = None,
     ) -> FrameBinaryPlan:
         target = target_override or await self._detect_target()
-        legacy_source_build = frame_legacy_source_build(self.frame)
         requested_compilation_mode = normalize_compilation_mode(
             compilation_mode or frame_compilation_mode(self.frame)
         )
-        if not legacy_source_build:
-            # The door is shut: whatever the frame stores, it gets the release
-            # binary (frame_compilation_mode already says so; an explicit
-            # override from a caller is held to the same rule).
-            requested_compilation_mode = COMPILATION_MODE_PRECOMPILED
         resolved_compilation_mode = requested_compilation_mode
         compiled_scene_count = frame_compiled_scene_count(self.frame)
-        compiled_scene_warning = None
-        if compiled_scene_count > 0 and not legacy_source_build:
-            noun = "compiled scene" + ("s" if compiled_scene_count != 1 else "")
-            compiled_scene_warning = (
-                f"{compiled_scene_count} {noun} will not run on the precompiled release. "
-                "Convert them to JavaScript, or enable the legacy source build for this frame."
-            )
         prebuilt_entry, prebuilt_target = await resolve_prebuilt_entry(
             distro=target.distro,
             distro_version=target.version,
@@ -247,7 +231,7 @@ class FrameBinaryBuilder:
             precompiled_skip_reason = "cross compilation is required"
         elif requested_compilation_mode == COMPILATION_MODE_PRECOMPILED:
             precompiled_url = precompiled_frameos_release_url(prebuilt_target or "")
-            if compiled_scene_count > 0 and legacy_source_build:
+            if compiled_scene_count > 0:
                 precompiled_skip_reason = (
                     f"{compiled_scene_count} compiled scene"
                     + ("s are" if compiled_scene_count != 1 else " is")
@@ -294,9 +278,7 @@ class FrameBinaryBuilder:
             will_attempt_precompiled=will_attempt_precompiled,
             precompiled_release_url=precompiled_url,
             precompiled_skip_reason=precompiled_skip_reason,
-            legacy_source_build=legacy_source_build,
             compiled_scene_count=compiled_scene_count,
-            compiled_scene_warning=compiled_scene_warning,
         )
 
     async def build(
