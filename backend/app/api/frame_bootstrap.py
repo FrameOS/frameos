@@ -450,7 +450,7 @@ ln -s "$remote_release_dir" "$FRAMEOS_REMOTE_DIR/current"
 chown -R "$remote_user" "$FRAMEOS_DIR"
 
 if [ "$FRAMEOS_COMPILED_SCENE_COUNT" -gt 0 ]; then
-  echo "This script installed the precompiled FrameOS runtime. $FRAMEOS_COMPILED_SCENE_COUNT compiled scene(s) still require a full deploy after FrameOS Remote connects."
+  echo "This script installed the precompiled FrameOS runtime. $FRAMEOS_COMPILED_SCENE_COUNT legacy compiled scene(s) will not run on it until a full deploy (source build) after FrameOS Remote connects — or convert them to JavaScript (docs/nim-to-js-conversion.md) and skip the build."
 fi
 
 set +e

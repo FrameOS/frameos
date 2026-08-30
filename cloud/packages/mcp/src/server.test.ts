@@ -204,6 +204,7 @@ describe("frameos-cloud MCP server", () => {
       "scene_update_content",
       "scene_render",
       "scene_lint",
+      "scene_convert",
       "store_browse",
       "ai_scene_chat",
       "api_tokens_list",

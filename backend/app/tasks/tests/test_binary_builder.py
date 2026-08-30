@@ -111,6 +111,9 @@ async def test_plan_build_attempts_precompiled_when_all_scenes_are_interpreted(m
         f"/frameos-{release_version()}-debian-trixie-arm64.tar.gz"
     )
     assert plan.precompiled_skip_reason is None
+    assert plan.compiled_scene_count == 0
+    assert plan.build_kind == "precompiled"
+    assert plan.to_dict()["compiled_scene_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -176,6 +179,9 @@ async def test_plan_build_skips_precompiled_when_compiled_scenes_exist(monkeypat
     assert plan.will_attempt_precompiled is False
     assert plan.will_attempt_cross_compile is True
     assert plan.precompiled_skip_reason == "1 compiled scene is configured"
+    assert plan.compiled_scene_count == 1
+    assert plan.build_kind == "cross"
+    assert plan.to_dict()["build_kind"] == "cross"
 
 
 @pytest.mark.asyncio
