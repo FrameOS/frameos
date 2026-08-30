@@ -1550,7 +1550,10 @@ async def test_api_frame_update_stamps_execution_from_scene_content(async_client
     assert resp.status_code == 200
     db.expire_all()
     updated = db.get(Frame, frame.id)
-    assert updated.scenes[0]["settings"] == {"execution": "compiled"}
+    # Absent means interpreted, even for a scene that carries Nim: nothing
+    # infers the legacy mode any more (the editor flags it instead).
+    assert updated.scenes[0]["settings"] == {"execution": "interpreted"}
+    # An explicit choice is kept.
     assert updated.scenes[1]["settings"] == {"execution": "compiled"}
 
 

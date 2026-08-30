@@ -30,6 +30,7 @@ from urllib.parse import quote
 
 # third-party ---------------------------------------------------------------
 import httpx
+from fastapi.responses import JSONResponse
 from fastapi import (
     Depends,
     File,
@@ -1475,6 +1476,65 @@ async def api_frame_event(
     except RuntimeError as exc:
         await log(db, redis, id, "stderr", f"Error on frame event {event}: {str(exc)}")
         raise exc
+
+
+# The Nim → interpreted converter lives on the cloud (docs/nim-to-js-conversion.md);
+# its API is public, so a self-hosted backend simply forwards the scene and hands
+# the converted one back for the editor to apply. The backend's own OpenAI key
+# (Settings → OpenAI) rides along when set, so the model pass is paid for by the
+# operator rather than the cloud's shared budget. Body: optional {"scene": …} —
+# the editor's unsaved copy, which wins over the stored frame.scenes entry.
+CONVERTER_TIMEOUT_SECONDS = 320.0
+
+
+def _converter_url() -> str:
+    from app.utils.cloud_link import DEFAULT_CLOUD_PROVIDER_URL, default_cloud_provider_url
+
+    provider = default_cloud_provider_url() or DEFAULT_CLOUD_PROVIDER_URL
+    return f"{provider.rstrip('/')}/api/scenes/convert"
+
+
+async def _post_to_converter(url: str, payload: dict) -> tuple[int, dict]:
+    """One request to the cloud converter: (status, json). Patched in tests."""
+    async with httpx.AsyncClient(timeout=CONVERTER_TIMEOUT_SECONDS) as client:
+        response = await client.post(url, json=payload)
+    try:
+        content = response.json()
+    except ValueError:
+        content = {"error": "invalid_converter_reply", "detail": response.text[:500]}
+    return response.status_code, content if isinstance(content, dict) else {"error": "invalid_converter_reply"}
+
+
+@api_project.post("/frames/{id:int}/scenes/{scene_id}/convert")
+async def api_frame_scene_convert(
+    id: int,
+    scene_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    frame = _project_frame(db, id) or _not_found()
+    body: dict = {}
+    if request.headers.get("content-type", "").startswith("application/json"):
+        parsed = await request.json()
+        body = parsed if isinstance(parsed, dict) else {}
+    scene = body.get("scene") if isinstance(body.get("scene"), dict) else None
+    if scene is None:
+        scene = next(
+            (s for s in (frame.scenes or []) if isinstance(s, dict) and s.get("id") == scene_id),
+            None,
+        )
+    if scene is None:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    payload: dict = {"scene": scene}
+    openai_settings = get_settings_dict(db, project_id=current_project_id()).get("openAI", {})
+    api_key = openai_settings.get("backendApiKey") if isinstance(openai_settings, dict) else None
+    if isinstance(api_key, str) and api_key.strip():
+        payload["openaiApiKey"] = api_key.strip()
+    try:
+        status, content = await _post_to_converter(_converter_url(), payload)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach the FrameOS Cloud converter: {exc}")
+    return JSONResponse(status_code=status, content=content)
 
 
 @api_project.post("/frames/{id:int}/upload_scenes")

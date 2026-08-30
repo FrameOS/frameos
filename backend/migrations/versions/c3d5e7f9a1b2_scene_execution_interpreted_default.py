@@ -25,9 +25,28 @@ depends_on = None
 
 
 def _stamp_scenes(connection, table_name: str) -> None:
-    # Same inference the ingest paths use, so a scene stamped here and a
-    # scene stamped on import agree.
-    from app.utils.scene_execution import normalize_scenes_execution
+    # The inference of 2026-08, frozen here: a scene that carried Nim the
+    # interpreter cannot run was stamped `compiled`, everything else
+    # `interpreted`. The ingest paths stopped inferring `compiled` on
+    # 2026-08-30 (app/utils/scene_execution.py), but this one-time stamp of
+    # data that predates the decision keeps its meaning — a self-hoster
+    # upgrading late must not find their compiled scenes silently switched.
+    from app.utils.scene_execution import explicit_scene_execution, scene_requires_compilation
+
+    def normalize_scenes_execution(scenes) -> bool:
+        if not isinstance(scenes, list):
+            return False
+        changed = False
+        for scene in scenes:
+            if not isinstance(scene, dict) or explicit_scene_execution(scene) is not None:
+                continue
+            settings = scene.get("settings")
+            if not isinstance(settings, dict):
+                settings = {}
+                scene["settings"] = settings
+            settings["execution"] = "compiled" if scene_requires_compilation(scene) else "interpreted"
+            changed = True
+        return changed
 
     table = sa.Table(
         table_name,

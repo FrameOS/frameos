@@ -77,9 +77,17 @@ App nodes then use `keyword: "myPanel"`. Inside `app.ts` the app sees
 `rotate`, `timeZone`), `context`, and the `frameos` helpers:
 `frameos.fetchJson(url)`, `frameos.fetchText(url)`, `frameos.svg(svg, spec)`,
 `frameos.image(spec)`, `frameos.log()`, `frameos.setState()`,
-`frameos.setNextSleep()`. It does **not** see the scene's state or the code
-node helpers (`format`, `now`, `parseTs`); pass such values in through fields.
-`Date` is UTC-only here as well.
+`frameos.setNextSleep()`. `app.state` **is** the scene's state — read any
+key from it, write with `frameos.setState(key, value)` and state nodes see the
+change. What an app does **not** have are the code-node time helpers
+(`format`, `now`, `parseTs`); take such values in through a field fed by a
+code node or `data/clock`. `Date` is UTC-only here as well.
+
+JavaScript is the format apps are written in. The Nim apps under
+`frameos/src/apps/` are the built-in catalog that ships inside the FrameOS
+binary (`render/text`, `data/clock`, …) — not something a scene carries or a
+user edits. A scene that still holds Nim sources or Nim code nodes is a
+legacy *compiled* scene; `docs/nim-to-js-conversion.md` is the way out.
 
 ### More than one file
 
