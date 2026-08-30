@@ -1,6 +1,14 @@
+import { fileURLToPath } from "node:url";
 import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // Browser-only ESM with no node entry: shared-spa tests that import a
+      // frontend logic touching Monaco (editAppLogic) get this stub instead.
+      "monaco-editor": fileURLToPath(new URL("./src/test/stubs/monaco-editor.ts", import.meta.url)),
+    },
+  },
   // The app tsconfig uses Next's "jsx": "preserve"; vitest (esbuild)
   // needs to be told to compile JSX itself.
   esbuild: { jsx: "automatic" },

@@ -41,7 +41,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
-import { describeConversion, requestSceneConversion } from '../../utils/sceneConvert'
+import { convertSceneWithFeedback, requestSceneConversion } from '../../utils/sceneConvert'
 import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import {
   cloudFrameSettingKeys,
@@ -2511,25 +2511,15 @@ export const frameLogic = kea<frameLogicType>([
         actions.sceneConversionFinished(sceneId, false)
         return
       }
-      const result = await requestSceneConversion(props.frameId, scene)
-      if (!result.ok || !result.scene) {
+      const converted = await convertSceneWithFeedback(scene, (s) => requestSceneConversion(props.frameId, s))
+      if (!converted) {
         actions.sceneConversionFinished(sceneId, false)
-        const lines = describeConversion(result.report)
-        window.alert(
-          result.error ?? `The scene could not be converted completely.${lines.length ? `\n\n${lines.join('\n')}` : ''}`
-        )
         return
       }
       // In place and unsaved: the diagram, apps and settings follow the
       // form, and Save or Deploy is the user's call.
-      actions.updateScene(sceneId, result.scene)
+      actions.updateScene(sceneId, converted)
       actions.sceneConversionFinished(sceneId, true)
-      const lines = describeConversion(result.report)
-      window.alert(
-        `Converted "${scene.name || 'scene'}" to an interpreted scene.${
-          lines.length ? `\n\n${lines.join('\n')}` : ''
-        }\n\nIt is not saved yet — check it, then save or deploy.`
-      )
     },
     resetUnsavedChanges: () => {
       if (!values.frame) {

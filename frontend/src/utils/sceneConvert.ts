@@ -52,9 +52,22 @@ const errorMessages: Record<string, string> = {
 
 export async function requestSceneConversion(frameId: FrameId, scene: FrameScene): Promise<SceneConversionResult> {
   const path = isCloudMode() ? '/api/scenes/convert' : `/api/frames/${frameId}/scenes/${scene.id}/convert`
+  return postSceneConversion(path, scene, apiFetch)
+}
+
+/**
+ * POST one scene to a converter endpoint and normalise the reply. The
+ * embedded editor (frameos-editor, no backend: its apiFetch answers 404)
+ * calls this with the host page's own fetch and endpoint.
+ */
+export async function postSceneConversion(
+  path: string,
+  scene: FrameScene,
+  fetchImpl: (input: string, init?: RequestInit) => Promise<Response>
+): Promise<SceneConversionResult> {
   let response: Response
   try {
-    response = await apiFetch(path, {
+    response = await fetchImpl(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scene }),
@@ -74,11 +87,39 @@ export async function requestSceneConversion(frameId: FrameId, scene: FrameScene
     const code = payload.error ?? String(response.status)
     return {
       ok: false,
-      error: errorMessages[code] ?? `Conversion failed: ${code}${payload.hint ?? payload.detail ? ` — ${payload.hint ?? payload.detail}` : ''}`,
+      error:
+        errorMessages[code] ??
+        `Conversion failed: ${code}${payload.hint ?? payload.detail ? ` — ${payload.hint ?? payload.detail}` : ''}`,
     }
   }
   const report = payload.reports?.[0]
   return { ok: Boolean(payload.ok), scene: payload.scene, report }
+}
+
+/**
+ * Run a conversion and tell the user how it went (window.alert, like the
+ * rest of the editor's one-off notices). Returns the converted scene, or
+ * null when nothing should be applied. Shared by frameLogic and the
+ * embedded editor's embedFrameLogic so both report the same way.
+ */
+export async function convertSceneWithFeedback(
+  scene: FrameScene,
+  request: (scene: FrameScene) => Promise<SceneConversionResult>
+): Promise<FrameScene | null> {
+  const result = await request(scene)
+  const lines = describeConversion(result.report)
+  if (!result.ok || !result.scene) {
+    window.alert(
+      result.error ?? `The scene could not be converted completely.${lines.length ? `\n\n${lines.join('\n')}` : ''}`
+    )
+    return null
+  }
+  window.alert(
+    `Converted "${scene.name || 'scene'}" to an interpreted scene.${
+      lines.length ? `\n\n${lines.join('\n')}` : ''
+    }\n\nIt is not saved yet — check it, then save or deploy.`
+  )
+  return result.scene
 }
 
 /** One line per thing the converter did, for the summary shown after a run. */
@@ -98,7 +139,11 @@ export function describeConversion(report: ConversionReport | undefined): string
   }
   const renamed = report.items.filter((item) => item.kind === 'arg')
   if (renamed.length) {
-    lines.push(`${renamed.length} reserved argument name${renamed.length === 1 ? '' : 's'} renamed (${renamed.map((item) => `${item.from} → ${item.to}`).join(', ')})`)
+    lines.push(
+      `${renamed.length} reserved argument name${renamed.length === 1 ? '' : 's'} renamed (${renamed
+        .map((item) => `${item.from} → ${item.to}`)
+        .join(', ')})`
+    )
   }
   const dropped = report.items.filter((item) => item.kind === 'edge' && item.status === 'dropped')
   if (dropped.length) {
@@ -106,11 +151,17 @@ export function describeConversion(report: ConversionReport | undefined): string
   }
   for (const item of report.items) {
     if (item.status === 'needs_manual_port' || item.status === 'needs_model') {
-      lines.push(`NOT converted — ${item.kind === 'app' ? `app "${item.name ?? item.id}"` : `${item.kind} node ${item.nodeId}`}: ${item.reason ?? item.status}`)
+      lines.push(
+        `NOT converted — ${
+          item.kind === 'app' ? `app "${item.name ?? item.id}"` : `${item.kind} node ${item.nodeId}`
+        }: ${item.reason ?? item.status}`
+      )
     }
   }
   if (report.modelCalls > 0) {
-    lines.push(`${report.modelCalls} AI call${report.modelCalls === 1 ? '' : 's'}${report.model ? ` (${report.model})` : ''}`)
+    lines.push(
+      `${report.modelCalls} AI call${report.modelCalls === 1 ? '' : 's'}${report.model ? ` (${report.model})` : ''}`
+    )
   }
   return lines
 }
