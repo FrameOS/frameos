@@ -490,18 +490,38 @@ proc jsChronoParseTs(ctx: ptr JSContext, fmt: JSValue, text: JSValue): JSValue {
     raise newException(ValueError, "parseTs failed: " & e.msg)
 
 proc setJsTimeZone*(name: string) =
-  ## The zone `frameos.format` and friends render in. On a device it is
-  ## detected from /etc/localtime; the wasm preview has no such file and
-  ## sets the frame's configured zone here.
+  ## Fallback zone for `format` when the JS call has no scene behind it (a
+  ## bare context outside a render). Whenever a scene is evaluating, its
+  ## frameConfig.timeZone wins — see jsTimeZone.
   tzName = name.strip()
+
+proc jsTimeZone(ctx: ptr JSContext): string =
+  ## The zone `format(ts, fmt)` renders in: the frame's configured zone.
+  ##
+  ## frameConfig.timeZone is the one value every platform keeps current —
+  ## frame.json (or /etc/localtime) on a Pi, the cloud/console zone pushed
+  ## every render pass on an ESP32, the preview's zone in wasm. The previous
+  ## fallback, detectSystemTimeZone(), reads /etc/localtime, which does not
+  ## exist on an ESP32: every `format()` there rendered UTC no matter what
+  ## zone the frame had, so a word clock in Brussels ran two hours behind
+  ## while the Nim-side clock apps (which read frameConfig) were right.
+  ## Chrono treats a zone it has no data for as UTC, so a name whose slice
+  ## has not arrived yet degrades to what the old code did, never an error.
+  let e = env(ctx)
+  if e != nil and e.scene != nil and e.scene.frameConfig != nil:
+    let configured = e.scene.frameConfig.timeZone.strip()
+    if configured.len > 0:
+      return configured
+  if tzName.len == 0:
+    tzName = detectSystemTimeZone()
+  tzName
 
 proc jsChronoFormat(ctx: ptr JSContext, tsVal: JSValue, fmt: JSValue): JSValue {.nimcall.} =
   let ts = toNimFloat(ctx, tsVal).Timestamp
   let fmtStr = toNimString(ctx, fmt)
-  if tzName.len == 0:
-    tzName = detectSystemTimeZone()
+  let zone = jsTimeZone(ctx)
   try:
-    let output = format(ts, fmtStr, tzName = tzName)
+    let output = format(ts, fmtStr, tzName = zone)
     return nimStringToJS(ctx, output)
   except CatchableError as e:
     raise newException(ValueError, "format failed: " & e.msg)

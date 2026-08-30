@@ -3,6 +3,7 @@ import std/[json, sequtils, strutils, unittest]
 import frameos/js_runtime/runtime
 import frameos/types
 import frameos/values
+import lib/tz
 
 proc testScene(): InterpretedFrameScene =
   InterpretedFrameScene(
@@ -131,6 +132,49 @@ function demo(input: number) {
     check errorLogs.len == 1
     check "mapped boom" in errorLogs[0]{"message"}.getStr()
     check ">:3:18" in errorLogs[0]{"stack"}.getStr()
+    cleanupSceneJs(scene)
+    cleanupCompilerJs()
+
+  test "format renders in the scene's configured time zone":
+    # A Word clock scene asks `format(now(), "{hour}")`. It must answer in
+    # the frame's zone on every platform — the ESP32 has no /etc/localtime,
+    # so the old detectSystemTimeZone() fallback rendered UTC there.
+    initTimeZone()
+    var scene = testScene()
+    scene.frameConfig = FrameConfig(timeZone: "Europe/Brussels")
+    # 2026-08-30T08:00:00Z; Brussels is on CEST (UTC+2).
+    let summer = evalSnippet(scene, testContext(scene), 3.NodeId,
+      "format(1788076800, \"{hour/2}:{minute/2}\")")
+    check summer.asString() == "10:00"
+    # 2026-01-15T08:00:00Z; CET (UTC+1) — the DST fold must follow the date.
+    let winter = evalSnippet(scene, testContext(scene), 3.NodeId,
+      "format(1768464000, \"{hour/2}:{minute/2}\")")
+    check winter.asString() == "09:00"
+
+    # The ESP32 pushes a changed zone into the same frameConfig every render
+    # pass; the running QuickJS context must pick it up without a rebuild.
+    scene.frameConfig.timeZone = "America/New_York"
+    let moved = evalSnippet(scene, testContext(scene), 3.NodeId,
+      "format(1788076800, \"{hour/2}:{minute/2}\")")
+    check moved.asString() == "04:00"
+
+    # A zone chrono has no data for renders as UTC rather than failing the
+    # node (an ESP32 whose tz slice has not arrived yet).
+    scene.frameConfig.timeZone = "Mars/Olympus_Mons"
+    let unknown = evalSnippet(scene, testContext(scene), 3.NodeId,
+      "format(1788076800, \"{hour/2}:{minute/2}\")")
+    check unknown.asString() == "08:00"
+    cleanupSceneJs(scene)
+    cleanupCompilerJs()
+
+  test "format falls back to setJsTimeZone without a frameConfig":
+    initTimeZone()
+    setJsTimeZone("Asia/Tokyo")
+    var scene = testScene()
+    let tokyo = evalSnippet(scene, testContext(scene), 4.NodeId,
+      "format(1788076800, \"{hour/2}:{minute/2}\")")
+    check tokyo.asString() == "17:00"
+    setJsTimeZone("")
     cleanupSceneJs(scene)
     cleanupCompilerJs()
 
