@@ -40,6 +40,8 @@ from app.tasks.buildroot_image import (
     _merge_boot_config_lines,
     _network_manager_wifi_connection,
     _wpa_supplicant_conf,
+    buildroot_wifi_country,
+    normalize_wifi_country,
     precompiled_buildroot_sd_image_release_url,
     render_buildroot_frameos_service,
     stage_buildroot_frameos_service,
@@ -2573,3 +2575,45 @@ def test_frameos_service_names_network_manager_only_where_it_exists():
     without_nm = render_buildroot_frameos_service(False)
     assert "NetworkManager" not in without_nm
     assert "After=network.target" in without_nm
+
+
+def test_buildroot_wpa_supplicant_conf_offers_wpa3_and_carries_the_country():
+    conf = _wpa_supplicant_conf("Home", "hunter2hunter2", "fr")
+    # Global settings first (country among them), then the network block.
+    assert "update_config=1\ncountry=FR\nnetwork={" in conf
+    # WPA2-PSK and WPA3-SAE both offered, PMF optional; the passphrase itself
+    # is what SAE needs, so it is written as typed.
+    assert "key_mgmt=WPA-PSK SAE" in conf
+    assert "ieee80211w=1" in conf
+    assert 'psk="hunter2hunter2"' in conf
+    # No country, or garbage: no line at all.
+    assert "country=" not in _wpa_supplicant_conf("Home", "hunter2hunter2")
+    assert "country=" not in _wpa_supplicant_conf("Home", "hunter2hunter2", "France")
+    # A raw hex PSK has nothing to derive SAE from.
+    hex_conf = _wpa_supplicant_conf("Home", "A" * 64, "FR")
+    assert "key_mgmt=WPA-PSK\n" in hex_conf
+    assert "SAE" not in hex_conf and "ieee80211w" not in hex_conf
+
+
+def test_normalize_wifi_country_accepts_exactly_two_ascii_letters():
+    assert normalize_wifi_country("fr") == "FR"
+    assert normalize_wifi_country(" ee ") == "EE"
+    assert normalize_wifi_country("") == ""
+    assert normalize_wifi_country(None) == ""
+    assert normalize_wifi_country("France") == ""
+    assert normalize_wifi_country("F1") == ""
+    assert normalize_wifi_country("ée") == ""
+    assert buildroot_wifi_country({"wifiCountry": "de"}) == "DE"
+    assert buildroot_wifi_country({}) == ""
+    assert buildroot_wifi_country(None) == ""
+
+
+def test_buildroot_sd_image_bakes_the_frames_wifi_country(tmp_path):
+    network = {"wifiSSID": "Home WiFi", "wifiPassword": "hunter2hunter2", "wifiCountry": "fr"}
+    conf_relative = Path(BUILDROOT_WPA_SUPPLICANT_STATE_DIR.lstrip("/")) / BUILDROOT_WPA_SUPPLICANT_CONF_NAME
+    frame = SimpleNamespace(id=1, network=network, buildroot={"platform": RASPBERRY_PI_32.key})
+    overlay = tmp_path / "overlay"
+    BuildrootImageBuilder(db=None, redis=None, frame=frame)._write_state_wpa_supplicant_conf(overlay)
+    conf = (overlay / conf_relative).read_text(encoding="utf-8")
+    assert "country=FR\n" in conf
+    assert "key_mgmt=WPA-PSK SAE" in conf

@@ -1921,7 +1921,8 @@ class BuildrootImageBuilder:
         conf_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(conf_dir, 0o700)
         conf_path = conf_dir / BUILDROOT_WPA_SUPPLICANT_CONF_NAME
-        conf_path.write_text(_wpa_supplicant_conf(ssid, password), encoding="utf-8")
+        country = buildroot_wifi_country(self.frame.network if isinstance(self.frame.network, dict) else None)
+        conf_path.write_text(_wpa_supplicant_conf(ssid, password, country), encoding="utf-8")
         os.chmod(conf_path, 0o600)
 
     @staticmethod
@@ -4080,7 +4081,25 @@ def _wpa_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _wpa_supplicant_conf(ssid: str, password: str) -> str:
+def normalize_wifi_country(value: Any) -> str:
+    """ISO 3166-1 alpha-2 in upper case, or "" for anything else.
+
+    Mirrors normalizeCountryCode in frameos/src/frameos/network/supplicant.nim:
+    the regulatory domain for the Wi-Fi radio. Without one the kernel sits in
+    the world domain, where 2.4 GHz channels 12/13 cannot be joined.
+    """
+    code = str(value or "").strip()
+    if len(code) != 2 or not code.isascii() or not code.isalpha():
+        return ""
+    return code.upper()
+
+
+def buildroot_wifi_country(network: dict[str, Any] | None) -> str:
+    network = network if isinstance(network, dict) else {}
+    return normalize_wifi_country(network.get("wifiCountry"))
+
+
+def _wpa_supplicant_conf(ssid: str, password: str, country: str = "") -> str:
     """Byte-for-byte the config frameos/src/frameos/network/supplicant.nim writes.
 
     Used on platforms without NetworkManager (armv6 / Pi Zero W), where the
@@ -4097,6 +4116,11 @@ def _wpa_supplicant_conf(ssid: str, password: str) -> str:
         f"ctrl_interface={BUILDROOT_WPA_SUPPLICANT_CTRL_DIR}",
         "ctrl_interface_group=0",
         "update_config=1",
+    ]
+    country = normalize_wifi_country(country)
+    if country:
+        lines.append(f"country={country}")
+    lines += [
         "network={",
         f"    ssid={_wpa_quote(ssid)}",
         "    scan_ssid=1",
@@ -4105,12 +4129,17 @@ def _wpa_supplicant_conf(ssid: str, password: str) -> str:
         # Open network: any key management makes wpa_supplicant wait forever
         # for a handshake that never comes.
         lines.append("    key_mgmt=NONE")
-    else:
+    elif len(password) == 64 and all(c in "0123456789abcdefABCDEF" for c in password):
+        # A raw PSK has no passphrase to derive SAE from: WPA2 only.
         lines.append("    key_mgmt=WPA-PSK")
-        if len(password) == 64 and all(c in "0123456789abcdefABCDEF" for c in password):
-            lines.append(f"    psk={password.lower()}")
-        else:
-            lines.append(f"    psk={_wpa_quote(password)}")
+        lines.append(f"    psk={password.lower()}")
+    else:
+        # WPA2-PSK and WPA3-SAE both offered (the image builds wpa_supplicant
+        # with BR2_PACKAGE_WPA_SUPPLICANT_WPA3); the daemon picks whichever
+        # the access point advertises, so a WPA3-only SSID joins too.
+        lines.append("    key_mgmt=WPA-PSK SAE")
+        lines.append("    ieee80211w=1")
+        lines.append(f"    psk={_wpa_quote(password)}")
     lines.append("}")
     return "\n".join(lines) + "\n"
 

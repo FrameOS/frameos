@@ -137,6 +137,27 @@ var networkCheckProgressHook*: proc(status: string) {.gcsafe.} = nil
 ## nil = plain sleep.
 var networkCheckTickHook*: proc(): float {.gcsafe.} = nil
 
+## The supplicant backend's join is re-attempted from the network check loop
+## at most this often (a fresh join is a 15 s association wait plus DHCP).
+## Counted from process start: the boot join itself runs at startup.
+const stationRepairIntervalSeconds* = 20
+var lastStationRepair = getMonoTime()
+
+proc effectiveWifiCountry*(frameOS: FrameOS): string {.gcsafe.} =
+  ## frame.json's network.wifiCountry, else the `wifi_country` a cloud SD
+  ## card left in the pending enrollment (the enrollment that would write it
+  ## into frame.json needs the network first). "" when neither says.
+  if frameOS != nil and frameOS.frameConfig != nil and frameOS.frameConfig.network != nil:
+    result = wpa.normalizeCountryCode(frameOS.frameConfig.network.wifiCountry)
+    if result.len > 0:
+      return
+  try:
+    let pending = loadPendingEnrollment()
+    if pending != nil and pending.kind == JObject:
+      result = wpa.normalizeCountryCode(pending{"wifi_country"}.getStr(""))
+  except CatchableError:
+    result = ""
+
 proc waitBetweenNetworkAttempts*(ms: int) =
   ## `portalSleepHook(ms)`, sliced by the tick hook when one is installed so
   ## the boot screen keeps moving through a 60 s backoff.
@@ -1277,13 +1298,26 @@ proc hotspotAutoTimeoutLoop(frameOS: FrameOS, startedAt: MonoTime) {.gcsafe, nim
     if (getMonoTime() - startedAt) >= initDuration(milliseconds = int(timeoutSec * 1000)):
       pLog("portal:stopAp:autoTimeout")
       stopAp(frameOS)
+      # NetworkManager autoconnects once the AP profile is down; the
+      # supplicant backend has to be told. Without this a frame whose boot
+      # join was merely slow spent the hotspot's 5 minutes offline and then
+      # had no network at all until the next reboot.
+      if activeNetworkBackend() == nbSupplicant:
+        let device = supplicantWifiDevice()
+        let res = wpa.repairStation(networkContext(), device, networkToolProbe(),
+                                    effectiveWifiCountry(frameOS))
+        pLog("portal:stopAp:stationRestored", %*{"device": device, "ok": res.ok, "detail": res.message})
+        frameOS.network.status = if res.ok: NetworkStatus.connected else: NetworkStatus.error
+        if res.ok:
+          requestEnrollmentNudge()
       sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()})
 
 proc attemptConnectSupplicant(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} =
   ## No post-connect grace sleep here (unlike the nmcli path): wpa.connect
   ## only returns once the DHCP client has actually produced an address.
   let device = supplicantWifiDevice()
-  let res = wpa.connect(networkContext(), device, ssid, password, "", networkToolProbe())
+  let res = wpa.connect(networkContext(), device, ssid, password, effectiveWifiCountry(frameOS),
+                        networkToolProbe())
   pLog("portal:connect:supplicant",
        %*{"device": device, "ssid": ssid, "ok": res.ok, "detail": res.message})
   if not res.ok:
@@ -1424,6 +1458,10 @@ proc checkNetwork*(self: FrameOS): bool =
   let timer = getMonoTime()
   var attempt = 1
   var diagnosticsLogged = false
+  # A station repair that just succeeded earns one probe past the deadline:
+  # the repair itself can run the clock out, and giving up on an address
+  # that is seconds old would be the very failure it just fixed.
+  var probeAfterRepair = false
   self.network.status = NetworkStatus.connecting
   self.logger.log(%*{"event": "networkCheck", "url": url})
   while true:
@@ -1435,11 +1473,12 @@ proc checkNetwork*(self: FrameOS): bool =
         networkCheckProgressHook(progress)
       except CatchableError:
         discard
-    if (getMonoTime() - timer) >= initDuration(milliseconds = int(timeout*1000)):
+    if not probeAfterRepair and (getMonoTime() - timer) >= initDuration(milliseconds = int(timeout*1000)):
       self.network.status = NetworkStatus.timeout
       self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
       logNetworkDiagnostics("timeout")
       return false
+    probeAfterRepair = false
     let client = newHttpClient(timeout = 5000)
     try:
       let response = client.get(url)
@@ -1480,20 +1519,48 @@ proc checkNetwork*(self: FrameOS): bool =
         self.network.status = NetworkStatus.connecting
         self.logger.log(%*{"event": "networkCheck", "status": "wifi_connecting"})
 
+    # The supplicant backend joins once, at startup, with a 15 s association
+    # budget. A check that keeps failing while the station is down is the
+    # cue to try the join again - not every attempt (a supplicant mid-way
+    # through associating must not be kicked), but as often as a fresh join
+    # takes. NetworkManager retries on its own.
+    if activeNetworkBackend() == nbSupplicant and attempt >= 2 and
+        (getMonoTime() - lastStationRepair) >= initDuration(seconds = stationRepairIntervalSeconds):
+      let device = supplicantWifiDevice()
+      let ctx = networkContext()
+      let probe = networkToolProbe()
+      if not wpa.stationUp(ctx, device, probe):
+        lastStationRepair = getMonoTime()
+        let res = wpa.repairStation(ctx, device, probe, effectiveWifiCountry(self))
+        self.logger.log(%*{"event": "portal:networkBackend:stationRepair", "attempt": attempt,
+                           "device": device, "ok": res.ok, "detail": res.message})
+        if res.ok:
+          # Straight back to the probe: the address is seconds old.
+          probeAfterRepair = true
+          attempt += 1
+          continue
+
     waitBetweenNetworkAttempts(min(attempt, 60) * 1000)
     attempt += 1
   return false
 
 proc ensureNetworkBackendReady*(frameOS: FrameOS) {.gcsafe.} =
   ## Called once at startup: pins the configured backend, logs which one won,
-  ## and - on the supplicant backend - does what NetworkManager autoconnect
-  ## would have done, i.e. brings the saved network back up after a reboot.
+  ## applies the Wi-Fi regulatory domain, and - on the supplicant backend -
+  ## does what NetworkManager autoconnect would have done, i.e. brings the
+  ## saved network back up after a reboot.
   if frameOS.frameConfig != nil and frameOS.frameConfig.network != nil:
     setNetworkBackendOverride(frameOS.frameConfig.network.networkBackend)
+  let country = effectiveWifiCountry(frameOS)
   if activeNetworkBackend() != nbSupplicant:
+    # NetworkManager never sets a regulatory domain; the kernel stays in the
+    # world domain (no channel 12/13) unless someone says otherwise.
+    wpa.applyRegulatoryDomain(networkContext(), country, networkToolProbe())
     return
-  let res = wpa.ensureStation(networkContext(), supplicantWifiDevice(), networkToolProbe())
+  let res = wpa.ensureStation(networkContext(), supplicantWifiDevice(), networkToolProbe(), country)
   pLog("portal:networkBackend:station", %*{"ok": res.ok, "detail": res.message})
+  # The repair clock starts when this join finished, not when the process did.
+  lastStationRepair = getMonoTime()
 
 proc setPortalHooksForTest*(
   runHook: PortalRunHook = nil,

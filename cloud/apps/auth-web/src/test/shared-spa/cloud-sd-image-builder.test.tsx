@@ -451,6 +451,10 @@ describe("SdImageBuilder", () => {
     fireEvent.change(screen.getByPlaceholderText("WiFi password"), {
       target: { value: "hunter2" },
     });
+    // The radio's regulatory domain; typed lower-case, written upper-case.
+    fireEvent.change(screen.getByLabelText(/WiFi country/), {
+      target: { value: "fr" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /download sd image/i }));
 
     await screen.findByTestId("sd-image-done", undefined, { timeout: 5000 });
@@ -490,6 +494,7 @@ describe("SdImageBuilder", () => {
     expect(regionText).toContain("name=Kitchen Frame\n");
     expect(regionText).toContain("wifi_ssid=MyNet\n");
     expect(regionText).toContain("wifi_password=hunter2\n");
+    expect(regionText).toContain("wifi_country=FR\n");
   });
 
   it("requires a root password or an explicit passwordless-root opt-in", async () => {
