@@ -80,6 +80,16 @@ proc loadConfigJson(): JsonNode =
   except CatchableError:
     return %*{}
 
+proc networkConfigJson*(): JsonNode =
+  ## A copy of frame.json's `network` object (empty object when absent), for
+  ## callers that must send the whole object back because the update path
+  ## replaces it rather than merging.
+  let config = loadConfigJson()
+  if config != nil and config.kind == JObject and config{"network"} != nil and
+      config["network"].kind == JObject:
+    return copy(config["network"])
+  newJObject()
+
 proc activeScenesJsonPath*(): tuple[path: string, compressed: bool] =
   let configuredPath = getEnv("FRAMEOS_SCENES_JSON")
   if configuredPath.len > 0:

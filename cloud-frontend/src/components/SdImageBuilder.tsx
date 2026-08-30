@@ -1,11 +1,13 @@
 import { ArrowDownTrayIcon, ArrowRightIcon, CheckCircleIcon, CircleStackIcon } from '@heroicons/react/24/outline'
 import { browserTimeZone } from '../lib/browser-time-zone'
+import { browserWifiCountry } from '../lib/browser-wifi-country'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
 import {
   CLOUD_CONFIG_REGION_SIZE,
   cloudConfigContentLength,
+  normalizeWifiCountry,
   renderCloudConfig,
   sanitizeConfigValue,
   SdImagePatchError,
@@ -246,6 +248,10 @@ export function SdImageBuilder({
   const remembered = useRef(loadRememberedWifi()).current
   const [wifiSsid, setWifiSsid] = useState(remembered?.ssid ?? '')
   const [wifiPassword, setWifiPassword] = useState(remembered?.password ?? '')
+  // Regulatory domain for the radio, prefilled from the browser's locale.
+  // Without one the kernel sits in the world domain and never joins an
+  // access point on 2.4 GHz channel 12 or 13 (common in Europe).
+  const [wifiCountry, setWifiCountry] = useState(() => browserWifiCountry())
   const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
   // Console login on the device: either a real root password (written into
   // the image in-browser, applied via chpasswd on first boot — which also
@@ -303,6 +309,7 @@ export function SdImageBuilder({
       width: width ? Number(width) : undefined,
       wifiPassword,
       wifiSsid,
+      wifiCountry: normalizeWifiCountry(wifiCountry),
       rootPassword: rootPassword || undefined,
       timeZone: browserTimeZone(),
       sshPublicKeys,
@@ -460,6 +467,7 @@ export function SdImageBuilder({
       sanitizeConfigValue(frameName, 'Frame name')
       sanitizeConfigValue(wifiSsid, 'WiFi network name')
       sanitizeConfigValue(wifiPassword, 'WiFi password')
+      normalizeWifiCountry(wifiCountry, true)
       sanitizeConfigValue(device, 'Display device')
       sanitizeConfigValue(uploadUrl.trim(), 'Upload URL')
       sanitizeConfigValue(rootPassword, 'Root password')
@@ -553,6 +561,8 @@ export function SdImageBuilder({
         width: device && width ? Number(width) : undefined,
         wifiPassword: wifiSsid ? wifiPassword : '',
         wifiSsid,
+        // Written even without credentials: the setup portal's join uses it too.
+        wifiCountry: normalizeWifiCountry(wifiCountry),
         rootPassword: rootPassword || undefined,
         timeZone: browserTimeZone(),
         sshPublicKeys,
@@ -879,6 +889,21 @@ export function SdImageBuilder({
             value={wifiPassword}
           />
           </FormRow>
+          <FormRow label="Country">
+          <input
+            aria-label="WiFi country (two-letter code)"
+            className={controlClassName}
+            disabled={building}
+            maxLength={2}
+            onChange={(event) => setWifiCountry(event.target.value.toUpperCase())}
+            placeholder="FR"
+            value={wifiCountry}
+          />
+          </FormRow>
+          <p className="frameos-muted text-xs">
+            Two-letter country code — the radio&apos;s regulatory domain. Without it the frame cannot join access
+            points on 2.4 GHz channels 12 or 13.
+          </p>
           <label className="frameos-muted flex items-center gap-2 text-xs">
             <input
               checked={rememberWifi}

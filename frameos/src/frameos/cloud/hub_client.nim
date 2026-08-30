@@ -825,6 +825,13 @@ proc applySystemTimeZone(timeZone: string) {.gcsafe.} =
 proc applyEnrollmentPersonalization(personalization: JsonNode) {.gcsafe.} =
   {.gcsafe.}:
     try:
+      if personalization.hasKey("wifiCountry"):
+        # `network` is replaced, not merged, by persistFrameApiUpdate: carry
+        # the stored object with the one new key set.
+        var network = networkConfigJson()
+        network["wifiCountry"] = personalization["wifiCountry"]
+        personalization["network"] = network
+        personalization.delete("wifiCountry")
       if frameApiUpdateChangesConfig(personalization):
         persistFrameApiUpdate(personalization)
         log(%*{"event": "cloud:enroll:personalization", "applied": personalization})

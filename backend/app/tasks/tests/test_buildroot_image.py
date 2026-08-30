@@ -40,9 +40,13 @@ from app.tasks.buildroot_image import (
     _merge_boot_config_lines,
     _network_manager_wifi_connection,
     _wpa_supplicant_conf,
+    buildroot_wifi_country,
+    normalize_wifi_country,
     precompiled_buildroot_sd_image_release_url,
     render_buildroot_frameos_service,
     stage_buildroot_frameos_service,
+    stage_buildroot_network_service_dropin,
+    stage_buildroot_resolved_dropin,
     render_expand_sd_card_script,
     render_expand_sd_card_service,
     render_post_build_script,
@@ -1850,8 +1854,20 @@ async def test_partition_patches_stay_local_when_this_host_has_the_tools(tmp_pat
     async def fake_log(*_args, **_kwargs):
         return None
 
+    staged_dropins: dict[str, str] = {}
+
     async def fake_run_local(command, **_kwargs):
         local_commands.append(command)
+        # The compose dir is rmtree'd when _patch_root_partition returns, so
+        # capture what was staged while the patch script would still see it.
+        service_root = output_image.parent / f".{output_image.stem}-root-patch" / "root-service"
+        for dropin in (
+            "etc/systemd/resolved.conf.d/10-frameos.conf",
+            "etc/systemd/system/network.service.d/10-frameos.conf",
+        ):
+            path = service_root / dropin
+            if path.is_file():
+                staged_dropins[dropin] = path.read_text(encoding="utf-8")
         return 0, "", ""
 
     monkeypatch.setattr(builder, "_log", fake_log)
@@ -1874,6 +1890,35 @@ async def test_partition_patches_stay_local_when_this_host_has_the_tools(tmp_pat
     # container mount point that only exists on the build host.
     assert str(output_image.parent) in local_commands[0]
     assert str(output_image.parent) in local_commands[1]
+
+    # The patch path is how cached base images built before these drop-ins
+    # existed pick them up: without the refresh a composed SD boots with
+    # DNSSEC validation on (every lookup fails "no-signature" behind consumer
+    # routers) and a phantom failed "Network Connectivity" unit on Wi-Fi-only
+    # boards.
+    assert "[Resolve]\nDNSSEC=no\n" in staged_dropins["etc/systemd/resolved.conf.d/10-frameos.conf"]
+    assert "/sys/class/net/eth0" in staged_dropins["etc/systemd/system/network.service.d/10-frameos.conf"]
+
+
+def test_stage_buildroot_network_service_dropin(tmp_path):
+    stage_buildroot_network_service_dropin(tmp_path)
+
+    dropin = tmp_path / "etc" / "systemd" / "system" / "network.service.d" / "10-frameos.conf"
+    text = dropin.read_text(encoding="utf-8")
+    # Buildroot's ifupdown unit runs `ifup -a` over an interfaces file that
+    # lists eth0; boards without an Ethernet port must not fail the unit,
+    # while boards with one (Pi 1 B/B+) must still really run ifup.
+    assert "[Service]\n" in text
+    assert "ExecStart=\n" in text
+    assert "if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifup -a; fi" in text
+    assert "if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifdown -a; fi" in text
+
+
+def test_stage_buildroot_resolved_dropin(tmp_path):
+    stage_buildroot_resolved_dropin(tmp_path)
+
+    dropin = tmp_path / "etc" / "systemd" / "resolved.conf.d" / "10-frameos.conf"
+    assert "[Resolve]\nDNSSEC=no\n" in dropin.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -2573,3 +2618,45 @@ def test_frameos_service_names_network_manager_only_where_it_exists():
     without_nm = render_buildroot_frameos_service(False)
     assert "NetworkManager" not in without_nm
     assert "After=network.target" in without_nm
+
+
+def test_buildroot_wpa_supplicant_conf_offers_wpa3_and_carries_the_country():
+    conf = _wpa_supplicant_conf("Home", "hunter2hunter2", "fr")
+    # Global settings first (country among them), then the network block.
+    assert "update_config=1\ncountry=FR\nnetwork={" in conf
+    # WPA2-PSK and WPA3-SAE both offered, PMF optional; the passphrase itself
+    # is what SAE needs, so it is written as typed.
+    assert "key_mgmt=WPA-PSK SAE" in conf
+    assert "ieee80211w=1" in conf
+    assert 'psk="hunter2hunter2"' in conf
+    # No country, or garbage: no line at all.
+    assert "country=" not in _wpa_supplicant_conf("Home", "hunter2hunter2")
+    assert "country=" not in _wpa_supplicant_conf("Home", "hunter2hunter2", "France")
+    # A raw hex PSK has nothing to derive SAE from.
+    hex_conf = _wpa_supplicant_conf("Home", "A" * 64, "FR")
+    assert "key_mgmt=WPA-PSK\n" in hex_conf
+    assert "SAE" not in hex_conf and "ieee80211w" not in hex_conf
+
+
+def test_normalize_wifi_country_accepts_exactly_two_ascii_letters():
+    assert normalize_wifi_country("fr") == "FR"
+    assert normalize_wifi_country(" ee ") == "EE"
+    assert normalize_wifi_country("") == ""
+    assert normalize_wifi_country(None) == ""
+    assert normalize_wifi_country("France") == ""
+    assert normalize_wifi_country("F1") == ""
+    assert normalize_wifi_country("ée") == ""
+    assert buildroot_wifi_country({"wifiCountry": "de"}) == "DE"
+    assert buildroot_wifi_country({}) == ""
+    assert buildroot_wifi_country(None) == ""
+
+
+def test_buildroot_sd_image_bakes_the_frames_wifi_country(tmp_path):
+    network = {"wifiSSID": "Home WiFi", "wifiPassword": "hunter2hunter2", "wifiCountry": "fr"}
+    conf_relative = Path(BUILDROOT_WPA_SUPPLICANT_STATE_DIR.lstrip("/")) / BUILDROOT_WPA_SUPPLICANT_CONF_NAME
+    frame = SimpleNamespace(id=1, network=network, buildroot={"platform": RASPBERRY_PI_32.key})
+    overlay = tmp_path / "overlay"
+    BuildrootImageBuilder(db=None, redis=None, frame=frame)._write_state_wpa_supplicant_conf(overlay)
+    conf = (overlay / conf_relative).read_text(encoding="utf-8")
+    assert "country=FR\n" in conf
+    assert "key_mgmt=WPA-PSK SAE" in conf

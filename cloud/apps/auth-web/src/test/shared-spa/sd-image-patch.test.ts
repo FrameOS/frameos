@@ -7,6 +7,7 @@ import {
   CLOUD_CONFIG_REGION_SIZE,
   SdImagePatchError,
   cloudConfigContentLength,
+  normalizeWifiCountry,
   patchCloudConfig,
   renderCloudConfig,
   sanitizeConfigValue,
@@ -225,7 +226,37 @@ describe("renderCloudConfig", () => {
     const text = decoder.decode(config);
     expect(text).not.toContain("name=");
     expect(text).not.toContain("wifi_ssid=");
+    expect(text).not.toContain("wifi_country=");
     expect(text).not.toContain("time_zone=");
+  });
+
+  it("writes the WiFi country upper-cased and rejects anything but a country code", () => {
+    // The first-boot script's key (setup_json_reset.py recognizes
+    // wifi_country) — the radio's regulatory domain.
+    const text = decoder.decode(
+      renderCloudConfig({
+        claimToken: "FRCT_x",
+        cloudUrl: "https://c.example",
+        wifiCountry: " fr ",
+        wifiPassword: "hunter2",
+        wifiSsid: "MyNet",
+      }),
+    );
+    expect(text).toContain("wifi_country=FR\n");
+    expect(normalizeWifiCountry("ee")).toBe("EE");
+    expect(normalizeWifiCountry("")).toBe("");
+    expect(normalizeWifiCountry(undefined)).toBe("");
+    // Lenient mode (the builder's live budget) drops a bad value; strict
+    // mode (the build itself) refuses it before anything is downloaded.
+    expect(normalizeWifiCountry("France")).toBe("");
+    expect(() => normalizeWifiCountry("France", true)).toThrowError(/two-letter country code/);
+    expect(() =>
+      renderCloudConfig({
+        claimToken: "FRCT_x",
+        cloudUrl: "https://c.example",
+        wifiCountry: "F1",
+      }),
+    ).toThrowError(/two-letter country code/);
   });
 
   it("rejects quotes in values", () => {

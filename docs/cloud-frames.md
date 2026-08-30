@@ -698,6 +698,8 @@ claim_token=FRCT_…
 name=Kitchen frame
 wifi_ssid=…            # optional; omitted by default
 wifi_password=…        # optional
+wifi_country=FR        # optional ISO 3166-1 alpha-2 regulatory domain; without it
+                       # the radio stays in the world domain (no channels 12/13)
 device=waveshare.EPD_13in3e   # optional display driver (frame.json device key)
 width=1600             # optional, with device
 height=1200            # optional, with device
