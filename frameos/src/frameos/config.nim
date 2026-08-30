@@ -189,6 +189,7 @@ proc newHook*(v: var NetworkConfig) =
     wifiHotspotSsid: "FrameOS-Setup",
     wifiHotspotPassword: "frame1234",
     wifiHotspotTimeoutSeconds: 300,
+    wifiCountry: "",
     networkBackend: "auto",
     allowLocalNetworkAccess: false,
   )

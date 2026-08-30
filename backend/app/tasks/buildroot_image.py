@@ -720,6 +720,34 @@ def stage_buildroot_resolved_dropin(root: Path) -> None:
     os.chmod(path, 0o644)
 
 
+BUILDROOT_NETWORK_SERVICE_DROPIN_PATH = "/etc/systemd/system/network.service.d/10-frameos.conf"
+BUILDROOT_NETWORK_SERVICE_DROPIN = """# FrameOS: no phantom "Network Connectivity" failure on Wi-Fi-only boards.
+#
+# BR2_SYSTEM_DHCP="eth0" makes Buildroot's ifupdown network.service run
+# `ifup -a` over an /etc/network/interfaces that lists eth0. Boards without
+# an Ethernet port (Pi Zero W, Zero 2 W) have no eth0, so the unit failed on
+# every boot and `systemctl --failed` put "network.service ... Network
+# Connectivity" into the post-boot snapshot. Wi-Fi is managed by
+# NetworkManager or frameos's wpa_supplicant backend - this unit plays no
+# part in it - but that red line reads exactly like the reason a frame has
+# no internet, and sent a real debugging session (2026-08-30, Pi Zero W)
+# chasing it. Skip ifup when there is no eth0; run it for real when there
+# is one (Pi 1 B/B+ share the armv6 image and do use it).
+[Service]
+ExecStart=
+ExecStart=/bin/sh -c 'if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifup -a; fi'
+ExecStop=
+ExecStop=/bin/sh -c 'if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifdown -a; fi'
+"""
+
+
+def stage_buildroot_network_service_dropin(root: Path) -> None:
+    path = root / BUILDROOT_NETWORK_SERVICE_DROPIN_PATH.lstrip("/")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(BUILDROOT_NETWORK_SERVICE_DROPIN, encoding="utf-8")
+    os.chmod(path, 0o644)
+
+
 def _apply_boot_config_lines(content: str, requested_lines: list[str]) -> tuple[str, bool]:
     lines = content.splitlines()
     changed = False
@@ -1698,6 +1726,7 @@ class BuildrootImageBuilder:
             directory.mkdir(parents=True, exist_ok=True)
         stage_buildroot_network_manager_state(overlay_dir)
         stage_buildroot_resolved_dropin(overlay_dir)
+        stage_buildroot_network_service_dropin(overlay_dir)
         stage_postboot_log(overlay_dir)
 
         if not frameos_build.binary_path:
@@ -1921,7 +1950,8 @@ class BuildrootImageBuilder:
         conf_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(conf_dir, 0o700)
         conf_path = conf_dir / BUILDROOT_WPA_SUPPLICANT_CONF_NAME
-        conf_path.write_text(_wpa_supplicant_conf(ssid, password), encoding="utf-8")
+        country = buildroot_wifi_country(self.frame.network if isinstance(self.frame.network, dict) else None)
+        conf_path.write_text(_wpa_supplicant_conf(ssid, password, country), encoding="utf-8")
         os.chmod(conf_path, 0o600)
 
     @staticmethod
@@ -2617,6 +2647,15 @@ genimage --rootpath "$work_dir/empty-root" --tmppath "$work_dir/tmp" --inputpath
         compose_dir.mkdir(parents=True, exist_ok=True)
         stage_buildroot_frameos_service(service_root, self.platform.uses_network_manager)
         stage_postboot_log(service_root)
+        # These drop-ins shipped inside the base rootfs long after many cached
+        # base images were built. An SD composed from an old base without them
+        # boots with DNSSEC validation on — every lookup fails "no-signature"
+        # against routers that answer DO-flagged queries without RRSIGs, so the
+        # frame has Wi-Fi and a route but resolves nothing (Pi Zero W,
+        # 2026-08-30) — and with a red "Network Connectivity" systemd unit
+        # that derails the diagnosis. Refresh them here like the units above.
+        stage_buildroot_resolved_dropin(service_root)
+        stage_buildroot_network_service_dropin(service_root)
         (service_root / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
         # Refresh the first-boot setup script/unit and fstab on the root
         # partition so images composed from older cached base images pick up
@@ -4080,7 +4119,25 @@ def _wpa_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _wpa_supplicant_conf(ssid: str, password: str) -> str:
+def normalize_wifi_country(value: Any) -> str:
+    """ISO 3166-1 alpha-2 in upper case, or "" for anything else.
+
+    Mirrors normalizeCountryCode in frameos/src/frameos/network/supplicant.nim:
+    the regulatory domain for the Wi-Fi radio. Without one the kernel sits in
+    the world domain, where 2.4 GHz channels 12/13 cannot be joined.
+    """
+    code = str(value or "").strip()
+    if len(code) != 2 or not code.isascii() or not code.isalpha():
+        return ""
+    return code.upper()
+
+
+def buildroot_wifi_country(network: dict[str, Any] | None) -> str:
+    network = network if isinstance(network, dict) else {}
+    return normalize_wifi_country(network.get("wifiCountry"))
+
+
+def _wpa_supplicant_conf(ssid: str, password: str, country: str = "") -> str:
     """Byte-for-byte the config frameos/src/frameos/network/supplicant.nim writes.
 
     Used on platforms without NetworkManager (armv6 / Pi Zero W), where the
@@ -4097,6 +4154,11 @@ def _wpa_supplicant_conf(ssid: str, password: str) -> str:
         f"ctrl_interface={BUILDROOT_WPA_SUPPLICANT_CTRL_DIR}",
         "ctrl_interface_group=0",
         "update_config=1",
+    ]
+    country = normalize_wifi_country(country)
+    if country:
+        lines.append(f"country={country}")
+    lines += [
         "network={",
         f"    ssid={_wpa_quote(ssid)}",
         "    scan_ssid=1",
@@ -4105,12 +4167,17 @@ def _wpa_supplicant_conf(ssid: str, password: str) -> str:
         # Open network: any key management makes wpa_supplicant wait forever
         # for a handshake that never comes.
         lines.append("    key_mgmt=NONE")
-    else:
+    elif len(password) == 64 and all(c in "0123456789abcdefABCDEF" for c in password):
+        # A raw PSK has no passphrase to derive SAE from: WPA2 only.
         lines.append("    key_mgmt=WPA-PSK")
-        if len(password) == 64 and all(c in "0123456789abcdefABCDEF" for c in password):
-            lines.append(f"    psk={password.lower()}")
-        else:
-            lines.append(f"    psk={_wpa_quote(password)}")
+        lines.append(f"    psk={password.lower()}")
+    else:
+        # WPA2-PSK and WPA3-SAE both offered (the image builds wpa_supplicant
+        # with BR2_PACKAGE_WPA_SUPPLICANT_WPA3); the daemon picks whichever
+        # the access point advertises, so a WPA3-only SSID joins too.
+        lines.append("    key_mgmt=WPA-PSK SAE")
+        lines.append("    ieee80211w=1")
+        lines.append(f"    psk={_wpa_quote(password)}")
     lines.append("}")
     return "\n".join(lines) + "\n"
 

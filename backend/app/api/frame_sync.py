@@ -153,6 +153,7 @@ FRAME_SYNC_NETWORK_KEYS = {
     "wifiHotspotSsid",
     "wifiHotspotPassword",
     "wifiHotspotTimeoutSeconds",
+    "wifiCountry",
 }
 FRAME_SYNC_AGENT_KEYS = {
     "agentEnabled",

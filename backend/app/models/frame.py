@@ -673,6 +673,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
             "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
             "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 300)),
+            # Regulatory domain for the radio (ISO 3166-1 alpha-2); "" keeps
+            # the kernel's world domain, where channels 12/13 cannot be joined.
+            "wifiCountry": str(network.get('wifiCountry') or "").strip().upper()[:2],
         },
         "agent": {
             "agentEnabled": bool(agent.get('agentEnabled', False)),

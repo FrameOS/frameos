@@ -55,6 +55,33 @@ def test_postboot_log_script_refreshes_then_stops():
     assert 'Refreshed every ${REFRESH_INTERVAL_SECONDS}s' in script
 
 
+def test_postboot_log_filters_driver_data_spam(tmp_path: Path):
+    script = render_postboot_log_script()
+    # A debug-enabled frame logs a waveshare data line every few KB of a
+    # panel push; unfiltered, that spam is all the size-capped journal and
+    # frameos-log tails ever contain.
+    assert "filter_data_spam" in script
+    assert '"event":"driver:waveshare:data"' in script
+
+    # The filter drops exactly the transfer spam and keeps everything else.
+    sample = tmp_path / "sample.log"
+    sample.write_text(
+        '{"event":"driver:waveshare:data","message":"Data transfer progress","bytesSent":4200}\n'
+        '{"event":"networkCheck","status":"timeout","seconds":90}\n'
+        '{"event":"driver:waveshare:data","index":9,"data":85,"dataHex":"0x55"}\n'
+        '{"event":"driver:waveshare:error","message":"panel timeout"}\n',
+        encoding="utf-8",
+    )
+    filtered = subprocess.run(
+        ["/bin/sh", "-c", 'grep -v \'"event":"driver:waveshare:data"\' "$1"', "sh", str(sample)],
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "networkCheck" in filtered
+    assert "driver:waveshare:error" in filtered
+    assert "driver:waveshare:data" not in filtered
+
+
 def test_postboot_log_redaction_pattern_works(tmp_path: Path):
     conf = tmp_path / "wpa_supplicant-wlan0.conf"
     conf.write_text(

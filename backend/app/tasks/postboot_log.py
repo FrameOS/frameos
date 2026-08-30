@@ -138,15 +138,34 @@ write_network() {
       | tail -c "$SECTION_BYTES" >> "$STAGE_FILE" || true
 }
 
+# A frame with debug logging on emits a "driver:waveshare:data" line every
+# few KB of a panel push - tens of thousands of lines per refresh. Left in,
+# they fill every tail below and push the whole boot story (network check,
+# scene load, errors) out of the size cap; a real 2026-08-30 log had all four
+# journal sections and the frameos log reduced to pure transfer spam. The
+# events carry no diagnostic value at rest, so drop exactly them.
+filter_data_spam() {
+  grep -v '"event":"driver:waveshare:data"'
+}
+
+journal_tail() {
+  if command -v journalctl >/dev/null 2>&1; then
+    journalctl -b $1 --no-pager -o short-iso 2>&1 | filter_data_spam \\
+        | tail -c "$SECTION_BYTES" >> "$STAGE_FILE" || true
+  else
+    printf '(journalctl not available)\\n' >> "$STAGE_FILE"
+  fi
+}
+
 write_journal() {
   section "journal: frameos.service (tail)"
-  grab journalctl -b -u frameos.service --no-pager -o short-iso
+  journal_tail "-u frameos.service"
   section "journal: frameos-remote.service (tail)"
-  grab journalctl -b -u frameos-remote.service --no-pager -o short-iso
+  journal_tail "-u frameos-remote.service"
   section "journal: wpa_supplicant.service (tail)"
-  grab journalctl -b -u wpa_supplicant.service --no-pager -o short-iso
+  journal_tail "-u wpa_supplicant.service"
   section "journal: full boot (tail)"
-  grab journalctl -b --no-pager -o short-iso
+  journal_tail ""
 }
 
 write_frameos_log() {
@@ -154,7 +173,10 @@ write_frameos_log() {
   latest_log="$(ls -1t /srv/frameos/logs/ 2>/dev/null | head -n 1)"
   if [ -n "$latest_log" ]; then
     printf 'file=/srv/frameos/logs/%s\\n' "$latest_log" >> "$STAGE_FILE"
-    tail -c "$SECTION_BYTES" "/srv/frameos/logs/$latest_log" >> "$STAGE_FILE" 2>/dev/null || true
+    # Filter before the byte cap, or a debug frame's transfer spam is all
+    # the cap keeps; take the last 4x first so a huge file stays cheap.
+    tail -c $((SECTION_BYTES * 4)) "/srv/frameos/logs/$latest_log" 2>/dev/null \\
+        | filter_data_spam | tail -c "$SECTION_BYTES" >> "$STAGE_FILE" || true
   else
     printf '(no files in /srv/frameos/logs/)\\n' >> "$STAGE_FILE"
   fi
