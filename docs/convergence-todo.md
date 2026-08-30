@@ -260,9 +260,8 @@ that they are on a legacy path and where the exit is. The exit button is
 Stage 3's; this stage wires the places, with a "coming soon" until then.
 
 **Shipped 2026-08-30 (branch `convergence-stage-2`, stacked on stage 1).**
-The exit everywhere is `openNimConverterWithScene` (copy the scene JSON,
-open scenes.frameos.net/nim-converter) until the converter is called from
-the editor itself. Every box below is ticked; what each left open is noted.
+The exit everywhere is `frameLogic.convertSceneToInterpreted` — the
+converter called from the editor, applied to the unsaved scene in place. Every box below is ticked; what each left open is noted.
 
 - [x] **Frame list and dashboard.** `GET /api/frames` gains
   `compiled_scene_count` (from `frame_compiled_scene_count`,

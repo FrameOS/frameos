@@ -1,4 +1,4 @@
-import { useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { sceneSettingsLogic } from './sceneSettingsLogic'
 import { Form, Group } from 'kea-forms'
@@ -10,11 +10,7 @@ import { Select } from '../../../../components/Select'
 import { TextArea } from '../../../../components/TextArea'
 import { AdvancedSection } from '../../../../components/AdvancedSection'
 import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
-import {
-  frameRunsScenesInterpreted,
-  openNimConverterWithScene,
-  sceneExecutionForFrame,
-} from '../../../../utils/sceneExecution'
+import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -30,7 +26,8 @@ function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
 }
 
 export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
-  const { frameId, frameForm } = useValues(frameLogic)
+  const { frameId, frameForm, convertingSceneId } = useValues(frameLogic)
+  const { convertSceneToInterpreted } = useActions(frameLogic)
   const { sceneIndex, scene } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
@@ -123,11 +120,16 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 </div>
                 {hasCompiledOnlyContent ? (
                   <div className="flex flex-wrap items-center gap-2">
-                    <Button size="small" color="primary" onClick={() => void openNimConverterWithScene(scene)}>
-                      Convert to an interpreted scene…
+                    <Button
+                      size="small"
+                      color="primary"
+                      disabled={convertingSceneId === sceneId}
+                      onClick={() => convertSceneToInterpreted(sceneId)}
+                    >
+                      {convertingSceneId === sceneId ? 'Converting…' : 'Convert to an interpreted scene'}
                     </Button>
                     <span className="frameos-muted text-xs">
-                      Copies the scene JSON and opens scenes.frameos.net/nim-converter to paste it into.
+                      Converts in place, unsaved — check the result, then save or deploy.
                     </span>
                   </div>
                 ) : null}

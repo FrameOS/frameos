@@ -24,7 +24,7 @@ import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { cloudDriveLogic } from '../frame/panels/Templates/cloudDriveLogic'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
-import { openNimConverterWithScene, sceneIsCompiledForFrame } from '../../utils/sceneExecution'
+import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 
 import { openWorkspaceSceneUtility, workspaceLogic } from './workspaceLogic'
 
@@ -48,7 +48,7 @@ export function WorkspaceSceneDropDown({
   const [renameName, setRenameName] = useState<string | null>(null)
   const [templateModalMounted, setTemplateModalMounted] = useState(false)
   const { frameForm } = useValues(frameLogic({ frameId: frame.id }))
-  const { setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
+  const { setFrameFormValues, convertSceneToInterpreted } = useActions(frameLogic({ frameId: frame.id }))
   // sceneUpdatesLogic and not scenesLogic: this dropdown renders on the frames
   // home, and scenesLogic would mount controlLogic, which fetches frame state.
   const { sceneUpdateVersions } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
@@ -115,14 +115,13 @@ export function WorkspaceSceneDropDown({
             onClick: () => navigator.clipboard.writeText(JSON.stringify(currentScene)),
             icon: <ClipboardDocumentIcon className="h-5 w-5" />,
           },
-          // Legacy compiled scenes only: the way off the source-build path.
-          // Until the converter is wired into the editor this copies the
-          // scene's JSON and opens the converter page to paste it into.
+          // Legacy compiled scenes only: the way off the source-build path —
+          // converts the scene in place, unsaved (frameLogic).
           ...(sceneIsCompiledForFrame(currentScene, frame.mode)
             ? [
                 {
-                  label: 'Convert to an interpreted scene…',
-                  onClick: () => void openNimConverterWithScene(currentScene),
+                  label: 'Convert to an interpreted scene',
+                  onClick: () => convertSceneToInterpreted(currentScene.id),
                   icon: <ArrowsRightLeftIcon className="h-5 w-5" />,
                 },
               ]

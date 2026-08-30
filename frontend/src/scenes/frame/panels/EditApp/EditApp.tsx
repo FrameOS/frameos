@@ -12,8 +12,6 @@ import clsx from 'clsx'
 import { TrashIcon } from '@heroicons/react/24/solid'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { javascriptAppSourceFiles } from '../../../../utils/sceneApps'
-import type { FrameScene } from '../../../../types'
-import { openNimConverterWithScene } from '../../../../utils/sceneExecution'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 
 interface EditAppProps {
@@ -108,12 +106,14 @@ export function systemAppGithubUrl(keyword: string): string {
 function ReadOnlyNimAppNotice({
   keyword,
   sceneLocal,
-  scene,
+  converting,
+  onConvert,
 }: {
   keyword: string | null
   /** A Nim app the scene carries itself (legacy), as opposed to a built-in from the catalog. */
   sceneLocal: boolean
-  scene: FrameScene | null
+  converting: boolean
+  onConvert: () => void
 }): JSX.Element {
   if (sceneLocal) {
     return (
@@ -123,11 +123,9 @@ function ReadOnlyNimAppNotice({
           its own Nim app; running it needs a FrameOS source build on every deploy. The converter ports it to a
           JavaScript app.
         </div>
-        {scene ? (
-          <Button size="small" color="primary" onClick={() => void openNimConverterWithScene(scene)}>
-            Convert to an interpreted scene…
-          </Button>
-        ) : null}
+        <Button size="small" color="primary" disabled={converting} onClick={onConvert}>
+          {converting ? 'Converting…' : 'Convert to an interpreted scene'}
+        </Button>
       </div>
     )
   }
@@ -237,7 +235,8 @@ export function EditApp({
   compactWarnings = false,
   showToolbar = false,
 }: EditAppProps) {
-  const { frameId } = useValues(frameLogic)
+  const { frameId, convertingSceneId } = useValues(frameLogic)
+  const { convertSceneToInterpreted } = useActions(frameLogic)
   const { theme } = useValues(workspaceLogic)
   const { persistUntilClosed } = useActions(frameEditorsLogic)
   const logicProps: EditAppLogicProps = {
@@ -364,7 +363,12 @@ export function EditApp({
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
         {requiresCompiledOnSave && !compactWarnings ? (
-          <ReadOnlyNimAppNotice keyword={savedKeyword} sceneLocal={Boolean(sceneAppKey)} scene={scene} />
+          <ReadOnlyNimAppNotice
+            keyword={savedKeyword}
+            sceneLocal={Boolean(sceneAppKey)}
+            converting={convertingSceneId === sceneId}
+            onConvert={() => convertSceneToInterpreted(sceneId)}
+          />
         ) : null}
         {hasMultipleAppUsages && !requiresCompiledOnSave ? (
           <div className="frame-tool-card flex flex-col gap-3 rounded-2xl p-3 text-sm @md:flex-row @md:items-center">
