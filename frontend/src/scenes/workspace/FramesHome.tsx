@@ -966,20 +966,20 @@ function resolveSceneControlSelection(
   uploadedScenes: FrameScene[]
 ): { scene: FrameScene | null; sceneId: string; saved: boolean } {
   const uploadedSceneId = sceneId.startsWith(uploadedScenePrefix) ? sceneId.slice(uploadedScenePrefix.length) : null
-  const savedScene =
-    savedFrame.scenes?.find((candidate) => candidate.id === sceneId) ??
-    (uploadedSceneId ? savedFrame.scenes?.find((candidate) => candidate.id === uploadedSceneId) : null)
+  const findScene = (scenes: FrameScene[] | undefined): FrameScene | null =>
+    scenes?.find((candidate) => candidate.id === sceneId) ??
+    (uploadedSceneId ? scenes?.find((candidate) => candidate.id === uploadedSceneId) ?? null : null) ??
+    null
 
-  if (savedScene) {
-    return { scene: savedScene, sceneId: savedScene.id, saved: true }
-  }
-
-  const editingScene =
-    editingFrame.scenes?.find((candidate) => candidate.id === sceneId) ??
-    (uploadedSceneId ? editingFrame.scenes?.find((candidate) => candidate.id === uploadedSceneId) : null)
-
-  if (editingScene) {
-    return { scene: editingScene, sceneId: editingScene.id, saved: false }
+  const savedScene = findScene(savedFrame.scenes)
+  // The editing frame wins: it is the saved frame with the form's unsaved
+  // edits on top, so the drawer shows what the editor shows — a scene just
+  // converted to interpreted stops claiming to be legacy compiled here too.
+  // `saved` still means "this scene exists in the saved frame", which is what
+  // the unsaved/undeployed chips below ask about.
+  const scene = findScene(editingFrame.scenes) ?? savedScene
+  if (scene) {
+    return { scene, sceneId: scene.id, saved: !!savedScene }
   }
 
   const uploadedScene = uploadedSceneId
