@@ -269,12 +269,25 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
   const flowStore = useStoreApi()
   const nodesInitialized = useNodesInitialized()
   const diagramLogicProps: DiagramLogicProps = { frameId, sceneId, updateNodeInternals }
-  const { nodes, nodesWithStyle, edges, selectedNodeIds, fitViewCounter, panRequest, isCompiledScene } = useValues(
-    diagramLogic(diagramLogicProps)
-  )
-  const { onEdgesChange, onNodesChange, setNodes, addEdge, keywordDropped, setCursorPosition } = useActions(
-    diagramLogic(diagramLogicProps)
-  )
+  const {
+    nodes,
+    nodesWithStyle,
+    edges,
+    selectedNodeIds,
+    fitViewCounter,
+    panRequest,
+    isCompiledScene,
+    convertingSceneId,
+  } = useValues(diagramLogic(diagramLogicProps))
+  const {
+    onEdgesChange,
+    onNodesChange,
+    setNodes,
+    addEdge,
+    keywordDropped,
+    setCursorPosition,
+    convertSceneToInterpreted,
+  } = useActions(diagramLogic(diagramLogicProps))
   const { newNodePicker } = useValues(newNodePickerLogic(diagramLogicProps))
   const { openNewNodePicker } = useActions(newNodePickerLogic(diagramLogicProps))
   const highlightedEdges = useMemo(() => {
@@ -571,7 +584,10 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
           />
           {isCompiledScene ? (
             <div className="absolute top-3 left-2 z-10">
-              <CompiledSceneTag />
+              <CompiledSceneTag
+                converting={convertingSceneId === sceneId}
+                onConvertCopy={() => convertSceneToInterpreted(sceneId, true)}
+              />
             </div>
           ) : null}
           {showToolbar ? (
