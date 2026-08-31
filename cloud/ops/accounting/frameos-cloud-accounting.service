@@ -1,0 +1,9 @@
+[Unit]
+Description=FrameOS Cloud nightly accounting job (usage sweep + ledger invariants)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/frameos-cloud/accounting.env
+ExecStart=/usr/local/bin/frameos-cloud-accounting

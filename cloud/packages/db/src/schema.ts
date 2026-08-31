@@ -1337,3 +1337,119 @@ export const ledgerBalances = pgTable("ledger_balances", {
     .defaultNow()
     .notNull(),
 });
+
+// AI metering (migration 0043). The metering subledger every ledger entry
+// for a chat turn is derived from, plus the effective-dated provider price
+// table and the first global settings table. Design:
+// cloud/docs/accounting-todo.md §3.2.
+//
+// Same rule as the ledger tables above: no foreign key points out of the
+// accounting module. account_id, chat_id and updated_by hold uuids as plain
+// columns; event_id points *into* the module, which is allowed.
+
+// What the provider charges, effective-dated. Micro-dollars per MILLION
+// tokens — per-token cannot represent a cached gpt-4o-mini token ($0.075 per
+// 1M, i.e. 0.075 micro-dollars, which as a bigint is zero).
+export const aiModelPrices = pgTable(
+  "ai_model_prices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    model: text("model").notNull(),
+    inputMicrosPerMtok: bigint("input_micros_per_mtok", {
+      mode: "bigint",
+    }).notNull(),
+    cachedInputMicrosPerMtok: bigint("cached_input_micros_per_mtok", {
+      mode: "bigint",
+    }).notNull(),
+    // Reasoning tokens bill as output; there is deliberately no third price.
+    outputMicrosPerMtok: bigint("output_micros_per_mtok", {
+      mode: "bigint",
+    }).notNull(),
+    currency: text("currency").default("USD").notNull(),
+    effectiveFrom: timestamp("effective_from", {
+      withTimezone: true,
+    }).notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    modelFromUnique: uniqueIndex("ai_model_prices_model_from_unique").on(
+      table.model,
+      table.effectiveFrom,
+    ),
+    modelIdx: index("ai_model_prices_model_idx").on(
+      table.model,
+      table.effectiveFrom,
+    ),
+  }),
+);
+
+// Margin, overdraft, metering mode. Superadmin-writable and audited; every
+// key has a code-level fallback so a fresh database boots with sane numbers.
+export const billingSettings = pgTable("billing_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  // An accounts uuid, deliberately unreferenced.
+  updatedBy: uuid("updated_by"),
+});
+
+// One row per AI turn: what it cost us, what it would cost the customer, and
+// the pricing snapshot behind both numbers.
+//
+// Token counts here are DISJOINT, unlike the provider's: `inputTokens` is
+// the UNCACHED input, `cachedInputTokens` the rest of what was sent, so each
+// multiplies by its own price without a subtraction anybody can forget.
+// `reasoningTokens` stays a subset of `outputTokens` and is recorded for
+// analysis only — it bills as output, which is how the provider bills it.
+export const aiUsageRecords = pgTable(
+  "ai_usage_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id"),
+    chatId: uuid("chat_id"),
+    // The turn's own id, and the idempotency handle: this row's ledger event
+    // is keyed "turn:<turnId>", so re-posting it is a replay.
+    turnId: uuid("turn_id").notNull(),
+    surface: text("surface"),
+    model: text("model").notNull(),
+    // Whose key paid the provider: "account" (the customer's own — we incur
+    // nothing and charge nothing), "shared" (the operator's key, our cost,
+    // not billed), "platform" (our key, billed — Phase 3).
+    credentialSource: text("credential_source").notNull(),
+    inputTokens: integer("input_tokens").default(0).notNull(),
+    cachedInputTokens: integer("cached_input_tokens").default(0).notNull(),
+    outputTokens: integer("output_tokens").default(0).notNull(),
+    reasoningTokens: integer("reasoning_tokens").default(0).notNull(),
+    rounds: integer("rounds").default(0).notNull(),
+    costMicros: bigint("cost_micros", { mode: "bigint" }).default(0n).notNull(),
+    priceMicros: bigint("price_micros", { mode: "bigint" })
+      .default(0n)
+      .notNull(),
+    currency: text("currency").default("USD").notNull(),
+    pricing: jsonb("pricing").default({}).notNull(),
+    // "shadow" rows are measurement only and never post, whatever they
+    // priced at; "live" rows post, and the sweep chases the ones that did
+    // not. Stamped per row rather than read from settings at sweep time, so
+    // flipping the switch cannot retroactively bill a week of shadow turns.
+    meteringMode: text("metering_mode").default("shadow").notNull(),
+    eventId: uuid("event_id").references(() => financialEvents.id),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    accountCreatedIdx: index("ai_usage_records_account_created_idx").on(
+      table.accountId,
+      table.createdAt,
+    ),
+    turnUnique: uniqueIndex("ai_usage_records_turn_unique").on(table.turnId),
+  }),
+);

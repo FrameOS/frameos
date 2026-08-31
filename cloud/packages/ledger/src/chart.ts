@@ -19,7 +19,9 @@ export const systemAccountCodes = {
   deferredSubscriptions: "liability:deferred:subscriptions",
   promoContraRevenue: "contra_revenue:promo",
   pspFees: "expense:psp_fees",
-  pspStripe: "asset:psp:stripe",
+  // The payment service provider is not chosen yet, so the account that
+  // holds money sitting at it is named for the role, not the vendor.
+  psp: "asset:psp:main",
   refundsPayable: "liability:refunds_payable",
   revenueAiUsage: "revenue:ai_usage",
   revenueSubscriptions: "revenue:subscriptions",
@@ -62,7 +64,7 @@ const systemDefinitions: Record<string, LedgerAccountDefinition> = {
     "revenue",
   ),
   [systemAccountCodes.pspFees]: definition("expense", "cost_of_revenue"),
-  [systemAccountCodes.pspStripe]: definition("asset", "assets"),
+  [systemAccountCodes.psp]: definition("asset", "assets"),
   [systemAccountCodes.refundsPayable]: definition("liability", "liabilities"),
   [systemAccountCodes.revenueAiUsage]: definition("revenue", "revenue"),
   [systemAccountCodes.revenueSubscriptions]: definition("revenue", "revenue"),

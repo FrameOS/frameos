@@ -10,6 +10,7 @@ const sections = [
   { href: "/admin/frames", key: "frames", label: "Frames" },
   { href: "/admin/scenes", key: "scenes", label: "Store scenes" },
   { href: "/admin/reports", key: "reports", label: "Reports" },
+  { href: "/admin/billing", key: "billing", label: "Billing" },
 ] as const;
 
 export type AdminNavCounts = Partial<

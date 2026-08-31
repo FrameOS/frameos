@@ -5,6 +5,7 @@ import {
   Check,
   KeyRound,
   Loader2,
+  Play,
   Send,
   Sparkles,
   Square,
@@ -69,8 +70,15 @@ const isOpen = (line: ToolLine) => line.status === "start" || line.status === "p
 const RECOVERY_POLL_MS = 20 * 1000;
 const RECOVERY_POLL_ATTEMPTS = 12;
 
-/** The frame the render check drew, ready for an <img>. */
-type RenderPreview = { src: string; width: number; height: number };
+/** The frame the render check drew, ready for an <img>, together with the
+ * scenes it was drawn from — "Show in preview" runs exactly those. */
+type RenderPreview = {
+  src: string;
+  width: number;
+  height: number;
+  scenes: SceneJson[];
+  sceneId: string;
+};
 
 type ChatMessage = {
   id: string;
@@ -124,7 +132,25 @@ export type SceneAiPanelProps = {
   /** The AI edited the listing (description, tags, category, minimum
    * FrameOS version): applied to the draft like scenes, published by Save. */
   onListing?: ((changes: AiListingChanges) => void) | undefined;
+  /** A conversation to reopen (a restored draft): the transcript as it was,
+   * and the chat it belongs to so the next turn continues it. */
+  initialChat?: AiChatSnapshot | undefined;
+  /** The transcript changed, as much of it as is worth keeping — text only,
+   * no rendered frames (each is a full PNG). */
+  onChatChange?: ((chat: AiChatSnapshot) => void) | undefined;
+  /** Offered under a rendered frame as "Show in preview": run exactly the
+   * scenes that frame was drawn from in the Preview panel. */
+  onShowInPreview?: ((snapshot: RenderedScenes) => void) | undefined;
 };
+
+/** A transcript worth storing: what the panel can be handed back later. */
+export type AiChatSnapshot = {
+  chatId: string;
+  messages: { role: "user" | "assistant"; content: string; auto?: boolean }[];
+};
+
+/** The scenes behind one rendered frame in the transcript. */
+export type RenderedScenes = { scenes: SceneJson[]; sceneId: string };
 
 function newId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -380,13 +406,26 @@ export function SceneAiPanel({
   saveHint,
   getListing,
   onListing,
+  initialChat,
+  onChatChange,
+  onShowInPreview,
 }: SceneAiPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // A restored draft reopens its transcript (message ids are ours, not the
+  // server's, so they are minted fresh) and keeps its chat id, so the next
+  // turn continues the same conversation server-side.
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    (initialChat?.messages ?? []).map((message) => ({
+      content: message.content,
+      id: newId(),
+      role: message.role,
+      ...(message.auto ? { auto: true } : {}),
+    })),
+  );
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [fatal, setFatal] = useState<FatalState | null>(null);
-  const [chatId, setChatId] = useState<string>(() => newId());
+  const [chatId, setChatId] = useState<string>(() => initialChat?.chatId || newId());
   const [returnTo, setReturnTo] = useState<string>("");
   const abortRef = useRef<AbortController | null>(null);
   // The server-side turn behind the in-flight request (for Stop + recovery).
@@ -414,6 +453,35 @@ export function SceneAiPanel({
       element.scrollTop = element.scrollHeight;
     }
   }, [messages, status]);
+
+  // The transcript, handed to whoever wants to keep it (the new-scene page
+  // stores it with its draft). Settled messages only, and text only: the
+  // rendered frames are megabytes of PNG and are not worth storing.
+  const onChatChangeRef = useRef(onChatChange);
+  onChatChangeRef.current = onChatChange;
+  const storedChatRef = useRef("");
+  useEffect(() => {
+    const handler = onChatChangeRef.current;
+    if (!handler) {
+      return;
+    }
+    const snapshot: AiChatSnapshot = {
+      chatId,
+      messages: messages
+        .filter((message) => message.content.trim() && !message.streaming && !message.error)
+        .map((message) => ({
+          content: message.content,
+          role: message.role,
+          ...(message.auto ? { auto: true } : {}),
+        })),
+    };
+    const json = JSON.stringify(snapshot);
+    if (snapshot.messages.length === 0 || json === storedChatRef.current) {
+      return;
+    }
+    storedChatRef.current = json;
+    handler(snapshot);
+  }, [messages, chatId]);
 
   const updateMessage = useCallback((id: string, patch: Partial<ChatMessage> | ((message: ChatMessage) => Partial<ChatMessage>)) => {
     setMessages((current) =>
@@ -639,10 +707,13 @@ export function SceneAiPanel({
         // validated as JSON can still fail at render time.
         setStatus("Checking that the scene renders…");
         const { getScenes: readLatest, height: checkHeight, width: checkWidth } = propsRef.current;
+        // Kept beside the frame it produces: "Show in preview" runs these
+        // exact scenes, whatever the editor holds by then.
+        const checkedScenes = readLatest() ?? editorScenes;
         const check = await renderSceneCheck({
           height: checkHeight,
           sceneId: deliveredSceneId,
-          scenes: readLatest() ?? editorScenes,
+          scenes: checkedScenes,
           width: checkWidth,
         });
         setStatus(null);
@@ -662,6 +733,8 @@ export function SceneAiPanel({
         const preview: RenderPreview | null = check.pngDataUrl
           ? {
               height: check.height > 0 ? check.height : checkHeight,
+              sceneId: deliveredSceneId,
+              scenes: checkedScenes,
               src: check.pngDataUrl,
               width: check.width > 0 ? check.width : checkWidth,
             }
@@ -836,7 +909,24 @@ export function SceneAiPanel({
                   {message.check.text}
                 </span>
               ) : null}
-              {message.preview ? <RenderPreviewImage preview={message.preview} /> : null}
+              {message.preview ? (
+                <div className="ai-panel__render-block">
+                  <RenderPreviewImage preview={message.preview} />
+                  {onShowInPreview ? (
+                    <button
+                      className="ai-panel__render-open"
+                      onClick={() => {
+                        const { sceneId: renderedSceneId, scenes } = message.preview!;
+                        onShowInPreview({ sceneId: renderedSceneId, scenes });
+                      }}
+                      type="button"
+                    >
+                      <Play aria-hidden size={12} />
+                      Show in preview
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ),
         )}

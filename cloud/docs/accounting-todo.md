@@ -1,8 +1,10 @@
 # FrameOS Cloud accounting module — design + todo
 
-Status: written 2026-08-31. Phases 0 and 1 are built (migration 0042,
-`cloud/packages/ledger`); nothing meters or charges yet — that starts at
-Phase 2.
+Status: written 2026-08-31. Phases 0, 1, 2 and 4 are built — the ledger, the
+AI metering that feeds it, and the admin/ops surfaces that make it readable.
+Metering runs in **shadow mode**: every turn is measured and priced, and no
+entry is posted. Nothing charges anybody; that starts at Phase 3, which
+needs a payment provider chosen first.
 
 The goal: real double-entry accounting inside FrameOS Cloud. Users buy prepaid
 credits, we meter their AI spend (gpt-5.6-terra today), add a configurable
@@ -43,7 +45,7 @@ without re-architecting.
 Three layers, top to bottom:
 
 ```
-product code (chat route, Stripe webhook, admin action, cron)
+product code (chat route, PSP webhook, admin action, cron)
       │  emits, append-only
       ▼
 financial_events          "what happened" — product-side facts, idempotent
@@ -81,7 +83,7 @@ Launch chart (system accounts):
 
 | code | type | normal side | purpose |
 |---|---|---|---|
-| `asset:psp:stripe` | asset | debit | money sitting at Stripe (charges land here, fees and payouts leave) |
+| `asset:psp:main` | asset | debit | money sitting at the payment provider (charges land here, fees and payouts leave) |
 | `asset:bank:main` | asset | debit | our bank account (used once payouts/reconciliation arrive) |
 | `asset:receivable:customer:<id>` | asset | debit | postpay, later — what a customer owes us |
 | `liability:credits:customer:<id>` | liability | credit | **prepaid credit balance** (deferred revenue held per customer) |
@@ -93,7 +95,7 @@ Launch chart (system accounts):
 | `revenue:subscriptions` | revenue | credit | recognized subscription revenue |
 | `contra_revenue:promo` | contra-revenue | debit | cost of granting promo credits |
 | `expense:cogs:openai` | expense | debit | provider cost of metered usage |
-| `expense:psp_fees` | expense | debit | Stripe fees |
+| `expense:psp_fees` | expense | debit | payment-provider fees |
 
 The margin is **derived, never stored as a balance**: revenue posts at
 customer price, COGS posts at provider cost, and margin = the difference.
@@ -113,8 +115,12 @@ Two distinct mechanisms, and it matters which one a situation calls for:
    entry that debits one account and credits another (e.g. moving a booked
    amount from `revenue:ai_usage` to `revenue:subscriptions` because it was
    posted wrong). The original entry is never touched; the reclass entry
-   links to it via `reverses_entry_id` / `metadata.reclassifies`.
-   Use for: actual mistakes or genuine changes in the nature of an amount.
+   links to it via `metadata.reclassifies` and deliberately **not** through
+   `reverses_entry_id` — that column means "these two entries cancel out leg
+   for leg", which invariant 7 proves for every row that has it, and a
+   reclassification moves one amount while leaving the rest of the original
+   alone. Use for: actual mistakes or genuine changes in the nature of an
+   amount.
 
 ---
 
@@ -130,11 +136,11 @@ CREATE TABLE "financial_events" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "event_type" text NOT NULL,          -- 'credit_purchase.succeeded', 'ai_usage.turn', ...
   "account_id" uuid,                   -- accounts uuid, NO foreign key (§2.1); NULL only for system-level events
-  "source" text NOT NULL,              -- 'chat_route' | 'stripe_webhook' | 'admin' | 'cron' | 'backfill'
-  "source_ref" text,                   -- turn id, stripe event id, ...
-  "idempotency_key" text NOT NULL,     -- the dedupe handle, e.g. 'stripe:evt_...' or 'turn:<uuid>'
+  "source" text NOT NULL,              -- 'metering' | 'psp_webhook' | 'admin' | 'cron' | 'backfill'
+  "source_ref" text,                   -- turn id, provider event id, ...
+  "idempotency_key" text NOT NULL,     -- the dedupe handle, e.g. 'psp:evt_...' or 'turn:<uuid>'
   "occurred_at" timestamptz NOT NULL,  -- economic time (when the tokens were burned)
-  "payload" jsonb NOT NULL,            -- full fact: token counts, stripe object, ...
+  "payload" jsonb NOT NULL,            -- full fact: token counts, provider object, ...
   "processed_at" timestamptz,          -- set when posting rules ran; NULL = pending/failed
   "created_at" timestamptz NOT NULL DEFAULT now()
 );
@@ -179,7 +185,7 @@ CREATE TABLE "ledger_entries" (
   "occurred_at" timestamptz NOT NULL,  -- economic date (drives revenue period)
   "posted_at" timestamptz NOT NULL DEFAULT now(),
   "reverses_entry_id" uuid REFERENCES "ledger_entries"("id"),
-  "external_ref" text,                 -- stripe charge/balance_txn/payout id — reconciliation hook
+  "external_ref" text,                 -- provider charge/fee/payout id — reconciliation hook
   "metadata" jsonb NOT NULL DEFAULT '{}'  -- pricing snapshot: token counts, unit prices, margin
 );
 CREATE INDEX "ledger_entries_event_idx" ON "ledger_entries" ("event_id");
@@ -211,66 +217,88 @@ CREATE TABLE "ledger_balances" (
 Plus product-side tables introduced by their phases:
 
 ```sql
--- Phase 2: high-volume metering subledger (one row per AI turn; per-round detail in payload)
+-- Migration 0043: the metering subledger (one row per AI turn), the
+-- effective-dated provider price table, and the first global settings table.
+--
+-- Two things in here differ from the first sketch of them, both learned
+-- while writing the pricing code:
+--
+--  * Token counts are DISJOINT. The provider's `input_tokens` includes the
+--    cached ones and its `output_tokens` includes reasoning; we store
+--    uncached input separately from cached, so each multiplies by its own
+--    price without a subtraction anyone can forget. `reasoning_tokens`
+--    stays a subset of `output_tokens`, recorded for analysis and billed as
+--    output (§8.2 still wants that confirmed against a real invoice).
+--  * Prices are per MILLION tokens, not per token. Per-token cannot
+--    represent the cheap models at all: a cached gpt-4o-mini token is
+--    $0.000000075, i.e. 0.075 micro-dollars, which as a bigint is zero.
 CREATE TABLE "ai_usage_records" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "account_id" uuid,                   -- accounts uuid, no foreign key (§2.1)
   "chat_id" uuid,
-  "turn_id" uuid NOT NULL,
-  "surface" text,                      -- 'scene_chat' | 'app_chat' | 'scene_convert' | ...
+  "turn_id" uuid NOT NULL,             -- the idempotency handle: 'turn:<id>'
+  "surface" text,                      -- 'scene_chat' | 'app_chat' | 'scene_convert' | 'store_classify' | ...
   "model" text NOT NULL,
   "credential_source" text NOT NULL,   -- 'account' | 'shared' | 'platform'
-  "input_tokens" integer NOT NULL,
+  "input_tokens" integer NOT NULL,     -- UNCACHED input
   "cached_input_tokens" integer NOT NULL,
   "output_tokens" integer NOT NULL,
-  "reasoning_tokens" integer NOT NULL,
+  "reasoning_tokens" integer NOT NULL, -- a subset of output_tokens
   "rounds" integer NOT NULL,
   "cost_micros" bigint NOT NULL,       -- provider cost at snapshot prices
-  "price_micros" bigint NOT NULL,      -- customer price = cost × (1 + margin), 0 when not billable
-  "pricing" jsonb NOT NULL,            -- {unit prices, margin, price table version}
+  "price_micros" bigint NOT NULL,      -- customer price = cost x (1 + margin), 0 when not billable
+  "currency" text NOT NULL DEFAULT 'USD',
+  "pricing" jsonb NOT NULL,            -- {unit prices, margin, where the price came from}
+  "metering_mode" text NOT NULL,       -- 'shadow' | 'live', stamped per row
   "event_id" uuid REFERENCES "financial_events"("id"),  -- NULL until posted
+  "occurred_at" timestamptz NOT NULL,
   "created_at" timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX "ai_usage_records_turn_unique" ON "ai_usage_records" ("turn_id");
 CREATE INDEX "ai_usage_records_account_created_idx" ON "ai_usage_records" ("account_id", "created_at");
+CREATE INDEX "ai_usage_records_unposted_idx" ON "ai_usage_records" ("created_at")
+  WHERE "event_id" IS NULL AND "metering_mode" = 'live';
 
--- Phase 2: effective-dated provider price table (admin-editable, auditable)
 CREATE TABLE "ai_model_prices" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "model" text NOT NULL,
-  "input_micros_per_token" bigint NOT NULL,
-  "cached_input_micros_per_token" bigint NOT NULL,
-  "output_micros_per_token" bigint NOT NULL,   -- reasoning tokens bill as output
+  "input_micros_per_mtok" bigint NOT NULL,        -- $2 per 1M = 2000000
+  "cached_input_micros_per_mtok" bigint NOT NULL,
+  "output_micros_per_mtok" bigint NOT NULL,       -- reasoning tokens bill as output
+  "currency" text NOT NULL DEFAULT 'USD',
   "effective_from" timestamptz NOT NULL,
+  "note" text,
   "created_at" timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX "ai_model_prices_model_from_unique" ON "ai_model_prices" ("model", "effective_from");
 
--- Phase 2: first global settings table (margin etc.); admin-writable, audited
 CREATE TABLE "billing_settings" (
-  "key" text PRIMARY KEY,              -- 'ai_margin_percent', 'payg_overdraft_micros', ...
+  "key" text PRIMARY KEY,              -- 'ai_margin_percent' | 'payg_overdraft_micros' | 'ai_metering_mode'
   "value" jsonb NOT NULL,
   "updated_at" timestamptz NOT NULL DEFAULT now(),
   "updated_by" uuid                    -- accounts uuid, no foreign key (§2.1)
 );
 
--- Phase 3: Stripe purchase intents (state machine; the ledger only sees success events)
+-- Phase 3: purchase intents (state machine; the ledger only sees success
+-- events). Provider-neutral on purpose — the PSP is not chosen (§8.7), so
+-- the columns name the roles rather than one vendor's object types.
 CREATE TABLE "credit_purchases" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "account_id" uuid,                   -- accounts uuid, no foreign key (§2.1)
   "amount_micros" bigint NOT NULL,
   "currency" text NOT NULL DEFAULT 'USD',
   "status" text NOT NULL,              -- 'pending'|'succeeded'|'failed'|'refunded'
-  "stripe_checkout_session_id" text,
-  "stripe_payment_intent_id" text,
+  "provider" text NOT NULL,            -- 'stripe' | 'paddle' | ...
+  "provider_checkout_id" text,         -- the hosted-checkout handle
+  "provider_payment_id" text,          -- what reconciliation matches on
   "created_at" timestamptz NOT NULL DEFAULT now(),
   "updated_at" timestamptz NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX "credit_purchases_checkout_unique" ON "credit_purchases" ("stripe_checkout_session_id");
+CREATE UNIQUE INDEX "credit_purchases_checkout_unique" ON "credit_purchases" ("provider", "provider_checkout_id");
 
 -- Phase 5: plans + subscriptions (sketch; refine in that phase)
 CREATE TABLE "billing_plans" ( ... );          -- code, name, price_micros, period ('month'), features jsonb, active
-CREATE TABLE "subscriptions" ( ... );          -- account_id, plan, status, started_at, cancel_at, payment method (credits|stripe)
+CREATE TABLE "subscriptions" ( ... );          -- account_id, plan, status, started_at, cancel_at, payment method (credits|card)
 CREATE TABLE "subscription_periods" ( ... );   -- subscription_id, period_start/end, charged entry, recognition state
 ```
 
@@ -336,24 +364,37 @@ examples with a $10 purchase, 30% margin, terra prices.
 
 ### 3.1 Credit purchase (Phase 3)
 
-Stripe checkout for $10 succeeds (webhook `checkout.session.completed`):
+The payment provider is **not chosen** (§8.7). The accounts are named for
+the role rather than the vendor — `asset:psp:main`, `expense:psp_fees` — and
+the recipes below hold for any PSP that can tell us three things: a payment
+succeeded, what it cost us in fees, and a stable id per payment to reconcile
+against later. Stripe, Paddle, Lemon Squeezy and a bank-transfer flow all
+post exactly this; only the webhook parsing differs, and that lives outside
+the ledger.
+
+A checkout for $10 succeeds (the provider's "payment completed" webhook):
 
 ```
-Entry 'credit_purchase'         (external_ref: stripe payment_intent)
-  Dr asset:psp:stripe                       10.000000
+Entry 'credit_purchase'         (external_ref: the provider's payment id)
+  Dr asset:psp:main                         10.000000
   Cr liability:credits:customer:<id>        10.000000
 ```
 
-Stripe fee, booked from the `balance_transaction` (same webhook or the
-charge.updated that carries it):
+The provider's fee, booked from whatever line item carries it:
 
 ```
-Entry 'psp_fee'                 (external_ref: stripe balance_txn)
+Entry 'psp_fee'                 (external_ref: the provider's fee/txn id)
   Dr expense:psp_fees                        0.590000
-  Cr asset:psp:stripe                        0.590000
+  Cr asset:psp:main                          0.590000
 ```
 
 The customer's balance is the full $10 — the fee is our cost, not theirs.
+
+A merchant-of-record provider (Paddle, Lemon Squeezy) changes one thing and
+it is worth deciding before writing the webhook: they collect and remit VAT
+themselves, so the money that reaches `asset:psp:main` is net of tax we
+never owed, and §8.6's `liability:vat_payable` leg is theirs rather than
+ours. A direct PSP (Stripe) leaves that liability with us.
 
 ### 3.2 AI usage (Phase 2/3) — the PAYG core
 
@@ -402,7 +443,7 @@ Entry 'subscription_recognition'   (occurred_at: period end / each day)
 ```
 
 A subscription charged by card instead posts
-`Dr asset:psp:stripe / Cr liability:deferred:subscriptions` — same shape,
+`Dr asset:psp:main / Cr liability:deferred:subscriptions` — same shape,
 different first leg. Because recognition is separate from charging, the
 unearned remainder of any period is *always* sitting in
 `liability:deferred:subscriptions`, which is what makes §3.4 possible.
@@ -423,9 +464,9 @@ or, cash refund path:
 Entry 'subscription_refund_approved'
   Dr liability:deferred:subscriptions        2.500000
   Cr liability:refunds_payable               2.500000
-Entry 'refund_paid'              (external_ref: stripe refund id)
+Entry 'refund_paid'              (external_ref: the provider's refund id)
   Dr liability:refunds_payable               2.500000
-  Cr asset:psp:stripe                        2.500000
+  Cr asset:psp:main                          2.500000
 ```
 
 Nothing new is needed in the schema for this — only the recipes and a
@@ -491,7 +532,24 @@ migration-replay global setup auth-web and the hub use (own database,
 - `src/pricing.ts` — price lookup (`ai_model_prices` effective-dated, with a
   hardcoded fallback seeded from `evals/compare-models.ts` values), margin
   from `billing_settings`, cost/price computation with the single-rounding
-  rule.
+  rule. `splitProviderUsage` is the one door provider token counts come
+  through: it separates cached input out of the reported total, because
+  multiplying a total that secretly contains a differently-priced part is
+  the bug that shows up as a percentage of revenue and never as a crash.
+  A model with no price row prices at a deliberately conservative fallback
+  rather than at zero, and the snapshot says which — an unknown price that
+  read as free would hide the whole of its spend.
+- `src/settings.ts` — the margin/overdraft/metering-mode knobs, with a
+  code-level default for every key and an env-var bootstrap for the margin.
+  Values are validated on write, not on read: a typo'd setting has to fail
+  where a human can see it.
+- `src/metering.ts` — `recordAiUsage` (write the record, then post) and
+  `sweepUnpostedUsage` (the nightly catch-up). The order is the design; §4.1
+  says why.
+- `src/reports.ts` — trial balance, journal listing, customer statement,
+  group management and the nightly summary. All of it reads the postings,
+  never `ledger_balances`: a report that trusted the cache could not notice
+  the cache had gone wrong.
 - `src/balances.ts` — `accountBalanceMicros(db, code)` off the cache,
   `accountBalanceFromPostings` for the slow always-correct answer, and
   `availableCreditMicros(db, accountId, {overdraftMicros})` (paid + promo +
@@ -503,7 +561,13 @@ migration-replay global setup auth-web and the hub use (own database,
   the nightly script.
 
 `apps/auth-web/src/lib/billing.ts` wraps the package for route use (session
-scoping, wire payloads — snake_case JSON per house rule).
+scoping, wire payloads — snake_case JSON per house rule). Its one rule:
+**a metering failure never changes what the user got.** A finished turn is
+delivered whether or not the ledger could be written; the failure is
+reported and the sweep picks the measurement back up.
+`apps/auth-web/src/lib/billing-admin.ts` holds the one thing the ledger
+deliberately does not — customer names, resolved live and degrading to the
+bare uuid (§8.10).
 
 ### 4.1 Why synchronous posting (and the one exception)
 
@@ -523,24 +587,28 @@ the metering table already supports that without schema change.
 
 ## 5. Product integration points (facts from the current code)
 
-- **Payer signal exists and is discarded**: `resolveAiCredentials()` in
+- **Payer signal** (Phase 2, done): `resolveAiCredentials()` in
   `apps/auth-web/src/lib/ai/api-key.ts` returns
-  `source: "account" | "shared"`; the chat route drops it. Add
-  `source: "platform"` (PAYG on our key, billed) and thread `source` through
-  to the usage record. Billing rule: `account` → record only;
-  `shared` → record only (operator's free tier); `platform` → charge.
-- **Commit points**: `startTurn()`'s `onFinish` in
-  `apps/auth-web/src/lib/ai/turn-runner.ts` (per turn; `onRound` deposits
-  per-round detail). `usageSeen` accumulation already exists in
-  `app/api/ai/chat/route.ts`.
-- **`turnId` is in-memory only today** — it becomes the usage-record key, so
-  it must be persisted (it already reaches PostHog as `$ai_trace_id`).
-- **Other OpenAI call sites needing meters**: app-code chat
-  (`src/lib/ai/app-chat.ts` — currently no telemetry at all and reads the
-  account key directly; route through `resolveAiCredentials`), scene convert
-  (`app/api/scenes/convert/route.ts` — its per-IP/day rate-limit budget gets
-  replaced by real billing for logged-in platform users), moderation +
-  admin recategorize (operator-paid, record with `price_micros = 0`).
+  `source: "account" | "shared"`, and the chat route now threads it into the
+  usage record instead of dropping it. Billing rule: `account` → record
+  only, and no cost either (they paid the provider); `shared` → record plus
+  a COGS entry (the operator's free tier is a real bill we absorb);
+  `platform` → both. Phase 3 adds `"platform"` to what
+  `resolveAiCredentials` can return; until then nothing is billable.
+- **Commit point** (done): `startTurn()`'s `onFinish` in
+  `apps/auth-web/src/lib/ai/turn-runner.ts`, metered fire-and-forget so the
+  turn is not held open by it, and metered whatever the outcome — a turn
+  that errored or was stopped still burned the tokens it burned. `turnId`,
+  which was in-memory only, is now persisted as `ai_usage_records.turn_id`
+  and is the idempotency handle.
+- **Other OpenAI call sites** (done): app-code chat
+  (`src/lib/ai/app-chat.ts`, which also now goes through
+  `resolveAiCredentials` rather than reading the account key itself), scene
+  convert (`app/api/scenes/convert/route.ts` — a caller's own key meters as
+  `account`, the platform key as `shared`; its per-address budgets become
+  real billing for a signed-in caller in Phase 3), and the store classifier
+  at publish and recategorize. Moderation is not metered: OpenAI's
+  omni-moderation endpoint is free, so there is nothing to book.
 - **Spend gate**: before starting a platform-key turn, require
   `availableCreditMicros > 0` (allow the configured overdraft to cover the
   in-flight turn; a turn's cost is unknown until it ends). Error shape:
@@ -548,21 +616,25 @@ the metering table already supports that without schema change.
 - **Surfacing**: extend `GET /api/account/usage` (already the aggregation
   point that MCP `account_quota` proxies) with
   `credit_balance_micros`, `promo_balance_micros`, spend this month.
-- **Margin config**: no global settings surface exists today.
-  `billing_settings` (+ admin form, superadmin-gated via
-  `getSuperadminContext()`, written through `recordAuditEvent`) is the first
-  one; env-var fallback `FRAMEOS_CLOUD_AI_MARGIN_PERCENT` (default 30,
-  parsed `usage.ts`-style with `logWarn`) for bootstrap.
-- **Jobs**: no runner exists; nightly integrity + unposted-sweep is a new
-  `scripts/accounting-nightly.sh` (tsx) + `ops/` systemd timer, sibling of
-  `db-cleanup` / the backup timers.
+- **Margin config** (done): `billing_settings` is the repo's first global
+  settings table, with the admin form at `/admin/billing`, superadmin-gated
+  via `getSuperadminContext()` and written through `recordAuditEvent`.
+  Env-var bootstrap `FRAMEOS_CLOUD_AI_MARGIN_PERCENT` for a database whose
+  row has not been written yet; the row wins once it exists.
+- **Jobs** (done): `scripts/accounting-nightly.sh` + `ops/accounting/`
+  systemd timer, sibling of the backup timers. It curls
+  `POST /api/admin/billing/nightly` rather than doing the work itself —
+  see Phase 4 for why.
 
 ---
 
 ## 6. Invariants (the smoke-test suite)
 
 Each is (a) a vitest integration test and (b) a nightly checker query that
-alerts (`reportError`) on violation:
+alerts (`reportError`) on violation. They are the same code in both cases —
+`packages/ledger/src/integrity.ts` — which is the point: one definition of
+"the books are consistent", proven on fresh data by the suite, on production
+data by the nightly job, and shown live on `/admin/billing`.
 
 1. **Every entry balances**: per `entry_id` per currency,
    SUM(debit amounts) = SUM(credit amounts).
@@ -575,10 +647,12 @@ alerts (`reportError`) on violation:
    minutes; no two entries of the same `entry_type` for one event unless the
    recipe declares multiplicity.
 5. **No negative customer credit** beyond the configured overdraft.
-6. **Metering completeness**: every `ai_usage_records` row with
-   `credential_source = 'platform'` has `event_id` set (after sweep);
-   every finished platform-key turn has a usage record (count vs
-   `ai.chat.turn_finished` logs / PostHog as an external cross-check).
+6. **Metering completeness**: every *live, billable* `ai_usage_records` row
+   has `event_id` set after the sweep. Narrow on purpose — a shadow-mode
+   record posts nothing by design and an own-key turn cost nothing and is
+   charged nothing, so neither is a violation. The external cross-check
+   (every finished turn has a record: count vs `ai.chat.turn_finished` logs
+   / PostHog) is the shadow-period comparison in Phase 2, not a query.
 7. **Reversals mirror**: an entry with `reverses_entry_id` has legs exactly
    negating its target.
 8. **Immutability**: the update/delete triggers exist and fire (tested by
@@ -607,34 +681,57 @@ to it, including the provider-cost entry that names no customer account
 (§2.1). The remaining Phase 0 decisions that only bind later phases are
 in §8.
 
-### Phase 2 — meter AI usage (shadow mode: record everything, charge nothing)
-- [ ] Migration `0043`: `ai_usage_records`, `ai_model_prices` (seeded:
-      gpt-5.5, gpt-5.6-luna/sol/terra from the eval price table),
-      `billing_settings` (seed `ai_margin_percent = 30`).
-- [ ] `pricing.ts`: effective-dated lookup, margin, single-rounding
-      cost/price computation. Unit tests against hand-computed fixtures.
-- [ ] Thread `source` from `resolveAiCredentials` through the chat route;
-      write a usage record in `onFinish` (turn-runner, so detached turns
-      post too); recipe `ai_usage` (charge entry only for `platform`,
-      cost entry for `platform`/`shared`).
-- [ ] Wire remaining call sites: app-chat (also fix it to use
-      `resolveAiCredentials`), scene-convert, moderation/admin as
-      `price_micros = 0` records.
-- [ ] Unposted-records sweep function (kernel replay by `turn:<id>` key).
-- [ ] Invariant 6 + golden-file test for a metered turn.
-- [ ] Run in production in shadow mode; compare a week of
-      `ai_usage_records` totals against PostHog `$ai_generation` sums
-      before any charging goes live.
+### Phase 2 — meter AI usage — shipped 2026-08-31 (shadow mode)
+
+Migration `0043` (`ai_usage_records`, `ai_model_prices` seeded with gpt-5.5,
+gpt-5.6-luna/sol/terra and gpt-4o-mini, `billing_settings` seeded with a 30%
+margin, a $1 overdraft and `ai_metering_mode = shadow`), `pricing.ts`,
+`settings.ts`, `metering.ts` and the `ai_usage` recipe. Every OpenAI call
+site now meters: the scene chat (from the turn runner's `onFinish`, so a
+detached or resumed turn still posts), app-chat (which now resolves its key
+through `resolveAiCredentials` like everything else instead of reading the
+account setting directly), the public scene converter, and the store
+classifier at both publish and recategorize. Invariant 6 covers metering
+completeness, and the golden-file lifecycle test walks a customer from
+purchase through usage, reversal and reclassification asserting the whole
+journal at each step.
+
+Two things worth knowing before Phase 3 builds on it:
+
+- **The mode is stamped per record, not read at sweep time.** Flipping
+  `ai_metering_mode` to live therefore cannot retroactively bill the shadow
+  period — those rows stay unposted forever unless somebody deliberately
+  backfills them, which is exactly the decision Phase 4 leaves open below.
+- **`credential_source: "platform"` has no producer yet.** Nothing is
+  billable until Phase 3 teaches `resolveAiCredentials` to return it, so the
+  charge half of the `ai_usage` recipe is exercised only by tests. That is
+  the shape "shadow mode" actually takes: there is no customer to charge,
+  rather than a charge being suppressed.
+
+Still open, and the gate on Phase 3:
+
+- [ ] Run a week in production and compare `ai_usage_records` totals against
+      PostHog `$ai_generation` sums **and against the provider's own
+      invoice** — the second comparison is the one that settles §8.2.
 
 ### Phase 3 — PAYG credits (first revenue)
-- [ ] Stripe account + `stripe` SDK; env plumbing; webhook endpoint
-      `app/api/webhooks/stripe/route.ts` (signature check, event id as
-      idempotency key, raw-body handling).
+
+**The payment provider is not chosen** (§8.7), and the ledger no longer
+assumes one: the account is `asset:psp:main`, the recipes in §3.1 hold for
+any provider that reports a successful payment, its fee, and a stable
+payment id, and `credit_purchases` names the roles rather than one vendor's
+object types. What changes with the choice is the webhook parsing and the
+VAT question (§8.6, and §3.1's note on merchant-of-record providers) —
+neither of which reaches the posting rules.
+
+- [ ] Choose the provider, then: SDK + env plumbing; webhook endpoint
+      `app/api/webhooks/<provider>/route.ts` (signature check, provider
+      event id as idempotency key, raw-body handling).
 - [ ] Migration `0044`: `credit_purchases`.
-- [ ] Checkout route (`POST /api/billing/checkout` → Stripe Checkout
-      session, fixed top-up amounts to start); success/cancel pages.
+- [ ] Checkout route (`POST /api/billing/checkout` → the provider's hosted
+      checkout, fixed top-up amounts to start); success/cancel pages.
 - [ ] Recipes: `credit_purchase`, `psp_fee`, `credit_purchase_refund`
-      (Stripe-side refund of a purchase — needed for disputes from day one).
+      (a provider-side refund — needed for disputes from day one).
 - [ ] `source: "platform"` in `resolveAiCredentials` (accounts with
       credit > 0 and no own key), spend gate + overdraft setting,
       `insufficient_credits` error through chat route → SPA panel state.
@@ -645,21 +742,49 @@ in §8.
 - [ ] Golden-file test: purchase → turns → balance depletion → gate.
 - [ ] Legal/pricing page copy: what a credit is, expiry policy (§8).
 
-### Phase 4 — books you can actually read + ops
-- [ ] Admin `/admin/billing`: trial balance by group, journal browser
-      (entry → postings → event drill-down), account statement per
-      customer, manual journal form (superadmin, audited, reason required).
-      The statement view is what forces §8.10: the ledger holds account
-      uuids and no name, so decide where the label comes from first.
-- [ ] Group management UI (create/re-map — mechanism 1 of §1.3) +
-      `reclassification` recipe (mechanism 2).
-- [ ] `billing_settings` admin form (margin, overdraft), audited.
-- [ ] `scripts/accounting-nightly.sh` + `ops/accounting/…timer`: sweep
-      unposted records, run all invariants, `reportError` on violation,
-      emit a daily summary log line (revenue, COGS, margin, liability).
-- [ ] Backfill decision executed: either start books at go-live (recommended
-      — no history to fabricate) or `source: 'backfill'` events for the
-      shadow-mode period.
+### Phase 4 — books you can actually read + ops — shipped 2026-08-31
+
+`/admin/billing` in four views: the trial balance (with the 30-day revenue /
+cost / margin / liability tiles and the invariants run live on every
+render), the journal browser with account/type/customer/event filters and
+per-entry reversal, the chart of accounts with group re-mapping, and the
+per-customer statement with a running balance and the metered turns behind
+it. Posting by hand — manual journal and reclassification — goes through
+`POST /api/admin/billing/journal`, superadmin-gated, reason-required and
+audited; the `reclassification` recipe is mechanism 2 of §1.3, deliberately
+*not* using `reverses_entry_id` (that column promises a leg-for-leg
+cancellation, which the integrity checker proves, and a reclass is not one).
+Settings and groups have their own audited routes.
+
+The nightly job is `scripts/accounting-nightly.sh` +
+`ops/accounting/frameos-cloud-accounting.timer`, and it is a curl rather
+than a script that does the work: `POST /api/admin/billing/nightly` sweeps
+unposted records, runs every invariant, `reportError`s each violation and
+logs the daily summary line. The reason is one definition of "consistent" —
+the invariants are TypeScript the test suite already proves, and a
+psql sibling of `db-cleanup.sh` would have been a second copy of every query
+drifting from the first. (It cannot be a Node script either: the release
+bundle is Next's standalone output and carries no tsx, the same reason
+`object-store-sweep.sh` is bash.) It authenticates with a superadmin API
+token — an auth mechanism that already exists rather than a new secret.
+
+The job reports and never repairs. Books that disagree with themselves need
+a human; a quiet automatic "correction" is how a discrepancy becomes
+undiscoverable.
+
+§8.10 was settled by building the statement view: names are resolved live
+from `accounts` and degrade to the bare uuid, so an erased customer's
+statement reads "deleted account" and stays complete. That stops working the
+day accounting moves to its own database (§7 Phase 6) — which is when a
+deliberate customer-label table becomes the answer, and not before.
+
+Still open, and deliberately not decided by building:
+
+- [ ] Backfill decision: either start the books at go-live (recommended — no
+      history to fabricate) or post `source: 'backfill'` events for the
+      shadow-mode period. Nothing forces it either way; the shadow records
+      sit there with `event_id IS NULL` and the sweep is built to ignore
+      them, so both options stay open until somebody chooses.
 
 ### Phase 5 — subscriptions
 - [ ] Migration: `billing_plans`, `subscriptions`, `subscription_periods`.
@@ -674,9 +799,9 @@ in §8.
       (shelf-test the refund recipe even though no UI calls it).
 
 ### Phase 6 — later, enabled by the above, not designed in detail here
-- [ ] Bank/PSP reconciliation: import Stripe payout reports + bank
+- [ ] Bank/PSP reconciliation: import the provider's payout reports + bank
       statements, match on `external_ref`, `reconciliations` table,
-      unmatched-items report. (`asset:psp:stripe` vs payout lines is the
+      unmatched-items report. (`asset:psp:main` vs payout lines is the
       first match target; the accrued-OpenAI account vs their invoices the
       second.)
 - [ ] Postpay: credit limits, invoicing, receivables aging.
@@ -702,10 +827,13 @@ in §8.
 1. **Credits display unit** — plain dollars, or "credits" at 1 credit =
    $0.01? Ledger is unaffected; pure product copy. Lean: show dollars,
    avoid a fake currency.
-2. **Reasoning-token pricing** — the eval table prices output only;
-   OpenAI bills reasoning as output tokens. Assumed "reasoning bills as
-   output" in §2; verify against the actual invoice line items in shadow
-   mode.
+2. **Reasoning-token pricing** — still open, and now measurable. The
+   implementation assumes reasoning bills as output (it is a subset of
+   `output_tokens`, recorded separately for analysis and never priced on its
+   own), so `ai_model_prices` has no third column. Verify against the
+   provider's actual invoice line items during the shadow period; if it
+   turns out to be wrong the fix is a column plus a rule-version bump, not a
+   re-model.
 3. **Shared-key tier** — once PAYG exists, does
    `FRAMEOS_AI_SHARED_KEY_ACCESS` shrink (e.g. `verified` keeps a small free
    monthly grant as promo credits) or stay as-is? Affects whether promo
@@ -718,12 +846,22 @@ in §8.
    otherwise). Needs a terms-of-service answer before launch, not a schema
    change.
 6. **VAT/sales tax** — out of scope above, but EU sales likely need it
-   sooner than reconciliation does. When it lands: `liability:vat_payable`
-   account + tax legs in the purchase/subscription recipes, and Stripe Tax
-   can compute the amounts. Flagging now so the recipes are written with a
-   third leg in mind.
-7. **Stripe vs alternatives** — doc assumes Stripe Checkout (fastest,
-   handles SCA); confirm.
+   sooner than reconciliation does. When it lands: a `liability:vat_payable`
+   account plus tax legs in the purchase/subscription recipes. Who owes it
+   depends on §8.7: a merchant-of-record provider remits it themselves and
+   the money reaching `asset:psp:main` is already net, while a direct PSP
+   leaves the liability with us (Stripe Tax can compute the amounts, but
+   computing is not remitting). Flagged now so the recipes are written with
+   a third leg in mind.
+7. **Payment provider** — undecided, and the code no longer assumes one.
+   `asset:psp:main` names the role, `credit_purchases` carries a `provider`
+   column, and §3.1's recipes hold for anything that reports a successful
+   payment, a fee and a stable payment id. The choice is a product/tax
+   decision rather than a schema one, and the sharpest part of it is §8.6: a
+   merchant-of-record (Paddle, Lemon Squeezy) collects and remits VAT for
+   us, which removes a liability and a compliance burden at the cost of a
+   higher fee; a direct PSP (Stripe) leaves both with us. Decide it before
+   Phase 3 writes a webhook, not after.
 8. **Retention wording in the privacy policy** — §2.1 keeps account uuids in
    the books after erasure, deliberately. `/legal/privacy` currently promises
    only that account data "goes, along with your frames, scenes, files and
@@ -744,17 +882,26 @@ in §8.
    reason §2.1 gives — carry the frame uuid unreferenced, and snapshot the
    frame name into the event payload, because a uuid whose row is gone is a
    discriminator without a label.
-10. **Do events carry an identity snapshot?** — open, and it gets sharper the
-    further §2.1 is taken. A uuid is a discriminator, not a label: nothing in
-    the ledger can say *whose* books these are without joining `accounts`,
-    and that join is impossible after erasure and impossible by construction
-    once accounting has its own database (§7 Phase 6). Phase 4's "account
-    statement per customer" therefore needs a name from somewhere. Options:
+10. **Do events carry an identity snapshot?** — **decided 2026-08-31 by
+    building Phase 4's statement view: resolve live, degrade to the uuid.**
+    `apps/auth-web/src/lib/billing-admin.ts` looks the name up in `accounts`
+    and renders "…(deleted account)" when it is gone, so the books hold no
+    identifying data past erasure and a statement stays complete and
+    attributed without one. Revisit only if support finds the bare uuid
+    unworkable — and note the expiry date on this answer: it stops working
+    the day accounting moves to its own database (§7 Phase 6), which is when
+    a ledger-owned customer-label table becomes the answer. The reasoning
+    that led here, kept because the trade-off will come back: it gets
+    sharper the further §2.1 is taken. A uuid is a discriminator, not a
+    label: nothing in the ledger can say *whose* books these are without
+    joining `accounts`, and that join is impossible after erasure and
+    impossible by construction once accounting has its own database (§7
+    Phase 6). Phase 4's "account statement per customer" therefore needed a
+    name from somewhere. Options:
     write `{email, displayName}` into the event payload at post time (the
     books read standalone, at the cost of holding identifying data past
     erasure — which is exactly what §2.1 avoids); resolve names live and show
     the bare uuid when the lookup fails (honest, ugly for support); or a
     separate customer-label table the ledger owns, populated at first touch
     and cleared on erasure (a third thing to keep in sync). Lean: resolve
-    live, degrade to uuid, and revisit if support hates it — but decide
-    before Phase 4 builds the statement view, not during.
+    live, degrade to uuid — which is what shipped.

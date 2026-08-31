@@ -9,6 +9,8 @@ import { StoreVersionSelect } from "../../src/components/StoreVersionSelect";
 import { getStoreCategory, storeCategories } from "../../src/lib/categories";
 import { StoreActionCards } from "../../src/components/StoreActionCards";
 import {
+  getCloudBaseUrl,
+  getMyScenesUrl,
   getScenesBaseUrl,
   getStorePath,
   hasDatabaseUrl,
@@ -56,6 +58,11 @@ export default async function StorePage({
   const storePath = getStorePath();
   const newSceneUrl = new URL(`${myScenesPath}/new`, getScenesBaseUrl()).toString();
   const session = await readSession();
+  // A ZIP cannot round-trip through the login form the way the AI prompt
+  // does, so a signed-out visitor is sent to "My scenes" to sign in and
+  // upload there.
+  const uploadLoginUrl = new URL("/login", getCloudBaseUrl());
+  uploadLoginUrl.searchParams.set("return_to", getMyScenesUrl());
   const isSuperadmin = await accountIsSuperadmin(session?.accountId);
   const params = await searchParams;
   const filters = parseStoreBrowseFilters(params);
@@ -220,7 +227,11 @@ export default async function StorePage({
         </button>
       </form>
 
-      <StoreActionCards aiAction={newSceneUrl} showUpload={false} />
+      <StoreActionCards
+        aiAction={newSceneUrl}
+        showUpload
+        uploadLoginHref={session ? undefined : uploadLoginUrl.toString()}
+      />
 
       {categoryCounts.size > 0 ? (
         <div className="tag-list store-tag-row">

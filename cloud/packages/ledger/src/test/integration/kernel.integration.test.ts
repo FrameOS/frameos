@@ -40,7 +40,7 @@ function purchase(accountId: string, key: string, dollars = 10) {
       externalRef: "pi_test_123",
       legs: [
         {
-          accountCode: systemAccountCodes.pspStripe,
+          accountCode: systemAccountCodes.psp,
           amountMicros: dollarsToMicros(dollars).toString(),
           direction: "debit",
         },
@@ -93,7 +93,7 @@ describe("posting kernel", () => {
 
     // Stripe holds ten dollars (an asset, positive on the debit side); we owe
     // the customer the same ten (a liability, positive on the credit side).
-    expect(await accountBalanceMicros(db, systemAccountCodes.pspStripe)).toBe(
+    expect(await accountBalanceMicros(db, systemAccountCodes.psp)).toBe(
       10_000_000n,
     );
     expect(await accountBalanceMicros(db, customerCreditsCode(accountId))).toBe(
@@ -184,7 +184,7 @@ describe("posting kernel", () => {
           description: "Ten in, nine out",
           legs: [
             {
-              accountCode: systemAccountCodes.pspStripe,
+              accountCode: systemAccountCodes.psp,
               amountMicros: "10000000",
               direction: "debit",
             },
@@ -227,7 +227,7 @@ describe("posting kernel", () => {
       ),
     );
 
-    expect(await accountBalanceMicros(db, systemAccountCodes.pspStripe)).toBe(
+    expect(await accountBalanceMicros(db, systemAccountCodes.psp)).toBe(
       8_000_000n,
     );
   });
@@ -252,7 +252,7 @@ describe("posting kernel", () => {
       "debit",
     ]);
     // Reversed means back to zero, not "adjusted": both accounts are flat.
-    expect(await accountBalanceMicros(db, systemAccountCodes.pspStripe)).toBe(0n);
+    expect(await accountBalanceMicros(db, systemAccountCodes.psp)).toBe(0n);
     expect(await accountBalanceMicros(db, customerCreditsCode(accountId))).toBe(
       0n,
     );

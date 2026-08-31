@@ -32,6 +32,7 @@ export async function checkLedgerIntegrity(
     ...(await checkBalanceCache(db)),
     ...(await checkEventsPostedOnce(db, options)),
     ...(await checkCustomerCreditFloor(db, options)),
+    ...(await checkMeteringCompleteness(db, options)),
     ...(await checkReversalsMirror(db)),
     ...(await checkImmutabilityTriggers(db)),
   ];
@@ -181,6 +182,36 @@ export async function checkCustomerCreditFloor(
   return rows.map((row) => ({
     check: "customer_credit_floor",
     detail: `${row.code} is at ${row.balance_micros} micros`,
+  }));
+}
+
+// 6. Metering is complete: every usage record that should be in the books is
+//    in the books. "Should be" is narrow on purpose — a shadow-mode record
+//    posts nothing by design, and a turn on the customer's own key cost us
+//    nothing and is charged nothing, so neither is a violation. What is left
+//    is a live billable record whose entries never landed, which means the
+//    sweep is not running or is failing on it.
+export async function checkMeteringCompleteness(
+  db: LedgerExecutor,
+  options: LedgerIntegrityOptions = {},
+): Promise<LedgerIntegrityViolation[]> {
+  const now = options.now ?? new Date();
+  const grace = options.pendingEventGraceMs ?? 15 * 60 * 1000;
+  const cutoff = new Date(now.getTime() - grace);
+  const rows = await db.execute<{ count: string; oldest: string; turn_id: string }>(sql`
+    select count(*) as count,
+           min(created_at)::text as oldest,
+           (array_agg(turn_id::text order by created_at))[1] as turn_id
+      from ai_usage_records
+     where event_id is null
+       and metering_mode = 'live'
+       and (cost_micros > 0 or price_micros > 0)
+       and created_at < ${cutoff.toISOString()}::timestamptz
+    having count(*) > 0
+  `);
+  return rows.map((row) => ({
+    check: "metering_completeness",
+    detail: `${row.count} billable usage record(s) have never posted, oldest ${row.oldest} (turn ${row.turn_id})`,
   }));
 }
 

@@ -13,7 +13,11 @@
 // rewritten app.ts into prose is the failure this shape prevents — the panel
 // only applies what arrives through write_app_files.
 
-import { streamResponse, type ResponsesToolDefinition } from "./openai";
+import {
+  streamResponse,
+  type ResponsesToolDefinition,
+  type ResponseUsage,
+} from "./openai";
 import { parseToolArguments } from "./tool-args";
 
 export const maxAppSourceChars = 120_000;
@@ -27,6 +31,9 @@ export interface AppChatResult {
   reply: string;
   tool: "ask_about_app" | "ask_about_app_error" | "edit_app";
   files?: AppChatSources;
+  // What the call burned, so the route can meter it. One round, always:
+  // this panel has no agent loop.
+  usage: ResponseUsage;
 }
 
 /** Parse and bound the `sources` map. Returns undefined when there is nothing
@@ -179,9 +186,10 @@ export async function runAppChat(input: {
     tools: [writeAppFilesTool],
   });
 
+  const usage = result.usage;
   const call = result.functionCalls.find((entry) => entry.name === "write_app_files");
   if (!call) {
-    return { reply: result.outputText.trim() || "Done.", tool: "ask_about_app" };
+    return { reply: result.outputText.trim() || "Done.", tool: "ask_about_app", usage };
   }
 
   // App sources are JS, and a model writing JS into a JSON argument is the
@@ -199,11 +207,12 @@ export async function runAppChat(input: {
         result.outputText.trim() ||
         "I tried to rewrite the app but produced no usable files — say what you want changed and I will try again.",
       tool: "ask_about_app",
+      usage,
     };
   }
   const reply =
     (parsed?.reply === undefined ? "" : String(parsed.reply)).trim() ||
     result.outputText.trim() ||
     "Updated app files.";
-  return { files, reply, tool: "edit_app" };
+  return { files, reply, tool: "edit_app", usage };
 }
