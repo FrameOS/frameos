@@ -1,5 +1,6 @@
 #include "fos_battery.h"
 
+#include "fos_battery_filter.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_oneshot.h"
@@ -11,7 +12,15 @@
 
 static const char *TAG = "fos_battery";
 
-#define BATTERY_SAMPLES 16
+/* How long the divider gets to charge before the first round. The Seeed
+ * Battery_Monitor example waits 10 ms; the prod logs show whole bursts
+ * reading a third of the truth at that figure, so the first round starts
+ * later and the rounds below re-read until two agree. */
+#define BATTERY_SETTLE_MS 20
+/* Between rounds. Long enough that a still-charging divider has visibly
+ * moved by the next round, short enough that four rounds are ~30 ms — noise
+ * beside the 40-60 s render this read precedes. */
+#define BATTERY_ROUND_GAP_MS 5
 
 static bool s_present = false;
 static float s_divider = 2.0f;
@@ -93,25 +102,40 @@ void fos_battery_init(int8_t gpio, float divider, int8_t enable_gpio)
 
 bool fos_battery_present(void) { return s_present; }
 
-/* The averaged raw ADC reading with the divider switched on; -1 when no
- * sample came back. Caller holds s_lock. */
+/* The believed raw ADC reading with the divider switched on; -1 when no
+ * sample came back. Caller holds s_lock.
+ *
+ * Rounds of samples rather than one long burst, reduced by
+ * fos_battery_filter.c: the median within a round drops the odd near-zero
+ * sample, and the highest round wins because every way this read can go
+ * wrong (a divider still charging, a supply sagging under the radio, an
+ * overlapping read) pulls the number down and none pushes it up. A settled
+ * divider stops after two rounds, so the healthy case stays cheap. */
 static int sample_raw_locked(void)
 {
     if (s_enable_gpio >= 0) {
-        /* Seeed: enable, wait ~10 ms for the divider to settle, read. */
+        /* Seeed: enable, wait for the divider to settle, read. */
         gpio_set_level(s_enable_gpio, 1);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(BATTERY_SETTLE_MS));
     }
-    int raw_sum = 0, samples = 0;
-    for (int i = 0; i < BATTERY_SAMPLES; i++) {
-        int raw = 0;
-        if (adc_oneshot_read(s_adc, s_channel, &raw) == ESP_OK) {
-            raw_sum += raw;
-            samples++;
+
+    fos_battery_burst_t burst;
+    fos_battery_burst_reset(&burst);
+    for (int round = 0; round < FOS_BATTERY_MAX_ROUNDS; round++) {
+        if (round > 0) vTaskDelay(pdMS_TO_TICKS(BATTERY_ROUND_GAP_MS));
+        int scratch[FOS_BATTERY_ROUND_SAMPLES];
+        int samples = 0;
+        for (int i = 0; i < FOS_BATTERY_ROUND_SAMPLES; i++) {
+            int raw = 0;
+            if (adc_oneshot_read(s_adc, s_channel, &raw) == ESP_OK) {
+                scratch[samples++] = raw;
+            }
         }
+        if (fos_battery_burst_add(&burst, fos_battery_median(scratch, samples))) break;
     }
+
     if (s_enable_gpio >= 0) gpio_set_level(s_enable_gpio, 0);
-    return samples == 0 ? -1 : raw_sum / samples;
+    return fos_battery_burst_value(&burst);
 }
 
 static int millivolts_from_raw(int raw)
@@ -158,6 +182,11 @@ void fos_battery_read(int *millivolts, int *percent)
     }
     if (millivolts) *millivolts = mv;
     if (percent) *percent = percent_from_millivolts(mv);
+}
+
+int fos_battery_percent_for(int millivolts)
+{
+    return percent_from_millivolts(millivolts);
 }
 
 int fos_battery_millivolts(void)

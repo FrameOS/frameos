@@ -192,8 +192,27 @@ static const char *wake_cause_name(void)
 static void log_metrics_sample(void)
 {
     char json[640];
-    int battery_pct = -1, battery_mv = 0;
-    if (fos_battery_present()) fos_battery_read(&battery_mv, &battery_pct);
+    int battery_pct = -1, battery_mv = 0, battery_raw_mv = 0;
+    if (fos_battery_present()) {
+        fos_battery_read(&battery_raw_mv, &battery_pct);
+        battery_mv = battery_raw_mv;
+        /* Report what the pass BELIEVED, not the bare sample. fos_power.h's
+         * hysteresis already refuses to act on a reading that drops
+         * implausibly far in one pass, but this line went straight to the
+         * ADC — so a frame that correctly kept rendering still told the
+         * cloud it was at 1 %, and the graph grew a cliff that never
+         * happened (E1004 reported 3062 mV at 16:38 and 3942 mV fifteen
+         * minutes later, 2026-08-31). Same test, same answer, one source of
+         * truth. The raw sample is still reported when the two differ, so a
+         * misbehaving divider stays visible rather than being smoothed into
+         * silence. */
+        int believed = s_power_state.last_good_mv;
+        if (believed >= FOS_POWER_PRESENT_MV &&
+            battery_raw_mv < believed - FOS_POWER_GLITCH_DROP_MV) {
+            battery_mv = believed;
+            battery_pct = fos_battery_percent_for(believed);
+        }
+    }
     size_t used = (size_t)snprintf(
         json, sizeof(json),
         "{\"event\":\"metrics\",\"source\":\"esp32\","
@@ -237,6 +256,10 @@ static void log_metrics_sample(void)
                                  ",\"batteryPercent\":%d,\"batteryMillivolts\":%d,\"onBattery\":%s",
                                  battery_pct, battery_mv,
                                  battery_mv >= FOS_POWER_PRESENT_MV ? "true" : "false");
+        if (battery_raw_mv != battery_mv && used < sizeof(json) - 40) {
+            used += (size_t)snprintf(json + used, sizeof(json) - used,
+                                     ",\"batteryRawMillivolts\":%d", battery_raw_mv);
+        }
     }
     if (used < sizeof(json) - 2) {
         snprintf(json + used, sizeof(json) - used, "}");

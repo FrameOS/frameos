@@ -20,6 +20,7 @@ idf_component_register(
         "fos_settings.c"
         "fos_tz.c"
         "fos_battery.c"
+        "fos_battery_filter.c"
         "fos_assets.c"
         "fos_assets_sd.c"
         "fos_sd_probe.c"
