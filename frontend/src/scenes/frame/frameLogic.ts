@@ -60,6 +60,7 @@ import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
 import { generateFrameTlsMaterial } from '../../utils/tlsCertificates'
 import { normalizeSceneApps } from '../../utils/sceneApps'
+import { sortScenesAlphabetically } from '../../utils/sortScenes'
 import {
   type ChangeDetail,
   CURRENT_FRAMEOS_REMOTE_VERSION,
@@ -2506,7 +2507,10 @@ export const frameLogic = kea<frameLogicType>([
   }),
   listeners(({ asyncActions, actions, values, props }) => ({
     convertSceneToInterpreted: async ({ sceneId }) => {
-      const scene = values.frameForm.scenes?.find((s) => s.id === sceneId)
+      // getCurrentFrameForm, not frameForm: the tag offers this from surfaces
+      // (the frames home, a dashboard tile) where the form was never touched
+      // and would find no scene at all.
+      const scene = getCurrentFrameForm(values.frame, values.frameForm).scenes?.find((s) => s.id === sceneId)
       if (!scene) {
         actions.sceneConversionFinished(sceneId, false)
         return
@@ -2517,8 +2521,16 @@ export const frameLogic = kea<frameLogicType>([
         return
       }
       // In place and unsaved: the diagram, apps and settings follow the
-      // form, and Save or Deploy is the user's call.
-      actions.updateScene(sceneId, converted)
+      // form, and Save or Deploy is the user's call. The converted scene
+      // REPLACES the old one rather than merging into it — the converter
+      // returns the whole scene, and a merge would leave behind whatever it
+      // dropped (a ported app's Nim sources, say).
+      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+      actions.setFrameFormValues({
+        scenes: (frameForm.scenes ?? []).map((s) =>
+          s.id === sceneId ? sanitizeScene({ ...converted, id: sceneId }, frameForm) : s
+        ),
+      })
       actions.sceneConversionFinished(sceneId, true)
     },
     resetUnsavedChanges: () => {
@@ -2735,7 +2747,7 @@ export const frameLogic = kea<frameLogicType>([
     ],
     sortedScenes: [
       (s) => [s.scenes],
-      (scenes: frameLogicValues['scenes']): FrameScene[] => scenes.toSorted((a, b) => a.name.localeCompare(b.name)),
+      (scenes: frameLogicValues['scenes']): FrameScene[] => sortScenesAlphabetically(scenes),
     ],
     unsavedChanges: [
       (s) => [s.frame, s.frameForm],

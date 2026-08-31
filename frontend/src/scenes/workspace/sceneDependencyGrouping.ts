@@ -1,5 +1,8 @@
 import type { FrameScene, SceneNodeData, FrameId } from '../../types'
+import { sortScenesAlphabetically } from '../../utils/sortScenes'
 import { sceneChildExpansionKey } from './workspaceLogic'
+
+export { sortScenesAlphabetically } from '../../utils/sortScenes'
 
 export interface SceneDependencyEntry {
   scene: FrameScene
@@ -10,10 +13,6 @@ export interface SceneDependencyEntry {
 export interface SceneDependencyGraph {
   childrenBySceneId: Map<string, string[]>
   sceneById: Map<string, FrameScene>
-}
-
-export function sortScenesAlphabetically(scenes: FrameScene[]): FrameScene[] {
-  return [...scenes].toSorted((left, right) => (left.name || left.id).localeCompare(right.name || right.id))
 }
 
 function sceneChildIds(scene: FrameScene, sceneById: Map<string, FrameScene>): string[] {
@@ -100,14 +99,12 @@ export function buildSceneDependencyEntries({
 
     const nextVisited = new Set(visited)
     nextVisited.add(scene.id)
-    for (const childId of childrenBySceneId.get(scene.id) ?? []) {
-      if (nextVisited.has(childId)) {
-        continue
-      }
-      const childScene = sceneById.get(childId)
-      if (childScene) {
-        appendScene(childScene, true, `${path}/${childScene.id}`, nextVisited)
-      }
+    const childScenes = (childrenBySceneId.get(scene.id) ?? [])
+      .filter((childId) => !nextVisited.has(childId))
+      .map((childId) => sceneById.get(childId))
+      .filter((childScene): childScene is FrameScene => !!childScene)
+    for (const childScene of sortScenesAlphabetically(childScenes)) {
+      appendScene(childScene, true, `${path}/${childScene.id}`, nextVisited)
     }
   }
 

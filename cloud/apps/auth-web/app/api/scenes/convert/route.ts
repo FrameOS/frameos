@@ -232,10 +232,15 @@ export async function POST(request: NextRequest) {
     // The request id is the turn: one conversion, however many scenes and
     // model calls it took. A caller who sent their own key pays the provider
     // directly, exactly like an account key does, so both meter as "account"
-    // and cost us nothing; only the platform's own key is our bill. Today
-    // that is `shared` — Phase 3's per-address budgets become real billing
-    // for a signed-in caller, and this is the measurement that says what it
-    // would have come to.
+    // and cost us nothing; only the platform's own key is our bill.
+    //
+    // That bill stays ours. `scene_convert` is an absorbed surface in the
+    // ledger (packages/ledger/src/metering.ts): whichever of our keys pays,
+    // the turn books as COGS and is charged to nobody. We are the ones
+    // asking people off the legacy compiled path, so we pay for the trip —
+    // and Phase 3 handing this route a billable key changes nothing about
+    // that, which is why the policy lives in the ledger and not in a
+    // `credentialSource` this route happens not to pass today.
     const credentialSource: CredentialSource =
       keySource === "shared" ? "shared" : "account";
     await meterAiUsage({

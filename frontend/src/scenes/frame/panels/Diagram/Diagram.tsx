@@ -571,7 +571,7 @@ function Diagram_({ sceneId, showToolbar = true }: DiagramProps) {
           />
           {isCompiledScene ? (
             <div className="absolute top-3 left-2 z-10">
-              <CompiledSceneTag />
+              <CompiledSceneTag frameId={frameId} sceneId={sceneId} />
             </div>
           ) : null}
           {showToolbar ? (

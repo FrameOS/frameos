@@ -605,10 +605,24 @@ the metering table already supports that without schema change.
   (`src/lib/ai/app-chat.ts`, which also now goes through
   `resolveAiCredentials` rather than reading the account key itself), scene
   convert (`app/api/scenes/convert/route.ts` — a caller's own key meters as
-  `account`, the platform key as `shared`; its per-address budgets become
-  real billing for a signed-in caller in Phase 3), and the store classifier
-  at publish and recategorize. Moderation is not metered: OpenAI's
+  `account`, the platform key as `shared`), and the store classifier at
+  publish and recategorize. Moderation is not metered: OpenAI's
   omni-moderation endpoint is free, so there is nothing to book.
+- **Absorbed surfaces** (done): `absorbedSurfaces` in
+  `packages/ledger/src/metering.ts` names the surfaces the platform pays for
+  on purpose — today just `scene_convert`. On one of our keys they book the
+  provider cost as COGS and price at nothing, and unlike the `shared`/
+  `account` distinction that is a property of the *surface*, so it survives
+  Phase 3 handing that route a billable key. The reasoning is product, not
+  accounting: we deprecated compiled scenes and asked everyone to convert, so
+  the conversion is our migration cost, not a line on their bill. Anything
+  else we decide to give away goes in the same list, and the books then show
+  it as what it is — a cost with no revenue against it, visible in the trial
+  balance rather than hidden in a route that never charges.
+  Still unpriced, and deliberately: the conversion's *compute* (the headless
+  render check on our own box) has no cost model anywhere in the ledger yet —
+  that is the same unanswered "free cloud rendering" question §7 Phase 6
+  parks, and it is infrastructure spend rather than a per-turn provider bill.
 - **Spend gate**: before starting a platform-key turn, require
   `availableCreditMicros > 0` (allow the configured overdraft to cover the
   in-flight turn; a turn's cost is unknown until it ends). Error shape:
@@ -735,6 +749,9 @@ neither of which reaches the posting rules.
 - [ ] `source: "platform"` in `resolveAiCredentials` (accounts with
       credit > 0 and no own key), spend gate + overdraft setting,
       `insufficient_credits` error through chat route → SPA panel state.
+      The scene converter is not part of this: it is an absorbed surface
+      (§5), so it keeps booking as pure cost when the billable key reaches
+      it — and the spend gate must not turn a free surface into a 402.
 - [ ] Extend `GET /api/account/usage` + account page: balance, top-up
       button, usage history (from `ai_usage_records`).
 - [ ] MCP: extend `account_quota`/`account_info` payloads (route first,

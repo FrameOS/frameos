@@ -513,6 +513,11 @@ export interface AiUsageSummaryRow {
   meteringMode: string;
   outputTokens: bigint;
   priceMicros: bigint;
+  // Which product surface burned the tokens, null for a record written
+  // before anything said. Grouped on so the free surfaces (§5's absorbed
+  // list — the scene converter today) show up as their own cost line: a
+  // giveaway nobody can see the price of stops being a decision.
+  surface: string | null;
   turns: bigint;
 }
 
@@ -536,10 +541,12 @@ export async function aiUsageSummary(
     metering_mode: string;
     output_tokens: string;
     price_micros: string;
+    surface: string | null;
     turns: string;
   }>(sql`
     select credential_source,
            metering_mode,
+           surface,
            count(*)::text as turns,
            coalesce(sum(input_tokens), 0)::text as input_tokens,
            coalesce(sum(cached_input_tokens), 0)::text as cached_input_tokens,
@@ -554,8 +561,8 @@ export async function aiUsageSummary(
       from ai_usage_records
      where occurred_at >= ${window.since.toISOString()}::timestamptz
        and occurred_at < ${window.until.toISOString()}::timestamptz
-     group by credential_source, metering_mode
-     order by credential_source, metering_mode
+     group by credential_source, metering_mode, surface
+     order by credential_source, metering_mode, surface
   `);
   return rows.map((row) => ({
     cachedInputTokens: BigInt(row.cached_input_tokens),
@@ -566,6 +573,7 @@ export async function aiUsageSummary(
     meteringMode: row.metering_mode,
     outputTokens: BigInt(row.output_tokens),
     priceMicros: BigInt(row.price_micros),
+    surface: row.surface,
     turns: BigInt(row.turns),
   }));
 }

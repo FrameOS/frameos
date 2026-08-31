@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createDb } from "@frameos-cloud/db";
 import {
+  absorbedSurfaces,
   aiUsageSummary,
   checkLedgerIntegrity,
   dailySummary,
@@ -122,6 +123,13 @@ export default async function AdminBillingPage() {
           that cost us nothing, because they paid OpenAI directly. This is the
           column to reconcile against PostHog and the provider invoice.
         </p>
+        <p className="section-description">
+          Split by surface, because a surface marked <em>absorbed</em> is one
+          we pay for on purpose and never charge for — scene conversion is our
+          own migration off compiled scenes — and the price of a giveaway
+          should be a number somebody can read, not a decision buried in a
+          route that happens not to bill.
+        </p>
         {usage.length === 0 ? (
           <section className="card">
             <p>No AI usage metered in the window.</p>
@@ -132,6 +140,7 @@ export default async function AdminBillingPage() {
               <thead>
                 <tr>
                   <th>Paid by</th>
+                  <th>Surface</th>
                   <th>Mode</th>
                   <th style={{ textAlign: "right" }}>Turns</th>
                   <th style={{ textAlign: "right" }}>Tokens (in / cached / out)</th>
@@ -142,13 +151,17 @@ export default async function AdminBillingPage() {
               </thead>
               <tbody>
                 {usage.map((row) => (
-                  <tr key={`${row.credentialSource}:${row.meteringMode}`}>
+                  <tr key={`${row.credentialSource}:${row.meteringMode}:${row.surface ?? ""}`}>
                     <td>
                       {row.credentialSource === "account"
                         ? "the customer (own key)"
                         : row.credentialSource === "shared"
                           ? "us (operator key)"
                           : "us (platform key, billable)"}
+                    </td>
+                    <td className="copy">
+                      {row.surface ?? "—"}
+                      {row.surface && absorbedSurfaces.includes(row.surface) ? " (absorbed)" : ""}
                     </td>
                     <td>
                       <span className="pill">{row.meteringMode}</span>
@@ -168,7 +181,7 @@ export default async function AdminBillingPage() {
               </tbody>
               <tfoot>
                 <tr>
-                  <th colSpan={4}>Total at list prices</th>
+                  <th colSpan={5}>Total at list prices</th>
                   <th style={{ textAlign: "right" }}>{formatMicrosUsd(listCostTotal)}</th>
                   <th colSpan={2} />
                 </tr>

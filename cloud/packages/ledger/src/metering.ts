@@ -85,15 +85,32 @@ export interface RecordAiUsageOptions extends PostEventOptions {
   post?: boolean | undefined;
 }
 
+// Surfaces whose cost the platform absorbs on purpose, whichever of OUR keys
+// paid for it: they book as COGS and are billed to nobody, ever. Scene
+// conversion is here because it is our own migration off the legacy compiled
+// path — we asked people to convert, so we pay for the conversion. Phase 3
+// turns platform-key turns into revenue; an absorbed surface stays a pure
+// cost line through that change, which is the point of naming it here rather
+// than relying on nobody wiring the billable key into that route.
+export const absorbedSurfaces: readonly string[] = ["scene_convert"];
+
+export function surfaceIsAbsorbed(surface: string | null | undefined): boolean {
+  return typeof surface === "string" && absorbedSurfaces.includes(surface);
+}
+
 // Who pays the provider decides both numbers. The customer's own key costs
 // us nothing and is charged nothing — we still keep the record, because
 // "how much AI is this account using" is a question worth answering whoever
 // paid for it. The operator's shared key is a real cost we absorb: booked as
 // COGS, billed to nobody. Only the platform key is billable, and Phase 3 is
-// what starts returning it.
-function billing(source: CredentialSource): { billable: boolean; ours: boolean } {
+// what starts returning it — except on an absorbed surface, which is a cost
+// and never a charge.
+function billing(
+  source: CredentialSource,
+  surface: string | null | undefined,
+): { billable: boolean; ours: boolean } {
   return {
-    billable: source === "platform",
+    billable: source === "platform" && !surfaceIsAbsorbed(surface),
     ours: source === "platform" || source === "shared",
   };
 }
@@ -105,7 +122,7 @@ export async function recordAiUsage(
 ): Promise<RecordAiUsageResult> {
   const occurredAt = input.occurredAt ?? new Date();
   const settings = await readBillingSettings(db, options.env);
-  const { billable, ours } = billing(input.credentialSource);
+  const { billable, ours } = billing(input.credentialSource, input.surface);
   const usage = splitProviderUsage(input.usage);
   const price = await resolveModelPrice(db, input.model, occurredAt);
   const priced = priceUsage({
