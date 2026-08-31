@@ -3297,12 +3297,6 @@ a.stat-tile:hover {
   font-weight: 650;
 }
 
-.ai-panel__beta {
-  margin-left: auto;
-  padding: 2px 7px;
-  font-size: 11px;
-}
-
 .ai-panel__transcript {
   display: flex;
   flex-direction: column;

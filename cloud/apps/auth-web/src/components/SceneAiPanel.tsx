@@ -751,7 +751,6 @@ export function SceneAiPanel({
       <header className="ai-panel__header">
         <Sparkles aria-hidden size={16} />
         <span>AI assistant</span>
-        <span className="pill ai-panel__beta">Beta</span>
       </header>
 
       <div className="ai-panel__transcript" ref={transcriptRef}>
