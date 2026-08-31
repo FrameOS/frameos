@@ -1,6 +1,8 @@
 # FrameOS Cloud accounting module — design + todo
 
-Status: design document, nothing implemented. Written 2026-08-31.
+Status: written 2026-08-31. Phases 0 and 1 are built (migration 0042,
+`cloud/packages/ledger`); nothing meters or charges yet — that starts at
+Phase 2.
 
 The goal: real double-entry accounting inside FrameOS Cloud. Users buy prepaid
 credits, we meter their AI spend (gpt-5.6-terra today), add a configurable
@@ -127,7 +129,7 @@ schema.ts maintained in parallel; open with the usual why-comment block).
 CREATE TABLE "financial_events" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "event_type" text NOT NULL,          -- 'credit_purchase.succeeded', 'ai_usage.turn', ...
-  "account_id" uuid REFERENCES "accounts"("id"),  -- NULL for system-level events; NO cascade (see §2.1)
+  "account_id" uuid,                   -- accounts uuid, NO foreign key (§2.1); NULL only for system-level events
   "source" text NOT NULL,              -- 'chat_route' | 'stripe_webhook' | 'admin' | 'cron' | 'backfill'
   "source_ref" text,                   -- turn id, stripe event id, ...
   "idempotency_key" text NOT NULL,     -- the dedupe handle, e.g. 'stripe:evt_...' or 'turn:<uuid>'
@@ -143,12 +145,14 @@ CREATE INDEX "financial_events_pending_idx" ON "financial_events" ("created_at")
 -- Reporting hierarchy; mutable, no accounting meaning.
 CREATE TABLE "ledger_account_groups" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  "code" text NOT NULL,                -- stable handle, like ledger_accounts.code
   "name" text NOT NULL,
   "parent_id" uuid REFERENCES "ledger_account_groups"("id"),
   "sort_order" integer NOT NULL DEFAULT 0,
   "created_at" timestamptz NOT NULL DEFAULT now(),
   "updated_at" timestamptz NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX "ledger_account_groups_code_unique" ON "ledger_account_groups" ("code");
 
 -- Chart of accounts. System rows have owner_account_id NULL.
 CREATE TABLE "ledger_accounts" (
@@ -157,7 +161,7 @@ CREATE TABLE "ledger_accounts" (
   "type" text NOT NULL,                -- 'asset'|'liability'|'equity'|'revenue'|'contra_revenue'|'expense'
   "normal_side" text NOT NULL,         -- 'debit'|'credit'
   "currency" text NOT NULL DEFAULT 'USD',
-  "owner_account_id" uuid REFERENCES "accounts"("id"),  -- NO cascade
+  "owner_account_id" uuid,             -- accounts uuid, no foreign key (§2.1)
   "group_id" uuid REFERENCES "ledger_account_groups"("id"),
   "metadata" jsonb NOT NULL DEFAULT '{}',
   "created_at" timestamptz NOT NULL DEFAULT now()
@@ -181,6 +185,8 @@ CREATE TABLE "ledger_entries" (
 CREATE INDEX "ledger_entries_event_idx" ON "ledger_entries" ("event_id");
 CREATE INDEX "ledger_entries_occurred_idx" ON "ledger_entries" ("occurred_at");
 CREATE INDEX "ledger_entries_external_ref_idx" ON "ledger_entries" ("external_ref") WHERE "external_ref" IS NOT NULL;
+-- An entry is reversed once. The rule checks it too, for a better message.
+CREATE UNIQUE INDEX "ledger_entries_reverses_unique" ON "ledger_entries" ("reverses_entry_id") WHERE "reverses_entry_id" IS NOT NULL;
 
 -- Entry lines. Balanced per entry per currency: SUM(debits) = SUM(credits).
 CREATE TABLE "ledger_postings" (
@@ -208,7 +214,7 @@ Plus product-side tables introduced by their phases:
 -- Phase 2: high-volume metering subledger (one row per AI turn; per-round detail in payload)
 CREATE TABLE "ai_usage_records" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  "account_id" uuid NOT NULL REFERENCES "accounts"("id"),  -- NO cascade
+  "account_id" uuid,                   -- accounts uuid, no foreign key (§2.1)
   "chat_id" uuid,
   "turn_id" uuid NOT NULL,
   "surface" text,                      -- 'scene_chat' | 'app_chat' | 'scene_convert' | ...
@@ -245,13 +251,13 @@ CREATE TABLE "billing_settings" (
   "key" text PRIMARY KEY,              -- 'ai_margin_percent', 'payg_overdraft_micros', ...
   "value" jsonb NOT NULL,
   "updated_at" timestamptz NOT NULL DEFAULT now(),
-  "updated_by" uuid REFERENCES "accounts"("id")
+  "updated_by" uuid                    -- accounts uuid, no foreign key (§2.1)
 );
 
 -- Phase 3: Stripe purchase intents (state machine; the ledger only sees success events)
 CREATE TABLE "credit_purchases" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  "account_id" uuid NOT NULL REFERENCES "accounts"("id"),  -- NO cascade
+  "account_id" uuid,                   -- accounts uuid, no foreign key (§2.1)
   "amount_micros" bigint NOT NULL,
   "currency" text NOT NULL DEFAULT 'USD',
   "status" text NOT NULL,              -- 'pending'|'succeeded'|'failed'|'refunded'
@@ -270,15 +276,49 @@ CREATE TABLE "subscription_periods" ( ... );   -- subscription_id, period_start/
 
 ### 2.1 Deliberate deviations from house patterns
 
-- **No `ON DELETE cascade` from `accounts` into anything financial.** House
-  style cascades account-owned rows; the ledger must survive account
-  deletion (books are books). Account deletion (GDPR) keeps the financial
-  rows and severs PII elsewhere — the uuid alone is not personal data we can
-  destroy without destroying the books. Needs an explicit decision, §8.
-- **Append-only enforced in the database, not just in code.** The repo has
-  no triggers today; a ledger justifies the first ones — `BEFORE UPDATE OR
-  DELETE` on `financial_events`, `ledger_entries`, `ledger_postings` raising
-  an exception. Cheap, and it turns "we promise" into "it cannot happen".
+- **No foreign key points out of the ledger** (decided 2026-08-31, revised
+  the same day — see below). `account_id` / `owner_account_id` hold an
+  accounts uuid as a plain column: no `REFERENCES`, so no cascade, no
+  `SET NULL`, nothing outside these tables able to rewrite them. House style
+  cascades account-owned rows, but books are books: the accounting equation
+  cannot depend on nobody exercising erasure, and `POST /api/account/delete`
+  is a single `DELETE FROM accounts` leaning on cascades, so `RESTRICT`
+  would break self-serve deletion outright.
+
+  *Revised from `ON DELETE SET NULL`*, which was the first decision and is
+  wrong in a way worth recording. It loses precisely the rows that matter: a
+  metered turn posts two entries, and while the customer charge carries a
+  `liability:credits:customer:<uuid>` leg that keeps it attributable through
+  its account code, the provider-cost entry
+  (`Dr expense:cogs:openai / Cr liability:accrued:openai`) touches only
+  system accounts — with the id nulled it is attributable to nobody, and
+  per-customer margin silently skews for any period containing a departed
+  customer. The `audit_events` precedent it claimed does not say what it
+  seemed to either: that table nulls its column but keeps the account uuid
+  in its `actor` jsonb, i.e. it already does what this now does.
+
+  Retaining a bare uuid is also what erasure can honestly promise. Every
+  field that names the person — email, display name, credentials — lives in
+  `accounts` and cascades away; what remains is a discriminator that
+  separates one customer's history from another's, which is what a financial
+  record is *for*, and what bookkeeping-retention law expects to still exist
+  (GDPR art. 17(3)(b) covers retention required by law — the privacy policy
+  needs a billing-records line before we take money; §8.8).
+
+  Second reason, and the one that generalizes: with no outward references
+  these tables are a self-contained module. **If accounting moves to its own
+  Postgres database, it moves** — nothing to unpick first. Any new financial
+  table follows the same rule, including the Phase 2/3 ones above.
+- **Append-only enforced in the database, not just in code.** The repo had
+  no triggers; a ledger justifies the first ones — `BEFORE UPDATE OR DELETE`
+  on `financial_events`, `ledger_entries`, `ledger_postings` raising an
+  exception. Cheap, and it turns "we promise" into "it cannot happen".
+  Because no cascade can reach these rows, `financial_events` allows exactly
+  one after-the-fact change and refuses every other: the one-way
+  `processed_at` stamp the kernel writes. (Under the old `SET NULL` design
+  the trigger also had to permit `account_id` going to NULL, or account
+  deletion would have failed on the ledger — dropping the foreign key
+  removed that hole rather than widening it.)
 - **Balanced-entry enforcement**: primary enforcement is the posting kernel
   (§4.1) which is the *only* code path that writes entries and refuses
   unbalanced input inside the transaction. Optionally add a deferred
@@ -423,9 +463,12 @@ model change.
 
 ## 4. Code layout
 
-New Next-free package **`cloud/packages/ledger`** (`@frameos-cloud/ledger`),
+Next-free package **`cloud/packages/ledger`** (`@frameos-cloud/ledger`),
 mirroring how `scene-convert` is packaged, so `frame-hub`, scripts, and tests
-use it without Next:
+use it without Next. Its unit tests run under `pnpm test`; the kernel's own
+tests need Postgres and run under `pnpm test:integration`, with the same
+migration-replay global setup auth-web and the hub use (own database,
+`frameos_cloud_ledger_test`, wired into cloud-ci):
 
 - `src/kernel.ts` — **the posting kernel**, the only writer:
   `postEvent(db, {eventType, accountId, idempotencyKey, occurredAt, payload})`.
@@ -440,13 +483,22 @@ use it without Next:
   `{name, version, build(event): EntryDraft[]}`. Bump `version` on any
   logic change; old entries keep their `rule_version`.
 - `src/chart.ts` — chart definitions + `ensureLedgerAccount(db, code, ...)`
-  lazy creation (customer subaccounts on first touch).
+  lazy creation (customer subaccounts on first touch). Codes canonicalize
+  before lookup — the customer uuid is lowercased — because a leg naming the
+  same customer in another casing would otherwise mint a second account and
+  split their balance. Any new code shape must define its canonical form in
+  `resolveAccountCode`.
 - `src/pricing.ts` — price lookup (`ai_model_prices` effective-dated, with a
   hardcoded fallback seeded from `evals/compare-models.ts` values), margin
   from `billing_settings`, cost/price computation with the single-rounding
   rule.
-- `src/balance.ts` — `availableCreditMicros(db, accountId)` (paid + promo −
-  overdraft policy), used by the spend gate.
+- `src/balances.ts` — `accountBalanceMicros(db, code)` off the cache,
+  `accountBalanceFromPostings` for the slow always-correct answer, and
+  `availableCreditMicros(db, accountId, {overdraftMicros})` (paid + promo +
+  whatever overdraft policy allows) for the Phase 3 spend gate.
+- `src/money.ts` — the one door micro-dollar amounts come through: jsonb
+  payloads carry them as decimal strings, because JSON's single number type
+  silently loses integers above 2^53.
 - `src/integrity.ts` — the invariant checks (§6), callable from tests and
   the nightly script.
 
@@ -540,26 +592,20 @@ reversal) asserting the full journal and every balance at each step.
 
 ## 7. Implementation phases (the todo)
 
-### Phase 0 — decisions (§8) + skeleton
-- [ ] Resolve the open decisions below (each blocks something specific).
-- [ ] Migration `0042_accounting_ledger.sql`: `financial_events`,
-      `ledger_account_groups`, `ledger_accounts`, `ledger_entries`,
-      `ledger_postings`, `ledger_balances`, immutability triggers, seed
-      system chart rows + default groups.
-- [ ] Matching `schema.ts` blocks (+ `schema.test.ts` assertions).
-- [ ] Package `packages/ledger` scaffold wired into turbo/tsconfig.
+### Phases 0 and 1 — shipped 2026-08-31
 
-### Phase 1 — ledger kernel (pure, no product wiring)
-- [ ] `postEvent` kernel: idempotent insert → rule dispatch → balance
-      validation → postings → `ledger_balances` upsert, one transaction.
-- [ ] `ensureLedgerAccount` + chart codes module.
-- [ ] Recipes: `manual_journal` (superadmin escape hatch, always available
-      for corrections) + `reversal`.
-- [ ] `integrity.ts` invariant checks 1–5, 7, 8.
-- [ ] Integration tests: kernel happy path, idempotent replay (same key
-      twice → one entry set), unbalanced draft refused, concurrent posting
-      to one account (balance correct under parallelism), reversal
-      round-trip, immutability triggers.
+Migration `0042_accounting_ledger.sql` (the six tables, the check
+constraints, the append-only triggers, the seeded groups and system chart)
+with matching `schema.ts` blocks, and `packages/ledger`: the `postEvent`
+kernel, `ensureLedgerAccount` + chart codes, the `manual_journal` and
+`reversal` recipes, `integrity.ts` (checks 1–5, 7, 8) and `balances.ts`.
+Twenty-one integration tests cover the happy path, idempotent replay, rollback
+of an unbalanced draft and of a caller-owned transaction, concurrent
+posting to one account, the reversal round-trip, the triggers firing, and
+the books surviving deletion of the account they billed — still attributed
+to it, including the provider-cost entry that names no customer account
+(§2.1). The remaining Phase 0 decisions that only bind later phases are
+in §8.
 
 ### Phase 2 — meter AI usage (shadow mode: record everything, charge nothing)
 - [ ] Migration `0043`: `ai_usage_records`, `ai_model_prices` (seeded:
@@ -603,6 +649,8 @@ reversal) asserting the full journal and every balance at each step.
 - [ ] Admin `/admin/billing`: trial balance by group, journal browser
       (entry → postings → event drill-down), account statement per
       customer, manual journal form (superadmin, audited, reason required).
+      The statement view is what forces §8.10: the ledger holds account
+      uuids and no name, so decide where the label comes from first.
 - [ ] Group management UI (create/re-map — mechanism 1 of §1.3) +
       `reclassification` recipe (mechanism 2).
 - [ ] `billing_settings` admin form (margin, overdraft), audited.
@@ -635,6 +683,17 @@ reversal) asserting the full journal and every balance at each step.
 - [ ] Storage/other metered products: new event types + recipes only.
 - [ ] Multi-currency: EUR chart siblings, FX gain/loss account.
 - [ ] Refund self-service UI on the §3.4 recipes.
+- [ ] **Accounting in its own Postgres database** (stated intention,
+      2026-08-31). §2.1 already pays the entry price: no ledger table
+      references anything outside the ledger, and a schema test fails if one
+      ever does, so the tables can be dumped and restored elsewhere as a
+      unit. What still has to be answered when it happens: the kernel takes
+      a `LedgerExecutor` so callers can post inside *their* transaction
+      (§4.1) — two databases means that guarantee is gone for the
+      purchase/webhook paths, and they need either an outbox in the product
+      database or an accepted window where the payment row and its entry can
+      disagree. Nothing about the schema changes; the atomicity story does.
+      Decide it before splitting, not after.
 
 ---
 
@@ -647,23 +706,55 @@ reversal) asserting the full journal and every balance at each step.
    OpenAI bills reasoning as output tokens. Assumed "reasoning bills as
    output" in §2; verify against the actual invoice line items in shadow
    mode.
-3. **Account deletion vs books** (§2.1) — proposed: financial rows survive,
-   PII scrubbed elsewhere; needs a real yes.
-4. **Shared-key tier** — once PAYG exists, does
+3. **Shared-key tier** — once PAYG exists, does
    `FRAMEOS_AI_SHARED_KEY_ACCESS` shrink (e.g. `verified` keeps a small free
    monthly grant as promo credits) or stay as-is? Affects whether promo
    accounts ship in Phase 3 or 4.
-5. **Overdraft size** — one turn can cost ~$0.50+; proposal: allow balance
+4. **Overdraft size** — one turn can cost ~$0.50+; proposal: allow balance
    to go negative by `payg_overdraft_micros` (default $1) and gate the
    *next* turn.
-6. **Credit expiry** — legal/VAT implications differ by jurisdiction
+5. **Credit expiry** — legal/VAT implications differ by jurisdiction
    (unused prepaid balances are liabilities indefinitely unless terms say
    otherwise). Needs a terms-of-service answer before launch, not a schema
    change.
-7. **VAT/sales tax** — out of scope above, but EU sales likely need it
+6. **VAT/sales tax** — out of scope above, but EU sales likely need it
    sooner than reconciliation does. When it lands: `liability:vat_payable`
    account + tax legs in the purchase/subscription recipes, and Stripe Tax
    can compute the amounts. Flagging now so the recipes are written with a
    third leg in mind.
-8. **Stripe vs alternatives** — doc assumes Stripe Checkout (fastest,
+7. **Stripe vs alternatives** — doc assumes Stripe Checkout (fastest,
    handles SCA); confirm.
+8. **Retention wording in the privacy policy** — §2.1 keeps account uuids in
+   the books after erasure, deliberately. `/legal/privacy` currently promises
+   only that account data "goes, along with your frames, scenes, files and
+   backups" and that the security trail is kept "with your account identifier
+   removed". Billing records need their own line (kept as long as bookkeeping
+   law requires, identified by an internal id only) before we take the first
+   payment. Separately and already true on main: the audit trail's stated
+   de-identification is not what the code does — `recordAuditEvent` keeps
+   `actor.accountId`, and the self-delete event keeps the email in
+   `metadata` — so either the jsonb is scrubbed on delete or that sentence
+   changes. Not an accounting bug; found while deciding §2.1.
+9. **Per-frame attribution** — nothing in the ledger names a frame today, and
+   AI usage is per-account, so nothing needs it yet. It starts mattering the
+   moment a per-device product is metered (cloud rendering for thin clients,
+   storage — §7 Phase 6, tangled with the unanswered "free cloud rendering
+   forever" question in `docs/todo.md`). When it lands: `frames` *cascades*
+   from `accounts`, so a foreign key would be useless here for the same
+   reason §2.1 gives — carry the frame uuid unreferenced, and snapshot the
+   frame name into the event payload, because a uuid whose row is gone is a
+   discriminator without a label.
+10. **Do events carry an identity snapshot?** — open, and it gets sharper the
+    further §2.1 is taken. A uuid is a discriminator, not a label: nothing in
+    the ledger can say *whose* books these are without joining `accounts`,
+    and that join is impossible after erasure and impossible by construction
+    once accounting has its own database (§7 Phase 6). Phase 4's "account
+    statement per customer" therefore needs a name from somewhere. Options:
+    write `{email, displayName}` into the event payload at post time (the
+    books read standalone, at the cost of holding identifying data past
+    erasure — which is exactly what §2.1 avoids); resolve names live and show
+    the bare uuid when the lookup fails (honest, ugly for support); or a
+    separate customer-label table the ledger owns, populated at first touch
+    and cleared on erasure (a third thing to keep in sync). Lean: resolve
+    live, degrade to uuid, and revisit if support hates it — but decide
+    before Phase 4 builds the statement view, not during.

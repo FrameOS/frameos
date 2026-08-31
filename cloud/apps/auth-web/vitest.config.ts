@@ -24,5 +24,8 @@ export default defineConfig({
     // fail on a tsconfig that no longer resolves its `extends`, so running the
     // suite after a build reported 85 failed files and 0 failed tests.
     exclude: [...configDefaults.exclude, "**/*.integration.test.ts", "**/.next/**"],
+    // Scrubs environment the CI workflow exports for the build step (the
+    // PostHog key) so tests only see values they set themselves.
+    setupFiles: ["src/test/setup-env.ts"],
   },
 });

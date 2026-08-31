@@ -1158,3 +1158,182 @@ export const aiChatMessages = pgTable(
     chatIdx: index("ai_chat_messages_chat_idx").on(table.chatId, table.id),
   }),
 );
+
+// Double-entry accounting (migration 0042). Product code emits an immutable
+// financial_events row; a versioned posting rule in packages/ledger turns it
+// into balanced ledger_entries + ledger_postings; ledger_balances caches the
+// running sum. Design: cloud/docs/accounting-todo.md.
+//
+// No foreign key points out of the ledger. account_id and owner_account_id
+// hold an accounts uuid as a plain column, so a deleted account can neither
+// take its books with it nor anonymize them — "we paid OpenAI $4.20 on
+// behalf of somebody" is not an accounting record, and a provider-cost entry
+// touches no customer account to recover the id from. It also keeps these
+// tables a self-contained module that could move to its own database. See
+// the migration header for the full argument.
+//
+// Database triggers make financial_events, ledger_entries and
+// ledger_postings append-only — drizzle cannot express them, so read the
+// migration for the one change financial_events still allows (the one-way
+// processed_at stamp).
+export const financialEvents = pgTable(
+  "financial_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    eventType: text("event_type").notNull(),
+    // An accounts uuid, deliberately unreferenced. NULL means the event
+    // belongs to no customer (a provider invoice, an opening balance), never
+    // "we forgot whose it was".
+    accountId: uuid("account_id"),
+    // Which product surface stated the fact: chat_route, stripe_webhook,
+    // admin, cron, backfill.
+    source: text("source").notNull(),
+    sourceRef: text("source_ref"),
+    // The dedupe handle — "turn:<uuid>", "stripe:evt_...". Unique, and what
+    // makes replaying an event a no-op instead of a double charge.
+    idempotencyKey: text("idempotency_key").notNull(),
+    // Economic time (when the tokens were burned), not write time.
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    payload: jsonb("payload").default({}).notNull(),
+    // Stamped when the posting rule ran. NULL means pending or failed, which
+    // is what the unposted sweep looks for.
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    accountOccurredIdx: index("financial_events_account_occurred_idx").on(
+      table.accountId,
+      table.occurredAt,
+    ),
+    idempotencyUnique: uniqueIndex("financial_events_idempotency_unique").on(
+      table.idempotencyKey,
+    ),
+  }),
+);
+
+// Reporting hierarchy only: re-pointing an account at another group
+// re-buckets every report and touches no posting. Moving an amount between
+// accounts is a reclassification entry instead.
+export const ledgerAccountGroups = pgTable(
+  "ledger_account_groups",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    parentId: uuid("parent_id").references(
+      (): AnyPgColumn => ledgerAccountGroups.id,
+    ),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    codeUnique: uniqueIndex("ledger_account_groups_code_unique").on(table.code),
+  }),
+);
+
+// The chart of accounts. System accounts are seeded by the migration with
+// owner_account_id NULL; per-customer subaccounts
+// ("liability:credits:customer:<uuid>") are created on first touch. Posting
+// rules name accounts by `code`, never by id.
+export const ledgerAccounts = pgTable(
+  "ledger_accounts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    code: text("code").notNull(),
+    // asset | liability | equity | revenue | contra_revenue | expense
+    type: text("type").notNull(),
+    // debit | credit — the side a positive balance sits on.
+    normalSide: text("normal_side").notNull(),
+    currency: text("currency").default("USD").notNull(),
+    // The customer a subaccount belongs to; NULL on system accounts. Same
+    // unreferenced accounts uuid, also spelled out inside `code`.
+    ownerAccountId: uuid("owner_account_id"),
+    groupId: uuid("group_id").references(() => ledgerAccountGroups.id),
+    metadata: jsonb("metadata").default({}).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    codeUnique: uniqueIndex("ledger_accounts_code_unique").on(table.code),
+    ownerIdx: index("ledger_accounts_owner_idx").on(table.ownerAccountId),
+  }),
+);
+
+// Journal entry header. One event may produce several entries: a metered AI
+// turn posts the customer charge and our provider cost as two independent
+// balanced entries from the one fact.
+export const ledgerEntries = pgTable(
+  "ledger_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => financialEvents.id),
+    // The posting rule that built it, and the version of that rule. Old
+    // entries keep the version they were posted under; rules never
+    // retroactively change what they already produced.
+    entryType: text("entry_type").notNull(),
+    ruleVersion: integer("rule_version").notNull(),
+    description: text("description").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    postedAt: timestamp("posted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    reversesEntryId: uuid("reverses_entry_id").references(
+      (): AnyPgColumn => ledgerEntries.id,
+    ),
+    // Stripe charge / balance transaction / payout id: the reconciliation
+    // hook, indexed for the day the books are matched against a statement.
+    externalRef: text("external_ref"),
+    // Pricing snapshot (token counts, unit prices, the margin in force) so an
+    // entry stays explainable after the settings behind it change.
+    metadata: jsonb("metadata").default({}).notNull(),
+  },
+  (table) => ({
+    eventIdx: index("ledger_entries_event_idx").on(table.eventId),
+    occurredIdx: index("ledger_entries_occurred_idx").on(table.occurredAt),
+  }),
+);
+
+// Entry lines, balanced per entry per currency. Amounts are always positive
+// bigint micro-dollars; the direction carries the sign.
+export const ledgerPostings = pgTable(
+  "ledger_postings",
+  {
+    id: bigint("id", { mode: "number" })
+      .generatedAlwaysAsIdentity()
+      .primaryKey(),
+    entryId: uuid("entry_id")
+      .notNull()
+      .references(() => ledgerEntries.id),
+    ledgerAccountId: uuid("ledger_account_id")
+      .notNull()
+      .references(() => ledgerAccounts.id),
+    // debit | credit
+    direction: text("direction").notNull(),
+    amountMicros: bigint("amount_micros", { mode: "bigint" }).notNull(),
+    currency: text("currency").default("USD").notNull(),
+  },
+  (table) => ({
+    accountIdx: index("ledger_postings_account_idx").on(table.ledgerAccountId),
+    entryIdx: index("ledger_postings_entry_idx").on(table.entryId),
+  }),
+);
+
+// Derived cache, signed so positive means "on this account's normal side".
+// The nightly integrity check proves it equals the sum over postings; if the
+// two ever disagree, the postings win.
+export const ledgerBalances = pgTable("ledger_balances", {
+  ledgerAccountId: uuid("ledger_account_id")
+    .primaryKey()
+    .references(() => ledgerAccounts.id),
+  balanceMicros: bigint("balance_micros", { mode: "bigint" })
+    .default(0n)
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
