@@ -1164,21 +1164,27 @@ export const aiChatMessages = pgTable(
 // into balanced ledger_entries + ledger_postings; ledger_balances caches the
 // running sum. Design: cloud/docs/accounting-todo.md.
 //
-// Nothing below cascades from accounts: books survive account deletion, so
-// the account references are ON DELETE SET NULL (the audit_events treatment)
-// and the customer's uuid lives on inside the ledger account code. Database
-// triggers make financial_events, ledger_entries and ledger_postings
-// append-only — drizzle cannot express them, so read the migration for the
-// two changes financial_events still allows (the one-way processed_at stamp
-// and account_id going to NULL).
+// No foreign key points out of the ledger. account_id and owner_account_id
+// hold an accounts uuid as a plain column, so a deleted account can neither
+// take its books with it nor anonymize them — "we paid OpenAI $4.20 on
+// behalf of somebody" is not an accounting record, and a provider-cost entry
+// touches no customer account to recover the id from. It also keeps these
+// tables a self-contained module that could move to its own database. See
+// the migration header for the full argument.
+//
+// Database triggers make financial_events, ledger_entries and
+// ledger_postings append-only — drizzle cannot express them, so read the
+// migration for the one change financial_events still allows (the one-way
+// processed_at stamp).
 export const financialEvents = pgTable(
   "financial_events",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     eventType: text("event_type").notNull(),
-    accountId: uuid("account_id").references(() => accounts.id, {
-      onDelete: "set null",
-    }),
+    // An accounts uuid, deliberately unreferenced. NULL means the event
+    // belongs to no customer (a provider invoice, an opening balance), never
+    // "we forgot whose it was".
+    accountId: uuid("account_id"),
     // Which product surface stated the fact: chat_route, stripe_webhook,
     // admin, cron, backfill.
     source: text("source").notNull(),
@@ -1241,9 +1247,9 @@ export const ledgerAccounts = pgTable(
     // debit | credit — the side a positive balance sits on.
     normalSide: text("normal_side").notNull(),
     currency: text("currency").default("USD").notNull(),
-    ownerAccountId: uuid("owner_account_id").references(() => accounts.id, {
-      onDelete: "set null",
-    }),
+    // The customer a subaccount belongs to; NULL on system accounts. Same
+    // unreferenced accounts uuid, also spelled out inside `code`.
+    ownerAccountId: uuid("owner_account_id"),
     groupId: uuid("group_id").references(() => ledgerAccountGroups.id),
     metadata: jsonb("metadata").default({}).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })

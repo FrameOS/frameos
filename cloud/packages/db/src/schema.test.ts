@@ -41,16 +41,32 @@ describe("cloud schema", () => {
     expect(ledgerBalances.balanceMicros.getSQLType()).toBe("bigint");
   });
 
-  // Books survive account deletion: the delete route removes the accounts row
-  // and relies on cascades, so a financial row that cascaded would take the
-  // revenue it recorded with it, and a row that restricted would break
-  // self-serve erasure outright. Both references null out instead.
-  it("never cascades account deletion into the ledger", () => {
-    for (const table of [financialEvents, ledgerAccounts]) {
-      const [reference] = getTableConfig(table).foreignKeys.filter((key) =>
-        key.reference().foreignTable === accounts,
-      );
-      expect(reference?.onDelete).toBe("set null");
+  // The ledger holds account uuids but references nothing outside itself, so
+  // deleting an account can neither cascade its books away nor null the id
+  // that says whose they were — a provider-cost entry touches no customer
+  // account and would otherwise become attributable to nobody. It also keeps
+  // the module movable to its own database.
+  it("points no foreign key out of the ledger", () => {
+    const ledgerTables = [
+      financialEvents,
+      ledgerAccountGroups,
+      ledgerAccounts,
+      ledgerEntries,
+      ledgerPostings,
+      ledgerBalances,
+    ];
+    const ledgerTableNames = new Set(
+      ledgerTables.map((table) => getTableConfig(table).name),
+    );
+    for (const table of ledgerTables) {
+      const outward = getTableConfig(table)
+        .foreignKeys.map((key) => getTableConfig(key.reference().foreignTable).name)
+        .filter((name) => !ledgerTableNames.has(name));
+      expect(outward).toEqual([]);
     }
+    // The uuid columns are still there — unreferenced, not removed.
+    expect(financialEvents.accountId.getSQLType()).toBe("uuid");
+    expect(ledgerAccounts.ownerAccountId.getSQLType()).toBe("uuid");
+    expect(accounts.id.getSQLType()).toBe("uuid");
   });
 });

@@ -22,29 +22,53 @@
 --
 -- Two deliberate deviations from house patterns:
 --
---  1. Nothing here cascades from `accounts`. Books are books: a deleted
---     account must not take the revenue it produced with it, or the
---     accounting equation stops holding the moment anyone exercises GDPR
---     erasure. Instead the account references are ON DELETE SET NULL, the
---     same treatment `audit_events` gets, and the customer's uuid survives
---     inside the ledger account code (`liability:credits:customer:<uuid>`)
---     and the event payload, which is what keeps the history traceable
---     without keeping the person identifiable.
+--  1. No foreign key points out of the ledger. `account_id` and
+--     `owner_account_id` hold an accounts uuid, but they are plain columns:
+--     no REFERENCES, so no cascade, no SET NULL, and nothing outside these
+--     tables can reach in and rewrite them.
+--
+--     Books are books. A deleted account must not take the revenue it
+--     produced with it, and it must not become anonymous either: "we paid
+--     OpenAI $4.20 on behalf of somebody" is not an accounting record. The
+--     tempting middle road — ON DELETE SET NULL, the way `audit_events`
+--     declares it — turns out to lose exactly the rows that matter. A
+--     metered turn posts two entries; the customer charge carries a
+--     `liability:credits:customer:<uuid>` leg and stays attributable
+--     through its account code, while the provider-cost entry touches only
+--     system accounts and, with the id nulled, is attributable to nobody.
+--     Margin per customer would then quietly skew for every period
+--     containing a departed one. (`audit_events` in fact does the same
+--     thing this does: it nulls the column but keeps the uuid in its
+--     `actor` jsonb.)
+--
+--     Retaining a bare uuid is also what erasure can honestly promise here.
+--     Everything that names the person — email, display name, credentials —
+--     lives in `accounts` and cascades away; what is left is a
+--     discriminator that separates one customer's history from another's,
+--     which is what a financial record is for and what bookkeeping
+--     retention law expects to still exist afterwards.
+--
+--     The second reason is structural: with no outward references these
+--     tables are a self-contained module. If accounting ever moves to its
+--     own database, it moves — nothing to unpick first.
 --
 --  2. Append-only is enforced by triggers, not just by convention. These
 --     are the repo's first triggers and a ledger is what justifies them:
 --     they turn "the kernel promises not to rewrite history" into "the
---     database will not let it". `financial_events` allows exactly two
---     after-the-fact changes — the one-way `processed_at` stamp, and
---     `account_id` going to NULL for the erasure above — and refuses
---     everything else; entries and postings allow nothing at all.
---     `ledger_balances` is a derived cache and stays freely writable.
+--     database will not let it". Because no cascade can reach these rows,
+--     `financial_events` allows exactly one after-the-fact change — the
+--     one-way `processed_at` stamp — and refuses everything else; entries
+--     and postings allow nothing at all. `ledger_balances` is a derived
+--     cache and stays freely writable.
 
 -- Immutable product-side facts. One row per thing-that-happened.
 CREATE TABLE "financial_events" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "event_type" text NOT NULL,
-  "account_id" uuid REFERENCES "accounts"("id") ON DELETE SET NULL,
+  -- An accounts uuid, deliberately unreferenced (see the header). NULL means
+  -- the event belongs to no customer — a provider invoice, an opening
+  -- balance — never "we forgot whose it was".
+  "account_id" uuid,
   "source" text NOT NULL,
   "source_ref" text,
   "idempotency_key" text NOT NULL,
@@ -83,7 +107,10 @@ CREATE TABLE "ledger_accounts" (
   "type" text NOT NULL CHECK ("type" IN ('asset', 'liability', 'equity', 'revenue', 'contra_revenue', 'expense')),
   "normal_side" text NOT NULL CHECK ("normal_side" IN ('debit', 'credit')),
   "currency" text NOT NULL DEFAULT 'USD',
-  "owner_account_id" uuid REFERENCES "accounts"("id") ON DELETE SET NULL,
+  -- The customer a subaccount belongs to; NULL on system accounts. Same
+  -- unreferenced accounts uuid as financial_events.account_id, and also
+  -- spelled out inside `code`.
+  "owner_account_id" uuid,
   "group_id" uuid REFERENCES "ledger_account_groups"("id"),
   "metadata" jsonb NOT NULL DEFAULT '{}',
   "created_at" timestamptz NOT NULL DEFAULT now()
@@ -149,10 +176,10 @@ CREATE TRIGGER "ledger_postings_immutable"
   BEFORE UPDATE OR DELETE ON "ledger_postings"
   FOR EACH ROW EXECUTE FUNCTION "ledger_rows_are_immutable"();
 
--- Events are facts and never change either, with the two exceptions the
--- header explains. Both are one-way: processed_at is stamped once by the
--- kernel and account_id can only be cleared, never re-pointed at another
--- account.
+-- Events are facts and never change either, with the single exception the
+-- header explains: processed_at, stamped once by the kernel after the
+-- postings land. Everything else about the row — account_id included, since
+-- no cascade can reach it any more — is fixed at insert.
 CREATE FUNCTION "financial_events_are_append_only"() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -166,15 +193,10 @@ BEGIN
       USING ERRCODE = 'restrict_violation';
   END IF;
 
-  IF NEW."account_id" IS DISTINCT FROM OLD."account_id" AND NEW."account_id" IS NOT NULL THEN
-    RAISE EXCEPTION 'financial_events.account_id can only be cleared (account erasure), never reassigned'
-      USING ERRCODE = 'restrict_violation';
-  END IF;
-
-  IF (NEW."id", NEW."event_type", NEW."source", NEW."source_ref", NEW."idempotency_key", NEW."occurred_at", NEW."payload", NEW."created_at")
+  IF (NEW."id", NEW."event_type", NEW."account_id", NEW."source", NEW."source_ref", NEW."idempotency_key", NEW."occurred_at", NEW."payload", NEW."created_at")
      IS DISTINCT FROM
-     (OLD."id", OLD."event_type", OLD."source", OLD."source_ref", OLD."idempotency_key", OLD."occurred_at", OLD."payload", OLD."created_at") THEN
-    RAISE EXCEPTION 'financial_events rows are immutable apart from the processed_at stamp and account erasure'
+     (OLD."id", OLD."event_type", OLD."account_id", OLD."source", OLD."source_ref", OLD."idempotency_key", OLD."occurred_at", OLD."payload", OLD."created_at") THEN
+    RAISE EXCEPTION 'financial_events rows are immutable apart from the processed_at stamp'
       USING ERRCODE = 'restrict_violation';
   END IF;
 

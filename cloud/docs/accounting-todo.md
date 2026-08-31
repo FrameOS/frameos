@@ -129,7 +129,7 @@ schema.ts maintained in parallel; open with the usual why-comment block).
 CREATE TABLE "financial_events" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "event_type" text NOT NULL,          -- 'credit_purchase.succeeded', 'ai_usage.turn', ...
-  "account_id" uuid REFERENCES "accounts"("id") ON DELETE SET NULL,  -- NULL for system-level events, and after erasure (see §2.1)
+  "account_id" uuid,                   -- accounts uuid, NO foreign key (§2.1); NULL only for system-level events
   "source" text NOT NULL,              -- 'chat_route' | 'stripe_webhook' | 'admin' | 'cron' | 'backfill'
   "source_ref" text,                   -- turn id, stripe event id, ...
   "idempotency_key" text NOT NULL,     -- the dedupe handle, e.g. 'stripe:evt_...' or 'turn:<uuid>'
@@ -161,7 +161,7 @@ CREATE TABLE "ledger_accounts" (
   "type" text NOT NULL,                -- 'asset'|'liability'|'equity'|'revenue'|'contra_revenue'|'expense'
   "normal_side" text NOT NULL,         -- 'debit'|'credit'
   "currency" text NOT NULL DEFAULT 'USD',
-  "owner_account_id" uuid REFERENCES "accounts"("id") ON DELETE SET NULL,  -- §2.1
+  "owner_account_id" uuid,             -- accounts uuid, no foreign key (§2.1)
   "group_id" uuid REFERENCES "ledger_account_groups"("id"),
   "metadata" jsonb NOT NULL DEFAULT '{}',
   "created_at" timestamptz NOT NULL DEFAULT now()
@@ -214,7 +214,7 @@ Plus product-side tables introduced by their phases:
 -- Phase 2: high-volume metering subledger (one row per AI turn; per-round detail in payload)
 CREATE TABLE "ai_usage_records" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  "account_id" uuid REFERENCES "accounts"("id") ON DELETE SET NULL,  -- §2.1
+  "account_id" uuid,                   -- accounts uuid, no foreign key (§2.1)
   "chat_id" uuid,
   "turn_id" uuid NOT NULL,
   "surface" text,                      -- 'scene_chat' | 'app_chat' | 'scene_convert' | ...
@@ -251,13 +251,13 @@ CREATE TABLE "billing_settings" (
   "key" text PRIMARY KEY,              -- 'ai_margin_percent', 'payg_overdraft_micros', ...
   "value" jsonb NOT NULL,
   "updated_at" timestamptz NOT NULL DEFAULT now(),
-  "updated_by" uuid REFERENCES "accounts"("id")
+  "updated_by" uuid                    -- accounts uuid, no foreign key (§2.1)
 );
 
 -- Phase 3: Stripe purchase intents (state machine; the ledger only sees success events)
 CREATE TABLE "credit_purchases" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  "account_id" uuid REFERENCES "accounts"("id") ON DELETE SET NULL,  -- §2.1
+  "account_id" uuid,                   -- accounts uuid, no foreign key (§2.1)
   "amount_micros" bigint NOT NULL,
   "currency" text NOT NULL DEFAULT 'USD',
   "status" text NOT NULL,              -- 'pending'|'succeeded'|'failed'|'refunded'
@@ -276,27 +276,49 @@ CREATE TABLE "subscription_periods" ( ... );   -- subscription_id, period_start/
 
 ### 2.1 Deliberate deviations from house patterns
 
-- **`ON DELETE SET NULL` from `accounts`, never cascade** (decided
-  2026-08-31). House style cascades account-owned rows; the ledger must
-  survive account deletion, because books are books and the accounting
-  equation cannot depend on nobody exercising GDPR erasure. Restricting
-  instead would break self-serve deletion outright — `POST
-  /api/account/delete` is a single `DELETE FROM accounts` that leans on
-  cascades — so the financial references take the `audit_events` treatment:
-  the row stays, the account link nulls out, and the customer's uuid lives
-  on inside the ledger account code (`liability:credits:customer:<uuid>`)
-  and the event payload. That keeps a balance attributable without keeping
-  the person identifiable. Every financial `account_id` is therefore
-  nullable, including in the Phase 2/3 tables above.
+- **No foreign key points out of the ledger** (decided 2026-08-31, revised
+  the same day — see below). `account_id` / `owner_account_id` hold an
+  accounts uuid as a plain column: no `REFERENCES`, so no cascade, no
+  `SET NULL`, nothing outside these tables able to rewrite them. House style
+  cascades account-owned rows, but books are books: the accounting equation
+  cannot depend on nobody exercising erasure, and `POST /api/account/delete`
+  is a single `DELETE FROM accounts` leaning on cascades, so `RESTRICT`
+  would break self-serve deletion outright.
+
+  *Revised from `ON DELETE SET NULL`*, which was the first decision and is
+  wrong in a way worth recording. It loses precisely the rows that matter: a
+  metered turn posts two entries, and while the customer charge carries a
+  `liability:credits:customer:<uuid>` leg that keeps it attributable through
+  its account code, the provider-cost entry
+  (`Dr expense:cogs:openai / Cr liability:accrued:openai`) touches only
+  system accounts — with the id nulled it is attributable to nobody, and
+  per-customer margin silently skews for any period containing a departed
+  customer. The `audit_events` precedent it claimed does not say what it
+  seemed to either: that table nulls its column but keeps the account uuid
+  in its `actor` jsonb, i.e. it already does what this now does.
+
+  Retaining a bare uuid is also what erasure can honestly promise. Every
+  field that names the person — email, display name, credentials — lives in
+  `accounts` and cascades away; what remains is a discriminator that
+  separates one customer's history from another's, which is what a financial
+  record is *for*, and what bookkeeping-retention law expects to still exist
+  (GDPR art. 17(3)(b) covers retention required by law — the privacy policy
+  needs a billing-records line before we take money; §8.8).
+
+  Second reason, and the one that generalizes: with no outward references
+  these tables are a self-contained module. **If accounting moves to its own
+  Postgres database, it moves** — nothing to unpick first. Any new financial
+  table follows the same rule, including the Phase 2/3 ones above.
 - **Append-only enforced in the database, not just in code.** The repo had
   no triggers; a ledger justifies the first ones — `BEFORE UPDATE OR DELETE`
   on `financial_events`, `ledger_entries`, `ledger_postings` raising an
   exception. Cheap, and it turns "we promise" into "it cannot happen".
-  `financial_events` allows exactly two after-the-fact changes and refuses
-  every other: the one-way `processed_at` stamp the kernel writes, and
-  `account_id` going to NULL for the erasure above (without that second
-  exception the trigger would block the `ON DELETE SET NULL` itself, and
-  account deletion would fail on the ledger).
+  Because no cascade can reach these rows, `financial_events` allows exactly
+  one after-the-fact change and refuses every other: the one-way
+  `processed_at` stamp the kernel writes. (Under the old `SET NULL` design
+  the trigger also had to permit `account_id` going to NULL, or account
+  deletion would have failed on the ledger — dropping the foreign key
+  removed that hole rather than widening it.)
 - **Balanced-entry enforcement**: primary enforcement is the posting kernel
   (§4.1) which is the *only* code path that writes entries and refuses
   unbalanced input inside the transaction. Optionally add a deferred
@@ -576,8 +598,10 @@ kernel, `ensureLedgerAccount` + chart codes, the `manual_journal` and
 Twenty-one integration tests cover the happy path, idempotent replay, rollback
 of an unbalanced draft and of a caller-owned transaction, concurrent
 posting to one account, the reversal round-trip, the triggers firing, and
-the books surviving deletion of the account they billed. The remaining Phase 0 decisions that only bind
-later phases are in §8.
+the books surviving deletion of the account they billed — still attributed
+to it, including the provider-cost entry that names no customer account
+(§2.1). The remaining Phase 0 decisions that only bind later phases are
+in §8.
 
 ### Phase 2 — meter AI usage (shadow mode: record everything, charge nothing)
 - [ ] Migration `0043`: `ai_usage_records`, `ai_model_prices` (seeded:
@@ -683,3 +707,23 @@ later phases are in §8.
    third leg in mind.
 7. **Stripe vs alternatives** — doc assumes Stripe Checkout (fastest,
    handles SCA); confirm.
+8. **Retention wording in the privacy policy** — §2.1 keeps account uuids in
+   the books after erasure, deliberately. `/legal/privacy` currently promises
+   only that account data "goes, along with your frames, scenes, files and
+   backups" and that the security trail is kept "with your account identifier
+   removed". Billing records need their own line (kept as long as bookkeeping
+   law requires, identified by an internal id only) before we take the first
+   payment. Separately and already true on main: the audit trail's stated
+   de-identification is not what the code does — `recordAuditEvent` keeps
+   `actor.accountId`, and the self-delete event keeps the email in
+   `metadata` — so either the jsonb is scrubbed on delete or that sentence
+   changes. Not an accounting bug; found while deciding §2.1.
+9. **Per-frame attribution** — nothing in the ledger names a frame today, and
+   AI usage is per-account, so nothing needs it yet. It starts mattering the
+   moment a per-device product is metered (cloud rendering for thin clients,
+   storage — §7 Phase 6, tangled with the unanswered "free cloud rendering
+   forever" question in `docs/todo.md`). When it lands: `frames` *cascades*
+   from `accounts`, so a foreign key would be useless here for the same
+   reason §2.1 gives — carry the frame uuid unreferenced, and snapshot the
+   frame name into the event payload, because a uuid whose row is gone is a
+   discriminator without a label.

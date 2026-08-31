@@ -350,27 +350,72 @@ describe("posting kernel", () => {
           .where(eq(financialEvents.id, posted.event.id)),
       ),
     ).toMatch(/immutable/);
+    // Whose event it was is a fact like any other. Nothing cascades here any
+    // more, so nothing needs to clear this and the trigger refuses to.
+    expect(
+      await refusalMessage(
+        db
+          .update(financialEvents)
+          .set({ accountId: null })
+          .where(eq(financialEvents.id, posted.event.id)),
+      ),
+    ).toMatch(/immutable/);
   });
 
-  // GDPR erasure removes the person, not the books: the accounts row goes,
-  // the entries stay, and the ledger still balances.
-  it("survives the deletion of the account it billed", async () => {
+  // Erasure removes the person, not the books: the accounts row goes, every
+  // entry stays, and each one still says whose it was. The uuid is all that
+  // remains — everything that names the customer lived in accounts and went
+  // with it.
+  it("survives the deletion of the account it billed, still attributed", async () => {
     const accountId = await createAccount();
     await postEvent(db, purchase(accountId, "purchase:1"));
+    // The second entry a metered turn posts: provider cost, system accounts
+    // only. Nothing about its postings names the customer, so the event's
+    // account_id is the one thing keeping it attributable — which is why the
+    // ledger holds that uuid rather than a foreign key that would null it.
+    await postEvent(db, {
+      accountId,
+      eventType: manualJournalEventType,
+      idempotencyKey: "cost:1",
+      payload: {
+        description: "Provider cost for the turn",
+        legs: [
+          {
+            accountCode: systemAccountCodes.cogsOpenai,
+            amountMicros: "442400",
+            direction: "debit",
+          },
+          {
+            accountCode: systemAccountCodes.accruedOpenai,
+            amountMicros: "442400",
+            direction: "credit",
+          },
+        ],
+      },
+      source: "admin",
+    });
 
     await db.delete(accounts).where(eq(accounts.id, accountId));
 
-    const [event] = await db.select().from(financialEvents);
-    expect(event?.accountId).toBeNull();
-    expect(event?.processedAt).toBeInstanceOf(Date);
-    // The customer's uuid lives on in the account code, which is what keeps
-    // the balance attributable without keeping the person identifiable.
+    const events = await db.select().from(financialEvents);
+    expect(events).toHaveLength(2);
+    for (const event of events) {
+      expect(event.accountId).toBe(accountId);
+      expect(event.processedAt).toBeInstanceOf(Date);
+    }
+    // The subaccount keeps its owner too, and the uuid is in its code either
+    // way.
+    const [creditsAccount] = await db
+      .select({ ownerAccountId: ledgerAccounts.ownerAccountId })
+      .from(ledgerAccounts)
+      .where(eq(ledgerAccounts.code, customerCreditsCode(accountId)));
+    expect(creditsAccount?.ownerAccountId).toBe(accountId);
     expect(await accountBalanceMicros(db, customerCreditsCode(accountId))).toBe(
       10_000_000n,
     );
     const counts = await db.execute<{ count: string }>(
       sql`select count(*)::text as count from ledger_postings`,
     );
-    expect(counts[0]?.count).toBe("2");
+    expect(counts[0]?.count).toBe("4");
   });
 });
