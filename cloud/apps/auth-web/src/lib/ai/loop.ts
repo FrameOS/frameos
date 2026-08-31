@@ -8,7 +8,6 @@ import {
   emptyUsage,
   OpenAiRequestError,
   streamResponse,
-  type FunctionCallItem,
   type ResponseInputItem,
   type ResponseUsage,
 } from "./openai";
@@ -21,7 +20,7 @@ import {
   type ScenesEvent,
   type ToolContext,
 } from "./tools";
-import type { JsonObject } from "./scene-utils";
+import { parseToolArguments } from "./tool-args";
 
 export type ChatStreamEvent =
   // turnId identifies the detached server-side turn; the client resumes the
@@ -58,6 +57,17 @@ export type RoundReport = {
   httpStatus?: number;
   error?: string;
   toolCalls: string[];
+};
+
+// A function call whose arguments never parsed as JSON, so the tool did not
+// run. Reported separately from RoundReport because it is only discovered
+// after that round's telemetry has already gone out.
+export type ToolArgumentErrorReport = {
+  round: number;
+  tool: string;
+  // The JSON.parse failure (a position, never scene content).
+  detail: string;
+  length: number;
 };
 
 export function formatBytes(bytes: number): string {
@@ -105,18 +115,6 @@ export function buildInitialInput({
   return input;
 }
 
-function parseToolArguments(call: FunctionCallItem): JsonObject {
-  try {
-    const parsed = JSON.parse(call.arguments) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as JsonObject;
-    }
-  } catch {
-    // fall through
-  }
-  return {};
-}
-
 export async function runAgentLoop({
   apiKey,
   model,
@@ -126,6 +124,7 @@ export async function runAgentLoop({
   emit,
   signal,
   onRound,
+  onToolArgumentError,
 }: {
   apiKey: string;
   model: string;
@@ -135,6 +134,7 @@ export async function runAgentLoop({
   emit: (event: ChatStreamEvent) => void;
   signal?: AbortSignal;
   onRound?: (report: RoundReport) => void;
+  onToolArgumentError?: (report: ToolArgumentErrorReport) => void;
 }): Promise<AgentLoopResult> {
   const instructions = buildSystemPrompt();
   let reply = "";
@@ -209,13 +209,34 @@ export async function runAgentLoop({
       toolCalls.push(call.name);
       emit({ label, name: call.name, status: "start", type: "tool" });
       let output: string;
-      try {
-        output = await executeTool(call.name, parseToolArguments(call), toolContext);
-        emit({ label, name: call.name, status: "done", type: "tool" });
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        output = JSON.stringify({ error: detail });
-        emit({ detail, label, name: call.name, status: "error", type: "tool" });
+      const parsed = parseToolArguments(call.name, call.arguments);
+      if ("error" in parsed) {
+        // The call never ran. Hand the model a result that says exactly that,
+        // so it re-sends instead of reporting that the tool rejected work it
+        // never saw.
+        output = JSON.stringify({ error: parsed.error, ok: false });
+        onToolArgumentError?.({
+          detail: parsed.detail,
+          length: parsed.length,
+          round: rounds,
+          tool: call.name,
+        });
+        emit({
+          detail: "arguments were not valid JSON",
+          label,
+          name: call.name,
+          status: "error",
+          type: "tool",
+        });
+      } else {
+        try {
+          output = await executeTool(call.name, parsed.args, toolContext);
+          emit({ label, name: call.name, status: "done", type: "tool" });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          output = JSON.stringify({ error: detail });
+          emit({ detail, label, name: call.name, status: "error", type: "tool" });
+        }
       }
       input.push({
         call_id: call.call_id,

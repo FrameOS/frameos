@@ -755,6 +755,39 @@ function partialSceneIssue(current: JsonObject, delivered: JsonObject): string |
   );
 }
 
+// `scenes` is documented as an array of scene objects, but the tool schema is
+// free-form (`items: { type: "object" }`) so nothing enforces that. Accept the
+// three shapes models reach for anyway — a lone scene, the array re-encoded as
+// a JSON string, the array wrapped in another `{ scenes }` — rather than
+// telling them their scene has no nodes.
+function coerceDeliveredScenes(rawScenes: unknown): unknown[] {
+  if (Array.isArray(rawScenes)) {
+    return rawScenes;
+  }
+  if (typeof rawScenes === "string") {
+    const text = rawScenes.trim();
+    if (!text) {
+      return [];
+    }
+    try {
+      return coerceDeliveredScenes(JSON.parse(text));
+    } catch {
+      return [];
+    }
+  }
+  if (rawScenes && typeof rawScenes === "object") {
+    const entry = rawScenes as JsonObject;
+    if (Array.isArray(entry.scenes)) {
+      return entry.scenes;
+    }
+    // A single scene object, unwrapped.
+    if (entry.nodes !== undefined || entry.id !== undefined || entry.name !== undefined) {
+      return [entry];
+    }
+  }
+  return [];
+}
+
 function deliverScenes(
   ctx: ToolContext,
   rawScenes: unknown,
@@ -762,7 +795,21 @@ function deliverScenes(
   title?: string,
   options: { rewrite?: boolean } = {},
 ): string {
-  const scenes = Array.isArray(rawScenes) ? rawScenes : [];
+  const scenes = coerceDeliveredScenes(rawScenes);
+  if (scenes.length === 0) {
+    // Nothing was inspected, so say so plainly: a model told "the payload has
+    // no scenes" after sending a scene concludes the editor is broken.
+    return JSON.stringify({
+      issues: [
+        "No scene arrived: the call carried no scene JSON, so nothing was validated and " +
+          "nothing reached the editor. This is not a judgement on the scene you wrote. " +
+          (tool === "build_scene"
+            ? "Call create_scenes again with the complete scene JSON as `scenes`, an array of scene objects."
+            : "Call update_scene again with the complete scene JSON as `scene`, a single scene object."),
+      ],
+      ok: false,
+    });
+  }
   const payload: JsonObject = { scenes };
   if (tool === "modify_scene" && scenes.length > 0) {
     const first = scenes[0];
@@ -1286,9 +1333,10 @@ async function saveSceneToAccount(
   ctx: ToolContext,
   args: JsonObject,
 ): Promise<string> {
-  const explicit = Array.isArray(args.scenes) ? (args.scenes as unknown[]) : null;
+  const explicit =
+    args.scenes === undefined ? null : coerceDeliveredScenes(args.scenes);
   const scenes =
-    explicit ??
+    (explicit && explicit.length > 0 ? explicit : null) ??
     ctx.deliveredScenes ??
     (ctx.currentScene ? [ctx.currentScene] : null);
   if (!scenes || scenes.length === 0) {
@@ -1740,7 +1788,7 @@ export async function executeTool(
             "There is no current scene in this chat. Use create_scenes to build a new one, or ask the user to open a scene.",
         });
       }
-      return deliverScenes(ctx, args.scene ? [args.scene] : [], "modify_scene", undefined, {
+      return deliverScenes(ctx, args.scene ?? args.scenes, "modify_scene", undefined, {
         rewrite: args.rewrite === true,
       });
     }

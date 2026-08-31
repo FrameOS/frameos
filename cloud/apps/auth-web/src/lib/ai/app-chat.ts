@@ -14,6 +14,7 @@
 // only applies what arrives through write_app_files.
 
 import { streamResponse, type ResponsesToolDefinition } from "./openai";
+import { parseToolArguments } from "./tool-args";
 
 export const maxAppSourceChars = 120_000;
 export const maxAppFiles = 40;
@@ -183,15 +184,13 @@ export async function runAppChat(input: {
     return { reply: result.outputText.trim() || "Done.", tool: "ask_about_app" };
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(call.arguments);
-  } catch {
-    parsed = undefined;
-  }
-  const files = readAppSources(
-    parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>).files : undefined,
-  );
+  // App sources are JS, and a model writing JS into a JSON argument is the
+  // common way a call comes back with raw newlines in it. parseToolArguments
+  // repairs that where it safely can; where it cannot, `files` stays empty and
+  // the reply below says the edit did not happen.
+  const parsedArgs = parseToolArguments(call.name, call.arguments);
+  const parsed = "args" in parsedArgs ? parsedArgs.args : undefined;
+  const files = readAppSources(parsed?.files);
   if (!files) {
     // The model meant to edit and produced nothing applicable. Say so rather
     // than reporting a successful edit the editor never received.
@@ -203,10 +202,7 @@ export async function runAppChat(input: {
     };
   }
   const reply =
-    (parsed && typeof parsed === "object"
-      ? String((parsed as Record<string, unknown>).reply ?? "")
-      : ""
-    ).trim() ||
+    (parsed?.reply === undefined ? "" : String(parsed.reply)).trim() ||
     result.outputText.trim() ||
     "Updated app files.";
   return { files, reply, tool: "edit_app" };
