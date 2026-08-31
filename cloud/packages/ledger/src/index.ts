@@ -26,6 +26,7 @@ export {
   checkEventsPostedOnce,
   checkImmutabilityTriggers,
   checkLedgerIntegrity,
+  checkMeteringCompleteness,
   checkReversalsMirror,
   type LedgerIntegrityOptions,
   type LedgerIntegrityViolation,
@@ -38,18 +39,75 @@ export {
   type PostEventOptions,
 } from "./kernel";
 export {
+  postUsageRecord,
+  recordAiUsage,
+  sweepUnpostedUsage,
+  type AiUsageInput,
+  type AiUsageRecord,
+  type CredentialSource,
+  type RecordAiUsageOptions,
+  type RecordAiUsageResult,
+  type SweepResult,
+} from "./metering";
+export {
   dollarsToMicros,
   formatMicros,
   microsPerDollar,
   parseMicros,
 } from "./money";
 export {
+  applyMarginMicros,
+  divideRoundHalfUp,
+  fallbackModelPrice,
+  fallbackModelPrices,
+  priceUsage,
+  providerCostMicros,
+  resolveModelPrice,
+  splitProviderUsage,
+  unknownModelPrice,
+  type ModelPrice,
+  type PricedUsage,
+  type TokenUsage,
+} from "./pricing";
+export {
+  createAccountGroup,
+  customerStatement,
+  dailySummary,
+  listAccountGroups,
+  listJournalEntries,
+  setAccountGroup,
+  trialBalance,
+  type CustomerStatement,
+  type CustomerStatementLine,
+  type DailySummary,
+  type JournalEntry,
+  type JournalFilter,
+  type JournalPosting,
+  type LedgerAccountGroup,
+  type TrialBalance,
+  type TrialBalanceRow,
+} from "./reports";
+export {
+  aiUsageEventType,
+  aiUsageRule,
   manualJournalEventType,
   manualJournalRule,
   postingRules,
+  reclassificationEventType,
+  reclassificationRule,
   reversalEventType,
   reversalRule,
 } from "./rules";
+export {
+  billingSettingKeys,
+  defaultBillingSettings,
+  readBillingSettings,
+  readRawBillingSettings,
+  writeBillingSetting,
+  type BillingSettingKey,
+  type BillingSettings,
+  type MeteringMode,
+} from "./settings";
 export {
   LedgerError,
   type EntryDraft,

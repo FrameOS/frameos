@@ -207,6 +207,32 @@ It also reports the opposite problem — a referenced key that is **not** in the
 store, i.e. a row pointing at bytes that are gone. That line should never
 appear.
 
+### The nightly accounting job
+
+`ops/accounting/frameos-cloud-accounting.timer` runs
+`scripts/accounting-nightly.sh` at 04:20, which curls
+`POST /api/admin/billing/nightly`. Two things happen: AI usage records whose
+ledger entries never landed are re-posted (idempotent by turn id, so a night
+that already posted is a no-op), and every ledger invariant runs — each
+violation is `reportError`ed and the run exits non-zero.
+
+Install with `cloud/ops/accounting/install.sh`. The one manual step is the
+token: create a personal API token as a superadmin at `/account/api-tokens`
+and put it in `/etc/frameos-cloud/accounting.env` as
+`ACCOUNTING_API_TOKEN`. Optionally set `ACCOUNTING_HEALTHCHECKS_URL` for the
+same dead-man pattern the backup and uptime jobs use.
+
+**A violation is an alert, not something to fix by hand from the psql
+prompt.** The ledger is append-only in the database — `UPDATE` and `DELETE`
+on `ledger_entries`, `ledger_postings` and `financial_events` raise — and
+that is deliberate: a wrong entry is corrected with a reversing entry from
+`/admin/billing`, never edited. Start at `/admin/billing`, which runs the
+same checks live and drills from any number into the entries behind it.
+
+The daily line to grep for is `billing.nightly` (revenue, COGS, margin,
+customer liability, sweep counts, violation count). A *missing* line is
+itself the signal — the job did not run.
+
 ## Data Subject Requests
 
 Most of this is self-serve and needs no operator at all — which is the point,

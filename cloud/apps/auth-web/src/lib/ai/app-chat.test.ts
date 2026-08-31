@@ -81,6 +81,8 @@ describe("runAppChat", () => {
     expect(result).toEqual({
       reply: "It renders the temperature.",
       tool: "ask_about_app",
+      // The counts the route meters the call with; this stub reports none.
+      usage: { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0 },
     });
   });
 

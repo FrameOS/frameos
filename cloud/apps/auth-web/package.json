@@ -29,6 +29,7 @@
   "dependencies": {
     "@frameos-cloud/auth-client": "workspace:*",
     "@frameos-cloud/db": "workspace:*",
+    "@frameos-cloud/ledger": "workspace:*",
     "@frameos-cloud/mcp": "workspace:*",
     "@frameos-cloud/scene-convert": "workspace:*",
     "@simplewebauthn/browser": "^13.3.0",

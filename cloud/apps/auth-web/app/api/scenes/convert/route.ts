@@ -15,6 +15,7 @@ import { appCatalog, jsTypeDeclarations } from "../../../../src/lib/ai/context";
 import { lintScenes, type LintIssue } from "../../../../src/lib/ai/scene-lint";
 import { validateScenePayload } from "../../../../src/lib/ai/scene-utils";
 import { captureSceneConversion } from "../../../../src/lib/ai/telemetry";
+import { meterAiUsage, type CredentialSource } from "../../../../src/lib/billing";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import { jsonError } from "../../../../src/lib/device-flow";
 import { hasDatabaseUrl } from "../../../../src/lib/env";
@@ -99,6 +100,7 @@ export async function POST(request: NextRequest) {
   let model = DEFAULT_CONVERT_MODEL;
   let reasoningEffort: string | undefined;
   let distinctId = "anonymous";
+  let accountId: string | null = null;
   if (!dryRun) {
     const requestKey = typeof body.openaiApiKey === "string" ? body.openaiApiKey.trim() : "";
     if (requestKey) {
@@ -114,6 +116,7 @@ export async function POST(request: NextRequest) {
     const session = csrfResponse(request) ? undefined : await readSession();
     if (session?.accountId) {
       distinctId = session.accountId;
+      accountId = session.accountId;
       if (!apiKey && hasDatabaseUrl()) {
         const credentials = await resolveAiCredentials(createDb(), session.accountId);
         if (credentials?.source === "account") {
@@ -224,6 +227,27 @@ export async function POST(request: NextRequest) {
     }),
     { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 },
   );
+  const modelCalls = reports.reduce((n, report) => n + report.modelCalls, 0);
+  if (modelCalls > 0) {
+    // The request id is the turn: one conversion, however many scenes and
+    // model calls it took. A caller who sent their own key pays the provider
+    // directly, exactly like an account key does, so both meter as "account"
+    // and cost us nothing; only the platform's own key is our bill. Today
+    // that is `shared` — Phase 3's per-address budgets become real billing
+    // for a signed-in caller, and this is the measurement that says what it
+    // would have come to.
+    const credentialSource: CredentialSource =
+      keySource === "shared" ? "shared" : "account";
+    await meterAiUsage({
+      accountId,
+      credentialSource,
+      model: reports.find((report) => report.model)?.model ?? model,
+      rounds: modelCalls,
+      surface: "scene_convert",
+      turnId: requestId,
+      usage,
+    });
+  }
   const output = rewrapScenes(input, converted, shape);
   return NextResponse.json(
     {
@@ -233,7 +257,7 @@ export async function POST(request: NextRequest) {
       lint,
       render,
       model: {
-        calls: reports.reduce((n, report) => n + report.modelCalls, 0),
+        calls: modelCalls,
         name: port ? (reports.find((report) => report.model)?.model ?? model) : null,
         source: keySource,
         usage,

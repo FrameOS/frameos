@@ -1,14 +1,27 @@
 import type { PostingRuleRegistry } from "../types";
+import { aiUsageEventType, aiUsageRule } from "./ai-usage";
 import { manualJournalEventType, manualJournalRule } from "./manual-journal";
+import {
+  reclassificationEventType,
+  reclassificationRule,
+} from "./reclassification";
 import { reversalEventType, reversalRule } from "./reversal";
 
 // Event type → the rule that knows what it means. Product code emits facts;
 // this table is the whole of the translation into accounting, and adding a
-// recipe (ai_usage, credit_purchase, psp_fee) is adding a line here.
+// recipe (credit_purchase, psp_fee, subscription_charge) is adding a line
+// here.
 export const postingRules: PostingRuleRegistry = {
+  [aiUsageEventType]: aiUsageRule,
   [manualJournalEventType]: manualJournalRule,
+  [reclassificationEventType]: reclassificationRule,
   [reversalEventType]: reversalRule,
 };
 
+export { aiUsageEventType, aiUsageRule } from "./ai-usage";
 export { manualJournalEventType, manualJournalRule } from "./manual-journal";
+export {
+  reclassificationEventType,
+  reclassificationRule,
+} from "./reclassification";
 export { reversalEventType, reversalRule } from "./reversal";

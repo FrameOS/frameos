@@ -10,6 +10,7 @@ import { jsonError } from "./device-flow";
 import { logWarn } from "./log";
 import { getScenesBaseUrl } from "./env";
 import { moderateStoreContent } from "./moderation";
+import { meterAiUsage } from "./billing";
 import { classifyStoreScene } from "./store-classify";
 import {
   detectImageContentType,
@@ -230,6 +231,20 @@ export async function publishStoreScene(
         existingTags: tags,
         name,
       });
+  if (classified) {
+    // The classifier runs on the operator's key: our cost, the publisher's
+    // benefit, nobody's charge. Metered all the same — an unmetered model
+    // call is spend the books cannot explain.
+    await meterAiUsage({
+      accountId,
+      credentialSource: "shared",
+      model: classified.model,
+      rounds: 1,
+      surface: "store_classify",
+      turnId: crypto.randomUUID(),
+      usage: classified.usage,
+    });
+  }
   const listing: SceneListing = {
     category: category ?? classified?.category ?? null,
     description,

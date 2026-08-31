@@ -29,7 +29,7 @@ async function postPurchase(accountId: string, dollars = 10) {
       description: "Prepaid credit purchase",
       legs: [
         {
-          accountCode: systemAccountCodes.pspStripe,
+          accountCode: systemAccountCodes.psp,
           amountMicros: dollarsToMicros(dollars).toString(),
           direction: "debit",
         },
@@ -79,14 +79,14 @@ describe("ledger integrity", () => {
       .where(
         eq(
           ledgerBalances.ledgerAccountId,
-          await accountIdFor(systemAccountCodes.pspStripe),
+          await accountIdFor(systemAccountCodes.psp),
         ),
       );
 
     const violations = await checkLedgerIntegrity(db);
     expect(violations).toHaveLength(1);
     expect(violations[0]?.check).toBe("balance_cache");
-    expect(violations[0]?.detail).toContain(systemAccountCodes.pspStripe);
+    expect(violations[0]?.detail).toContain(systemAccountCodes.psp);
   });
 
   // Postings written by anything but the kernel are exactly what these
