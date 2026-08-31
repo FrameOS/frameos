@@ -101,14 +101,10 @@ export async function postSceneConversion(
  * rest of the editor's one-off notices). Returns the converted scene, or
  * null when nothing should be applied. Shared by frameLogic and the
  * embedded editor's embedFrameLogic so both report the same way.
- *
- * `asCopy` only changes the wording: the caller decides whether the result
- * replaces the scene in place (unsaved) or is kept as a new scene beside it.
  */
 export async function convertSceneWithFeedback(
   scene: FrameScene,
-  request: (scene: FrameScene) => Promise<SceneConversionResult>,
-  asCopy = false
+  request: (scene: FrameScene) => Promise<SceneConversionResult>
 ): Promise<FrameScene | null> {
   const result = await request(scene)
   const lines = describeConversion(result.report)
@@ -119,11 +115,9 @@ export async function convertSceneWithFeedback(
     return null
   }
   window.alert(
-    `Converted "${scene.name || 'scene'}" to an interpreted scene.${lines.length ? `\n\n${lines.join('\n')}` : ''}\n\n${
-      asCopy
-        ? 'Keeping it as a copy — this scene is left exactly as it is.'
-        : 'It is not saved yet — check it, then save or deploy.'
-    }`
+    `Converted "${scene.name || 'scene'}" to an interpreted scene.${
+      lines.length ? `\n\n${lines.join('\n')}` : ''
+    }\n\nIt is not saved yet — check it, then save or deploy.`
   )
   return result.scene
 }

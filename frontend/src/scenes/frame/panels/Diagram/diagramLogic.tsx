@@ -681,11 +681,7 @@ export interface diagramLogicActions {
     preserveSceneIds: boolean
     template: Partial<TemplateType>
   } // frameLogic
-  convertSceneToInterpreted: (
-    sceneId: string,
-    asCopy?: boolean | undefined
-  ) => {
-    asCopy: boolean
+  convertSceneToInterpreted: (sceneId: string) => {
     sceneId: string
   } // frameLogic
   setFrameFormValues: (values: DeepPartial<FrameType>) => {

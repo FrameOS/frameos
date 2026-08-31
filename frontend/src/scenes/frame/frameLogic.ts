@@ -1489,24 +1489,6 @@ function normalizeFrameForSubmit(frame: Partial<FrameType>): Partial<FrameType> 
   return normalizedFrame.mode === 'buildroot' ? { ...normalizedFrame, assets_path: '/srv/assets' } : normalizedFrame
 }
 
-/**
- * The name for a one-click converted copy: "<scene> (interpreted)", numbered
- * if that is already taken, so converting twice does not make two scenes the
- * scene list cannot tell apart.
- */
-function interpretedCopyName(name: string | undefined, scenes: FrameScene[]): string {
-  const base = `${name || 'Scene'} (interpreted)`
-  const taken = new Set(scenes.map((scene) => scene.name))
-  if (!taken.has(base)) {
-    return base
-  }
-  let counter = 2
-  while (taken.has(`${base} ${counter}`)) {
-    counter += 1
-  }
-  return `${base} ${counter}`
-}
-
 function getCurrentFrameForm(frame: FrameType | null | undefined, frameForm: Partial<FrameType>): Partial<FrameType> {
   return Object.keys(frameForm ?? {}).length > 0 ? frameForm : frame ? sanitizeFrame(frame) : frameForm
 }
@@ -1938,11 +1920,7 @@ export interface frameLogicActions {
   clearNextAction: () => {
     value: true
   }
-  convertSceneToInterpreted: (
-    sceneId: string,
-    asCopy?: boolean
-  ) => {
-    asCopy: boolean
+  convertSceneToInterpreted: (sceneId: string) => {
     sceneId: string
   }
   createBlankScene: (
@@ -2237,7 +2215,7 @@ export const frameLogic = kea<frameLogicType>([
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
     // The Nim → interpreted converter, applied to the editor's unsaved copy of
     // the scene; the result replaces it in the form (utils/sceneConvert.ts).
-    convertSceneToInterpreted: (sceneId: string, asCopy: boolean = false) => ({ sceneId, asCopy }),
+    convertSceneToInterpreted: (sceneId: string) => ({ sceneId }),
     sceneConversionFinished: (sceneId: string, ok: boolean) => ({ sceneId, ok }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
@@ -2528,59 +2506,31 @@ export const frameLogic = kea<frameLogicType>([
     ],
   }),
   listeners(({ asyncActions, actions, values, props }) => ({
-    convertSceneToInterpreted: async ({ sceneId, asCopy }) => {
+    convertSceneToInterpreted: async ({ sceneId }) => {
+      // getCurrentFrameForm, not frameForm: the tag offers this from surfaces
+      // (the frames home, a dashboard tile) where the form was never touched
+      // and would find no scene at all.
       const scene = getCurrentFrameForm(values.frame, values.frameForm).scenes?.find((s) => s.id === sceneId)
       if (!scene) {
         actions.sceneConversionFinished(sceneId, false)
         return
       }
-      const converted = await convertSceneWithFeedback(scene, (s) => requestSceneConversion(props.frameId, s), asCopy)
+      const converted = await convertSceneWithFeedback(scene, (s) => requestSceneConversion(props.frameId, s))
       if (!converted) {
         actions.sceneConversionFinished(sceneId, false)
         return
       }
-      if (asCopy) {
-        // One click, nothing lost: the legacy scene stays exactly as it is
-        // (still assigned, still the active one if it was), and the
-        // converted version is saved next to it as a new scene.
-        const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
-        const scenes = frameForm.scenes ?? []
-        const copyId = uuidv4()
-        const copy: FrameScene = {
-          ...converted,
-          id: copyId,
-          name: interpretedCopyName(scene.name, scenes),
-          default: false,
-        }
-        const nextScenes = [...scenes, copy]
-        actions.setFrameFormValues({ scenes: nextScenes })
-        try {
-          await saveFrameForm({ ...frameForm, scenes: nextScenes }, props.frameId, values.nextAction)
-        } catch (error) {
-          actions.sceneConversionFinished(sceneId, false)
-          window.alert(
-            `The converted copy could not be saved: ${
-              error instanceof Error ? error.message : String(error)
-            }\n\nIt is still here as an unsaved scene — save the frame to keep it.`
-          )
-          return
-        }
-        framesModel.actions.loadFrame(props.frameId)
-        // The copy renders the same picture as the original, so it should
-        // not sit at "no snapshot" next to its twin (as in duplicateScene).
-        await assignSceneImages(
-          props.frameId,
-          [copyId],
-          { sourceSceneId: sceneId },
-          { label: 'snapshot', ignoreMissingSource: true }
-        )
-        actions.sceneConversionFinished(sceneId, true)
-        router.actions.push(urls.scenes(props.frameId, copyId))
-        return
-      }
       // In place and unsaved: the diagram, apps and settings follow the
-      // form, and Save or Deploy is the user's call.
-      actions.updateScene(sceneId, converted)
+      // form, and Save or Deploy is the user's call. The converted scene
+      // REPLACES the old one rather than merging into it — the converter
+      // returns the whole scene, and a merge would leave behind whatever it
+      // dropped (a ported app's Nim sources, say).
+      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+      actions.setFrameFormValues({
+        scenes: (frameForm.scenes ?? []).map((s) =>
+          s.id === sceneId ? sanitizeScene({ ...converted, id: sceneId }, frameForm) : s
+        ),
+      })
       actions.sceneConversionFinished(sceneId, true)
     },
     resetUnsavedChanges: () => {

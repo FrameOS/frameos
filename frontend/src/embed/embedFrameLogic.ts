@@ -1,6 +1,5 @@
 import { MakeLogicType, actions, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { forms } from 'kea-forms'
-import { v4 as uuidv4 } from 'uuid'
 import { FrameScene, FrameType, FrameId } from '../types'
 import { frameFormSceneErrors } from '../scenes/frame/frameFormSceneErrors'
 import { convertSceneWithFeedback, postSceneConversion, type SceneConversionResult } from '../utils/sceneConvert'
@@ -78,11 +77,7 @@ export interface embedFrameLogicActions {
     openDrawer: boolean | undefined
     template: any
   }
-  convertSceneToInterpreted: (
-    sceneId: string,
-    asCopy?: boolean
-  ) => {
-    asCopy: boolean
+  convertSceneToInterpreted: (sceneId: string) => {
     sceneId: string
   }
   initEmbedFrame: (frame: Partial<FrameType>) => {
@@ -182,10 +177,8 @@ export const embedFrameLogic = kea<embedFrameLogicType>([
     sendEvent: (event: string, payload?: Record<string, any>) => ({ event, payload }),
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
     // The Nim → interpreted converter on the editor's copy of the scene
-    // (same contract as frameLogic: in place, unsaved — or, with asCopy, as
-    // a new scene beside the original; there is nothing to save here, the
-    // edit streams out through embedBridge either way).
-    convertSceneToInterpreted: (sceneId: string, asCopy: boolean = false) => ({ sceneId, asCopy }),
+    // (same contract as frameLogic: in place, unsaved).
+    convertSceneToInterpreted: (sceneId: string) => ({ sceneId }),
     sceneConversionFinished: (sceneId: string, ok: boolean) => ({ sceneId, ok }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({
       sceneId,
@@ -308,27 +301,16 @@ export const embedFrameLogic = kea<embedFrameLogicType>([
         console.error(`Node ${nodeId} not found in scene ${sceneId}`)
       }
     },
-    convertSceneToInterpreted: async ({ sceneId, asCopy }: { sceneId: string; asCopy: boolean }) => {
+    convertSceneToInterpreted: async ({ sceneId }: { sceneId: string }) => {
       const scenes: FrameScene[] = values.frameForm.scenes ?? values.frame?.scenes ?? []
       const scene = scenes.find((s) => s.id === sceneId)
       if (!scene) {
         actions.sceneConversionFinished(sceneId, false)
         return
       }
-      const converted = await convertSceneWithFeedback(scene, embedBridge.convertScene ?? defaultConvertScene, asCopy)
+      const converted = await convertSceneWithFeedback(scene, embedBridge.convertScene ?? defaultConvertScene)
       if (!converted) {
         actions.sceneConversionFinished(sceneId, false)
-        return
-      }
-      if (asCopy) {
-        const copyId = uuidv4()
-        const taken = new Set(scenes.map((s) => s.name))
-        let name = `${scene.name || 'Scene'} (interpreted)`
-        for (let counter = 2; taken.has(name); counter += 1) {
-          name = `${scene.name || 'Scene'} (interpreted) ${counter}`
-        }
-        actions.updateScene(copyId, { ...converted, id: copyId, name, default: false })
-        actions.sceneConversionFinished(sceneId, true)
         return
       }
       actions.updateScene(sceneId, converted)

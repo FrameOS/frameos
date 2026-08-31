@@ -10,7 +10,7 @@ interface CompiledSceneTagProps {
   /** Frame-level use: how many of the frame's scenes are compiled. */
   count?: number
   /**
-   * Given both, the tooltip offers the one-click conversion for that scene.
+   * Given both, the tooltip offers the one-click conversion of that scene.
    * Frame-level tags (a count, a card that stands for the whole frame) leave
    * them out and the tooltip just points at the hosted converter.
    */
@@ -21,11 +21,11 @@ interface CompiledSceneTagProps {
 }
 
 /**
- * The conversion the tag offers: convert this scene and keep the result as a
- * new scene, leaving the legacy one exactly as it is. Its own component so
- * the hooks only run where a scene is actually in view.
+ * The conversion the tag offers: the same in-place, unsaved conversion the
+ * diagram's Nim nodes offer (frameLogic). Its own component so the hooks only
+ * run where a scene is actually in view.
  */
-function ConvertToCopyButton({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element {
+function ConvertSceneButton({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element {
   const { convertingSceneId } = useValues(frameLogic({ frameId }))
   const { convertSceneToInterpreted } = useActions(frameLogic({ frameId }))
   const converting = convertingSceneId === sceneId
@@ -35,11 +35,11 @@ function ConvertToCopyButton({ frameId, sceneId }: { frameId: FrameId; sceneId: 
       disabled={converting}
       onClick={(event) => {
         event.stopPropagation()
-        convertSceneToInterpreted(sceneId, true)
+        convertSceneToInterpreted(sceneId)
       }}
       className="mt-2 mb-1 block w-full rounded bg-amber-950 px-2 py-1 text-xs font-semibold text-amber-50 hover:bg-amber-800 disabled:opacity-60"
     >
-      {converting ? 'Converting…' : 'Convert to an interpreted copy'}
+      {converting ? 'Converting…' : 'Convert this scene'}
     </button>
   )
 }
@@ -66,9 +66,9 @@ export function CompiledSceneTag({ className, count, frameId, sceneId, label }: 
           needs a whole-frame recompilation on every deploy.
           {convertible ? (
             <>
-              <ConvertToCopyButton frameId={frameId} sceneId={sceneId} />
-              Ports the scene's Nim to JavaScript and saves that as a new scene — this one is left exactly as it is. Or
-              convert it by hand at{' '}
+              <ConvertSceneButton frameId={frameId} sceneId={sceneId} />
+              Ports the scene's Nim to JavaScript in place. Nothing is saved until you do — check the result, then save
+              or deploy. Or convert it by hand at{' '}
             </>
           ) : (
             <> Convert it to an interpreted scene at </>
