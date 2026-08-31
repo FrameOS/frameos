@@ -18,7 +18,35 @@ function classifyModel() {
 export type SceneClassification = {
   category: string;
   tags: string[];
+  // What the call burned, so the caller can meter it. The classifier runs on
+  // the operator's key, so this is our cost and nobody's charge — but an
+  // unmetered model call is spend nothing in the books can explain.
+  usage: ClassificationUsage;
+  model: string;
 };
+
+export type ClassificationUsage = {
+  cachedInputTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+};
+
+// The chat-completions shape, which is not the Responses one the chat uses:
+// prompt_tokens / completion_tokens, with the cached part in
+// prompt_tokens_details.
+function usageFrom(raw: unknown): ClassificationUsage {
+  const usage = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const details = usage.prompt_tokens_details as Record<string, unknown> | undefined;
+  const num = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+  return {
+    cachedInputTokens: num(details?.cached_tokens),
+    inputTokens: num(usage.prompt_tokens),
+    outputTokens: num(usage.completion_tokens),
+    reasoningTokens: 0,
+  };
+}
 
 export function isClassificationConfigured() {
   return Boolean(process.env.OPENAI_API_KEY?.trim());
@@ -113,6 +141,7 @@ export async function classifyStoreScene(input: {
       }
       const payload = (await response.json()) as {
         choices?: { message?: { content?: string } }[];
+        usage?: unknown;
       };
       const content = payload.choices?.[0]?.message?.content;
       if (!content) {
@@ -132,9 +161,11 @@ export async function classifyStoreScene(input: {
       }
       return {
         category,
+        model: classifyModel(),
         tags: sanitizeTagCandidates(parsed.tags).filter(
           (tag) => tag !== category,
         ),
+        usage: usageFrom(payload.usage),
       };
     } catch {
       // fall through to retry / undefined

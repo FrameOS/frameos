@@ -259,6 +259,9 @@ importers:
       '@frameos-cloud/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@frameos-cloud/ledger':
+        specifier: workspace:*
+        version: link:../../packages/ledger
       '@frameos-cloud/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp

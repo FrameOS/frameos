@@ -3,8 +3,19 @@
 import { Save } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { applyAiScenes, blankScene, prepareForEditor, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
+import {
+  clearNewSceneDraft,
+  draftIdFromHash,
+  hashForDraftId,
+  newSceneDraftId,
+  readNewSceneDraft,
+  writeNewSceneDraft,
+  type NewSceneDraft,
+  type NewSceneDraftChat,
+} from "../lib/new-scene-draft";
 import { takeHandoffScenes } from "../lib/scene-handoff";
 import { singlePanelFor, type SceneEditorPanelName, type SceneEditorPanels } from "../lib/scene-views";
+import type { RenderedScenes } from "./SceneAiPanel";
 import {
   readDocumentTheme,
   SceneEditorBackButton,
@@ -104,7 +115,27 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
   const panelsRef = useRef(panels);
   panelsRef.current = panels;
   selectedSceneIdRef.current = selectedSceneId;
+  // The scenes the editor started from (its own echo of them, normalised);
+  // anything else means there is something to keep.
+  const initialJsonRef = useRef("");
+  const baselinePendingRef = useRef(false);
+  const presetIndexRef = useRef(presetIndex);
+  presetIndexRef.current = presetIndex;
+  const chatRef = useRef<NewSceneDraftChat | null>(null);
   useEditorStylesheet(true);
+
+  // The draft this page is keeping in the browser: its id rides in the URL
+  // hash, so a reload lands back on the same one. Read at the first render,
+  // not in an effect — the AI panel decides on mount whether to run
+  // ?prompt=, and a restored draft must not run it a second time. (None of
+  // it reaches the DOM, so the server render still matches.)
+  const openedRef = useRef<{ draftId: string | null; draft: NewSceneDraft | null } | null>(null);
+  if (openedRef.current === null) {
+    const draftId = typeof window === "undefined" ? null : draftIdFromHash(window.location.hash);
+    openedRef.current = { draft: draftId ? readNewSceneDraft(draftId) : null, draftId };
+  }
+  const restored = openedRef.current.draft;
+  const draftIdRef = useRef<string | null>(openedRef.current.draftId);
 
   function publishScenes(next: SceneJson[]) {
     latestScenesRef.current = next;
@@ -120,6 +151,61 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
     setSceneName(sceneNameFor(latestScenesRef.current, nextSceneId));
   }
 
+  // Nothing here is saved server-side until "Save to my scenes", so every
+  // change lands in localStorage (debounced) and the URL hash names it: a
+  // reload, a Back, a closed-and-reopened tab picks the scene up where it
+  // was instead of starting over. Cleared once the scene is saved.
+  const draftTimerRef = useRef<number | null>(null);
+  function persistDraftNow() {
+    draftTimerRef.current = null;
+    const latest = latestScenesRef.current;
+    if (!latest || latest.length === 0) {
+      return;
+    }
+    const chat = chatRef.current;
+    if (JSON.stringify(latest) === initialJsonRef.current && !chat) {
+      // Still the blank scene the page opened with: nothing to keep, and no
+      // reason to stamp a draft id into the URL.
+      return;
+    }
+    let draftId = draftIdRef.current;
+    if (!draftId) {
+      draftId = newSceneDraftId();
+      draftIdRef.current = draftId;
+      window.history.replaceState(window.history.state, "", hashForDraftId(draftId));
+    }
+    writeNewSceneDraft(draftId, {
+      chat,
+      presetIndex: presetIndexRef.current,
+      savedAt: new Date().toISOString(),
+      scenes: latest,
+      selectedSceneId: selectedSceneIdRef.current,
+    });
+  }
+  function scheduleDraftPersist() {
+    if (draftTimerRef.current !== null) {
+      window.clearTimeout(draftTimerRef.current);
+    }
+    draftTimerRef.current = window.setTimeout(persistDraftNow, 500);
+  }
+  // A change still inside the debounce window must not be lost to the very
+  // reload the draft guards against: flushed when the page goes away.
+  const persistDraftNowRef = useRef(persistDraftNow);
+  persistDraftNowRef.current = persistDraftNow;
+  useEffect(() => {
+    const flush = () => {
+      if (draftTimerRef.current !== null) {
+        window.clearTimeout(draftTimerRef.current);
+        persistDraftNowRef.current();
+      }
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
+
   // The bar's pencil: rename the selected scene through the mounted editor
   // (in place, echoed back through onScenesChanged) — or, before it has
   // mounted, by handing it the renamed scenes to start from.
@@ -131,7 +217,10 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
     }
     const next = current.map((scene) => (scene.id === targetId ? { ...scene, name } : scene));
     publishScenes(next);
+    // Whatever the editor echoes back now is an edit, not the baseline.
+    baselinePendingRef.current = false;
     setTouched(true);
+    scheduleDraftPersist();
     if (editorApiRef.current) {
       editorApiRef.current.renameScene(targetId, name);
     } else {
@@ -141,6 +230,24 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
 
   useEffect(() => {
     setTheme(readDocumentTheme());
+    // A draft from this browser (#d=…) reopens as it was — scenes, selected
+    // scene, display size — and counts as unsaved work from the start.
+    if (restored) {
+      chatRef.current = restored.chat;
+      if (newScenePresets[restored.presetIndex]) {
+        setPresetIndex(restored.presetIndex);
+      }
+      latestScenesRef.current = restored.scenes;
+      setPreviewScenes(restored.scenes);
+      setScenes(restored.scenes);
+      selectScene(
+        restored.scenes.some((scene) => scene.id === restored.selectedSceneId)
+          ? restored.selectedSceneId
+          : (restored.scenes[0]?.id ?? null),
+      );
+      setTouched(true);
+      return;
+    }
     // Handed-off scenes (the converter's "Open in the editor") open as they
     // are, unsaved, with the preview beside the editor instead of the AI
     // panel: the user came to look at a result, not to describe a new one.
@@ -156,6 +263,10 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
     if (handedOff) {
       setPanels({ ai: false, editor: true, info: false, preview: true });
       setTouched(true);
+    } else {
+      // The editor answers with its own normalised copy of the blank scene;
+      // that echo, not this array, is what "still untouched" compares to.
+      baselinePendingRef.current = true;
     }
     latestScenesRef.current = initial;
     setPreviewScenes(initial);
@@ -199,13 +310,24 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
 
   const preset = newScenePresets[presetIndex] ?? newScenePresets[0];
 
+  // What the AI panel opens with. A restored draft brings its conversation
+  // back instead — and the ?prompt= that started that conversation must not
+  // run (and be paid for) a second time.
+  const aiEntry: { initialChat?: NewSceneDraftChat; initialPrompt?: string | undefined } = restored
+    ? restored.chat
+      ? { initialChat: restored.chat }
+      : {}
+    : { initialPrompt };
+
   function applyAiEvent(event: AiScenesEvent): string | null {
     const result = applyAiScenes(latestScenesRef.current ?? scenes ?? [], event, selectedSceneIdRef.current);
+    baselinePendingRef.current = false;
     selectedSceneIdRef.current = result.selectedSceneId;
     publishScenes(result.scenes);
     setScenes(result.scenes);
     setSelectedSceneId(result.selectedSceneId);
     setTouched(true);
+    scheduleDraftPersist();
     return result.selectedSceneId;
   }
 
@@ -231,8 +353,26 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
     setPanels(next);
   }
 
+  // "Show in preview" under a frame the AI rendered: open the Preview panel
+  // on exactly those scenes (the editor may have moved on since), and put
+  // the editor on the scene that was drawn.
+  function showRenderInPreview({ sceneId, scenes: rendered }: RenderedScenes) {
+    setPreviewScenes(rendered);
+    if (rendered.some((scene) => scene.id === sceneId)) {
+      selectScene(sceneId);
+    }
+    if (narrow) {
+      setActivePanel("preview");
+    }
+    if (!panels.preview) {
+      setPanels({ ...panels, preview: true });
+    }
+  }
+
   function changePreset(index: number) {
     setPresetIndex(index);
+    presetIndexRef.current = index;
+    scheduleDraftPersist();
     // The editor only re-reads its width/height when the scenes identity
     // changes; hand it the same scenes in a fresh array.
     setScenes((current) => (current ? [...current] : current));
@@ -263,6 +403,15 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
         const code = payload.error ?? String(response.status);
         setError(createErrors[code] ?? `Saving failed: ${code}`);
         return;
+      }
+      // Saved: the browser copy has done its job.
+      if (draftTimerRef.current !== null) {
+        window.clearTimeout(draftTimerRef.current);
+        draftTimerRef.current = null;
+      }
+      if (draftIdRef.current) {
+        clearNewSceneDraft(draftIdRef.current);
+        draftIdRef.current = null;
       }
       window.location.href = `/s/${payload.scene.slug}`;
     } catch {
@@ -326,12 +475,16 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
       </SceneEditorBar>
       <SceneEditorWorkspace
         ai={{
+          ...aiEntry,
           getScenes: () => latestScenesRef.current,
-          initialPrompt,
           loginUrl,
           mode: "new",
+          onChatChange: (chat) => {
+            chatRef.current = chat;
+            scheduleDraftPersist();
+          },
           onScenes: applyAiEvent,
-          saveHint: "“Save to my scenes” creates a private scene in your account from what is in the editor.",
+          onShowInPreview: showRenderInPreview,
           settingsUrl,
           signedIn: true,
         }}
@@ -342,7 +495,15 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
           if (hookRef.current) {
             hookRef.current.version += 1;
           }
+          const json = JSON.stringify(nextScenes);
+          if (baselinePendingRef.current) {
+            // The editor's first echo of the blank scene it was handed.
+            baselinePendingRef.current = false;
+            initialJsonRef.current = json;
+            return;
+          }
           setTouched(true);
+          scheduleDraftPersist();
         }}
         // The editor reports null before its first init; nothing to follow.
         onSelectedSceneChanged={(nextSceneId) => {

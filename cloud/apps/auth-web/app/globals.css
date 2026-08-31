@@ -3499,6 +3499,32 @@ a.stat-tile:hover {
   background: #ffffff;
 }
 
+/* The frame and, under it, the way into the Preview panel. */
+.ai-panel__render-block {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+/* An action, styled as the link people look for under the picture. */
+.ai-panel__render-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-panel__render-open:hover {
+  color: var(--primary-strong);
+  text-decoration: underline;
+}
+
 .ai-panel__render-link:hover .ai-panel__render {
   border-color: color-mix(in srgb, var(--primary), var(--line) 45%);
 }
@@ -3676,6 +3702,7 @@ html.theme-dark .ai-panel__render {
   color: var(--text);
   font: inherit;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
   transition:
     transform 160ms ease,

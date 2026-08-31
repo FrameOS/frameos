@@ -43,7 +43,7 @@ import {
   type SceneEditorPanelName,
   type SceneEditorPanels,
 } from "../lib/scene-views";
-import { SceneAiPanel, type SceneAiPanelProps } from "./SceneAiPanel";
+import { SceneAiPanel, type RenderedScenes, type SceneAiPanelProps } from "./SceneAiPanel";
 import {
   SceneInfoPanel,
   type SceneInfoData,
@@ -1797,6 +1797,25 @@ export function SceneEditorModal({
     router.push(backUrl);
   }
 
+  // "Show in preview" under a frame the AI rendered: open the Preview panel
+  // on exactly those scenes (the editor may have moved on since), and put
+  // the editor on the scene that was drawn.
+  function showRenderInPreview({ sceneId: renderedSceneId, scenes: rendered }: RenderedScenes) {
+    setPreviewScenes(rendered);
+    if (rendered.some((scene) => scene.id === renderedSceneId)) {
+      selectScene(renderedSceneId);
+    }
+    if (!panels) {
+      return;
+    }
+    if (narrow) {
+      setActivePanel("preview");
+    }
+    if (!panels.preview) {
+      commitPanels(constrainPanels({ ...panels, preview: true }, available));
+    }
+  }
+
   // The AI delivered scenes: apply them with a NEW array identity (the
   // editor re-initialises on identity change), select the right one, and
   // let Save / Fork take it from there.
@@ -2137,6 +2156,7 @@ export function SceneEditorModal({
           mode: "existing",
           onListing: applyAiListing,
           onScenes: applyAiEvent,
+          ...(canPreview ? { onShowInPreview: showRenderInPreview } : {}),
           saveHint,
           settingsUrl,
           signedIn,

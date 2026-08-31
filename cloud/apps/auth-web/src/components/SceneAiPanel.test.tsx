@@ -293,3 +293,94 @@ describe("SceneAiPanel", () => {
     expect(screen.getByRole("button", { name: "Change the colour scheme" })).toBeDefined();
   });
 });
+
+describe("SceneAiPanel rendered frames", () => {
+  it("offers Show in preview under the frame, with the scenes it was drawn from", async () => {
+    const delivered = [{ id: "scene-1", name: "Counter", nodes: [{ id: "n1" }], edges: [] }];
+    fetchMock.mockResolvedValueOnce(
+      ndjson([
+        { chatId: "chat-1", type: "chat" },
+        { scenes: delivered, tool: "modify_scene", type: "scenes" },
+        { reply: "Made the title bigger.", tool: "modify_scene", type: "done" },
+      ]),
+    );
+    const onShowInPreview = vi.fn();
+    renderPanel({ onShowInPreview });
+
+    sendPrompt("make the title text bigger");
+    const button = await screen.findByRole("button", { name: "Show in preview" });
+    // Right under the frame, in the same bubble.
+    expect(
+      button.closest(".ai-panel__render-block")?.querySelector("img"),
+    ).not.toBeNull();
+
+    fireEvent.click(button);
+    // getScenes reports what the editor holds; that is what was rendered.
+    expect(onShowInPreview).toHaveBeenCalledWith({ sceneId: "scene-1", scenes });
+  });
+
+  it("leaves the frame alone when there is no preview panel to show it in", async () => {
+    fetchMock.mockResolvedValueOnce(
+      ndjson([
+        { chatId: "chat-1", type: "chat" },
+        { scenes: [{ id: "scene-1", name: "Counter", nodes: [], edges: [] }], tool: "modify_scene", type: "scenes" },
+        { reply: "Done.", tool: "modify_scene", type: "done" },
+      ]),
+    );
+    renderPanel();
+
+    sendPrompt("make the title text bigger");
+    expect(await screen.findByRole("img", { name: "Rendered preview of the scene" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Show in preview" })).toBeNull();
+  });
+});
+
+describe("SceneAiPanel conversations", () => {
+  it("reopens a stored transcript and keeps its chat going", async () => {
+    renderPanel({
+      initialChat: {
+        chatId: "chat-9",
+        messages: [
+          { content: "show a big pineapple", role: "user" },
+          { content: "Made a bold, sunny pineapple.", role: "assistant" },
+        ],
+      },
+    });
+    expect(screen.getByText("show a big pineapple")).toBeTruthy();
+    expect(screen.getByText("Made a bold, sunny pineapple.")).toBeTruthy();
+
+    fetchMock.mockResolvedValueOnce(ndjson([{ reply: "Sure.", tool: "reply", type: "done" }]));
+    sendPrompt("make it smaller");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body.chatId).toBe("chat-9");
+    expect(body.history).toEqual([
+      { content: "show a big pineapple", role: "user" },
+      { content: "Made a bold, sunny pineapple.", role: "assistant" },
+    ]);
+  });
+
+  it("reports the settled transcript, text only, for whoever stores it", async () => {
+    fetchMock.mockResolvedValueOnce(
+      ndjson([
+        { chatId: "chat-1", type: "chat" },
+        { text: "Made a bold, sunny pineapple.", type: "delta" },
+        { reply: "Made a bold, sunny pineapple.", tool: "reply", type: "done" },
+      ]),
+    );
+    const onChatChange = vi.fn();
+    renderPanel({ onChatChange });
+    expect(onChatChange).not.toHaveBeenCalled();
+
+    sendPrompt("show a big pineapple");
+    await waitFor(() =>
+      expect(onChatChange).toHaveBeenLastCalledWith({
+        chatId: "chat-1",
+        messages: [
+          { content: "show a big pineapple", role: "user" },
+          { content: "Made a bold, sunny pineapple.", role: "assistant" },
+        ],
+      }),
+    );
+  });
+});

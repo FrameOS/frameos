@@ -48,10 +48,17 @@ describe("classifyStoreScene", () => {
       name: "Weather",
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       category: "weather",
       // "Forecast!" is slugified, and the category slug is dropped as a tag.
       tags: ["forecast", "open-meteo", "e-ink"],
+    });
+    // The counts the caller meters the call with; this stub reports none.
+    expect(result?.usage).toEqual({
+      cachedInputTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
     });
     const [, init] = fetchMock.mock.calls[0] ?? [];
     const body = JSON.parse(String(init?.body));
@@ -78,7 +85,7 @@ describe("classifyStoreScene", () => {
       completion({ category: "art", tags: ["paintings"] }),
     );
 
-    expect(await classifyStoreScene({ name: "Masterpieces" })).toEqual({
+    expect(await classifyStoreScene({ name: "Masterpieces" })).toMatchObject({
       category: "art",
       tags: ["paintings"],
     });

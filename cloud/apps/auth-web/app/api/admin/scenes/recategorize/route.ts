@@ -4,6 +4,7 @@ import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { getSuperadminContext } from "../../../../../src/lib/admin";
+import { meterAiUsage } from "../../../../../src/lib/billing";
 import { readBlob } from "../../../../../src/lib/blobs";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
@@ -121,6 +122,17 @@ export async function POST(request: NextRequest) {
       failed.push(scene.slug);
       continue;
     }
+    // Operator housekeeping on the operator's key: attributed to no
+    // customer, because no customer asked for it.
+    await meterAiUsage({
+      accountId: null,
+      credentialSource: "shared",
+      model: classified.model,
+      rounds: 1,
+      surface: "store_recategorize",
+      turnId: crypto.randomUUID(),
+      usage: classified.usage,
+    });
 
     const fillTags = scene.tags.length === 0 && classified.tags.length > 0;
     await db

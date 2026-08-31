@@ -1,0 +1,11 @@
+[Unit]
+Description=FrameOS Cloud accounting job, nightly
+
+[Timer]
+# After the backup window, before anybody reads the books in the morning.
+OnCalendar=*-*-* 04:20:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

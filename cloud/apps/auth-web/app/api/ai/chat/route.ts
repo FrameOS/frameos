@@ -12,6 +12,7 @@ import {
   historyForModel,
 } from "../../../../src/lib/ai/chat-store";
 import { resolveAiCredentials } from "../../../../src/lib/ai/api-key";
+import { meterAiUsageInBackground } from "../../../../src/lib/billing";
 import { buildInitialInput, runAgentLoop } from "../../../../src/lib/ai/loop";
 import { formatAiException, type JsonObject } from "../../../../src/lib/ai/scene-utils";
 import { captureAiGeneration, captureAiTurn } from "../../../../src/lib/ai/telemetry";
@@ -234,7 +235,7 @@ export async function POST(request: NextRequest) {
       detail: "OpenAI backend API key not set",
     });
   }
-  const { apiKey, model, reasoningEffort } = credentials;
+  const { apiKey, model, reasoningEffort, source: credentialSource } = credentials;
 
   const requestedChatId = stringOrNull(body.chatId) ?? crypto.randomUUID();
   const scenePayload = objectOrNull(body.scene);
@@ -346,6 +347,7 @@ export async function POST(request: NextRequest) {
   const scenesDelivered: { tool: string; title?: string; count: number }[] = [];
   const deliveredScenes: unknown[] = [];
   const roundToolCalls: string[] = [];
+  const toolArgErrors: string[] = [];
 
   const turnId = crypto.randomUUID();
   let roundsSeen = 0;
@@ -386,6 +388,19 @@ export async function POST(request: NextRequest) {
     id: turnId,
     onFinish: (finished, outcome, failure) => {
       const durationMs = Date.now() - finished.startedAt;
+      // Metered whatever the outcome: a turn that errored or was stopped
+      // still burned the tokens it burned, and the provider bills for them.
+      // Not awaited — onFinish runs while the turn tears down.
+      meterAiUsageInBackground({
+        accountId,
+        chatId: chat.id,
+        credentialSource,
+        model,
+        rounds: roundsSeen,
+        surface,
+        turnId: finished.id,
+        usage: usageSeen,
+      });
       captureAiTurn({
         accountId,
         chatId: chat.id,
@@ -398,6 +413,7 @@ export async function POST(request: NextRequest) {
         resumes: finished.resumes,
         rounds: roundsSeen,
         surface,
+        toolArgErrors,
         toolCalls: roundToolCalls,
         turnId: finished.id,
         usage: usageSeen,
@@ -451,6 +467,21 @@ export async function POST(request: NextRequest) {
               toolCalls: report.toolCalls,
               turnId,
               usage: report.usage,
+            });
+          },
+          onToolArgumentError: (report) => {
+            toolArgErrors.push(report.tool);
+            // The parse failure and the byte count, never the arguments
+            // themselves — enough to tell "the model wrote bad JSON" from
+            // "the model was cut off", which the tool result alone cannot.
+            logWarn("ai.chat.tool_arguments_unparsable", {
+              accountId,
+              chatId: chat.id,
+              detail: report.detail,
+              length: report.length,
+              round: report.round,
+              tool: report.tool,
+              turnId,
             });
           },
           reasoningEffort,
