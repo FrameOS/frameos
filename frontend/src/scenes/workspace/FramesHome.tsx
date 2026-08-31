@@ -1131,7 +1131,11 @@ function SceneControlPanelContent({
                 {selectedSceneIsActive ? <FrameImageOverlayControls frame={frame} sceneId={scene.id} /> : null}
                 {sceneIsCompiledForFrame(scene, frame.mode) ? (
                   <div className="absolute left-2 top-10 z-10">
-                    <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm" />
+                    <CompiledSceneTag
+                      frameId={frame.id}
+                      sceneId={scene.id}
+                      className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm"
+                    />
                   </div>
                 ) : null}
                 {!saved ? (

@@ -60,6 +60,7 @@ import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
 import { generateFrameTlsMaterial } from '../../utils/tlsCertificates'
 import { normalizeSceneApps } from '../../utils/sceneApps'
+import { sortScenesAlphabetically } from '../../utils/sortScenes'
 import {
   type ChangeDetail,
   CURRENT_FRAMEOS_REMOTE_VERSION,
@@ -2796,7 +2797,7 @@ export const frameLogic = kea<frameLogicType>([
     ],
     sortedScenes: [
       (s) => [s.scenes],
-      (scenes: frameLogicValues['scenes']): FrameScene[] => scenes.toSorted((a, b) => a.name.localeCompare(b.name)),
+      (scenes: frameLogicValues['scenes']): FrameScene[] => sortScenesAlphabetically(scenes),
     ],
     unsavedChanges: [
       (s) => [s.frame, s.frameForm],

@@ -115,14 +115,20 @@ export function WorkspaceSceneDropDown({
             onClick: () => navigator.clipboard.writeText(JSON.stringify(currentScene)),
             icon: <ClipboardDocumentIcon className="h-5 w-5" />,
           },
-          // Legacy compiled scenes only: the way off the source-build path —
-          // converts the scene in place, unsaved (frameLogic).
+          // Legacy compiled scenes only: the two ways off the source-build
+          // path — in place and unsaved, or saved as a copy that leaves this
+          // scene alone (frameLogic).
           ...(sceneIsCompiledForFrame(currentScene, frame.mode)
             ? [
                 {
                   label: 'Convert to an interpreted scene',
                   onClick: () => convertSceneToInterpreted(currentScene.id),
                   icon: <ArrowsRightLeftIcon className="h-5 w-5" />,
+                },
+                {
+                  label: 'Convert to an interpreted copy',
+                  onClick: () => convertSceneToInterpreted(currentScene.id, true),
+                  icon: <DocumentDuplicateIcon className="h-5 w-5" />,
                 },
               ]
             : []),

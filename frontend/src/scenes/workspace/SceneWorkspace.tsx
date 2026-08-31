@@ -48,6 +48,7 @@ import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
+import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
@@ -304,10 +305,20 @@ function SceneSelector({
                     selected ? 'frameos-primary-soft-active' : 'frameos-frame-row text-slate-700'
                   )}
                 >
-                  <button
-                    type="button"
+                  {/* role=button, not <button>: the legacy-compiled chip inside
+                      carries its own button (the one-click converter), and a
+                      nested <button> is invalid markup. */}
+                  <div
+                    role="button"
+                    tabIndex={0}
                     title={sceneStatusTitle || undefined}
                     onClick={() => navigateToScene(frame.id, scene.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        navigateToScene(frame.id, scene.id)
+                      }
+                    }}
                     className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                   >
                     <span className="frameos-card-media relative h-10 w-12 shrink-0 overflow-hidden rounded-lg border border-white/70 bg-slate-100 shadow-sm">
@@ -335,13 +346,16 @@ function SceneSelector({
                       <span className="frameos-muted mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-slate-400">
                         <span className="truncate">{scene.nodes?.length ?? 0} nodes</span>
                         {compiled ? (
-                          <Tag
-                            color="orange"
-                            title="Legacy compiled scene — needs a whole-frame recompilation on every deploy. Convert it to an interpreted scene at scenes.frameos.net/nim-converter."
-                            className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
-                          >
-                            legacy compiled
-                          </Tag>
+                          // The chip opens its own popover — the row's click
+                          // handler must not also navigate away under it.
+                          <span onClick={(event) => event.stopPropagation()}>
+                            <CompiledSceneTag
+                              frameId={frame.id}
+                              sceneId={scene.id}
+                              label="legacy compiled"
+                              className="shrink-0 whitespace-nowrap !px-1.5 !py-0 !text-[10px] !font-semibold normal-case"
+                            />
+                          </span>
                         ) : null}
                         {active ? (
                           <Tag
@@ -372,7 +386,7 @@ function SceneSelector({
                         ) : null}
                       </span>
                     </span>
-                  </button>
+                  </div>
                   <div className="pr-1">
                     <SceneDropDown context="scenes" sceneId={scene.id} navigation="workspace" />
                   </div>
@@ -1001,7 +1015,7 @@ function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: FrameId; sceneId
 
 function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
-  const { frame, scenes, unsavedChanges, undeployedChanges } = useValues(frameLogic(frameLogicProps))
+  const { frame, scenes, sortedScenes, unsavedChanges, undeployedChanges } = useValues(frameLogic(frameLogicProps))
   const { framesList } = useValues(framesModel)
   const { selectedSceneId, selectedSceneIdsByFrame, templateDrawerFrameId, utilityPanel } = useValues(workspaceLogic)
 
@@ -1046,7 +1060,10 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
             <SceneTree
               frame={frame}
               frames={framesList}
-              scenes={scenes}
+              // Alphabetical, not frame order: the sidebar is how you find a
+              // scene, and a new one (a converted copy, say) landing at the
+              // bottom of a long list is exactly where you do not look.
+              scenes={sortedScenes}
               selectedSceneId={resolvedSceneId}
               unsavedChanges={unsavedChanges}
               undeployedChanges={undeployedChanges}

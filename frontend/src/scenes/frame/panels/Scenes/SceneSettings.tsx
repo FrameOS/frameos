@@ -119,18 +119,29 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                     : 'Nothing in it needs the compiler any more — switch execution to Interpreted.'}
                 </div>
                 {hasCompiledOnlyContent ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      size="small"
-                      color="primary"
-                      disabled={convertingSceneId === sceneId}
-                      onClick={() => convertSceneToInterpreted(sceneId)}
-                    >
-                      {convertingSceneId === sceneId ? 'Converting…' : 'Convert to an interpreted scene'}
-                    </Button>
-                    <span className="frameos-muted text-xs">
-                      Converts in place, unsaved — check the result, then save or deploy.
-                    </span>
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        size="small"
+                        color="primary"
+                        disabled={convertingSceneId === sceneId}
+                        onClick={() => convertSceneToInterpreted(sceneId)}
+                      >
+                        {convertingSceneId === sceneId ? 'Converting…' : 'Convert to an interpreted scene'}
+                      </Button>
+                      <Button
+                        size="small"
+                        color="secondary"
+                        disabled={convertingSceneId === sceneId}
+                        onClick={() => convertSceneToInterpreted(sceneId, true)}
+                      >
+                        {convertingSceneId === sceneId ? 'Converting…' : 'Convert to a copy'}
+                      </Button>
+                    </div>
+                    <div className="frameos-muted text-xs">
+                      In place: unsaved, so check the result and then save or deploy. As a copy: the converted scene is
+                      saved next to this one, and this one is left exactly as it is.
+                    </div>
                   </div>
                 ) : null}
               </div>
