@@ -4,7 +4,9 @@ Everything left to do across the repo, in one file. It is written to be read
 cold: each section says what that part of FrameOS *is* before it says what is
 missing from it. Reference material — principles, permission scopes, threat
 models, wire protocols, measurements — lives in the linked docs; this file only
-carries the work. **When an item ships, delete it.**
+carries the work. **When an item ships, delete it.** Larger tracks keep their
+own files: architecture convergence in `docs/convergence-todo.md`, store
+content in `docs/scenes-todo.md`, the JSX widget UI in `docs/ui-todo.md`.
 
 **Compiled scenes are deprecated (2026-08-30).** No editor action produces
 new Nim, every surface that shows a compiled scene warns and points at the
