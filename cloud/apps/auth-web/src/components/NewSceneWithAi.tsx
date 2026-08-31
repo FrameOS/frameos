@@ -485,7 +485,6 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
           },
           onScenes: applyAiEvent,
           onShowInPreview: showRenderInPreview,
-          saveHint: "“Save to my scenes” creates a private scene in your account from what is in the editor.",
           settingsUrl,
           signedIn: true,
         }}
