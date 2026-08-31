@@ -70,6 +70,7 @@ export {
   type TokenUsage,
 } from "./pricing";
 export {
+  aiUsageSummary,
   createAccountGroup,
   customerStatement,
   dailySummary,
@@ -77,6 +78,7 @@ export {
   listJournalEntries,
   setAccountGroup,
   trialBalance,
+  type AiUsageSummaryRow,
   type CustomerStatement,
   type CustomerStatementLine,
   type DailySummary,

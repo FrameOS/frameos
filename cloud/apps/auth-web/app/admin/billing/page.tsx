@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createDb } from "@frameos-cloud/db";
 import {
+  aiUsageSummary,
   checkLedgerIntegrity,
   dailySummary,
   readBillingSettings,
@@ -42,14 +43,17 @@ export default async function AdminBillingPage() {
     db,
     stored.map((row) => row.updatedBy),
   );
-  const [balance, violations, summary] = await Promise.all([
+  const window = {
+    since: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+    until: new Date(),
+  };
+  const [balance, violations, summary, usage] = await Promise.all([
     trialBalance(db),
     checkLedgerIntegrity(db, { overdraftMicros: settings.overdraftMicros }),
-    dailySummary(db, {
-      since: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      until: new Date(),
-    }),
+    dailySummary(db, window),
+    aiUsageSummary(db, window),
   ]);
+  const listCostTotal = usage.reduce((sum, row) => sum + row.listCostMicros, 0n);
 
   const groups = new Map<string, TrialBalanceRow[]>();
   for (const row of balance.rows) {
@@ -106,6 +110,72 @@ export default async function AdminBillingPage() {
             </div>
           </div>
         </div>
+      </section>
+
+      <section className="section-block">
+        <h2>AI usage, 30 days</h2>
+        <p className="section-description">
+          Every metered turn, priced at the snapshot rates — whoever paid the
+          provider. Only the <code>shared</code> and <code>platform</code>
+          rows are the platform&apos;s own cost and reach the trial balance; a
+          turn on the customer&apos;s <code>account</code> key is real usage
+          that cost us nothing, because they paid OpenAI directly. This is the
+          column to reconcile against PostHog and the provider invoice.
+        </p>
+        {usage.length === 0 ? (
+          <section className="card">
+            <p>No AI usage metered in the window.</p>
+          </section>
+        ) : (
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Paid by</th>
+                  <th>Mode</th>
+                  <th style={{ textAlign: "right" }}>Turns</th>
+                  <th style={{ textAlign: "right" }}>Tokens (in / cached / out)</th>
+                  <th style={{ textAlign: "right" }}>At list prices</th>
+                  <th style={{ textAlign: "right" }}>Our cost</th>
+                  <th style={{ textAlign: "right" }}>Priced to customers</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.map((row) => (
+                  <tr key={`${row.credentialSource}:${row.meteringMode}`}>
+                    <td>
+                      {row.credentialSource === "account"
+                        ? "the customer (own key)"
+                        : row.credentialSource === "shared"
+                          ? "us (operator key)"
+                          : "us (platform key, billable)"}
+                    </td>
+                    <td>
+                      <span className="pill">{row.meteringMode}</span>
+                    </td>
+                    <td style={{ textAlign: "right" }}>{row.turns.toString()}</td>
+                    <td className="copy" style={{ textAlign: "right" }}>
+                      {row.inputTokens.toString()} / {row.cachedInputTokens.toString()} /{" "}
+                      {row.outputTokens.toString()}
+                    </td>
+                    <td style={{ textAlign: "right" }}>
+                      {formatMicrosUsd(row.listCostMicros)}
+                    </td>
+                    <td style={{ textAlign: "right" }}>{formatMicrosUsd(row.costMicros)}</td>
+                    <td style={{ textAlign: "right" }}>{formatMicrosUsd(row.priceMicros)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th colSpan={4}>Total at list prices</th>
+                  <th style={{ textAlign: "right" }}>{formatMicrosUsd(listCostTotal)}</th>
+                  <th colSpan={2} />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="section-block">

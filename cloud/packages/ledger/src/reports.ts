@@ -496,3 +496,76 @@ export async function dailySummary(
     until: window.until,
   };
 }
+
+export interface AiUsageSummaryRow {
+  cachedInputTokens: bigint;
+  // What we actually paid the provider (zero for turns on the customer's own
+  // key) and what customers were priced (zero until Phase 3).
+  costMicros: bigint;
+  credentialSource: string;
+  inputTokens: bigint;
+  // What the tokens cost at the snapshot prices, WHOEVER paid the provider.
+  // Recomputed from the stored counts and the pricing snapshot rather than
+  // read from cost_micros, because cost_micros deliberately says "what it
+  // cost us" and is zero for own-key turns — and the whole point of this
+  // number is that it is not.
+  listCostMicros: bigint;
+  meteringMode: string;
+  outputTokens: bigint;
+  priceMicros: bigint;
+  turns: bigint;
+}
+
+// Metered AI usage over a window, by whose key paid for it. This is the view
+// that reconciles the books against the outside world: PostHog's
+// $ai_generation sums and the provider's invoice should both match the
+// list-cost column, while the trial balance only ever shows the `shared` and
+// `platform` share — a turn on the customer's own key is real usage and zero
+// platform cost, and a page showing only the latter reads as if metering
+// missed the former.
+export async function aiUsageSummary(
+  db: LedgerExecutor,
+  window: { since: Date; until: Date },
+): Promise<AiUsageSummaryRow[]> {
+  const rows = await db.execute<{
+    cached_input_tokens: string;
+    cost_micros: string;
+    credential_source: string;
+    input_tokens: string;
+    list_cost_micros: string;
+    metering_mode: string;
+    output_tokens: string;
+    price_micros: string;
+    turns: string;
+  }>(sql`
+    select credential_source,
+           metering_mode,
+           count(*)::text as turns,
+           coalesce(sum(input_tokens), 0)::text as input_tokens,
+           coalesce(sum(cached_input_tokens), 0)::text as cached_input_tokens,
+           coalesce(sum(output_tokens), 0)::text as output_tokens,
+           coalesce(sum(cost_micros), 0)::text as cost_micros,
+           coalesce(sum(price_micros), 0)::text as price_micros,
+           coalesce(sum(round(
+             (input_tokens::numeric * coalesce(pricing->>'inputMicrosPerMtok', '0')::numeric
+              + cached_input_tokens::numeric * coalesce(pricing->>'cachedInputMicrosPerMtok', '0')::numeric
+              + output_tokens::numeric * coalesce(pricing->>'outputMicrosPerMtok', '0')::numeric)
+             / 1000000)), 0)::text as list_cost_micros
+      from ai_usage_records
+     where occurred_at >= ${window.since.toISOString()}::timestamptz
+       and occurred_at < ${window.until.toISOString()}::timestamptz
+     group by credential_source, metering_mode
+     order by credential_source, metering_mode
+  `);
+  return rows.map((row) => ({
+    cachedInputTokens: BigInt(row.cached_input_tokens),
+    costMicros: BigInt(row.cost_micros),
+    credentialSource: row.credential_source,
+    inputTokens: BigInt(row.input_tokens),
+    listCostMicros: BigInt(row.list_cost_micros),
+    meteringMode: row.metering_mode,
+    outputTokens: BigInt(row.output_tokens),
+    priceMicros: BigInt(row.price_micros),
+    turns: BigInt(row.turns),
+  }));
+}

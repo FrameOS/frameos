@@ -3,6 +3,7 @@ import { aiUsageRecords, ledgerEntries } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   accountBalanceMicros,
+  aiUsageSummary,
   billingSettingKeys,
   checkLedgerIntegrity,
   checkMeteringCompleteness,
@@ -300,6 +301,26 @@ describe("AI metering", () => {
     await recordAiUsage(db, turn(accountId, uuid(13)));
     await recordAiUsage(db, turn(accountId, uuid(14), "shared"));
     await recordAiUsage(db, turn(accountId, uuid(15), "account"));
+
+    // The usage rollup prices every turn at the snapshot rates whoever paid:
+    // the own-key turn cost US nothing, but it is not free usage, and a page
+    // showing only our cost would read as if metering had missed it.
+    const summary = await aiUsageSummary(db, {
+      since: new Date(Date.now() - 60 * 60 * 1000),
+      until: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    expect(
+      summary.map((row) => ({
+        cost: row.costMicros,
+        list: row.listCostMicros,
+        price: row.priceMicros,
+        source: row.credentialSource,
+      })),
+    ).toEqual([
+      { cost: 0n, list: 442_400n, price: 0n, source: "account" },
+      { cost: 442_400n, list: 442_400n, price: 575_120n, source: "platform" },
+      { cost: 442_400n, list: 442_400n, price: 0n, source: "shared" },
+    ]);
 
     expect(
       await checkLedgerIntegrity(db, {
