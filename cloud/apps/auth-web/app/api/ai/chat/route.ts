@@ -347,6 +347,7 @@ export async function POST(request: NextRequest) {
   const scenesDelivered: { tool: string; title?: string; count: number }[] = [];
   const deliveredScenes: unknown[] = [];
   const roundToolCalls: string[] = [];
+  const toolArgErrors: string[] = [];
 
   const turnId = crypto.randomUUID();
   let roundsSeen = 0;
@@ -412,6 +413,7 @@ export async function POST(request: NextRequest) {
         resumes: finished.resumes,
         rounds: roundsSeen,
         surface,
+        toolArgErrors,
         toolCalls: roundToolCalls,
         turnId: finished.id,
         usage: usageSeen,
@@ -465,6 +467,21 @@ export async function POST(request: NextRequest) {
               toolCalls: report.toolCalls,
               turnId,
               usage: report.usage,
+            });
+          },
+          onToolArgumentError: (report) => {
+            toolArgErrors.push(report.tool);
+            // The parse failure and the byte count, never the arguments
+            // themselves — enough to tell "the model wrote bad JSON" from
+            // "the model was cut off", which the tool result alone cannot.
+            logWarn("ai.chat.tool_arguments_unparsable", {
+              accountId,
+              chatId: chat.id,
+              detail: report.detail,
+              length: report.length,
+              round: report.round,
+              tool: report.tool,
+              turnId,
             });
           },
           reasoningEffort,

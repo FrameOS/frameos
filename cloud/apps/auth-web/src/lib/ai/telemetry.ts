@@ -93,6 +93,9 @@ export type AiTurnRecord = {
   durationMs: number;
   rounds: number;
   toolCalls: string[];
+  // Tools whose arguments never parsed as JSON, so they never ran. A silent
+  // one of these is what makes a model apologise for a scene it did send.
+  toolArgErrors: string[];
   deliveredTool: string;
   usage: ResponseUsage;
   // How often the browser's stream dropped and how often it came back.
@@ -118,6 +121,7 @@ export function captureAiTurn(record: AiTurnRecord) {
     resumes: record.resumes,
     rounds: record.rounds,
     surface: record.surface,
+    tool_arg_errors: record.toolArgErrors,
     tool_calls: record.toolCalls,
     turn_id: record.turnId,
   });
