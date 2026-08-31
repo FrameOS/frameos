@@ -483,7 +483,11 @@ migration-replay global setup auth-web and the hub use (own database,
   `{name, version, build(event): EntryDraft[]}`. Bump `version` on any
   logic change; old entries keep their `rule_version`.
 - `src/chart.ts` — chart definitions + `ensureLedgerAccount(db, code, ...)`
-  lazy creation (customer subaccounts on first touch).
+  lazy creation (customer subaccounts on first touch). Codes canonicalize
+  before lookup — the customer uuid is lowercased — because a leg naming the
+  same customer in another casing would otherwise mint a second account and
+  split their balance. Any new code shape must define its canonical form in
+  `resolveAccountCode`.
 - `src/pricing.ts` — price lookup (`ai_model_prices` effective-dated, with a
   hardcoded fallback seeded from `evals/compare-models.ts` values), margin
   from `billing_settings`, cost/price computation with the single-rounding
@@ -645,6 +649,8 @@ in §8.
 - [ ] Admin `/admin/billing`: trial balance by group, journal browser
       (entry → postings → event drill-down), account statement per
       customer, manual journal form (superadmin, audited, reason required).
+      The statement view is what forces §8.10: the ledger holds account
+      uuids and no name, so decide where the label comes from first.
 - [ ] Group management UI (create/re-map — mechanism 1 of §1.3) +
       `reclassification` recipe (mechanism 2).
 - [ ] `billing_settings` admin form (margin, overdraft), audited.
@@ -677,6 +683,17 @@ in §8.
 - [ ] Storage/other metered products: new event types + recipes only.
 - [ ] Multi-currency: EUR chart siblings, FX gain/loss account.
 - [ ] Refund self-service UI on the §3.4 recipes.
+- [ ] **Accounting in its own Postgres database** (stated intention,
+      2026-08-31). §2.1 already pays the entry price: no ledger table
+      references anything outside the ledger, and a schema test fails if one
+      ever does, so the tables can be dumped and restored elsewhere as a
+      unit. What still has to be answered when it happens: the kernel takes
+      a `LedgerExecutor` so callers can post inside *their* transaction
+      (§4.1) — two databases means that guarantee is gone for the
+      purchase/webhook paths, and they need either an outbox in the product
+      database or an accepted window where the payment row and its entry can
+      disagree. Nothing about the schema changes; the atomicity story does.
+      Decide it before splitting, not after.
 
 ---
 
@@ -727,3 +744,17 @@ in §8.
    reason §2.1 gives — carry the frame uuid unreferenced, and snapshot the
    frame name into the event payload, because a uuid whose row is gone is a
    discriminator without a label.
+10. **Do events carry an identity snapshot?** — open, and it gets sharper the
+    further §2.1 is taken. A uuid is a discriminator, not a label: nothing in
+    the ledger can say *whose* books these are without joining `accounts`,
+    and that join is impossible after erasure and impossible by construction
+    once accounting has its own database (§7 Phase 6). Phase 4's "account
+    statement per customer" therefore needs a name from somewhere. Options:
+    write `{email, displayName}` into the event payload at post time (the
+    books read standalone, at the cost of holding identifying data past
+    erasure — which is exactly what §2.1 avoids); resolve names live and show
+    the bare uuid when the lookup fails (honest, ugly for support); or a
+    separate customer-label table the ledger owns, populated at first touch
+    and cleared on erasure (a third thing to keep in sync). Lean: resolve
+    live, degrade to uuid, and revisit if support hates it — but decide
+    before Phase 4 builds the statement view, not during.
