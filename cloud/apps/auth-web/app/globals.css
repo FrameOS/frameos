@@ -3676,6 +3676,7 @@ html.theme-dark .ai-panel__render {
   color: var(--text);
   font: inherit;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
   transition:
     transform 160ms ease,

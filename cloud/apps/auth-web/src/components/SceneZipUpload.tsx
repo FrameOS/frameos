@@ -13,6 +13,7 @@ const uploadErrors: Record<string, string> = {
   invalid_template_json: "template.json is not valid",
   invalid_upload: "Choose a FrameOS scene ZIP",
   invalid_zip: "That file is not a valid ZIP",
+  login_required: "Sign in to upload a scene",
   missing_scenes: "The ZIP has no scenes",
   missing_template_json: "The ZIP has no template.json",
   moderation_unavailable: "Moderation service unavailable — try again later",

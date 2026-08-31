@@ -11,14 +11,20 @@ type ActionKey = "ai" | "zip";
 // frameos.net uses for its setup choices: a tinted gradient with a grain
 // overlay, a soft glow, the icon ghosted large in the corner and again as
 // a small badge. Pressing a card opens its form right below the row;
-// pressing it again folds it away. The store front only offers the AI
-// card (the ZIP upload lives on "My scenes").
+// pressing it again folds it away.
+//
+// A file cannot survive a login round-trip the way the AI prompt does, so on
+// the signed-out store front the ZIP card is a link to sign in first
+// (uploadLoginHref) and the upload form itself waits on the other side.
 export function StoreActionCards({
   aiAction,
   showUpload,
+  uploadLoginHref,
 }: {
   aiAction: string;
   showUpload: boolean;
+  /** Signed out: the ZIP card links here (login) instead of opening a form. */
+  uploadLoginHref?: string | undefined;
 }) {
   const [open, setOpen] = useState<ActionKey | null>(null);
   const toggle = (key: ActionKey) => setOpen((current) => (current === key ? null : key));
@@ -38,9 +44,10 @@ export function StoreActionCards({
         {showUpload ? (
           <ActionCard
             description="Upload a scene export. New uploads are private; uploading the same scene name again creates a new version."
+            href={uploadLoginHref}
             icon={<Upload aria-hidden />}
             onClick={() => toggle("zip")}
-            pressed={open === "zip"}
+            pressed={open === "zip" && !uploadLoginHref}
             testId="action-card-zip"
             tint="teal"
             title="Upload a scene ZIP"
@@ -52,7 +59,7 @@ export function StoreActionCards({
           <CreateSceneWithAiBox action={aiAction} autoFocus compact />
         </div>
       ) : null}
-      {open === "zip" && showUpload ? (
+      {open === "zip" && showUpload && !uploadLoginHref ? (
         <div className="action-cards__form" data-testid="action-card-form">
           <SceneZipUpload compact />
         </div>
@@ -63,6 +70,7 @@ export function StoreActionCards({
 
 function ActionCard({
   description,
+  href,
   icon,
   onClick,
   pressed,
@@ -71,6 +79,8 @@ function ActionCard({
   title,
 }: {
   description: string;
+  /** When set the card navigates instead of toggling a form open. */
+  href?: string | undefined;
   icon: ReactNode;
   onClick: () => void;
   pressed: boolean;
@@ -78,15 +88,9 @@ function ActionCard({
   tint: "gold" | "teal";
   title: string;
 }) {
-  return (
-    <button
-      aria-expanded={pressed}
-      aria-pressed={pressed}
-      className={`action-card action-card--${tint}`}
-      data-testid={testId}
-      onClick={onClick}
-      type="button"
-    >
+  const className = `action-card action-card--${tint}`;
+  const inside = (
+    <>
       <span aria-hidden className="action-card__grain" />
       <span aria-hidden className="action-card__glow" />
       <span aria-hidden className="action-card__ghost">
@@ -97,6 +101,27 @@ function ActionCard({
         <span className="action-card__title">{title}</span>
         <span className="action-card__description">{description}</span>
       </span>
+    </>
+  );
+
+  if (href) {
+    return (
+      <a className={className} data-testid={testId} href={href}>
+        {inside}
+      </a>
+    );
+  }
+
+  return (
+    <button
+      aria-expanded={pressed}
+      aria-pressed={pressed}
+      className={className}
+      data-testid={testId}
+      onClick={onClick}
+      type="button"
+    >
+      {inside}
     </button>
   );
 }
