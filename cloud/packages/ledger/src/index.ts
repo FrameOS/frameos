@@ -39,8 +39,10 @@ export {
   type PostEventOptions,
 } from "./kernel";
 export {
+  absorbedSurfaces,
   postUsageRecord,
   recordAiUsage,
+  surfaceIsAbsorbed,
   sweepUnpostedUsage,
   type AiUsageInput,
   type AiUsageRecord,

@@ -151,6 +151,40 @@ describe("AI metering", () => {
     expect(await accountBalanceMicros(db, customerCreditsCode(accountId))).toBe(0n);
   });
 
+  // Scene conversion is our migration off the legacy compiled path, run for
+  // free on purpose: even on the key that bills everything else, it is a cost
+  // line and nobody's charge.
+  it("books an absorbed surface as a pure cost on the billable key", async () => {
+    await goLive();
+    const accountId = await createAccount();
+    const result = await recordAiUsage(db, {
+      ...turn(accountId, uuid(16), "platform"),
+      surface: "scene_convert",
+    });
+
+    expect(result.entries.map((entry) => entry.entryType)).toEqual(["ai_usage_cost"]);
+    expect(result.record.costMicros).toBe(442_400n);
+    expect(result.record.priceMicros).toBe(0n);
+    expect(await accountBalanceMicros(db, systemAccountCodes.cogsOpenai)).toBe(442_400n);
+    expect(await accountBalanceMicros(db, systemAccountCodes.accruedOpenai)).toBe(442_400n);
+    expect(await accountBalanceMicros(db, systemAccountCodes.revenueAiUsage)).toBe(0n);
+    expect(await accountBalanceMicros(db, customerCreditsCode(accountId))).toBe(0n);
+
+    // And it is legible as its own line: what the giveaway costs is a number
+    // on the books, not a subtraction somebody has to know to do.
+    await recordAiUsage(db, turn(accountId, uuid(17), "platform"));
+    const summary = await aiUsageSummary(db, {
+      since: new Date(Date.now() - 60 * 60 * 1000),
+      until: new Date(Date.now() + 60 * 60 * 1000),
+    });
+    expect(
+      summary.map((row) => ({ cost: row.costMicros, price: row.priceMicros, surface: row.surface })),
+    ).toEqual([
+      { cost: 442_400n, price: 575_120n, surface: "scene_chat" },
+      { cost: 442_400n, price: 0n, surface: "scene_convert" },
+    ]);
+  });
+
   // onFinish firing twice for one turn — a resumed turn that finished after
   // its relay had already been told so — must not meter it twice.
   it("meters one turn once however many times it is reported", async () => {
