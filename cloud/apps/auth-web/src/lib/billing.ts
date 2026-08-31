@@ -73,9 +73,27 @@ export async function meterAiUsage(input: MeterAiUsageInput): Promise<void> {
   }
 }
 
+// Every background write still in flight. Nothing in a request path waits on
+// these; the set exists so that teardown has a point where the writes are
+// known to be over — an integration test that truncates the database while a
+// metering insert is still open deadlocks against it.
+const pendingMetering = new Set<Promise<void>>();
+
 // Fire-and-forget form, for the places that must not await: a chat turn's
 // onFinish is a synchronous observer the turn runner calls while tearing
 // down, and blocking it would hold the turn open.
 export function meterAiUsageInBackground(input: MeterAiUsageInput): void {
-  void meterAiUsage(input);
+  const pending = meterAiUsage(input).finally(() => {
+    pendingMetering.delete(pending);
+  });
+  pendingMetering.add(pending);
+}
+
+// Settle every background metering write. Loops because one write can be
+// queued while another is being awaited. meterAiUsage never rejects, so this
+// never does either.
+export async function waitForPendingAiMetering(): Promise<void> {
+  while (pendingMetering.size > 0) {
+    await Promise.all([...pendingMetering]);
+  }
 }

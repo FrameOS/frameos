@@ -23,6 +23,7 @@ import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSession, sessionCookieName } from "../../lib/session";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
+import { waitForPendingAiMetering } from "../../lib/billing";
 import { executeTool, type ListingEvent, type ScenesEvent, type ToolContext } from "../../lib/ai/tools";
 import type { ResponseInputItem } from "../../lib/ai/openai";
 
@@ -74,6 +75,7 @@ let userCounter = 0;
 let sceneCounter = 0;
 
 afterAll(async () => {
+  await waitForPendingAiMetering();
   await db.$client.end({ timeout: 5 });
 });
 
@@ -81,6 +83,9 @@ beforeEach(async () => {
   resetRateLimitForTests();
   cookieJar.clear();
   capturedInputs.length = 0;
+  // A finished turn meters itself in the background, after the response has
+  // been read: truncating while that insert is open deadlocks against it.
+  await waitForPendingAiMetering();
   const tables = await db.execute<{ tablename: string }>(
     sql`select tablename from pg_tables where schemaname = 'public'`,
   );
