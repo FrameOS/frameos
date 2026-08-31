@@ -200,6 +200,12 @@ jobs:
         env:
           TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_frame_hub_test
 
+      # Accounting: the posting kernel, the append-only triggers and the
+      # ledger invariants, against real Postgres (same story, own database).
+      - run: pnpm --filter @frameos-cloud/ledger test:integration
+        env:
+          TEST_DATABASE_URL: postgres://frameos_cloud:frameos_cloud@127.0.0.1:5432/frameos_cloud_ledger_test
+
   # Every merge to main that verify approves goes to production, unattended.
   # The pieces that make that safe are on the server, not here: migrations run
   # before anything is flipped, the new release has to answer /healthz on the
