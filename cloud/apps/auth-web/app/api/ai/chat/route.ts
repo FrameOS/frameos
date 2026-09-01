@@ -506,7 +506,9 @@ export async function POST(request: NextRequest) {
                   });
                   turn.controller.abort(
                     new Error(
-                      "This account reached its daily AI limit during this reply. Today's limit resets at midnight UTC.",
+                      budget.allowance === "shared"
+                        ? "This reply used up today's free AI allowance on the shared key. Nothing is billed for it; it resets at midnight UTC."
+                        : "This account reached its daily AI limit during this reply. Today's limit resets at midnight UTC.",
                     ),
                   );
                 }

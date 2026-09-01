@@ -8,6 +8,7 @@ import {
   accounts,
   auditEvents,
   createDb,
+  subscriptions,
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import {
@@ -24,6 +25,8 @@ import {
   writeBillingSetting,
 } from "@frameos-cloud/ledger";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { PUT as putCustomerAi } from "../../../app/api/admin/billing/customers/[accountId]/ai/route";
+import { PUT as putCustomerPlan } from "../../../app/api/admin/billing/customers/[accountId]/plan/route";
 import { POST as postGroups } from "../../../app/api/admin/billing/groups/route";
 import { POST as postJournal } from "../../../app/api/admin/billing/journal/route";
 import { POST as postNightly } from "../../../app/api/admin/billing/nightly/route";
@@ -113,6 +116,16 @@ function postJson(path: string, body: Record<string, unknown>) {
     method: "POST",
   });
 }
+
+function putJson(path: string, body: Record<string, unknown>) {
+  return new NextRequest(new URL(path, baseUrl), {
+    body: JSON.stringify(body),
+    headers: { "content-type": "application/json", origin: baseUrl },
+    method: "PUT",
+  });
+}
+
+const params = (accountId: string) => ({ params: Promise.resolve({ accountId }) });
 
 async function signIn({ superadmin = false } = {}) {
   userCounter += 1;
@@ -479,5 +492,136 @@ describe("admin billing routes", () => {
     expect(
       await accountBalanceMicros(db, customerReceivableCode(customer)),
     ).toBe(575_120n);
+  });
+
+  // §9.3's operator surfaces: the AI switch (§5.1's "superadmin side") and
+  // putting an account on a plan by hand. Both want a reason and both leave
+  // an audit row, because "why is AI off for me" and "why am I on Studio"
+  // are support questions with a findable answer.
+  it("lets an operator throw a customer's AI switch, with a reason on record", async () => {
+    const customer = await signIn();
+    const admin = await signIn({ superadmin: true });
+
+    const unreasoned = await putCustomerAi(
+      putJson(`/api/admin/billing/customers/${customer}/ai`, { enabled: false }),
+      params(customer),
+    );
+    expect(unreasoned.status).toBe(400);
+    expect((await unreasoned.json()).error).toBe("reason_required");
+
+    const off = await putCustomerAi(
+      putJson(`/api/admin/billing/customers/${customer}/ai`, {
+        enabled: false,
+        reason: "Invoice 30 days overdue",
+      }),
+      params(customer),
+    );
+    expect(off.status).toBe(200);
+    const [row] = await db
+      .select({ aiDisabledAt: accounts.aiDisabledAt })
+      .from(accounts)
+      .where(eq(accounts.id, customer));
+    expect(row?.aiDisabledAt).not.toBeNull();
+
+    const on = await putCustomerAi(
+      putJson(`/api/admin/billing/customers/${customer}/ai`, { enabled: true, reason: "Paid" }),
+      params(customer),
+    );
+    expect(on.status).toBe(200);
+    const [back] = await db
+      .select({ aiDisabledAt: accounts.aiDisabledAt })
+      .from(accounts)
+      .where(eq(accounts.id, customer));
+    expect(back?.aiDisabledAt).toBeNull();
+
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.accountId, customer))
+      .orderBy(auditEvents.createdAt);
+    expect(audit.map((event) => event.eventType)).toEqual([
+      "admin.ai_disabled",
+      "admin.ai_enabled",
+    ]);
+    expect(audit[0]?.metadata).toMatchObject({ reason: "Invoice 30 days overdue" });
+    expect(audit[0]?.actor).toMatchObject({ accountId: admin, kind: "superadmin" });
+
+    const missing = await putCustomerAi(
+      putJson(`/api/admin/billing/customers/00000000-0000-4000-8000-000000000000/ai`, {
+        enabled: false,
+        reason: "x",
+      }),
+      params("00000000-0000-4000-8000-000000000000"),
+    );
+    expect(missing.status).toBe(404);
+  });
+
+  it("lets an operator move a customer between plans, self-serve gate or not", async () => {
+    const customer = await signIn();
+    await signIn({ superadmin: true });
+    await db.execute(sql`
+      INSERT INTO billing_plans ("code", "name", "price_micros", "margin_basis_points", "sort_order", "public") VALUES
+        ('payg', 'Pay as you go', 0, 10000, 0, true),
+        ('maker', 'Maker', 1990000, 5000, 10, true),
+        ('partner', 'Partner', 990000, 2000, 20, false)
+      ON CONFLICT ("code") DO NOTHING
+    `);
+
+    const unknown = await putCustomerPlan(
+      putJson(`/api/admin/billing/customers/${customer}/plan`, { plan: "gold", reason: "x" }),
+      params(customer),
+    );
+    expect(unknown.status).toBe(404);
+
+    // A non-public plan is exactly what this route is for.
+    const partner = await putCustomerPlan(
+      putJson(`/api/admin/billing/customers/${customer}/plan`, {
+        plan: "partner",
+        reason: "Negotiated: hardware partner",
+      }),
+      params(customer),
+    );
+    expect(partner.status).toBe(200);
+    expect(await partner.json()).toMatchObject({ plan: { code: "partner" }, subscribed: true });
+    // The first period is charged the moment the plan is set.
+    expect(await accountBalanceMicros(db, customerReceivableCode(customer))).toBe(990_000n);
+
+    // Back to free: runs to the end of the period charged for by default.
+    const free = await putCustomerPlan(
+      putJson(`/api/admin/billing/customers/${customer}/plan`, { plan: "payg", reason: "Left" }),
+      params(customer),
+    );
+    expect(free.status).toBe(200);
+    const [row] = await db
+      .select({ status: subscriptions.status })
+      .from(subscriptions)
+      .where(eq(subscriptions.accountId, customer));
+    expect(row?.status).toBe("canceling");
+
+    const audit = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.accountId, customer))
+      .orderBy(auditEvents.createdAt);
+    expect(audit.map((event) => event.eventType)).toEqual([
+      "admin.plan_changed",
+      "admin.plan_canceled",
+    ]);
+    expect(audit[0]?.metadata).toMatchObject({ from: null, plan: "partner", reason: "Negotiated: hardware partner" });
+    expect(audit[1]?.metadata).toMatchObject({ from: "partner", immediately: false, plan: "payg" });
+  });
+
+  it("keeps the operator surfaces superadmin only", async () => {
+    const customer = await signIn();
+    const ai = await putCustomerAi(
+      putJson(`/api/admin/billing/customers/${customer}/ai`, { enabled: false, reason: "x" }),
+      params(customer),
+    );
+    expect(ai.status).toBe(403);
+    const plan = await putCustomerPlan(
+      putJson(`/api/admin/billing/customers/${customer}/plan`, { plan: "maker", reason: "x" }),
+      params(customer),
+    );
+    expect(plan.status).toBe(403);
   });
 });

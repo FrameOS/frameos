@@ -14,17 +14,26 @@ set -euo pipefail
 # tsx, which is why this cannot simply be a Node script either — the same
 # reason object-store-sweep.sh is bash.)
 #
-# Authentication is a personal API token belonging to a superadmin, which is
-# an auth mechanism that already exists rather than a new shared secret:
+# Authentication is an API token on a superadmin account, which is an auth
+# mechanism that already exists rather than a new shared secret:
 #
 #   /etc/frameos-cloud/accounting.env
 #     ACCOUNTING_API_TOKEN=fc_api_...
 #     ACCOUNTING_URL=https://cloud.frameos.net/api/admin/billing/nightly
-#     ACCOUNTING_HEALTHCHECKS_URL=https://hc-ping.com/...   # optional
+#     ACCOUNTING_HEALTHCHECKS_URL=https://hc-ping.com/...   # or "none"
 #
-# Create the token at /account/api-tokens as a superadmin. Run nightly via
+# Whose token: a dedicated service account, minted by
+# scripts/accounting-service-account.sh, NOT a person's. A personal token
+# dies with the person — revoked on their way out, or expired with their
+# account — and the job with it, silently (§9.3). Run nightly via
 # ops/accounting/frameos-cloud-accounting.timer; see
 # cloud/docs/operational-runbooks.md.
+#
+# The healthchecks ping is REQUIRED. This is a dead-man job: the failure
+# mode that matters is not a loud error but a night that never ran, and
+# only an external check that expects a ping can notice that. A deployment
+# that genuinely has nowhere to ping says so with ACCOUNTING_HEALTHCHECKS_URL=none
+# rather than by leaving it unset.
 #
 # Exit status is the alert: 0 when the sweep worked and every invariant
 # holds, 1 when anything needs a human. Violations are NOT fixed
@@ -33,7 +42,10 @@ set -euo pipefail
 
 url="${ACCOUNTING_URL:-http://127.0.0.1:3000/api/admin/billing/nightly}"
 token="${ACCOUNTING_API_TOKEN:?set ACCOUNTING_API_TOKEN in /etc/frameos-cloud/accounting.env}"
-ping_url="${ACCOUNTING_HEALTHCHECKS_URL:-}"
+ping_url="${ACCOUNTING_HEALTHCHECKS_URL:?set ACCOUNTING_HEALTHCHECKS_URL in /etc/frameos-cloud/accounting.env (a healthchecks.io ping URL, or "none" to opt out of the dead-man check on purpose)}"
+if [ "$ping_url" = "none" ]; then
+  ping_url=""
+fi
 
 response="$(mktemp)"
 trap 'rm -f "$response"' EXIT

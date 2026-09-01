@@ -26,7 +26,12 @@ import { storeFrameLogs } from "../../lib/frames";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { hashSecret } from "../../lib/secrets";
 import { createSession, sessionCookieName } from "../../lib/session";
-import { recordAiUsage } from "@frameos-cloud/ledger";
+import {
+  billingSettingKeys,
+  checkDailyCapRespected,
+  recordAiUsage,
+  writeBillingSetting,
+} from "@frameos-cloud/ledger";
 import { resolveAiAccess } from "../../lib/ai/api-key";
 import {
   accountUsage,
@@ -239,6 +244,51 @@ describe("the daily AI cap", () => {
     // An absorbed surface is never refused by the cap.
     const absorbed = await resolveAiAccess(db, accountId, { env, surface: "scene_convert" });
     expect(absorbed.ok).toBe(true);
+  });
+
+  // §9.3: the shared key is the operator's free tier, and its usage is our
+  // money. It gets its own cap, and the refusal says whose allowance ran
+  // out rather than showing a dollar limit on a bill the account does not
+  // owe.
+  it("caps the shared key on its own allowance, and says so", async () => {
+    const accountId = await signIn();
+    for (let n = 1; n <= 3; n += 1) {
+      await turn(accountId, n); // 1,725,360 in all
+    }
+    // Under the $10 default the shared cap falls back to: through, on the
+    // shared allowance.
+    const under = await resolveAiAccess(db, accountId, { env, surface: "scene_chat" });
+    expect(under.ok).toBe(true);
+    if (under.ok) {
+      expect(under.budget).toMatchObject({ allowance: "shared", capMicros: 10_000_000n });
+    }
+
+    // A $1.50 shared allowance: the same three turns are over it, while
+    // the $10 billable cap is untouched.
+    await writeBillingSetting(db, billingSettingKeys.sharedKeyDailyCapMicros, "1500000");
+    const over = await resolveAiAccess(db, accountId, { env, surface: "scene_chat" });
+    expect(over.ok).toBe(false);
+    if (!over.ok) {
+      expect(over.refusal).toMatchObject({
+        allowance: "shared",
+        capMicros: "1500000",
+        reason: "daily_cap_reached",
+        spentMicros: "1725360",
+      });
+      expect(over.refusal.detail).toContain("free AI allowance");
+      expect(over.refusal.detail).not.toContain("daily AI limit");
+    }
+    // The nightly check judges a shared-key day against the shared ceiling.
+    const violations = await checkDailyCapRespected(db, {
+      dailyCapMicros: 10_000_000n,
+      overdraftMicros: 0n,
+      sharedKeyDailyCapMicros: 1_500_000n,
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.detail).toContain("past the 1500000 ceiling");
+    expect(
+      await checkDailyCapRespected(db, { dailyCapMicros: 10_000_000n, overdraftMicros: 0n }),
+    ).toEqual([]);
   });
 });
 

@@ -16,6 +16,9 @@ export function aiRefusalResponse(refusal: AiRefusal) {
   }
   if (refusal.reason === "daily_cap_reached") {
     return jsonError("daily_cap_reached", 402, {
+      // "shared" when the cap was the operator's free allowance rather than
+      // the account's own credit limit: the SPA words it differently.
+      allowance: refusal.allowance,
       cap_micros: refusal.capMicros,
       detail: refusal.detail,
       reset_at: refusal.resetAt,

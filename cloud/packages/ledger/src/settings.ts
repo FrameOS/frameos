@@ -3,8 +3,9 @@ import { billingSettings } from "@frameos-cloud/db";
 import { LedgerError, type LedgerExecutor } from "./types";
 
 // The knobs that change what metering does: the margin over provider cost,
-// how far a customer may overdraw, and whether metering posts to the ledger
-// at all. Rows in `billing_settings`, editable by a superadmin at
+// the daily caps (one for billable usage, one for the operator's shared
+// key), how far a turn may overrun them, and whether metering posts to the
+// ledger at all. Rows in `billing_settings`, editable by a superadmin at
 // /admin/billing, with a code-level default for every key so a database that
 // has never been seeded still boots with sane numbers.
 //
@@ -18,6 +19,7 @@ export const billingSettingKeys = {
   aiMeteringMode: "ai_metering_mode",
   paygDailyCapMicros: "payg_daily_cap_micros",
   paygOverdraftMicros: "payg_overdraft_micros",
+  sharedKeyDailyCapMicros: "shared_key_daily_cap_micros",
 } as const;
 
 export type BillingSettingKey =
@@ -35,6 +37,13 @@ export interface BillingSettings {
   marginBasisPoints: number;
   meteringMode: MeteringMode;
   overdraftMicros: bigint;
+  // The ceiling for an account running on the operator's SHARED key
+  // (§5.3, §9.3). That usage is our money, not theirs — a free-tier user
+  // hitting `dailyCapMicros` was being "limited" on a bill they do not owe,
+  // and shown a dollar figure with "nothing is billed" under it. Its own,
+  // typically smaller, number; falls back to the daily cap when unset so a
+  // deployment that never touches it behaves exactly as before.
+  sharedKeyDailyCapMicros: bigint;
 }
 
 export const defaultBillingSettings: BillingSettings = {
@@ -42,6 +51,7 @@ export const defaultBillingSettings: BillingSettings = {
   marginBasisPoints: 3_000,
   meteringMode: "shadow",
   overdraftMicros: 1_000_000n,
+  sharedKeyDailyCapMicros: 10_000_000n,
 };
 
 export async function readBillingSettings(
@@ -54,11 +64,12 @@ export async function readBillingSettings(
     .where(inArray(billingSettings.key, Object.values(billingSettingKeys)));
   const values = new Map(rows.map((row) => [row.key, row.value]));
 
+  const dailyCapMicros =
+    microsFrom(values.get(billingSettingKeys.paygDailyCapMicros)) ??
+    microsFrom(env.FRAMEOS_CLOUD_AI_DAILY_CAP_MICROS) ??
+    defaultBillingSettings.dailyCapMicros;
   return {
-    dailyCapMicros:
-      microsFrom(values.get(billingSettingKeys.paygDailyCapMicros)) ??
-      microsFrom(env.FRAMEOS_CLOUD_AI_DAILY_CAP_MICROS) ??
-      defaultBillingSettings.dailyCapMicros,
+    dailyCapMicros,
     marginBasisPoints:
       marginBasisPointsFrom(values.get(billingSettingKeys.aiMarginPercent)) ??
       // Bootstrap for a deployment whose settings row has not been written
@@ -72,6 +83,10 @@ export async function readBillingSettings(
     overdraftMicros:
       microsFrom(values.get(billingSettingKeys.paygOverdraftMicros)) ??
       defaultBillingSettings.overdraftMicros,
+    sharedKeyDailyCapMicros:
+      microsFrom(values.get(billingSettingKeys.sharedKeyDailyCapMicros)) ??
+      microsFrom(env.FRAMEOS_CLOUD_AI_SHARED_KEY_DAILY_CAP_MICROS) ??
+      dailyCapMicros,
   };
 }
 
@@ -135,6 +150,14 @@ function validateSetting(key: BillingSettingKey, value: unknown): void {
         throw new LedgerError(
           "invalid_amount",
           "payg_overdraft_micros must be a non-negative whole number of micro-dollars",
+        );
+      }
+      return;
+    case billingSettingKeys.sharedKeyDailyCapMicros:
+      if (microsFrom(value) === undefined) {
+        throw new LedgerError(
+          "invalid_amount",
+          "shared_key_daily_cap_micros must be a non-negative whole number of micro-dollars",
         );
       }
       return;

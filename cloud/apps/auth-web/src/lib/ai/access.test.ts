@@ -23,6 +23,7 @@ describe("AI refusal responses", () => {
   // body carries everything a panel needs to say when it comes back.
   it("reports the daily cap with the numbers behind it", async () => {
     const refusal: AiRefusal = {
+      allowance: "shared",
       capMicros: "10000000",
       detail: "This account has reached its daily AI limit.",
       reason: "daily_cap_reached",
@@ -32,6 +33,9 @@ describe("AI refusal responses", () => {
     const response = aiRefusalResponse(refusal);
     expect(response.status).toBe(402);
     expect(await body(response)).toMatchObject({
+      // Whose money the cap guarded: the panel words a shared-key
+      // allowance differently from the account's own limit.
+      allowance: "shared",
       cap_micros: "10000000",
       error: "daily_cap_reached",
       reset_at: "2026-09-02T00:00:00.000Z",

@@ -31,10 +31,13 @@ export {
   type PlanEntitlements,
 } from "./plans";
 export {
+  accruePeriod,
   addMonth,
   cancelAccountPlan,
   chargePeriod,
   closeOutSubscriptionForDeletedAccount,
+  deferredMicros,
+  earnedToDateMicros,
   recognizePeriod,
   refundUnearnedPeriod,
   runSubscriptionCycle,

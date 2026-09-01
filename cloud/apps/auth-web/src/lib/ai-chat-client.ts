@@ -70,15 +70,19 @@ export type AiChatRequest = {
 export class AiChatRequestError extends Error {
   readonly code: string;
   readonly status: number;
-  // When the daily cap refused the turn: the moment today's number resets.
+  // When the daily cap refused the turn: the moment today's number resets,
+  // and whether the cap was the account's own limit or the operator's free
+  // allowance on the shared key ("shared").
   readonly resetAt: string | undefined;
+  readonly allowance: string | undefined;
 
-  constructor(code: string, status: number, detail?: string, resetAt?: string) {
+  constructor(code: string, status: number, detail?: string, resetAt?: string, allowance?: string) {
     super(detail || code);
     this.name = "AiChatRequestError";
     this.code = code;
     this.status = status;
     this.resetAt = resetAt;
+    this.allowance = allowance;
   }
 }
 
@@ -238,6 +242,7 @@ export async function streamAiChat(
   });
   if (!response.ok || !response.body) {
     const payload = (await response.json().catch(() => ({}))) as {
+      allowance?: unknown;
       error?: unknown;
       detail?: unknown;
       reset_at?: unknown;
@@ -253,6 +258,7 @@ export async function streamAiChat(
       response.status,
       typeof payload.detail === "string" ? payload.detail : undefined,
       typeof payload.reset_at === "string" ? payload.reset_at : undefined,
+      typeof payload.allowance === "string" ? payload.allowance : undefined,
     );
   }
 

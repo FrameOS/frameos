@@ -8,6 +8,7 @@ export type BillingSettingsValues = {
   dailyCapMicros: string;
   meteringMode: "live" | "shadow";
   overdraftMicros: string;
+  sharedKeyDailyCapMicros: string;
 };
 
 // The three knobs, and the one warning worth putting in front of a human:
@@ -24,6 +25,7 @@ export function BillingSettingsForm({
   const [margin, setMargin] = useState(values.aiMarginPercent);
   const [overdraft, setOverdraft] = useState(values.overdraftMicros);
   const [dailyCap, setDailyCap] = useState(values.dailyCapMicros);
+  const [sharedCap, setSharedCap] = useState(values.sharedKeyDailyCapMicros);
   const [mode, setMode] = useState<"live" | "shadow">(values.meteringMode);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export function BillingSettingsForm({
           ai_metering_mode: mode,
           payg_daily_cap_micros: dailyCap,
           payg_overdraft_micros: overdraft,
+          shared_key_daily_cap_micros: sharedCap,
         },
       }),
       headers: { "content-type": "application/json" },
@@ -96,6 +99,24 @@ export function BillingSettingsForm({
           Postpay&apos;s credit limit: a turn is refused once an account&apos;s
           chargeable AI usage for the UTC day reaches this. 10,000,000 is ten
           dollars; 0 switches the cap off.
+        </p>
+      </div>
+
+      <div className="field">
+        <label htmlFor="billing-shared-cap">Daily allowance on the shared key (micro-dollars)</label>
+        <input
+          className="input"
+          id="billing-shared-cap"
+          inputMode="numeric"
+          onChange={(event) => setSharedCap(event.target.value)}
+          value={sharedCap}
+        />
+        <p className="copy">
+          The cap for accounts running on the deployment&apos;s shared OpenAI
+          key — the free tier. That usage is our money, not theirs, so it
+          gets its own, usually smaller, number; the refusal tells them it is
+          the operator&apos;s allowance rather than their limit. Falls back
+          to the daily cap above until it is set.
         </p>
       </div>
 

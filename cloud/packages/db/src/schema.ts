@@ -1562,6 +1562,13 @@ export const subscriptionPeriods = pgTable(
     refundedMicros: bigint("refunded_micros", { mode: "bigint" })
       .default(0n)
       .notNull(),
+    // Recognised as revenue so far (migration 0047). The nightly job earns
+    // each period daily, pro rata by whole days served; this is the cursor
+    // that keeps that step idempotent, and at `recognized_at` it equals
+    // price − refunded.
+    recognizedMicros: bigint("recognized_micros", { mode: "bigint" })
+      .default(0n)
+      .notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

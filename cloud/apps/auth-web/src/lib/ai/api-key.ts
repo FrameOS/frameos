@@ -32,8 +32,19 @@ export type AiCredentials = {
 export type AiRefusal =
   // The account turned AI off. Nothing is wrong; they asked for this.
   | { detail: string; reason: "ai_disabled" }
-  // Today's spend is at the cap. Comes back tomorrow on its own.
-  | { detail: string; reason: "daily_cap_reached"; resetAt: string; capMicros: string; spentMicros: string }
+  // Today's spend is at the cap. Comes back tomorrow on its own. `allowance`
+  // says whose money the cap was guarding: "billable" is the account's own
+  // credit limit, "shared" is the operator's free allowance on the shared
+  // key — a limit on money the account does not owe, and the copy must not
+  // pretend otherwise (§9.3).
+  | {
+      allowance: "billable" | "shared";
+      capMicros: string;
+      detail: string;
+      reason: "daily_cap_reached";
+      resetAt: string;
+      spentMicros: string;
+    }
   // No key available to this account at all — the original meaning of null.
   | { detail: string; reason: "missing_api_key" };
 
@@ -41,6 +52,7 @@ export type AiRefusal =
 // to keep checking against while the turn runs. Absent when no cap applies
 // (their own key, an absorbed surface, a deployment with no cap).
 export type AiSpendBudget = {
+  allowance: "billable" | "shared";
   capMicros: bigint;
   overdraftMicros: bigint;
   spentMicros: bigint;
@@ -82,6 +94,10 @@ export function sharedKeyAllowedFor(
  * its spend queried, let alone be told about a cap), then the key, then the
  * cap — which only binds when the key is OURS, because a turn on the
  * customer's own key costs us nothing and capping it would be gratuitous.
+ *
+ * Two caps, one query: the shared key (the operator's free tier) has its own
+ * `shared_key_daily_cap_micros`, because that usage is our money and not a
+ * bill the account will ever see. It falls back to the main cap when unset.
  */
 export async function resolveAiAccess(
   db: ReturnType<typeof createDb>,
@@ -126,7 +142,10 @@ export async function resolveAiAccess(
   }
 
   const settings = await readBillingSettings(db, env);
-  if (settings.dailyCapMicros > 0n) {
+  const allowance = credentials.source === "shared" ? "shared" : "billable";
+  const capMicros =
+    allowance === "shared" ? settings.sharedKeyDailyCapMicros : settings.dailyCapMicros;
+  if (capMicros > 0n) {
     const window = utcDayWindow();
     const spent = await accountAiSpendMicros(db, accountId, window);
     // Refused AT the cap. A turn's cost is unknown until it ends, so a turn
@@ -135,13 +154,13 @@ export async function resolveAiAccess(
     // mid-flight, and the tolerance the nightly check allows. The gate used
     // to refuse at cap + overdraft, which made the real cap $11 and every
     // honest overshoot a nightly alert (§9.2 item 3).
-    if (spent >= settings.dailyCapMicros) {
+    if (spent >= capMicros) {
       return {
         ok: false,
         refusal: {
-          capMicros: settings.dailyCapMicros.toString(),
-          detail:
-            "This account has reached its daily AI limit. It resets at midnight UTC.",
+          allowance,
+          capMicros: capMicros.toString(),
+          detail: dailyCapDetail(allowance),
           reason: "daily_cap_reached",
           resetAt: window.until.toISOString(),
           spentMicros: spent.toString(),
@@ -150,7 +169,8 @@ export async function resolveAiAccess(
     }
     return {
       budget: {
-        capMicros: settings.dailyCapMicros,
+        allowance,
+        capMicros,
         overdraftMicros: settings.overdraftMicros,
         spentMicros: spent,
       },
@@ -159,6 +179,16 @@ export async function resolveAiAccess(
     };
   }
   return { credentials, ok: true };
+}
+
+// The sentence a refused turn carries. A shared-key user is not "over
+// budget" on anything they owe: the allowance is ours, and the message says
+// whose it is rather than showing them a dollar limit on a bill that does
+// not exist.
+export function dailyCapDetail(allowance: "billable" | "shared"): string {
+  return allowance === "shared"
+    ? "This account has used up today's free AI allowance on the shared key. Nothing is billed for it; it resets at midnight UTC."
+    : "This account has reached its daily AI limit. It resets at midnight UTC.";
 }
 
 export async function resolveAiCredentials(

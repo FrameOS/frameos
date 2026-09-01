@@ -15,6 +15,7 @@ import {
 } from "@frameos-cloud/ledger";
 import { accounts, createDb } from "@frameos-cloud/db";
 import { AiUsageSwitch } from "../../../src/components/AiUsageSwitch";
+import { resolveAiCredentials } from "../../../src/lib/ai/api-key";
 import { formatDateTime } from "../../../src/lib/format";
 import { readSession } from "../../../src/lib/session";
 
@@ -80,7 +81,7 @@ export default async function AccountAiPage() {
   const now = new Date();
   const dayWindow = utcDayWindow(now);
   const receivable = customerReceivableCode(accountId);
-  const [[account], thisMonth, lastMonth, today, turns, settings, plan, owed, statement] =
+  const [[account], thisMonth, lastMonth, today, turns, settings, plan, owed, statement, credentials] =
     await Promise.all([
       db
         .select({ aiDisabledAt: accounts.aiDisabledAt })
@@ -95,9 +96,14 @@ export default async function AccountAiPage() {
       readAccountPlan(db, accountId),
       accountBalanceMicros(db, receivable),
       customerStatement(db, receivable, { limit: 1000 }),
+      // Which key the next turn runs on decides which daily limit applies,
+      // and whose money it guards (§5.3).
+      resolveAiCredentials(db, accountId),
     ]);
   // ONE margin definition, the same one metering prices with (plans.ts).
   const marginBasisPoints = await accountMarginBasisPoints(db, accountId, settings);
+  const sharedKey = credentials?.source === "shared";
+  const dailyCapMicros = sharedKey ? settings.sharedKeyDailyCapMicros : settings.dailyCapMicros;
 
   const enabled = !account?.aiDisabledAt;
   // The statement lines that are not metered turns: subscription charges,
@@ -265,11 +271,29 @@ export default async function AccountAiPage() {
         <p className="copy">
           You are on the <strong>{plan.plan.name}</strong> plan
           {plan.nextPlanCode ? ` (moving to ${plan.nextPlanCode} at the next renewal)` : ""}
-          {plan.cancelAt ? ` (ends ${formatDateTime(plan.cancelAt)})` : ""}. A daily limit
-          of {dollars(settings.dailyCapMicros)} applies: today you have used{" "}
-          {dollars(today.chargeableMicros)}, and it resets at{" "}
-          {formatDateTime(dayWindow.until)}. The limit is there so that a
-          runaway loop costs you a bounded amount rather than an unbounded one.
+          {plan.cancelAt ? ` (ends ${formatDateTime(plan.cancelAt)})` : ""}.
+          {plan.plan.priceMicros > 0n
+            ? " The plan fee is billed at the start of each period, in advance; AI usage is billed at the end of the month, for what was actually used."
+            : ""}{" "}
+          {sharedKey ? (
+            <>
+              Your requests run on the operator&rsquo;s shared key, which comes
+              with a free daily allowance of {dollars(dailyCapMicros)}: today
+              you have used {dollars(today.chargeableMicros)} of it, and it
+              resets at {formatDateTime(dayWindow.until)}. That allowance is
+              the operator&rsquo;s budget, not a bill — nothing on it is ever
+              charged to you. Add your own OpenAI key under Settings to use AI
+              without it.
+            </>
+          ) : (
+            <>
+              A daily limit of {dollars(dailyCapMicros)} applies: today you
+              have used {dollars(today.chargeableMicros)}, and it resets at{" "}
+              {formatDateTime(dayWindow.until)}. The limit is there so that a
+              runaway loop costs you a bounded amount rather than an unbounded
+              one.
+            </>
+          )}
         </p>
         {!billed ? (
           <p className="copy">
