@@ -59,8 +59,9 @@ proc run*(self: App, context: ExecutionContext) =
 
     assert "proc run*(self: AppRoot, context: ExecutionContext)" in app_loader_nim
     assert "proc get*(self: AppRoot, context: ExecutionContext)" not in app_loader_nim
-    assert 'of "nodeapp_custom": nodeapp_custom_loader.run(app, context)' in apps_nim
-    assert "nodeapp_custom_loader.get(app, context)" not in apps_nim
+    assert "runProc: nodeapp_custom_loader.run" in apps_nim
+    assert "getProc: nil" in apps_nim
+    assert "nodeapp_custom_loader.get" not in apps_nim
 
 
 def test_embedded_unavailable_apps_are_guarded_in_registry(tmp_path):
@@ -81,8 +82,15 @@ def test_embedded_unavailable_apps_are_guarded_in_registry(tmp_path):
 
     assert "when not defined(frameosEmbedded) and not defined(frameosWasm):" in apps_nim
     assert "  import apps/data/rstpSnapshot/app_loader as data_rstpSnapshot_loader" in apps_nim
-    assert 'of "data/rstpSnapshot":\n    when defined(frameosEmbedded) or defined(frameosWasm):' in apps_nim
-    assert "App 'data/rstpSnapshot' is not available on this build target" in apps_nim
+
+    # The registry is built twice: the embedded/wasm table leaves the host-only
+    # app out entirely, the host table carries it, and the keyword still gets
+    # the "not available on this build target" answer rather than "unknown".
+    embedded_table, host_table = apps_nim.split("else:\n  const appEntries = [")
+    assert 'AppEntry(keyword: "data/rstpSnapshot"' not in embedded_table
+    assert 'AppEntry(keyword: "data/rstpSnapshot"' in host_table
+    assert 'const hostOnlyApps = ["data/rstpSnapshot"]' in apps_nim
+    assert "App '\" & keyword & \"' is not available on this build target" in apps_nim
 
 
 def _write_capability_app(tmp_path, keyword, config_json):

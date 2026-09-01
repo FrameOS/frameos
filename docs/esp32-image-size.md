@@ -159,3 +159,140 @@ Dropping the last `sscanf` call from FrameOS code does *not* remove newlib's
 float-capable scanf either: ESP-IDF's `console` component calls it from
 `linenoise.c`. mbedTLS' ARIA cipher (3.4 KB) has no Kconfig switch in IDF 5.5.
 IPv6 (≈14 KB in `nd6`/`ip6`/`mld6`) is deliberately kept.
+
+---
+
+# The generated-Nim pass (2026-09-01)
+
+*`esp32-s3`, 8 MB layout, `EPD_7in5_V2` default panel. Nine full
+`ci_build_image.sh` builds; every number is a measured delta between two of
+them, not an estimate.*
+
+**3,286,224 → 3,208,992 bytes (−77,232, −2.35%). OTA slot 91.2% → 89.0% full,
+395 KB free.** Nim is 45% of the image (1,474,196 B of the 3,264,613 the map
+attributes); hand-written C for the whole firmware is 110,687.
+
+## Where it came from
+
+| change | delta |
+|---|---:|
+| App loaders describe their config fields in data instead of code | −60,896 |
+| One CRC-32 table instead of two (crunchy → zippy) | −8,445 |
+| App registry: a sorted proc table instead of four `case keyword:` chains | −4,618 |
+| ASCII case folding where the input is ASCII | −3,188 |
+
+**App loaders.** `backend/app/codegen/app_loader_nim.py` used to inline a full
+JSON-coercion `block:` per config field, per app: 38 loaders, ~700 fields,
+131,295 B — 4.0% of the whole firmware — and the calendar loader alone was 508
+lines and 20,799 B. Each loader now emits a `const` table of field descriptors
+(name, kind, byte offset inside its own `AppConfig`) and hands it to the two
+shared procs in `frameos/app_config.nim`. Loaders: 131,295 → 68,550. Calendar:
+20,799 → 7,084 B, 508 → 171 lines. The descriptor templates check the field's
+Nim type at compile time, so a mismatch between `config.json` and the app's
+`AppConfig` is still a compile error, as it was when every field carried its
+own typed assignment.
+
+Doing only the cheap half of this — replacing the inlined blocks with calls to
+shared `cfgInt`/`cfgBool`/… procs — was worth just −28,864. The inlined blocks
+were only ~60–90 B each; the weight was in having per-field *code* at all.
+
+**Two CRC-32 tables.** crunchy (pixie's checksum dependency) and zippy ship the
+same slicing-by-8 CRC-32, each with its own 8,192-byte compile-time table, and
+both are linked. `config.nims` now `patchFile`s crunchy's `crc32` to forward to
+zippy's on embedded builds only (`src/embedded/patched_crc32.nim`).
+
+**ASCII case folding.** `std/unicode`'s `toLower`/`toUpper` were reached from
+six places whose input is ASCII by definition — RFC 5545 weekday tokens in
+`ical.nim`, file-extension matching in `localImage`. Those are now
+`toLowerAscii`/`toUpperAscii`. Note the filename *search* in `localImage` folds
+ASCII only now, so "Ä" no longer matches "ä" in a filename. The 9,872 B of
+`toUpperSinglets`/`toLowerSinglets` survive anyway: `--gc-sections` drops the
+procs but keeps the tables.
+
+## Compiler flags: measured, and mostly not levers
+
+| variant | bin bytes | Δ |
+|---|---:|---:|
+| baseline | 3,286,224 | — |
+| `--opt:speed` | 3,286,224 | 0 |
+| `-flto` on the nimcache component | 3,281,504 | −4,720 |
+| `--mm:arc` | 3,272,624 | −13,600 |
+| `--panics:on` | 3,138,304 | **−147,920** |
+| `-d:danger` | 3,123,760 | −162,464 |
+| `-d:danger --panics:on` | 2,980,640 | −305,584 |
+
+`--opt:speed` and `--opt:size` produce images differing in exactly 65 bytes —
+the build timestamp and the appended SHA256. Under `--compileOnly` ESP-IDF
+picks the optimization level and Nim's `--opt` flag never reaches a compiler.
+The `--opt:size` in `build_nim.sh` is decorative.
+
+LTO on the generated C works (the component's `-fno-lto` can simply be
+dropped) and buys 4,720 B for ~75 s of build time. It notably does *not* fold
+the 693 near-identical `=destroy` hooks: their addresses live in type
+descriptors. Not worth it. `--mm:arc` buys 13,600 B — the whole cycle
+collector — on a device where a leaked pixie `Image.root` cycle is worse than
+0.4% of flash.
+
+### Why `-d:danger` and `--panics:on` stack
+
+Pattern counts over the generated `nimcache/*.c`:
+
+| generated with | `if (*nimErr_) goto` | `raiseIndexError2` | `nimAddInt` | C bytes |
+|---|---:|---:|---:|---:|
+| baseline | 21,705 | 3,644 | 3,314 | 19,977,108 |
+| `--panics:on` | 6,071 | 3,644 | 3,314 | 18,723,490 |
+| `-d:danger` | 21,098 | 0 | 0 | 17,806,251 |
+| `-d:danger --panics:on` | 6,072 | 0 | 0 | 16,582,020 |
+| `--exceptions:quirky` | 0 | 3,644 | 3,315 | 18,138,999 |
+
+They cut different things. `-d:danger` deletes the *checks* and still leaves
+21,098 propagation sites standing — turning checks off does not make a proc
+non-raising. `--panics:on` keeps every bounds, overflow and range check and
+removes 72% of the propagation, at ~9.5 B per site. If only one of the two is
+ever taken, it should be `--panics:on`: it is the one that keeps the checks.
+
+**`--panics:on` is a product decision, not a safety one.** Every check stays.
+What it costs is `except Defect`: `embedded_main.nim` and
+`embedded_runtime.nim` wrap every C-API entry point in one — log,
+`GC_fullCollect()`, re-arm the 1 MB emergency reserve, return a failure code —
+and under panics those handlers go dead, so an out-of-memory render reboots the
+frame instead of degrading. That containment design now has a price tag:
+**148 KB**. To keep both, the escape hatch is the one already used for
+`malloc`: `patchFile` `system/fatal.nim` and longjmp to a barrier at the render
+entry (the shape of the wasm simulator's setjmp guard), accepting that ARC
+destructors are skipped on that path and one render's allocations leak.
+
+**`--exceptions:quirky` is a trap.** It removes all propagation and produces
+the smallest C of any variant, and on the C backend a raise does not unwind at
+all: `raiseExceptionAux` calls `pushCurrentException` and *returns*. Verified
+on the host — execution continues past the `raise`, the proc returns garbage,
+and the handler fires only after everything downstream has run on corrupt
+state.
+
+## The 52 hash tables
+
+Nim emits a full copy of the hash-table implementation per `Table[K, V]` pair.
+The image has 52 of them, `tables.nim.c.obj` is 70,601 B — about 1,358 B each.
+They are genuinely different pairs, not accidents: `NI -> AppRoot*`,
+`NI -> DiagramNode*`, `NI -> FrameScene*`, `NI -> ExportedScene*`,
+`NI -> JsonNodeObj*`, `NI -> ImageFusionPlan*`, `NI -> ImageBoundsPlan*`,
+`NimStringV2 -> ExportedInterpretedScene*`, `ptr JSContext -> JsAppRuntime*` …
+
+Consolidating the pointer-valued ones behind a single `Table[K, RootRef]` with
+typed accessors is the only real lever, and the ceiling is about **16 KB** —
+0.5% of the image — for a type-erasure layer through the interpreter, the
+planner, the JS runtime and the font cache. Not a good trade. Two pairs
+(`NI -> NimStringV2`, `NI -> NI`) are accidental duplicates that generate
+byte-identical C because a `distinct int` key makes a distinct table type;
+merging those is worth ~1.4 KB each and needs the two declarations found first.
+
+## Constant data
+
+- **String literals cost about twice their text.** 4,709 payloads and 6,443
+  `NimStringV2` headers — 51.5 KB of pure 8-byte header — carrying ~77 KB of
+  actual text in ~159 KB of rodata. Log event names and JSON keys dominate.
+  No lever short of patching the compiler.
+- Dragonbox's `pow10` is 9,904 B of float printing. `-d:nimLegacySprintf`
+  routes `$float` back through newlib, but changes how floats stringify
+  (`0.1` → `0.10000000000000001`), and those strings reach scene state and the
+  cloud. Not measured; not recommended without a formatting audit.

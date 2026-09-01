@@ -450,7 +450,7 @@ proc processCurrentFields*(self: var ParsedCalendar) =
             continue
           let weekDay = day[^2..^1]
           let dayNum = if day.len > 2: day[0..(day.len - weekDay.len - 1)].parseInt() else: 0
-          case weekDay.toUpper():
+          case weekDay.toUpperAscii():
           of "SU": rrule.byDay.add((RRuleDay.su, dayNum))
           of "MO": rrule.byDay.add((RRuleDay.mo, dayNum))
           of "TU": rrule.byDay.add((RRuleDay.tu, dayNum))
@@ -473,7 +473,7 @@ proc processCurrentFields*(self: var ParsedCalendar) =
       of "BYSETPOS":
         raise newException(ValueError, "BYSETPOS is not supported")
       of "WKST":
-        case keyValue[1].toUpper()
+        case keyValue[1].toUpperAscii()
         of "SU": rrule.weekStart = RRuleDay.su
         of "MO": rrule.weekStart = RRuleDay.mo
         of "TU": rrule.weekStart = RRuleDay.tu

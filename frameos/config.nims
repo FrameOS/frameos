@@ -29,3 +29,7 @@ when defined(frameosEmbedded):
   # PSRAM reserve (frameos_nim_glue.c) and retries the allocation; the
   # render loop sheds memory and re-arms the reserve afterwards.
   patchFile("stdlib", "malloc", "src/embedded/patched_malloc")
+
+  # crunchy and zippy each build their own 8 KB slicing-by-8 CRC-32 table, and
+  # both are linked into the firmware. Point crunchy's at zippy's.
+  patchFile("crunchy", "crc32", "src/embedded/patched_crc32")

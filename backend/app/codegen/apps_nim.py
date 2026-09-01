@@ -273,19 +273,19 @@ def _app_capability_literal(config: dict) -> Optional[str]:
     )
 
 
-def _app_call_case(app_id: str, call: str) -> str:
-    if app_id not in EMBEDDED_UNAVAILABLE_APPS:
-        return f'  of "{app_id}": {call}'
+def _app_entry(app_id: str, alias: str, capabilities: set) -> str:
+    """One row of the app registry: keyword plus the loader's four entry points.
 
-    error = f"App '{app_id}' is not available on this build target"
-    return "\n".join(
-        [
-            f'  of "{app_id}":',
-            "    when defined(frameosEmbedded) or defined(frameosWasm):",
-            f'      raise newException(ValueError, "{error}")',
-            "    else:",
-            f"      {call}",
-        ]
+    Four `case keyword:` chains over ~40 apps used to be ~9 KB of the embedded
+    firmware. A sorted table of proc pointers does the same dispatch in a
+    binary search, and the rows are data.
+    """
+    get_proc = f"{alias}.get" if "get" in capabilities else "nil"
+    run_proc = f"{alias}.run" if "run" in capabilities else "nil"
+    return (
+        f'  AppEntry(keyword: "{app_id}", initProc: {alias}.init,'
+        f" setFieldProc: {alias}.setField,"
+        f" getProc: {get_proc}, runProc: {run_proc}),"
     )
 
 
@@ -345,54 +345,100 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
         imports.append("  # runtime features such as child processes and external binaries.")
         imports.extend(f"  {import_line}" for import_line in embedded_unavailable_imports)
 
-    # 2) case branches
-    init_cases = []
-    set_cases  = []
-    run_cases  = []
-    get_cases  = []
+    # 2) the registry table, sorted so lookup can bisect, plus the capability
+    #    cases (still a case: those are literals, not calls)
     capability_cases = []
-
     for app_id, cfg in sorted(all_apps.items(), key=lambda kv: kv[0]):
         literal = _app_capability_literal(cfg)
         if literal:
             capability_cases.append(f'  of "{app_id}":\n    {literal}')
-
-    for app_id, alias, capabilities in items:
-        init_cases.append(_app_call_case(app_id, f"{alias}.init(node, scene)"))
-        set_cases.append(_app_call_case(app_id, f"{alias}.setField(app, field, value)"))
-
-        if "run" in capabilities:
-            run_cases.append(_app_call_case(app_id, f"{alias}.run(app, context)"))
-        if "get" in capabilities:
-            get_cases.append(_app_call_case(app_id, f"{alias}.get(app, context)"))
-
-    init_cases.append('  else: raise newException(ValueError, "Unknown app keyword: " & keyword)')
-    set_cases.append('  else: raise newException(ValueError, "Unknown app keyword: " & keyword)')
-    get_cases.append('  else: raise newException(ValueError, "Unknown app keyword: " & keyword)')
-    # run: include a helpful default error
-    run_cases.append('  else: raise newException(Exception, "App \'" & keyword & "\' cannot be run; use get().")')
-
     capability_cases.append("  else: NoAppCapabilities")
+
+    portable = sorted(
+        (row for row in items if row[0] not in EMBEDDED_UNAVAILABLE_APPS),
+        key=lambda row: row[0],
+    )
+    host_only = sorted(
+        (row for row in items if row[0] in EMBEDDED_UNAVAILABLE_APPS),
+        key=lambda row: row[0],
+    )
+    portable_entries = [_app_entry(*row) for row in portable]
+    all_entries = [_app_entry(*row) for row in sorted(items, key=lambda row: row[0])]
+    host_only_keywords = ", ".join(f'"{row[0]}"' for row in host_only)
 
     # 3) Compose Nim
     nl = "\n"
+    if host_only:
+        table = f"""when defined(frameosEmbedded) or defined(frameosWasm):
+  const appEntries = [
+{nl.join("  " + line for line in portable_entries)}
+  ]
+else:
+  const appEntries = [
+{nl.join("  " + line for line in all_entries)}
+  ]
+
+const hostOnlyApps = [{host_only_keywords}]
+"""
+        host_only_check = """  when defined(frameosEmbedded) or defined(frameosWasm):
+    for hostOnly in hostOnlyApps:
+      if hostOnly == keyword:
+        raise newException(ValueError,
+          "App '" & keyword & "' is not available on this build target")
+"""
+    else:
+        table = f"""const appEntries = [
+{nl.join(all_entries)}
+]
+"""
+        host_only_check = ""
+
     code = f"""{nl.join(imports)}
 
+type AppEntry = object
+  ## One app's four entry points, so dispatch is a table lookup instead of
+  ## four `case keyword:` chains repeated over every app in the registry.
+  keyword: string
+  initProc: proc (node: DiagramNode, scene: FrameScene): AppRoot {{.nimcall.}}
+  setFieldProc: proc (app: AppRoot, field: string, value: Value) {{.nimcall.}}
+  getProc: proc (app: AppRoot, context: ExecutionContext): Value {{.nimcall.}}
+  runProc: proc (app: AppRoot, context: ExecutionContext) {{.nimcall.}}
+
+{table}
+proc appIndex(keyword: string): int =
+  ## Bisect the keyword-sorted registry. -1 when this build has no such app.
+  var lo = 0
+  var hi = appEntries.len - 1
+  while lo <= hi:
+    let mid = (lo + hi) div 2
+    if appEntries[mid].keyword == keyword: return mid
+    elif appEntries[mid].keyword < keyword: lo = mid + 1
+    else: hi = mid - 1
+  -1
+
+proc raiseUnknownApp(keyword: string) =
+{host_only_check}  raise newException(ValueError, "Unknown app keyword: " & keyword)
+
 proc initApp*(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
-  case keyword:
-{nl.join(init_cases)}
+  let i = appIndex(keyword)
+  if i < 0: raiseUnknownApp(keyword)
+  appEntries[i].initProc(node, scene)
 
 proc setAppField*(keyword: string, app: AppRoot, field: string, value: Value) =
-  case keyword:
-{nl.join(set_cases)}
+  let i = appIndex(keyword)
+  if i < 0: raiseUnknownApp(keyword)
+  appEntries[i].setFieldProc(app, field, value)
 
 proc runApp*(keyword: string, app: AppRoot, context: ExecutionContext) =
-  case keyword:
-{nl.join(run_cases)}
+  let i = appIndex(keyword)
+  if i < 0 or appEntries[i].runProc == nil:
+    raise newException(Exception, "App '" & keyword & "' cannot be run; use get().")
+  appEntries[i].runProc(app, context)
 
 proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
-  case keyword:
-{nl.join(get_cases)}
+  let i = appIndex(keyword)
+  if i < 0 or appEntries[i].getProc == nil: raiseUnknownApp(keyword)
+  appEntries[i].getProc(app, context)
 
 proc appCapabilities*(keyword: string): AppCapabilities =
   ## Per-port protocols this app declares in its config.json. Apps that

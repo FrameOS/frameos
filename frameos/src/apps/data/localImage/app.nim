@@ -35,7 +35,7 @@ type
 # Function to check if a file is an image
 proc isImage(file: string): bool =
   for ext in imageExtensions:
-    if file.toLower().endsWith(ext):
+    if file.toLowerAscii().endsWith(ext):
       return true
   return false
 
@@ -68,13 +68,13 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
   if not dirExists(folder):
     return @[]
 
-  let searchQuery = search.toLower()
+  let searchQuery = search.toLowerAscii()
   var images: seq[string] = @[]
   # walkDirRecNoJunk skips hidden/OS-junk files (`._IMG.jpg`, `.DS_Store`,
   # `Thumbs.db`, `*.crdownload`, …) and never descends into junk directories
   # (`.thumbs`, `.frameos`, `@eaDir`, `System Volume Information`, …).
   for file in walkDirRecNoJunk(folder, relative = true):
-    if isImage(file) and (searchQuery == "" or file.toLower().contains(searchQuery)):
+    if isImage(file) and (searchQuery == "" or file.toLowerAscii().contains(searchQuery)):
       # An empty file is not an image, whatever it is called. The Waveshare
       # demo card ships a zero-byte `sys_decode.bmp`, and enumerating it meant
       # the rotation landed on an error frame every Nth render for a file that
@@ -92,7 +92,7 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
 proc readExifHead*(path: string): string =
   ## First 256KB of a JPEG file: enough for the EXIF segment without
   ## re-reading whole multi-megabyte files.
-  let lowerPath = path.toLower()
+  let lowerPath = path.toLowerAscii()
   if not (lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg")):
     return ""
   var file: File
