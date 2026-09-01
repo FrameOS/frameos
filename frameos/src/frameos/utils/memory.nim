@@ -21,6 +21,24 @@ when defined(frameosEmbedded):
     # EMBEDDED_RENDER_PSRAM_RESERVE_BYTES (backend): it was 1_536_000 here,
     # a decimal-MB slip 36 KB short of the other two.
     EmbeddedReserveBytes = 1536 * 1024
+elif defined(frameosWasm):
+  # The preview's simulated device ceiling (tools/wasm/fos_wasm_mem.c). With
+  # no limit set these report 0 and the host defaults below apply, so an
+  # ordinary browser preview behaves exactly as it always did.
+  proc fosWasmMemoryLimit(): cuint {.
+    importc: "frameos_wasm_memory_limit", header: "<fos_wasm_mem.h>", cdecl.}
+  proc fosWasmMemoryUsed(): cuint {.
+    importc: "frameos_wasm_memory_used", header: "<fos_wasm_mem.h>", cdecl.}
+  proc fosWasmRenderHeadroom(): cuint {.
+    importc: "frameos_wasm_memory_render_headroom", header: "<fos_wasm_mem.h>",
+    cdecl.}
+
+  proc simulatedRenderBytes(): int =
+    ## Bytes the render pipeline may still plan for; 0 = no ceiling set.
+    if fosWasmMemoryLimit().int <= 0:
+      return 0
+    max(0, fosWasmRenderHeadroom().int)
+
 elif defined(linux) and not defined(frameosWasm):
   import std/[strutils, os]
 
@@ -65,6 +83,8 @@ proc renderMemoryInUse*(): tuple[known: bool, bytes: int] =
   ## RSS. Hosts without a cheap probe report `known = false`.
   when defined(frameosEmbedded):
     (true, -fos_psram_free_bytes().int)
+  elif defined(frameosWasm):
+    (fosWasmMemoryLimit().int > 0, fosWasmMemoryUsed().int)
   elif defined(linux) and not defined(frameosWasm):
     try:
       # /proc/self/statm: "size resident shared ..." in pages.
@@ -90,6 +110,9 @@ proc availableRenderBytes*(): int =
     # Image buffers need one contiguous block; fragmented PSRAM can have
     # plenty free but no block large enough.
     max(0, min(largest, free - EmbeddedReserveBytes))
+  elif defined(frameosWasm):
+    let simulated = simulatedRenderBytes()
+    if simulated > 0: simulated else: 1024 * 1024 * 1024
   elif defined(linux) and not defined(frameosWasm):
     let available = memAvailableBytes()
     if available <= 0:
@@ -112,6 +135,9 @@ proc availableRenderHeadroomBytes*(): int =
       return availableRenderBytesOverride
   when defined(frameosEmbedded):
     max(0, fos_psram_free_bytes().int - EmbeddedReserveBytes)
+  elif defined(frameosWasm):
+    let simulated = simulatedRenderBytes()
+    if simulated > 0: simulated else: 1024 * 1024 * 1024
   elif defined(linux) and not defined(frameosWasm):
     let available = memAvailableBytes()
     if available <= 0:

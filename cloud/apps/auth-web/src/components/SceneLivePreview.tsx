@@ -2,6 +2,9 @@
 
 import {
   coerceStateFieldValue,
+  describeDeviceLimits,
+  deviceLimitsFor,
+  devicePresets,
   evaluateShowIf,
   FrameOSPreview,
   panelPalettes,
@@ -87,6 +90,18 @@ const AUTO_APPLY_STORAGE_KEY = "frameos.preview.autoApply";
 /** Where the panel simulation is remembered (this browser). Empty means off;
  * anything else is a panelPalettes key. */
 const PANEL_STORAGE_KEY = "frameos.preview.panel";
+const DEVICE_STORAGE_KEY = "frameos.preview.device";
+
+/** Megabytes with one decimal below 10 — the scale these numbers live at. */
+function formatMegabytes(bytes: number): string {
+  const mb = Math.max(0, bytes) / (1024 * 1024);
+  return `${mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10} MB`;
+}
+
+/** Which device the memory checkbox turns on first — the tightest one, and
+ * the class of frame a scene is most likely to be too heavy for. */
+const DEFAULT_DEVICE = "esp32";
+
 /** Which panel the dither checkbox turns on first — the newest colour e-ink,
  * and what the 13.3" boards FrameOS ships for use. */
 const DEFAULT_PANEL: PanelPaletteKey = "spectra6";
@@ -305,6 +320,46 @@ export function SceneLivePreviewPanel({
     }
   }
 
+  // "Device": run the runtime under a real device's memory ceiling, so a
+  // scene too heavy for that frame fails here instead of on hardware. The
+  // ceiling is applied when the runtime boots, so changing it restarts the
+  // runtime the way Resize does. Remembered per browser, like Dither.
+  const [device, setDevice] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(DEVICE_STORAGE_KEY);
+      if (stored && devicePresets.some((entry) => entry.key === stored)) {
+        setDevice(stored);
+      }
+    } catch {
+      // Storage blocked: the control still works for this session.
+    }
+  }, []);
+  const deviceRef = useRef<string | null>(device);
+  deviceRef.current = device;
+  // What the last render cost, and whether one was refused outright.
+  const [deviceMemory, setDeviceMemory] = useState<{
+    limitBytes: number;
+    peakBytes: number;
+  } | null>(null);
+  const [outOfMemory, setOutOfMemory] = useState<{
+    refusedBytes: number;
+    limitBytes: number;
+  } | null>(null);
+  const deviceLimits = deviceLimitsFor(device, viewport.width, viewport.height);
+  function chooseDevice(next: string | null) {
+    setDevice(next);
+    setDeviceMemory(null);
+    setOutOfMemory(null);
+    try {
+      window.localStorage.setItem(DEVICE_STORAGE_KEY, next ?? "");
+    } catch {
+      // See above.
+    }
+    // The ceiling can only be set on a fresh heap; reboot the runtime.
+    setRestartCount((count) => count + 1);
+  }
+
   // Runtime plumbing: the canvas the worker paints onto, the live preview
   // handle, and what the runtime has reported so far.
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -455,6 +510,27 @@ export function SceneLivePreviewPanel({
         proxyUrl: "/api/store/preview-proxy",
         fastMode,
         panelPalette: panelRef.current,
+        deviceLimits: deviceLimitsFor(
+          deviceRef.current,
+          viewport.width,
+          viewport.height
+        ),
+        onMemory: (usage) => {
+          if (!cancelled) {
+            setDeviceMemory({
+              limitBytes: usage.limitBytes,
+              peakBytes: usage.peakBytes,
+            });
+          }
+        },
+        onOutOfMemory: (info) => {
+          if (!cancelled) {
+            setOutOfMemory({
+              refusedBytes: info.refusedBytes,
+              limitBytes: info.limitBytes,
+            });
+          }
+        },
         onFastRenderRequest: (intervalMs) => {
           if (cancelled) {
             return;
@@ -562,6 +638,11 @@ export function SceneLivePreviewPanel({
     // fastMode reaches a running runtime through setFastMode below; only a
     // fresh runtime reads it from the options, so it is no dependency here.
   }, [scenes, viewport, storedSettings, previewSettings, restartCount, previewGated]);
+
+  // A new runtime starts with a clean heap.
+  useEffect(() => {
+    setOutOfMemory(null);
+  }, [restartCount]);
 
   function answerFastRender(enabled: boolean) {
     setFastMode(enabled);
@@ -1184,6 +1265,67 @@ export function SceneLivePreviewPanel({
           ))}
         </select>
       </div>
+      {/* "Memory limit": a browser has gigabytes and a frame has a few
+          megabytes, and until now that difference only showed up on the
+          device. Off by default — a preview that runs out of memory is a
+          thing you go looking for. */}
+      <div className="viewport-controls">
+        <label className="viewport-controls__toggle">
+          <input
+            checked={device !== null}
+            onChange={(event) =>
+              chooseDevice(event.target.checked ? DEFAULT_DEVICE : null)
+            }
+            type="checkbox"
+          />
+          Memory limit
+        </label>
+        <select
+          aria-label="Device to simulate"
+          className="viewport-controls__select"
+          disabled={device === null}
+          onChange={(event) => chooseDevice(event.target.value)}
+          title={
+            deviceLimits
+              ? describeDeviceLimits(deviceLimits)
+              : "Renders with the browser's own memory."
+          }
+          value={device ?? DEFAULT_DEVICE}
+        >
+          {devicePresets.map((entry) => (
+            <option key={entry.key} value={entry.key}>
+              {entry.label}
+            </option>
+          ))}
+        </select>
+        {deviceMemory && deviceMemory.limitBytes > 0 && !outOfMemory ? (
+          // Reported in the device's own bytes, so they line up with what the
+          // frame's logs say: the preview's extra canvas cost comes back off
+          // both numbers (see previewOverheadBytes).
+          <span className="viewport-controls__hint">
+            peak{" "}
+            {formatMegabytes(
+              deviceMemory.peakBytes - (deviceLimits?.previewOverheadBytes ?? 0)
+            )}{" "}
+            of{" "}
+            {formatMegabytes(
+              deviceMemory.limitBytes - (deviceLimits?.previewOverheadBytes ?? 0)
+            )}{" "}
+            usable
+          </span>
+        ) : null}
+      </div>
+      {outOfMemory ? (
+        <div className="preview-notice preview-notice--error" role="status">
+          <strong>Out of memory on the simulated device.</strong> The render
+          asked for {formatMegabytes(outOfMemory.refusedBytes)} with{" "}
+          {formatMegabytes(
+            outOfMemory.limitBytes - (deviceLimits?.previewOverheadBytes ?? 0)
+          )}{" "}
+          usable and could not get it — this scene would fail on that frame.
+          Restart the preview after changing the scene.
+        </div>
+      ) : null}
       {assetsOpen ? (
         <PreviewAssetsDialog
           assetsVersion={assetsVersion}

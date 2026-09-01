@@ -50,6 +50,42 @@ Two rules that shape most entries:
   `memory:oomAbort` appear in the cloud log when provoked (force the budget
   low with an oversized photo); the leak-percent restart fires.
 
+## Get the TypeScript transpiler off the device
+
+Scene apps ship TypeScript (`sources: {"app.ts", "config.json"}`) and every
+frame compiles it itself: ~4,000 lines of Nim (`transpiler.nim`, `tokens.nim`,
+`parser.nim`, `token_processor.nim`) implementing a tokenizer, a parser and a
+TS-erasure pass, run once per JS app node per render. The QuickJS bridge around
+it (`burrito.nim`, `app_runtime.nim`, `runtime.nim`) stays either way.
+
+The plan is to move that to publish/deploy time — the cloud emits `app.js`
+beside the `app.ts`, and the device only ever evaluates JavaScript.
+
+It was shelved on the grounds that a ~3.3 s cold-boot transpile is cheap and
+readable source on the device is a feature. That reasoning missed the real
+cost, which is **memory, not time**: the token array is the largest allocation
+in a render. A 36 KB app tokenizes to 8,989 tokens, and until the fix in this
+area it held three copies at once — a doubling-grown 16,384-slot array, an
+exact-sized return copy, and the processor's own — about **1.4 MB for one app**
+on a 13.3" board with ~2.2 MB of render headroom. That is what stopped the
+E1004 rendering the Weather scene. Even one array is ~430 KB, plus ~1 s of
+CPU per app per render and 80-90 KB of flash for the transpiler itself.
+
+- Emit the transpiled module at publish/deploy time and ship it in the scene
+  payload; teach the runtime to prefer it and skip `transpileAppSource`.
+- Keep the on-device transpiler working for one release: scenes already on
+  frames carry only `.ts`, and shipped code keeps working when asked for
+  (`docs/convergence-todo.md`). Delete it once no assigned scene needs it.
+- Decide whether `.ts` still ships alongside for on-device readability, or
+  whether the source map is enough. Shipping both keeps the source bytes but
+  costs no transpile.
+- Both control planes: the self-hosted backend deploy path needs the same
+  step, not just the cloud publish path.
+- `quickts` (parking lot) is the alternative route to the same end — it keeps
+  readable `.ts` on the device instead of moving the work off it. Pick one.
+
+---
+
 ## Pre-release manual test sweep
 
 `docs/manual-testing-todo.md` collects every unticked manual checkbox and
@@ -172,10 +208,9 @@ Everything else parked:
   edge is visible over USB and nowhere else.
 - **quickts: parse TypeScript straight into QuickJS** — strip TS syntax at parse
   time, so apps ship `.ts` source and both the transpiler pass and the
-  transpiled copy every runtime keeps disappear.
-- **ESP32: parse/transpile scenes at deploy time** — shelved. Cold-boot
-  transpile is only ~3.3 s and shipping readable TS source is a feature. Revisit
-  only if boot time or flash budget becomes a real constraint.
+  transpiled copy every runtime keeps disappear. The alternative to moving
+  transpilation off the device (section above); it keeps readable source on the
+  frame, at the cost of carrying a patched QuickJS.
 - Fleet features: one cloud account administering many backends (installer /
   digital signage); a cloud-side "all my frames" dashboard.
 - Shared household access: invite a second account to a backend with a role
