@@ -1,13 +1,13 @@
 "use client";
 
-import { Sparkles, Upload } from "lucide-react";
+import { FilePlus2, Sparkles, Upload } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { CreateSceneWithAiBox } from "./CreateSceneWithAiBox";
 import { SceneZipUpload } from "./SceneZipUpload";
 
 type ActionKey = "ai" | "zip";
 
-// The two ways to get a new scene into your account, as the card buttons
+// The three ways to get a new scene into your account, as the card buttons
 // frameos.net uses for its setup choices: a tinted gradient with a grain
 // overlay, a soft glow, the icon ghosted large in the corner and again as
 // a small badge. Pressing a card opens its form right below the row;
@@ -40,6 +40,20 @@ export function StoreActionCards({
           testId="action-card-ai"
           tint="gold"
           title="Create a scene with AI"
+        />
+        {/* Straight into the editor with one empty scene. Same destination as
+            the AI card, minus the prompt — /my-scenes/new starts blank when
+            nothing is passed, and bounces through login on its own if there
+            is no session yet. */}
+        <ActionCard
+          description="Start from an empty scene and build it yourself in the editor. The AI panel is there if you want it later."
+          href={aiAction}
+          icon={<FilePlus2 aria-hidden />}
+          onClick={() => undefined}
+          pressed={false}
+          testId="action-card-blank"
+          tint="slate"
+          title="New blank scene"
         />
         {showUpload ? (
           <ActionCard
@@ -85,7 +99,7 @@ function ActionCard({
   onClick: () => void;
   pressed: boolean;
   testId: string;
-  tint: "gold" | "teal";
+  tint: "gold" | "slate" | "teal";
   title: string;
 }) {
   const className = `action-card action-card--${tint}`;

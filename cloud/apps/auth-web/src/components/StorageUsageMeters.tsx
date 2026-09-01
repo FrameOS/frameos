@@ -56,7 +56,11 @@ function aiUsageValue(ai: AccountUsage["ai"]): { note?: string; value: string } 
       : { value: "$0.00 this month" };
   }
   const value = `${formatDollars(micros)} this month`;
-  return ai.metering_mode === "live" ? { value } : { note: "not billed yet", value };
+  // "Billed" needs both: metering actually posting, and something in the
+  // month that is billable to them. A month spent entirely on the operator's
+  // shared key owes nothing, and a bare dollar figure would imply otherwise.
+  const billed = ai.metering_mode === "live" && BigInt(ai.billable_micros) > 0n;
+  return billed ? { value } : { note: "not billed", value };
 }
 
 // Micro-dollars to a displayed amount, rounding UP to the cent: a tenth of a

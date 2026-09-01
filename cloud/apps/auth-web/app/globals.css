@@ -3758,12 +3758,21 @@ html.theme-dark .ai-panel__render {
   --card-ink: #155e4e;
 }
 
+.action-card--slate {
+  --card-tint: #4a5b78;
+  --card-ink: #35435c;
+}
+
 html.theme-dark .action-card--gold {
   --card-ink: #e2c468;
 }
 
 html.theme-dark .action-card--teal {
   --card-ink: #6fbfa9;
+}
+
+html.theme-dark .action-card--slate {
+  --card-ink: #9fb2d1;
 }
 
 html.theme-dark .action-card {

@@ -405,6 +405,9 @@ async function accountAiSummary(
       sql`select ai_disabled_at from accounts where id = ${accountId}`,
     );
     return {
+      // What they actually owe, which is narrower than what they used: only
+      // the platform key bills anybody (see billing() in metering.ts).
+      billable_micros: thisMonth.billableMicros.toString(),
       daily_cap_micros: settings.dailyCapMicros.toString(),
       enabled: !account?.ai_disabled_at,
       margin_basis_points: plan.subscribed
@@ -419,6 +422,7 @@ async function accountAiSummary(
     };
   } catch {
     return {
+      billable_micros: "0",
       daily_cap_micros: "0",
       enabled: true,
       margin_basis_points: 0,

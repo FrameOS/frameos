@@ -33,17 +33,32 @@ function dollars(micros: bigint): string {
 }
 
 // Surface slugs are for the database. These are for people.
+//
+// The values are what the routes actually record, which is not the same as
+// what they pass to the access gate: the scene chat meters the CLIENT's
+// `body.surface` ("editor", "frame", "store", "store-new"), so a map written
+// from the gate's argument names would have labelled almost nothing. Checked
+// against `select distinct surface from ai_usage_records`.
 const surfaceLabels: Record<string, string> = {
   app_chat: "App code assistant",
+  editor: "Scene editor chat",
+  frame: "Frame chat",
   scene_chat: "Scene chat",
   scene_convert: "Scene converter",
+  store: "Store editor chat",
+  "store-new": "New scene chat",
   store_classify: "Store classification",
+  store_recategorize: "Store recategorisation",
 };
 
 // Surfaces the platform pays for on purpose, whoever's key ran them. Listed
 // *because* they are free: $0.00 next to a real number is the clearest
 // possible statement of what we do and do not charge for.
-const freeSurfaces = new Set(["scene_convert", "store_classify"]);
+const freeSurfaces = new Set([
+  "scene_convert",
+  "store_classify",
+  "store_recategorize",
+]);
 
 function surfaceLabel(surface: string | null): string {
   if (!surface) {
@@ -82,10 +97,11 @@ export default async function AccountAiPage() {
     ]);
 
   const enabled = !account?.aiDisabledAt;
-  const live = settings.meteringMode === "live";
-  const marginPercent =
-    (plan.subscribed ? plan.plan.marginBasisPoints : settings.marginBasisPoints) /
-    100;
+  // Billed only when metering is live AND something in the month was actually
+  // billable to them. A month spent entirely on the operator's shared key or
+  // on absorbed surfaces owes nothing, and saying "this is billed at the end
+  // of the month" over that number would be a bill-shaped lie.
+  const billed = settings.meteringMode === "live" && thisMonth.billableMicros > 0n;
 
   return (
     <>
@@ -101,9 +117,9 @@ export default async function AccountAiPage() {
             You&rsquo;ve used <strong>{dollars(thisMonth.chargeableMicros)}</strong>{" "}
             of AI this month across {thisMonth.turns}{" "}
             {thisMonth.turns === 1 ? "request" : "requests"}.{" "}
-            {live
+            {billed
               ? "This is billed at the end of the month."
-              : "Nothing is billed — FrameOS Cloud AI is in preview and every request is currently free."}
+              : "Nothing is billed — every request above is currently free to you."}
             {lastMonth.turns > 0
               ? ` Last month it was ${dollars(lastMonth.chargeableMicros)}.`
               : null}
@@ -189,12 +205,11 @@ export default async function AccountAiPage() {
       <section className="card">
         <h2>How pricing works</h2>
         <p className="copy">
-          We pay the model provider for every token a request uses, and add a
-          margin of {marginPercent}% on top. That is the whole formula — no
-          per-seat fee, no minimum, nothing up front. The exact token counts
-          and unit prices behind every request above are on record, which is
-          what makes the numbers on this page checkable rather than merely
-          asserted.
+          We pay the model provider for every token a request uses, and add
+          our margin on top. That is the whole formula — no per-seat fee, no
+          minimum, nothing up front. The exact token counts and unit prices
+          behind every request above are on record, which is what makes the
+          numbers on this page checkable rather than merely asserted.
         </p>
         <p className="copy">
           You are on the <strong>{plan.plan.name}</strong> plan. A daily limit
@@ -203,10 +218,10 @@ export default async function AccountAiPage() {
           {formatDateTime(dayWindow.until)}. The limit is there so that a
           runaway loop costs you a bounded amount rather than an unbounded one.
         </p>
-        {!live ? (
+        {!billed ? (
           <p className="copy">
-            While AI is in preview nothing is charged at all. When that
-            changes you will be told before it happens, not after.
+            Nothing is being charged for AI right now. When that changes you
+            will be told before it happens, not after.
           </p>
         ) : null}
       </section>

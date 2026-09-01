@@ -34,11 +34,16 @@ const listCostExpression = sql`round(
    + output_tokens::numeric * coalesce(pricing->>'outputMicrosPerMtok', '0')::numeric)
   / 1000000)`;
 
-// What this turn is worth to bill: the price if one was actually computed,
-// otherwise the list cost marked up at the margin the row was metered under.
-// Turns on the customer's own key are worth nothing to bill — they paid the
-// provider directly — and are excluded here rather than zeroed, so that
-// `ownKey` buckets keep their list cost for display.
+// What a turn on ONE OF OUR KEYS is worth at the customer's rate: the price
+// if one was actually computed, otherwise the list cost marked up at the
+// margin the row was metered under. Turns on the customer's own key are worth
+// nothing — they paid the provider directly — and are excluded rather than
+// zeroed, so an own-key bucket keeps its list cost for display.
+//
+// This is the CAP's number, and it deliberately includes `shared`. A turn on
+// the operator's shared key is a real bill we absorb, so it belongs against a
+// limit that exists to bound *our* exposure. It is NOT what the customer
+// owes: see `billableExpression`.
 const chargeableExpression = sql`case
   when credential_source = 'account' then 0
   when price_micros > 0 then price_micros
@@ -46,9 +51,29 @@ const chargeableExpression = sql`case
     * (10000 + coalesce((pricing->>'marginBasisPoints')::numeric, 3000)) / 10000)
 end`;
 
+// What the CUSTOMER owes, which is a narrower question and has to agree with
+// `billing()` in metering.ts: only the platform key bills anybody. The
+// operator's shared key is a cost we absorb on purpose and their own key cost
+// us nothing, so neither is a line on anyone's invoice.
+//
+// Kept apart from the number above rather than folded into it, because
+// conflating them shows a shared-key user a dollar figure they do not owe the
+// moment metering goes live — which is exactly the kind of "bill-shaped lie"
+// the own-key state already exists to avoid.
+const billableExpression = sql`case
+  when credential_source <> 'platform' then 0
+  when price_micros > 0 then price_micros
+  else round(${listCostExpression}
+    * (10000 + coalesce((pricing->>'marginBasisPoints')::numeric, 3000)) / 10000)
+end`;
+
 export interface AccountAiUsageBucket {
-  // What this would be billed at (0 for own-key turns and absorbed
-  // surfaces). See the note above on why this is not `priceMicros`.
+  // What the customer actually owes for this: platform-key turns only, and
+  // never an absorbed surface. Agrees with `billing()` in metering.ts.
+  billableMicros: bigint;
+  // What this is worth at the customer's rate on any of OUR keys — the
+  // number the daily cap is measured against, which includes the shared key
+  // we absorb. Not a bill. See the note above on why it is not `priceMicros`.
   chargeableMicros: bigint;
   // What we actually paid the provider (0 when the key was not ours).
   costMicros: bigint;
@@ -62,6 +87,10 @@ export interface AccountAiUsageBucket {
 }
 
 export interface AccountAiUsage {
+  // True when nothing in the window is billable to the customer — every turn
+  // ran on their own key, on the operator's absorbed shared key, or on a
+  // surface we pay for. A dollar figure presented as a bill would be wrong.
+  billableMicros: bigint;
   buckets: AccountAiUsageBucket[];
   chargeableMicros: bigint;
   costMicros: bigint;
@@ -91,6 +120,7 @@ export async function accountAiUsage(
   window: UsageWindow,
 ): Promise<AccountAiUsage> {
   const rows = await db.execute<{
+    billable_micros: string;
     chargeable_micros: string;
     cost_micros: string;
     credential_source: string;
@@ -105,7 +135,8 @@ export async function accountAiUsage(
            coalesce(sum(cost_micros), 0)::text as cost_micros,
            coalesce(sum(price_micros), 0)::text as price_micros,
            coalesce(sum(${listCostExpression}), 0)::text as list_cost_micros,
-           coalesce(sum(${chargeableExpression}), 0)::text as chargeable_micros
+           coalesce(sum(${chargeableExpression}), 0)::text as chargeable_micros,
+           coalesce(sum(${billableExpression}), 0)::text as billable_micros
       from ai_usage_records
      where account_id = ${accountId}
        and occurred_at >= ${window.since.toISOString()}::timestamptz
@@ -115,6 +146,9 @@ export async function accountAiUsage(
   `);
 
   const buckets = rows.map((row) => ({
+    billableMicros: surfaceIsAbsorbed(row.surface)
+      ? 0n
+      : BigInt(row.billable_micros),
     // An absorbed surface (the legacy scene converter) is our migration
     // cost, never a line on anybody's bill — §5. Zeroed here rather than in
     // SQL because `absorbedSurfaces` is a TypeScript list that product
@@ -135,6 +169,7 @@ export async function accountAiUsage(
   const sum = (pick: (bucket: AccountAiUsageBucket) => bigint) =>
     buckets.reduce((total, bucket) => total + pick(bucket), 0n);
   return {
+    billableMicros: sum((bucket) => bucket.billableMicros),
     buckets,
     chargeableMicros: sum((bucket) => bucket.chargeableMicros),
     costMicros: sum((bucket) => bucket.costMicros),

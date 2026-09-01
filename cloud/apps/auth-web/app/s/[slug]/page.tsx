@@ -17,6 +17,7 @@ import { SceneMarkdown } from "../../../src/components/SceneMarkdown";
 import { SceneViewTracker } from "../../../src/components/SceneViewTracker";
 import {
   getAccountBaseUrl,
+  getAccountUrl,
   getCloudBaseUrl,
   getFramesUrl,
   getScenesBaseUrl,
@@ -179,13 +180,21 @@ export default async function ScenePage({
     session?.accountId && session.accountId === scene.accountId,
   );
   let isAdmin = false;
-  if (session?.accountId && !isOwner) {
+  // The AI switch (Account → AI usage). Read here so the panel can say AI is
+  // off BEFORE accepting a prompt: the gate would refuse the turn anyway, but
+  // discovering that after typing and waiting is a bad way to learn it.
+  let aiDisabled = false;
+  if (session?.accountId) {
     const [row] = await db
-      .select({ isSuperadmin: accounts.isSuperadmin })
+      .select({
+        aiDisabledAt: accounts.aiDisabledAt,
+        isSuperadmin: accounts.isSuperadmin,
+      })
       .from(accounts)
       .where(eq(accounts.id, session.accountId))
       .limit(1);
-    isAdmin = row?.isSuperadmin ?? false;
+    aiDisabled = Boolean(row?.aiDisabledAt);
+    isAdmin = isOwner ? false : (row?.isSuperadmin ?? false);
   }
 
   // Private and pulled scenes exist only for their owner and moderators;
@@ -411,6 +420,8 @@ export default async function ScenePage({
       {/* The diagram is part of what a shared scene IS: everyone gets to
           look behind it. Only the owner can save a new version. */}
       <SceneEditorModal
+        aiDisabled={aiDisabled}
+        aiSettingsUrl={getAccountUrl("/account/ai")}
         backUrl={getStorePath()}
         canFork={Boolean(session?.accountId)}
         canPreview={scene.status !== "pulled"}
