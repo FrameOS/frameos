@@ -58,6 +58,31 @@ def _accepts_byte_iter(field: Dict[str, Any]) -> bool:
     return isinstance(capabilities, dict) and isinstance(capabilities.get("byteIter"), dict)
 
 
+
+def _color_literal(spec: str) -> Optional[str]:
+    """#rgb / #rrggbb / #rrggbbaa -> a Nim Color literal, else None.
+
+    parseHtmlColor also accepts names, rgb()/hsl() and so on; anything this
+    cannot fold stays a runtime call.
+    """
+    t = spec.strip()
+    if not t.startswith("#"):
+        return None
+    h = t[1:]
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) == 6:
+        h += "ff"
+    if len(h) != 8:
+        return None
+    try:
+        vals = [int(h[i:i + 2], 16) / 255 for i in range(0, 8, 2)]
+    except ValueError:
+        return None
+    r, g, b, a = (f"{v:.9g}" for v in vals)
+    return f"Color(r: {r}, g: {g}, b: {b}, a: {a})"
+
+
 def _default_literal(field_name: str, field_type: str, default: Scalar, required: bool) -> str:
     """Return a Nim literal/expression usable as the fallback/default element value."""
     if field_type in ("string", "text", "select", "font", "date", "path"):
@@ -81,92 +106,41 @@ def _default_literal(field_name: str, field_type: str, default: Scalar, required
     if field_type == "color":
         # fallback to black if not provided
         s = default if isinstance(default, str) and default else "#000000"
-        return f'parseHtmlColor({_nim_quote(s)})'
+        lit = _color_literal(s)
+        return lit if lit else f'parseHtmlColor({_nim_quote(s)})'
     raise ValueError(f"Unsupported field type: {field_type}, field name: {field_name}")
+
+# config.json field types that live in a plain AppConfig slot the descriptor
+# table can address by byte offset, mapped to the template that builds the
+# descriptor (frameos/app_config.nim).
+SPEC_FIELD_TEMPLATES: Dict[str, str] = {
+    "string": "cfgFieldStr",
+    "text": "cfgFieldStr",
+    "select": "cfgFieldStr",
+    "font": "cfgFieldStr",
+    "date": "cfgFieldStr",
+    "path": "cfgFieldStr",
+    "integer": "cfgFieldInt",
+    "float": "cfgFieldFloat",
+    "boolean": "cfgFieldBool",
+    "color": "cfgFieldColor",
+    "node": "cfgFieldNode",
+}
+
 
 def _scalar_getter(field_name: str, field_type: str, default_expr: str, required: bool) -> str:
     """
-    Build Nim expression to read a scalar from params with default, robust to numbers-as-strings, etc.
-    Returns a Nim *expression* (often a 'block:' expression).
+    The value a scalar field starts life with in the AppConfig constructor.
+
+    Every type in SPEC_FIELD_TEMPLATES starts at its default and is then
+    overwritten by applyConfigParams walking the descriptor table, so the
+    constructor only carries the literal. `json` still takes the raw node
+    straight from the config; `image` is never read from the config at all.
     """
-    k = f'params{{"{field_name}"}}'
-    if field_type in ("string", "text", "select", "font", "date", "path"):
-        return f'{k}.getStr({default_expr})'
-
-    if field_type == "integer":
-        return f"""block:
-  var v = {default_expr}
-  if params.hasKey("{field_name}"):
-    let n = {k}
-    if n.kind == JInt:
-      v = n.getInt().int
-    elif n.kind == JFloat:
-      v = int(n.getFloat())
-    elif n.kind == JString:
-      try: v = parseInt(n.getStr())
-      except CatchableError: discard
-  v"""
-
-    if field_type == "float":
-        return f"""block:
-  var v = {default_expr}
-  if params.hasKey("{field_name}"):
-    let n = {k}
-    if n.kind == JFloat:
-        v = n.getFloat()
-    elif n.kind == JInt:
-        v = n.getInt().float
-    elif n.kind == JString:
-        try: v = parseFloat(n.getStr())
-        except CatchableError: discard
-  v"""
-
-    if field_type == "boolean":
-        return f"""block:
-  var v = {default_expr}
-  if params.hasKey("{field_name}"):
-    let n = {k}
-    if n.kind == JBool:
-        v = n.getBool()
-    elif n.kind == JString:
-        let s = n.getStr().toLowerAscii()
-        v = (s in ["true","1","yes","y"])
-  v"""
-
-    if field_type == "image":
-        # Not read from config; use default (Option[Image] or Image if required)
-        return default_expr
-
-    if field_type == "node":
-        return f"""block:
-  var v: NodeId = 0.NodeId
-  if params.hasKey("{field_name}"):
-    let n = {k}
-    if n.kind == JInt:
-      v = n.getInt().int.NodeId
-    elif n.kind == JFloat:
-        v = int(n.getFloat()).NodeId
-    elif n.kind == JString:
-        try: v = int(parseFloat(n.getStr())).NodeId
-        except CatchableError: discard
-  v"""
-
     if field_type == "json":
-        return k  # hand over the raw JsonNode
-
-    if field_type == "color":
-        # Respect the field's default from config (default_expr) instead of forcing black.
-        return f"""block:
-  var v: Color = {default_expr}
-  if params.hasKey("{field_name}"):
-    let n = {k}
-    if n.kind == JString:
-      let s = n.getStr()
-      try:
-        v = parseHtmlColor(s)
-      except CatchableError:
-        discard
-  v"""
+        return f'params{{"{field_name}"}}'
+    if field_type in SPEC_FIELD_TEMPLATES or field_type == "image":
+        return default_expr
     raise ValueError(f"Unsupported field type: {field_type}, fieldName: {field_name}")
 
 def _field_elem_nim_type(field_type: str, required: bool) -> str:
@@ -206,19 +180,7 @@ def _size_expr(bound: Union[int, str], all_fields: Dict[str, Dict[str, Any]], de
     except Exception:
         dflt = default_if_ref
 
-    k = f'params{{"{ref}"}}'
-    return f"""block:
-  var v = {dflt}
-  if params.hasKey("{ref}"):
-    let n = {k}
-    if n.kind == JInt:
-      v = n.getInt().int
-    elif n.kind == JFloat:
-      v = int(n.getFloat())
-    elif n.kind == JString:
-      try: v = parseInt(n.getStr())
-      except CatchableError: discard
-  v"""
+    return f'cfgInt(params, "{ref}", {dflt})'
 
 def _seq_init_expr(field: Dict[str, Any], all_fields: Dict[str, Dict[str, Any]]) -> list[str]:
     """
@@ -603,6 +565,7 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
 
     app_config_lines: List[str] = []
     app_set_lines: List[str] = []
+    spec_lines: List[str] = []
 
     inserted_fields: set[str] = set() # prevent duplicate keys
 
@@ -644,6 +607,13 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
         else:
             app_config_lines.append(f"    {field_name}: {getter_expr},")
 
+        spec_template = SPEC_FIELD_TEMPLATES.get(field_type)
+        if spec_template:
+            # The descriptor table reads this one out of the config and writes
+            # wired values into it; no per-field code needed for either.
+            spec_lines.append(f"  {spec_template}(app_module.AppConfig, {field_name}),")
+            continue
+
         app_set_lines.append(f'  of "{field_name}":')
         if not field_required and field_type == "image":
             app_set_lines.append(
@@ -673,26 +643,55 @@ def write_app_loader_nim(app_dir, config: Optional[dict] = None) -> str:
 
     newline = os.linesep
     init_call = "  app_module.init(app_module.App(result))" if app_has_self_init else ""
+
+    # Scalar fields are described once, in data, and read/written by the two
+    # shared procs in frameos/app_config.nim. Only the field types that need
+    # real code — images, raw JSON, seqs, spools — still get their own lines.
+    raise_unknown = 'raise newException(ValueError, "Unknown field: " & field)'
+    if spec_lines:
+        spec_block = "const configFields = [{0}{1}{0}]{0}{0}".format(
+            newline, newline.join(spec_lines)
+        )
+        config_binding = "var"
+        apply_params = "  applyConfigParams(addr config, configFields, params)" + newline
+        fallback = [
+            "if not setConfigField(addr app.appConfig, configFields, field, value):",
+            f"  {raise_unknown}",
+        ]
+    else:
+        spec_block = ""
+        config_binding = "let"
+        apply_params = ""
+        fallback = [raise_unknown]
+
+    if app_set_lines:
+        set_body = newline.join(
+            ["  case field:"] + app_set_lines + ["  else:"] + [f"    {line}" for line in fallback]
+        )
+    else:
+        set_body = newline.join(f"  {line}" for line in fallback)
+
     nim_code = f"""{{.warning[UnusedImport]: off.}}
 import json
 import options
 import strutils
 import pixie
+import frameos/app_config
 import frameos/values
 import frameos/types
 import ./app as app_module
 
-proc init*(
+{spec_block}proc init*(
     node: DiagramNode,
     scene: FrameScene,
 ): AppRoot =
   let params = node.data["config"]
   if params.kind != JObject:
     raise newException(Exception, "Invalid config format")
-  let config = app_module.AppConfig(
+  {config_binding} config = app_module.AppConfig(
 {newline.join(app_config_lines)}
   )
-
+{apply_params}
   result = app_module.App(
     appConfig: config,
     nodeName: node.data{{"name"}}.getStr(),
@@ -704,10 +703,7 @@ proc init*(
 
 proc setField*(self: AppRoot, field: string, value: Value) =
   let app = app_module.App(self)
-  case field:
-{newline.join(app_set_lines)}
-  else:
-    raise newException(ValueError, "Unknown field: " & field)
+{set_body}
 """
     if app_has_get:
         nim_code += """
