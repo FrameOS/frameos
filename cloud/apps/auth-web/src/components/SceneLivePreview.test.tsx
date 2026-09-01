@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DeviceLimits } from "frameos-wasm";
 import {
   AUTO_APPLY_DEBOUNCE_MS,
   EDITOR_RELOAD_DEBOUNCE_MS,
@@ -10,14 +11,23 @@ import {
   SceneLivePreviewPanel,
 } from "./SceneLivePreview";
 
+type PreviewMemoryUsage = {
+  limitBytes: number;
+  usedBytes: number;
+  peakBytes: number;
+};
+
 type PreviewCallbacks = {
   onReady?: (info: unknown) => void;
   onFrame?: (frame: { width: number; height: number; renderMs: number }) => void;
   onState?: (state: Record<string, unknown>) => void;
   onFastRenderRequest?: (intervalMs: number) => void;
   onAssetsChanged?: () => void;
+  onMemory?: (usage: PreviewMemoryUsage) => void;
+  onOutOfMemory?: (info: PreviewMemoryUsage & { refusedBytes: number }) => void;
   fastMode?: boolean;
   panelPalette?: string | null;
+  deviceLimits?: DeviceLimits | null;
 };
 
 // The wasm runtime is a worker + emscripten bundle — not something jsdom can
