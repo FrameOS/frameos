@@ -56,8 +56,13 @@ export const metricChartThemes: Record<MetricChartThemeName, MetricChartTheme> =
   },
 }
 
-export function themeMetricSeries(series: MetricSeries[], chartTheme: MetricChartTheme): MetricSeries[] {
-  if (chartTheme.name === 'dark') {
+/**
+ * Recolours series for a theme. Returns the input itself when there is
+ * nothing to recolour: the chart components memoise on series identity,
+ * and a fresh array per render would re-derive every scale and path.
+ */
+export function themeMetricSeries<T extends MetricSeries>(series: T[], chartTheme: MetricChartTheme): T[] {
+  if (chartTheme.name === 'dark' || Object.keys(chartTheme.seriesColors).length === 0) {
     return series
   }
 

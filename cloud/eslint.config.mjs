@@ -50,6 +50,10 @@ export default tseslint.config(
       // metricsLogic, whose RebootMarker literals spell optional fields as
       // `undefined`.
       "**/src/test/shared-spa/battery-misreads.test.ts",
+      // Same exclusion, same reason: chartData takes its types from
+      // metricsLogic, and BrushChart draws chartData's output.
+      "**/src/test/shared-spa/metrics-chart-data.test.ts",
+      "**/src/test/shared-spa/metrics-brush-chart.test.tsx",
       // Same exclusion, same reason, widest graph of the lot: mounts the
       // whole FrameSettings panel and the colour picker behind it.
       "**/src/test/shared-spa/cloud-frame-settings-panel.test.tsx",

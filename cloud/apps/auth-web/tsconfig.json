@@ -63,6 +63,12 @@
     // Nothing else in auth-web reaches that module. Vitest still runs it;
     // only tsc leaves it out.
     "src/test/shared-spa/battery-misreads.test.ts",
+    // Same story: chartData's types come from metricsLogic, and the module
+    // itself indexes sorted arrays the way the frontend's tsconfig allows
+    // (no noUncheckedIndexedAccess). Vitest still runs it; only tsc leaves
+    // it out.
+    "src/test/shared-spa/metrics-chart-data.test.ts",
+    "src/test/shared-spa/metrics-brush-chart.test.tsx",
     // The widest graph of the lot: it mounts the whole FrameSettings panel,
     // which reaches the colour picker and every device-settings component
     // behind it. Vitest still runs it; only tsc leaves it out.
