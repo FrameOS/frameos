@@ -14,6 +14,7 @@ import {
   accountBalanceMicros,
   billingSettingKeys,
   customerCreditsCode,
+  customerReceivableCode,
   listJournalEntries,
   readBillingSettings,
   recordAiUsage,
@@ -417,24 +418,32 @@ describe("admin billing routes", () => {
     expect(await accountBalanceMicros(db, systemAccountCodes.revenueAiUsage)).toBe(
       575_120n,
     );
-    // The turn overdrew a customer who has bought nothing, but by less than
-    // the dollar of overdraft policy allows, so the books are fine.
+    // Postpay: the charge is an ordinary debit to what the customer owes us,
+    // so there is nothing irregular about the books at all — and half a
+    // dollar is well inside the $10 daily cap.
     expect(payload).toMatchObject({ ok: true, violations: [] });
+    expect(
+      await accountBalanceMicros(db, customerReceivableCode(customer)),
+    ).toBe(575_120n);
 
-    // Take the allowance away and the same balance becomes the violation the
-    // nightly job exists to shout about.
+    // Drop the cap under what the day already spent and the same turn becomes
+    // the violation the nightly job exists to shout about. This is invariant
+    // 5's postpay replacement, and the reason it matters is that it is the
+    // only automated proof the spend gate sits in front of every AI surface
+    // rather than most of them.
     await writeBillingSetting(db, billingSettingKeys.paygOverdraftMicros, 0);
+    await writeBillingSetting(db, billingSettingKeys.paygDailyCapMicros, 1);
     const strict = await postNightly(postJson("/api/admin/billing/nightly", {}));
     const strictPayload = await strict.json();
     expect(strictPayload.violations).toContainEqual({
-      check: "customer_credit_floor",
+      check: "daily_cap_respected",
       detail: expect.stringContaining(customer),
     });
     expect(strictPayload.ok).toBe(false);
     // And it reports rather than repairs: a book that disagrees with itself
     // needs a human, and a silent "correction" is how that goes unnoticed.
-    expect(await accountBalanceMicros(db, customerCreditsCode(customer))).toBe(
-      -575_120n,
-    );
+    expect(
+      await accountBalanceMicros(db, customerReceivableCode(customer)),
+    ).toBe(575_120n);
   });
 });
