@@ -46,6 +46,10 @@ export default tseslint.config(
       // Same exclusion, same reason: sanitizeIncomingScenes is a thin wrapper
       // over that same sanitizeScene.
       "**/src/test/shared-spa/embedded-editor-scene-sanitize.test.ts",
+      // Same exclusion, same reason from the other direction: it imports
+      // metricsLogic, whose RebootMarker literals spell optional fields as
+      // `undefined`.
+      "**/src/test/shared-spa/battery-misreads.test.ts",
       // Same exclusion, same reason, widest graph of the lot: mounts the
       // whole FrameSettings panel and the colour picker behind it.
       "**/src/test/shared-spa/cloud-frame-settings-panel.test.tsx",
