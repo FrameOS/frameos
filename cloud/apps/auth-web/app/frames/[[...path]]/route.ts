@@ -132,6 +132,9 @@ async function appConfigLines(): Promise<string[]> {
     `cloud_frames_url: ${JSON.stringify(new URL("/frames", getAccountBaseUrl()).toString())},`,
     `cloud_logout_url: ${JSON.stringify(new URL("/api/auth/logout", getCloudBaseUrl()).toString())},`,
     `cloud_scenes_url: ${JSON.stringify(getStoreUrl())},`,
+    // The global settings (service API keys, SSH keys) are an account page;
+    // the SPA's urls.settings() links out to this finished URL.
+    `cloud_settings_url: ${JSON.stringify(getAccountUrl("/account/settings"))},`,
     `cloud_origin: ${JSON.stringify(await enrollmentOrigin(accountOrigin))},`,
     `cloud_claim_token_ttl_hours: ${Math.round(claimTokenTtlMs / (60 * 60 * 1000))},`,
     // The workspace and the account pages are two different apps sharing one
@@ -190,6 +193,19 @@ function anchorMissing(anchor: string, purpose: string) {
 // itself redirects to /login on 401 — the shell is served unauthenticated,
 // like every other static asset. See cloud-frontend/README.md.
 export async function GET(request: NextRequest) {
+  // The global settings used to be a scene of the SPA at /frames/settings;
+  // they are an account page now. Old links — and the #settings-openai
+  // anchors the scene editors pointed at — keep working: a redirect without
+  // a fragment keeps the browser's. Temporary and uncacheable on purpose,
+  // like the surface redirects in proxy.ts: a permanent redirect freezes
+  // into browser caches, and routing has changed under them before.
+  if (request.nextUrl.pathname.replace(/\/+$/, "") === "/frames/settings") {
+    return NextResponse.redirect(getAccountUrl("/account/settings"), {
+      headers: { "cache-control": "no-store" },
+      status: 307,
+    });
+  }
+
   let html: string;
   try {
     html = await readFile(

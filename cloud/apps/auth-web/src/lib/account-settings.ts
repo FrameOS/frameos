@@ -7,7 +7,22 @@
 // form knows (SSH keys, build environment, deploy defaults, PostHog, ...) is
 // backend-only and never reaches the database here.
 
+import { eq } from "drizzle-orm";
+import { accountSettings, type createDb } from "@frameos-cloud/db";
 import { previewSettingsGroups } from "./preview-settings";
+
+// Everything stored for the account, as the merged {group: value} object
+// GET /api/settings answers with and the account settings page renders.
+export async function storedAccountSettings(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+): Promise<Record<string, unknown>> {
+  const rows = await db
+    .select()
+    .from(accountSettings)
+    .where(eq(accountSettings.accountId, accountId));
+  return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+}
 
 // Generous for API tokens and URLs; anything longer is not a credential.
 export const maxAccountSettingValueLength = 4096;

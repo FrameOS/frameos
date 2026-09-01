@@ -31,6 +31,7 @@ const accountPagePrefixes = [
 const accountSectionRewrites = new Map([
   ["/backends", "/account/installs"],
   ["/ai", "/account/ai"],
+  ["/settings", "/account/settings"],
   ["/backups", "/account/backups"],
   ["/activity", "/account/activity"],
   ["/security", "/account/security"],

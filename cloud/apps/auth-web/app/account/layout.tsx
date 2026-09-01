@@ -113,6 +113,7 @@ export default async function AccountLayout({
           developer: getAccountUrl("/account/developer"),
           installs: getAccountUrl("/account/installs"),
           security: getAccountUrl("/account/security"),
+          settings: getAccountUrl("/account/settings"),
         }}
       />
       {children}

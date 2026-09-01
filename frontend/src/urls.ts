@@ -28,6 +28,18 @@ function scenesUrl(frameId?: FrameId, sceneId?: string): string {
   return getRouteBasePath() + '/scenes' + (frameId ? '/' + frameId : '') + (frameId && sceneId ? '/' + sceneId : '')
 }
 
+// On the cloud the global settings (service API keys, SSH keys) are a tab of
+// the account pages, not a scene of this SPA. The finished URL is injected
+// by the server (cloud/apps/auth-web/app/frames/[[...path]]/route.ts —
+// cloud_settings_url) because the account surface may live on another origin
+// and shortens /account/* on a split-host deployment; the fallback is only
+// for a shell served without injection.
+function cloudAccountSettingsUrl(): string {
+  const injected =
+    typeof window !== 'undefined' ? (window as any).FRAMEOS_APP_CONFIG?.cloud_settings_url : undefined
+  return typeof injected === 'string' && injected ? injected : '/account/settings'
+}
+
 function frameControlUrl(tool?: string): string {
   return frameUrl(getFrameControlFrameId(), tool)
 }
@@ -51,7 +63,12 @@ export const urls = {
     (frameId && sceneId && nodeId ? '/' + nodeId : ''),
   systemApps: (keyword?: string | null) =>
     getRouteBasePath() + '/apps/system' + (keyword ? '/' + encodeURIComponent(keyword) : ''),
-  settings: () => (isInFrameAdminMode() ? frameControlUrl('settings') : getRouteBasePath() + '/settings'),
+  settings: () =>
+    isInFrameAdminMode()
+      ? frameControlUrl('settings')
+      : isCloudMode()
+        ? cloudAccountSettingsUrl()
+        : getRouteBasePath() + '/settings',
   login: () => getRouteBasePath() + '/login',
   logout: () => getRouteBasePath() + '/logout',
   signup: () => getRouteBasePath() + '/signup',
