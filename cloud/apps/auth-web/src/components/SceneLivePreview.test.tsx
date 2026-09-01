@@ -117,6 +117,66 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+describe("SceneLivePreviewPanel memory limit", () => {
+  it("is off by default, and the device picker waits behind its checkbox", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+
+    const toggle = screen.getByLabelText("Memory limit") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    const picker = screen.getByLabelText("Device to simulate") as HTMLSelectElement;
+    expect(picker.disabled).toBe(true);
+    expect([...picker.options].map((option) => option.value)).toEqual([
+      "pi",
+      "piZero",
+      "esp32_16mb",
+      "esp32",
+    ]);
+    // Nothing simulated until it is asked for.
+    expect(previews[0]!.options.deviceLimits).toBeNull();
+  });
+
+  it("ticking it reboots the runtime under the tightest board's ceiling", async () => {
+    render(<SceneLivePreviewPanel height={1600} sceneId="scene-1" scenes={[clockScene]} width={1200} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Memory limit"));
+    });
+
+    // The ceiling can only be set on a fresh heap, so the runtime restarts.
+    await waitFor(() => expect(previews).toHaveLength(2));
+    const limits = previews[1]!.options.deviceLimits;
+    expect(limits).not.toBeNull();
+    // 8 MB at 1200x1600: 6.08 MB of device heap, plus the canvas the preview
+    // keeps in RGBX where the frame keeps it in RGB565.
+    expect(limits!.memoryBytes).toBe(10_220_032);
+    expect(limits!.previewOverheadBytes).toBe(3_840_000);
+    expect((screen.getByLabelText("Device to simulate") as HTMLSelectElement).disabled).toBe(false);
+  });
+
+  it("reports a render's peak in the device's own bytes", async () => {
+    render(<SceneLivePreviewPanel height={1600} sceneId="scene-1" scenes={[clockScene]} width={1200} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Memory limit"));
+    });
+    await waitFor(() => expect(previews).toHaveLength(2));
+
+    act(() =>
+      previews[1]!.options.onMemory!({
+        limitBytes: 10_220_032,
+        peakBytes: 9_980_000,
+        usedBytes: 9_000_000,
+      })
+    );
+
+    // 9.98 MB of preview peak is 5.9 MB on the frame, under its 6.1 MB — the
+    // numbers its own logs would show, not the preview's inflated ones.
+    expect(screen.getByText(/peak 5.9 MB of 6.1 MB usable/)).toBeTruthy();
+  });
+});
+
 describe("SceneLivePreviewPanel screenshot gating", () => {
   it("keeps the screenshot buttons disabled until the runtime paints a frame", async () => {
     render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);

@@ -38,6 +38,8 @@ export default tseslint.config(
       // Same exclusion, same reason: importing frameLogic pulls in
       // framesModel and the decorators behind it.
       "**/src/test/shared-spa/cloud-frame-change-details.test.ts",
+      // Same exclusion, same reason: mounts framesModel itself.
+      "**/src/test/shared-spa/cloud-frame-scenes-loading.test.ts",
       // Same exclusion, same reason: imports frameLogic's sanitizeScene.
       "**/src/test/shared-spa/cloud-scene-persist-equality.test.ts",
       "**/src/test/shared-spa/scene-origin.test.ts",

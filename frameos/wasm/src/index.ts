@@ -18,6 +18,8 @@ export {
   esp32CanvasBytesPerPixel,
   esp32DeviceHeapBytes,
   esp32PreviewMemoryBytes,
+  esp32PreviewOverheadBytes,
+  piDeviceHeapBytes,
   type DeviceLimits,
   type DevicePreset,
   type DevicePresetKey,

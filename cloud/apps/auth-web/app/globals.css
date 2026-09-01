@@ -1449,11 +1449,7 @@ a.tag-pill--active:hover {
   cursor: not-allowed;
 }
 
-/* The "Memory" control's label and the peak-usage readout beside it. */
-.viewport-controls__label {
-  white-space: nowrap;
-}
-
+/* The peak-usage readout beside the "Memory limit" control. */
 .viewport-controls__hint {
   color: var(--muted);
   font-size: 12px;

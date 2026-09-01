@@ -623,6 +623,21 @@ export function FrameAddSceneTile({ frame, compact = false }: { frame: FrameType
   )
 }
 
+/**
+ * Cloud frames arrive from /api/frames without their scenes; those are fetched
+ * per frame straight after (framesModel's hydrateCloudFrameScenes). In between,
+ * `scenes` is empty for the same reason it is empty on a frame that genuinely
+ * has none — and the blank-frame hint told everyone their frames were empty
+ * every time the page loaded. This holds the space until the fetch settles.
+ */
+function LoadingFrameScenesHint(): JSX.Element {
+  return (
+    <div className="frameos-empty flex h-40 min-w-64 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
+      Loading scenes…
+    </div>
+  )
+}
+
 function BlankFrameSceneHint(): JSX.Element {
   return (
     <div className="frameos-blank-frame-scene-hint mb-4 rounded-lg border border-amber-200 bg-amber-100 px-4 py-3 text-sm font-medium leading-5 text-amber-950 shadow-sm">
@@ -651,6 +666,7 @@ function FrameScenesBlock({
   // edits first, then the saved frame (which is what cloud mode hydrates), so
   // an empty/absent form never blanks the list.
   const { scenes: liveScenes } = useValues(frameLogic({ frameId: frame.id }))
+  const { cloudFrameScenesLoaded } = useValues(framesModel)
   const { applyTemplate, setFrameFormValues } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
   const [multiSelectEnabled, setMultiSelectEnabled] = useState(false)
@@ -843,6 +859,8 @@ function FrameScenesBlock({
         <div className="frameos-empty flex h-40 min-w-64 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/45 px-6 text-center text-sm font-medium text-slate-500">
           No scenes match this search.
         </div>
+      ) : workspaceMode() === 'cloud' && !cloudFrameScenesLoaded[frame.id] ? (
+        <LoadingFrameScenesHint />
       ) : (
         <div>
           <BlankFrameSceneHint />
