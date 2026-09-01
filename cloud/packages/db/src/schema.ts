@@ -1421,7 +1421,12 @@ export const aiUsageRecords = pgTable(
     // The turn's own id, and the idempotency handle: this row's ledger event
     // is keyed "turn:<turnId>", so re-posting it is a replay.
     turnId: uuid("turn_id").notNull(),
+    // The gate's own name for the product surface ("scene_chat", ...): an
+    // enum the server owns, because it decides whether a turn is absorbed.
     surface: text("surface"),
+    // The client's hint about where in the product the turn came from
+    // ("editor", "frame", "store"). Display only; nothing prices on it.
+    context: text("context"),
     model: text("model").notNull(),
     // Whose key paid the provider: "account" (the customer's own — we incur
     // nothing and charge nothing), "shared" (the operator's key, our cost,
@@ -1444,6 +1449,9 @@ export const aiUsageRecords = pgTable(
     // flipping the switch cannot retroactively bill a week of shadow turns.
     meteringMode: text("metering_mode").default("shadow").notNull(),
     eventId: uuid("event_id").references(() => financialEvents.id),
+    // Set when the charge entry this record posted was reversed: the page
+    // and the daily cap then stop counting it (§9.2 item 11).
+    creditedAt: timestamp("credited_at", { withTimezone: true }),
     occurredAt: timestamp("occurred_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -1501,12 +1509,17 @@ export const subscriptions = pgTable(
   "subscriptions",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    accountId: uuid("account_id")
-      .notNull()
-      .references(() => accounts.id, { onDelete: "cascade" }),
+    // An accounts uuid, unreferenced like every other billing table (§2.1).
+    // Migration 0045 had it cascading from accounts, which took a charged
+    // period's row with the account and stranded its deferred revenue; 0046
+    // dropped the reference.
+    accountId: uuid("account_id").notNull(),
     planCode: text("plan_code")
       .notNull()
       .references(() => billingPlans.code),
+    // A downgrade lands here and moves into plan_code at the next rollover
+    // (§9.2 item 6); an upgrade switches plan_code at once, prorated.
+    nextPlanCode: text("next_plan_code"),
     status: text("status").default("active").notNull(),
     startedAt: timestamp("started_at", { withTimezone: true })
       .defaultNow()
@@ -1544,6 +1557,11 @@ export const subscriptionPeriods = pgTable(
     periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
     chargedAt: timestamp("charged_at", { withTimezone: true }),
     recognizedAt: timestamp("recognized_at", { withTimezone: true }),
+    // Returned to the receivable before period end (§3.6's refund recipe);
+    // recognition then earns price − this, never the full price.
+    refundedMicros: bigint("refunded_micros", { mode: "bigint" })
+      .default(0n)
+      .notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

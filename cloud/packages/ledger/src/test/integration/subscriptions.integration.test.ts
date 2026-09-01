@@ -1,16 +1,19 @@
-import { eq } from "drizzle-orm";
-import { subscriptionPeriods, subscriptions } from "@frameos-cloud/db";
+import { eq, sql } from "drizzle-orm";
+import { accounts, subscriptionPeriods, subscriptions } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   accountAiUsage,
+  accountBalanceMicros,
   billingSettingKeys,
   cancelAccountPlan,
+  checkDeferredSubscriptions,
   checkLedgerIntegrity,
+  closeOutSubscriptionForDeletedAccount,
   customerReceivableCode,
-  accountBalanceMicros,
   formatMicros,
   listJournalEntries,
   readAccountPlan,
+  recognizePeriod,
   recordAiUsage,
   refundUnearnedPeriod,
   runSubscriptionCycle,
@@ -57,49 +60,65 @@ const turnUsage = {
   reasoningTokens: 8_000,
 };
 
+const day = 24 * 60 * 60 * 1000;
+// A fixed clock for the tests that reason about periods: Jan 10 → Feb 10 is
+// 31 days, so half a period is exactly 15.5 days and prorations come out in
+// whole micro-dollars.
+const t0 = new Date("2026-01-10T00:00:00Z");
+const halfway = new Date(t0.getTime() + 15.5 * day);
+
+async function deferred() {
+  return accountBalanceMicros(db, systemAccountCodes.deferredSubscriptions);
+}
+
+async function periodsFor(accountId: string) {
+  const [row] = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.accountId, accountId));
+  if (!row) {
+    return [];
+  }
+  return db
+    .select()
+    .from(subscriptionPeriods)
+    .where(eq(subscriptionPeriods.subscriptionId, row.id))
+    .orderBy(subscriptionPeriods.periodStart);
+}
+
 // The postpay + subscription golden file (cloud/docs/accounting-todo.md §3.6):
-// a customer subscribes, the cycle charges and recognizes the period, their
-// metered turns price at the PLAN's margin rather than the deployment's, and
-// everything lands on the one receivable a month-end invoice would collect.
+// a customer subscribes, the period is charged the moment they do, their
+// metered turns price at the PLAN's margin rather than PAYG's, and everything
+// lands on the one receivable a month-end invoice would collect.
 describe("a subscriber's life through the books", () => {
-  it("charges, recognizes and meters at the plan's margin, all on one receivable", async () => {
+  it("charges on subscribing, recognizes at period end, and meters at the plan's margin", async () => {
     const accountId = await createAccount();
     await writeBillingSetting(db, billingSettingKeys.aiMeteringMode, "live");
     const receivable = customerReceivableCode(accountId);
 
     // 1. They take the Maker plan: $1.99/month, and AI at 50% margin instead
-    //    of the deployment's 30%.
+    //    of PAYG's. The first period opens and charges right here — a plan
+    //    taken and cancelled the same afternoon used to cost nothing because
+    //    only the nightly job opened periods (§9.2 item 6).
     await setAccountPlan(db, accountId, "maker");
     const plan = await readAccountPlan(db, accountId);
     expect(plan.plan.code).toBe("maker");
     expect(plan.plan.marginBasisPoints).toBe(5_000);
     expect(plan.subscribed).toBe(true);
-
-    // 2. The nightly cycle opens the period and charges it. The charge is an
-    //    accrual, not a payment: it lands on the receivable next to their
-    //    metered usage, which is the whole reason postpay came first.
-    const opened = await runSubscriptionCycle(db);
-    expect(opened.opened).toBe(1);
-    expect(opened.charged).toBe(1);
-    expect(opened.recognized).toBe(0);
-    expect(opened.failures).toEqual([]);
     expect(await accountBalanceMicros(db, receivable)).toBe(1_990_000n);
-    // Not revenue yet: they have paid for a month we have not served.
-    expect(
-      await accountBalanceMicros(db, systemAccountCodes.deferredSubscriptions),
-    ).toBe(1_990_000n);
+    // Not revenue yet: they owe for a month we have not served.
+    expect(await deferred()).toBe(1_990_000n);
     expect(
       await accountBalanceMicros(db, systemAccountCodes.revenueSubscriptions),
     ).toBe(0n);
 
-    // 3. Running again the same night charges nobody twice. This is the one
-    //    property the nightly job's whole design rests on.
-    const again = await runSubscriptionCycle(db);
-    expect(again).toMatchObject({ charged: 0, opened: 0, recognized: 0 });
+    // 2. The nightly cycle finds nothing to do, however many times it runs.
+    //    This is the one property the job's whole design rests on.
+    expect(await runSubscriptionCycle(db)).toMatchObject({ charged: 0, opened: 0, recognized: 0 });
+    expect(await runSubscriptionCycle(db)).toMatchObject({ charged: 0, opened: 0, recognized: 0 });
     expect(await accountBalanceMicros(db, receivable)).toBe(1_990_000n);
 
-    // 4. A metered turn, priced at the PLAN's 50% and not the global 30%.
-    //    442,400 provider cost × 1.5 = 663,600.
+    // 3. A metered turn, priced at the PLAN's 50%: 442,400 × 1.5 = 663,600.
     await recordAiUsage(db, {
       accountId,
       credentialSource: "platform",
@@ -113,8 +132,7 @@ describe("a subscriber's life through the books", () => {
       await accountBalanceMicros(db, systemAccountCodes.revenueAiUsage),
     ).toBe(663_600n);
 
-    // The customer's own view agrees with the books, which is §5.2's point:
-    // the page and the ledger are one query apart, not two definitions apart.
+    // The customer's own view agrees with the books, which is §5.2's point.
     const mine = await accountAiUsage(db, accountId, utcMonthWindow(new Date()));
     expect(mine.chargeableMicros).toBe(663_600n);
     expect(mine.turns).toBe(1);
@@ -136,7 +154,6 @@ describe("a subscriber's life through the books", () => {
   it("recognizes the period once it has actually been served", async () => {
     const accountId = await createAccount();
     await setAccountPlan(db, accountId, "maker");
-    await runSubscriptionCycle(db);
 
     // Nothing is earned until the period ends, however many nights run.
     await runSubscriptionCycle(db);
@@ -144,41 +161,51 @@ describe("a subscriber's life through the books", () => {
       await accountBalanceMicros(db, systemAccountCodes.revenueSubscriptions),
     ).toBe(0n);
 
-    // Two months on, the first period is over and a second has opened.
-    const later = new Date(Date.now() + 40 * 24 * 60 * 60 * 1000);
+    // Forty days on, the first period is over and a second has opened.
+    const later = new Date(Date.now() + 40 * day);
     const result = await runSubscriptionCycle(db, { now: later });
-    expect(result.recognized).toBe(1);
+    expect(result).toMatchObject({ charged: 1, opened: 1, recognized: 1 });
     expect(
       await accountBalanceMicros(db, systemAccountCodes.revenueSubscriptions),
     ).toBe(1_990_000n);
     expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
   });
 
-  it("returns the unearned remainder to the receivable rather than to cash", async () => {
+  it("returns the unearned remainder to the receivable, and then earns only the rest", async () => {
     const accountId = await createAccount();
     await setAccountPlan(db, accountId, "studio");
-    await runSubscriptionCycle(db);
     const receivable = customerReceivableCode(accountId);
     expect(await accountBalanceMicros(db, receivable)).toBe(6_990_000n);
 
-    const [period] = await db.select().from(subscriptionPeriods);
+    const [period] = await periodsFor(accountId);
     // Half the month unearned: it nets against what they owe, which under
     // postpay is usually the entire answer — no cash leaves.
     await refundUnearnedPeriod(db, period!, 3_495_000n);
     expect(await accountBalanceMicros(db, receivable)).toBe(3_495_000n);
-    expect(
-      await accountBalanceMicros(db, systemAccountCodes.deferredSubscriptions),
-    ).toBe(3_495_000n);
+    expect(await deferred()).toBe(3_495_000n);
     expect(
       await accountBalanceMicros(db, systemAccountCodes.refundsPayable),
     ).toBe(0n);
+
+    // A second refund cannot exceed what is still deferred.
+    const [refunded] = await periodsFor(accountId);
+    await expect(refundUnearnedPeriod(db, refunded!, 3_495_001n)).rejects.toThrow(
+      /no larger than/,
+    );
+
+    // Recognition earns the half that was served, not the full price — the
+    // full price would have driven the deferred account $3.50 negative.
+    await recognizePeriod(db, refunded!);
+    expect(
+      await accountBalanceMicros(db, systemAccountCodes.revenueSubscriptions),
+    ).toBe(3_495_000n);
+    expect(await deferred()).toBe(0n);
     expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
   });
 
-  it("runs a cancelled plan to the end of the period it was paid for", async () => {
+  it("runs a cancelled plan to the end of the period it was charged for", async () => {
     const accountId = await createAccount();
     await setAccountPlan(db, accountId, "maker");
-    await runSubscriptionCycle(db);
 
     await cancelAccountPlan(db, accountId);
     const [row] = await db
@@ -186,19 +213,125 @@ describe("a subscriber's life through the books", () => {
       .from(subscriptions)
       .where(eq(subscriptions.accountId, accountId));
     expect(row?.status).toBe("canceling");
-    // Still theirs: they paid for this month.
+    // Still theirs: they owe for this month, and it was charged already.
     expect((await readAccountPlan(db, accountId)).plan.code).toBe("maker");
+    expect(await accountBalanceMicros(db, customerReceivableCode(accountId))).toBe(1_990_000n);
 
     // Past the period end, the entitlement is gone and nothing new is
     // charged — the plan expires on time whether or not the job has run.
-    const later = new Date(Date.now() + 40 * 24 * 60 * 60 * 1000);
+    const later = new Date(Date.now() + 40 * day);
     const cycle = await runSubscriptionCycle(db, { now: later });
     expect(cycle.opened).toBe(0);
     expect(cycle.charged).toBe(0);
     expect((await readAccountPlan(db, accountId)).plan.code).toBe("payg");
   });
 
-  it("puts an account with no subscription on the free plan", async () => {
+  // §9.2 item 2: the catch-up used to start from the last period's end even
+  // across a cancellation, so a return six months later was billed for six
+  // months nobody was subscribed for.
+  it("does not bill the gap between a cancellation and a return", async () => {
+    const accountId = await createAccount();
+    const receivable = customerReceivableCode(accountId);
+    await setAccountPlan(db, accountId, "maker", { now: t0 });
+    await cancelAccountPlan(db, accountId, { immediately: true, now: new Date(t0.getTime() + day) });
+    expect(await accountBalanceMicros(db, receivable)).toBe(1_990_000n);
+
+    const back = new Date(t0.getTime() + 200 * day);
+    await setAccountPlan(db, accountId, "studio", { now: back });
+    const periods = await periodsFor(accountId);
+    expect(periods.map((period) => period.planCode)).toEqual(["maker", "studio"]);
+    expect(periods[1]?.periodStart).toEqual(back);
+    // One Maker month and one Studio month: nothing in between.
+    expect(await accountBalanceMicros(db, receivable)).toBe(1_990_000n + 6_990_000n);
+    expect(await runSubscriptionCycle(db, { now: back })).toMatchObject({ charged: 0, opened: 0 });
+    expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
+  });
+
+  // §9.2 item 6: an upgrade is reverse-and-rebook, prorated. The unearned
+  // half of the Maker month comes back to the receivable, the Maker period
+  // ends now, and a Studio period starts now at Studio's price and margin.
+  it("prorates an upgrade and starts the new plan at once", async () => {
+    const accountId = await createAccount();
+    const receivable = customerReceivableCode(accountId);
+    await setAccountPlan(db, accountId, "maker", { now: t0 });
+    await setAccountPlan(db, accountId, "studio", { now: halfway });
+
+    expect((await readAccountPlan(db, accountId)).plan.code).toBe("studio");
+    const periods = await periodsFor(accountId);
+    expect(periods).toHaveLength(2);
+    expect(periods[0]).toMatchObject({ planCode: "maker", refundedMicros: 995_000n });
+    expect(periods[0]?.periodEnd).toEqual(halfway);
+    expect(periods[1]).toMatchObject({ planCode: "studio", priceMicros: 6_990_000n });
+    expect(periods[1]?.periodStart).toEqual(halfway);
+    // Owed: the served half of Maker plus the whole Studio month.
+    expect(await accountBalanceMicros(db, receivable)).toBe(995_000n + 6_990_000n);
+    expect(await deferred()).toBe(995_000n + 6_990_000n);
+
+    // The next cycle recognizes the Maker half that was served, no more.
+    const cycle = await runSubscriptionCycle(db, { now: new Date(halfway.getTime() + 60_000) });
+    expect(cycle).toMatchObject({ charged: 0, opened: 0, recognized: 1 });
+    expect(
+      await accountBalanceMicros(db, systemAccountCodes.revenueSubscriptions),
+    ).toBe(995_000n);
+    expect(await deferred()).toBe(6_990_000n);
+    expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
+  });
+
+  it("applies a downgrade at the rollover, not before", async () => {
+    const accountId = await createAccount();
+    const receivable = customerReceivableCode(accountId);
+    await setAccountPlan(db, accountId, "studio", { now: t0 });
+    await setAccountPlan(db, accountId, "maker", { now: new Date(t0.getTime() + 5 * day) });
+
+    // They keep what they paid for until the period ends.
+    const during = await readAccountPlan(db, accountId);
+    expect(during.plan.code).toBe("studio");
+    expect(during.nextPlanCode).toBe("maker");
+    expect(await accountBalanceMicros(db, receivable)).toBe(6_990_000n);
+
+    const cycle = await runSubscriptionCycle(db, { now: new Date(t0.getTime() + 35 * day) });
+    expect(cycle).toMatchObject({ charged: 1, opened: 1, recognized: 1 });
+    const after = await readAccountPlan(db, accountId);
+    expect(after.plan.code).toBe("maker");
+    expect(after.nextPlanCode).toBeNull();
+    expect((await periodsFor(accountId)).map((period) => period.planCode)).toEqual(["studio", "maker"]);
+    expect(await accountBalanceMicros(db, receivable)).toBe(6_990_000n + 1_990_000n);
+    expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
+  });
+
+  // §9.2 item 4: deleting a subscriber used to cascade the charged period
+  // away and strand its deferred revenue. Now erasure closes the books out
+  // first, the subscription row survives (a bare uuid, like every ledger
+  // row), and the deferred-revenue invariant is what would notice if it
+  // ever went wrong again.
+  it("closes a subscription out when the account is erased, and the books stay whole", async () => {
+    const accountId = await createAccount();
+    const receivable = customerReceivableCode(accountId);
+    await setAccountPlan(db, accountId, "maker", { now: t0 });
+
+    await closeOutSubscriptionForDeletedAccount(db, accountId, { now: halfway });
+    await db.delete(accounts).where(eq(accounts.id, accountId));
+
+    const [row] = await db
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.accountId, accountId));
+    expect(row?.status).toBe("canceled");
+    expect((await periodsFor(accountId))[0]).toMatchObject({ refundedMicros: 995_000n });
+    // The served half is still owed; the unearned half came back.
+    expect(await accountBalanceMicros(db, receivable)).toBe(995_000n);
+    expect(await deferred()).toBe(995_000n);
+    expect(await checkDeferredSubscriptions(db)).toEqual([]);
+
+    // What the old cascade did, by hand: the period row vanishes and the
+    // deferred balance is orphaned. The invariant says so.
+    await db.execute(sql`delete from subscription_periods`);
+    const violations = await checkDeferredSubscriptions(db);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.detail).toContain("995000");
+  });
+
+  it("puts an account with no subscription on the free plan, at the PAYG row's margin", async () => {
     const accountId = await createAccount();
     const plan = await readAccountPlan(db, accountId);
     expect(plan.plan.code).toBe("payg");
@@ -206,5 +339,19 @@ describe("a subscriber's life through the books", () => {
     // And opens no period for it: a $0 charge is not an entry worth posting.
     expect(await runSubscriptionCycle(db)).toMatchObject({ charged: 0, opened: 0 });
     expect(await db.select().from(subscriptionPeriods)).toHaveLength(0);
+
+    // One margin definition (§9.2 item 5): the PAYG row's, not the global
+    // setting's. The helper pins the row to 30% for the other suites; this
+    // is the seeded 100%.
+    await db.execute(sql`update billing_plans set margin_basis_points = 10000 where code = 'payg'`);
+    const metered = await recordAiUsage(db, {
+      accountId,
+      credentialSource: "platform",
+      model: "gpt-5.6-terra",
+      surface: "scene_chat",
+      turnId: "00000000-0000-4000-8000-0000000000b2",
+      usage: turnUsage,
+    });
+    expect(metered.record.priceMicros).toBe(884_800n);
   });
 });

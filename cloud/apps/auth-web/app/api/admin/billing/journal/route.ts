@@ -2,6 +2,7 @@ import { createDb } from "@frameos-cloud/db";
 import {
   LedgerError,
   manualJournalEventType,
+  markUsageRecordsCredited,
   postEvent,
   reclassificationEventType,
   reverseEntry,
@@ -195,11 +196,15 @@ async function postReversal(
     reason,
     source: "admin",
   });
+  // A reversed AI charge is a turn the customer no longer owes for; tell the
+  // metering subledger so their usage page and the daily cap agree with the
+  // journal (§9.2 item 11). No-op for anything but an ai_usage_charge.
+  const credited = await markUsageRecordsCredited(db, entryId);
 
   await recordAuditEvent(db, {
     actor: { accountId: adminAccountId, kind: "superadmin", providerSubject },
     eventType: "billing.reversal",
-    metadata: { reason, replayed: result.replayed },
+    metadata: { credited, reason, replayed: result.replayed },
     target: { entryId },
   });
   return NextResponse.json({

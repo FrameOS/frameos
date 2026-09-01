@@ -1,6 +1,9 @@
 import { eq } from "drizzle-orm";
 import {
   accountAiUsage,
+  accountBalanceMicros,
+  accountMarginBasisPoints,
+  customerReceivableCode,
   listPlans,
   readAccountPlan,
   readBillingSettings,
@@ -53,7 +56,7 @@ export async function GET(request: NextRequest) {
   const accountId = session.accountId;
   const now = new Date();
   const dayWindow = utcDayWindow(now);
-  const [[account], thisMonth, lastMonth, today, turns, settings, plan, plans] =
+  const [[account], thisMonth, lastMonth, today, turns, settings, plan, plans, owed] =
     await Promise.all([
       db
         .select({ aiDisabledAt: accounts.aiDisabledAt })
@@ -67,10 +70,17 @@ export async function GET(request: NextRequest) {
       readBillingSettings(db),
       readAccountPlan(db, accountId),
       listPlans(db),
+      // What the books say they owe — the receivable, which is what the
+      // month-end invoice collects and the only number that includes a
+      // subscription charge, a credit or a reversal (§9.2 item 11).
+      accountBalanceMicros(db, customerReceivableCode(accountId)),
     ]);
   if (!account) {
     return jsonError("login_required", 401);
   }
+  // ONE definition of the margin (plans.ts): the same function metering
+  // prices with, so the page cannot name a rate the meter does not use.
+  const marginBasisPoints = await accountMarginBasisPoints(db, accountId, settings);
 
   return NextResponse.json(
     {
@@ -82,10 +92,12 @@ export async function GET(request: NextRequest) {
         resets_at: dayWindow.until.toISOString(),
         today_micros: today.chargeableMicros.toString(),
       },
+      balance: {
+        // Positive = owed to us; negative = a credit in their favour.
+        receivable_micros: owed.toString(),
+      },
       enabled: account.aiDisabledAt === null,
-      margin_basis_points: plan.subscribed
-        ? plan.plan.marginBasisPoints
-        : settings.marginBasisPoints,
+      margin_basis_points: marginBasisPoints,
       // 'shadow' means measured and priced but charged to nobody. Every
       // number below is real; only the billing is not, and a UI that does not
       // say so is telling people they owe money they do not.
@@ -95,9 +107,11 @@ export async function GET(request: NextRequest) {
         previous: serializeUsage(lastMonth),
       },
       plan: {
+        cancel_at: plan.cancelAt?.toISOString() ?? null,
         code: plan.plan.code,
         margin_basis_points: plan.plan.marginBasisPoints,
         name: plan.plan.name,
+        next_plan_code: plan.nextPlanCode,
         price_micros: plan.plan.priceMicros.toString(),
         subscribed: plan.subscribed,
       },
@@ -114,6 +128,7 @@ export async function GET(request: NextRequest) {
         })),
       turns: turns.map((turn) => ({
         chat_id: turn.chatId,
+        credited: turn.credited,
         list_cost_micros: turn.listCostMicros.toString(),
         micros: turn.chargeableMicros.toString(),
         model: turn.model,

@@ -18,9 +18,9 @@ import {
   evictOldestUnusedClaimTokens,
   frameForAccount,
   maxClaimTokensPerAccount,
-  maxFramesPerAccount,
   sweepExpiredClaimTokens,
 } from "../../../../src/lib/frames";
+import { accountLimits } from "../../../../src/lib/usage";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createSecretToken, hashSecret } from "../../../../src/lib/secrets";
 import { readSession } from "../../../../src/lib/session";
@@ -118,15 +118,16 @@ export async function POST(request: NextRequest) {
   // each boot enrolls a distinct pending frame. Budget capped at the frame
   // quota — a leaked image can never enroll more than the account could
   // hold anyway, and every enrollment still needs owner confirmation.
+  const maxFrames = (await accountLimits(db, session.accountId)).frames;
   let maxUses = 1;
   if (body.multi_use === true) {
-    maxUses = maxFramesPerAccount;
+    maxUses = maxFrames;
   } else if (body.max_uses !== undefined) {
     if (
       typeof body.max_uses !== "number" ||
       !Number.isInteger(body.max_uses) ||
       body.max_uses < 1 ||
-      body.max_uses > maxFramesPerAccount
+      body.max_uses > maxFrames
     ) {
       return jsonError("invalid_max_uses", 400);
     }
@@ -170,10 +171,10 @@ export async function POST(request: NextRequest) {
   // limit into a lockout.
   if (
     boundFrame === undefined &&
-    (await countFramesForAccount(db, session.accountId)) >= maxFramesPerAccount
+    (await countFramesForAccount(db, session.accountId)) >= maxFrames
   ) {
     return jsonError("frame_quota_exceeded", 403, {
-      max_frames: maxFramesPerAccount,
+      max_frames: maxFrames,
     });
   }
 

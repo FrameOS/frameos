@@ -3,6 +3,7 @@ import {
   accounts,
   createDb,
 } from "@frameos-cloud/db";
+import { closeOutSubscriptionForDeletedAccount } from "@frameos-cloud/ledger";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { getSuperadminContext } from "../../../../../src/lib/admin";
@@ -85,6 +86,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 
   assertDatabaseUrlConfigured();
   const db = createDb();
+  // Books first (cloud/docs/accounting-todo.md §9.2 item 4): a subscription
+  // in progress returns its unearned remainder to the receivable and ends,
+  // so deleting the account cannot strand deferred revenue.
+  await closeOutSubscriptionForDeletedAccount(db, accountId);
   const [deleted] = await db
     .delete(accounts)
     .where(eq(accounts.id, accountId))

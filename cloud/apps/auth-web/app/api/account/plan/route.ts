@@ -58,6 +58,8 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(
     {
       cancel_at: current.cancelAt?.toISOString() ?? null,
+      // A downgrade waits for the rollover; this names where it lands.
+      next_plan_code: current.nextPlanCode,
       plan: {
         code: current.plan.code,
         margin_basis_points: current.plan.marginBasisPoints,
@@ -142,6 +144,7 @@ export async function PUT(request: NextRequest) {
   return NextResponse.json(
     {
       cancel_at: current.cancelAt?.toISOString() ?? null,
+      next_plan_code: current.nextPlanCode,
       plan: { code: current.plan.code, name: current.plan.name },
       subscribed: current.subscribed,
     },

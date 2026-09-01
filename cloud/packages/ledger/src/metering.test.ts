@@ -5,15 +5,16 @@ import { absorbedSurfaces, surfaceIsAbsorbed } from "./metering";
 // business decision rather than a query: what we hand out for free stays a
 // cost line no matter which key pays for it or what Phase 3 does to the rest.
 describe("absorbed surfaces", () => {
-  it("absorbs scene conversion", () => {
+  it("absorbs scene conversion and store classification", () => {
     expect(surfaceIsAbsorbed("scene_convert")).toBe(true);
-    expect(absorbedSurfaces).toContain("scene_convert");
+    expect(surfaceIsAbsorbed("store_classify")).toBe(true);
+    expect(surfaceIsAbsorbed("store_recategorize")).toBe(true);
+    expect(absorbedSurfaces).toEqual(["scene_convert", "store_classify", "store_recategorize"]);
   });
 
   it("leaves the billable surfaces alone", () => {
     expect(surfaceIsAbsorbed("scene_chat")).toBe(false);
     expect(surfaceIsAbsorbed("app_chat")).toBe(false);
-    expect(surfaceIsAbsorbed("store_classify")).toBe(false);
   });
 
   // A turn with no surface is the general case (an older record, a caller

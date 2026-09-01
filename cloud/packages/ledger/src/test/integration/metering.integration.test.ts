@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { aiUsageRecords, ledgerEntries } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
+  accountAiUsage,
   accountBalanceMicros,
   aiUsageSummary,
   billingSettingKeys,
@@ -9,10 +10,13 @@ import {
   checkLedgerIntegrity,
   checkMeteringCompleteness,
   customerReceivableCode,
+  markUsageRecordsCredited,
   postUsageRecord,
   recordAiUsage,
+  reverseEntry,
   sweepUnpostedUsage,
   systemAccountCodes,
+  utcDayWindow,
   writeBillingSetting,
   type CredentialSource,
 } from "../../index";
@@ -419,8 +423,56 @@ describe("AI metering", () => {
       ...turn(accountId, "00000000-0000-4000-8000-0000000000e0", "platform"),
       surface: "scene_convert",
     });
+    // Store classification is ours too: a publisher did not ask for it, so
+    // it neither bills them nor eats their cap (§9.2 item 7).
+    await recordAiUsage(db, {
+      ...turn(accountId, "00000000-0000-4000-8000-0000000000e1", "shared"),
+      surface: "store_classify",
+    });
     expect(
       await checkDailyCapRespected(db, { dailyCapMicros: 100_000n }),
     ).toEqual([]);
+    const usage = await accountAiUsage(db, accountId, utcDayWindow());
+    expect(usage.chargeableMicros).toBe(0n);
+  });
+
+  // A reversed charge is a turn the customer no longer owes for, and the
+  // subledger the page and the cap read has to say so too (§9.2 item 11).
+  it("stops counting a turn once its charge has been reversed", async () => {
+    await goLive();
+    const accountId = await createAccount();
+    const metered = await recordAiUsage(db, turn(accountId, uuid(0xc1)));
+    const charge = metered.entries.find((entry) => entry.entryType === "ai_usage_charge")!;
+    expect((await accountAiUsage(db, accountId, utcDayWindow())).chargeableMicros).toBe(575_120n);
+    expect(
+      await checkDailyCapRespected(db, { dailyCapMicros: 100_000n }),
+    ).toHaveLength(1);
+
+    await reverseEntry(db, { accountId, entryId: charge.id, reason: "Disputed", source: "admin" });
+    expect(await markUsageRecordsCredited(db, charge.id)).toBe(1);
+    expect((await accountAiUsage(db, accountId, utcDayWindow())).chargeableMicros).toBe(0n);
+    expect((await accountAiUsage(db, accountId, utcDayWindow())).billableMicros).toBe(0n);
+    expect(
+      await checkDailyCapRespected(db, { dailyCapMicros: 100_000n }),
+    ).toEqual([]);
+    // Reversing the cost entry credits nothing: it is not a charge.
+    const cost = metered.entries.find((entry) => entry.entryType === "ai_usage_cost")!;
+    expect(await markUsageRecordsCredited(db, cost.id)).toBe(0);
+    expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
+  });
+
+  // The sweep drains its queue rather than stopping at one batch (§9.2
+  // item 18).
+  it("sweeps a backlog larger than one batch in one night", async () => {
+    await goLive();
+    const accountId = await createAccount();
+    for (let index = 0; index < 5; index += 1) {
+      await recordAiUsage(db, turn(accountId, uuid(0xd00 + index)), { rules: {} });
+    }
+    await db.execute(sql`update ai_usage_records set created_at = now() - interval '1 hour'`);
+    const swept = await sweepUnpostedUsage(db, { limit: 2 });
+    expect(swept).toMatchObject({ posted: 5, scanned: 5 });
+    expect(swept.failures).toEqual([]);
+    expect(await checkMeteringCompleteness(db, { pendingEventGraceMs: 0 })).toEqual([]);
   });
 });

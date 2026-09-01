@@ -12,8 +12,9 @@ export async function resetLedger() {
   await db.execute(sql`
     TRUNCATE TABLE ai_usage_records, ledger_postings, ledger_balances, ledger_entries, financial_events
   `);
-  // Subscriptions cascade from accounts, but truncating explicitly keeps a
-  // test that never made an account from inheriting the last one's periods.
+  // Subscriptions no longer cascade from accounts (migration 0046), so they
+  // have to go explicitly — and a test that never made an account must not
+  // inherit the last one's periods either way.
   await db.execute(sql`TRUNCATE TABLE subscription_periods, subscriptions`);
   await db.execute(
     sql`DELETE FROM ledger_accounts WHERE owner_account_id IS NOT NULL`,
@@ -33,6 +34,14 @@ export async function resetLedger() {
   `);
   await db.execute(sql`
     UPDATE billing_settings SET value = '10000000' WHERE key = 'payg_daily_cap_micros'
+  `);
+  // An account with no subscription prices at the PAYG row's margin (one
+  // number — plans.ts says why). The seeded ladder puts PAYG at 100%; these
+  // suites were written with worked examples at 30%, so the row is pinned
+  // to 30% here and the one test that cares about the seeded value sets it
+  // back explicitly.
+  await db.execute(sql`
+    UPDATE billing_plans SET margin_basis_points = 3000 WHERE code = 'payg'
   `);
 }
 

@@ -404,9 +404,12 @@ function toEventRecord(row: typeof financialEvents.$inferSelect): FinancialEvent
   };
 }
 
-// Events whose postings never happened: the sweep's queue. Phase 2 gives it
-// a nightly job; the query is here because the kernel owns what "posted"
-// means.
+// Events whose postings never happened. A tripwire, not a queue: this
+// kernel inserts the event and stamps `processed_at` in one transaction, so
+// nothing it wrote can ever show up here — a row that does was written by
+// something else, which is exactly what the nightly check wants to hear
+// about. (The sweep's real queue is `ai_usage_records` with a null
+// event_id; see metering.ts.)
 export async function findUnpostedEvents(
   db: LedgerExecutor,
   olderThan: Date,

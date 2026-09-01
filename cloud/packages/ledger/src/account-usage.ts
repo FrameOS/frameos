@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { surfaceIsAbsorbed } from "./metering";
+import { absorbedSurfaces, surfaceIsAbsorbed } from "./metering";
 import type { LedgerExecutor } from "./types";
 
 // What one account's AI usage looks like from the account's own side —
@@ -28,7 +28,7 @@ import type { LedgerExecutor } from "./types";
 // whoever actually paid for them. Own-key turns have `cost_micros = 0` (we
 // paid nothing) but still burned real tokens, and the account page shows
 // them — "you used $3 of AI on your own key" is a true and useful sentence.
-const listCostExpression = sql`round(
+export const listCostExpression = sql`round(
   (input_tokens::numeric * coalesce(pricing->>'inputMicrosPerMtok', '0')::numeric
    + cached_input_tokens::numeric * coalesce(pricing->>'cachedInputMicrosPerMtok', '0')::numeric
    + output_tokens::numeric * coalesce(pricing->>'outputMicrosPerMtok', '0')::numeric)
@@ -44,12 +44,27 @@ const listCostExpression = sql`round(
 // the operator's shared key is a real bill we absorb, so it belongs against a
 // limit that exists to bound *our* exposure. It is NOT what the customer
 // owes: see `billableExpression`.
-const chargeableExpression = sql`case
+//
+// A credited turn — one whose charge entry was reversed — counts for nothing
+// here: the books no longer charge for it, so neither may the page or the
+// cap (§9.2 item 11). Exported because the cap invariant in integrity.ts
+// must measure exactly what the gate measures, and a second copy of this
+// expression is how the two drift apart.
+export const chargeableExpression = sql`case
   when credential_source = 'account' then 0
+  when credited_at is not null then 0
   when price_micros > 0 then price_micros
   else round(${listCostExpression}
     * (10000 + coalesce((pricing->>'marginBasisPoints')::numeric, 3000)) / 10000)
 end`;
+
+// `surface` not in the absorbed list, as SQL, built from the one TypeScript
+// list so that a surface added to `absorbedSurfaces` is exempt everywhere at
+// once — the gate, the page, and the nightly cap check.
+export const notAbsorbedSurfaceCondition = sql`(surface is null or surface not in (${sql.join(
+  absorbedSurfaces.map((surface) => sql`${surface}`),
+  sql`, `,
+)}))`;
 
 // What the CUSTOMER owes, which is a narrower question and has to agree with
 // `billing()` in metering.ts: only the platform key bills anybody. The
@@ -62,6 +77,7 @@ end`;
 // the own-key state already exists to avoid.
 const billableExpression = sql`case
   when credential_source <> 'platform' then 0
+  when credited_at is not null then 0
   when price_micros > 0 then price_micros
   else round(${listCostExpression}
     * (10000 + coalesce((pricing->>'marginBasisPoints')::numeric, 3000)) / 10000)
@@ -198,6 +214,8 @@ export async function accountAiSpendMicros(
 export interface AccountAiTurn {
   chatId: string | null;
   chargeableMicros: bigint;
+  // True when the charge for this turn was reversed after the fact.
+  credited: boolean;
   listCostMicros: bigint;
   model: string;
   occurredAt: Date;
@@ -222,6 +240,7 @@ export async function recentAccountAiTurns(
     chargeable_micros: string;
     chat_id: string | null;
     credential_source: string;
+    credited_at: string | null;
     list_cost_micros: string;
     model: string;
     occurred_at: string;
@@ -229,6 +248,7 @@ export async function recentAccountAiTurns(
   }>(sql`
     select chat_id::text as chat_id,
            credential_source,
+           credited_at,
            model,
            surface,
            occurred_at,
@@ -244,6 +264,7 @@ export async function recentAccountAiTurns(
       ? 0n
       : BigInt(row.chargeable_micros),
     chatId: row.chat_id,
+    credited: row.credited_at !== null,
     listCostMicros: BigInt(row.list_cost_micros),
     model: row.model,
     occurredAt: new Date(row.occurred_at),
