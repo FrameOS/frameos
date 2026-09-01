@@ -104,19 +104,12 @@ What is left is that everything on the device runs as root. FrameOS Remote —
 the root agent with `shell`, a PTY and arbitrary file write — no longer ships
 enabled on images that have no backend to talk to.
 
-- **Verify on hardware that a generic card still adopts.** Release images now
-  ship `agentEnabled: false` (the audit's §2 recommendation), so a Buildroot
-  frame flashed from a generic image and *then* adopted by a backend needs the
-  one `systemctl enable` that the backend's first deploy already does through
-  `frameos setup`. The cost looks like zero, and that is worth seeing on a real
-  card before believing it.
-- **Run `frameos.service` as a `frameos` user.** The plan, the privileged call
-  sites and the suggested sequencing are in `docs/buildroot-privileges.md` §3.
-  Privileged work moves behind one narrow enum-only door (`apply-setup`,
-  `apply-network-profile`, `reboot`, `install-ota <staged-dir>`) so OTA stays
-  smooth: download and signature verification are already unprivileged, and
-  only the final install crosses the line. Blocked on hardware time, not on a
-  decision. The SPI/GPIO panel drivers are the part to measure first.
+- **Run `frameos.service` as a `frameos` user.** Implemented in PR #415 (uid
+  990 behind the narrow enum-only door from `docs/buildroot-privileges.md` §3:
+  `apply-setup`, `apply-network-profile`, `reboot`, `install-ota <staged-dir>`);
+  download and signature verification stay unprivileged, only the final OTA
+  install crosses the line. Unmerged — blocked on hardware testing time, not on
+  a decision. The SPI/GPIO panel drivers are the part to measure first.
 
 ---
 
