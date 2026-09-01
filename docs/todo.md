@@ -52,40 +52,6 @@ Two rules that shape most entries:
   and `memory:oomAbort` appear in the cloud log when provoked (force the
   budget low with an oversized photo); the leak-percent restart fires.
 
-## Get the TypeScript transpiler off the device
-
-Scene apps ship TypeScript (`sources: {"app.ts", "config.json"}`) and every
-frame compiles it itself: ~4,000 lines of Nim (`transpiler.nim`, `tokens.nim`,
-`parser.nim`, `token_processor.nim`) implementing a tokenizer, a parser and a
-TS-erasure pass, run once per JS app node per render. The QuickJS bridge around
-it (`burrito.nim`, `app_runtime.nim`, `runtime.nim`) stays either way.
-
-It was left alone on the grounds that a ~3.3 s cold-boot transpile is cheap
-and readable source on the device is a feature. That reasoning missed the real
-cost, which is **memory, not time**: the token array is the largest allocation
-in a render. A 36 KB app tokenizes to 8,989 tokens, and until #428 it held
-three copies at once — a doubling-grown 16,384-slot array, an exact-sized
-return copy, and the processor's own — about **1.4 MB for one app** on a
-13.3" board with ~2.2 MB of render headroom. That is what stopped the E1004
-rendering the Weather scene. Even one array is ~430 KB, plus ~1 s of CPU per
-app per render and 80-90 KB of flash for the transpiler itself.
-
-- **The route being taken is quickts** —
-  <https://github.com/FrameOS/quickts> (built 2026-09-01, upstream QuickJS
-  plus one commit) strips TypeScript at parse time, so apps keep shipping
-  readable `.ts` and both the transpiler pass and the transpiled copy every
-  runtime keeps disappear. Measured: +15.8 KB of code, +4% parse time,
-  against the transpiler's ~4,300 lines, 80–90 KB of flash and up to 1.4 MB
-  of RAM; it parses 1,026 of this repo's 1,027 `.ts`/`.tsx` files and all
-  three Weather apps from source. The FrameOS integration — fetch quickts,
-  set the eval flags in `burrito.nim`, delete the four transpiler files — is
-  in progress on the `worktree-quickts-feasibility` branch (write-up:
-  `docs/quickts.md` there). When it merges this section goes.
-- The fallback if quickts falls through: transpile at publish/deploy time on
-  both control planes (the cloud publish path *and* the self-hosted backend
-  deploy), ship `app.js` beside `app.ts`, teach the runtime to prefer it, and
-  keep the on-device transpiler one release for scenes already on frames.
-
 ---
 
 ## Pre-release manual test sweep

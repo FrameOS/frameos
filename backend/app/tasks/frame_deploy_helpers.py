@@ -14,9 +14,11 @@ from app.utils.remote_exec import upload_file
 
 icon = "🔷"
 
+# quickts: QuickJS plus native TypeScript/JSX (github.com/FrameOS/quickts).
+# Keep in step with frameos/frameos.nimble and tools/prebuilt-deps/build.sh.
 QUICKJS_ARCHIVE_URL = "https://archive.frameos.net/source/vendor/quickjs-{version}.tar.xz"
-DEFAULT_QUICKJS_VERSION = "2026-06-04"
-DEFAULT_QUICKJS_SHA256 = "b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a"
+DEFAULT_QUICKJS_VERSION = "2026-06-04-quickts.1"
+DEFAULT_QUICKJS_SHA256 = "94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f"
 
 APT_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 RPIOS_SUDO_SECURITY_UPDATE_URL = "https://www.raspberrypi.com/news/a-security-update-for-raspberry-pi-os/"
@@ -311,18 +313,19 @@ async def ensure_quickjs(
     ):
         await install_if_necessary(deployer, package_name)
 
-    await deployer.exec_command("cd /srv/frameos/vendor && rm -rf quickjs")
-    await deployer.log("stdout", f"{icon} Downloading QuickJS {quickjs_dirname.removeprefix('quickjs-')}")
+    # Build from source. The tarball unpacks to quickjs-<version>/, and it has
+    # to end up where the prebuilt path puts it and where the remote build
+    # links it from: /srv/frameos/vendor/quickjs/<dirname>. (This used to
+    # extract one level up and look for a `quickjs` directory the tarball
+    # never contained; every target has a prebuilt, so it never ran.)
+    version = quickjs_dirname.removeprefix("quickjs-")
+    source_archive = f"/tmp/{quickjs_dirname}.tar.xz"
+    await deployer.log("stdout", f"{icon} Downloading QuickJS {version} sources")
     await deployer.exec_command(
-        "cd /srv/frameos/vendor && "
-        f"wget -q {QUICKJS_ARCHIVE_URL.format(version=quickjs_dirname.removeprefix('quickjs-'))} && "
-        f"tar -xf {quickjs_dirname}.tar.gz && "
-        f"rm {quickjs_dirname}.tar.gz && "
-        f"mv quickjs {quickjs_dirname}"
+        f"mkdir -p /srv/frameos/vendor/quickjs && rm -rf {shlex.quote(quickjs_vendor_dir)} && "
+        f"wget -q -O {source_archive} {shlex.quote(QUICKJS_ARCHIVE_URL.format(version=version))} && "
+        f"tar -xf {source_archive} -C /srv/frameos/vendor/quickjs/ && rm {source_archive}"
     )
     await deployer.log("stdout", "- Building libquickjs.a")
-    await deployer.exec_command(f"cd /srv/frameos/vendor/{quickjs_dirname} && make libquickjs.a")
-    await deployer.exec_command(
-        f"cd /srv/frameos/vendor/{quickjs_dirname} && echo -n '{quickjs_dirname.removeprefix('quickjs-')}' > VERSION"
-    )
+    await deployer.exec_command(f"cd {shlex.quote(quickjs_vendor_dir)} && make libquickjs.a")
     return quickjs_dirname

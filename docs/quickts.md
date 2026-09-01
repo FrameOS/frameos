@@ -4,7 +4,7 @@
 (release 2026-06-04) plus one commit. The README there is the reference for
 what is supported, what is not, how it is wired in and how to merge new
 QuickJS releases. This page is the FrameOS side: why it exists, what it
-measured, and what switching to it involves.
+measured, and how FrameOS is wired to it.
 
 ## Why
 
@@ -61,39 +61,53 @@ require()` / `export =`, the legacy `<T>value` assertion. And one
 divergence shared with `tsc`: with the pass on, `f < a > (b)` is the generic
 call `f<a>(b)`. It cannot affect `.js` sources, where the pass is off.
 
-## Switching FrameOS to it
+## How FrameOS uses it
 
-Not done yet; this is the list.
+Done 2026-09-02. The moving parts, for the next time the version changes:
 
-1. **Fetch quickts instead of the Bellard tarball.** `frameos.nimble`'s
-   `build_quickjs` task and `tools/prebuilt-deps/Dockerfile.quickjs` both
-   `curl` `quickjs-2026-06-04.tar.xz` and run `make`; point them at a
-   FrameOS/quickts release tarball (tag one first) and re-run the
-   prebuilt-deps pipeline for every target in `manifest.json`. The ESP32 and
-   WASM builds compile `frameos/quickjs/quickjs.c` from source and need
-   nothing but the new tree. The `res = -tm.tm_gmtoff / 60;` guard in
-   `embedded/esp32/components/frameos_quickjs/CMakeLists.txt` is untouched.
-2. **Set the flags.** `burrito.nim`: add `JS_EVAL_FLAG_TYPESCRIPT = 1 shl 8`
-   and `JS_EVAL_FLAG_JSX = 1 shl 9`, and a flags parameter on `eval` /
-   `evalModuleNamespace` / the multi-file module loader from PR #410, mapped
-   from the source name the way `quickts_eval_flags()` does it. `.ts` and
-   `.tsx` app files and code nodes get the flags; `.js` files must not.
-3. **Stop transpiling.** `transpileAppSource` becomes a no-op; code nodes
-   (`compileCodeFn`, `compileInlineFn`, the eval helper in `runtime.nim`)
-   pass the envelope straight to `eval` with the flags. The line-map
-   composition in those paths reduces to the envelope's constant offset.
-4. **Delete** `transpiler.nim`, `tokens.nim`, `parser.nim`,
-   `token_processor.nim` and the transform-related parts of
-   `source_map.nim`, with their tests. The `imports` transform is already
-   dead code — `evalModuleNamespace` lets QuickJS parse the module form.
-5. **Keep one release of overlap** for scenes already on frames, per
-   `docs/convergence-todo.md`: shipped `.ts` keeps working because the new
-   runtime parses it directly, so the overlap is about the *runtime* being
-   new, not the payload.
-
-The JSX factory names default to `__frameosJsx` / `__frameosFragment`, the
-ones `js_runtime/runtime.nim` already defines, so the scene runtime is
-unchanged.
+- **One source tarball, one version string.** Release `2026-06-04-quickts.1`
+  is the git tag `v2026-06-04-quickts.1` in the quickts repo, published as
+  `quickjs-2026-06-04-quickts.1.tar.xz` (unpacks to `quickjs-<version>/`,
+  Bellard's layout) both as a GitHub release asset and mirrored at
+  `https://archive.frameos.net/source/vendor/` with
+  `tools/prebuilt-deps/r2_put_source.py`. Every fetcher reads the mirror:
+  `frameos.nimble` (`build_quickjs`), `frameos/tools/install_prebuilt_quickjs.py`
+  (default version), `frameos/tools/build_wasm.sh`, the root `Dockerfile`,
+  `tools/prebuilt-deps/build.sh` + `Dockerfile.quickjs`, and
+  `backend/app/tasks/frame_deploy_helpers.py` (`DEFAULT_QUICKJS_VERSION`, the
+  on-device source-build fallback). The component is still called `quickjs`
+  everywhere -- it *is* QuickJS -- so nothing keyed on that name moved.
+- **Prebuilt libraries for all 15 targets** (`tools/prebuilt-deps/manifest.json`,
+  `archive.frameos.net/prebuilt-deps/<target>/quickjs-2026-06-04-quickts.1.tar.gz`)
+  were rebuilt from the tarball and uploaded; the archives now ship
+  `quickts*.h` next to `quickjs.h`. The older `quickjs-2026-06-04` archives
+  stay under their versioned keys, so checkouts with the old manifest keep
+  working. `ubuntu-26.04-amd64` cannot be built under QEMU on an arm64 Mac
+  (`tar: Cannot mkdir: Function not implemented`); build that one natively on
+  monster and rsync the component directory back before `r2_sync.py upload`.
+- **ESP32 and WASM** compile `frameos/quickjs/quickjs.c` from source, so they
+  picked quickts up with the tarball; the root `Dockerfile` now copies the
+  three `quickts*.h` headers into `/app/frameos/quickjs` alongside it. On
+  xtensa (`-Os`) `quickjs.o` grows by 13.2 KB against the ~80-90 KB the Nim
+  transpiler took.
+- **The runtime asks for the passes per eval.** `burrito.nim` has
+  `JS_EVAL_FLAG_TYPESCRIPT` / `JS_EVAL_FLAG_JSX` and `quicktsFlagsFor(name)`:
+  `.js`/`.mjs`/`.cjs` get nothing, `.jsx` gets JSX, everything else gets both
+  (a scene app's main file always had both passes run over it whatever it was
+  called, and JSX can only claim a `<` that would otherwise be a syntax
+  error). `eval`, `compileModule` and `evalModuleNamespace` take the flags;
+  `app_runtime.nim` evaluates `runtime.source` straight from the scene JSON
+  and the module loader compiles imported files the same way; code nodes and
+  inline expressions use `runtime.snippetEvalFlags`.
+- **Deleted:** `transpiler.nim`, `tokens.nim`, `parser.nim`,
+  `token_processor.nim`, their tests, `tools/native_js_transpile.nim` and
+  the Sucrase parity harness -- ~4,900 lines. `source_map.nim` keeps only
+  what the snippet envelope needs. No line maps exist for apps any more;
+  QuickJS reports the app's own file and line.
+- **Editor validation** (`backend/app/utils/js_apps.py`) runs
+  `frameos/tools/js_check.nim`, which links the same QuickJS and compiles the
+  file with the same flags, instead of transpile + `node --check`. Built on
+  first use, or `FRAMEOS_JS_CHECK` points at one; the Docker image builds it.
 
 ## Merging upstream QuickJS later
 

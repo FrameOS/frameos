@@ -5,8 +5,11 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUTPUT_BASE="${ROOT_DIR}/build/prebuilt-deps"
 
 NIM_VERSION="${NIM_VERSION:-2.2.4}"
-QUICKJS_VERSION="${QUICKJS_VERSION:-2026-06-04}"
-QUICKJS_SHA256="${QUICKJS_SHA256:-b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a}"
+# quickts (https://github.com/FrameOS/quickts): QuickJS with TypeScript and
+# JSX parsed natively. The tarball is mirrored at
+# archive.frameos.net/source/vendor/quickjs-<version>.tar.xz.
+QUICKJS_VERSION="${QUICKJS_VERSION:-2026-06-04-quickts.1}"
+QUICKJS_SHA256="${QUICKJS_SHA256:-94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f}"
 
 declare -a COMPONENTS=("nim" "quickjs")
 

@@ -56,12 +56,12 @@ QJS_SRC="$FRAMEOS_DIR/quickjs"
 if [[ ! -f "$QJS_SRC/quickjs.c" ]]; then
     QJS_SRC="$BUILD_DIR/quickjs-src"
     if [[ ! -f "$QJS_SRC/quickjs.c" ]]; then
-        QJS_TARBALL_VERSION="2026-06-04"
-        QJS_TARBALL_SHA256="b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a"
+        QJS_TARBALL_VERSION="2026-06-04-quickts.1"
+        QJS_TARBALL_SHA256="94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f"
         echo "quickjs/ has no C sources (prebuilt install) — downloading QuickJS $QJS_TARBALL_VERSION sources"
         mkdir -p "$BUILD_DIR"
         curl -fsSL -o "$BUILD_DIR/quickjs-src.tar.xz" \
-            "https://bellard.org/quickjs/quickjs-$QJS_TARBALL_VERSION.tar.xz"
+            "https://archive.frameos.net/source/vendor/quickjs-$QJS_TARBALL_VERSION.tar.xz"
         if command -v sha256sum >/dev/null; then
             echo "$QJS_TARBALL_SHA256  $BUILD_DIR/quickjs-src.tar.xz" | sha256sum -c -
         else

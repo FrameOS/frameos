@@ -308,6 +308,27 @@ const
   JS_EVAL_FLAG_COMPILE_ONLY* = (1 shl 5)
   JS_EVAL_FLAG_BACKTRACE_BARRIER* = (1 shl 6)
   JS_EVAL_FLAG_ASYNC* = (1 shl 7)
+  # quickts (https://github.com/FrameOS/quickts): the bundled QuickJS parses
+  # TypeScript and JSX itself when asked. Off, the parser is byte-for-byte
+  # upstream's, so plain JavaScript never sees either pass.
+  JS_EVAL_FLAG_TYPESCRIPT* = (1 shl 8)
+  JS_EVAL_FLAG_JSX* = (1 shl 9)
+
+proc quicktsFlagsFor*(filename: string): cint =
+  ## The parser passes a source file gets, by extension. Matches
+  ## quickts_eval_flags() in quickjs.h for the extensions it knows; the
+  ## difference is the default. A scene app's main file has always had both
+  ## passes run over it whatever it was called (`app.ts` with JSX in it works
+  ## and has for years), so anything that is not explicitly JavaScript gets
+  ## both. JSX is safe to leave on: it only claims a `<` that would otherwise
+  ## be a syntax error. Real `.js` stays on the untouched parser, where a
+  ## `f < a > (b)` comparison still means what JavaScript says it means.
+  if filename.endsWith(".js") or filename.endsWith(".mjs") or filename.endsWith(".cjs"):
+    0
+  elif filename.endsWith(".jsx"):
+    JS_EVAL_FLAG_JSX
+  else:
+    JS_EVAL_FLAG_TYPESCRIPT or JS_EVAL_FLAG_JSX
 
 # Property flags
 const
@@ -1291,10 +1312,12 @@ proc close*(js: var QuickJS) =
     dealloc(js.guard)
     js.guard = nil
 
-proc eval*(js: QuickJS, code: string, filename: string = "<eval>"): string =
-  ## Evaluate JavaScript code and return result as string
+proc eval*(js: QuickJS, code: string, filename: string = "<eval>", flags: cint = 0): string =
+  ## Evaluate JavaScript code and return result as string. `flags` adds
+  ## JS_EVAL_FLAG_* bits (quicktsFlagsFor for TypeScript / JSX sources).
   withDeadline(js):
-    let val = JS_Eval(js.context, code.cstring, code.len.csize_t, filename.cstring, JS_EVAL_TYPE_GLOBAL)
+    let val = JS_Eval(js.context, code.cstring, code.len.csize_t, filename.cstring,
+                      (JS_EVAL_TYPE_GLOBAL or flags).cint)
     defer: JS_FreeValue(js.context, val)
 
     if JS_IsException(val) != 0:
@@ -1367,13 +1390,13 @@ proc moduleDefOf*(compiled: JSValue): ptr JSModuleDef =
   """.}
   moduleDef
 
-proc compileModule*(ctx: ptr JSContext, code: string, filename: string): ptr JSModuleDef =
+proc compileModule*(ctx: ptr JSContext, code: string, filename: string, flags: cint = 0): ptr JSModuleDef =
   ## Compile `code` as an ES module named `filename` without running it — the
   ## shape a module loader callback returns. On a syntax error the exception
   ## is left pending on the context and nil comes back, which is exactly what
   ## QuickJS expects from a loader.
   let compiled = JS_Eval(ctx, code.cstring, code.len.csize_t, filename.cstring,
-                         (JS_EVAL_TYPE_MODULE or JS_EVAL_FLAG_COMPILE_ONLY).cint)
+                         (JS_EVAL_TYPE_MODULE or JS_EVAL_FLAG_COMPILE_ONLY or flags).cint)
   if JS_IsException(compiled) != 0:
     return nil
   result = moduleDefOf(compiled)
@@ -1393,22 +1416,19 @@ proc setModuleLoader*(js: QuickJS,
   ## js_strdup'd string; QuickJS frees it.
   JS_SetModuleLoaderFunc(js.runtime, cast[pointer](normalize), cast[pointer](loader), opaque)
 
-proc evalModuleNamespace*(js: QuickJS, code: string, filename: string = "<module>"): JSValue =
+proc evalModuleNamespace*(js: QuickJS, code: string, filename: string = "<module>", flags: cint = 0): JSValue =
   ## Evaluate `code` as a real ES module and return its namespace object —
   ## the thing that carries its `export`s.
   ##
-  ## The alternative, and what FrameOS used to do, is to rewrite the module
-  ## into CommonJS first (the transpiler's "imports" transform) so a plain
-  ## global eval can pick the exports off an `exports` object. That rewrite
-  ## tokenises the whole file: ~26% of a transform, about 5.7 s for a 36 KB
-  ## app on an ESP32-S3, to move one `export` keyword. QuickJS parses the
-  ## file anyway during eval, so letting it handle the module form is the
-  ## same work done once instead of twice.
+  ## FrameOS used to rewrite the module into CommonJS first and, before that,
+  ## transpile TypeScript out of it in Nim. Both are gone: the bundled QuickJS
+  ## is quickts, which parses `.ts`/`.tsx` itself when `flags` says so, and it
+  ## always understood the module form.
   ##
   ## The caller owns the returned value and must JS_FreeValue it.
   let ctx = js.context
   let compiled = JS_Eval(ctx, code.cstring, code.len.csize_t, filename.cstring,
-                         (JS_EVAL_TYPE_MODULE or JS_EVAL_FLAG_COMPILE_ONLY).cint)
+                         (JS_EVAL_TYPE_MODULE or JS_EVAL_FLAG_COMPILE_ONLY or flags).cint)
   if JS_IsException(compiled) != 0:
     let exception = JS_GetException(ctx)
     defer: JS_FreeValue(ctx, exception)
