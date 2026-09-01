@@ -16,6 +16,7 @@ import { LedgerError, type LedgerExecutor } from "./types";
 export const billingSettingKeys = {
   aiMarginPercent: "ai_margin_percent",
   aiMeteringMode: "ai_metering_mode",
+  paygDailyCapMicros: "payg_daily_cap_micros",
   paygOverdraftMicros: "payg_overdraft_micros",
 } as const;
 
@@ -28,12 +29,16 @@ export type BillingSettingKey =
 export type MeteringMode = "live" | "shadow";
 
 export interface BillingSettings {
+  // The ceiling on one account's chargeable AI usage in a UTC day (§5.3).
+  // Postpay's credit limit, wearing a unit users think in.
+  dailyCapMicros: bigint;
   marginBasisPoints: number;
   meteringMode: MeteringMode;
   overdraftMicros: bigint;
 }
 
 export const defaultBillingSettings: BillingSettings = {
+  dailyCapMicros: 10_000_000n,
   marginBasisPoints: 3_000,
   meteringMode: "shadow",
   overdraftMicros: 1_000_000n,
@@ -50,6 +55,10 @@ export async function readBillingSettings(
   const values = new Map(rows.map((row) => [row.key, row.value]));
 
   return {
+    dailyCapMicros:
+      microsFrom(values.get(billingSettingKeys.paygDailyCapMicros)) ??
+      microsFrom(env.FRAMEOS_CLOUD_AI_DAILY_CAP_MICROS) ??
+      defaultBillingSettings.dailyCapMicros,
     marginBasisPoints:
       marginBasisPointsFrom(values.get(billingSettingKeys.aiMarginPercent)) ??
       // Bootstrap for a deployment whose settings row has not been written
@@ -110,6 +119,14 @@ function validateSetting(key: BillingSettingKey, value: unknown): void {
         throw new LedgerError(
           "invalid_draft",
           'ai_metering_mode must be "shadow" or "live"',
+        );
+      }
+      return;
+    case billingSettingKeys.paygDailyCapMicros:
+      if (microsFrom(value) === undefined) {
+        throw new LedgerError(
+          "invalid_amount",
+          "payg_daily_cap_micros must be a non-negative whole number of micro-dollars",
         );
       }
       return;

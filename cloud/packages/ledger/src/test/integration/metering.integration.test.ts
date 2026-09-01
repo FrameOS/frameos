@@ -5,9 +5,10 @@ import {
   accountBalanceMicros,
   aiUsageSummary,
   billingSettingKeys,
+  checkDailyCapRespected,
   checkLedgerIntegrity,
   checkMeteringCompleteness,
-  customerCreditsCode,
+  customerReceivableCode,
   postUsageRecord,
   recordAiUsage,
   sweepUnpostedUsage,
@@ -97,11 +98,12 @@ describe("AI metering", () => {
       "ai_usage_charge",
       "ai_usage_cost",
     ]);
-    // The customer's credit account goes negative — they have not bought any
-    // yet, and Phase 3's spend gate is what stops that happening for real.
-    expect(await accountBalanceMicros(db, customerCreditsCode(accountId))).toBe(
-      -575_120n,
-    );
+    // Postpay (rule v2): the charge lands on the customer's RECEIVABLE, an
+    // asset, because a metered turn is money they now owe us rather than a
+    // draw-down of a balance they handed us in advance.
+    expect(
+      await accountBalanceMicros(db, customerReceivableCode(accountId)),
+    ).toBe(575_120n);
     expect(await accountBalanceMicros(db, systemAccountCodes.revenueAiUsage)).toBe(
       575_120n,
     );
@@ -148,7 +150,7 @@ describe("AI metering", () => {
 
     expect(result.entries.map((entry) => entry.entryType)).toEqual(["ai_usage_cost"]);
     expect(await accountBalanceMicros(db, systemAccountCodes.cogsOpenai)).toBe(442_400n);
-    expect(await accountBalanceMicros(db, customerCreditsCode(accountId))).toBe(0n);
+    expect(await accountBalanceMicros(db, customerReceivableCode(accountId))).toBe(0n);
   });
 
   // Scene conversion is our migration off the legacy compiled path, run for
@@ -168,7 +170,7 @@ describe("AI metering", () => {
     expect(await accountBalanceMicros(db, systemAccountCodes.cogsOpenai)).toBe(442_400n);
     expect(await accountBalanceMicros(db, systemAccountCodes.accruedOpenai)).toBe(442_400n);
     expect(await accountBalanceMicros(db, systemAccountCodes.revenueAiUsage)).toBe(0n);
-    expect(await accountBalanceMicros(db, customerCreditsCode(accountId))).toBe(0n);
+    expect(await accountBalanceMicros(db, customerReceivableCode(accountId))).toBe(0n);
 
     // And it is legible as its own line: what the giveaway costs is a number
     // on the books, not a subtraction somebody has to know to do.
@@ -356,13 +358,69 @@ describe("AI metering", () => {
       { cost: 442_400n, list: 442_400n, price: 0n, source: "shared" },
     ]);
 
+    // Postpay: the charge sits on the receivable as an ordinary debit, so
+    // there is no negative balance to excuse any more — the books are simply
+    // consistent, which is the whole point of the change.
     expect(
-      await checkLedgerIntegrity(db, {
-        // The customer bought no credits, so their balance is legitimately
-        // negative here; Phase 3's gate is what stops that in production.
-        overdraftMicros: 10_000_000n,
-        pendingEventGraceMs: 0,
+      await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 }),
+    ).toEqual([]);
+  });
+
+  // Invariant 5 under postpay: the daily cap is what bounds the credit risk,
+  // and this check is the only automated proof that the gate in
+  // resolveAiAccess() sits in front of every AI surface rather than most of
+  // them. Measured on the usage records, not the postings, because it has to
+  // hold for shadow-mode and own-key accounts that post nothing.
+  it("notices a day that ran past the daily cap", async () => {
+    const accountId = await createAccount();
+    // Four turns at 575,120 micros each = 2,300,480.
+    for (let index = 0; index < 4; index += 1) {
+      await recordAiUsage(
+        db,
+        turn(accountId, `00000000-0000-4000-8000-0000000000c${index}`, "platform"),
+      );
+    }
+
+    // Well under a $10 cap: nothing to say.
+    expect(
+      await checkDailyCapRespected(db, {
+        dailyCapMicros: 10_000_000n,
+        overdraftMicros: 1_000_000n,
       }),
+    ).toEqual([]);
+
+    // Against a $1 cap the day is over the line even allowing one turn's
+    // overshoot, and the violation names the account, the day and the number.
+    const violations = await checkDailyCapRespected(db, {
+      dailyCapMicros: 1_000_000n,
+      overdraftMicros: 1_000_000n,
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.check).toBe("daily_cap_respected");
+    expect(violations[0]?.detail).toContain(accountId);
+    expect(violations[0]?.detail).toContain("2300480");
+
+    // No cap configured is not the same as a cap of zero: a deployment whose
+    // setting is missing must not report every account as a violation.
+    expect(await checkDailyCapRespected(db, {})).toEqual([]);
+  });
+
+  // Own-key turns cost us nothing and are charged nothing, so capping them
+  // would be gratuitous — and the check must agree with the gate about that.
+  it("leaves own-key turns and absorbed surfaces out of the cap", async () => {
+    const accountId = await createAccount();
+    for (let index = 0; index < 6; index += 1) {
+      await recordAiUsage(
+        db,
+        turn(accountId, `00000000-0000-4000-8000-0000000000d${index}`, "account"),
+      );
+    }
+    await recordAiUsage(db, {
+      ...turn(accountId, "00000000-0000-4000-8000-0000000000e0", "platform"),
+      surface: "scene_convert",
+    });
+    expect(
+      await checkDailyCapRespected(db, { dailyCapMicros: 100_000n }),
     ).toEqual([]);
   });
 });

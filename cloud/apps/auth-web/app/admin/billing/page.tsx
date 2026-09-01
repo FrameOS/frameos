@@ -102,14 +102,27 @@ export default async function AdminBillingPage() {
             </div>
           </div>
           <div className="stat-tile">
-            <div className="stat-tile__label">Owed to customers</div>
+            <div className="stat-tile__label">Owed by customers</div>
             <div className="stat-tile__value">
-              {formatMicrosUsd(summary.customerLiabilityMicros)}
+              {formatMicrosUsd(summary.customerReceivableMicros)}
             </div>
             <div className="stat-tile__detail">
-              Prepaid credit not yet spent — a liability, not revenue.
+              Metered usage and subscriptions accrued but not yet invoiced —
+              postpay&rsquo;s receivable, and what a month-end run collects.
             </div>
           </div>
+          {summary.customerLiabilityMicros !== 0n ? (
+            <div className="stat-tile">
+              <div className="stat-tile__label">Owed to customers</div>
+              <div className="stat-tile__value">
+                {formatMicrosUsd(summary.customerLiabilityMicros)}
+              </div>
+              <div className="stat-tile__detail">
+                Prepaid credit not yet spent. Zero unless the shelved prepaid
+                model is in use — shown only when it is not.
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
 

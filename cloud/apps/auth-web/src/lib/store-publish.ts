@@ -31,7 +31,7 @@ import {
 import type { SceneListing } from "./store-listing";
 import { alignZipCover, writeSceneVersion } from "./store-version-write";
 import {
-  maxPrivateSceneBytesPerAccount,
+  accountLimits,
   privateSceneBytesForAccount,
   sceneBytesTotal,
 } from "./usage";
@@ -155,15 +155,16 @@ export async function publishStoreScene(
       existing && existing.visibility === "public"
         ? await sceneBytesTotal(db, existing.id)
         : 0;
+    const { privateSceneBytes: maxBytes } = await accountLimits(db, accountId);
     if (
       privateBytes +
         flippingPrivateBytes +
         content.length +
         (uploadedPreview?.length ?? 0) >
-      maxPrivateSceneBytesPerAccount
+      maxBytes
     ) {
       return jsonError("storage_quota_exceeded", 403, {
-        max_bytes: maxPrivateSceneBytesPerAccount,
+        max_bytes: maxBytes,
         private_bytes: Math.round(privateBytes),
       });
     }

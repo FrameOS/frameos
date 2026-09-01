@@ -1,10 +1,14 @@
+import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import { accounts, createDb } from "@frameos-cloud/db";
 import { NewSceneWithAi } from "../../../src/components/NewSceneWithAi";
 import {
+  getAccountUrl,
   getCloudBaseUrl,
   getFramesUrl,
   getMyScenesUrl,
   getScenesBaseUrl,
+  hasDatabaseUrl,
   myScenesPath,
 } from "../../../src/lib/env";
 import { convertedScenesHandoffKey } from "../../../src/lib/scene-handoff";
@@ -41,8 +45,23 @@ export default async function NewScenePage({
     loginUrl.searchParams.set("return_to", returnTo.toString());
     redirect(loginUrl.toString());
   }
+  // The AI switch, so the panel opens saying AI is off rather than accepting
+  // a prompt and refusing it a round trip later. Skipped for the converter's
+  // signed-out path, which has no account to ask about.
+  let aiDisabled = false;
+  if (session?.accountId && hasDatabaseUrl()) {
+    const [row] = await createDb()
+      .select({ aiDisabledAt: accounts.aiDisabledAt })
+      .from(accounts)
+      .where(eq(accounts.id, session.accountId))
+      .limit(1);
+    aiDisabled = Boolean(row?.aiDisabledAt);
+  }
+
   return (
     <NewSceneWithAi
+      aiDisabled={aiDisabled}
+      aiSettingsUrl={getAccountUrl("/account/ai")}
       handoffKey={fromConverter ? convertedScenesHandoffKey : undefined}
       initialPrompt={prompt}
       loginUrl={new URL("/login", getCloudBaseUrl()).toString()}

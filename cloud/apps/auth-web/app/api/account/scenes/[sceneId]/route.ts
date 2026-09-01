@@ -24,7 +24,7 @@ import { imageSetForVersion } from "../../../../../src/lib/store-images";
 import { sceneSummary, sceneVisibilities } from "../../../../../src/lib/store";
 import { loadOwnedScene } from "../../../../../src/lib/store-owner";
 import {
-  maxPrivateSceneBytesPerAccount,
+  accountLimits,
   privateSceneBytesForAccount,
   sceneBytesTotal,
 } from "../../../../../src/lib/usage";
@@ -202,9 +202,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       privateSceneBytesForAccount(db, session.accountId!),
       sceneBytesTotal(db, scene.id),
     ]);
-    if (privateBytes + flippedBytes > maxPrivateSceneBytesPerAccount) {
+    const { privateSceneBytes: maxBytes } = await accountLimits(
+      db,
+      session.accountId!,
+    );
+    if (privateBytes + flippedBytes > maxBytes) {
       return jsonError("storage_quota_exceeded", 403, {
-        max_bytes: maxPrivateSceneBytesPerAccount,
+        max_bytes: maxBytes,
         private_bytes: Math.round(privateBytes),
         scene_bytes: Math.round(flippedBytes),
       });

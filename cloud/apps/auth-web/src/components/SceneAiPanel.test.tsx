@@ -282,6 +282,35 @@ describe("SceneAiPanel", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // The switch is known before the first turn, so the panel must say so up
+  // front. Letting somebody type a prompt, wait for a round trip and only
+  // then learn AI is off is the failure this replaces.
+  it("says AI is off before a prompt can be sent, not after", () => {
+    renderPanel({
+      aiDisabled: true,
+      aiSettingsUrl: "https://cloud.example/account/ai",
+    });
+
+    expect(screen.getByText("AI features are switched off.")).toBeDefined();
+    const box = screen.getByLabelText("Message the AI") as HTMLTextAreaElement;
+    expect(box.disabled).toBe(true);
+    expect(box.placeholder).toBe("AI features are off for this account");
+    const link = screen.getByRole("link", {
+      name: "Turn AI back on",
+    }) as HTMLAnchorElement;
+    expect(link.href).toBe("https://cloud.example/account/ai");
+
+    // And nothing reaches the server even if a keystroke gets through.
+    sendPrompt("make it blue");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // An initial prompt is submitted on mount; with AI off it must not be.
+  it("does not auto-submit an initial prompt when AI is off", () => {
+    renderPanel({ aiDisabled: true, initialPrompt: "make it blue" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("submits the initial prompt on mount and shows suggestion chips otherwise", async () => {
     fetchMock.mockResolvedValueOnce(ndjson([{ reply: "Hi", tool: "reply", type: "done" }]));
     const { unmount } = renderPanel({ initialPrompt: "make it blue" });

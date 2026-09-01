@@ -12,6 +12,10 @@ export interface LedgerIntegrityViolation {
 }
 
 export interface LedgerIntegrityOptions {
+  // The daily spend ceiling in force (payg_daily_cap_micros). Omitted means
+  // "no cap configured", and the check is skipped rather than assumed to be
+  // zero — a missing setting must not report every account as a violation.
+  dailyCapMicros?: bigint | undefined;
   now?: Date | undefined;
   // How far a customer's credit balance may go below zero before it counts
   // as a violation. Mirrors the payg_overdraft_micros setting.
@@ -32,6 +36,7 @@ export async function checkLedgerIntegrity(
     ...(await checkBalanceCache(db)),
     ...(await checkEventsPostedOnce(db, options)),
     ...(await checkCustomerCreditFloor(db, options)),
+    ...(await checkDailyCapRespected(db, options)),
     ...(await checkMeteringCompleteness(db, options)),
     ...(await checkReversalsMirror(db)),
     ...(await checkImmutabilityTriggers(db)),
@@ -182,6 +187,67 @@ export async function checkCustomerCreditFloor(
   return rows.map((row) => ({
     check: "customer_credit_floor",
     detail: `${row.code} is at ${row.balance_micros} micros`,
+  }));
+}
+
+// 5b. The daily cap held. Under postpay this is the check that matters
+//     — there is no prepaid balance to keep out of the red, and the cap is
+//     what bounds the credit risk instead (§5.3). It is also the only
+//     automated proof that the gate in resolveAiAccess() actually sits in
+//     front of EVERY AI surface rather than most of them: a surface added
+//     next month that forgets it shows up here as a day over the line.
+//
+//     Measured the same way the gate measures, on `ai_usage_records` rather
+//     than on postings, because the cap must hold for shadow-mode and
+//     own-key accounts too — and those post nothing at all.
+//
+//     The tolerated overshoot is one turn's worth (`payg_overdraft_micros`):
+//     a turn's cost is unknown until it ends, so the last turn of a day can
+//     legitimately cross the line. Anything past that is the gate failing.
+export async function checkDailyCapRespected(
+  db: LedgerExecutor,
+  options: LedgerIntegrityOptions = {},
+): Promise<LedgerIntegrityViolation[]> {
+  const cap = options.dailyCapMicros;
+  if (cap === undefined || cap <= 0n) {
+    return [];
+  }
+  const ceiling = cap + (options.overdraftMicros ?? 0n);
+  const rows = await db.execute<{
+    account_id: string;
+    day: string;
+    spent: string;
+  }>(sql`
+    select account_id::text as account_id,
+           to_char(date_trunc('day', occurred_at at time zone 'UTC'), 'YYYY-MM-DD') as day,
+           sum(case
+                 when credential_source = 'account' then 0
+                 when price_micros > 0 then price_micros
+                 else round(
+                   round((input_tokens::numeric * coalesce(pricing->>'inputMicrosPerMtok', '0')::numeric
+                          + cached_input_tokens::numeric * coalesce(pricing->>'cachedInputMicrosPerMtok', '0')::numeric
+                          + output_tokens::numeric * coalesce(pricing->>'outputMicrosPerMtok', '0')::numeric)
+                         / 1000000)
+                   * (10000 + coalesce((pricing->>'marginBasisPoints')::numeric, 3000)) / 10000)
+               end)::text as spent
+      from ai_usage_records
+     where account_id is not null
+       and surface is distinct from 'scene_convert'
+     group by 1, 2
+    having sum(case
+                 when credential_source = 'account' then 0
+                 when price_micros > 0 then price_micros
+                 else round(
+                   round((input_tokens::numeric * coalesce(pricing->>'inputMicrosPerMtok', '0')::numeric
+                          + cached_input_tokens::numeric * coalesce(pricing->>'cachedInputMicrosPerMtok', '0')::numeric
+                          + output_tokens::numeric * coalesce(pricing->>'outputMicrosPerMtok', '0')::numeric)
+                         / 1000000)
+                   * (10000 + coalesce((pricing->>'marginBasisPoints')::numeric, 3000)) / 10000)
+               end) > ${ceiling.toString()}::numeric
+  `);
+  return rows.map((row) => ({
+    check: "daily_cap_respected",
+    detail: `Account ${row.account_id} metered ${row.spent} micros on ${row.day}, past the ${ceiling.toString()} ceiling`,
   }));
 }
 

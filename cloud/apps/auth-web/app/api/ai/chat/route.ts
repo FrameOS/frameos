@@ -11,7 +11,8 @@ import {
   ensureChat,
   historyForModel,
 } from "../../../../src/lib/ai/chat-store";
-import { resolveAiCredentials } from "../../../../src/lib/ai/api-key";
+import { aiRefusalResponse } from "../../../../src/lib/ai/access";
+import { resolveAiAccess } from "../../../../src/lib/ai/api-key";
 import { meterAiUsageInBackground } from "../../../../src/lib/billing";
 import { buildInitialInput, runAgentLoop } from "../../../../src/lib/ai/loop";
 import { formatAiException, type JsonObject } from "../../../../src/lib/ai/scene-utils";
@@ -229,13 +230,15 @@ export async function POST(request: NextRequest) {
     return jsonError("invalid_prompt", 400, { detail: "Prompt is required" });
   }
 
-  const credentials = await resolveAiCredentials(db, accountId);
-  if (!credentials) {
-    return jsonError("missing_api_key", 400, {
-      detail: "OpenAI backend API key not set",
-    });
+  // The one gate: the AI switch, the key, and the daily cap, in that order
+  // (§5.1/§5.3). Every AI surface goes through it, which is what makes
+  // "does the cap apply here?" a question with one answer.
+  const access = await resolveAiAccess(db, accountId, { surface: "scene_chat" });
+  if (!access.ok) {
+    return aiRefusalResponse(access.refusal);
   }
-  const { apiKey, model, reasoningEffort, source: credentialSource } = credentials;
+  const { apiKey, model, reasoningEffort, source: credentialSource } =
+    access.credentials;
 
   const requestedChatId = stringOrNull(body.chatId) ?? crypto.randomUUID();
   const scenePayload = objectOrNull(body.scene);

@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
 import { aiUsageRecords } from "@frameos-cloud/db";
 import { postEvent, type PostEventOptions } from "./kernel";
+import { accountMarginBasisPoints } from "./plans";
 import {
   priceUsage,
   resolveModelPrice,
@@ -125,9 +126,18 @@ export async function recordAiUsage(
   const { billable, ours } = billing(input.credentialSource, input.surface);
   const usage = splitProviderUsage(input.usage);
   const price = await resolveModelPrice(db, input.model, occurredAt);
+  // The plan's margin, falling back to the deployment's global one. Read here
+  // and snapshotted into the record exactly as the global margin always was,
+  // so an entry stays explainable after the account changes plan — and so a
+  // plan change is never retroactive.
+  const marginBasisPoints = await accountMarginBasisPoints(
+    db,
+    input.accountId,
+    settings,
+  );
   const priced = priceUsage({
     billable,
-    marginBasisPoints: settings.marginBasisPoints,
+    marginBasisPoints,
     price,
     usage,
   });

@@ -44,6 +44,10 @@ type NewSceneWithAiProps = {
   /** From ?prompt=…: submitted to the AI as soon as the page opens. */
   initialPrompt?: string | undefined;
   settingsUrl?: string | undefined;
+  /** The account switched AI features off; the panel says so up front. */
+  aiDisabled?: boolean | undefined;
+  /** Where to turn AI back on. */
+  aiSettingsUrl?: string | undefined;
   loginUrl?: string | undefined;
   /** Where "Back" goes. */
   myScenesUrl: string;
@@ -87,7 +91,15 @@ const createErrors: Record<string, string> = {
 // A full-page editor for a brand-new scene, AI panel open: start from one
 // blank scene, describe what you want, then "Save to my scenes" creates it
 // as a private scene and jumps to its page.
-export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesUrl, handoffKey }: NewSceneWithAiProps) {
+export function NewSceneWithAi({
+  aiDisabled = false,
+  aiSettingsUrl,
+  initialPrompt,
+  settingsUrl,
+  loginUrl,
+  myScenesUrl,
+  handoffKey,
+}: NewSceneWithAiProps) {
   // Scenes are minted on the client (crypto ids) after mount, so the server
   // render and the hydration pass agree.
   const [scenes, setScenes] = useState<SceneJson[] | null>(null);
@@ -485,6 +497,8 @@ export function NewSceneWithAi({ initialPrompt, settingsUrl, loginUrl, myScenesU
           },
           onScenes: applyAiEvent,
           onShowInPreview: showRenderInPreview,
+          aiDisabled,
+          ...(aiSettingsUrl ? { aiSettingsUrl } : {}),
           settingsUrl,
           signedIn: true,
         }}

@@ -114,6 +114,12 @@ export type SceneAiPanelProps = {
    * ended up selecting, which the render check then targets. */
   onScenes: (event: AiScenesEvent) => void | string | null;
   signedIn: boolean;
+  /** The account switched AI features off (Account → AI usage). Known before
+   * the first turn, so the panel says so up front instead of accepting a
+   * prompt and refusing it after the round trip. */
+  aiDisabled?: boolean | undefined;
+  /** Where to go to turn AI back on. */
+  aiSettingsUrl?: string | undefined;
   /** Submitted as the first turn as soon as the panel mounts (signed in), or
    * pre-filled into the prompt box (signed out). */
   initialPrompt?: string | undefined;
@@ -391,6 +397,8 @@ function ToolActivity({ tools, streaming }: { tools: ToolLine[]; streaming: bool
 // tool activity, and the scenes the agent delivers, applied to the editor
 // through onScenes. State stays in React — this app doesn't use kea.
 export function SceneAiPanel({
+  aiDisabled = false,
+  aiSettingsUrl,
   storeSceneId,
   getScenes,
   selectedSceneId,
@@ -496,7 +504,7 @@ export function SceneAiPanel({
   const submit = useCallback(
     async (rawPrompt: string, round = 0): Promise<void> => {
       const prompt = rawPrompt.trim();
-      if (!prompt || busyRef.current || !signedIn) {
+      if (!prompt || busyRef.current || !signedIn || aiDisabled) {
         return;
       }
       busyRef.current = true;
@@ -760,7 +768,7 @@ export function SceneAiPanel({
       busyRef.current = false;
       setBusy(false);
     },
-    [signedIn, updateMessage],
+    [aiDisabled, signedIn, updateMessage],
   );
 
   // The entry points hand over a prompt (?ai=… / ?prompt=…): send it right
@@ -814,8 +822,13 @@ export function SceneAiPanel({
 
   const chips = suggestions ?? (mode === "new" ? newSceneSuggestions : existingSceneSuggestions);
   const signInHref = `${loginUrl}${loginUrl.includes("?") ? "&" : "?"}return_to=${encodeURIComponent(returnTo || "/")}`;
-  const placeholder =
-    mode === "new"
+  // A composer you can type into and send, that then always fails, is worse
+  // than one that is plainly closed. Both the switch and the sign-in gate are
+  // known before the first turn, so neither should be discovered by failing.
+  const composerBlocked = !signedIn || aiDisabled;
+  const placeholder = aiDisabled
+    ? "AI features are off for this account"
+    : mode === "new"
       ? "Describe the scene, e.g. “A clock with the date underneath, big white text on dark green”"
       : "Ask for a change, e.g. “make the title text bigger”";
 
@@ -827,6 +840,24 @@ export function SceneAiPanel({
       </header>
 
       <div className="ai-panel__transcript" ref={transcriptRef}>
+        {signedIn && aiDisabled ? (
+          <div className="notice ai-panel__notice">
+            <strong className="ai-panel__notice-title">
+              <Sparkles aria-hidden size={14} />
+              AI features are switched off.
+            </strong>
+            <p className="copy">
+              You turned AI off for this account, so nothing here can run — and
+              nothing can cost you anything.
+            </p>
+            {aiSettingsUrl ? (
+              <a className="button button--small" href={aiSettingsUrl}>
+                Turn AI back on
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+
         {!signedIn ? (
           <div className="notice ai-panel__notice">
             <strong>Sign in to use the AI.</strong>
@@ -988,7 +1019,7 @@ export function SceneAiPanel({
         <textarea
           aria-label="Message the AI"
           className="ai-panel__input"
-          disabled={!signedIn}
+          disabled={composerBlocked}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
@@ -1006,7 +1037,7 @@ export function SceneAiPanel({
           ) : (
             <button
               className="button button--small button-primary"
-              disabled={!signedIn || !input.trim()}
+              disabled={composerBlocked || !input.trim()}
               type="submit"
             >
               <Send aria-hidden size={14} />

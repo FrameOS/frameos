@@ -2,6 +2,7 @@ import {
   checkLedgerIntegrity,
   dailySummary,
   readBillingSettings,
+  runSubscriptionCycle,
   sweepUnpostedUsage,
 } from "@frameos-cloud/ledger";
 import { NextRequest, NextResponse } from "next/server";
@@ -30,13 +31,21 @@ export const maxDuration = 300;
 // scripts/accounting-nightly.sh, which curls this with a superadmin API
 // token — an existing auth mechanism rather than a new shared secret.
 //
-// Two things happen, in order:
+// Three things happen, in order:
 //   1. Sweep the usage records whose ledger entries never landed. Idempotent
 //      by turn id, so a night that already posted is a no-op.
-//   2. Run every invariant and report each violation. A violation is an
+//   2. Run the subscription cycle: open the periods that are due, charge the
+//      ones that have started, recognize the ones that have ended. Idempotent
+//      on each period row, so a night that runs twice charges nobody twice
+//      and a night that never ran is caught up rather than skipped.
+//   3. Run every invariant and report each violation. A violation is an
 //      alert, not a failure to fix automatically: books that disagree with
 //      themselves need a human, and quietly "correcting" them is how a
 //      discrepancy becomes undiscoverable.
+//
+// The order matters for step 3: it must see the books AFTER everything that
+// was going to be written tonight has been, or it reports a disagreement it
+// caused itself.
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
   if (csrf) {
@@ -68,7 +77,15 @@ export async function POST(request: NextRequest) {
     reportError("billing.sweep_failed", failure.error, { turnId: failure.turnId });
   }
 
+  const subscriptionCycle = await runSubscriptionCycle(db);
+  for (const failure of subscriptionCycle.failures) {
+    reportError("billing.subscription_cycle_failed", failure.error, {
+      periodId: failure.periodId,
+    });
+  }
+
   const violations = await checkLedgerIntegrity(db, {
+    dailyCapMicros: settings.dailyCapMicros,
     overdraftMicros: settings.overdraftMicros,
   });
   for (const violation of violations) {
@@ -91,11 +108,16 @@ export async function POST(request: NextRequest) {
     cogsMicros: summary.cogsMicros.toString(),
     contraRevenueMicros: summary.contraRevenueMicros.toString(),
     customerLiabilityMicros: summary.customerLiabilityMicros.toString(),
+    customerReceivableMicros: summary.customerReceivableMicros.toString(),
     durationMs: Date.now() - startedAt,
     marginMicros: summary.marginMicros.toString(),
     meteringMode: settings.meteringMode,
     netRevenueMicros: summary.netRevenueMicros.toString(),
     revenueMicros: summary.revenueMicros.toString(),
+    subscriptionsCharged: subscriptionCycle.charged,
+    subscriptionsFailed: subscriptionCycle.failures.length,
+    subscriptionsOpened: subscriptionCycle.opened,
+    subscriptionsRecognized: subscriptionCycle.recognized,
     sweepFailed: sweep.failures.length,
     sweepPosted: sweep.posted,
     violations: violations.length,
@@ -103,16 +125,26 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     metering_mode: settings.meteringMode,
-    ok: violations.length === 0 && sweep.failures.length === 0,
+    ok:
+      violations.length === 0 &&
+      sweep.failures.length === 0 &&
+      subscriptionCycle.failures.length === 0,
     summary: {
       cogs_micros: summary.cogsMicros.toString(),
       contra_revenue_micros: summary.contraRevenueMicros.toString(),
       customer_liability_micros: summary.customerLiabilityMicros.toString(),
+      customer_receivable_micros: summary.customerReceivableMicros.toString(),
       margin_micros: summary.marginMicros.toString(),
       net_revenue_micros: summary.netRevenueMicros.toString(),
       revenue_micros: summary.revenueMicros.toString(),
       since: since.toISOString(),
       until: until.toISOString(),
+    },
+    subscriptions: {
+      charged: subscriptionCycle.charged,
+      failed: subscriptionCycle.failures.length,
+      opened: subscriptionCycle.opened,
+      recognized: subscriptionCycle.recognized,
     },
     sweep: {
       failed: sweep.failures.length,

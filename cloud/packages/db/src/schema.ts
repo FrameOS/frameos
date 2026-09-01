@@ -44,6 +44,12 @@ export const deviceAuthorizationStatus = pgEnum("device_authorization_status", [
 
 export const accounts = pgTable("accounts", {
   id: uuid("id").defaultRandom().primaryKey(),
+  // The AI opt-out (migration 0044). Set = the account has explicitly turned
+  // AI features off and nothing it does may incur AI cost;
+  // resolveAiCredentials() refuses before it looks at any key. A timestamp so
+  // "since when" is answerable, and null for every account that never touched
+  // the switch.
+  aiDisabledAt: timestamp("ai_disabled_at", { withTimezone: true }),
   displayName: text("display_name"),
   isSuperadmin: boolean("is_superadmin").default(false).notNull(),
   // Null for accounts that only sign in through an external provider.
@@ -1450,6 +1456,102 @@ export const aiUsageRecords = pgTable(
       table.accountId,
       table.createdAt,
     ),
+    // The daily cap and the /account/ai page both window on occurred_at —
+    // when the tokens burned, not when the row was written (migration 0044).
+    accountOccurredIdx: index("ai_usage_records_account_occurred_idx").on(
+      table.accountId,
+      table.occurredAt,
+    ),
     turnUnique: uniqueIndex("ai_usage_records_turn_unique").on(table.turnId),
+  }),
+);
+
+// Plans and subscriptions (migration 0045). What varies down the ladder is
+// the MARGIN on metered AI rather than access to a feature — a plan is a
+// better rate on something everybody may already use, which is why there is
+// no "has_ai" column here. Design: cloud/docs/accounting-todo.md §0.1, §3.6.
+//
+// These are NOT ledger tables: they reference `accounts` normally, because a
+// subscription is product state. What the ledger sees is the entries §3.6's
+// recipes post, and those name the account the same unreferenced way every
+// other financial event does.
+export const billingPlans = pgTable("billing_plans", {
+  code: text("code").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  priceMicros: bigint("price_micros", { mode: "bigint" }).notNull(),
+  currency: text("currency").default("USD").notNull(),
+  period: text("period").default("month").notNull(),
+  // Overrides the global `ai_margin_percent` for accounts on this plan, and
+  // is snapshotted per usage record exactly as the global one always was.
+  marginBasisPoints: integer("margin_basis_points").notNull(),
+  // cloud_rendered_frames, backup_bytes, frame_log_bytes,
+  // private_scene_bytes, frames. Read by src/lib/usage.ts, never by the
+  // ledger: a plan's entitlements are not accounting facts.
+  entitlements: jsonb("entitlements").default({}).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  public: boolean("public").default(true).notNull(),
+  ...timestamps,
+});
+
+// One row per account, at most. No row means PAYG — the same thing as a row
+// pointing at the payg plan, so that enrolling every existing account is not
+// a prerequisite for shipping.
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    planCode: text("plan_code")
+      .notNull()
+      .references(() => billingPlans.code),
+    status: text("status").default("active").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // Set when the user cancels: the plan runs to the end of the paid period
+    // and stops. Nothing is refunded by default.
+    cancelAt: timestamp("cancel_at", { withTimezone: true }),
+    canceledAt: timestamp("canceled_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => ({
+    accountUnique: uniqueIndex("subscriptions_account_unique").on(
+      table.accountId,
+    ),
+  }),
+);
+
+// One row per billed period: charged at period start, recognized at period
+// end, both idempotent on this row's id so the nightly job may run twice or
+// miss a night without double-charging or losing a period.
+export const subscriptionPeriods = pgTable(
+  "subscription_periods",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    subscriptionId: uuid("subscription_id")
+      .notNull()
+      .references(() => subscriptions.id, { onDelete: "cascade" }),
+    // Snapshotted, not joined: a period is billed at the price and margin in
+    // force when it started, whatever the plan row says afterwards.
+    planCode: text("plan_code").notNull(),
+    priceMicros: bigint("price_micros", { mode: "bigint" }).notNull(),
+    marginBasisPoints: integer("margin_basis_points").notNull(),
+    currency: text("currency").default("USD").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    chargedAt: timestamp("charged_at", { withTimezone: true }),
+    recognizedAt: timestamp("recognized_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    periodUnique: uniqueIndex("subscription_periods_unique").on(
+      table.subscriptionId,
+      table.periodStart,
+    ),
   }),
 );

@@ -57,21 +57,21 @@ export async function GET(request: NextRequest) {
     return response;
   }
   const [[account], usage] = await Promise.all([
-    db
-      .select({
-        createdAt: accounts.createdAt,
-        displayName: accounts.displayName,
-        id: accounts.id,
-        isSuperadmin: accounts.isSuperadmin,
-        primaryEmail: accounts.primaryEmail,
-        storeBannedAt: accounts.storeBannedAt,
-        verifiedPublisherAt: accounts.verifiedPublisherAt,
-      })
-      .from(accounts)
-      .where(eq(accounts.id, session.accountId))
-      .limit(1),
-    accountUsage(db, session.accountId),
-  ]);
+      db
+        .select({
+          createdAt: accounts.createdAt,
+          displayName: accounts.displayName,
+          id: accounts.id,
+          isSuperadmin: accounts.isSuperadmin,
+          primaryEmail: accounts.primaryEmail,
+          storeBannedAt: accounts.storeBannedAt,
+          verifiedPublisherAt: accounts.verifiedPublisherAt,
+        })
+        .from(accounts)
+        .where(eq(accounts.id, session.accountId))
+        .limit(1),
+      accountUsage(db, session.accountId),
+    ]);
   if (!account) {
     return jsonError("login_required", 401);
   }

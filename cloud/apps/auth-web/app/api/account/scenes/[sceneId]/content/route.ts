@@ -39,7 +39,7 @@ import {
   writeSceneVersion,
 } from "../../../../../../src/lib/store-version-write";
 import {
-  maxPrivateSceneBytesPerAccount,
+  accountLimits,
   privateSceneBytesForAccount,
 } from "../../../../../../src/lib/usage";
 
@@ -278,10 +278,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const newImageBytes = images
       .filter((image) => !previousShas.has(image.sha256))
       .reduce((sum, image) => sum + image.sizeBytes, 0);
-    const privateBytes = await privateSceneBytesForAccount(db, session.accountId!);
-    if (privateBytes + content.length + newImageBytes > maxPrivateSceneBytesPerAccount) {
+    const [privateBytes, { privateSceneBytes: maxBytes }] = await Promise.all([
+      privateSceneBytesForAccount(db, session.accountId!),
+      accountLimits(db, session.accountId!),
+    ]);
+    if (privateBytes + content.length + newImageBytes > maxBytes) {
       return jsonError("storage_quota_exceeded", 403, {
-        max_bytes: maxPrivateSceneBytesPerAccount,
+        max_bytes: maxBytes,
         private_bytes: Math.round(privateBytes),
       });
     }

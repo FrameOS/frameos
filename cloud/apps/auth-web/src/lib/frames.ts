@@ -49,7 +49,7 @@ import { logWarn, reportError } from "./log";
 import {
   cullFrameLogsOverBudget,
   frameLogBytesForAccount,
-  maxFrameLogBytesPerAccount,
+  accountLimits,
 } from "./usage";
 
 type Database = ReturnType<typeof createDb>;
@@ -1315,7 +1315,7 @@ export async function storeFrameLogs(
     if (accountId) {
       const overBudget =
         (await frameLogBytesForAccount(tx, accountId)) >
-        maxFrameLogBytesPerAccount;
+        (await accountLimits(tx, accountId)).frameLogBytes;
       if (overBudget) {
         await cullFrameLogsOverBudget(tx, accountId);
       }

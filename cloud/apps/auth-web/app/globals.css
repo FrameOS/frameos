@@ -359,6 +359,26 @@ html.theme-dark .button-primary {
   display: contents;
 }
 
+/* The AI usage row is a link, not a meter: the only number it could fill a
+   bar against today is the daily cap, and a bar that empties every midnight
+   says nothing useful. See cloud/docs/accounting-todo.md §5.2. */
+.storage-usage__link {
+  display: contents;
+  color: inherit;
+  text-decoration: none;
+}
+
+.storage-usage__link:hover .storage-usage__value,
+.storage-usage__link:focus-visible .storage-usage__value {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.storage-usage__note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .compact-header {
   align-items: center;
   margin-bottom: 0;
@@ -3738,12 +3758,21 @@ html.theme-dark .ai-panel__render {
   --card-ink: #155e4e;
 }
 
+.action-card--slate {
+  --card-tint: #4a5b78;
+  --card-ink: #35435c;
+}
+
 html.theme-dark .action-card--gold {
   --card-ink: #e2c468;
 }
 
 html.theme-dark .action-card--teal {
   --card-ink: #6fbfa9;
+}
+
+html.theme-dark .action-card--slate {
+  --card-ink: #9fb2d1;
 }
 
 html.theme-dark .action-card {

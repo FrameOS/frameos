@@ -12,6 +12,9 @@ export async function resetLedger() {
   await db.execute(sql`
     TRUNCATE TABLE ai_usage_records, ledger_postings, ledger_balances, ledger_entries, financial_events
   `);
+  // Subscriptions cascade from accounts, but truncating explicitly keeps a
+  // test that never made an account from inheriting the last one's periods.
+  await db.execute(sql`TRUNCATE TABLE subscription_periods, subscriptions`);
   await db.execute(
     sql`DELETE FROM ledger_accounts WHERE owner_account_id IS NOT NULL`,
   );
@@ -27,6 +30,9 @@ export async function resetLedger() {
   `);
   await db.execute(sql`
     UPDATE billing_settings SET value = '"shadow"' WHERE key = 'ai_metering_mode'
+  `);
+  await db.execute(sql`
+    UPDATE billing_settings SET value = '10000000' WHERE key = 'payg_daily_cap_micros'
   `);
 }
 

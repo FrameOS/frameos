@@ -42,7 +42,7 @@ import type { SceneListing } from "./store-listing";
 import type { PublishActor } from "./store-publish";
 import { alignZipCover, writeSceneVersion } from "./store-version-write";
 import {
-  maxPrivateSceneBytesPerAccount,
+  accountLimits,
   privateSceneBytesForAccount,
 } from "./usage";
 
@@ -178,9 +178,10 @@ async function forkStoreSceneLocked(db: Database, input: ForkInput) {
   if (rebuilt.length > maxSceneZipBytes) {
     return jsonError("scene_too_large", 413, { max_bytes: maxSceneZipBytes });
   }
-  if (privateBytes + rebuilt.length > maxPrivateSceneBytesPerAccount) {
+  const { privateSceneBytes: maxPrivateBytes } = await accountLimits(db, accountId);
+  if (privateBytes + rebuilt.length > maxPrivateBytes) {
     return jsonError("storage_quota_exceeded", 403, {
-      max_bytes: maxPrivateSceneBytesPerAccount,
+      max_bytes: maxPrivateBytes,
       private_bytes: Math.round(privateBytes),
     });
   }

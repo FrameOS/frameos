@@ -30,7 +30,14 @@ beforeEach(async () => {
 
 // The golden-file test: one customer's whole life through the books, with
 // the complete journal asserted at every step rather than one balance at the
-// end. The unit tests prove each recipe in isolation; this proves the
+// end.
+//
+// This one deliberately mixes both models. The metered turns post the LIVE
+// postpay shape (rule v2: the charge debits the customer's receivable), while
+// the purchase and the promo grant exercise the prepaid accounts §3.5 keeps
+// on the shelf — which is what stops a shelved model from quietly rotting
+// into something that no longer balances. subscriptions.integration.test.ts
+// is the postpay + subscription walk. The unit tests prove each recipe in isolation; this proves the
 // sequence, which is where accounting bugs actually live — a charge that
 // posts fine on its own and leaves the wrong liability behind once a refund
 // and a reversal have happened around it.
@@ -164,13 +171,13 @@ describe("a customer's life through the books", () => {
     Dr contra_revenue:promo               5.000000
     Cr liability:credits_promo:customer:<id> 5.000000
   ai_usage_charge
-    Dr liability:credits:customer:<id>    0.575120
+    Dr asset:receivable:customer:<id>     0.575120
     Cr revenue:ai_usage                   0.575120
   ai_usage_cost
     Dr expense:cogs:openai                0.442400
     Cr liability:accrued:openai           0.442400
   ai_usage_charge
-    Dr liability:credits:customer:<id>    0.575120
+    Dr asset:receivable:customer:<id>     0.575120
     Cr revenue:ai_usage                   0.575120
   ai_usage_cost
     Dr expense:cogs:openai                0.442400
@@ -206,8 +213,9 @@ describe("a customer's life through the books", () => {
     expect(balance.balanced).toBe(true);
     expect("\n" + renderBalances(balance.rows)).toBe(`
   asset:psp:main                     9.410000
+  asset:receivable:customer:<id>     0.575120
   liability:accrued:openai           0.884800
-  liability:credits:customer:<id>    9.424880
+  liability:credits:customer:<id>    10.000000
   liability:credits_promo:customer:<id> 5.000000
   contra_revenue:promo               5.000000
   revenue:ai_usage                   0.475120
@@ -229,7 +237,13 @@ describe("a customer's life through the books", () => {
     expect(formatMicros(summary.contraRevenueMicros)).toBe("5.000000");
     expect(formatMicros(summary.netRevenueMicros)).toBe("-4.424880");
     expect(formatMicros(summary.marginMicros)).toBe("-5.899680");
-    expect(formatMicros(summary.customerLiabilityMicros)).toBe("14.424880");
+    // Two different customer balances now, and the distinction is the whole
+    // of §0: the prepaid liability is what we owe them (still the full $15
+    // they were given, because postpay never draws it down), and the
+    // receivable is what they owe us for the one charge that survived the
+    // reversal.
+    expect(formatMicros(summary.customerLiabilityMicros)).toBe("15.000000");
+    expect(formatMicros(summary.customerReceivableMicros)).toBe("0.575120");
 
     // Every invariant, after all of it.
     expect(
