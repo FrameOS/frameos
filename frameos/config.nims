@@ -22,7 +22,12 @@ if frameosZippyPath.len > 0:
     quit("FRAMEOS_ZIPPY_PATH must point to a zippy checkout with src/zippy/", QuitFailure)
   switch("path", frameosZippySrc)
 
-when defined(frameosEmbedded):
+when defined(frameosWasm):
+  # The browser preview can simulate a device's memory ceiling, which means
+  # allocations have to be counted and refusable. See
+  # tools/wasm/fos_wasm_mem.c and src/wasm/patched_malloc.nim.
+  patchFile("stdlib", "malloc", "src/wasm/patched_malloc")
+elif defined(frameosEmbedded):
   # On FreeRTOS, Nim's -d:useMalloc allocator returns nil on exhaustion
   # without raising, turning any out-of-memory render into a null-pointer
   # crash and a device reboot. The patched malloc releases an emergency

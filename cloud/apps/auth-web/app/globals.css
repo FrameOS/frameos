@@ -1449,6 +1449,36 @@ a.tag-pill--active:hover {
   cursor: not-allowed;
 }
 
+/* The "Memory" control's label and the peak-usage readout beside it. */
+.viewport-controls__label {
+  white-space: nowrap;
+}
+
+.viewport-controls__hint {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A render the simulated device could not fit. Sits under the controls, in
+   the same shape as the panel's other inline notices. */
+.preview-notice {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.preview-notice--error {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+}
+
 .json-editor {
   width: 100%;
   border: 1px solid var(--line);
