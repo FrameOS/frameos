@@ -25,8 +25,12 @@ const accountPagePrefixes = [
   "/device",
   "/frames",
 ] as const;
+// Every section in AccountNav needs a row here: the nav links to the clean
+// path (getAccountPath), and without a rewrite back to the app route the
+// clean path is a 404 in production — which is exactly how /ai shipped.
 const accountSectionRewrites = new Map([
   ["/backends", "/account/installs"],
+  ["/ai", "/account/ai"],
   ["/backups", "/account/backups"],
   ["/activity", "/account/activity"],
   ["/security", "/account/security"],

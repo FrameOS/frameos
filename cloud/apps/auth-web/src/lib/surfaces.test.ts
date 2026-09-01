@@ -56,6 +56,7 @@ describe("surface routing", () => {
       ["/account", "/backends"],
       ["/account/installs", "/backends"],
       ["/account/frames", "/frames"],
+      ["/account/ai", "/ai"],
       ["/account/backups", "/backups"],
       ["/account/activity", "/activity"],
       ["/account/developer", "/developer"],
@@ -138,6 +139,7 @@ describe("surface routing", () => {
 
     for (const [external, internal] of [
       ["/backends", "/account/installs"],
+      ["/ai", "/account/ai"],
       ["/backups", "/account/backups"],
       ["/activity", "/account/activity"],
       ["/security", "/account/security"],
@@ -183,6 +185,10 @@ describe("surface routing", () => {
     expectRoute("https://cloud.frameos.net/security", {
       kind: "rewrite",
       url: "https://cloud.frameos.net/account/security",
+    });
+    expectRoute("https://cloud.frameos.net/ai", {
+      kind: "rewrite",
+      url: "https://cloud.frameos.net/account/ai",
     });
     expectRoute("https://cloud.frameos.net/developer", {
       kind: "rewrite",
