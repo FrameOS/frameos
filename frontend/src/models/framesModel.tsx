@@ -605,6 +605,7 @@ export interface framesModelValues {
   archivedFramesExpanded: boolean
   archivedFramesList: FrameType[]
   cloudFrameConfirmErrors: Record<FrameId, string>
+  cloudFrameScenesLoaded: Record<FrameId, boolean>
   cloudFramesConfirming: Record<FrameId, boolean>
   frames: Record<FrameId, FrameType>
   framesEverLoaded: boolean
@@ -627,6 +628,9 @@ export interface framesModelActions {
     id: FrameId
   }
   cancelDeploy: (id: FrameId) => {
+    id: FrameId
+  }
+  cloudFrameScenesSettled: (id: FrameId) => {
     id: FrameId
   }
   confirmCloudFrame: (id: FrameId) => {
@@ -896,6 +900,10 @@ export const framesModel = kea<framesModelType>([
     // frame.scenes so the tiles survive a reload. `force` skips the
     // once-a-minute throttle (used right after an install).
     hydrateCloudFrameScenes: (id: FrameId, force?: boolean) => ({ id, force: force || false }),
+    // One hydration attempt for this frame has finished, successfully or not.
+    // Until the first one does, an empty scene list means "not fetched yet",
+    // not "this frame has none".
+    cloudFrameScenesSettled: (id: FrameId) => ({ id }),
     setCloudFrameScenes: (id: FrameId, scenes: FrameScene[], sources?: Record<string, CloudSceneSource>) => ({
       id,
       scenes,
@@ -984,6 +992,15 @@ export const framesModel = kea<framesModelType>([
         confirmCloudFrame: (state, { id }) => ({ ...state, [id]: true }),
         confirmCloudFrameFailure: (state, { id }) => ({ ...state, [id]: false }),
         loadFrameSuccess: (state) => (Object.keys(state).length > 0 ? {} : state),
+      },
+    ],
+    // Which frames have had their cloud scenes fetched at least once. A frame
+    // that is still fetching has an empty `scenes` for the same reason a frame
+    // with none does, and the dashboard must not confuse the two.
+    cloudFrameScenesLoaded: [
+      {} as Record<FrameId, boolean>,
+      {
+        cloudFrameScenesSettled: (state, { id }) => (state[id] ? state : { ...state, [id]: true }),
       },
     ],
     cloudFrameConfirmErrors: [
@@ -1695,6 +1712,10 @@ export const framesModel = kea<framesModelType>([
       }
       const hydratedAt = cloudFrameScenesHydratedAt.get(id) ?? 0
       if (!force && Date.now() - hydratedAt < CLOUD_FRAME_SCENES_REFRESH_MS) {
+        // Already fetched recently. The throttle map outlives a logic remount
+        // while the reducer does not, so say so again rather than leave the
+        // dashboard waiting for a hydration that will never run.
+        actions.cloudFrameScenesSettled(id)
         return
       }
       cloudFrameSceneHydrationsInFlight.add(id)
@@ -1720,6 +1741,7 @@ export const framesModel = kea<framesModelType>([
         console.error(error)
       } finally {
         cloudFrameSceneHydrationsInFlight.delete(id)
+        actions.cloudFrameScenesSettled(id)
       }
     },
     loadFrameSuccess: ({ frames }) => {

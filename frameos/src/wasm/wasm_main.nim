@@ -335,10 +335,14 @@ proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
 
 # ---------------------------------------------------------------- rendering
 
-proc frameos_wasm_render(): cint {.exportc, cdecl.} =
+proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   ## Render the current scene into an RGBA buffer owned by Nim; read it via
   ## frameos_wasm_buffer/_buffer_len/_width/_height. Returns 0 on success,
   ## 1 when the render produced an error frame, 2 when nothing could render.
+  ##
+  ## Called through `frameos_wasm_render` in tools/wasm/fos_wasm_mem.c, which
+  ## wraps it in the setjmp guard that catches a simulated out-of-memory and
+  ## returns 3. Without a simulated memory limit the guard is a direct call.
   renderRequested = false
   try:
     refreshDecodeBudget()

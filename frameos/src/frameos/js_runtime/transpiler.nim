@@ -1555,9 +1555,11 @@ proc shouldRemoveAbstractMember(tokens: seq[JsToken], index: int): bool =
   true
 
 proc tokenStripTypeScriptErasure(code: string): string =
-  let parsed = parseJs(code)
-  let tokens = parsed.tokens
-  var processor = initTokenProcessor(code, tokens)
+  var parsed = parseJs(code)
+  # Hand the token array to the processor instead of copying it, and read it
+  # back through the alias below — one array, not two. See initTokenProcessor.
+  var processor = initTokenProcessor(code, move(parsed.tokens))
+  template tokens: untyped = processor.tokens
   var removeUntil = -1
 
   while not processor.isAtEnd():
@@ -1802,9 +1804,11 @@ proc parseJsxElement(p: var JsxParser): string =
   "__frameosJsx(" & args.join(", ") & ")"
 
 proc transformJSX(code: string): string =
-  let parsed = parseJs(code)
-  let tokens = parsed.tokens
-  var processor = initTokenProcessor(code, tokens)
+  var parsed = parseJs(code)
+  # Hand the token array to the processor instead of copying it, and read it
+  # back through the alias below — one array, not two. See initTokenProcessor.
+  var processor = initTokenProcessor(code, move(parsed.tokens))
+  template tokens: untyped = processor.tokens
 
   while not processor.isAtEnd():
     let token = processor.currentToken()
@@ -2068,9 +2072,11 @@ proc exportDeclarationName(code: string, tokens: seq[JsToken], startIndex: int):
     ""
 
 proc transformImportsTokenDriven(code: string): string =
-  let parsed = parseJs(code)
-  let tokens = parsed.tokens
-  var processor = initTokenProcessor(code, tokens)
+  var parsed = parseJs(code)
+  # Hand the token array to the processor instead of copying it, and read it
+  # back through the alias below — one array, not two. See initTokenProcessor.
+  var processor = initTokenProcessor(code, move(parsed.tokens))
+  template tokens: untyped = processor.tokens
   var moduleCounter = 0
   var imports: seq[string] = @[]
   var exports: seq[string] = @[]

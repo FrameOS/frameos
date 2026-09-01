@@ -22,12 +22,15 @@ type
     resultMappings*: seq[int]
     tokenIndex*: int
 
-proc initTokenProcessor*(code: string, tokens: seq[JsToken]): TokenProcessor =
-  TokenProcessor(
-    code: code,
-    tokens: tokens,
-    resultMappings: newSeqWith(tokens.len, -1),
-  )
+proc initTokenProcessor*(code: string, tokens: sink seq[JsToken]): TokenProcessor =
+  ## Takes ownership of `tokens`. The array is the single biggest allocation
+  ## in the transpiler — a 36 KB scene app tokenizes to ~9000 entries, over
+  ## 400 KB — and copying it in here meant the parse result and the processor
+  ## held one each while a 13.3" frame had barely a megabyte of PSRAM left.
+  ## Callers that still need the tokens read them back off the processor.
+  result.resultMappings = newSeqWith(tokens.len, -1)
+  result.code = code
+  result.tokens = tokens
 
 proc isAtEnd*(processor: TokenProcessor): bool =
   processor.tokenIndex >= processor.tokens.len

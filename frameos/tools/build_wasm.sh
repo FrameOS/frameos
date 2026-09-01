@@ -115,13 +115,26 @@ if [[ "$qjs_needs_build" == "1" || ! -f "$QJS_BUILD/libquickjs.a" ]]; then
     emar rcs "$QJS_BUILD/libquickjs.a" "$QJS_BUILD"/*.o
 fi
 
+# ------------------------------------------------- simulated device memory
+# The preview can run under a device's memory ceiling (see the file's header).
+# It owns the exported `frameos_wasm_render` symbol, wrapping the Nim
+# `frameos_wasm_render_impl` in a setjmp guard, and Nim's allocator is patched
+# to route through it (src/wasm/patched_malloc.nim via config.nims).
+MEM_SHIM="$FRAMEOS_DIR/tools/wasm/fos_wasm_mem.c"
+MEM_OBJ="$BUILD_DIR/fos_wasm_mem.o"
+mkdir -p "$BUILD_DIR"
+if [[ ! -f "$MEM_OBJ" || "$MEM_SHIM" -nt "$MEM_OBJ" || "${MEM_SHIM%.c}.h" -nt "$MEM_OBJ" ]]; then
+    echo "building the simulated-memory shim with emcc"
+    emcc -c -O2 -w "$MEM_SHIM" -o "$MEM_OBJ"
+fi
+
 # --------------------------------------------------------------- nim -> wasm
 FRAMEOS_VERSION="$(python3 tools/frameos_version.py ../versions.json)"
 
 # _main keeps Nim's generated main() alive: emscripten calls it on module
 # startup and that runs NimMain (all Nim module initializers, e.g. the
 # baked-in font asset tables).
-EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_tz_offset_seconds
+EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_tz_offset_seconds,_frameos_wasm_set_memory_limit,_frameos_wasm_memory_limit,_frameos_wasm_memory_used,_frameos_wasm_memory_peak,_frameos_wasm_memory_failed,_frameos_wasm_memory_reset_peak,_frameos_wasm_memory_render_headroom
 # FS lets the render harness preload a virtual frame's assets into MEMFS;
 # IDBFS (linked below with -lidbfs.js) backs the browser preview's
 # /srv/assets folder with IndexedDB (see tools/wasm/preview-worker.js).
@@ -147,6 +160,11 @@ nim c \
     --define:frameosVersion:"$FRAMEOS_VERSION" \
     --nimcache:"$NIMCACHE" \
     --out:"$BUILD_DIR/frameos.js" \
+    --passC:"-I$FRAMEOS_DIR/tools/wasm" \
+    --passL:"$MEM_OBJ" \
+    `# setjmp/longjmp is how a refused allocation gets out of a render` \
+    `# without taking the module down (tools/wasm/fos_wasm_mem.c).` \
+    --passL:"-sSUPPORT_LONGJMP=emscripten" \
     --passL:"-sMODULARIZE=1" \
     --passL:"-sEXPORT_ES6=1" \
     --passL:"-sEXPORT_NAME=createFrameOS" \
