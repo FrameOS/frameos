@@ -1,6 +1,9 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
+import { useEffect, useRef } from 'react'
 import {
+  metricCardElementId,
+  metricCardFromHash,
   metricSeriesVisibilityKey,
   metricTimestamp,
   metricsLogic,
@@ -68,6 +71,20 @@ const metricHelp: Record<string, JSX.Element> = {
   ),
 }
 
+const batteryMisreadHelp = (
+  <div className="space-y-1">
+    <div>
+      Readings the samples around them contradict, left off the chart. The frame reads its cell through a resistor
+      divider on an ADC pin, and every way that read can go wrong — a divider still charging, the supply sagging under
+      the radio, two tasks sampling at once — pulls the number down, never up.
+    </div>
+    <div>
+      So a lone reading far below its neighbours is a misread, not a discharge, and a frame that shows a red 0% for one
+      sample and 78% for the next has not moved. Frequent misreads mean the frame wants a firmware update.
+    </div>
+  </div>
+)
+
 const latestDatapointFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short',
   day: 'numeric',
@@ -76,6 +93,27 @@ const latestDatapointFormatter = new Intl.DateTimeFormat(undefined, {
   second: '2-digit',
   hourCycle: 'h23',
 })
+
+/**
+ * Scrolls the card a `#metric=...` link named into view. The cards only
+ * exist once the samples have loaded, hence the retries — the same shape as
+ * the settings-section scroll in FrameWorkspace.
+ */
+function scrollToMetricCard(category: string, attempt = 0): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return
+  }
+  window.requestAnimationFrame(() => {
+    const card = document.getElementById(metricCardElementId(category))
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    if (attempt < 8) {
+      window.setTimeout(() => scrollToMetricCard(category, attempt + 1), 50)
+    }
+  })
+}
 
 interface MetricsProps {
   scrollContainer?: boolean
@@ -97,6 +135,7 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
     selectedTimeRangePreset,
     metricGapThresholdMs,
     latestMetricSummariesByCategory,
+    batteryMisreadCount,
     requestMetricsLoading,
   } = useValues(metricsLogic({ frameId }))
   const {
@@ -112,6 +151,16 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
       : metricsTimeRangeOptions
   const chartTheme = metricChartThemes[theme]
   const requestMetricsTooltipId = `frame-${frameId}-request-metrics-tooltip`
+  const scrolledToHashCardRef = useRef(false)
+  useEffect(() => {
+    const category = metricCardFromHash()
+    if (scrolledToHashCardRef.current || metricsLoading || metrics.length === 0 || !category) {
+      return
+    }
+    scrolledToHashCardRef.current = true
+    scrollToMetricCard(category)
+  }, [metricsLoading, metrics.length])
+
   const latestMetric = sortedMetrics[sortedMetrics.length - 1]
   const latestMetricTimestamp = latestMetric ? metricTimestamp(latestMetric) : null
   const latestDatapointLabel =
@@ -177,7 +226,11 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
           const themedSeries = themeMetricSeries(series, chartTheme)
           const visibleSeries = themeMetricSeries(visibleMetricsByCategory[key] ?? [], chartTheme)
           return (
-            <div key={key} className="frame-tool-card mb-3 overflow-hidden rounded-[22px]">
+            <div
+              key={key}
+              id={metricCardElementId(key)}
+              className="frame-tool-card mb-3 overflow-hidden rounded-[22px]"
+            >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-sm">
                 <strong className="frame-tool-heading">{metricLabels[key] ?? key}</strong>
                 {metricHelp[key] ? (
@@ -191,6 +244,17 @@ export function Metrics({ scrollContainer = true }: MetricsProps = {}) {
                 ) : null}
                 {latestMetricSummariesByCategory[key] ? (
                   <span className="frame-tool-muted">{latestMetricSummariesByCategory[key]}</span>
+                ) : null}
+                {batteryMisreadCount > 0 && (key === 'batteryPercent' || key === 'batteryMillivolts') ? (
+                  <Tooltip
+                    title={batteryMisreadHelp}
+                    className="frame-tool-muted"
+                    titleClassName="w-72 text-xs leading-snug"
+                  >
+                    <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-600">
+                      {batteryMisreadCount} misread{batteryMisreadCount === 1 ? '' : 's'} ignored
+                    </span>
+                  </Tooltip>
                 ) : null}
                 {series.length > 1 &&
                   themedSeries.map((chartSeries) => {

@@ -8,7 +8,7 @@
 import std/[strutils]
 
 type
-  TokenType* = enum
+  TokenType* {.size: 1.} = enum
     ttNum,
     ttBigint,
     ttDecimal,
@@ -123,7 +123,7 @@ type
     ttType,
     ttImplements
 
-  ContextualKeyword* = enum
+  ContextualKeyword* {.size: 1.} = enum
     ckNone,
     ckAbstract,
     ckAccessor,
@@ -166,7 +166,7 @@ type
     ckUnique,
     ckUsing
 
-  IdentifierRole* = enum
+  IdentifierRole* {.size: 1.} = enum
     irNone,
     irAccess,
     irExportAccess,
@@ -181,7 +181,7 @@ type
     irObjectKey,
     irImportAccess
 
-  JSXRole* = enum
+  JSXRole* {.size: 1.} = enum
     jsxRoleNone,
     jsxNoChildren,
     jsxOneChild,
@@ -193,26 +193,31 @@ type
     endTokenIndex*: int
     isFunctionScope*: bool
 
+  # Field order is deliberate: word-sized fields first, then the byte-wide
+  # enums and flags, so one token is 48 bytes on a 32-bit target instead of
+  # 56. A scene app tokenizes to thousands of these (36 KB of TypeScript ->
+  # ~9000 tokens), and the array is one contiguous allocation on a device
+  # whose whole render headroom is a couple of megabytes.
   JsToken* = object
-    typ*: TokenType
-    contextualKeyword*: ContextualKeyword
     start*: int
     `end`*: int
     scopeDepth*: int
-    isType*: bool
-    identifierRole*: IdentifierRole
-    jsxRole*: JSXRole
-    shadowsGlobal*: bool
-    isAsyncOperation*: bool
     contextId*: int
     rhsEndIndex*: int
-    isExpression*: bool
     numNullishCoalesceStarts*: int
     numNullishCoalesceEnds*: int
-    isOptionalChainStart*: bool
-    isOptionalChainEnd*: bool
     subscriptStartIndex*: int
     nullishStartIndex*: int
+    typ*: TokenType
+    contextualKeyword*: ContextualKeyword
+    identifierRole*: IdentifierRole
+    jsxRole*: JSXRole
+    isType*: bool
+    shadowsGlobal*: bool
+    isAsyncOperation*: bool
+    isExpression*: bool
+    isOptionalChainStart*: bool
+    isOptionalChainEnd*: bool
 
   TokenizeOptions* = object
     jsx*: bool
@@ -906,11 +911,26 @@ proc tokenizeJs*(code: string, options = defaultTokenizeOptions()): seq[JsToken]
   var jsxDepth = 0
   var jsxTagClosing = false
   var jsxSelfClosing = false
-  var tokens: seq[JsToken] = @[]
+  # Pre-size the array and fill `result` directly. Two things went wrong
+  # without this, and together they cost more than a megabyte of PSRAM for a
+  # single 36 KB app on a 13.3" ESP32 frame:
+  #
+  #  * growing from empty doubles the capacity, so ~9000 tokens ended up in a
+  #    16384-slot array, and the realloc that got there needed the old and the
+  #    new block alive at once;
+  #  * `pushToken` as a closure captured a local `tokens`, which stopped the
+  #    final `return` from being a move — the caller got a second, exact-sized
+  #    copy of the whole array.
+  #
+  # Real scene apps tokenize at 3.7-5.4 bytes per token, so 3.5 bytes per
+  # token covers them with one allocation and no copy. Denser code simply
+  # falls back to the usual growth; it is slower, never wrong.
+  result = newSeqOfCap[JsToken](code.len * 2 div 7 + 32)
 
-  proc pushToken(token: JsToken) =
-    tokens.add(token)
-    prev = token.typ
+  template pushToken(token: JsToken) =
+    let pushed = token
+    result.add(pushed)
+    prev = pushed.typ
 
   while true:
     if mode == modeTemplate:
@@ -1037,8 +1057,6 @@ proc tokenizeJs*(code: string, options = defaultTokenizeOptions()): seq[JsToken]
     pushToken(token)
     if token.typ == ttBraceR and braceModeStack.len > 0:
       mode = braceModeStack.pop()
-
-  tokens
 
 proc formatToken*(code: string, token: JsToken): string =
   let raw = if token.start >= 0 and token.`end` <= code.len and token.start <= token.`end`: code[token.start..<token.`end`] else: ""

@@ -52,9 +52,17 @@
     // decorators behind it, so the graph reaches those same legacy
     // components. Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/cloud-frame-change-details.test.ts",
+    "src/test/shared-spa/cloud-frame-scenes-loading.test.ts",
     "src/test/shared-spa/cloud-scene-persist-equality.test.ts",
     "src/test/shared-spa/scene-origin.test.ts",
     "src/test/shared-spa/embedded-editor-scene-sanitize.test.ts",
+    // Same story from the other direction: it imports metricsLogic directly
+    // for the metric-card hash helpers, and metricsLogic builds RebootMarker
+    // objects with optional fields spelled as `undefined` — legal under the
+    // frontend's tsconfig, not under this one's exactOptionalPropertyTypes.
+    // Nothing else in auth-web reaches that module. Vitest still runs it;
+    // only tsc leaves it out.
+    "src/test/shared-spa/battery-misreads.test.ts",
     // The widest graph of the lot: it mounts the whole FrameSettings panel,
     // which reaches the colour picker and every device-settings component
     // behind it. Vitest still runs it; only tsc leaves it out.

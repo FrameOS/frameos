@@ -25,6 +25,7 @@ import {
   type TimeRange,
 } from '../frame/panels/Metrics/metricsLogic'
 import { socketLogic } from '../socketLogic'
+import { withoutBatteryMisreads } from '../../utils/batteryMisreads'
 
 const PREVIEW_METRICS_WINDOW_MS = 60 * 60 * 1000
 const PREVIEW_METRICS_LIMIT = 1000
@@ -143,10 +144,13 @@ export const frameMetricsPreviewLogic = kea<frameMetricsPreviewLogicType>([
     },
   })),
   selectors({
+    // Battery readings the neighbouring samples contradict are ADC misreads
+    // and are stripped here, at the source, so the header chips, the sidebar
+    // glyph and the metric alerts never see one (utils/batteryMisreads.ts).
     sortedRecentMetrics: [
       (s) => [s.recentMetrics],
       (metrics: frameMetricsPreviewLogicValues['recentMetrics']) =>
-        [...metrics].sort((a, b) => metricTimestamp(a) - metricTimestamp(b)),
+        withoutBatteryMisreads([...metrics].sort((a, b) => metricTimestamp(a) - metricTimestamp(b))).metrics,
     ],
     previewMetricsTimeRange: [
       (s) => [s.currentTime, s.sortedRecentMetrics],
