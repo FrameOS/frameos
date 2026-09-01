@@ -35,9 +35,26 @@ describe("StoreActionCards", () => {
     expect(screen.queryByTestId("action-card-form")).toBeNull();
   });
 
-  it("offers only the AI card on the store front", () => {
+  it("offers only the AI card when uploads are hidden", () => {
     render(<StoreActionCards aiAction="/my-scenes/new" showUpload={false} />);
     expect(screen.getByRole("button", { name: /Create a scene with AI/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Upload a scene ZIP/ })).toBeNull();
+  });
+
+  it("sends a signed-out visitor to log in instead of opening the upload form", () => {
+    render(
+      <StoreActionCards
+        aiAction="/my-scenes/new"
+        showUpload
+        uploadLoginHref="https://cloud.example/login?return_to=%2Fmy-scenes"
+      />,
+    );
+    const zip = screen.getByRole("link", { name: /Upload a scene ZIP/ });
+    expect(zip.getAttribute("href")).toBe(
+      "https://cloud.example/login?return_to=%2Fmy-scenes",
+    );
+    // A link, not a toggle: there is no upload form on this page to open.
+    expect(screen.queryByRole("button", { name: /Upload a scene ZIP/ })).toBeNull();
+    expect(screen.queryByTestId("action-card-form")).toBeNull();
   });
 });

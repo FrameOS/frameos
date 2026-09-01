@@ -473,6 +473,108 @@ proc setupSystemHardening*(liveApply = true): SetupResult =
       setupLog("FrameOS setup: system hardening: could not update " & cmdlinePath & ": " & e.msg)
     break
 
+const resolvedDnssecDropinPath = "/etc/systemd/resolved.conf.d/10-frameos.conf"
+const resolvedDnssecDropin = """# FrameOS: no DNSSEC validation on frames.
+#
+# Buildroot builds systemd-resolved with default-dnssec=allow-downgrade, and
+# many consumer routers answer DO-flagged queries without RRSIGs: every
+# lookup then fails "DNSSEC validation failed: no-signature" while Wi-Fi,
+# DHCP and the LAN all look healthy (Pi Zero W, 2026-08-30). New SD images
+# ship this drop-in in the rootfs; frameos setup retrofits it onto frames
+# flashed from base images that predate it, so nobody has to reflash.
+[Resolve]
+DNSSEC=no
+"""
+
+proc dropinTurnsDnssecOff*(content: string): bool =
+  ## Any existing config that already turns validation off counts, whichever
+  ## build of the image wrote it — this step must not fight the SD builder's
+  ## copy over comment wording.
+  for line in content.splitLines():
+    if line.strip() == "DNSSEC=no":
+      return true
+  false
+
+proc setupResolvedDnssec*(liveApply = true, dropinPath = resolvedDnssecDropinPath): SetupResult =
+  result = setupOk()
+  if not commandExists("systemctl"):
+    setupLog("FrameOS setup: resolved DNSSEC: systemctl not found, skipping")
+    return
+  if not commandSucceeds("systemctl is-active --quiet systemd-resolved.service"):
+    setupLog("FrameOS setup: resolved DNSSEC: systemd-resolved not active, skipping")
+    return
+  var current = ""
+  try:
+    if fileExists(dropinPath):
+      current = readFile(dropinPath)
+  except CatchableError:
+    discard
+  if dropinTurnsDnssecOff(current):
+    setupLog("FrameOS setup: resolved DNSSEC: already off")
+    return
+  setupLog("FrameOS setup: resolved DNSSEC: turning DNSSEC validation off")
+  withWritableMount(dropinPath):
+    discard runSetupCommand(privilegedCommand("install -d -m 755 " & shellQuote(parentDir(dropinPath))),
+      raiseOnError = false)
+    writePrivilegedFile(dropinPath, resolvedDnssecDropin)
+  if liveApply:
+    # Safe with the deploy connection open: resolved serializes per-link DNS
+    # state to /run/systemd/resolve/netif/ and restores it across a restart,
+    # so the servers the DHCP lease registered stay known.
+    discard runSetupCommand(privilegedCommand("systemctl try-restart systemd-resolved.service"),
+      raiseOnError = false)
+  else:
+    setupLog("FrameOS setup: resolved DNSSEC: deferring resolved restart; applies at the next reboot")
+
+const networkServiceDropinPath = "/etc/systemd/system/network.service.d/10-frameos.conf"
+const networkServiceDropin = """# FrameOS: no phantom "Network Connectivity" failure on Wi-Fi-only boards.
+#
+# Buildroot's ifupdown network.service runs `ifup -a` over an
+# /etc/network/interfaces that lists eth0; boards without an Ethernet port
+# (Pi Zero W, Zero 2 W) have no eth0, so the unit failed on every boot and
+# `systemctl --failed` pointed straight at "Network Connectivity" — nothing
+# to do with Wi-Fi, but exactly what a debugging session latches onto.
+# Skip ifup when there is no eth0; run it for real when there is one.
+[Service]
+ExecStart=
+ExecStart=/bin/sh -c 'if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifup -a; fi'
+ExecStop=
+ExecStop=/bin/sh -c 'if [ -d /sys/class/net/eth0 ]; then exec /sbin/ifdown -a; fi'
+"""
+
+proc setupNetworkServiceEth0Guard*(liveApply = true, dropinPath = networkServiceDropinPath): SetupResult =
+  result = setupOk()
+  if not commandExists("systemctl"):
+    setupLog("FrameOS setup: network.service eth0 guard: systemctl not found, skipping")
+    return
+  if not commandSucceeds("systemctl cat network.service >/dev/null 2>&1"):
+    setupLog("FrameOS setup: network.service eth0 guard: no network.service on this image, skipping")
+    return
+  var current = ""
+  try:
+    if fileExists(dropinPath):
+      current = readFile(dropinPath)
+  except CatchableError:
+    discard
+  if current.contains("/sys/class/net/eth0"):
+    setupLog("FrameOS setup: network.service eth0 guard: already in place")
+    return
+  setupLog("FrameOS setup: network.service eth0 guard: installing drop-in")
+  withWritableMount(dropinPath):
+    discard runSetupCommand(privilegedCommand("install -d -m 755 " & shellQuote(parentDir(dropinPath))),
+      raiseOnError = false)
+    writePrivilegedFile(dropinPath, networkServiceDropin)
+  if liveApply:
+    discard runSetupCommand(privilegedCommand("systemctl daemon-reload"), raiseOnError = false)
+    # Only restart a unit that already failed: on an Ethernet board a restart
+    # would ifdown the very link the deploy may be running over, while a
+    # failed unit has nothing up to drop and the restart clears the red
+    # status immediately.
+    if commandSucceeds("systemctl is-failed --quiet network.service"):
+      discard runSetupCommand(privilegedCommand("systemctl restart network.service"), raiseOnError = false)
+  else:
+    setupLog("FrameOS setup: network.service eth0 guard: deferring restart; applies at the next reboot")
+
 proc setupReleaseActivation*(currentDir = getAppDir()): SetupResult =
   let normalizedDir = currentDir.strip(chars = {'/'})
   if normalizedDir.len == 0:
@@ -602,6 +704,15 @@ proc setupFrameOS*(configPath = ""): SetupResult =
     setupLog("FrameOS setup: running inside frameos-remote.service; deferring live system changes " &
       "to keep the remote connection alive")
   addSetupResult(result, runSetupStep("system hardening", proc(): SetupResult = setupSystemHardening(liveApply)))
+  if frameOS.frameConfig.mode == "buildroot":
+    # Retrofits for frames flashed from base images that predate the rootfs
+    # fixes: DNSSEC validation off (Buildroot's resolved default breaks all
+    # DNS behind many consumer routers) and no phantom failed network.service
+    # on boards without eth0. New images ship both in the rootfs, making
+    # these steps no-ops there.
+    addSetupResult(result, runSetupStep("resolved DNSSEC off", proc(): SetupResult = setupResolvedDnssec(liveApply)))
+    addSetupResult(result, runSetupStep("network.service eth0 guard",
+      proc(): SetupResult = setupNetworkServiceEth0Guard(liveApply)))
   addSetupResult(result, runSetupStep("release activation", proc(): SetupResult = setupReleaseActivation()))
   if frameOS.frameConfig.mode == "buildroot":
     # Last, after everything above may have created root-owned files under

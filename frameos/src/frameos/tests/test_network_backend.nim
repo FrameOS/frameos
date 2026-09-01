@@ -743,3 +743,195 @@ suite "supplicant credential import through NetworkContext":
     check not res.ok
     check res.message == "no saved Wi-Fi configuration"
     check not anyWifiConfigured(ctx, "wlan0")
+
+const fullProbeTools = "wpa_supplicant\nwpa_cli\nhostapd\niw\ndnsmasq\nudhcpc\n"
+
+proc ranCommand(stub: StubNetwork, fragment: string): bool =
+  for cmd in stub.commands:
+    if cmd.contains(fragment):
+      return true
+  false
+
+proc saeRefusingContext(stub: StubNetwork, starts: ref int): NetworkContext =
+  ## A wpa_supplicant built without CONFIG_SAE: every start against a config
+  ## that still carries the SAE token fails the way the real daemon does.
+  let base = stubContext(stub)
+  NetworkContext(
+    run: proc(cmd, loggedCmd: string): NetCmdResult {.gcsafe.} =
+      if cmd.contains("wpa_supplicant -B"):
+        inc starts[]
+        if stub.files[importedConfPath].contains("SAE"):
+          return (output: "Line 8: Invalid configuration line 'key_mgmt=WPA-PSK SAE'.", rc: 255)
+        return (output: "", rc: 0)
+      base.run(cmd, loggedCmd),
+    sleep: base.sleep, log: base.log, writeFile: base.writeFile,
+    readFile: base.readFile, pathExists: base.pathExists)
+
+proc associatedWithoutLeaseContext(stub: StubNetwork, leaseRequests: ref int): NetworkContext =
+  ## A running, associated supplicant whose DHCP never ran: the address only
+  ## appears after a lease request.
+  let base = stubContext(stub)
+  NetworkContext(
+    run: proc(cmd, loggedCmd: string): NetCmdResult {.gcsafe.} =
+      if cmd.contains("wpa_cli") and cmd.contains(" ping"):
+        return (output: "PONG\n", rc: 0)
+      if cmd.contains("wpa_cli") and cmd.contains(" status"):
+        return (output: "wpa_state=COMPLETED\nssid=Home\n", rc: 0)
+      if cmd.contains("udhcpc -i 'wlan0' -f -n -q"):
+        inc leaseRequests[]
+        return (output: "", rc: 0)
+      if cmd.contains("ip -4 addr show"):
+        if leaseRequests[] > 0:
+          return (output: "    inet 192.168.1.20/24 brd 192.168.1.255 scope global wlan0\n", rc: 0)
+        return (output: "", rc: 0)
+      base.run(cmd, loggedCmd),
+    sleep: base.sleep, log: base.log, writeFile: base.writeFile,
+    readFile: base.readFile, pathExists: base.pathExists)
+
+proc stuckScanningContext(stub: StubNetwork, alive: ref bool): NetworkContext =
+  ## A running supplicant that never gets past SCANNING; `terminate` kills it.
+  let base = stubContext(stub)
+  NetworkContext(
+    run: proc(cmd, loggedCmd: string): NetCmdResult {.gcsafe.} =
+      if cmd.contains("wpa_cli") and cmd.contains(" ping"):
+        return (output: (if alive[]: "PONG\n" else: ""), rc: 0)
+      if cmd.contains("wpa_cli") and cmd.contains(" status"):
+        return (output: "wpa_state=SCANNING\n", rc: 0)
+      if cmd.contains("wpa_cli") and cmd.contains(" terminate"):
+        alive[] = false
+        return (output: "", rc: 0)
+      base.run(cmd, loggedCmd),
+    sleep: base.sleep, log: base.log, writeFile: base.writeFile,
+    readFile: base.readFile, pathExists: base.pathExists)
+
+suite "regulatory domain and WPA3":
+  test "normalizeCountryCode accepts exactly two ASCII letters":
+    check normalizeCountryCode("fr") == "FR"
+    check normalizeCountryCode(" ee ") == "EE"
+    check normalizeCountryCode("") == ""
+    check normalizeCountryCode("Estonia") == ""
+    check normalizeCountryCode("F1") == ""
+    check normalizeCountryCode("ée") == ""
+
+  test "withCountry inserts a missing country line before the first network block":
+    let conf = wpaSupplicantHeader() & buildWpaNetworkBlock("Home", "").conf
+    let updated = withCountry(conf, "fr")
+    check updated.contains("update_config=1\ncountry=FR\nnetwork={")
+    check parseWpaConfCountry(updated) == "FR"
+    # Idempotent, and a different code replaces in place.
+    check withCountry(updated, "FR") == updated
+    check withCountry(updated, "ee").contains("country=EE\n")
+    check not withCountry(updated, "ee").contains("country=FR")
+    # No valid code: untouched.
+    check withCountry(conf, "") == conf
+    check withCountry(conf, "Estonia") == conf
+
+  test "withCountry handles a config with no network block yet":
+    let header = wpaSupplicantHeader()
+    let updated = withCountry(header, "de")
+    check updated.endsWith("update_config=1\ncountry=DE\n")
+
+  test "a passphrase network offers WPA2-PSK and WPA3-SAE with optional PMF":
+    let generated = buildWpaNetworkBlock("Home", "hunter2hunter2")
+    check generated.error == ""
+    check generated.conf.contains("key_mgmt=WPA-PSK SAE\n")
+    check generated.conf.contains("ieee80211w=1\n")
+    check generated.conf.contains("psk=\"hunter2hunter2\"\n")
+
+  test "a raw hex PSK cannot do SAE and stays WPA-PSK only":
+    let hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    let generated = buildWpaNetworkBlock("Home", hex)
+    check generated.conf.contains("key_mgmt=WPA-PSK\n")
+    check not generated.conf.contains("SAE")
+    check not generated.conf.contains("ieee80211w")
+
+  test "stripSae downgrades every block for a daemon built without CONFIG_SAE":
+    let conf = wpaSupplicantHeader("FR") & buildWpaNetworkBlock("Home", "hunter2hunter2").conf &
+               buildWpaNetworkBlock("Open", "").conf
+    let downgraded = stripSae(conf)
+    check downgraded.contains("    key_mgmt=WPA-PSK\n")
+    check not downgraded.contains("SAE")
+    check not downgraded.contains("ieee80211w")
+    check downgraded.contains("key_mgmt=NONE")
+    check downgraded.contains("country=FR")
+    check downgraded.contains("psk=\"hunter2hunter2\"")
+    # Already plain: unchanged.
+    check stripSae(downgraded) == downgraded
+
+  test "an SAE-refusing wpa_supplicant gets a WPA-PSK config and a third start":
+    let stub = newStubNetwork()
+    stub.files["/etc/NetworkManager/system-connections/frameos-wifi.nmconnection"] = wpaKeyfile
+    var starts = new int
+    let ctx = saeRefusingContext(stub, starts)
+    let res = ensureStation(ctx, "wlan0", parseToolProbe(fullProbeTools))
+    check starts[] == 3
+    check "portal:supplicant:saeFallback" in stub.events
+    check not stub.files[importedConfPath].contains("SAE")
+    check stub.files[importedConfPath].contains("key_mgmt=WPA-PSK\n")
+    # The daemon is up now; the stub just never associates.
+    check res.message == "not associated"
+
+  test "ensureStation stamps frame.json's country into an imported config and sets the domain":
+    let stub = newStubNetwork()
+    stub.files["/etc/NetworkManager/system-connections/frameos-wifi.nmconnection"] = wpaKeyfile
+    let ctx = stubContext(stub)
+    discard ensureStation(ctx, "wlan0", parseToolProbe(fullProbeTools), "fr")
+    check stub.files[importedConfPath].contains("country=FR\n")
+    check ranCommand(stub, "iw reg set FR")
+    check "portal:supplicant:regdom" in stub.events
+
+  test "ensureStation keeps the first-boot country when frame.json has none":
+    let stub = newStubNetwork()
+    stub.files[importedConfPath] = "update_config=1\ncountry=EE\nnetwork={\n    ssid=\"Home\"\n    key_mgmt=NONE\n}\n"
+    let ctx = stubContext(stub)
+    discard ensureStation(ctx, "wlan0", parseToolProbe(fullProbeTools), "")
+    check stub.files[importedConfPath].contains("country=EE\n")
+    check ranCommand(stub, "iw reg set EE")
+
+  test "no country means no country line and no iw reg set":
+    let stub = newStubNetwork()
+    stub.files["/etc/NetworkManager/system-connections/frameos-wifi.nmconnection"] = wpaKeyfile
+    let ctx = stubContext(stub)
+    discard ensureStation(ctx, "wlan0", parseToolProbe(fullProbeTools))
+    check not stub.files[importedConfPath].contains("country=")
+    check not ranCommand(stub, "iw reg set")
+
+suite "repairing the boot-time station":
+  # The stub's `pkill -0` / `kill -0` answer "not running" and its wpa_cli
+  # returns nothing, so the plain stub starts from "supplicant down".
+  test "repairStation goes through the full join when nothing is running":
+    let stub = newStubNetwork()
+    stub.files["/etc/NetworkManager/system-connections/frameos-wifi.nmconnection"] = wpaKeyfile
+    let ctx = stubContext(stub)
+    let probe = parseToolProbe(fullProbeTools)
+    check not stationUp(ctx, "wlan0", probe)
+    let res = repairStation(ctx, "wlan0", probe, "fr")
+    check ranCommand(stub, "wpa_supplicant -B -i 'wlan0'")
+    check stub.files[importedConfPath].contains("country=FR")
+    check res.message == "not associated"
+
+  test "repairStation only asks for a lease when the station is associated without an address":
+    let stub = newStubNetwork()
+    stub.files[importedConfPath] = wpaSupplicantHeader() & buildWpaNetworkBlock("Home", "").conf
+    var leaseRequests = new int
+    let ctx = associatedWithoutLeaseContext(stub, leaseRequests)
+    let probe = parseToolProbe(fullProbeTools)
+    let res = repairStation(ctx, "wlan0", probe)
+    check res.ok
+    check res.message == "192.168.1.20"
+    check leaseRequests[] == 1
+    check not ranCommand(stub, "wpa_supplicant -B")
+    # Now it is up: a second repair is a no-op.
+    check stationUp(ctx, "wlan0", probe)
+    check repairStation(ctx, "wlan0", probe).message == "up"
+    check leaseRequests[] == 1
+
+  test "repairStation restarts a supplicant that is stuck scanning":
+    let stub = newStubNetwork()
+    stub.files[importedConfPath] = wpaSupplicantHeader() & buildWpaNetworkBlock("Home", "").conf
+    var alive = new bool
+    alive[] = true
+    let ctx = stuckScanningContext(stub, alive)
+    let res = repairStation(ctx, "wlan0", parseToolProbe(fullProbeTools))
+    check ranCommand(stub, "wpa_supplicant -B -i 'wlan0'")
+    check res.message == "not associated"

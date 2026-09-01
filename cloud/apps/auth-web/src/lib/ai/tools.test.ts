@@ -94,3 +94,75 @@ describe("add_scene_to_frame", () => {
     expect(tool?.description).toMatch(/deploy/i);
   });
 });
+
+// A model whose scene never reached deliverScenes was being told the payload
+// had no scenes, and concluded the editor had rejected the graph it did send
+// ("I couldn't deliver the scene because the editor validator rejected the
+// scene payload as having no nodes"). Two halves to that: accept the shapes
+// models actually send, and when there is genuinely nothing, say nothing was
+// inspected rather than that something failed validation.
+describe("create_scenes delivery", () => {
+  function calendarScene(): Record<string, unknown> {
+    return {
+      edges: [],
+      id: "cal",
+      name: "Calendar",
+      nodes: [{ data: { keyword: "render" }, id: "n1", type: "event" }],
+      settings: { execution: "interpreted" },
+    };
+  }
+
+  function context(): ToolContext & { delivered: unknown[][] } {
+    const delivered: unknown[][] = [];
+    return {
+      accountId: "a1",
+      db: {} as ToolContext["db"],
+      delivered,
+      emitScenes: (event: { scenes: unknown[] }) => delivered.push(event.scenes),
+      prompt: "test",
+    } as unknown as ToolContext & { delivered: unknown[][] };
+  }
+
+  it("delivers a scene sent as an array", async () => {
+    const ctx = context();
+    const output = JSON.parse(
+      await executeTool("create_scenes", { scenes: [calendarScene()], title: "Calendar" }, ctx),
+    ) as Record<string, unknown>;
+    expect(output.ok).toBe(true);
+    expect(ctx.delivered).toHaveLength(1);
+  });
+
+  it("accepts a lone scene object where an array was documented", async () => {
+    const ctx = context();
+    const output = JSON.parse(
+      await executeTool("create_scenes", { scenes: calendarScene(), title: "Calendar" }, ctx),
+    ) as Record<string, unknown>;
+    expect(output.ok).toBe(true);
+    expect(ctx.delivered[0]).toHaveLength(1);
+  });
+
+  it("accepts the array re-encoded as a JSON string", async () => {
+    const ctx = context();
+    const output = JSON.parse(
+      await executeTool(
+        "create_scenes",
+        { scenes: JSON.stringify([calendarScene()]), title: "Calendar" },
+        ctx,
+      ),
+    ) as Record<string, unknown>;
+    expect(output.ok).toBe(true);
+    expect(ctx.delivered[0]).toHaveLength(1);
+  });
+
+  it("says nothing arrived — not that validation failed — when there is no scene", async () => {
+    const ctx = context();
+    const output = JSON.parse(
+      await executeTool("create_scenes", { title: "Calendar" }, ctx),
+    ) as { issues: string[]; ok: boolean };
+    expect(output.ok).toBe(false);
+    expect(output.issues[0]).toContain("No scene arrived");
+    expect(output.issues[0]).toContain("not a judgement on the scene you wrote");
+    expect(output.issues[0]).toContain("create_scenes");
+    expect(ctx.delivered).toEqual([]);
+  });
+});

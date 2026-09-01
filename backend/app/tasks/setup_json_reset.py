@@ -17,7 +17,7 @@ BOOT_ROOT_PASSWORD_FILE = "/boot/frameos-root-password"
 BOOT_SETUP_RESET_LOG_FILE = "/boot/frameos-setup-reset.log"
 # Cloud-enrollment personalization file (docs/cloud-frames.md, "Provisioning").
 # INI-style KEY=value lines: cloud_url, claim_token, name, wifi_ssid,
-# wifi_password. Read once on first boot, then shredded.
+# wifi_password, wifi_country, ... Read once on first boot, then shredded.
 BOOT_CLOUD_CONFIG_FILE = "/boot/frameos-cloud.txt"
 # Handoff target for the FrameOS runtime: written 0600 on first boot when
 # /boot/frameos-cloud.txt carried a claim token. Content:
@@ -344,6 +344,7 @@ handle_cloud_config() {
   cloud_name=''
   cloud_wifi_ssid=''
   cloud_wifi_password=''
+  cloud_wifi_country=''
   cloud_device=''
   cloud_width=''
   cloud_height=''
@@ -376,6 +377,18 @@ handle_cloud_config() {
       name) cloud_name="$cloud_value"; cloud_recognized=1 ;;
       wifi_ssid) cloud_wifi_ssid="$cloud_value"; cloud_recognized=1 ;;
       wifi_password) cloud_wifi_password="$cloud_value"; cloud_recognized=1 ;;
+      # ISO 3166-1 alpha-2 regulatory domain for the radio; anything else is
+      # dropped here so no daemon ever sees it.
+      wifi_country)
+        cloud_wifi_country="$(printf '%s' "$cloud_value" | tr 'a-z' 'A-Z')"
+        case "$cloud_wifi_country" in
+          [A-Z][A-Z]) ;;
+          *)
+            echo "Warning: ignoring wifi_country '$cloud_value' (expected a two-letter country code)"
+            cloud_wifi_country=''
+            ;;
+        esac
+        cloud_recognized=1 ;;
       device) cloud_device="$cloud_value"; cloud_recognized=1 ;;
       width) cloud_width="$cloud_value"; cloud_recognized=1 ;;
       height) cloud_height="$cloud_value"; cloud_recognized=1 ;;
@@ -416,7 +429,7 @@ handle_cloud_config() {
       # would destroy the user's only copy of what they typed. Warn loudly,
       # keep the file, do not enroll.
       echo "Warning: $CLOUD_FILE has KEY=value lines but no recognized keys; unrecognized:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, wifi_country, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
       echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     else
       echo "No personalization keys in $CLOUD_FILE (placeholder or comments only); leaving it in place"
@@ -594,13 +607,15 @@ os.replace(tmp, path)'; then
     umask 077
     if command -v python3 >/dev/null 2>&1 && \\
       FRAMEOS_CLOUD_URL="$cloud_url" FRAMEOS_CLAIM_TOKEN="$claim_token" FRAMEOS_CLOUD_NAME="$cloud_name" \\
-      FRAMEOS_CLOUD_TIME_ZONE="$cloud_time_zone" \\
+      FRAMEOS_CLOUD_TIME_ZONE="$cloud_time_zone" FRAMEOS_CLOUD_WIFI_COUNTRY="$cloud_wifi_country" \\
       python3 -c 'import json, os
 data = {"claim_token": os.environ["FRAMEOS_CLAIM_TOKEN"], "provider_url": os.environ["FRAMEOS_CLOUD_URL"]}
 if os.environ.get("FRAMEOS_CLOUD_NAME"):
     data["name"] = os.environ["FRAMEOS_CLOUD_NAME"]
 if os.environ.get("FRAMEOS_CLOUD_TIME_ZONE"):
     data["time_zone"] = os.environ["FRAMEOS_CLOUD_TIME_ZONE"]
+if os.environ.get("FRAMEOS_CLOUD_WIFI_COUNTRY"):
+    data["wifi_country"] = os.environ["FRAMEOS_CLOUD_WIFI_COUNTRY"]
 print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
       :
     else
@@ -616,6 +631,10 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
       fi
       if [ -n "$json_cloud_time_zone" ]; then
         json_extra="$json_extra, \\"time_zone\\": \\"$json_cloud_time_zone\\""
+      fi
+      # Validated above to exactly two ASCII letters: nothing to sanitize.
+      if [ -n "$cloud_wifi_country" ]; then
+        json_extra="$json_extra, \\"wifi_country\\": \\"$cloud_wifi_country\\""
       fi
       printf '{"claim_token": "%s", "provider_url": "%s"%s}\\n' \\
         "$json_claim_token" "$json_cloud_url" "$json_extra" > "$pending_file"
@@ -645,7 +664,7 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     echo "Warning: nothing was applied from $CLOUD_FILE; leaving it in place instead of shredding it"
     if [ -n "$cloud_unknown_keys" ]; then
       echo "Warning: unrecognized keys:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, wifi_country, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
     fi
     echo "Warning: fix $CLOUD_FILE and reboot to enroll"
     return 0
@@ -655,7 +674,7 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     # WiFi was applied but the enrollment keys were mistyped: shredding here
     # would destroy the claim token the user meant to type.
     echo "Warning: no cloud enrollment happened; unrecognized keys:$cloud_unknown_keys"
-    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
+    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, wifi_country, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
     echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     return 0
   fi
@@ -902,6 +921,10 @@ nm_keyfile_field() {
 write_wpa_supplicant_conf() {
   wpa_ssid="$1"
   wpa_psk="$2"
+  # Optional ISO 3166-1 alpha-2 regulatory domain (already validated by the
+  # caller). Without it the radio stays in the world domain, where 2.4 GHz
+  # channels 12/13 cannot be joined.
+  wpa_country="${3:-}"
   if [ -z "$wpa_ssid" ]; then
     echo "Warning: no SSID for the wpa_supplicant configuration; skipping"
     return 1
@@ -923,6 +946,9 @@ write_wpa_supplicant_conf() {
       printf '%s\\n' 'ctrl_interface=/var/run/wpa_supplicant' 'ctrl_interface_group=0'
     fi
     printf '%s\\n' 'update_config=1'
+    case "$wpa_country" in
+      [A-Za-z][A-Za-z]) printf 'country=%s\\n' "$(printf '%s' "$wpa_country" | tr 'a-z' 'A-Z')" ;;
+    esac
     printf '%s\\n' 'network={'
     printf '    ssid=%s\\n' "$(wpa_quote_value "$wpa_ssid")"
     printf '%s\\n' '    scan_ssid=1'
@@ -930,13 +956,16 @@ write_wpa_supplicant_conf() {
       # Open network: any key management at all makes wpa_supplicant wait
       # forever for a handshake that never comes.
       printf '%s\\n' '    key_mgmt=NONE'
-    else
+    elif [ "${#wpa_psk}" -eq 64 ] && [ -z "$(printf '%s' "$wpa_psk" | tr -d '0-9a-fA-F')" ]; then
+      # A raw PSK has no passphrase to derive SAE from: WPA2 only.
       printf '%s\\n' '    key_mgmt=WPA-PSK'
-      if [ "${#wpa_psk}" -eq 64 ] && [ -z "$(printf '%s' "$wpa_psk" | tr -d '0-9a-fA-F')" ]; then
-        printf '    psk=%s\\n' "$wpa_psk"
-      else
-        printf '    psk=%s\\n' "$(wpa_quote_value "$wpa_psk")"
-      fi
+      printf '    psk=%s\\n' "$(printf '%s' "$wpa_psk" | tr 'A-F' 'a-f')"
+    else
+      # WPA2-PSK and WPA3-SAE both offered; wpa_supplicant picks whichever
+      # the access point advertises (the image builds it with WPA3).
+      printf '%s\\n' '    key_mgmt=WPA-PSK SAE'
+      printf '%s\\n' '    ieee80211w=1'
+      printf '    psk=%s\\n' "$(wpa_quote_value "$wpa_psk")"
     fi
     printf '%s\\n' '}'
   } > "$wpa_conf_file"; then
@@ -973,7 +1002,7 @@ _WPA_SUPPLICANT_FROM_BOOT_KEYFILE = """  echo "Mirroring the WiFi credentials in
   wpa_supplicant_conf_from_keyfile "$WIFI_CONNECTION_FILE" || true"""
 
 _WPA_SUPPLICANT_FROM_CLOUD = """    echo "Mirroring the cloud WiFi credentials into wpa_supplicant form (no NetworkManager on this platform)"
-    if write_wpa_supplicant_conf "$cloud_wifi_ssid" "$cloud_wifi_password"; then
+    if write_wpa_supplicant_conf "$cloud_wifi_ssid" "$cloud_wifi_password" "$cloud_wifi_country"; then
       cloud_wifi_applied=1
     fi"""
 

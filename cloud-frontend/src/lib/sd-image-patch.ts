@@ -72,6 +72,27 @@ export function sanitizeConfigValue(value: string, label: string): string {
   return value;
 }
 
+// The Wi-Fi country as the device wants it: two ASCII letters, upper case, or
+// "" when absent. With `strict` a value that is present but not a country code
+// is rejected loudly (the on-device parser would drop it with only a warning
+// in a log nobody reads), so the builder says so before the download.
+export function normalizeWifiCountry(value: string | undefined, strict = false): string {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (!/^[A-Za-z]{2}$/.test(trimmed)) {
+    if (strict) {
+      throw new SdImagePatchError(
+        "value_rejected",
+        "WiFi country must be a two-letter country code (for example FR or US).",
+      );
+    }
+    return "";
+  }
+  return trimmed.toUpperCase();
+}
+
 export interface CloudConfigInput {
   claimToken: string;
   cloudUrl: string;
@@ -88,6 +109,11 @@ export interface CloudConfigInput {
   width?: number | undefined;
   wifiPassword?: string | undefined;
   wifiSsid?: string | undefined;
+  // ISO 3166-1 alpha-2 regulatory domain for the Wi-Fi radio ("FR"). Without
+  // it the kernel stays in the world domain, where 2.4 GHz channels 12/13
+  // cannot be joined — the classic "connects at home in the US, not in
+  // Europe" card. Validated to exactly two letters; upper-cased on write.
+  wifiCountry?: string | undefined;
   // Console/SSH root password applied via chpasswd on first boot. Absent =
   // the image's build-time default: passwordless root on the console, SSH
   // password logins disabled. The builder UI only omits it when the user
@@ -122,6 +148,11 @@ export function renderCloudConfigLines(input: CloudConfigInput): string[] {
   push("name", input.name, "Frame name");
   push("wifi_ssid", input.wifiSsid, "WiFi network name");
   push("wifi_password", input.wifiPassword, "WiFi password");
+  push(
+    "wifi_country",
+    normalizeWifiCountry(input.wifiCountry, true) || undefined,
+    "WiFi country",
+  );
   push("device", input.device, "Display device");
   // Numbers are validated by the UI; undefined means "leave the image's
   // default alone". The on-device patcher re-validates and refuses to

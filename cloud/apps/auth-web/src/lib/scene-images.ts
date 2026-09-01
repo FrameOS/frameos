@@ -16,12 +16,12 @@ import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import {
   frames,
   frameSceneAssignments,
-  storeSceneImages,
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
 import { readBlob } from "./blobs";
 import { cachedAssetFile, sceneSnapshotAssetPath } from "./frame-asset-cache";
+import { imageSetForVersion } from "./store-images";
 import {
   extractScenesJson,
   frameForAccount,
@@ -305,65 +305,35 @@ export async function resolveStoreSceneForFrameScene(
   return undefined;
 }
 
-// The cover image for a store scene: the first gallery row from
-// store_scene_images, falling back to the primary preview extracted at
-// publish time (store_scenes.preview_image). Pulled scenes serve nothing —
-// the moderation kill switch hides their bytes everywhere.
+// The cover image for a store scene: position 0 of its latest version's
+// image set, or the next image along when that one is provably transparent
+// (legacy bytes uploaded before the publish-time check existed). Pulled
+// scenes serve nothing — the moderation kill switch hides their bytes
+// everywhere.
 export async function storeSceneCoverImage(
   db: FramesDatabase,
   storeSceneId: string,
 ): Promise<{ content: Buffer; contentType: string } | undefined> {
   const [scene] = await db
-    .select({
-      previewImage: storeScenes.previewImage,
-      previewImageType: storeScenes.previewImageType,
-      previewObjectKey: storeScenes.previewObjectKey,
-      status: storeScenes.status,
-    })
+    .select({ status: storeScenes.status })
     .from(storeScenes)
     .where(eq(storeScenes.id, storeSceneId))
     .limit(1);
   if (!scene || scene.status !== "active") {
     return undefined;
   }
-  // At most maxImagesPerScene (10) rows; walk them in gallery order and skip
-  // provably transparent bytes so a broken lead cannot blank every tile —
-  // fall through to the next image, then to the publish-time preview.
-  const galleryImages = await db
-    .select({
-      content: storeSceneImages.content,
-      contentType: storeSceneImages.contentType,
-      id: storeSceneImages.id,
-      objectKey: storeSceneImages.objectKey,
-    })
-    .from(storeSceneImages)
-    .where(eq(storeSceneImages.sceneId, storeSceneId))
-    .orderBy(asc(storeSceneImages.position), asc(storeSceneImages.createdAt));
-  for (const galleryImage of galleryImages) {
-    const content = await readBlob(galleryImage);
+  for (const image of await imageSetForVersion(db, storeSceneId, null)) {
+    const content = await readBlob(image);
     if (!content) {
       continue;
     }
-    if (isTransparentCover(`image:${galleryImage.id}`, content)) {
+    if (isTransparentCover(`image:${image.sha256}`, content)) {
       continue;
     }
     return {
       content,
       // Sniffed rather than trusted: see the note in the public image route.
-      contentType:
-        detectImageContentType(content) ??
-        (galleryImage.contentType || "image/jpeg"),
-    };
-  }
-  const preview = await readBlob({
-    content: scene.previewImage,
-    objectKey: scene.previewObjectKey,
-  });
-  if (preview && !isTransparentCover(`preview:${storeSceneId}`, preview)) {
-    return {
-      content: preview,
-      contentType:
-        detectImageContentType(preview) ?? scene.previewImageType ?? "image/jpeg",
+      contentType: detectImageContentType(content) ?? image.contentType,
     };
   }
   return undefined;

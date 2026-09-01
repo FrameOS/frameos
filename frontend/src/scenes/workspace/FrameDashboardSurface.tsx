@@ -67,6 +67,7 @@ import {
   buildSceneDependencyGraph,
   flatSceneDependencyEntries,
 } from './sceneDependencyGrouping'
+import { sortScenesAlphabetically } from '../../utils/sortScenes'
 
 const uploadedScenePrefix = 'uploaded/'
 const livePreviewSceneId = '__live_preview__'
@@ -343,6 +344,9 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
               </h2>
             </A>
             <FrameMetricAlertIndicator frame={frame} className="h-5 w-5" />
+            {(frame.compiled_scene_count ?? 0) > 0 ? (
+              <CompiledSceneTag count={frame.compiled_scene_count} className="!px-2 !py-0.5 !text-[11px] normal-case" />
+            ) : null}
             {archived ? (
               <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500">
                 Archived
@@ -520,7 +524,11 @@ function FrameSceneTile({
         <div className="pointer-events-none absolute left-1 top-1 z-10 flex flex-col items-start gap-1">
           {compiled ? (
             <div className="pointer-events-auto">
-              <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !px-1.5 !py-0 !text-[9px] !font-semibold !leading-4 !text-slate-700 shadow-sm backdrop-blur-sm" />
+              <CompiledSceneTag
+                frameId={frame.id}
+                sceneId={scene.id}
+                className="!bg-white/95 !border-slate-500/45 !px-1.5 !py-0 !text-[9px] !font-semibold !leading-4 !text-slate-700 shadow-sm backdrop-blur-sm"
+              />
             </div>
           ) : null}
           {active ? (
@@ -684,7 +692,9 @@ function FrameScenesBlock({
   const searchIsActive = search.trim().length > 0
   // While searching, `scenes` is only the matching subset; dependency grouping
   // needs the full (live) list so parents of a match still render.
-  const allScenes = searchIsActive ? liveScenes : scenes
+  // Alphabetical: this list is how you find a scene, and a new one (a
+  // converted copy, say) appended at the end is where nobody looks.
+  const allScenes = sortScenesAlphabetically(searchIsActive ? liveScenes : scenes)
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(allScenes)
   const matchingSceneIds = searchIsActive ? new Set(scenes.map((scene) => scene.id)) : null
   const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'overview')
@@ -697,7 +707,7 @@ function FrameScenesBlock({
         sceneChildExpansion: frameAssetFolderExpansion,
         scenes: allScenes,
       })
-    : flatSceneDependencyEntries(scenes)
+    : flatSceneDependencyEntries(sortScenesAlphabetically(scenes))
   // Allow-list per control plane — see workspaceSurfaces.ts. The frame's
   // device profile never removes a shortcut; it disables it with a tooltip
   // (an esp32 cloud frame keeps Logs — pushed to the cloud and read back —

@@ -1,44 +1,35 @@
 "use client";
 
 import { Check, Pencil, X } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-// Owner override for compatibility metadata. The server publishes a new ZIP
-// version so template.json, the version table, and repository.json agree.
+// FrameOS uses CalVer like 2026.7.3; the server's normalizeFrameosVersion
+// accepts the same shape.
+const versionPattern = /^\d{4}\.\d{1,2}\.\d{1,3}$/;
+
+// Owner override for compatibility metadata, in the workspace's draft: the
+// oldest FrameOS release that can run the scene. Save publishes it into
+// template.json, the version and repository.json together.
 export function SceneFrameosVersionEditor({
   frameosVersion,
-  sceneId,
+  onChange,
 }: {
   frameosVersion: string | null;
-  sceneId: string;
+  onChange: (frameosVersion: string | null) => void;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(frameosVersion ?? "");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function save() {
-    setBusy(true);
-    setError(null);
-    const response = await fetch(`/api/account/scenes/${sceneId}`, {
-      body: JSON.stringify({ frameosVersion: value.trim() || null }),
-      headers: { "content-type": "application/json" },
-      method: "PATCH",
-    });
-    setBusy(false);
-    if (response.ok) {
-      setEditing(false);
-      router.refresh();
+  function commit() {
+    const trimmed = value.trim();
+    if (trimmed && !versionPattern.test(trimmed)) {
+      setError("Use a version such as 2026.7.5.");
       return;
     }
-    const payload = await response.json().catch(() => ({}));
-    setError(
-      payload.error === "invalid_frameos_version"
-        ? "Use a version such as 2026.7.5."
-        : `Saving failed: ${payload.error ?? response.status}`,
-    );
+    setError(null);
+    setEditing(false);
+    onChange(trimmed || null);
   }
 
   if (!editing) {
@@ -68,19 +59,21 @@ export function SceneFrameosVersionEditor({
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
-            void save();
+            commit();
+          } else if (event.key === "Escape") {
+            setEditing(false);
+            setError(null);
           }
         }}
         placeholder="2026.7.5"
         value={value}
       />
-      <button className="button" disabled={busy} onClick={() => void save()} type="button">
+      <button className="button" onClick={commit} type="button">
         <Check aria-hidden size={14} />
-        {busy ? "Saving…" : "Save"}
+        Done
       </button>
       <button
         className="button button--subtle"
-        disabled={busy}
         onClick={() => {
           setEditing(false);
           setError(null);

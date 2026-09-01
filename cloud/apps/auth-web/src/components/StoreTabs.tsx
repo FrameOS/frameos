@@ -1,9 +1,12 @@
 import Link from "next/link";
-import { getMyScenesUrl, getStoreUrl } from "../lib/env";
+import { getMyScenesUrl, getNimConverterUrl, getStoreUrl } from "../lib/env";
+import { StoreTabsMenu } from "./StoreTabsMenu";
 
 // The two views of the scene store, as tabs under the header: the public
 // store front (/) and the signed-in owner's private scene list (/my-scenes).
 // Signed-out visitors only have the store, so no tabs are drawn for them.
+// The "…" at the right end holds the rare actions (the compiled-scene
+// converter) that do not earn a card on the page.
 export function StoreTabs({ active }: { active: "store" | "mine" }) {
   const storeUrl = getStoreUrl();
   const tabs = [
@@ -26,6 +29,7 @@ export function StoreTabs({ active }: { active: "store" | "mine" }) {
           {tab.label}
         </Link>
       ))}
+      <StoreTabsMenu convertUrl={getNimConverterUrl()} />
     </nav>
   );
 }

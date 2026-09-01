@@ -462,12 +462,39 @@ suite "portal supplicant backend":
     check hasEvent
     check ev[1] == "setCurrentScene"
 
-  test "attemptConnect hashes the passphrase when wpa_passphrase exists":
+  test "attemptConnect keeps the passphrase so WPA3-SAE can use it, wpa_passphrase or not":
+    # A pre-hashed PSK only does WPA2; a WPA3-only access point needs the
+    # passphrase itself, so the block offers both and stores it as typed.
     supHasWpaPassphrase = true
     check attemptConnect(makeFrameOS(), "home-wifi", "pw12345678")
     let conf = supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"]
-    check conf.contains("psk=deadbeef")
-    check not conf.contains("pw12345678") # the plaintext comment is stripped
+    check conf.contains("key_mgmt=WPA-PSK SAE")
+    check conf.contains("ieee80211w=1")
+    check conf.contains("psk=\"pw12345678\"")
+    check not conf.contains("psk=deadbeef")
+    check not supRan("| wpa_passphrase ")
+
+  test "attemptConnect writes the frame's Wi-Fi country and sets the regulatory domain":
+    let frame = makeFrameOS()
+    frame.frameConfig.network.wifiCountry = "fr"
+    check attemptConnect(frame, "home-wifi", "pw12345678")
+    let conf = supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"]
+    check conf.contains("country=FR\n")
+    check supRan("iw reg set FR")
+    # Without a country nothing is written and nothing is set.
+    supFiles.clear()
+    check attemptConnect(makeFrameOS(), "home-wifi", "pw12345678")
+    check not supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"].contains("country=")
+
+  test "attemptConnect keeps the country the SD card's first boot wrote":
+    # frame.json says nothing; the config on disk (first-boot mirror) does.
+    supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"] =
+      "update_config=1\ncountry=EE\nnetwork={\n    ssid=\"old\"\n    key_mgmt=NONE\n}\n"
+    check attemptConnect(makeFrameOS(), "home-wifi", "pw12345678")
+    let conf = supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"]
+    check conf.contains("country=EE\n")
+    check conf.contains("ssid=\"home-wifi\"")
+    check supRan("iw reg set EE")
 
   test "attemptConnect reports an actionable error when association stalls":
     supMode = smAssociateFails

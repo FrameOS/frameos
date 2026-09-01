@@ -1,4 +1,4 @@
-import { useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { sceneSettingsLogic } from './sceneSettingsLogic'
 import { Form, Group } from 'kea-forms'
@@ -8,7 +8,6 @@ import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
 import { TextArea } from '../../../../components/TextArea'
-import { Tooltip } from '../../../../components/Tooltip'
 import { AdvancedSection } from '../../../../components/AdvancedSection'
 import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../../../utils/sceneExecution'
@@ -27,7 +26,8 @@ function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
 }
 
 export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
-  const { frameId, frameForm } = useValues(frameLogic)
+  const { frameId, frameForm, convertingSceneId } = useValues(frameLogic)
+  const { convertSceneToInterpreted } = useActions(frameLogic)
   const { sceneIndex, scene } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
@@ -37,9 +37,6 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
   const execution = sceneExecutionForFrame(scene, frameForm.mode)
   const hasCompiledOnlyContent = sceneRequiresCompilation(scene)
   const hasInterpretedCompiledOnlyContent = execution === 'interpreted' && hasCompiledOnlyContent
-  // Compiled is the legacy mode: keep the switch out of the way unless this
-  // scene already uses it or carries content that needs it.
-  const showExecutionField = !frameRunsInterpreted && (execution === 'compiled' || hasCompiledOnlyContent)
 
   return (
     <Form
@@ -76,39 +73,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
             >
               <ColorInput name="backgroundColor" className="!h-10 !min-w-0" placeholder="#ffffff" />
             </Field>
-            {frameRunsInterpreted ? null : showExecutionField ? (
-              <Field
-                className={fieldClassName}
-                name="execution"
-                label={<SceneSettingsLabel>Execution</SceneSettingsLabel>}
-                tooltip={
-                  <div className="space-y-2">
-                    <p>Choose between compiled and interpreted execution modes.</p>
-                    <p>
-                      <strong>Compiled</strong> scenes are optimized for performance. They require a full redeploy
-                      whenever changes are made. If you edit the nim code for apps on the scene, you must use this mode.
-                      All inline code nodes must also be written in Nim.
-                    </p>
-                    <p>
-                      <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the need
-                      for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it doesn't
-                      matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit the nim
-                      source of apps in this mode.
-                    </p>
-                    <p>A full deploy is needed if switching between modes.</p>
-                  </div>
-                }
-              >
-                <Select
-                  name="execution"
-                  className="h-10"
-                  options={[
-                    { value: 'compiled', label: 'compiled' },
-                    { value: 'interpreted', label: 'interpreted' },
-                  ]}
-                />
-              </Field>
-            ) : (
+            {frameRunsInterpreted ? null : (
               <AdvancedSection className={fieldClassName}>
                 <Field
                   className={fieldClassName}
@@ -116,19 +81,15 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                   label={<SceneSettingsLabel>Execution</SceneSettingsLabel>}
                   tooltip={
                     <div className="space-y-2">
-                      <p>Choose between compiled and interpreted execution modes.</p>
                       <p>
-                        <strong>Compiled</strong> scenes are optimized for performance. They require a full redeploy
-                        whenever changes are made. If you edit the nim code for apps on the scene, you must use this
-                        mode. All inline code nodes must also be written in Nim.
+                        <strong>Interpreted</strong> is how scenes run: JavaScript code nodes and apps, fast deploys
+                        from the released FrameOS binaries, live preview in the browser.
                       </p>
                       <p>
-                        <strong>Interpreted</strong> scenes are executed as-is, allowing for fast deploys without the
-                        need for recompilation. This mode is slower, but when your frame takes 20 seconds to render, it
-                        doesn't matter much. Inline code nodes can use JavaScript, TypeScript, or JSX. You can't edit
-                        the nim source of apps in this mode.
+                        <strong>Compiled</strong> is the legacy mode for scenes that still carry Nim code nodes or Nim
+                        app sources. It needs a full FrameOS source build on every deploy. Convert it to an interpreted
+                        scene instead (scenes.frameos.net/nim-converter).
                       </p>
-                      <p>A full deploy is needed if switching between modes.</p>
                     </div>
                   }
                 >
@@ -136,25 +97,42 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                     name="execution"
                     className="h-10"
                     options={[
-                      { value: 'compiled', label: 'compiled' },
-                      { value: 'interpreted', label: 'interpreted' },
+                      { value: 'interpreted', label: 'Interpreted' },
+                      { value: 'compiled', label: 'Compiled (legacy — needs a source build on every deploy)' },
                     ]}
                   />
                 </Field>
               </AdvancedSection>
             )}
-            {hasInterpretedCompiledOnlyContent ? (
-              <div className="app-compiled-warning rounded-xl p-3 text-sm">
+            {hasCompiledOnlyContent || execution === 'compiled' ? (
+              <div className="app-compiled-warning rounded-xl p-3 text-sm space-y-2">
                 <div className="font-semibold">
                   {frameRunsInterpreted
-                    ? 'This scene uses compiled-only content that ESP32 frames cannot run.'
-                    : 'This compiled scene will not work in interpreted mode.'}
+                    ? 'This scene carries Nim that ESP32 frames cannot run.'
+                    : hasInterpretedCompiledOnlyContent
+                    ? 'This scene carries Nim that interpreted mode will not run.'
+                    : 'Legacy compiled scene — needs a FrameOS source build on every deploy.'}
                 </div>
                 <div>
-                  {frameRunsInterpreted
-                    ? 'It still contains Nim app source, Nim code nodes, or source nodes. Move the customization into JavaScript apps or inline code nodes.'
-                    : 'It still contains Nim app source, Nim code nodes, or source nodes that interpreted mode cannot run. Keep execution set to compiled, or move the customization into JavaScript apps or inline code nodes.'}
+                  {hasCompiledOnlyContent
+                    ? 'It still contains Nim app sources, Nim code nodes, or source nodes. Convert it to an interpreted scene: the converter ports the code nodes and apps to JavaScript, and the scene deploys from the released binaries.'
+                    : 'Nothing in it needs the compiler any more — switch execution to Interpreted.'}
                 </div>
+                {hasCompiledOnlyContent ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      size="small"
+                      color="primary"
+                      disabled={convertingSceneId === sceneId}
+                      onClick={() => convertSceneToInterpreted(sceneId)}
+                    >
+                      {convertingSceneId === sceneId ? 'Converting…' : 'Convert to an interpreted scene'}
+                    </Button>
+                    <span className="frameos-muted text-xs">
+                      Converts in place, unsaved — check the result, then save or deploy.
+                    </span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </Group>

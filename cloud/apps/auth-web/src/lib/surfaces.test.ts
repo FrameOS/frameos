@@ -81,6 +81,28 @@ describe("surface routing", () => {
     ).toBeUndefined();
   });
 
+  it("serves the Nim converter on the scenes host and sends the other hosts there", () => {
+    process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
+    process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
+    process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
+
+    expect(
+      resolveSurfaceRoute(new URL("https://scenes.frameos.net/nim-converter")),
+    ).toBeUndefined();
+    expectRoute("https://cloud.frameos.net/nim-converter", {
+      kind: "redirect",
+      url: "https://scenes.frameos.net/nim-converter",
+    });
+    expectRoute("https://account.frameos.net/nim-converter", {
+      kind: "redirect",
+      url: "https://scenes.frameos.net/nim-converter",
+    });
+    // The API behind it stays reachable on every host, like every route.
+    expect(
+      resolveSurfaceRoute(new URL("https://cloud.frameos.net/api/scenes/convert")),
+    ).toBeUndefined();
+  });
+
   it("moves the private scene list onto the scenes host as /my-scenes", () => {
     configureSplitOrigins();
 

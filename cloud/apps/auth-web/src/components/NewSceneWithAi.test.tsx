@@ -3,6 +3,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NewSceneWithAi } from "./NewSceneWithAi";
+import {
+  newSceneDraftKey,
+  readNewSceneDraft,
+  type NewSceneDraft,
+} from "../lib/new-scene-draft";
 
 // The embedded editor stood in for by a stub that answers the host's rename
 // through apiRef the way the real editor does: an echo of the renamed
@@ -39,7 +44,15 @@ function StubEditor(props: StubEditorProps) {
 }
 vi.mock("next/dynamic", () => ({ default: () => StubEditor }));
 vi.mock("./SceneLivePreview", () => ({ SceneLivePreviewPanel: () => null }));
-vi.mock("./SceneAiPanel", () => ({ SceneAiPanel: () => <div data-testid="ai-panel" /> }));
+vi.mock("./SceneAiPanel", () => ({
+  SceneAiPanel: (props: { initialPrompt?: string; initialChat?: { chatId: string } }) => (
+    <div
+      data-chat={props.initialChat?.chatId ?? ""}
+      data-prompt={props.initialPrompt ?? ""}
+      data-testid="ai-panel"
+    />
+  ),
+}));
 
 const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
   const url = String(input);
@@ -58,6 +71,29 @@ afterEach(() => {
   fetchMock.mockClear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("NewSceneWithAi hand-off", () => {
+  it("opens handed-off scenes as they are, unsaved, preview beside the editor", async () => {
+    const storage = new Map<string, string>([
+      ["frameos:converted-scenes", JSON.stringify([{ id: "s1", name: "Heater", nodes: [], edges: [], settings: { execution: "interpreted" } }])],
+    ]);
+    Object.defineProperty(window, "sessionStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        removeItem: (key: string) => void storage.delete(key),
+        setItem: (key: string, value: string) => void storage.set(key, value),
+      },
+    });
+    render(<NewSceneWithAi handoffKey="frameos:converted-scenes" myScenesUrl="/scenes" />);
+    await waitFor(() => expect(screen.getByTestId("editor")).toBeTruthy());
+    expect(screen.getByText("Heater")).toBeTruthy();
+    expect(screen.getByText("Not saved yet")).toBeTruthy();
+    // Read once: a reload starts blank rather than re-opening a stale copy.
+    expect(storage.has("frameos:converted-scenes")).toBe(false);
+    expect(screen.queryByTestId("ai-panel")).toBeNull();
+  });
 });
 
 describe("NewSceneWithAi scene name", () => {
@@ -141,5 +177,85 @@ describe("NewSceneWithAi bar", () => {
     expect(screen.getByRole("button", { name: "AI" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("button", { name: "Editor" }).getAttribute("aria-pressed")).toBe("true");
     expect((document.querySelector(".editor-modal__editor") as HTMLElement).hidden).toBe(false);
+  });
+});
+
+describe("NewSceneWithAi drafts", () => {
+  const draft: NewSceneDraft = {
+    chat: {
+      chatId: "chat-1",
+      messages: [
+        { content: "show a big pineapple", role: "user" },
+        { content: "Made a bold, sunny pineapple.", role: "assistant" },
+      ],
+    },
+    presetIndex: 1,
+    savedAt: new Date().toISOString(),
+    scenes: [{ id: "s1", name: "Pineapple", nodes: [], edges: [] }],
+    selectedSceneId: "s1",
+  };
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.location.hash = "";
+  });
+
+  it("keeps the unsaved scene in the browser, named by the URL hash", async () => {
+    const { unmount } = render(<NewSceneWithAi myScenesUrl="/scenes" />);
+    await waitFor(() => expect(screen.getByTestId("editor")).toBeTruthy());
+    // A blank page that nobody touched leaves nothing behind.
+    expect(window.location.hash).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename scene" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Scene name" }), {
+      target: { value: "Pineapple" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Scene name" }), { key: "Enter" });
+    // Unmounting flushes the debounced write, as a reload would.
+    unmount();
+
+    const draftId = window.location.hash.replace("#d=", "");
+    expect(draftId).toMatch(/^[a-f0-9]+$/);
+    expect(readNewSceneDraft(draftId)?.scenes[0]).toMatchObject({ name: "Pineapple" });
+  });
+
+  it("reopens the draft named by the hash instead of starting blank, and does not re-run ?prompt=", async () => {
+    window.location.hash = "#d=abc123";
+    window.localStorage.setItem(newSceneDraftKey("abc123"), JSON.stringify(draft));
+
+    render(<NewSceneWithAi initialPrompt="show a big pineapple" myScenesUrl="/scenes" />);
+    await waitFor(() => expect(screen.getByTestId("editor")).toBeTruthy());
+
+    expect(screen.getByText("Pineapple")).toBeTruthy();
+    expect(screen.getByText("Not saved yet")).toBeTruthy();
+    expect((screen.getByRole("combobox", { name: "Display size" }) as HTMLSelectElement).value).toBe("1");
+    const panel = screen.getByTestId("ai-panel");
+    expect(panel.getAttribute("data-prompt")).toBe("");
+    expect(panel.getAttribute("data-chat")).toBe("chat-1");
+  });
+
+  it("starts blank when the hash names a draft this browser does not have", async () => {
+    window.location.hash = "#d=gone";
+    render(<NewSceneWithAi initialPrompt="show a big pineapple" myScenesUrl="/scenes" />);
+    await waitFor(() => expect(screen.getByTestId("editor")).toBeTruthy());
+    expect(screen.getByText("New scene")).toBeTruthy();
+    expect(screen.getByTestId("ai-panel").getAttribute("data-prompt")).toBe("show a big pineapple");
+  });
+
+  it("clears the draft once the scene is saved", async () => {
+    window.location.hash = "#d=abc123";
+    window.localStorage.setItem(newSceneDraftKey("abc123"), JSON.stringify(draft));
+    fetchMock.mockImplementationOnce(async () => Response.json({ scene: { slug: "pineapple" } }));
+    // jsdom refuses a real navigation; the assignment is all we need.
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, hash: "#d=abc123", href: "" },
+    });
+
+    render(<NewSceneWithAi myScenesUrl="/scenes" />);
+    await waitFor(() => expect(screen.getByTestId("editor")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /Save to my scenes/ }));
+
+    await waitFor(() => expect(readNewSceneDraft("abc123")).toBeNull());
   });
 });

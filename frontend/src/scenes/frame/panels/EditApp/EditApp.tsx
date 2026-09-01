@@ -103,12 +103,37 @@ export function systemAppGithubUrl(keyword: string): string {
  * flip the whole scene to compiled mode (a full frame recompilation on every
  * later change), which is not something to stumble into from an editor tab.
  */
-function ReadOnlyNimAppNotice({ keyword }: { keyword: string | null }): JSX.Element {
+function ReadOnlyNimAppNotice({
+  keyword,
+  sceneLocal,
+  converting,
+  onConvert,
+}: {
+  keyword: string | null
+  /** A Nim app the scene carries itself (legacy), as opposed to a built-in from the catalog. */
+  sceneLocal: boolean
+  converting: boolean
+  onConvert: () => void
+}): JSX.Element {
+  if (sceneLocal) {
+    return (
+      <div className="app-compiled-warning flex flex-col gap-2 rounded-2xl p-3 text-sm @md:flex-row @md:items-center">
+        <div className="min-w-0 flex-1">
+          <span className="font-semibold">Legacy Nim app — convert the scene to interpreted.</span> This scene carries
+          its own Nim app; running it needs a FrameOS source build on every deploy. The converter ports it to a
+          JavaScript app.
+        </div>
+        <Button size="small" color="primary" disabled={converting} onClick={onConvert}>
+          {converting ? 'Converting…' : 'Convert to an interpreted scene'}
+        </Button>
+      </div>
+    )
+  }
   return (
     <div className="frame-tool-card flex flex-col gap-2 rounded-2xl p-3 text-sm @md:flex-row @md:items-center">
       <div className="min-w-0 flex-1">
-        <span className="font-semibold">Read only.</span> This is a compiled Nim app. To customize it, use a JavaScript
-        app or an inline code node instead.
+        <span className="font-semibold">Read only.</span> This is a built-in Nim app from the FrameOS catalog; edit it
+        on GitHub. To customize it here, use a JavaScript app or an inline code node instead.
       </div>
       {keyword ? (
         <a
@@ -210,7 +235,8 @@ export function EditApp({
   compactWarnings = false,
   showToolbar = false,
 }: EditAppProps) {
-  const { frameId } = useValues(frameLogic)
+  const { frameId, convertingSceneId } = useValues(frameLogic)
+  const { convertSceneToInterpreted } = useActions(frameLogic)
   const { theme } = useValues(workspaceLogic)
   const { persistUntilClosed } = useActions(frameEditorsLogic)
   const logicProps: EditAppLogicProps = {
@@ -226,6 +252,7 @@ export function EditApp({
     modelMarkers,
     requiresCompiledOnSave,
     savedKeyword,
+    sceneAppKey,
     appUsageCount,
     hasMultipleAppUsages,
     appTypeDeclarations,
@@ -335,7 +362,14 @@ export function EditApp({
       ) : null}
 
       <div className="overflow-y-auto overflow-x-auto w-full h-full max-h-full max-w-full gap-2 flex-1 flex flex-col">
-        {requiresCompiledOnSave && !compactWarnings ? <ReadOnlyNimAppNotice keyword={savedKeyword} /> : null}
+        {requiresCompiledOnSave && !compactWarnings ? (
+          <ReadOnlyNimAppNotice
+            keyword={savedKeyword}
+            sceneLocal={Boolean(sceneAppKey)}
+            converting={convertingSceneId === sceneId}
+            onConvert={() => convertSceneToInterpreted(sceneId)}
+          />
+        ) : null}
         {hasMultipleAppUsages && !requiresCompiledOnSave ? (
           <div className="frame-tool-card flex flex-col gap-3 rounded-2xl p-3 text-sm @md:flex-row @md:items-center">
             <div className="min-w-0 font-medium">

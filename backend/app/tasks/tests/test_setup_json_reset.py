@@ -866,3 +866,68 @@ def test_cloud_config_without_authorized_keys_writes_no_authorized_keys_file(tmp
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (sandbox.root / "root-ssh").exists()
+
+
+def test_cloud_wifi_country_lands_in_the_wpa_mirror_and_the_pending_state(tmp_path):
+    sandbox = Sandbox(tmp_path, uses_network_manager=False)
+    sandbox.write_cloud_file(
+        "claim_token=FRCT-cc\nwifi_ssid=Home\nwifi_password=hunter2hunter2\nwifi_country=fr\n"
+    )
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    conf = sandbox.wpa_supplicant_file.read_text(encoding="utf-8")
+    # Upper-cased, and placed with the global settings, before the network block.
+    assert "update_config=1\ncountry=FR\nnetwork={" in conf
+    # WPA2 and WPA3 both offered, PMF optional, passphrase kept for SAE.
+    assert "key_mgmt=WPA-PSK SAE" in conf
+    assert "ieee80211w=1" in conf
+    assert 'psk="hunter2hunter2"' in conf
+    # The runtime applies the same domain on every boot (and, once enrolled,
+    # writes it into frame.json) from the pending state.
+    pending = json.loads(sandbox.pending_file.read_text(encoding="utf-8"))
+    assert pending["wifi_country"] == "FR"
+
+    # The busybox-only JSON writer carries it too.
+    sandbox.write_cloud_file("claim_token=FRCT-cc2\nwifi_country=EE\n")
+    result = sandbox.run(disable_python3=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    pending = json.loads(sandbox.pending_file.read_text(encoding="utf-8"))
+    assert pending == {
+        "claim_token": "FRCT-cc2",
+        "provider_url": DEFAULT_CLOUD_PROVIDER_URL,
+        "wifi_country": "EE",
+    }
+
+
+def test_cloud_wifi_country_that_is_not_a_country_code_is_dropped_with_a_warning(tmp_path):
+    sandbox = Sandbox(tmp_path, uses_network_manager=False)
+    sandbox.write_cloud_file(
+        "claim_token=FRCT-cc3\nwifi_ssid=Home\nwifi_password=hunter2hunter2\nwifi_country=France\n"
+    )
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ignoring wifi_country 'France'" in result.stdout
+    conf = sandbox.wpa_supplicant_file.read_text(encoding="utf-8")
+    assert "country=" not in conf
+    pending = json.loads(sandbox.pending_file.read_text(encoding="utf-8"))
+    assert "wifi_country" not in pending
+
+
+def test_wpa_mirror_keeps_a_raw_hex_psk_on_wpa2_only(tmp_path):
+    sandbox = Sandbox(tmp_path, uses_network_manager=False)
+    sandbox.write_cloud_file("claim_token=FRCT-hex\nwifi_ssid=Home\nwifi_password=" + "A" * 64 + "\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    conf = sandbox.wpa_supplicant_file.read_text(encoding="utf-8")
+    # No passphrase to derive SAE from: WPA-PSK alone, and the PSK lower-cased
+    # the way supplicant.nim writes it.
+    assert "key_mgmt=WPA-PSK\n" in conf
+    assert "SAE" not in conf
+    assert "ieee80211w" not in conf
+    assert "psk=" + "a" * 64 in conf

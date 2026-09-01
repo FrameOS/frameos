@@ -1,31 +1,37 @@
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import {
   accounts,
   type createDb,
-  storeSceneImages,
   storeScenes,
-  storeSceneVersions,
 } from "@frameos-cloud/db";
 import { NextResponse } from "next/server";
 import { recordAuditEvent } from "./audit";
-import { blobNamespaces, readBlob, storeBlob } from "./blobs";
 import { jsonError } from "./device-flow";
+import { logWarn } from "./log";
 import { getScenesBaseUrl } from "./env";
 import { moderateStoreContent } from "./moderation";
+import { meterAiUsage } from "./billing";
 import { classifyStoreScene } from "./store-classify";
 import {
   detectImageContentType,
   maxNewScenesPerDay,
   maxScenesPerAccount,
   maxSceneZipBytes,
-  rebuildZipWithPreview,
   sceneSummary,
   slugifyName,
   slugSuffix,
   validateSceneZip,
+  compiledSceneHint,
 } from "./store";
 import {
-  maxPrivateSceneBytesPerAccount,
+  imageSetForVersion,
+  registerStoreImage,
+  type StoreImage,
+} from "./store-images";
+import type { SceneListing } from "./store-listing";
+import { alignZipCover, writeSceneVersion } from "./store-version-write";
+import {
+  accountLimits,
   privateSceneBytesForAccount,
   sceneBytesTotal,
 } from "./usage";
@@ -37,6 +43,12 @@ export type PublishActor =
 // Shared publishing path for linked FrameOS clients and signed-in web
 // uploads. Both entry points get identical ZIP validation, moderation,
 // versioning, quotas, and audit behavior.
+//
+// The zip is one version's worth of scene: its scenes.json, the listing in
+// its template.json, and one cover (image.jpg). On an existing scene the
+// listing fields the manifest carries replace the row's; the ones it omits
+// are kept. The cover, when the zip has one, leads the image set and the
+// previous version's images follow; without one the set is inherited.
 export async function publishStoreScene(
   db: ReturnType<typeof createDb>,
   input: {
@@ -50,7 +62,7 @@ export async function publishStoreScene(
   },
 ) {
   const { accountId, actor, linkedClientId } = input;
-  let content = input.content;
+  const content = input.content;
 
   const [publisher] = await db
     .select({ storeBannedAt: accounts.storeBannedAt })
@@ -68,27 +80,31 @@ export async function publishStoreScene(
     return jsonError("scene_too_large", 413, { max_bytes: maxSceneZipBytes });
   }
 
-  let validated = validateSceneZip(content);
-  if (!validated.ok) {
-    return jsonError(validated.error, 400);
+  const validation = validateSceneZip(content);
+  if (!validation.ok) {
+    return jsonError(validation.error, 400);
   }
-  // Keep these separate from the effective ZIP preview: a gallery fallback
-  // belongs in the archive, but must not be duplicated into the primary
-  // storefront image column.
-  const uploadedPreview = validated.value.previewImage;
-  const uploadedPreviewHeight = validated.value.imageHeight;
-  const uploadedPreviewWidth = validated.value.imageWidth;
+  const validated = validation.value;
+  if (validated.compiledScenes.length > 0) {
+    // Counted: the number of refusals is how many people still hit the
+    // legacy path from the cloud side.
+    logWarn("store.publish.refused_compiled_scene", {
+      accountId,
+      scenes: validated.compiledScenes.length,
+    });
+    return jsonError("scene_requires_compilation", 400, {
+      hint: compiledSceneHint,
+      scenes: validated.compiledScenes,
+    });
+  }
+  const uploadedPreview = validated.previewImage;
 
-  const name = (input.name ?? validated.value.manifestName)
+  const name = (input.name ?? validated.manifestName)
     ?.trim()
     .slice(0, 128);
   if (!name) {
     return jsonError("invalid_name", 400);
   }
-  const description =
-    input.description?.trim().slice(0, 2000) ??
-    validated.value.manifestDescription ??
-    null;
 
   // Same account + same name (case-insensitive) is a new immutable version.
   const [existing] = await db
@@ -106,41 +122,14 @@ export async function publishStoreScene(
     return jsonError("scene_pulled", 403);
   }
 
-  // A newly published ZIP may omit its own image while this existing scene
-  // still has a cloud gallery. Fold the gallery lead into this same immutable
-  // version so publishing cannot put the page and its download out of sync.
-  if (existing && !uploadedPreview) {
-    const [galleryLead] = await db
-      .select({
-        content: storeSceneImages.content,
-        objectKey: storeSceneImages.objectKey,
-      })
-      .from(storeSceneImages)
-      .where(eq(storeSceneImages.sceneId, existing.id))
-      .orderBy(asc(storeSceneImages.position), asc(storeSceneImages.createdAt))
-      .limit(1);
-    const galleryLeadContent = await readBlob(galleryLead);
-    if (galleryLeadContent) {
-      const rebuilt = rebuildZipWithPreview(
-        content,
-        Buffer.from(galleryLeadContent),
-      );
-      if (!rebuilt) {
-        return jsonError("invalid_scene_zip", 500);
-      }
-      if (rebuilt.length > maxSceneZipBytes) {
-        return jsonError("scene_too_large", 413, {
-          max_bytes: maxSceneZipBytes,
-        });
-      }
-      const rebuiltValidation = validateSceneZip(rebuilt);
-      if (!rebuiltValidation.ok) {
-        return jsonError(rebuiltValidation.error, 400);
-      }
-      content = rebuilt;
-      validated = rebuiltValidation;
-    }
-  }
+  const description =
+    input.description?.trim().slice(0, 2000) ||
+    validated.manifestDescription ||
+    existing?.description ||
+    null;
+  const previousImages: StoreImage[] = existing
+    ? await imageSetForVersion(db, existing.id, null)
+    : [];
 
   const [sceneCountRow] = await db
     .select({ scenes: sql<number>`count(*)::int` })
@@ -158,19 +147,24 @@ export async function publishStoreScene(
     input.visibility ?? existing?.visibility ?? "private";
   if (resultingVisibility !== "public") {
     const privateBytes = await privateSceneBytesForAccount(db, accountId);
-    // A version pushed onto an already-private scene adds `content.length`;
-    // if this publish also flips a public scene private, its existing bytes
-    // start counting too — fold them in so the flip cannot dodge the quota.
+    // A version pushed onto an already-private scene adds `content.length`
+    // (plus a new cover); if this publish also flips a public scene private,
+    // its existing bytes start counting too — fold them in so the flip
+    // cannot dodge the quota.
     const flippingPrivateBytes =
       existing && existing.visibility === "public"
         ? await sceneBytesTotal(db, existing.id)
         : 0;
+    const { privateSceneBytes: maxBytes } = await accountLimits(db, accountId);
     if (
-      privateBytes + flippingPrivateBytes + content.length >
-      maxPrivateSceneBytesPerAccount
+      privateBytes +
+        flippingPrivateBytes +
+        content.length +
+        (uploadedPreview?.length ?? 0) >
+      maxBytes
     ) {
       return jsonError("storage_quota_exceeded", 403, {
-        max_bytes: maxPrivateSceneBytesPerAccount,
+        max_bytes: maxBytes,
         private_bytes: Math.round(privateBytes),
       });
     }
@@ -193,12 +187,12 @@ export async function publishStoreScene(
   }
 
   const moderation = await moderateStoreContent({
-    texts: [name, description],
+    texts: [name, description, validated.manifestTags?.join(" ")],
     ...(uploadedPreview
       ? {
           image: {
             content: uploadedPreview,
-            contentType: "image/jpeg",
+            contentType: detectImageContentType(uploadedPreview) ?? "image/jpeg",
           },
         }
       : {}),
@@ -218,92 +212,93 @@ export async function publishStoreScene(
     return jsonError("moderation_unavailable", 503);
   }
 
+  // The listing this version records. Manifest values win where present;
+  // otherwise the row's stand (a re-publish keeps the tags the owner set).
+  const category =
+    validated.manifestCategory !== undefined
+      ? validated.manifestCategory
+      : (existing?.category ?? null);
+  const tags = validated.manifestTags ?? existing?.tags ?? [];
+
   // Auto-categorize: new scenes (and republishes of scenes that never got a
   // category) are classified into the fixed store taxonomy, and get suggested
   // tags when the owner has not set any. Owner-set values are never
   // overwritten, and a classifier outage just leaves the scene uncategorized.
-  const classified = existing?.category
+  const classified = category
     ? undefined
     : await classifyStoreScene({
-        appKeywords: validated.value.appKeywords,
+        appKeywords: validated.appKeywords,
         description,
-        existingTags: existing?.tags,
+        existingTags: tags,
         name,
       });
+  if (classified) {
+    // The classifier runs on the operator's key: our cost, the publisher's
+    // benefit, nobody's charge. Metered all the same — an unmetered model
+    // call is spend the books cannot explain.
+    await meterAiUsage({
+      accountId,
+      credentialSource: "shared",
+      model: classified.model,
+      rounds: 1,
+      surface: "store_classify",
+      turnId: crypto.randomUUID(),
+      usage: classified.usage,
+    });
+  }
+  const listing: SceneListing = {
+    category: category ?? classified?.category ?? null,
+    description,
+    frameosVersion: validated.frameosVersion ?? null,
+    tags: tags.length ? tags : (classified?.tags ?? []),
+  };
 
   const scene = existing ?? (await createScene(db, accountId, name));
   if (!scene) {
     return jsonError("scene_create_failed", 500);
   }
 
+  // The zip's cover leads the set; the previous version's images follow,
+  // minus the cover itself when it was already among them.
+  let images = previousImages;
+  if (uploadedPreview) {
+    const cover = await registerStoreImage(db, uploadedPreview, undefined, {
+      height: validated.imageHeight,
+      width: validated.imageWidth,
+    });
+    images = [cover, ...previousImages.filter((image) => image.sha256 !== cover.sha256)];
+  }
+  const aligned = await alignZipCover(content, validated, images);
+  if ("error" in aligned) {
+    return jsonError(
+      aligned.error,
+      aligned.error === "scene_too_large" ? 413 : aligned.error === "image_not_found" ? 404 : 500,
+    );
+  }
+
   const nextVersion = scene.latestVersion + 1;
-  const storedVersion = await storeBlob(
-    blobNamespaces.sceneVersion,
-    content,
-    "application/zip",
-    { extension: "zip" },
-  );
-  await db.insert(storeSceneVersions).values({
-    contentType: "application/zip",
-    frameosVersion: validated.value.frameosVersion ?? null,
-    objectKey: storedVersion.objectKey,
+  const written = await writeSceneVersion(db, {
+    content: aligned.content,
+    images,
+    listing,
     ...(linkedClientId ? { publishedByLinkedClientId: linkedClientId } : {}),
-    riskFlags: validated.value.riskFlags,
-    sceneId: scene.id,
-    sha256: storedVersion.sha256,
-    sizeBytes: storedVersion.sizeBytes,
-    version: nextVersion,
-  });
-
-  // Versions used to be pruned to the newest 20 (STORE-TODO decision 2, a
-  // deviation from immutable-forever taken because they were Postgres blobs).
-  // They are objects now, deduplicated by digest, so the deviation is retired
-  // and every published version stays downloadable.
-
-  const storedPreview = uploadedPreview
-    ? await storeBlob(
-        blobNamespaces.scenePreview,
-        uploadedPreview,
-        detectImageContentType(uploadedPreview) ?? "image/jpeg",
-      )
-    : undefined;
-
-  const [updated] = await db
-    .update(storeScenes)
-    .set({
-      ...(classified ? { category: classified.category } : {}),
-      ...(classified && !existing?.tags.length && classified.tags.length
-        ? { tags: classified.tags }
-        : {}),
-      description,
-      frameosVersion: validated.value.frameosVersion ?? null,
-      latestVersion: nextVersion,
+    rowChanges: {
       // A direct web upload clears the install attribution because no linked
       // FrameOS client published this latest version.
       linkedClientId: linkedClientId ?? null,
       name,
-      previewImage: null,
-      previewObjectKey: storedPreview?.objectKey ?? null,
-      previewImageHeight: uploadedPreviewHeight ?? null,
-      previewImageSizeBytes: storedPreview?.sizeBytes ?? null,
-      // The zip's conventional image.jpg path says nothing about the real
-      // format — PNG/WebP/GIF bytes are stored untranscoded, so sniff them.
-      previewImageType: uploadedPreview
-        ? detectImageContentType(uploadedPreview) ?? "image/jpeg"
-        : null,
-      previewImageWidth: uploadedPreviewWidth ?? null,
-      riskFlags: validated.value.riskFlags,
-      updatedAt: new Date(),
       // An omitted visibility keeps an existing scene's setting and lets the
       // database default new scenes to private.
       ...(input.visibility ? { visibility: input.visibility } : {}),
-    })
-    .where(eq(storeScenes.id, scene.id))
-    .returning();
-
-  if (!updated) {
+    },
+    sceneId: scene.id,
+    validated: aligned.validated,
+    version: nextVersion,
+  });
+  if ("error" in written) {
     return jsonError("scene_publish_failed", 500);
   }
+  const { updated } = written;
 
   await recordAuditEvent(db, {
     accountId,
@@ -311,8 +306,8 @@ export async function publishStoreScene(
     eventType: "store.scene_published",
     metadata: {
       name: updated.name,
-      sceneCount: validated.value.sceneCount,
-      sizeBytes: content.length,
+      sceneCount: validated.sceneCount,
+      sizeBytes: aligned.content.length,
       version: nextVersion,
       visibility: updated.visibility,
     },

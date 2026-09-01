@@ -51,7 +51,7 @@ const globalSettingsSections = [
   ['Home Assistant', 'settings-home-assistant'],
   ['GitHub', 'settings-github'],
   ['Unsplash API', 'settings-unsplash'],
-  ['Build environment', 'settings-build-environment'],
+  ['Advanced: legacy source builds', 'settings-build-environment'],
   ['FrameOS Cloud', 'settings-cloud'],
   ['System information', 'settings-system'],
   ['Custom fonts', 'settings-fonts'],

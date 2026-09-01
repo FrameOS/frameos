@@ -5,6 +5,7 @@ import {
   Check,
   KeyRound,
   Loader2,
+  Play,
   Send,
   Sparkles,
   Square,
@@ -27,6 +28,7 @@ import {
   stopAiChatTurn,
   streamAiChat,
   type AiChatHistoryItem,
+  type AiListingChanges,
 } from "../lib/ai-chat-client";
 import type { AiScenesEvent, SceneJson } from "../lib/ai-scenes-apply";
 import { renderSceneCheck } from "../lib/scene-render-check";
@@ -68,8 +70,15 @@ const isOpen = (line: ToolLine) => line.status === "start" || line.status === "p
 const RECOVERY_POLL_MS = 20 * 1000;
 const RECOVERY_POLL_ATTEMPTS = 12;
 
-/** The frame the render check drew, ready for an <img>. */
-type RenderPreview = { src: string; width: number; height: number };
+/** The frame the render check drew, ready for an <img>, together with the
+ * scenes it was drawn from — "Show in preview" runs exactly those. */
+type RenderPreview = {
+  src: string;
+  width: number;
+  height: number;
+  scenes: SceneJson[];
+  sceneId: string;
+};
 
 type ChatMessage = {
   id: string;
@@ -105,6 +114,12 @@ export type SceneAiPanelProps = {
    * ended up selecting, which the render check then targets. */
   onScenes: (event: AiScenesEvent) => void | string | null;
   signedIn: boolean;
+  /** The account switched AI features off (Account → AI usage). Known before
+   * the first turn, so the panel says so up front instead of accepting a
+   * prompt and refusing it after the round trip. */
+  aiDisabled?: boolean | undefined;
+  /** Where to go to turn AI back on. */
+  aiSettingsUrl?: string | undefined;
   /** Submitted as the first turn as soon as the panel mounts (signed in), or
    * pre-filled into the prompt box (signed out). */
   initialPrompt?: string | undefined;
@@ -118,7 +133,30 @@ export type SceneAiPanelProps = {
   loginUrl?: string | undefined;
   /** One line telling the user where their saves go. */
   saveHint?: string | undefined;
+  /** The draft's listing as the editor holds it, sent with each turn. */
+  getListing?: (() => AiListingChanges | null) | undefined;
+  /** The AI edited the listing (description, tags, category, minimum
+   * FrameOS version): applied to the draft like scenes, published by Save. */
+  onListing?: ((changes: AiListingChanges) => void) | undefined;
+  /** A conversation to reopen (a restored draft): the transcript as it was,
+   * and the chat it belongs to so the next turn continues it. */
+  initialChat?: AiChatSnapshot | undefined;
+  /** The transcript changed, as much of it as is worth keeping — text only,
+   * no rendered frames (each is a full PNG). */
+  onChatChange?: ((chat: AiChatSnapshot) => void) | undefined;
+  /** Offered under a rendered frame as "Show in preview": run exactly the
+   * scenes that frame was drawn from in the Preview panel. */
+  onShowInPreview?: ((snapshot: RenderedScenes) => void) | undefined;
 };
+
+/** A transcript worth storing: what the panel can be handed back later. */
+export type AiChatSnapshot = {
+  chatId: string;
+  messages: { role: "user" | "assistant"; content: string; auto?: boolean }[];
+};
+
+/** The scenes behind one rendered frame in the transcript. */
+export type RenderedScenes = { scenes: SceneJson[]; sceneId: string };
 
 function newId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -359,6 +397,8 @@ function ToolActivity({ tools, streaming }: { tools: ToolLine[]; streaming: bool
 // tool activity, and the scenes the agent delivers, applied to the editor
 // through onScenes. State stays in React — this app doesn't use kea.
 export function SceneAiPanel({
+  aiDisabled = false,
+  aiSettingsUrl,
   storeSceneId,
   getScenes,
   selectedSceneId,
@@ -372,13 +412,28 @@ export function SceneAiPanel({
   settingsUrl,
   loginUrl = "/login",
   saveHint,
+  getListing,
+  onListing,
+  initialChat,
+  onChatChange,
+  onShowInPreview,
 }: SceneAiPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // A restored draft reopens its transcript (message ids are ours, not the
+  // server's, so they are minted fresh) and keeps its chat id, so the next
+  // turn continues the same conversation server-side.
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    (initialChat?.messages ?? []).map((message) => ({
+      content: message.content,
+      id: newId(),
+      role: message.role,
+      ...(message.auto ? { auto: true } : {}),
+    })),
+  );
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [fatal, setFatal] = useState<FatalState | null>(null);
-  const [chatId, setChatId] = useState<string>(() => newId());
+  const [chatId, setChatId] = useState<string>(() => initialChat?.chatId || newId());
   const [returnTo, setReturnTo] = useState<string>("");
   const abortRef = useRef<AbortController | null>(null);
   // The server-side turn behind the in-flight request (for Stop + recovery).
@@ -393,8 +448,8 @@ export function SceneAiPanel({
   chatIdRef.current = chatId;
 
   // Always the freshest props for the in-flight turn (it spans awaits).
-  const propsRef = useRef({ getScenes, height, mode, onScenes, selectedSceneId, storeSceneId, width });
-  propsRef.current = { getScenes, height, mode, onScenes, selectedSceneId, storeSceneId, width };
+  const propsRef = useRef({ getListing, getScenes, height, mode, onListing, onScenes, selectedSceneId, storeSceneId, width });
+  propsRef.current = { getListing, getScenes, height, mode, onListing, onScenes, selectedSceneId, storeSceneId, width };
 
   useEffect(() => {
     setReturnTo(window.location.href);
@@ -406,6 +461,35 @@ export function SceneAiPanel({
       element.scrollTop = element.scrollHeight;
     }
   }, [messages, status]);
+
+  // The transcript, handed to whoever wants to keep it (the new-scene page
+  // stores it with its draft). Settled messages only, and text only: the
+  // rendered frames are megabytes of PNG and are not worth storing.
+  const onChatChangeRef = useRef(onChatChange);
+  onChatChangeRef.current = onChatChange;
+  const storedChatRef = useRef("");
+  useEffect(() => {
+    const handler = onChatChangeRef.current;
+    if (!handler) {
+      return;
+    }
+    const snapshot: AiChatSnapshot = {
+      chatId,
+      messages: messages
+        .filter((message) => message.content.trim() && !message.streaming && !message.error)
+        .map((message) => ({
+          content: message.content,
+          role: message.role,
+          ...(message.auto ? { auto: true } : {}),
+        })),
+    };
+    const json = JSON.stringify(snapshot);
+    if (snapshot.messages.length === 0 || json === storedChatRef.current) {
+      return;
+    }
+    storedChatRef.current = json;
+    handler(snapshot);
+  }, [messages, chatId]);
 
   const updateMessage = useCallback((id: string, patch: Partial<ChatMessage> | ((message: ChatMessage) => Partial<ChatMessage>)) => {
     setMessages((current) =>
@@ -420,7 +504,7 @@ export function SceneAiPanel({
   const submit = useCallback(
     async (rawPrompt: string, round = 0): Promise<void> => {
       const prompt = rawPrompt.trim();
-      if (!prompt || busyRef.current || !signedIn) {
+      if (!prompt || busyRef.current || !signedIn || aiDisabled) {
         return;
       }
       busyRef.current = true;
@@ -451,6 +535,7 @@ export function SceneAiPanel({
       const { getScenes: readScenes, onScenes: applyScenes, selectedSceneId: selected, storeSceneId: storeId } =
         propsRef.current;
       const editorScenes = readScenes() ?? [];
+      const draftListing = propsRef.current.getListing?.() ?? null;
       const targetScene =
         editorScenes.find((scene) => scene.id === selected) ?? editorScenes[0];
 
@@ -468,6 +553,7 @@ export function SceneAiPanel({
             surface: propsRef.current.mode === "new" ? "store-new" : "store",
             ...(targetScene ? { scene: targetScene, sceneId: targetScene.id } : {}),
             ...(editorScenes.length > 0 ? { scenes: editorScenes } : {}),
+            ...(draftListing ? { listing: draftListing } : {}),
           },
           {
             onEvent: (event) => {
@@ -530,6 +616,9 @@ export function SceneAiPanel({
                     }
                     return { tools };
                   });
+                  break;
+                case "listing":
+                  propsRef.current.onListing?.(event.listing);
                   break;
                 case "scenes": {
                   const applied = applyScenes(event);
@@ -626,10 +715,13 @@ export function SceneAiPanel({
         // validated as JSON can still fail at render time.
         setStatus("Checking that the scene renders…");
         const { getScenes: readLatest, height: checkHeight, width: checkWidth } = propsRef.current;
+        // Kept beside the frame it produces: "Show in preview" runs these
+        // exact scenes, whatever the editor holds by then.
+        const checkedScenes = readLatest() ?? editorScenes;
         const check = await renderSceneCheck({
           height: checkHeight,
           sceneId: deliveredSceneId,
-          scenes: readLatest() ?? editorScenes,
+          scenes: checkedScenes,
           width: checkWidth,
         });
         setStatus(null);
@@ -649,6 +741,8 @@ export function SceneAiPanel({
         const preview: RenderPreview | null = check.pngDataUrl
           ? {
               height: check.height > 0 ? check.height : checkHeight,
+              sceneId: deliveredSceneId,
+              scenes: checkedScenes,
               src: check.pngDataUrl,
               width: check.width > 0 ? check.width : checkWidth,
             }
@@ -674,7 +768,7 @@ export function SceneAiPanel({
       busyRef.current = false;
       setBusy(false);
     },
-    [signedIn, updateMessage],
+    [aiDisabled, signedIn, updateMessage],
   );
 
   // The entry points hand over a prompt (?ai=… / ?prompt=…): send it right
@@ -728,8 +822,13 @@ export function SceneAiPanel({
 
   const chips = suggestions ?? (mode === "new" ? newSceneSuggestions : existingSceneSuggestions);
   const signInHref = `${loginUrl}${loginUrl.includes("?") ? "&" : "?"}return_to=${encodeURIComponent(returnTo || "/")}`;
-  const placeholder =
-    mode === "new"
+  // A composer you can type into and send, that then always fails, is worse
+  // than one that is plainly closed. Both the switch and the sign-in gate are
+  // known before the first turn, so neither should be discovered by failing.
+  const composerBlocked = !signedIn || aiDisabled;
+  const placeholder = aiDisabled
+    ? "AI features are off for this account"
+    : mode === "new"
       ? "Describe the scene, e.g. “A clock with the date underneath, big white text on dark green”"
       : "Ask for a change, e.g. “make the title text bigger”";
 
@@ -738,10 +837,27 @@ export function SceneAiPanel({
       <header className="ai-panel__header">
         <Sparkles aria-hidden size={16} />
         <span>AI assistant</span>
-        <span className="pill ai-panel__beta">Beta</span>
       </header>
 
       <div className="ai-panel__transcript" ref={transcriptRef}>
+        {signedIn && aiDisabled ? (
+          <div className="notice ai-panel__notice">
+            <strong className="ai-panel__notice-title">
+              <Sparkles aria-hidden size={14} />
+              AI features are switched off.
+            </strong>
+            <p className="copy">
+              You turned AI off for this account, so nothing here can run — and
+              nothing can cost you anything.
+            </p>
+            {aiSettingsUrl ? (
+              <a className="button button--small" href={aiSettingsUrl}>
+                Turn AI back on
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+
         {!signedIn ? (
           <div className="notice ai-panel__notice">
             <strong>Sign in to use the AI.</strong>
@@ -824,7 +940,24 @@ export function SceneAiPanel({
                   {message.check.text}
                 </span>
               ) : null}
-              {message.preview ? <RenderPreviewImage preview={message.preview} /> : null}
+              {message.preview ? (
+                <div className="ai-panel__render-block">
+                  <RenderPreviewImage preview={message.preview} />
+                  {onShowInPreview ? (
+                    <button
+                      className="ai-panel__render-open"
+                      onClick={() => {
+                        const { sceneId: renderedSceneId, scenes } = message.preview!;
+                        onShowInPreview({ sceneId: renderedSceneId, scenes });
+                      }}
+                      type="button"
+                    >
+                      <Play aria-hidden size={12} />
+                      Show in preview
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ),
         )}
@@ -886,7 +1019,7 @@ export function SceneAiPanel({
         <textarea
           aria-label="Message the AI"
           className="ai-panel__input"
-          disabled={!signedIn}
+          disabled={composerBlocked}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
@@ -904,7 +1037,7 @@ export function SceneAiPanel({
           ) : (
             <button
               className="button button--small button-primary"
-              disabled={!signedIn || !input.trim()}
+              disabled={composerBlocked || !input.trim()}
               type="submit"
             >
               <Send aria-hidden size={14} />

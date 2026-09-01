@@ -26,9 +26,22 @@ export type AiChatEvent =
       title?: string | undefined;
       scenes: Record<string, unknown>[];
     }
+  | {
+      /** A listing edit for the draft (description, tags, category, minimum
+       * FrameOS version): applied like scenes, published by Save. */
+      type: "listing";
+      listing: AiListingChanges;
+    }
   | { type: "done"; tool: string; reply: string }
   | { type: "error"; detail: string }
   | { type: "ping" };
+
+export type AiListingChanges = {
+  category?: string | null | undefined;
+  description?: string | null | undefined;
+  frameosVersion?: string | null | undefined;
+  tags?: string[] | undefined;
+};
 
 export type AiChatHistoryItem = { role: "user" | "assistant"; content: string };
 
@@ -46,6 +59,9 @@ export type AiChatRequest = {
   scene?: Record<string, unknown> | undefined;
   /** Every scene in the editor, for multi-scene context. */
   scenes?: Record<string, unknown>[] | undefined;
+  /** The draft's listing as the editor holds it (unsaved edits included),
+   * so the assistant edits what the user sees, not what was published. */
+  listing?: AiListingChanges | undefined;
   history?: AiChatHistoryItem[] | undefined;
 };
 
@@ -102,7 +118,7 @@ export function transportFailureMessage(elapsedMs: number, hadTurn: boolean): st
   return `${base} and could not be re-established. The assistant may still finish on its own — reload this chat in a minute to see its reply.`;
 }
 
-const eventTypes = new Set(["chat", "delta", "tool", "scenes", "done", "error", "ping"]);
+const eventTypes = new Set(["chat", "delta", "tool", "scenes", "listing", "done", "error", "ping"]);
 
 /** One NDJSON line → event, or null for blank/garbled lines. */
 export function parseAiChatLine(line: string): AiChatEvent | null {

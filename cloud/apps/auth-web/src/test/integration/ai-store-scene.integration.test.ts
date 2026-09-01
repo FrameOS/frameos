@@ -23,7 +23,8 @@ import { NextRequest } from "next/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSession, sessionCookieName } from "../../lib/session";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
-import { executeTool, type ScenesEvent, type ToolContext } from "../../lib/ai/tools";
+import { waitForPendingAiMetering } from "../../lib/billing";
+import { executeTool, type ListingEvent, type ScenesEvent, type ToolContext } from "../../lib/ai/tools";
 import type { ResponseInputItem } from "../../lib/ai/openai";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
@@ -74,6 +75,7 @@ let userCounter = 0;
 let sceneCounter = 0;
 
 afterAll(async () => {
+  await waitForPendingAiMetering();
   await db.$client.end({ timeout: 5 });
 });
 
@@ -81,6 +83,9 @@ beforeEach(async () => {
   resetRateLimitForTests();
   cookieJar.clear();
   capturedInputs.length = 0;
+  // A finished turn meters itself in the background, after the response has
+  // been read: truncating while that insert is open deadlocks against it.
+  await waitForPendingAiMetering();
   const tables = await db.execute<{ tablename: string }>(
     sql`select tablename from pg_tables where schemaname = 'public'`,
   );
@@ -283,6 +288,63 @@ describe("save_scene on a store scene", () => {
       .from(auditEvents)
       .where(and(eq(auditEvents.eventType, "store.scene_forked"), eq(auditEvents.accountId, forker.accountId)));
     expect(event?.metadata).toMatchObject({ sourceSceneId: source.id, via: "ai_chat" });
+  });
+});
+
+describe("update_scene_listing", () => {
+  it("delivers a listing edit to the draft and writes nothing to the store", async () => {
+    const owner = await signIn(false);
+    const { scene } = await storeScene(owner.accountId, { name: "Visited world map" });
+    const events: ListingEvent[] = [];
+
+    const result = JSON.parse(
+      await executeTool(
+        "update_scene_listing",
+        { description: "Every country I have set foot in, in ink.", tags: ["Maps", "travel"] },
+        {
+          accountId: owner.accountId,
+          currentListing: { description: "Counts things", tags: ["counter"] },
+          db,
+          emitListing: (event) => {
+            events.push(event);
+          },
+          emitScenes: () => undefined,
+          prompt: "update the description",
+          storeSceneId: scene.id,
+        },
+      ),
+    ) as { listing: Record<string, unknown>; note: string; ok: boolean };
+    expect(result.ok).toBe(true);
+    expect(events).toEqual([
+      {
+        listing: { description: "Every country I have set foot in, in ink.", tags: ["maps", "travel"] },
+        type: "listing",
+      },
+    ]);
+    expect(result.note).toMatch(/Save publishes it/);
+
+    // The store is untouched until the user saves.
+    const [row] = await db.select().from(storeScenes).where(eq(storeScenes.id, scene.id));
+    expect(row).toMatchObject({ description: "Counts things", tags: ["counter"] });
+  });
+
+  it("shows the model the draft's listing, not the published one", async () => {
+    const owner = await signIn();
+    const { scene } = await storeScene(owner.accountId, { name: "Visited world map" });
+
+    const { response } = await chat({
+      listing: { description: "Draft text nobody saved yet", tags: ["maps"] },
+      prompt: "improve the description",
+      scene: renderScene("editor-1", "Visited world map"),
+      sceneId: "editor-1",
+      storeSceneId: scene.id,
+    });
+    expect(response.status).toBe(200);
+    const context = contextShownToModel();
+    expect(context).toContain("Listing description (the editor's draft): Draft text nobody saved yet");
+    expect(context).toContain("Tags: maps");
+    expect(context).not.toContain("Counts things");
+    expect(context).toContain("update_scene_listing edits the draft, and Save publishes it");
   });
 });
 

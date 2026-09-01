@@ -32,6 +32,7 @@ import {
   isJavaScriptCatalogApp,
   javascriptCatalogAppKeywords,
 } from '../../../../utils/sceneApps'
+import { confirmSceneBecomesCompiled } from '../../../../utils/sceneExecution'
 import { appCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
 import { frameEventsForScene } from '../../../../utils/frameEvents'
 import type { FrameScene, SceneApp } from '../../../../types'
@@ -804,7 +805,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         const nextSceneApps = installed.sceneApps
         if (nextSceneApps !== currentSceneApps) {
           currentSceneApps = nextSceneApps
-          actions.setSceneApps(nextSceneApps, true)
+          actions.setSceneApps(nextSceneApps, confirmSceneBecomesCompiled(values.scene, nextSceneApps))
         }
         return installed.app ? { keyword: installed.keyword, app: installed.app } : { keyword: appKeyword, app }
       }
@@ -819,7 +820,8 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         if (value === 'code') {
           newNode.type = 'code'
           newNode.style = { width: 300, height: 119 }
-          newNode.data = { code: '', codeArgs: [], codeOutputs: [] } satisfies CodeNodeData
+          // JavaScript from the start: a Nim `code` field is the legacy compiled path.
+          newNode.data = { codeJS: '', codeArgs: [], codeOutputs: [] } satisfies CodeNodeData
         } else if (value.startsWith('dispatch/')) {
           const eventKeyword = value.substring(9)
           newNode.type = 'dispatch'
@@ -887,7 +889,7 @@ export const newNodePickerLogic = kea<newNodePickerLogicType>([
         const codeArgs = (values.nodesById[nodeId]?.data as CodeNodeData)?.codeArgs ?? []
 
         newNode.data = {
-          code: value.startsWith('code/') ? value.substring(5) : '',
+          codeJS: value.startsWith('code/') ? value.substring(5) : '',
           codeArgs: [],
           codeOutputs: [],
         }

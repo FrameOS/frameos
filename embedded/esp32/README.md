@@ -433,6 +433,34 @@ millivolts believed (`suspect: true`) — so "deep sleep silently off" and
 push or poll that changes anything logs `settings:cloud` / `settings:sync`
 `applied` with the keys and values that changed.
 
+**The reading itself** (`fos_battery_filter.c`, host-tested by
+`main/tests/test_fos_battery_filter.c`) stopped being a mean. The old read
+averaged 16 back-to-back samples, and two different faults both came out of
+that as a confident, far-too-low number: a *minority* of samples returning
+near zero (the mean is dragged down in proportion — four zeros in sixteen
+turn a 4018 mV cell into 3013 mV), and the *whole* burst reading low because
+the divider had not finished charging (16 samples span well under a
+millisecond, so they all sit at the same point on the ramp and no average
+recovers the truth). Across 2026-08-29..31, 20 of 293 on-battery samples on
+E1002 and 44 of 396 on E1004 were wrong this way, the worst reading 1050 mV
+against a true ~4018 mV. The read now takes rounds of 9 samples spread over
+a few milliseconds, takes the **median** inside a round (killing the
+dropouts) and the **highest** round across the read (killing the ramp) — the
+maximum is the right estimator because every way this read goes wrong pulls
+it down and none pushes it up, the same reasoning `fos_client.c` already
+used when it kept the higher of two whole reads. A settled divider agrees
+within 32 counts on the second round and stops there, so a healthy cell
+costs about what it always did.
+
+The `metrics` sample reports the **believed** millivolts, not the bare ADC
+read: the hysteresis above already refused to act on an implausible drop, but
+the metrics line went straight to the ADC, so a frame that correctly kept
+rendering still told the cloud it was at 1 % and the battery graph grew a
+cliff that never happened (E1004 reported 3062 mV at 16:38 and 3942 mV
+fifteen minutes either side, 2026-08-31). When the two differ the raw sample
+is reported alongside as `batteryRawMillivolts`, so a misbehaving divider
+stays visible instead of being smoothed into silence.
+
 A pass that ends in an awake hold (a verb arrived, `keep_awake`) no longer
 renders again when the hold ends: the next panel refresh's due time is kept
 for every wait, so the follow-up pass checks in and sleeps until it. And

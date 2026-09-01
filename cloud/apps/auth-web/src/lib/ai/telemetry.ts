@@ -93,6 +93,9 @@ export type AiTurnRecord = {
   durationMs: number;
   rounds: number;
   toolCalls: string[];
+  // Tools whose arguments never parsed as JSON, so they never ran. A silent
+  // one of these is what makes a model apologise for a scene it did send.
+  toolArgErrors: string[];
   deliveredTool: string;
   usage: ResponseUsage;
   // How often the browser's stream dropped and how often it came back.
@@ -118,7 +121,53 @@ export function captureAiTurn(record: AiTurnRecord) {
     resumes: record.resumes,
     rounds: record.rounds,
     surface: record.surface,
+    tool_arg_errors: record.toolArgErrors,
     tool_calls: record.toolCalls,
     turn_id: record.turnId,
+  });
+}
+
+export type SceneConversionRecord = {
+  /** The account, or "anonymous" — the converter needs no sign-in. */
+  distinctId: string;
+  requestId: string;
+  scenes: number;
+  modelCalls: number;
+  model?: string | undefined;
+  keySource: "request" | "account" | "shared" | "none";
+  codeNodesDeterministic: number;
+  codeNodesModel: number;
+  apps: number;
+  needsModel: number;
+  needsManualPort: number;
+  lintErrors: number;
+  renderErrors: number | null;
+  durationMs: number;
+  usage?: ResponseUsage | { inputTokens: number; outputTokens: number; reasoningTokens: number } | undefined;
+  error?: string | undefined;
+};
+
+// One POST /api/scenes/convert, end to end: how much pass 1 got, how much
+// the model got, what was left, and whether the result lints and renders.
+// The number of conversions that leave something behind is the measure of
+// the converter; no scene content is sent.
+export function captureSceneConversion(record: SceneConversionRecord) {
+  void capture(record.distinctId, "scene_convert", {
+    $ai_input_tokens: record.usage?.inputTokens ?? 0,
+    $ai_model: record.model ?? null,
+    $ai_output_tokens: record.usage?.outputTokens ?? 0,
+    $ai_trace_id: record.requestId,
+    apps: record.apps,
+    code_nodes_deterministic: record.codeNodesDeterministic,
+    code_nodes_model: record.codeNodesModel,
+    duration_ms: record.durationMs,
+    error: record.error ?? null,
+    key_source: record.keySource,
+    lint_errors: record.lintErrors,
+    model_calls: record.modelCalls,
+    needs_manual_port: record.needsManualPort,
+    needs_model: record.needsModel,
+    render_errors: record.renderErrors,
+    scenes: record.scenes,
   });
 }

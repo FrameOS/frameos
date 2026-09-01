@@ -1,6 +1,6 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import {
-  storeSceneImages,
+  storeSceneVersionImages,
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
@@ -10,30 +10,21 @@ import { getScenesBaseUrl } from "../../../../../src/lib/env";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 import {
-  blobNamespaces,
-  readBlob,
-  storeBlob,
-} from "../../../../../src/lib/blobs";
-import {
   jsonError,
   parseOptionalString,
   readJsonObject,
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
-import { normalizeCategory } from "../../../../../src/lib/categories";
-import { moderateStoreContent } from "../../../../../src/lib/moderation";
+import { readBlob } from "../../../../../src/lib/blobs";
 import {
-  maxSceneZipBytes,
-  normalizeFrameosVersion,
-  normalizeTags,
-  rebuildZipWithFrameosVersion,
-  sceneSummary,
-  sceneVisibilities,
-  validateSceneZip,
-} from "../../../../../src/lib/store";
+  listingForVersion,
+  moderateListingChanges,
+} from "../../../../../src/lib/store-listing";
+import { imageSetForVersion } from "../../../../../src/lib/store-images";
+import { sceneSummary, sceneVisibilities } from "../../../../../src/lib/store";
 import { loadOwnedScene } from "../../../../../src/lib/store-owner";
 import {
-  maxPrivateSceneBytesPerAccount,
+  accountLimits,
   privateSceneBytesForAccount,
   sceneBytesTotal,
 } from "../../../../../src/lib/usage";
@@ -44,8 +35,9 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 
 // One owned scene with what the /s/[slug] page shows its owner: the
 // summary, every version (yanked ones included — yank hides from "latest",
-// it does not delete) and the gallery image ids. The content itself stays
-// at GET /api/store/scenes/{id}/scenes.json?version=N.
+// it does not delete) with the listing and image set it recorded, and the
+// latest version's images in full. The content itself stays at
+// GET /api/store/scenes/{id}/scenes.json?version=N.
 export async function GET(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "account:scene-detail", {
     limit: 240,
@@ -79,76 +71,107 @@ export async function GET(request: NextRequest, context: RouteContext) {
   if (!scene) {
     return jsonError("scene_not_found", 404);
   }
-  const [versions, images] = await Promise.all([
-    db
-      .select({
-        createdAt: storeSceneVersions.createdAt,
-        frameosVersion: storeSceneVersions.frameosVersion,
-        message: storeSceneVersions.message,
-        riskFlags: storeSceneVersions.riskFlags,
-        sha256: storeSceneVersions.sha256,
-        sizeBytes: storeSceneVersions.sizeBytes,
-        version: storeSceneVersions.version,
-        yankedAt: storeSceneVersions.yankedAt,
-      })
-      .from(storeSceneVersions)
-      .where(eq(storeSceneVersions.sceneId, scene.id))
-      .orderBy(desc(storeSceneVersions.version)),
-    db
-      .select({
-        contentType: storeSceneImages.contentType,
-        createdAt: storeSceneImages.createdAt,
-        id: storeSceneImages.id,
-        position: storeSceneImages.position,
-        sizeBytes: storeSceneImages.sizeBytes,
-      })
-      .from(storeSceneImages)
-      .where(eq(storeSceneImages.sceneId, scene.id))
-      .orderBy(storeSceneImages.position, storeSceneImages.createdAt),
+  const versions = await db
+    .select({
+      category: storeSceneVersions.category,
+      createdAt: storeSceneVersions.createdAt,
+      description: storeSceneVersions.description,
+      frameosVersion: storeSceneVersions.frameosVersion,
+      id: storeSceneVersions.id,
+      listingRecorded: storeSceneVersions.listingRecorded,
+      message: storeSceneVersions.message,
+      riskFlags: storeSceneVersions.riskFlags,
+      sha256: storeSceneVersions.sha256,
+      sizeBytes: storeSceneVersions.sizeBytes,
+      tags: storeSceneVersions.tags,
+      version: storeSceneVersions.version,
+      yankedAt: storeSceneVersions.yankedAt,
+    })
+    .from(storeSceneVersions)
+    .where(eq(storeSceneVersions.sceneId, scene.id))
+    .orderBy(desc(storeSceneVersions.version));
+  const [images, links] = await Promise.all([
+    imageSetForVersion(db, scene.id, null),
+    versions.length
+      ? db
+          .select({
+            imageSha256: storeSceneVersionImages.imageSha256,
+            versionId: storeSceneVersionImages.versionId,
+          })
+          .from(storeSceneVersionImages)
+          .where(
+            inArray(
+              storeSceneVersionImages.versionId,
+              versions.map((version) => version.id),
+            ),
+          )
+          .orderBy(asc(storeSceneVersionImages.position))
+      : [],
   ]);
-  const hasPrimaryPreview =
-    scene.previewImage !== null || scene.previewObjectKey !== null;
+  const linksByVersion = new Map<string, string[]>();
+  for (const link of links) {
+    const list = linksByVersion.get(link.versionId) ?? [];
+    list.push(link.imageSha256);
+    linksByVersion.set(link.versionId, list);
+  }
+  const latestImages = images.map((image) => image.sha256);
   return NextResponse.json(
     {
       images: images.map((image) => ({
         content_type: image.contentType,
-        created_at: image.createdAt.toISOString(),
-        id: image.id,
-        position: image.position,
+        height: image.height,
+        sha256: image.sha256,
         size_bytes: image.sizeBytes,
-        url: `/api/store/scenes/${scene.id}/images/${image.id}`,
+        url: `/api/store/scenes/${scene.id}/images/${image.sha256}`,
+        width: image.width,
       })),
       scene: {
         ...sceneSummary(scene),
-        has_preview: hasPrimaryPreview || images.length > 0,
-        preview_url: hasPrimaryPreview
-          ? `/api/store/scenes/${scene.id}/image?v=${scene.latestVersion}`
-          : (images[0] && `/api/store/scenes/${scene.id}/images/${images[0].id}`) ?? null,
+        has_preview: images.length > 0,
+        preview_url:
+          images.length > 0
+            ? `/api/store/scenes/${scene.id}/image?v=${scene.latestVersion}`
+            : null,
         pulled_reason: scene.pulledReason,
         share_url: scene.shareToken
           ? `${getScenesBaseUrl()}/s/${scene.slug}?share=${scene.shareToken}`
           : null,
         url: `${getScenesBaseUrl()}/s/${scene.slug}`,
       },
-      versions: versions.map((version) => ({
-        created_at: version.createdAt.toISOString(),
-        frameos_version: version.frameosVersion,
-        message: version.message,
-        risk_flags: version.riskFlags,
-        sha256: version.sha256,
-        size_bytes: version.sizeBytes,
-        version: version.version,
-        yanked: version.yankedAt !== null,
-      })),
+      versions: versions.map((version) => {
+        const listing = listingForVersion(version, scene);
+        return {
+          created_at: version.createdAt.toISOString(),
+          frameos_version: listing.frameosVersion,
+          // A version published before image sets were recorded shows the
+          // latest set, as imageSetForVersion does.
+          images: version.listingRecorded
+            ? (linksByVersion.get(version.id) ?? [])
+            : latestImages,
+          listing: {
+            category: listing.category,
+            description: listing.description,
+            frameos_version: listing.frameosVersion,
+            tags: listing.tags,
+          },
+          message: version.message,
+          risk_flags: version.riskFlags,
+          sha256: version.sha256,
+          size_bytes: version.sizeBytes,
+          version: version.version,
+          yanked: version.yankedAt !== null,
+        };
+      }),
     },
     { headers: { "cache-control": "no-store" } },
   );
 }
 
-// Owner management of a published scene from the web: visibility toggle,
-// description/tags/minimum FrameOS version edit, delete. Moderation state
-// (status/featured) is admin-only and lives under /api/admin/scenes.
-
+// Owner management of a scene from the web that is NOT part of a version:
+// the visibility toggle, and delete. The listing (description, tags,
+// category, minimum FrameOS version) and the images are published with a
+// version — POST …/content. Moderation state (status/featured) is
+// admin-only and lives under /api/admin/scenes.
 export async function PATCH(request: NextRequest, context: RouteContext) {
   const { db, errorResponse, scene, session } = await loadOwnedScene(
     request,
@@ -159,107 +182,54 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   const body = await readJsonObject(request);
-  const changes: Partial<{
-    category: string | null;
-    description: string | null;
-    frameosVersion: string | null;
-    latestVersion: number;
-    tags: string[];
-    updatedAt: Date;
-    visibility: string;
-  }> = {};
-
   const visibility = parseOptionalString(body.visibility);
-  if (visibility !== undefined) {
-    if (!sceneVisibilities.has(visibility)) {
-      return jsonError("invalid_visibility", 400);
-    }
-    // A pulled scene stays hidden regardless; flipping visibility on it is
-    // confusing at best, so reject it outright.
-    if (scene.status === "pulled") {
-      return jsonError("scene_pulled", 403);
-    }
-    // Public scenes are quota-free, so making one private moves its bytes
-    // back onto the meter — refuse the flip when it would land the account
-    // over quota instead of letting the toggle dodge every other check.
-    if (visibility === "private" && scene.visibility === "public") {
-      const [privateBytes, flippedBytes] = await Promise.all([
-        privateSceneBytesForAccount(db, session.accountId!),
-        sceneBytesTotal(db, scene.id),
-      ]);
-      if (privateBytes + flippedBytes > maxPrivateSceneBytesPerAccount) {
-        return jsonError("storage_quota_exceeded", 403, {
-          max_bytes: maxPrivateSceneBytesPerAccount,
-          private_bytes: Math.round(privateBytes),
-          scene_bytes: Math.round(flippedBytes),
-        });
-      }
-    }
-    changes.visibility = visibility;
-  }
-
-  if (typeof body.description === "string" || body.description === null) {
-    changes.description =
-      typeof body.description === "string"
-        ? body.description.slice(0, 2000)
-        : null;
-  }
-
-  if (body.tags !== undefined) {
-    const tags = normalizeTags(body.tags);
-    if (tags === undefined) {
-      return jsonError("invalid_tags", 400);
-    }
-    changes.tags = tags;
-  }
-
-  // Category is a fixed taxonomy slug (or null to clear), so unlike tags it
-  // needs no moderation pass.
-  if (body.category !== undefined) {
-    const category = normalizeCategory(body.category);
-    if (category === undefined) {
-      return jsonError("invalid_category", 400);
-    }
-    changes.category = category;
-  }
-
-  let requestedFrameosVersion: string | null | undefined;
-  if (Object.hasOwn(body, "frameosVersion")) {
-    if (body.frameosVersion === null || body.frameosVersion === "") {
-      requestedFrameosVersion = null;
-    } else {
-      requestedFrameosVersion = normalizeFrameosVersion(body.frameosVersion);
-      if (requestedFrameosVersion === undefined) {
-        return jsonError("invalid_frameos_version", 400);
-      }
-    }
-    changes.frameosVersion = requestedFrameosVersion;
-  }
-
-  if (Object.keys(changes).length === 0) {
+  if (visibility === undefined) {
     return jsonError("nothing_to_update", 400);
   }
+  if (!sceneVisibilities.has(visibility)) {
+    return jsonError("invalid_visibility", 400);
+  }
+  // A pulled scene stays hidden regardless; flipping visibility on it is
+  // confusing at best, so reject it outright.
+  if (scene.status === "pulled") {
+    return jsonError("scene_pulled", 403);
+  }
+  // Public scenes are quota-free, so making one private moves its bytes
+  // back onto the meter — refuse the flip when it would land the account
+  // over quota instead of letting the toggle dodge every other check.
+  if (visibility === "private" && scene.visibility === "public") {
+    const [privateBytes, flippedBytes] = await Promise.all([
+      privateSceneBytesForAccount(db, session.accountId!),
+      sceneBytesTotal(db, scene.id),
+    ]);
+    const { privateSceneBytes: maxBytes } = await accountLimits(
+      db,
+      session.accountId!,
+    );
+    if (privateBytes + flippedBytes > maxBytes) {
+      return jsonError("storage_quota_exceeded", 403, {
+        max_bytes: maxBytes,
+        private_bytes: Math.round(privateBytes),
+        scene_bytes: Math.round(flippedBytes),
+      });
+    }
+  }
 
-  // Edits that (will) show on public pages pass the same moderation gate as
-  // publishing: a changed description or tags, or flipping a scene public
-  // re-checks the whole listing (name + description + preview image).
-  const makingPublic =
-    changes.visibility === "public" && scene.visibility !== "public";
-  const editedDescription = changes.description;
-  const editedTags = changes.tags?.length ? changes.tags.join(" ") : undefined;
-  if (makingPublic || typeof editedDescription === "string" || editedTags) {
-    const moderation = await moderateStoreContent({
-      texts: makingPublic
-        ? [scene.name, editedDescription ?? scene.description, editedTags]
-        : [editedDescription, editedTags],
-      ...(makingPublic && scene.previewImage
-        ? {
-            image: {
-              content: scene.previewImage,
-              contentType: scene.previewImageType ?? "image/jpeg",
-            },
-          }
-        : {}),
+  // Flipping a scene public re-checks the whole listing (name +
+  // description + cover) through the same gate publishing uses.
+  const makingPublic = visibility === "public" && scene.visibility !== "public";
+  if (makingPublic) {
+    const [cover] = await imageSetForVersion(db, scene.id, null);
+    const coverBytes = cover ? await readBlob(cover) : undefined;
+    const moderation = await moderateListingChanges({
+      changes: {},
+      makingPublic,
+      scene: {
+        description: scene.description,
+        name: scene.name,
+        previewImage: coverBytes ?? null,
+        previewImageType: cover?.contentType ?? null,
+      },
     });
     if (!moderation.ok) {
       if (moderation.error === "content_rejected") {
@@ -281,85 +251,16 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
   }
 
-  const frameosVersionChanged =
-    requestedFrameosVersion !== undefined &&
-    requestedFrameosVersion !== scene.frameosVersion;
-  let nextVersionContent: Buffer | undefined;
-  if (frameosVersionChanged) {
-    const [latest] = await db
-      .select({
-        content: storeSceneVersions.content,
-        objectKey: storeSceneVersions.objectKey,
-      })
-      .from(storeSceneVersions)
-      .where(
-        and(
-          eq(storeSceneVersions.sceneId, scene.id),
-          eq(storeSceneVersions.version, scene.latestVersion),
-        ),
-      )
-      .limit(1);
-    const latestContent = await readBlob(latest);
-    if (!latestContent) {
-      return jsonError("version_not_found", 404);
-    }
-    nextVersionContent = rebuildZipWithFrameosVersion(
-      Buffer.from(latestContent),
-      requestedFrameosVersion ?? null,
-    );
-    if (!nextVersionContent) {
-      return jsonError("invalid_scene_zip", 500);
-    }
-    if (nextVersionContent.length > maxSceneZipBytes) {
-      return jsonError("scene_too_large", 413, { max_bytes: maxSceneZipBytes });
-    }
-    const validated = validateSceneZip(nextVersionContent);
-    if (!validated.ok) {
-      return jsonError(validated.error, 400);
-    }
-    changes.latestVersion = scene.latestVersion + 1;
-  }
-
-  // Outside the transaction on purpose: the upload is a network call, and a
-  // transaction held open across it would pin a Postgres connection for its
-  // duration. A stored object with no row pointing at it is harmless (the
-  // key is its digest, so the next publish of the same bytes re-uses it).
-  const storedVersion =
-    frameosVersionChanged && nextVersionContent
-      ? await storeBlob(
-          blobNamespaces.sceneVersion,
-          nextVersionContent,
-          "application/zip",
-          { extension: "zip" },
-        )
-      : undefined;
-
-  const updated = await db.transaction(async (tx) => {
-    if (storedVersion) {
-      await tx.insert(storeSceneVersions).values({
-        contentType: "application/zip",
-        frameosVersion: requestedFrameosVersion ?? null,
-        objectKey: storedVersion.objectKey,
-        riskFlags: scene.riskFlags,
-        sceneId: scene.id,
-        sha256: storedVersion.sha256,
-        sizeBytes: storedVersion.sizeBytes,
-        version: scene.latestVersion + 1,
-      });
-    }
-    const [row] = await tx
-      .update(storeScenes)
-      .set({ ...changes, updatedAt: new Date() })
-      .where(eq(storeScenes.id, scene.id))
-      .returning();
-    return row;
-  });
-
+  const [updated] = await db
+    .update(storeScenes)
+    .set({ updatedAt: new Date(), visibility })
+    .where(eq(storeScenes.id, scene.id))
+    .returning();
   if (!updated) {
     return jsonError("scene_update_failed", 500);
   }
 
-  if (changes.visibility && changes.visibility !== scene.visibility) {
+  if (visibility !== scene.visibility) {
     await recordAuditEvent(db, {
       accountId: session.accountId,
       actor: {
@@ -367,24 +268,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         providerSubject: session.providerSubject,
       },
       eventType: "store.visibility_changed",
-      metadata: { name: scene.name, visibility: changes.visibility },
-      target: { sceneId: scene.id },
-    });
-  }
-
-  if (frameosVersionChanged) {
-    await recordAuditEvent(db, {
-      accountId: session.accountId,
-      actor: {
-        accountId: session.accountId,
-        providerSubject: session.providerSubject,
-      },
-      eventType: "store.frameos_version_changed",
-      metadata: {
-        frameosVersion: requestedFrameosVersion,
-        name: scene.name,
-        version: scene.latestVersion + 1,
-      },
+      metadata: { name: scene.name, visibility },
       target: { sceneId: scene.id },
     });
   }

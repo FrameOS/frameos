@@ -55,6 +55,16 @@ The FrameOS backend is where you set up your frames. You can run it continuously
 
 Read more in [the documentation](https://frameos.net/guide/backend).
 
+**Compiled scenes are deprecated.** FrameOS ships as released binaries and a
+deploy never compiles anything. A scene still on the legacy _compiled_ path
+(Nim code nodes or Nim app sources) does not run on that binary: convert it to
+an interpreted scene at
+[scenes.frameos.net/nim-converter](https://scenes.frameos.net/nim-converter)
+(or in the editor, or with the CLI in `cloud/packages/scene-convert`; see
+`docs/nim-to-js-conversion.md`). Until then such a scene still forces the
+old whole-frame source build on every deploy — `docs/legacy-source-builds.md`
+— which goes away one release after the converter shipped (2026-08-30).
+
 ### Quick install
 
 The easiest way to install the FrameOS backend on a Mac or Debian/Ubuntu Linux is to run the following installation script:
@@ -77,9 +87,9 @@ docker run -d -p 8989:8989 \
     frameos/frameos
 
 # SD card image generation works in the default container without Docker privileges.
-# If you want to speed up source builds with cross-compilation, enable Docker access.
-# This lets FrameOS spin up containers for the various build environments.
-# Alternatively, skip this, and configure a remote build server, or build on devices directly.
+# Deploys install released binaries and never compile, so the plain container above
+# is all a normal install needs. The variant below additionally hands the backend the
+# Docker socket for the deprecated per-frame source build (docs/legacy-source-builds.md).
 SECRET_KEY=$(openssl rand -base64 32)
 mkdir -p db
 mkdir -p /tmp/frameos-cross

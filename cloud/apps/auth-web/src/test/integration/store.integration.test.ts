@@ -6,13 +6,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   accounts,
   createDb,
-  storeSceneImages,
+  storeImages,
   storeSceneVersions,
   storeScenes,
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { readBlob } from "../../lib/blobs";
+import { imageSetForVersion } from "../../lib/store-images";
 import HomePage from "../../../app/store/page";
 import MyScenesPage from "../../../app/my-scenes/page";
 import { PATCH as adminPatchScene } from "../../../app/api/admin/scenes/[sceneId]/route";
@@ -22,18 +22,14 @@ import {
   PATCH as patchScene,
 } from "../../../app/api/account/scenes/[sceneId]/route";
 import { PATCH as patchVersion } from "../../../app/api/account/scenes/[sceneId]/versions/[version]/route";
-import { DELETE as deletePrimaryImage } from "../../../app/api/account/scenes/[sceneId]/image/route";
-import {
-  PATCH as reorderGalleryImages,
-  POST as addGalleryImage,
-} from "../../../app/api/account/scenes/[sceneId]/images/route";
-import { DELETE as deleteGalleryImage } from "../../../app/api/account/scenes/[sceneId]/images/[imageId]/route";
+import { POST as addGalleryImage } from "../../../app/api/account/scenes/[sceneId]/images/route";
 import { POST as forkScene } from "../../../app/api/account/scenes/[sceneId]/fork/route";
 import { POST as uploadScene } from "../../../app/api/account/scenes/upload/route";
 import { POST as publishScene } from "../../../app/api/store/publish/route";
 import { GET as getRepositoryJson } from "../../../app/api/store/repository.json/route";
 import { GET as downloadScene } from "../../../app/api/store/scenes/[sceneId]/download/route";
 import { GET as getSceneImage } from "../../../app/api/store/scenes/[sceneId]/image/route";
+import { GET as getGalleryImage } from "../../../app/api/store/scenes/[sceneId]/images/[imageId]/route";
 import { GET as getScenesJson } from "../../../app/api/store/scenes/[sceneId]/scenes.json/route";
 import { POST as previewProxy } from "../../../app/api/store/preview-proxy/route";
 import { POST as editSceneContent } from "../../../app/api/account/scenes/[sceneId]/content/route";
@@ -301,10 +297,6 @@ function ctx(sceneId: string) {
   return { params: Promise.resolve({ sceneId }) };
 }
 
-function imageCtx(sceneId: string, imageId: string) {
-  return { params: Promise.resolve({ imageId, sceneId }) };
-}
-
 const publishScopes = ["backend:link", "store:publish"];
 
 function uploadRequest(content: Buffer, headers: Record<string, string> = {}) {
@@ -317,6 +309,42 @@ function uploadRequest(content: Buffer, headers: Record<string, string> = {}) {
     headers,
     method: "POST",
   });
+}
+
+
+/** Registers image bytes for the scene and returns their digest. */
+async function registerImage(sceneId: string, bytes: Buffer): Promise<string> {
+  const response = await addGalleryImage(
+    request(`/api/account/scenes/${sceneId}/images`, "POST", {
+      body: { content_base64: bytes.toString("base64") },
+      headers: { origin: baseUrl },
+    }),
+    ctx(sceneId),
+  );
+  expect(response.status).toBe(200);
+  return ((await readJson(response)).image as Record<string, unknown>).sha256 as string;
+}
+
+/** Publishes a version from the web editor with the given parts. */
+async function saveVersion(sceneId: string, body: Record<string, unknown>) {
+  return editSceneContent(
+    request(`/api/account/scenes/${sceneId}/content`, "POST", {
+      body,
+      headers: { origin: baseUrl },
+    }),
+    ctx(sceneId),
+  );
+}
+
+async function imageShas(sceneId: string, version: number | null = null): Promise<string[]> {
+  return (await imageSetForVersion(db, sceneId, version)).map((image) => image.sha256);
+}
+
+async function zipImage(response: Response): Promise<Buffer | undefined> {
+  const { unzipSync } = await import("fflate");
+  const files = unzipSync(new Uint8Array(await response.arrayBuffer()));
+  const imagePath = Object.keys(files).find((name) => name.endsWith("image.jpg"));
+  return imagePath ? Buffer.from(files[imagePath]!) : undefined;
 }
 
 describe("store publish and distribution", () => {
@@ -426,27 +454,17 @@ describe("store publish and distribution", () => {
     });
   });
 
-  it("copies every image when a scene is forked", async () => {
+  it("links every image when a scene is forked, copying nothing", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const source = (
       await readJson(await publish(accessToken, { visibility: "public" }))
     ).scene as Record<string, unknown>;
     const sourceId = source.id as string;
-    const galleryImages = [
-      {
-        content: Buffer.from([0x89, 0x50, 0x4e, 0x47, 1]),
-        contentType: "image/png",
-        position: 1,
-        sceneId: sourceId,
-      },
-      {
-        content: Buffer.from([0xff, 0xd8, 0xff, 0xdb, 2]),
-        contentType: "image/jpeg",
-        position: 2,
-        sceneId: sourceId,
-      },
-    ];
-    await db.insert(storeSceneImages).values(galleryImages);
+    const png = await registerImage(sourceId, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 1, 1, 1]));
+    const jpeg = await registerImage(sourceId, Buffer.from([0xff, 0xd8, 0xff, 0xdb, 2, 2, 2, 2, 2, 2, 2, 2]));
+    const [cover] = await imageShas(sourceId);
+    expect((await saveVersion(sourceId, { images: [cover, png, jpeg] })).status).toBe(200);
+    const [rowsBefore] = await db.select({ count: sql<number>`count(*)::int` }).from(storeImages);
 
     const response = await forkScene(
       request(`/api/account/scenes/${sourceId}/fork`, "POST", {
@@ -462,47 +480,11 @@ describe("store publish and distribution", () => {
       visibility: "private",
     });
 
-    const copiedImages = await db
-      .select({
-        content: storeSceneImages.content,
-        contentType: storeSceneImages.contentType,
-        objectKey: storeSceneImages.objectKey,
-        position: storeSceneImages.position,
-      })
-      .from(storeSceneImages)
-      .where(eq(storeSceneImages.sceneId, forked.id as string))
-      .orderBy(storeSceneImages.position);
-    expect(
-      await Promise.all(
-        copiedImages.map(async (image) => ({
-          content: (await readBlob(image))!,
-          contentType: image.contentType,
-          position: image.position,
-        })),
-      ),
-    ).toEqual(
-      galleryImages.map(({ content, contentType, position }) => ({
-        content,
-        contentType,
-        position,
-      })),
-    );
-
-    const [sourcePreview, forkedPreview] = await Promise.all([
-      db
-        .select({ previewImage: storeScenes.previewImage })
-        .from(storeScenes)
-        .where(eq(storeScenes.id, sourceId))
-        .then(([row]) => row),
-      db
-        .select({ previewImage: storeScenes.previewImage })
-        .from(storeScenes)
-        .where(eq(storeScenes.id, forked.id as string))
-        .then(([row]) => row),
-    ]);
-    expect(forkedPreview?.previewImage).toEqual(sourcePreview?.previewImage);
+    // The same three digests in the same order, and not one new image row.
+    expect(await imageShas(forked.id as string)).toEqual([cover, png, jpeg]);
+    const [rowsAfter] = await db.select({ count: sql<number>`count(*)::int` }).from(storeImages);
+    expect(rowsAfter?.count).toBe(rowsBefore?.count);
   });
-
   it("offers the signed-in owner a 'My scenes' tab that lists their scenes", async () => {
     const { accessToken } = await linkClient(publishScopes);
     await publish(accessToken);
@@ -554,7 +536,7 @@ describe("store publish and distribution", () => {
     expect(emptyScenes.status).toBe(400);
   });
 
-  it("rejects previews and gallery uploads proven fully transparent", async () => {
+  it("rejects previews and image uploads proven fully transparent", async () => {
     const { accessToken } = await linkClient(publishScopes);
 
     // Publish-time: the zip's image.jpg is a fully transparent PNG.
@@ -568,12 +550,13 @@ describe("store publish and distribution", () => {
       "preview_image_fully_transparent",
     );
 
-    // Gallery route: same detector on the direct image upload path.
+    // Upload route: same detector on the direct image upload path.
     const scene = (await readJson(await publish(accessToken))).scene as Record<
       string,
       unknown
     >;
     const sceneId = scene.id as string;
+    const [before] = await db.select({ count: sql<number>`count(*)::int` }).from(storeImages);
     const added = await addGalleryImage(
       request(`/api/account/scenes/${sceneId}/images`, "POST", {
         body: { content_base64: transparentPng().toString("base64") },
@@ -585,66 +568,51 @@ describe("store publish and distribution", () => {
     expect((await readJson(added)).error).toBe(
       "preview_image_fully_transparent",
     );
-    const [galleryCount] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(storeSceneImages)
-      .where(eq(storeSceneImages.sceneId, sceneId));
-    expect(galleryCount?.count).toBe(0);
+    const [after] = await db.select({ count: sql<number>`count(*)::int` }).from(storeImages);
+    expect(after?.count).toBe(before?.count);
   });
-
-  it("versions the ZIP preview when the lead storefront image changes", async () => {
+  it("makes the image set part of the version: every change to it is a new version, and old versions keep theirs", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scene = (
       await readJson(await publish(accessToken, { visibility: "public" }))
     ).scene as Record<string, unknown>;
     const sceneId = scene.id as string;
+    const [cover] = await imageShas(sceneId);
+    expect(cover).toMatch(/^[0-9a-f]{64}$/);
 
-    const missingOrigin = await deletePrimaryImage(
-      request(`/api/account/scenes/${sceneId}/image`, "DELETE"),
+    // CSRF and sessions apply to the version route like any owner write.
+    const missingOrigin = await editSceneContent(
+      request(`/api/account/scenes/${sceneId}/content`, "POST", { body: { images: [] } }),
       ctx(sceneId),
     );
     expect(missingOrigin.status).toBe(403);
 
-    const removed = await deletePrimaryImage(
-      request(`/api/account/scenes/${sceneId}/image`, "DELETE", {
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
+    // Dropping the cover publishes v2 without an image; v1 is untouched.
+    const removed = await saveVersion(sceneId, { images: [] });
     expect(removed.status).toBe(200);
-
-    const [row] = await db
-      .select({
-        latestVersion: storeScenes.latestVersion,
-        previewImage: storeScenes.previewImage,
-        previewImageHeight: storeScenes.previewImageHeight,
-        previewImageType: storeScenes.previewImageType,
-        previewImageWidth: storeScenes.previewImageWidth,
-      })
-      .from(storeScenes)
-      .where(eq(storeScenes.id, sceneId));
-    expect(row).toEqual({
-      latestVersion: 2,
-      previewImage: null,
-      previewImageHeight: null,
-      previewImageType: null,
-      previewImageWidth: null,
-    });
+    expect(((await readJson(removed)).scene as Record<string, unknown>).version).toBe(2);
+    expect(await imageShas(sceneId)).toEqual([]);
+    expect(await imageShas(sceneId, 1)).toEqual([cover]);
 
     const image = await getSceneImage(
       request(`/api/store/scenes/${sceneId}/image`, "GET"),
       ctx(sceneId),
     );
     expect(image.status).toBe(404);
+    const oldCover = await getSceneImage(
+      request(`/api/store/scenes/${sceneId}/image?version=1`, "GET"),
+      ctx(sceneId),
+    );
+    expect(oldCover.status).toBe(200);
 
     const withoutImage = await downloadScene(
       request(`/api/store/scenes/${sceneId}/download`, "GET"),
       ctx(sceneId),
     );
-    const { unzipSync } = await import("fflate");
     expect(withoutImage.headers.get("x-scene-version")).toBe("2");
+    const { unzipSync } = await import("fflate");
     const filesWithoutImage = unzipSync(
-      new Uint8Array(await withoutImage.arrayBuffer()),
+      new Uint8Array(await withoutImage.clone().arrayBuffer()),
     );
     expect(
       Object.keys(filesWithoutImage).some((name) => name.endsWith("image.jpg")),
@@ -664,30 +632,19 @@ describe("store publish and distribution", () => {
       ctx(sceneId),
     );
     expect(original.headers.get("x-scene-version")).toBe("1");
-    const originalFiles = unzipSync(
-      new Uint8Array(await original.arrayBuffer()),
-    );
-    expect(
-      Object.keys(originalFiles).some((name) => name.endsWith("image.jpg")),
-    ).toBe(true);
+    expect(await zipImage(original)).toBeTruthy();
 
-    // The first gallery upload becomes the new ZIP preview. Its PNG bytes are
-    // kept intact even though FrameOS uses the conventional image.jpg path.
+    // A registered upload binds nothing by itself: the set changes only
+    // when a version is published with it. Its PNG bytes are kept intact
+    // even though FrameOS uses the conventional image.jpg path.
     const firstBytes = Buffer.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 1,
     ]);
-    const firstAdded = await addGalleryImage(
-      request(`/api/account/scenes/${sceneId}/images`, "POST", {
-        body: { content_base64: firstBytes.toString("base64") },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    expect(firstAdded.status).toBe(200);
-    const firstPayload = await readJson(firstAdded);
-    expect(firstPayload.version).toBe(3);
-    const firstId = (firstPayload.image as Record<string, unknown>)
-      .id as string;
+    const first = await registerImage(sceneId, firstBytes);
+    expect(await imageShas(sceneId)).toEqual([]);
+    const bound = await saveVersion(sceneId, { images: [first], message: "Cover" });
+    expect(((await readJson(bound)).scene as Record<string, unknown>).version).toBe(3);
+    expect(await imageShas(sceneId)).toEqual([first]);
 
     const withFirst = await downloadScene(
       request(`/api/store/scenes/${sceneId}/download`, "GET"),
@@ -709,227 +666,142 @@ describe("store publish and distribution", () => {
       JSON.parse(Buffer.from(firstFiles[firstManifestPath]!).toString("utf8")),
     ).not.toMatchObject({ imageHeight: expect.anything() });
 
-    // Secondary images do not change the lead and therefore do not create a
-    // redundant version. Removing the lead promotes the next image.
+    // Reordering is a version too: position 0 is the cover, so the zip's
+    // image follows it. The previous version still leads with the old one.
     const secondBytes = Buffer.from([
       0xff, 0xd8, 0xff, 0xdb, 2, 3, 4, 5, 6, 7, 8, 9,
     ]);
-    const secondAdded = await addGalleryImage(
-      request(`/api/account/scenes/${sceneId}/images`, "POST", {
-        body: { content_base64: secondBytes.toString("base64") },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    const secondPayload = await readJson(secondAdded);
-    expect(secondPayload.version).toBeUndefined();
-    const secondId = (secondPayload.image as Record<string, unknown>)
-      .id as string;
-
-    const firstDeleted = await deleteGalleryImage(
-      request(`/api/account/scenes/${sceneId}/images/${firstId}`, "DELETE", {
-        headers: { origin: baseUrl },
-      }),
-      imageCtx(sceneId, firstId),
-    );
-    expect((await readJson(firstDeleted)).version).toBe(4);
-    const withSecond = await downloadScene(
-      request(`/api/store/scenes/${sceneId}/download`, "GET"),
-      ctx(sceneId),
-    );
-    const secondFiles = unzipSync(
-      new Uint8Array(await withSecond.arrayBuffer()),
-    );
-    const secondImagePath = Object.keys(secondFiles).find((name) =>
-      name.endsWith("image.jpg"),
-    )!;
-    expect(Buffer.from(secondFiles[secondImagePath]!)).toEqual(secondBytes);
-
-    const secondDeleted = await deleteGalleryImage(
-      request(`/api/account/scenes/${sceneId}/images/${secondId}`, "DELETE", {
-        headers: { origin: baseUrl },
-      }),
-      imageCtx(sceneId, secondId),
-    );
-    expect((await readJson(secondDeleted)).version).toBe(5);
-    const emptyAgain = await downloadScene(
-      request(`/api/store/scenes/${sceneId}/download`, "GET"),
-      ctx(sceneId),
-    );
-    const emptyFiles = unzipSync(
-      new Uint8Array(await emptyAgain.arrayBuffer()),
-    );
+    const second = await registerImage(sceneId, secondBytes);
+    expect((await saveVersion(sceneId, { images: [first, second] })).status).toBe(200);
+    const reordered = await saveVersion(sceneId, { images: [second, first] });
+    expect(((await readJson(reordered)).scene as Record<string, unknown>).version).toBe(5);
+    expect(await imageShas(sceneId)).toEqual([second, first]);
+    expect(await imageShas(sceneId, 4)).toEqual([first, second]);
     expect(
-      Object.keys(emptyFiles).some((name) => name.endsWith("image.jpg")),
-    ).toBe(false);
+      await zipImage(
+        await downloadScene(request(`/api/store/scenes/${sceneId}/download`, "GET"), ctx(sceneId)),
+      ),
+    ).toEqual(secondBytes);
+    expect(
+      await zipImage(
+        await downloadScene(
+          request(`/api/store/scenes/${sceneId}/download?version=4`, "GET"),
+          ctx(sceneId),
+        ),
+      ),
+    ).toEqual(firstBytes);
 
-    cookieJar.clear();
-    const anonymous = await deletePrimaryImage(
-      request(`/api/account/scenes/${sceneId}/image`, "DELETE", {
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    expect(anonymous.status).toBe(401);
-  });
+    // Removing one keeps the other; removing all leaves no image.
+    expect(((await readJson(await saveVersion(sceneId, { images: [second] }))).scene as Record<string, unknown>).version).toBe(6);
+    expect(await imageShas(sceneId)).toEqual([second]);
+    expect(((await readJson(await saveVersion(sceneId, { images: [] }))).scene as Record<string, unknown>).version).toBe(7);
+    expect(
+      await zipImage(
+        await downloadScene(request(`/api/store/scenes/${sceneId}/download`, "GET"), ctx(sceneId)),
+      ),
+    ).toBeUndefined();
 
-  it("reorders gallery images by dragging, and re-leads the ZIP preview when the lead moves", async () => {
-    const { accessToken } = await linkClient(publishScopes);
-    const scene = (
-      await readJson(await publish(accessToken, { visibility: "public" }))
-    ).scene as Record<string, unknown>;
-    const sceneId = scene.id as string;
-    const add = async (bytes: Buffer) => {
-      const response = await addGalleryImage(
-        request(`/api/account/scenes/${sceneId}/images`, "POST", {
-          body: { content_base64: bytes.toString("base64") },
-          headers: { origin: baseUrl },
-        }),
-        ctx(sceneId),
-      );
-      expect(response.status).toBe(200);
-      return ((await readJson(response)).image as Record<string, unknown>).id as string;
-    };
-    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 1]);
-    const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 2, 3, 4, 5, 6, 7, 8, 9]);
-    const gifBytes = Buffer.from("GIF89a\x01\x00\x01\x00\x00\x00", "latin1");
-    const first = await add(pngBytes);
-    const second = await add(jpegBytes);
-    const third = await add(gifBytes);
-    const positions = async () =>
-      (
-        await db
-          .select({ id: storeSceneImages.id })
-          .from(storeSceneImages)
-          .where(eq(storeSceneImages.sceneId, sceneId))
-          .orderBy(storeSceneImages.position, storeSceneImages.createdAt)
-      ).map((row) => row.id);
-    expect(await positions()).toEqual([first, second, third]);
-
-    // The whole list, or nothing: a partial or foreign list is rejected.
-    for (const order of [[first, second], [first, second, third, first], [first, second, "00000000-0000-4000-8000-000000000000"]]) {
-      const rejected = await reorderGalleryImages(
-        request(`/api/account/scenes/${sceneId}/images`, "PATCH", {
-          body: { order },
-          headers: { origin: baseUrl },
-        }),
-        ctx(sceneId),
-      );
-      expect(rejected.status).toBe(400);
+    // A malformed set is refused before anything is written: repeats, junk,
+    // an image nobody registered.
+    for (const images of [[first, first], ["not-a-digest"], [first, "a".repeat(64)]]) {
+      const rejected = await saveVersion(sceneId, { images });
+      expect([400, 404]).toContain(rejected.status);
     }
-    expect(await positions()).toEqual([first, second, third]);
-
-    // With the publish-time primary image in place, reordering the gallery
-    // does not touch the ZIP: no new version.
-    const reordered = await reorderGalleryImages(
-      request(`/api/account/scenes/${sceneId}/images`, "PATCH", {
-        body: { order: [third, first, second] },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    expect(reordered.status).toBe(200);
-    expect(await readJson(reordered)).toEqual({
-      order: [third, first, second],
-      status: "reordered",
-    });
-    expect(await positions()).toEqual([third, first, second]);
-
-    // Without a primary image the gallery lead is the ZIP preview, so moving
-    // a different image to the front appends a version carrying it.
-    const removed = await deletePrimaryImage(
-      request(`/api/account/scenes/${sceneId}/image`, "DELETE", {
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    expect((await readJson(removed)).version).toBe(2);
-    const releaded = await reorderGalleryImages(
-      request(`/api/account/scenes/${sceneId}/images`, "PATCH", {
-        body: { order: [second, third, first] },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    expect((await readJson(releaded)).version).toBe(3);
-    expect(await positions()).toEqual([second, third, first]);
-    const download = await downloadScene(
-      request(`/api/store/scenes/${sceneId}/download`, "GET"),
-      ctx(sceneId),
-    );
-    const { unzipSync } = await import("fflate");
-    expect(download.headers.get("x-scene-version")).toBe("3");
-    const files = unzipSync(new Uint8Array(await download.arrayBuffer()));
-    const imagePath = Object.keys(files).find((name) => name.endsWith("image.jpg"))!;
-    expect(Buffer.from(files[imagePath]!)).toEqual(jpegBytes);
-    // Same lead again: nothing to version.
-    const sameLead = await reorderGalleryImages(
-      request(`/api/account/scenes/${sceneId}/images`, "PATCH", {
-        body: { order: [second, first, third] },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    expect((await readJson(sameLead)).version).toBeUndefined();
+    expect(await imageShas(sceneId)).toEqual([]);
+    expect((await readJson(await saveVersion(sceneId, {}))).error).toBe("nothing_to_update");
 
     cookieJar.clear();
-    const anonymous = await reorderGalleryImages(
-      request(`/api/account/scenes/${sceneId}/images`, "PATCH", {
-        body: { order: [first, second, third] },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
+    const anonymous = await saveVersion(sceneId, { images: [first] });
     expect(anonymous.status).toBe(401);
   });
-
-  it("keeps the gallery lead in a newly published ZIP with no primary image", async () => {
+  it("serves an unbound draft image to its owner only, until Save binds it", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scene = (
       await readJson(await publish(accessToken, { visibility: "public" }))
     ).scene as Record<string, unknown>;
     const sceneId = scene.id as string;
+    const draftBytes = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 3, 1, 4, 1,
+    ]);
+    const sha = await registerImage(sceneId, draftBytes);
+    const imageCtx = { params: Promise.resolve({ imageId: sha, sceneId }) };
+
+    // The editor shows the thumbnail the moment the upload registers: the
+    // owner's session reads the digest before any version links it — served
+    // privately, never through the public CDN redirect.
+    const draft = await getGalleryImage(
+      request(`/api/store/scenes/${sceneId}/images/${sha}`, "GET"),
+      imageCtx,
+    );
+    expect(draft.status).toBe(200);
+    expect(Buffer.from(await draft.arrayBuffer())).toEqual(draftBytes);
+    expect(draft.headers.get("cache-control")).toContain("private");
+
+    // The binding requirement stays the public capability boundary: nobody
+    // else reads an unbound digest through the scene's URL.
+    const ownerSession = cookieJar.get(sessionCookieName)!;
+    cookieJar.clear();
+    const anonymous = await getGalleryImage(
+      request(`/api/store/scenes/${sceneId}/images/${sha}`, "GET"),
+      imageCtx,
+    );
+    expect(anonymous.status).toBe(404);
+
+    // Save publishes a version with the image; now the read is public.
+    cookieJar.set(sessionCookieName, ownerSession);
+    expect((await saveVersion(sceneId, { images: [sha] })).status).toBe(200);
+    cookieJar.clear();
+    const published = await getGalleryImage(
+      request(`/api/store/scenes/${sceneId}/images/${sha}`, "GET"),
+      imageCtx,
+    );
+    expect(published.status).toBe(200);
+    expect(published.headers.get("cache-control")).toContain("public");
+  });
+  it("inherits the image set when a republished ZIP has no cover, and leads with the cover when it has one", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const scene = (
+      await readJson(await publish(accessToken, { visibility: "public" }))
+    ).scene as Record<string, unknown>;
+    const sceneId = scene.id as string;
+    const [cover] = await imageShas(sceneId);
     const galleryBytes = Buffer.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 8, 7, 6,
     ]);
+    const gallery = await registerImage(sceneId, galleryBytes);
+    expect((await saveVersion(sceneId, { images: [cover!, gallery] })).status).toBe(200);
 
-    const added = await addGalleryImage(
-      request(`/api/account/scenes/${sceneId}/images`, "POST", {
-        body: { content_base64: galleryBytes.toString("base64") },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    expect(added.status).toBe(200);
-    expect((await readJson(added)).version).toBeUndefined();
-
+    // No image.jpg in the push: the set carries over, the zip gets the cover.
     const republished = await publish(accessToken, {
       content_base64: templateZip({ image: false }).toString("base64"),
     });
     expect(republished.status).toBe(200);
     expect(
       ((await readJson(republished)).scene as Record<string, unknown>).version,
-    ).toBe(2);
-
-    const [stored] = await db
-      .select({ previewImage: storeScenes.previewImage })
-      .from(storeScenes)
-      .where(eq(storeScenes.id, sceneId));
-    expect(stored?.previewImage).toBeNull();
-
+    ).toBe(3);
+    expect(await imageShas(sceneId)).toEqual([cover, gallery]);
     const download = await downloadScene(
       request(`/api/store/scenes/${sceneId}/download`, "GET"),
       ctx(sceneId),
     );
-    const { unzipSync } = await import("fflate");
-    const files = unzipSync(new Uint8Array(await download.arrayBuffer()));
-    const imagePath = Object.keys(files).find((name) =>
-      name.endsWith("image.jpg"),
-    )!;
-    expect(Buffer.from(files[imagePath]!)).toEqual(galleryBytes);
-  });
+    expect(await zipImage(download)).toBeTruthy();
 
-  it("uses the first gallery image in shared-scene social metadata", async () => {
+    // A push with its own image.jpg leads with it; the rest follow.
+    const newCoverBytes = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 4, 4, 4, 4, 4, 4, 4, 4]);
+    const withCover = await publish(accessToken, {
+      content_base64: templateZip({ imageBytes: newCoverBytes }).toString("base64"),
+    });
+    expect(withCover.status).toBe(200);
+    const shas = await imageShas(sceneId);
+    expect(shas).toHaveLength(3);
+    expect(shas.slice(1)).toEqual([cover, gallery]);
+    expect(
+      await zipImage(
+        await downloadScene(request(`/api/store/scenes/${sceneId}/download`, "GET"), ctx(sceneId)),
+      ),
+    ).toEqual(newCoverBytes);
+  });
+  it("uses the version's cover in shared-scene social metadata", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scene = (await readJson(await publish(accessToken))).scene as Record<
       string,
@@ -938,23 +810,8 @@ describe("store publish and distribution", () => {
     const sceneId = scene.id as string;
     const slug = scene.slug as string;
 
-    const removed = await deletePrimaryImage(
-      request(`/api/account/scenes/${sceneId}/image`, "DELETE", {
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    expect(removed.status).toBe(200);
-
-    const [galleryImage] = await db
-      .insert(storeSceneImages)
-      .values({
-        content: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
-        contentType: "image/png",
-        position: 1,
-        sceneId,
-      })
-      .returning({ id: storeSceneImages.id });
+    const gallery = await registerImage(sceneId, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 5, 5, 5, 5]));
+    expect((await saveVersion(sceneId, { images: [gallery] })).status).toBe(200);
     const [storedScene] = await db
       .select({ shareToken: storeScenes.shareToken })
       .from(storeScenes)
@@ -968,7 +825,7 @@ describe("store publish and distribution", () => {
       openGraph?: { images?: Array<{ url: string }>; url?: string };
       twitter?: { card?: string; images?: string[] };
     };
-    const expectedImageUrl = `${baseUrl}/api/store/scenes/${sceneId}/images/${galleryImage!.id}?share=${share}`;
+    const expectedImageUrl = `${baseUrl}/api/store/scenes/${sceneId}/image?share=${share}`;
     expect(metadata.openGraph?.images).toEqual([
       expect.objectContaining({ url: expectedImageUrl }),
     ]);
@@ -978,7 +835,6 @@ describe("store publish and distribution", () => {
       images: [expectedImageUrl],
     });
   });
-
   it("flattens markdown into the social description and names the publisher when there is none", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const described = (
@@ -1025,22 +881,16 @@ describe("store publish and distribution", () => {
     );
   });
 
-  it("shows a gallery screenshot as the store tile once the primary preview is gone", async () => {
+  it("shows the version's cover as the store tile, and nothing when the version has no images", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scene = (
       await readJson(await publish(accessToken, { visibility: "public" }))
     ).scene as Record<string, unknown>;
     const sceneId = scene.id as string;
 
-    const removed = await deletePrimaryImage(
-      request(`/api/account/scenes/${sceneId}/image`, "DELETE", {
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    expect(removed.status).toBe(200);
+    expect((await saveVersion(sceneId, { images: [] })).status).toBe(200);
 
-    // Nothing to show yet: the tiles say so and the image route is a 404.
+    // Nothing to show: the tiles say so and the image route is a 404.
     expect(
       renderToStaticMarkup(
         await HomePage({ searchParams: Promise.resolve({}) }),
@@ -1060,18 +910,13 @@ describe("store publish and distribution", () => {
       ).status,
     ).toBe(404);
 
-    // A screenshot added later (live preview → "Save to images") leads.
+    // A screenshot added later (live preview → "Save to images", then Save)
+    // leads.
     const galleryBytes = Buffer.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4,
     ]);
-    const added = await addGalleryImage(
-      request(`/api/account/scenes/${sceneId}/images`, "POST", {
-        body: { content_base64: galleryBytes.toString("base64") },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
-    expect(added.status).toBe(200);
+    const gallery = await registerImage(sceneId, galleryBytes);
+    expect((await saveVersion(sceneId, { images: [gallery] })).status).toBe(200);
 
     const markup = renderToStaticMarkup(
       await HomePage({ searchParams: Promise.resolve({}) }),
@@ -1079,7 +924,7 @@ describe("store publish and distribution", () => {
     expect(markup).not.toContain("No preview");
     expect(markup).toContain(`/api/store/scenes/${sceneId}/image`);
     // The owner's own listing selects from store_scenes alone (no publisher
-    // join), which is where the gallery fallback used to render false.
+    // join), which is where a subquery once resolved against the wrong table.
     const ownMarkup = renderToStaticMarkup(
       await MyScenesPage({ searchParams: Promise.resolve({}) }),
     );
@@ -1102,7 +947,6 @@ describe("store publish and distribution", () => {
     );
     expect(template?.image).toContain(`/scenes/${sceneId}/image`);
   });
-
   it("keeps private scenes private until the owner flips them", async () => {
     const { accessToken, accountId } = await linkClient(publishScopes);
 
@@ -1447,30 +1291,18 @@ describe("store publish and distribution", () => {
     expect(junkScene.frameos_version).toBeNull();
   });
 
-  it("lets the owner publish a minimum FrameOS version into the latest ZIP", async () => {
+  it("lets the owner publish a minimum FrameOS version as part of a version", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scene = (
       await readJson(await publish(accessToken, { visibility: "public" }))
     ).scene as Record<string, unknown>;
     const sceneId = scene.id as string;
 
-    const invalid = await patchScene(
-      request(`/api/account/scenes/${sceneId}`, "PATCH", {
-        body: { frameosVersion: "not a version!" },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
+    const invalid = await saveVersion(sceneId, { listing: { frameosVersion: "not a version!" } });
     expect(invalid.status).toBe(400);
     expect((await readJson(invalid)).error).toBe("invalid_frameos_version");
 
-    const tagged = await patchScene(
-      request(`/api/account/scenes/${sceneId}`, "PATCH", {
-        body: { frameosVersion: "2026.7.5" },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
+    const tagged = await saveVersion(sceneId, { listing: { frameosVersion: "2026.7.5" } });
     expect(tagged.status).toBe(200);
     expect(
       (await readJson(tagged)).scene as Record<string, unknown>,
@@ -1507,8 +1339,18 @@ describe("store publish and distribution", () => {
     );
     const templates = repo.templates as Array<Record<string, unknown>>;
     expect(templates[0]?.frameosVersion).toBe("2026.7.5");
-  });
 
+    // The old PATCH surface only flips visibility now.
+    const patched = await patchScene(
+      request(`/api/account/scenes/${sceneId}`, "PATCH", {
+        body: { frameosVersion: "2026.8.1" },
+        headers: { origin: baseUrl },
+      }),
+      ctx(sceneId),
+    );
+    expect(patched.status).toBe(400);
+    expect((await readJson(patched)).error).toBe("nothing_to_update");
+  });
   it("serves scenes.json for the live preview with download access rules", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scenes = [
@@ -1760,10 +1602,9 @@ describe("store publish and distribution", () => {
   });
 
   it("serves an image's real type, not the one the row claims", async () => {
-    // The store has rows from before the preview type was sniffed at publish:
-    // PNG bytes with `image/jpeg` in the column, and (once they moved) in the
-    // object's own content type too. The column is only as good as whatever
-    // wrote it; the bytes cannot be wrong about themselves.
+    // Rows from before the type was sniffed hold PNG bytes with `image/jpeg`
+    // in the column. The column is only as good as whatever wrote it; the
+    // bytes cannot be wrong about themselves.
     const { accessToken } = await linkClient(publishScopes);
     // PNG bytes behind the zip's conventional image.jpg name — which is how
     // the mislabelled rows came about in the first place.
@@ -1780,10 +1621,11 @@ describe("store publish and distribution", () => {
     const sceneId = scene.id as string;
 
     // Publishing sniffs, so make the stored column lie the way the old rows do.
+    const [cover] = await imageShas(sceneId);
     await db
-      .update(storeScenes)
-      .set({ previewImageType: "image/jpeg" })
-      .where(eq(storeScenes.id, sceneId));
+      .update(storeImages)
+      .set({ contentType: "image/jpeg" })
+      .where(eq(storeImages.sha256, cover!));
 
     const image = await getSceneImage(
       request(`/api/store/scenes/${sceneId}/image`, "GET"),
@@ -1792,35 +1634,41 @@ describe("store publish and distribution", () => {
     expect(image.status).toBe(200);
     expect(image.headers.get("content-type")).toBe("image/png");
   });
-
-  it("stores validated tags and exposes them in the repository index", async () => {
+  it("stores validated tags with the version and exposes them in the repository index", async () => {
     const { accessToken } = await linkClient(publishScopes);
     const scene = (
       await readJson(await publish(accessToken, { visibility: "public" }))
     ).scene as Record<string, unknown>;
     const sceneId = scene.id as string;
 
-    const tagged = await patchScene(
-      request(`/api/account/scenes/${sceneId}`, "PATCH", {
-        body: { tags: ["Clock", "e-ink", "clock"] },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
+    const tagged = await saveVersion(sceneId, { listing: { tags: ["Clock", "e-ink", "clock"] } });
     expect(tagged.status).toBe(200);
     expect(
       ((await readJson(tagged)).scene as Record<string, unknown>).tags,
     ).toEqual(["clock", "e-ink"]);
 
-    const invalid = await patchScene(
-      request(`/api/account/scenes/${sceneId}`, "PATCH", {
-        body: { tags: ["no spaces allowed"] },
-        headers: { origin: baseUrl },
-      }),
-      ctx(sceneId),
-    );
+    const invalid = await saveVersion(sceneId, { listing: { tags: ["no spaces allowed"] } });
     expect(invalid.status).toBe(400);
     expect((await readJson(invalid)).error).toBe("invalid_tags");
+
+    // The version records them, and the zip's manifest carries them.
+    const [version] = await db
+      .select({ tags: storeSceneVersions.tags })
+      .from(storeSceneVersions)
+      .where(eq(storeSceneVersions.sceneId, sceneId))
+      .orderBy(sql`version desc`)
+      .limit(1);
+    expect(version?.tags).toEqual(["clock", "e-ink"]);
+    const download = await downloadScene(
+      request(`/api/store/scenes/${sceneId}/download`, "GET"),
+      ctx(sceneId),
+    );
+    const { unzipSync } = await import("fflate");
+    const files = unzipSync(new Uint8Array(await download.arrayBuffer()));
+    const manifestPath = Object.keys(files).find((name) => name.endsWith("template.json"))!;
+    expect(JSON.parse(Buffer.from(files[manifestPath]!).toString("utf8"))).toMatchObject({
+      tags: ["clock", "e-ink"],
+    });
 
     const repo = await readJson(
       await getRepositoryJson(request("/api/store/repository.json", "GET")),
@@ -1828,7 +1676,6 @@ describe("store publish and distribution", () => {
     const templates = repo.templates as Array<Record<string, unknown>>;
     expect(templates[0]?.tags).toEqual(["clock", "e-ink"]);
   });
-
   it("guards the live-preview proxy against SSRF and junk", async () => {
     const proxied = (body: Record<string, unknown>) =>
       previewProxy(request("/api/store/preview-proxy", "POST", { body }));

@@ -2,6 +2,7 @@ from app.utils.legacy_app_migration import (
     migrate_legacy_apps_in_scene,
     migrate_legacy_apps_in_scenes,
 )
+from app.utils.scene_execution import scene_requires_compilation
 
 
 def app_node(node_id: str, keyword: str, config: dict | None = None, **extra) -> dict:
@@ -186,25 +187,24 @@ def test_openai_becomes_openai_image():
     assert node["data"]["keyword"] == "render/image"
 
 
-def test_resize_and_rotate_get_inlined_sources():
+def test_resize_and_rotate_are_marked_for_conversion_not_inlined():
     resize = app_node("rs-1", "legacy/resize", {"width": "800", "height": "480"})
     rotate = app_node("ro-1", "legacy/rotate", {"rotationDegree": "90"})
     scene = scene_with([resize, rotate])
     assert migrate_legacy_apps_in_scene(scene) is True
 
-    # no new nodes or edges: they become self-contained edited apps
+    # no new nodes or edges, and no Nim: a migration never manufactures a
+    # compiled scene any more
     assert len(scene["nodes"]) == 2
     assert scene["edges"] == []
-
     for node in (resize, rotate):
-        sources = node["data"]["sources"]
-        assert set(sources) == {"app.nim", "config.json"}
-        assert "proc run*" in sources["app.nim"]
-    # config values survive untouched
+        assert "sources" not in node["data"]
+        assert node["data"]["needsConversion"]["source"] == node["data"]["keyword"]
+        assert "mid-chain" in node["data"]["needsConversion"]["reason"]
+    # keyword and config values survive untouched
+    assert resize["data"]["keyword"] == "legacy/resize"
     assert resize["data"]["config"] == {"width": "800", "height": "480"}
-    assert "frameConfig.color" not in resize["data"]["sources"]["app.nim"]
-    assert "backgroundColor" in resize["data"]["sources"]["app.nim"]
-
+    assert not scene_requires_compilation(scene)
 
 def test_render_chain_edges_survive():
     render_event = {"id": "ev", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "render"}}
@@ -262,7 +262,8 @@ def test_bare_pre_category_keywords_are_migrated_too():
     scene = scene_with([resize])
     assert migrate_legacy_apps_in_scene(scene) is True
     assert resize["data"]["keyword"] == "legacy/resize"
-    assert "app.nim" in resize["data"]["sources"]
+    assert "sources" not in resize["data"]
+    assert resize["data"]["needsConversion"]["source"] == "legacy/resize"
 
 
 def test_bare_keyword_with_node_sources_is_left_alone():

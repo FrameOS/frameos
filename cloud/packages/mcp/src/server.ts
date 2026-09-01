@@ -1,4 +1,6 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { instrument } from "@posthog/mcp";
+import { PostHog } from "posthog-node";
 import { z } from "zod";
 import { FrameosCloudClient, type FetchLike } from "./client";
 import { explainError, type ToolContext } from "./result";
@@ -10,6 +12,12 @@ import { registerSceneTools } from "./tools/scenes";
 // One McpServer per connection. Stateless by design: every tool call is
 // an HTTP request to the cloud with the caller's token, so a server can be
 // built per request (the /api/mcp route does) or once for a stdio process.
+
+// Shared PostHog client — created once at module scope, never per request.
+// Set POSTHOG_PROJECT_TOKEN and POSTHOG_HOST in the environment to enable.
+export const posthog = new PostHog(process.env.POSTHOG_PROJECT_TOKEN ?? "", {
+  host: process.env.POSTHOG_HOST ?? "https://eu.i.posthog.com",
+});
 
 export const serverVersion = "0.1.0";
 
@@ -65,6 +73,9 @@ export function createFrameosMcpServer(options: FrameosMcpServerOptions) {
     { name: "frameos-cloud", version: serverVersion },
     { capabilities: { logging: {} }, instructions },
   );
+  instrument(server, posthog, {
+    logger: (msg) => process.stderr.write(msg + "\n"),
+  });
 
   registerAccountTools(server, ctx);
   registerFrameTools(server, ctx);

@@ -14,7 +14,7 @@ import {
   frames,
   frameSceneAssignments,
   linkedClients,
-  storeSceneImages,
+  storeSceneVersionImages,
   storeScenes,
   storeSceneVersions,
   upsertAccountFromIdentity,
@@ -28,6 +28,7 @@ import {
 import { POST as assignFrameScenes } from "../../../app/api/frames/[frameId]/scenes/route";
 import { validateSceneZip } from "../../lib/store";
 import { readBlob } from "../../lib/blobs";
+import { imageSetForVersion, registerStoreImage } from "../../lib/store-images";
 import { sceneSnapshotAssetPath } from "../../lib/frame-asset-cache";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { resetSceneImageCacheForTests } from "../../lib/scene-images";
@@ -199,8 +200,8 @@ async function createStoreScene(
   options: {
     name: string;
     runtimeSceneIds: string[];
-    previewImage?: Buffer;
-    previewImageType?: string;
+    /** The version's image set in order; the first is the cover. */
+    images?: { bytes: Buffer; contentType: string }[];
   },
 ) {
   const [scene] = await db
@@ -209,8 +210,6 @@ async function createStoreScene(
       accountId,
       latestVersion: 1,
       name: options.name,
-      previewImage: options.previewImage,
-      previewImageType: options.previewImageType,
       slug: `${options.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${userCounter}`,
       status: "active",
       visibility: "private",
@@ -219,16 +218,29 @@ async function createStoreScene(
   if (!scene) {
     throw new Error("scene insert failed");
   }
-  await db.insert(storeSceneVersions).values({
-    content: sceneZip(options.runtimeSceneIds),
-    contentType: "application/zip",
-    sceneId: scene.id,
-    sha256: "test",
-    sizeBytes: 1000,
-    version: 1,
-  });
+  const [version] = await db
+    .insert(storeSceneVersions)
+    .values({
+      content: sceneZip(options.runtimeSceneIds),
+      contentType: "application/zip",
+      listingRecorded: true,
+      sceneId: scene.id,
+      sha256: `test-${scene.id}`,
+      sizeBytes: 1000,
+      version: 1,
+    })
+    .returning({ id: storeSceneVersions.id });
+  for (const [position, image] of (options.images ?? []).entries()) {
+    const registered = await registerStoreImage(db, image.bytes, image.contentType);
+    await db.insert(storeSceneVersionImages).values({
+      imageSha256: registered.sha256,
+      position,
+      versionId: version!.id,
+    });
+  }
   return scene;
 }
+
 
 async function assignScene(frameId: string, sceneId: string, position = 0) {
   await db.insert(frameSceneAssignments).values({
@@ -286,31 +298,18 @@ function rgbaPng(width: number, height: number, alpha: number) {
 }
 
 describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
-  it("resolves a runtime scene id to the store scene's gallery cover", async () => {
+  it("resolves a runtime scene id to the store scene's cover", async () => {
     const accountId = await signIn();
     const frame = await activeFrame(accountId);
+    // Position 0 of the version's image set is the cover.
     const scene = await createStoreScene(accountId, {
+      images: [
+        { bytes: Buffer.from("first-gallery"), contentType: "image/png" },
+        { bytes: Buffer.from("second-gallery"), contentType: "image/webp" },
+      ],
       name: "Clock",
-      previewImage: Buffer.from("preview-bytes"),
-      previewImageType: "image/jpeg",
       runtimeSceneIds: ["runtime-clock", "runtime-clock-alt"],
     });
-    // Two gallery rows out of order: the lowest position must win over both
-    // the later row and the previewImage fallback.
-    await db.insert(storeSceneImages).values([
-      {
-        content: Buffer.from("second-gallery"),
-        contentType: "image/webp",
-        position: 2,
-        sceneId: scene.id,
-      },
-      {
-        content: Buffer.from("first-gallery"),
-        contentType: "image/png",
-        position: 1,
-        sceneId: scene.id,
-      },
-    ]);
     await assignScene(frame.id, scene.id);
 
     for (const runtimeId of ["runtime-clock", "runtime-clock-alt"]) {
@@ -328,19 +327,13 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
       );
     }
   });
-
   it("accepts the store scene uuid directly", async () => {
     const accountId = await signIn();
     const frame = await activeFrame(accountId);
     const scene = await createStoreScene(accountId, {
+      images: [{ bytes: Buffer.from("gallery-bytes"), contentType: "image/png" }],
       name: "Weather",
       runtimeSceneIds: ["runtime-weather"],
-    });
-    await db.insert(storeSceneImages).values({
-      content: Buffer.from("gallery-bytes"),
-      contentType: "image/png",
-      position: 0,
-      sceneId: scene.id,
     });
     await assignScene(frame.id, scene.id);
 
@@ -353,14 +346,12 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
       "gallery-bytes",
     );
   });
-
-  it("falls back to the store scene's previewImage when no gallery rows exist", async () => {
+  it("serves a single-image set with its own content type", async () => {
     const accountId = await signIn();
     const frame = await activeFrame(accountId);
     const scene = await createStoreScene(accountId, {
+      images: [{ bytes: Buffer.from("preview-bytes"), contentType: "image/webp" }],
       name: "Gallery-less",
-      previewImage: Buffer.from("preview-bytes"),
-      previewImageType: "image/webp",
       runtimeSceneIds: ["runtime-plain"],
     });
     await assignScene(frame.id, scene.id);
@@ -375,30 +366,17 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
       "preview-bytes",
     );
   });
-
-  it("skips a fully transparent gallery lead and serves the next image", async () => {
+  it("skips a fully transparent cover and serves the next image", async () => {
     const accountId = await signIn();
     const frame = await activeFrame(accountId);
     const scene = await createStoreScene(accountId, {
+      images: [
+        { bytes: transparentPng(), contentType: "image/png" },
+        { bytes: Buffer.from("second-gallery"), contentType: "image/jpeg" },
+      ],
       name: "Transparent lead",
-      previewImage: Buffer.from("preview-bytes"),
-      previewImageType: "image/webp",
       runtimeSceneIds: ["runtime-skip"],
     });
-    await db.insert(storeSceneImages).values([
-      {
-        content: transparentPng(),
-        contentType: "image/png",
-        position: 1,
-        sceneId: scene.id,
-      },
-      {
-        content: Buffer.from("second-gallery"),
-        contentType: "image/jpeg",
-        position: 2,
-        sceneId: scene.id,
-      },
-    ]);
     await assignScene(frame.id, scene.id);
 
     const response = await getSceneImage(
@@ -411,42 +389,15 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
       "second-gallery",
     );
   });
-
-  it("falls to preview_image when every gallery row is transparent, and 404s when the preview is transparent too", async () => {
+  it("404s when every image in the set is transparent", async () => {
     const accountId = await signIn();
     const frame = await activeFrame(accountId);
-    const scene = await createStoreScene(accountId, {
-      name: "Only transparent gallery",
-      previewImage: Buffer.from("preview-bytes"),
-      previewImageType: "image/webp",
-      runtimeSceneIds: ["runtime-fall"],
-    });
-    await db.insert(storeSceneImages).values({
-      content: transparentPng(),
-      contentType: "image/png",
-      position: 1,
-      sceneId: scene.id,
-    });
-    await assignScene(frame.id, scene.id);
-
-    const fell = await getSceneImage(
-      getRequest(`/api/frames/${frame.id}/scene_images/runtime-fall`),
-      routeParams(frame.id, "runtime-fall"),
-    );
-    expect(fell.status).toBe(200);
-    expect(fell.headers.get("content-type")).toBe("image/webp");
-    expect(Buffer.from(await fell.arrayBuffer()).toString()).toBe(
-      "preview-bytes",
-    );
-
-    // A legacy transparent preview_image is no better than no image.
     const blankScene = await createStoreScene(accountId, {
+      images: [{ bytes: transparentPng(), contentType: "image/png" }],
       name: "Transparent preview",
-      previewImage: transparentPng(),
-      previewImageType: "image/png",
       runtimeSceneIds: ["runtime-blank"],
     });
-    await assignScene(frame.id, blankScene.id, 1);
+    await assignScene(frame.id, blankScene.id);
 
     const blank = await getSceneImage(
       getRequest(`/api/frames/${frame.id}/scene_images/runtime-blank`),
@@ -455,7 +406,6 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
     expect(blank.status).toBe(404);
     expect((await blank.json()).error).toBe("no_image");
   });
-
   it("404s for scene ids no assignment owns, and for scenes with no image at all", async () => {
     const accountId = await signIn();
     const frame = await activeFrame(accountId);
@@ -486,9 +436,8 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
     const ownerId = await signIn();
     const frame = await activeFrame(ownerId);
     const scene = await createStoreScene(ownerId, {
+      images: [{ bytes: Buffer.from("secret-bytes"), contentType: "image/png" }],
       name: "Private",
-      previewImage: Buffer.from("secret-bytes"),
-      previewImageType: "image/png",
       runtimeSceneIds: ["runtime-private"],
     });
     await assignScene(frame.id, scene.id);
@@ -508,8 +457,7 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
     const frame = await activeFrame(accountId);
     const scene = await createStoreScene(accountId, {
       name: "Cached",
-      previewImage: Buffer.from("cached-bytes"),
-      previewImageType: "image/png",
+      images: [{ bytes: Buffer.from("cached-bytes"), contentType: "image/png" }],
       runtimeSceneIds: ["runtime-cached"],
     });
     await assignScene(frame.id, scene.id);
@@ -542,8 +490,7 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
     const frame = await activeFrame(accountId);
     const scene = await createStoreScene(accountId, {
       name: "Snapshotted",
-      previewImage: Buffer.from("cover-bytes"),
-      previewImageType: "image/jpeg",
+      images: [{ bytes: Buffer.from("cover-bytes"), contentType: "image/jpeg" }],
       runtimeSceneIds: ["runtime-snap"],
     });
     await assignScene(frame.id, scene.id);
@@ -572,8 +519,7 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
     const frame = await activeFrame(accountId);
     const scene = await createStoreScene(accountId, {
       name: "Fetching",
-      previewImage: Buffer.from("cover-bytes"),
-      previewImageType: "image/jpeg",
+      images: [{ bytes: Buffer.from("cover-bytes"), contentType: "image/jpeg" }],
       runtimeSceneIds: ["runtime-fetch"],
     });
     await assignScene(frame.id, scene.id);
@@ -676,8 +622,7 @@ describe("GET /api/frames/{id}/scene_images/{sceneId}", () => {
     });
     const scene = await createStoreScene(accountId, {
       name: "On a chip",
-      previewImage: Buffer.from("cover-bytes"),
-      previewImageType: "image/jpeg",
+      images: [{ bytes: Buffer.from("cover-bytes"), contentType: "image/jpeg" }],
       runtimeSceneIds: ["runtime-esp"],
     });
     await assignScene(frame.id, scene.id);
@@ -752,8 +697,7 @@ describe("POST /api/frames/{id}/scenes cover copy", () => {
     const frame = await activeFrame(accountId);
     const scene = await createStoreScene(accountId, {
       name: "Installed",
-      previewImage: Buffer.from("cover-bytes"),
-      previewImageType: "image/jpeg",
+      images: [{ bytes: Buffer.from("cover-bytes"), contentType: "image/jpeg" }],
       runtimeSceneIds: ["runtime-a", "runtime-b"],
     });
 
@@ -800,8 +744,7 @@ describe("POST /api/frames/{id}/scenes cover copy", () => {
     const frame = await activeFrame(accountId);
     const scene = await createStoreScene(accountId, {
       name: "Rendered before",
-      previewImage: Buffer.from("cover-bytes"),
-      previewImageType: "image/jpeg",
+      images: [{ bytes: Buffer.from("cover-bytes"), contentType: "image/jpeg" }],
       runtimeSceneIds: ["runtime-snapped"],
     });
     await db.insert(frameAssetFiles).values({
@@ -980,20 +923,12 @@ describe("POST /api/account/scenes preview_from_frame", () => {
     expect(response.status).toBe(200);
     const { scene } = (await response.json()) as { scene: { id: string } };
 
-    const [row] = await db
-      .select({
-        previewImage: storeScenes.previewImage,
-        previewImageType: storeScenes.previewImageType,
-        previewObjectKey: storeScenes.previewObjectKey,
-      })
-      .from(storeScenes)
-      .where(eq(storeScenes.id, scene.id));
-    const preview = await readBlob({
-      content: row?.previewImage ?? null,
-      objectKey: row?.previewObjectKey ?? null,
-    });
+    // The frame's snapshot became the new scene's cover: position 0 of
+    // its first version's image set.
+    const [coverImage] = await imageSetForVersion(db, scene.id, null);
+    const preview = await readBlob(coverImage!);
     expect(preview?.equals(cover)).toBe(true);
-    expect(row?.previewImageType).toBe("image/png");
+    expect(coverImage?.contentType).toBe("image/png");
 
     // The published zip carries it as the interchange format's image.jpg.
     const [version] = await db

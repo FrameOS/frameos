@@ -1,5 +1,5 @@
-import { asc, eq } from "drizzle-orm";
-import { storeSceneImages, storeScenes } from "@frameos-cloud/db";
+import { eq } from "drizzle-orm";
+import { storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { publicBlobUrl, readBlob } from "../../../../../../src/lib/blobs";
 import { detectImageContentType } from "../../../../../../src/lib/store";
@@ -14,15 +14,15 @@ import {
 } from "../../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
+import { imageSetForVersion } from "../../../../../../src/lib/store-images";
 
 export const runtime = "nodejs";
 
 type RouteContext = { params: Promise<{ sceneId: string }> };
 
-// The preview image extracted from the published zip at publish time, or —
-// when the owner removed that and only gallery screenshots remain — the
-// first gallery image. Served with a fixed image content type, never the
-// uploader's choosing.
+// The scene's cover: position 0 of a version's image set — the latest
+// version's by default, `?version=N` for a pinned one. Served with a fixed
+// image content type, never the uploader's choosing.
 async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:image", {
     limit: 1200,
@@ -46,9 +46,6 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     .select({
       accountId: storeScenes.accountId,
       latestVersion: storeScenes.latestVersion,
-      previewImage: storeScenes.previewImage,
-      previewImageType: storeScenes.previewImageType,
-      previewObjectKey: storeScenes.previewObjectKey,
       shareToken: storeScenes.shareToken,
       status: storeScenes.status,
       visibility: storeScenes.visibility,
@@ -59,35 +56,6 @@ async function handleGet(request: NextRequest, context: RouteContext) {
 
   if (!scene) {
     return jsonError("scene_not_found", 404);
-  }
-  let preview: {
-    content: Buffer | null;
-    objectKey: string | null;
-    tag: string;
-  } = {
-    content: scene.previewImage,
-    objectKey: scene.previewObjectKey,
-    tag: String(scene.latestVersion),
-  };
-  if (!scene.previewImage && !scene.previewObjectKey) {
-    const [lead] = await db
-      .select({
-        content: storeSceneImages.content,
-        id: storeSceneImages.id,
-        objectKey: storeSceneImages.objectKey,
-      })
-      .from(storeSceneImages)
-      .where(eq(storeSceneImages.sceneId, sceneId))
-      .orderBy(asc(storeSceneImages.position), asc(storeSceneImages.createdAt))
-      .limit(1);
-    if (!lead) {
-      return jsonError("scene_not_found", 404);
-    }
-    preview = {
-      content: lead.content,
-      objectKey: lead.objectKey,
-      tag: lead.id,
-    };
   }
   if (
     scene.status === "pulled" &&
@@ -112,21 +80,25 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     }
   }
 
-  // The preview bytes change only when a new version is published, so a
-  // request that names the current version (?v=…, emitted by the store
-  // repository index) is immutable and can live on the CDN edge for good —
-  // a new publish changes the URL. Everything else still gets a day at the
-  // edge plus an ETag, so the recurring cost of the Postgres bytea read is
-  // one 304 per browser instead of the full image per pageview. Private
-  // scenes must never be publicly cached: their URL is guessable and the
-  // edge would happily serve the cached copy to anonymous requests.
+  const requested = request.nextUrl.searchParams.get("version");
+  const version = requested && /^[0-9]{1,9}$/.test(requested) ? Number(requested) : null;
+  const [cover] = await imageSetForVersion(db, sceneId, version);
+  if (!cover) {
+    return jsonError("scene_not_found", 404);
+  }
+
+  // A version's cover never changes, so a request that names the current
+  // version (?v=…, emitted by the store repository index) is immutable and
+  // can live on the CDN edge for good — a new publish changes the URL.
+  // Everything else still gets a day at the edge plus an ETag keyed on the
+  // version. Private scenes must never be publicly cached: their URL is
+  // guessable and the edge would happily serve the copy to anyone.
   const isPublic = scene.visibility === "public";
   const versionParam = request.nextUrl.searchParams.get("v");
   const versionPinned =
-    versionParam !== null && versionParam === String(scene.latestVersion);
-  // A gallery lead is keyed by its row id: adding/removing images changes
-  // which one leads, while latestVersion may not move.
-  const etag = `W/"${sceneId}-${preview.tag}"`;
+    version !== null ||
+    (versionParam !== null && versionParam === String(scene.latestVersion));
+  const etag = `W/"${sceneId}-${version ?? scene.latestVersion}-${cover.sha256.slice(0, 12)}"`;
   const cacheControl = !isPublic
     ? "private, max-age=3600"
     : versionPinned
@@ -140,11 +112,11 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     });
   }
 
-  // A public scene's preview is public by construction, so hand the browser
+  // A public scene's cover is public by construction, so hand the browser
   // the CDN URL and let the edge serve the bytes. Private scenes (and any
-  // deployment without a public alias — every dev machine) are proxied here,
-  // where the authorization above still applies.
-  const cdnUrl = isPublic ? publicBlobUrl(preview.objectKey) : undefined;
+  // deployment without a public alias — every dev machine) are proxied
+  // here, where the authorization above still applies.
+  const cdnUrl = isPublic ? publicBlobUrl(cover.objectKey) : undefined;
   if (cdnUrl) {
     return NextResponse.redirect(cdnUrl, {
       headers: { "cache-control": cacheControl, etag },
@@ -152,10 +124,7 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     });
   }
 
-  const bytes = await readBlob({
-    content: preview.content,
-    objectKey: preview.objectKey,
-  });
+  const bytes = await readBlob(cover);
   if (!bytes) {
     return jsonError("scene_not_found", 404);
   }
@@ -164,12 +133,8 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     headers: {
       "cache-control": cacheControl,
       "content-length": String(bytes.length),
-      // Sniffed, not stored. previewImageType is only as good as whatever
-      // wrote it, and rows published before the type was sniffed at all say
-      // "image/jpeg" over PNG bytes. The bytes cannot be wrong about
-      // themselves.
-      "content-type":
-        detectImageContentType(bytes) ?? scene.previewImageType ?? "image/jpeg",
+      // Sniffed, not stored: the bytes cannot be wrong about themselves.
+      "content-type": detectImageContentType(bytes) ?? cover.contentType,
       etag,
       "x-content-type-options": "nosniff",
     },

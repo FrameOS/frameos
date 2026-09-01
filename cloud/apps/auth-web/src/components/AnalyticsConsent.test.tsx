@@ -88,6 +88,20 @@ describe("analytics consent gating", () => {
     const config = init.mock.calls[0]![1] as Record<string, unknown>;
     expect(config.capture_exceptions).toBe(true);
   });
+
+  it("never touches the SDK when no key is configured", () => {
+    // .env.example ships the key blank and self-hosted installs run without
+    // it. posthog-js refuses an empty token with an unconditional
+    // console.error ("PostHog was initialized without a token"), so the
+    // provider must not call init — or anything else — at all.
+    delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
+
+    render(<PostHogProvider>{null}</PostHogProvider>);
+
+    expect(init).not.toHaveBeenCalled();
+    expect(optInCapturing).not.toHaveBeenCalled();
+    expect(optOutCapturing).not.toHaveBeenCalled();
+  });
 });
 
 describe("consent banner", () => {
@@ -114,5 +128,15 @@ describe("consent banner", () => {
     (await screen.findByRole("button", { name: "Accept" })).click();
 
     expect(document.cookie).toContain(`${consentCookieName}=granted`);
+  });
+
+  it("does not ask at all when no analytics key is configured", () => {
+    // No analytics means nothing to consent to; showing the banner anyway
+    // would ask visitors about cookies that cannot exist.
+    delete process.env.NEXT_PUBLIC_POSTHOG_KEY;
+
+    const { container } = render(<AnalyticsConsentBanner />);
+
+    expect(container.querySelector(".consent-banner")).toBeNull();
   });
 });

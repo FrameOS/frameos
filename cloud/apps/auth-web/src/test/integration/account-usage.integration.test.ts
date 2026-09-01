@@ -121,11 +121,13 @@ async function seedScene(
       visibility,
     })
     .returning();
+  // Bytes are billed per distinct digest, so each seeded version needs a
+  // digest of its own — two scenes with the same zip really would share.
   await db.insert(storeSceneVersions).values({
     content: Buffer.from("tiny"),
     contentType: "application/zip",
     sceneId: scene!.id,
-    sha256: "seeded",
+    sha256: `seeded-${scene!.id}`,
     sizeBytes,
     version: 1,
   });

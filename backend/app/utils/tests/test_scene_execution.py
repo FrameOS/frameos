@@ -46,9 +46,12 @@ def test_code_and_source_nodes():
     assert not scene_requires_compilation({"nodes": [{"type": "event", "data": {"keyword": "render"}}]})
 
 
-def test_inference_defaults_to_interpreted():
+def test_inference_is_always_interpreted():
+    # Nothing infers the legacy mode: Nim content is flagged and converted,
+    # never silently stamped as compiled.
     assert infer_scene_execution({"nodes": []}) == "interpreted"
-    assert infer_scene_execution({"apps": {"custom": NIM_APP}}) == "compiled"
+    assert infer_scene_execution({"apps": {"custom": NIM_APP}}) == "interpreted"
+    assert scene_requires_compilation({"apps": {"custom": NIM_APP}})
 
 
 def test_normalize_stamps_only_unstamped_scenes():
@@ -59,7 +62,7 @@ def test_normalize_stamps_only_unstamped_scenes():
 
     assert normalize_scenes_execution([plain, nim, explicit, bad, "junk"])
     assert plain["settings"] == {"execution": "interpreted"}
-    assert nim["settings"] == {"refreshInterval": 60, "execution": "compiled"}
+    assert nim["settings"] == {"refreshInterval": 60, "execution": "interpreted"}
     # An explicit choice is never second-guessed, even a dubious one.
     assert explicit["settings"]["execution"] == "interpreted"
     assert bad["settings"] == {"execution": "interpreted"}

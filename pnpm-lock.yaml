@@ -259,9 +259,15 @@ importers:
       '@frameos-cloud/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@frameos-cloud/ledger':
+        specifier: workspace:*
+        version: link:../../packages/ledger
       '@frameos-cloud/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@frameos-cloud/scene-convert':
+        specifier: workspace:*
+        version: link:../../packages/scene-convert
       '@simplewebauthn/browser':
         specifier: ^13.3.0
         version: 13.3.0
@@ -441,14 +447,63 @@ importers:
         specifier: ^4.1.8
         version: 4.1.10(@types/node@25.9.5)(jsdom@29.1.1)(vite@7.3.6(@types/node@25.9.5)(jiti@1.21.7)(less@4.8.1)(sass-embedded@1.97.3)(sass@1.97.3)(tsx@4.23.1))
 
+  cloud/packages/ledger:
+    dependencies:
+      '@frameos-cloud/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(postgres@3.4.9)
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.2
+        version: 25.9.5
+      eslint:
+        specifier: ^9.39.1
+        version: 9.39.5(jiti@1.21.7)
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.8
+        version: 4.1.10(@types/node@25.9.5)(jsdom@29.1.1)(vite@7.3.6(@types/node@25.9.5)(jiti@1.21.7)(less@4.8.1)(sass-embedded@1.97.3)(sass@1.97.3)(tsx@4.23.1))
+
   cloud/packages/mcp:
     dependencies:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(zod@4.4.3)
+      '@posthog/mcp':
+        specifier: ^0.12.0
+        version: 0.12.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(posthog-node@5.51.4(rxjs@7.8.2))
+      posthog-node:
+        specifier: ^5.51.4
+        version: 5.51.4(rxjs@7.8.2)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.2
+        version: 25.9.5
+      eslint:
+        specifier: ^9.39.1
+        version: 9.39.5(jiti@1.21.7)
+      tsx:
+        specifier: ^4.23.1
+        version: 4.23.1
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.8
+        version: 4.1.10(@types/node@25.9.5)(jsdom@29.1.1)(vite@7.3.6(@types/node@25.9.5)(jiti@1.21.7)(less@4.8.1)(sass-embedded@1.97.3)(sass@1.97.3)(tsx@4.23.1))
+
+  cloud/packages/scene-convert:
     devDependencies:
       '@types/node':
         specifier: ^25.9.2
@@ -2414,8 +2469,27 @@ packages:
   '@posthog/core@1.46.1':
     resolution: {integrity: sha512-EoCFduRkvrg9E5ylMi4QnZCjlAdRJCq6tJouWfngBVR79XSI4iPvIWYA+CdzokAjk+TfSVBFVJ++4Im3r+T0Dg==}
 
+  '@posthog/core@1.49.2':
+    resolution: {integrity: sha512-AXHDo/4nisUg7OPG1TQNgREK7n+chBQXLQyttp7bDTDsDg2k9lV06TmnpvuNbwJs53q9mP9hjezKEZu4fYadfg==}
+
+  '@posthog/mcp@0.12.0':
+    resolution: {integrity: sha512-OZX+WAEKHs6P9AAarL9RIaGmepUuT/eC30A+ZCHxbMlUXF3DlULn8KLB3rmIyzvxPRvqRPSnFfEdE4owi49Fxw==}
+    engines: {node: ^20.20.0 || >=22.22.0}
+    peerDependencies:
+      '@modelcontextprotocol/sdk': '>=1.26.0'
+      '@modelcontextprotocol/server': '>=2.0.0'
+      posthog-node: ^5.0.0
+    peerDependenciesMeta:
+      '@modelcontextprotocol/sdk':
+        optional: true
+      '@modelcontextprotocol/server':
+        optional: true
+
   '@posthog/types@1.399.0':
     resolution: {integrity: sha512-/WDwBzqIPko8VJ1B+0rlso2XQEz9+2sqtsY9Tqy3p1GhgTqsFakcz/PmMpAnA321LTEZVRcO6x5hAwABV4yrDw==}
+
+  '@posthog/types@1.407.1':
+    resolution: {integrity: sha512-WhbkXPC2rgylXqmxHqv70ffI3k+KxyR6s7DBIfr5NvIqHkxp6v0pk31D/jbz0DNVbzwkLjyll2pxr4FNbJiYzg==}
 
   '@reactflow/background@11.3.14':
     resolution: {integrity: sha512-Gewd7blEVT5Lh6jqrvOgd4G6Qk17eGKQfsDXgyRSqM+CTwDqRldG2LsWN4sNeno6sbqVIC2fZ+rAUBFA9ZEUDA==}
@@ -5225,6 +5299,15 @@ packages:
   posthog-js@1.409.5:
     resolution: {integrity: sha512-s1iJz+vq0YAluUD4OwLjUFIJt/9pqiiB6MITvHWIS16a7pqTJqbSLXsd5/8kJcIgfrOSZHe+mdYAXLYcJCS4LQ==}
 
+  posthog-node@5.51.4:
+    resolution: {integrity: sha512-gI6JMBnU3vjDNclUBWonw3y7k8Y0UPIAVO4AQ2zu9eyW+7sY8UQRofx4JIA7IGYLMEbs4gykfogOmXp16+oUdg==}
+    engines: {node: ^20.20.0 || >=22.22.0}
+    peerDependencies:
+      rxjs: ^7.0.0
+    peerDependenciesMeta:
+      rxjs:
+        optional: true
+
   preact@10.29.8:
     resolution: {integrity: sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q==}
     peerDependencies:
@@ -7844,7 +7927,20 @@ snapshots:
     dependencies:
       '@posthog/types': 1.399.0
 
+  '@posthog/core@1.49.2':
+    dependencies:
+      '@posthog/types': 1.407.1
+
+  '@posthog/mcp@0.12.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(posthog-node@5.51.4(rxjs@7.8.2))':
+    dependencies:
+      '@posthog/core': 1.49.2
+      posthog-node: 5.51.4(rxjs@7.8.2)
+    optionalDependencies:
+      '@modelcontextprotocol/sdk': 1.30.0(zod@4.4.3)
+
   '@posthog/types@1.399.0': {}
+
+  '@posthog/types@1.407.1': {}
 
   '@reactflow/background@11.3.14(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
@@ -11023,6 +11119,12 @@ snapshots:
       web-vitals: 5.3.0
     transitivePeerDependencies:
       - preact-render-to-string
+
+  posthog-node@5.51.4(rxjs@7.8.2):
+    dependencies:
+      '@posthog/core': 1.49.2
+    optionalDependencies:
+      rxjs: 7.8.2
 
   preact@10.29.8: {}
 

@@ -6,6 +6,7 @@ import {
   FileArchive,
   GitFork,
   Info,
+  LogIn,
   MonitorDown,
   MoreHorizontal,
   Pencil,
@@ -29,6 +30,8 @@ import {
   type RefObject,
 } from "react";
 import { applyAiScenes, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
+import type { AiListingChanges } from "../lib/ai-chat-client";
+import { clearSceneDraft, readSceneDraft, writeSceneDraft } from "../lib/scene-draft";
 import {
   defaultSceneEditorPanels,
   onlyPanel,
@@ -40,8 +43,12 @@ import {
   type SceneEditorPanelName,
   type SceneEditorPanels,
 } from "../lib/scene-views";
-import { SceneAiPanel, type SceneAiPanelProps } from "./SceneAiPanel";
-import { SceneInfoPanel, type SceneInfoData } from "./SceneInfoPanel";
+import { SceneAiPanel, type RenderedScenes, type SceneAiPanelProps } from "./SceneAiPanel";
+import {
+  SceneInfoPanel,
+  type SceneInfoData,
+  type SceneListingData,
+} from "./SceneInfoPanel";
 import { SceneInstallDialog } from "./SceneInstallDialog";
 import { SceneLivePreviewPanel } from "./SceneLivePreview";
 import { SceneSaveDialog } from "./SceneSaveDialog";
@@ -86,6 +93,11 @@ type SceneEditorModalProps = {
   /** Whether the Preview panel is on offer; pulled scenes don't get one. */
   canPreview?: boolean;
   signedIn?: boolean;
+  /** The account switched AI features off; the panel says so before the first
+   * turn rather than after it fails. */
+  aiDisabled?: boolean;
+  /** Where to turn AI back on (the account's AI usage page). */
+  aiSettingsUrl?: string;
   /** Share token for private scenes, so shared visitors can load scenes.json. */
   share?: string | undefined;
   /** The store zip of the scene as the page shows it (its "Download zip"
@@ -548,6 +560,8 @@ export type SceneEditorPreviewOptions = {
    * (null while they load — the panel waits for them). */
   scenes: SceneJson[] | null;
   canSaveToGallery?: boolean | undefined;
+  /** A screenshot was registered; the workspace adds it to the draft. */
+  onImageRegistered?: ((sha256: string) => void) | undefined;
   /** The account settings page, linked from the panel's credentials hint. */
   settingsUrl?: string | undefined;
 };
@@ -1203,6 +1217,7 @@ export function SceneEditorWorkspace({
                 canSaveToGallery={preview.canSaveToGallery}
                 editorSceneId={sceneId ?? null}
                 height={height}
+                onImageRegistered={preview.onImageRegistered}
                 sceneId={preview.sceneId}
                 scenes={preview.scenes}
                 settingsUrl={preview.settingsUrl}
@@ -1232,6 +1247,25 @@ function cameFromOurPage(): boolean {
     return Boolean(previous?.url?.startsWith(origin));
   }
   return document.referrer.startsWith(origin) && window.history.length > 1;
+}
+
+/** The listing the page recorded for a version (null: the latest) — the
+ * version's own, or the latest's for versions published before listings
+ * were recorded; nothing without a page. */
+function listingOfVersion(info: SceneInfoData | undefined, version: number | null): SceneListingData {
+  const recorded = version === null ? undefined : info?.versions.find((entry) => entry.version === version);
+  const source = recorded?.listing ?? info?.scene;
+  return {
+    category: source?.category ?? null,
+    description: source?.description ?? null,
+    frameosVersion: source?.frameosVersion ?? null,
+    tags: source?.tags ?? [],
+  };
+}
+
+function imagesOfVersion(info: SceneInfoData | undefined, version: number | null): string[] {
+  const recorded = version === null ? undefined : info?.versions.find((entry) => entry.version === version);
+  return recorded?.images ?? info?.images ?? [];
 }
 
 /** The scenes.json URL for a version (null: the newest published one). */
@@ -1300,6 +1334,8 @@ export function SceneEditorModal({
   canRemix = true,
   canPreview = true,
   signedIn = canFork,
+  aiDisabled = false,
+  aiSettingsUrl,
   share,
   downloadUrl,
   settingsUrl,
@@ -1346,6 +1382,27 @@ export function SceneEditorModal({
   const [forking, setForking] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [scenes, setScenes] = useState<SceneJson[] | null>(null);
+  // The draft's listing and image set, next to the scenes: what the Info
+  // column shows and edits, what the AI reads, what Save publishes with
+  // the diagram. Loaded from the page's data for the version in the
+  // workspace; the initial refs are what "unchanged" means.
+  const [listing, setListing] = useState<SceneListingData>(() =>
+    listingOfVersion(info, pinnedVersion),
+  );
+  const [images, setImages] = useState<string[]>(() => imagesOfVersion(info, pinnedVersion));
+  const initialListingRef = useRef<string>(JSON.stringify(listing));
+  const initialImagesRef = useRef<string>(JSON.stringify(images));
+  const listingRef = useRef(listing);
+  listingRef.current = listing;
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  const listingDirty =
+    JSON.stringify(listing) !== initialListingRef.current ||
+    JSON.stringify(images) !== initialImagesRef.current;
+  const anyDirty = dirty || listingDirty;
+  // A draft from a previous visit was restored (see loadVersion): the bar
+  // says so and offers to discard it.
+  const [restoredDraft, setRestoredDraft] = useState(false);
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   // The selected scene's name, as the bar shows it; follows the editor's
   // edits (its own Rename included) and the scene tabs.
@@ -1365,6 +1422,10 @@ export function SceneEditorModal({
   const panelsRef = useRef(panels);
   panelsRef.current = panels;
   selectedSceneIdRef.current = selectedSceneId;
+  const selectedVersionRef = useRef(selectedVersion);
+  selectedVersionRef.current = selectedVersion;
+  const latestVersionRef = useRef(latestVersion);
+  latestVersionRef.current = latestVersion;
   const available: SceneEditorPanelAvailability = {
     ai: canRemix,
     info: info !== undefined,
@@ -1391,6 +1452,64 @@ export function SceneEditorModal({
     setSceneName(sceneNameFor(latestScenesRef.current, nextSceneId));
   }
 
+  // Every edit lands in localStorage (debounced) so a navigation away — a
+  // tag click, Back, a closed tab — does not lose it; loadVersion restores
+  // it on the next visit. Editing back to the published state (or saving)
+  // clears the draft instead.
+  const draftTimerRef = useRef<number | null>(null);
+  function persistDraftNow() {
+    draftTimerRef.current = null;
+    const latest = latestScenesRef.current;
+    if (!latest || latest.length === 0) {
+      return;
+    }
+    const scenesDirty = JSON.stringify(latest) !== initialJsonRef.current;
+    const listingDirtyNow =
+      JSON.stringify(listingRef.current) !== initialListingRef.current ||
+      JSON.stringify(imagesRef.current) !== initialImagesRef.current;
+    if (!scenesDirty && !listingDirtyNow) {
+      // Edited back to the published state: the draft has nothing to keep.
+      // A draft made on another version is not ours to clear, though.
+      const existing = readSceneDraft(sceneId);
+      if (existing && existing.baseVersion === selectedVersionRef.current) {
+        clearSceneDraft(sceneId);
+      }
+      return;
+    }
+    writeSceneDraft(sceneId, {
+      baseVersion: selectedVersionRef.current,
+      images: imagesRef.current,
+      listing: listingRef.current,
+      savedAt: new Date().toISOString(),
+      scenes: latest,
+    });
+  }
+  function scheduleDraftPersist() {
+    if (draftTimerRef.current !== null) {
+      window.clearTimeout(draftTimerRef.current);
+    }
+    draftTimerRef.current = window.setTimeout(persistDraftNow, 500);
+  }
+  // An edit still inside the debounce window must not be lost to the very
+  // navigation the draft guards against: flushed when the workspace
+  // unmounts (a client-side route change) and when the page itself goes
+  // (a reload, a closed tab).
+  const persistDraftNowRef = useRef(persistDraftNow);
+  persistDraftNowRef.current = persistDraftNow;
+  useEffect(() => {
+    const flush = () => {
+      if (draftTimerRef.current !== null) {
+        window.clearTimeout(draftTimerRef.current);
+        persistDraftNowRef.current();
+      }
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
+
   // The bar's pencil: rename the selected scene. Through the mounted editor
   // (its form updates in place, the diagram keeps its layout, and the edit
   // echoes back through onScenesChanged); before it has mounted, by handing
@@ -1404,6 +1523,7 @@ export function SceneEditorModal({
     const next = current.map((scene) => (scene.id === targetId ? { ...scene, name } : scene));
     publishScenes(next);
     setDirty(JSON.stringify(next) !== initialJsonRef.current);
+    scheduleDraftPersist();
     if (editorApiRef.current) {
       editorApiRef.current.renameScene(targetId, name);
     } else {
@@ -1419,6 +1539,12 @@ export function SceneEditorModal({
   const loadRequestRef = useRef(0);
   async function loadVersion(version: number | null) {
     const request = ++loadRequestRef.current;
+    // A persist still on its debounce timer belongs to the state this load
+    // replaces; firing after the baselines reset would write nonsense.
+    if (draftTimerRef.current !== null) {
+      window.clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
     try {
       const response = await fetch(scenesJsonUrl(sceneId, version, share));
       if (!response.ok) {
@@ -1434,8 +1560,35 @@ export function SceneEditorModal({
       baselinePendingRef.current = true;
       setScenes(loaded);
       setDirty(false);
+      const loadedListing = listingOfVersion(info, version);
+      const loadedImages = imagesOfVersion(info, version);
+      initialListingRef.current = JSON.stringify(loadedListing);
+      initialImagesRef.current = JSON.stringify(loadedImages);
+      setListing(loadedListing);
+      setImages(loadedImages);
       // Whatever the AI panel changed is gone with the edits.
       setSuggestedMessage(undefined);
+      // A draft this browser left behind (a tag click, Back, a closed tab)
+      // picks up where the edits stopped — but only on the version it was
+      // made on; a version published since (or another one picked from the
+      // dropdown) loads clean, with the draft kept for its own version.
+      const draft = readSceneDraft(sceneId);
+      if (draft && draft.baseVersion === (version ?? latestVersionRef.current)) {
+        latestScenesRef.current = draft.scenes;
+        setPreviewScenes(draft.scenes);
+        // The published scenes.json stays the baseline: the draft is, by
+        // definition, unsaved.
+        baselinePendingRef.current = false;
+        setScenes(draft.scenes);
+        setDirty(true);
+        setListing(draft.listing);
+        setImages(draft.images);
+        setRestoredDraft(true);
+        const draftScene = draft.scenes.find((scene) => scene.default === true) ?? draft.scenes[0];
+        selectScene(draftScene?.id ?? null);
+        return;
+      }
+      setRestoredDraft(false);
       const defaultScene = loaded.find((scene) => scene.default === true) ?? loaded[0];
       selectScene(defaultScene?.id ?? null);
     } catch (err) {
@@ -1473,8 +1626,12 @@ export function SceneEditorModal({
     if (version === selectedVersion) {
       return;
     }
-    if (dirty && !window.confirm(`Discard your unsaved changes and load v${version}?`)) {
+    if (anyDirty && !window.confirm(`Discard your unsaved changes and load v${version}?`)) {
       return;
+    }
+    if (anyDirty) {
+      // The user chose to discard: the browser's copy goes with the edits.
+      clearSceneDraft(sceneId);
     }
     setError(null);
     setSelectedVersion(version);
@@ -1482,9 +1639,49 @@ export function SceneEditorModal({
     void loadVersion(version);
   }
 
+  // A screenshot the server registered (the preview panel's "Save to
+  // images", the editor's render check): into the draft's image set, at
+  // the end; Save publishes it.
+  function addImage(sha256: string) {
+    const current = imagesRef.current;
+    if (!current.includes(sha256)) {
+      setImages([...current, sha256]);
+      scheduleDraftPersist();
+    }
+  }
+
+  function setDraftImages(next: string[]) {
+    setImages(next);
+    scheduleDraftPersist();
+  }
+
+  function applyListingChanges(changes: Partial<SceneListingData>) {
+    setListing({ ...listingRef.current, ...changes });
+    scheduleDraftPersist();
+  }
+
+  // The AI edited the listing: same draft, same Save.
+  function applyAiListing(changes: AiListingChanges) {
+    const next: Partial<SceneListingData> = {};
+    if (changes.description !== undefined) {
+      next.description = changes.description;
+    }
+    if (changes.category !== undefined) {
+      next.category = changes.category;
+    }
+    if (changes.frameosVersion !== undefined) {
+      next.frameosVersion = changes.frameosVersion;
+    }
+    if (changes.tags !== undefined) {
+      next.tags = changes.tags;
+    }
+    applyListingChanges(next);
+  }
+
   // The editor captured a frame (its render check, or the JSON panel's
-  // screenshot). Owners get it saved to the scene's image gallery; everyone
-  // else gets ok:false and the editor falls back to downloading the PNG.
+  // screenshot). Owners get it registered and added to the draft's images;
+  // everyone else gets ok:false and the editor falls back to downloading
+  // the PNG.
   async function saveScreenshot(dataUrl: string) {
     if (!canSave) {
       return { ok: false, error: "Only the scene owner can save to its images" };
@@ -1501,8 +1698,8 @@ export function SceneEditorModal({
         method: "POST",
       });
       const payload = await upload.json().catch(() => ({}));
-      if (upload.ok) {
-        router.refresh();
+      if (upload.ok && typeof payload.image?.sha256 === "string") {
+        addImage(payload.image.sha256 as string);
       }
       return {
         ok: upload.ok,
@@ -1607,6 +1804,25 @@ export function SceneEditorModal({
     router.push(backUrl);
   }
 
+  // "Show in preview" under a frame the AI rendered: open the Preview panel
+  // on exactly those scenes (the editor may have moved on since), and put
+  // the editor on the scene that was drawn.
+  function showRenderInPreview({ sceneId: renderedSceneId, scenes: rendered }: RenderedScenes) {
+    setPreviewScenes(rendered);
+    if (rendered.some((scene) => scene.id === renderedSceneId)) {
+      selectScene(renderedSceneId);
+    }
+    if (!panels) {
+      return;
+    }
+    if (narrow) {
+      setActivePanel("preview");
+    }
+    if (!panels.preview) {
+      commitPanels(constrainPanels({ ...panels, preview: true }, available));
+    }
+  }
+
   // The AI delivered scenes: apply them with a NEW array identity (the
   // editor re-initialises on identity change), select the right one, and
   // let Save / Fork take it from there.
@@ -1620,6 +1836,7 @@ export function SceneEditorModal({
     setScenes(result.scenes);
     setSelectedSceneId(result.selectedSceneId);
     setDirty(JSON.stringify(result.scenes) !== initialJsonRef.current);
+    scheduleDraftPersist();
     return result.selectedSceneId;
   }
 
@@ -1653,11 +1870,26 @@ export function SceneEditorModal({
         );
         return;
       }
+      // The edits live in the fork now; a draft left on this scene would
+      // restore them here a second time.
+      clearSceneDraft(sceneId);
       // Jump to the fresh copy; its workspace opens on unsaved-free state.
       window.location.href = `/s/${payload.scene.slug}`;
     } finally {
       setForking(false);
     }
+  }
+
+  // The restored-draft pill's Discard: drop the browser's copy and reload
+  // the published version the workspace holds.
+  function discardDraft() {
+    if (!window.confirm("Discard your unsaved changes and reload the published version?")) {
+      return;
+    }
+    clearSceneDraft(sceneId);
+    setRestoredDraft(false);
+    setError(null);
+    void loadVersion(selectedVersion === null || selectedVersion === latestVersion ? null : selectedVersion);
   }
 
   /** The bar's Save: the dialog asks what changed and publishes from there. */
@@ -1680,8 +1912,15 @@ export function SceneEditorModal({
     setSaving(true);
     setError(null);
     try {
+      const draftListing = listingRef.current;
+      const draftImages = imagesRef.current;
       const response = await fetch(`/api/account/scenes/${sceneId}/content`, {
-        body: JSON.stringify({ message, scenes: latest }),
+        body: JSON.stringify({
+          images: draftImages,
+          listing: draftListing,
+          message,
+          scenes: latest,
+        }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -1695,15 +1934,23 @@ export function SceneEditorModal({
             : // The name and the note show on the public page, so both are
               // moderated; the note is the usual suspect.
               payload.error === "content_rejected"
-              ? "The scene's name or your note was flagged by moderation — please reword it."
-              : `Saving failed: ${payload.error ?? response.status}`,
+              ? "The scene's name, description, tags or your note was flagged by moderation — please reword it."
+              : payload.error === "invalid_tags"
+                ? "Up to 5 tags; lowercase letters, digits, dashes, max 24 characters each."
+                : payload.error === "invalid_frameos_version"
+                  ? "The minimum FrameOS version should look like 2026.7.5."
+                  : `Saving failed: ${payload.error ?? response.status}`,
         );
         return;
       }
       setDirty(false);
       setSaveOpen(false);
       setSuggestedMessage(undefined);
+      clearSceneDraft(sceneId);
+      setRestoredDraft(false);
       initialJsonRef.current = JSON.stringify(latest);
+      initialListingRef.current = JSON.stringify(draftListing);
+      initialImagesRef.current = JSON.stringify(draftImages);
       // The workspace now holds the version just published: the latest.
       const published = typeof payload.scene?.version === "number" ? (payload.scene.version as number) : null;
       if (published !== null) {
@@ -1764,10 +2011,26 @@ export function SceneEditorModal({
       : versionList;
 
   const actions: SceneEditorAction[] = [];
+  // A visitor with no way to keep an edit — no Save, no Fork — is signed
+  // out: the bar says where saving lives instead of only that it doesn't.
+  // `window.location` is safe here: the render stops at the `panels` guard
+  // above until the browser has mounted.
+  if (!signedIn && !canSave && !canFork) {
+    const returnTo = `${window.location.origin}${window.location.pathname}${window.location.search}${window.location.hash}`;
+    actions.push({
+      Icon: LogIn,
+      emphasized: true,
+      href: `${loginUrl}${loginUrl.includes("?") ? "&" : "?"}return_to=${encodeURIComponent(returnTo)}`,
+      key: "signin",
+      label: "Sign in to edit",
+      primary: true,
+      title: "Sign in to save your edits as a scene of your own — and to use the AI assistant",
+    });
+  }
   if (canSave) {
     actions.push({
       Icon: Save,
-      disabled: saving || !dirty,
+      disabled: saving || !anyDirty,
       key: "save",
       label: saving ? "Saving…" : "Save as new version",
       onSelect: openSave,
@@ -1812,7 +2075,20 @@ export function SceneEditorModal({
       <SceneEditorBar
         actions={actions}
         leading={
-          (canSave || canFork) && dirty ? <UnsavedPill label="Unsaved changes" short="Unsaved" /> : null
+          restoredDraft ? (
+            <span
+              className="pill pill-warning editor-modal__unsaved"
+              title="Your unsaved edits from your last visit were restored from this browser"
+            >
+              <span className="editor-modal__unsaved-long">Restored unsaved edits</span>
+              <span className="editor-modal__unsaved-short">Restored</span>
+              <button className="editor-modal__discard" onClick={discardDraft} type="button">
+                Discard
+              </button>
+            </span>
+          ) : (canSave || canFork) && anyDirty ? (
+            <UnsavedPill label="Unsaved changes" short="Unsaved" />
+          ) : null
         }
       >
         <SceneEditorBackButton label="Back" onClick={goBack} />
@@ -1846,7 +2122,14 @@ export function SceneEditorModal({
         ) : null}
         {nameInInfo ? null : nameTitle}
         {!canSave ? (
-          <span className="pill" title="Explore and tweak freely; nothing you change here is saved anywhere">
+          <span
+            className="pill"
+            title={
+              signedIn
+                ? "Explore and tweak freely; “Fork & save copy” is how an edit becomes yours"
+                : "Explore and tweak freely; sign in to keep an edit"
+            }
+          >
             Playground — changes are not saved
           </span>
         ) : null}
@@ -1854,20 +2137,41 @@ export function SceneEditorModal({
       </SceneEditorBar>
       <SceneEditorWorkspace
         info={
-          info ? <SceneInfoPanel {...info} heading={nameTitle} /> : undefined
+          info ? (
+            <SceneInfoPanel
+              {...info}
+              draft={
+                canSave
+                  ? {
+                      images,
+                      listing,
+                      onImagesChange: setDraftImages,
+                      onListingChange: applyListingChanges,
+                    }
+                  : undefined
+              }
+              heading={nameTitle}
+              shown={{ images, listing }}
+            />
+          ) : undefined
         }
         ai={{
+          aiDisabled,
+          ...(aiSettingsUrl ? { aiSettingsUrl } : {}),
+          getListing: () => listingRef.current,
           getScenes: () => latestScenesRef.current,
           initialPrompt,
           loginUrl,
           mode: "existing",
+          onListing: applyAiListing,
           onScenes: applyAiEvent,
+          ...(canPreview ? { onShowInPreview: showRenderInPreview } : {}),
           saveHint,
           settingsUrl,
           signedIn,
           storeSceneId: sceneId,
         }}
-        description={description || undefined}
+        description={listing.description ?? description ?? undefined}
         editorApiRef={editorApiRef}
         height={height || 480}
         onSaveScreenshot={saveScreenshot}
@@ -1879,6 +2183,7 @@ export function SceneEditorModal({
             initialJsonRef.current = json;
           }
           setDirty(json !== initialJsonRef.current);
+          scheduleDraftPersist();
         }}
         // The editor reports null before its first init; there is nothing
         // to follow yet.
@@ -1898,6 +2203,7 @@ export function SceneEditorModal({
         panels={shown}
         preview={{
           canSaveToGallery: canSave,
+          onImageRegistered: addImage,
           sceneId,
           scenes: previewScenes,
           settingsUrl,

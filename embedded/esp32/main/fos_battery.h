@@ -26,14 +26,21 @@ bool fos_battery_present(void);
 /* One sampled read: the cell voltage in millivolts (after divider
  * correction; 0 when unavailable) and the charge estimate 0..100 from a
  * Li-ion discharge curve (-1 when unavailable), both from the SAME ADC
- * sample. Either out pointer may be NULL. Averages a handful of samples and
- * takes ~10 ms more on boards with an enable pin. Serialized by a mutex:
- * the render task, the HTTP server (/status), the console and the cloud
- * client all read it, and an unserialized caller switching the divider off
- * mid-sample turned a full cell into a ~1.9 V reading. Prefer one call per
- * pass over millivolts() + percent() back to back. */
+ * sample. Either out pointer may be NULL. Samples in rounds until two agree
+ * (see fos_battery_filter.h) and takes ~25-45 ms on boards with an enable
+ * pin. Serialized by a mutex: the render task, the HTTP server (/status),
+ * the console and the cloud client all read it, and an unserialized caller
+ * switching the divider off mid-sample turned a full cell into a ~1.9 V
+ * reading. Prefer one call per pass over millivolts() + percent() back to
+ * back. */
 void fos_battery_read(int *millivolts, int *percent);
 
 /* Convenience wrappers around fos_battery_read(); each one samples. */
 int fos_battery_millivolts(void);
 int fos_battery_percent(void);
+
+/* The charge estimate 0..100 for a voltage the caller already has, off the
+ * same Li-ion discharge curve fos_battery_read() uses; -1 for a voltage of
+ * 0. Lets a consumer that reports a believed reading (fos_power.h) report a
+ * percentage consistent with it instead of one from the raw sample. */
+int fos_battery_percent_for(int millivolts);

@@ -25,13 +25,14 @@ import { buildAppTypeDeclarations } from '../../../../utils/appTypeDeclarations'
 import {
   appOrigin,
   buildSceneApp,
-  hasCompiledAppSource,
+  hasCompiledNimAppSource,
   javascriptAppSourceFiles,
   loadAppSources,
   nextSceneAppKey,
   normalizeSceneApps,
   sceneAppToAppConfig,
 } from '../../../../utils/sceneApps'
+import { confirmSceneBecomesCompiled } from '../../../../utils/sceneExecution'
 import { sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 import type { FrameScene } from '../../../../types'
 import type { AppConfig, FrameType } from '../../../../types'
@@ -354,7 +355,7 @@ export const editAppLogic = kea<editAppLogicType>([
     requiresCompiledOnSave: [
       (s) => [s.isInterpreted, s.sources],
       (isInterpreted: editAppLogicValues['isInterpreted'], sources: editAppLogicValues['sources']): boolean =>
-        isInterpreted && hasCompiledAppSource(sources),
+        isInterpreted && hasCompiledNimAppSource(sources),
     ],
     hasChanges: [
       (s) => [s.sources, s.sourcesLoading, s.initialSources],
@@ -433,9 +434,13 @@ export const editAppLogic = kea<editAppLogicType>([
   }),
   listeners(({ actions, props, values }) => ({
     saveChanges: () => {
-      const settings = values.requiresCompiledOnSave
-        ? { ...values.scene?.settings, execution: 'compiled' as const }
-        : values.scene?.settings
+      // Saving Nim sources into an interpreted scene used to flip it to compiled
+      // silently; now it asks, and a declined flip keeps the scene interpreted
+      // (the app is saved either way — Scene Settings shows what it carries).
+      const settings =
+        values.requiresCompiledOnSave && confirmSceneBecomesCompiled(values.scene, {}, true)
+          ? { ...values.scene?.settings, execution: 'compiled' as const }
+          : values.scene?.settings
       if (values.sceneAppKey) {
         const sceneApps = normalizeSceneApps(values.scene?.apps)
         actions.updateScene(props.sceneId, {

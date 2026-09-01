@@ -286,7 +286,19 @@ function FrameTreeRow({
             className="min-w-0 flex-1 rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
             <span className="flex min-w-0 items-center gap-1.5">
-              <span className={clsx('block min-w-0 truncate', !archived && 'text-base font-medium')}>{frameName}</span>
+              <span className={clsx('block min-w-0 truncate', !archived && 'text-base font-medium')}>
+                {frameName}
+                {(frame.compiled_scene_count ?? 0) > 0 ? (
+                  <span
+                    className="ml-1.5 align-middle text-[10px] font-semibold text-amber-600"
+                    title={`${frame.compiled_scene_count} legacy compiled scene${
+                      frame.compiled_scene_count === 1 ? '' : 's'
+                    } — needs a source build on every deploy. Convert to JavaScript.`}
+                  >
+                    ⚠ {frame.compiled_scene_count}
+                  </span>
+                ) : null}
+              </span>
             </span>
             <span className="block truncate text-xs text-slate-400">{frameActivityDescription(frame)}</span>
           </button>
@@ -954,20 +966,20 @@ function resolveSceneControlSelection(
   uploadedScenes: FrameScene[]
 ): { scene: FrameScene | null; sceneId: string; saved: boolean } {
   const uploadedSceneId = sceneId.startsWith(uploadedScenePrefix) ? sceneId.slice(uploadedScenePrefix.length) : null
-  const savedScene =
-    savedFrame.scenes?.find((candidate) => candidate.id === sceneId) ??
-    (uploadedSceneId ? savedFrame.scenes?.find((candidate) => candidate.id === uploadedSceneId) : null)
+  const findScene = (scenes: FrameScene[] | undefined): FrameScene | null =>
+    scenes?.find((candidate) => candidate.id === sceneId) ??
+    (uploadedSceneId ? scenes?.find((candidate) => candidate.id === uploadedSceneId) ?? null : null) ??
+    null
 
-  if (savedScene) {
-    return { scene: savedScene, sceneId: savedScene.id, saved: true }
-  }
-
-  const editingScene =
-    editingFrame.scenes?.find((candidate) => candidate.id === sceneId) ??
-    (uploadedSceneId ? editingFrame.scenes?.find((candidate) => candidate.id === uploadedSceneId) : null)
-
-  if (editingScene) {
-    return { scene: editingScene, sceneId: editingScene.id, saved: false }
+  const savedScene = findScene(savedFrame.scenes)
+  // The editing frame wins: it is the saved frame with the form's unsaved
+  // edits on top, so the drawer shows what the editor shows — a scene just
+  // converted to interpreted stops claiming to be legacy compiled here too.
+  // `saved` still means "this scene exists in the saved frame", which is what
+  // the unsaved/undeployed chips below ask about.
+  const scene = findScene(editingFrame.scenes) ?? savedScene
+  if (scene) {
+    return { scene, sceneId: scene.id, saved: !!savedScene }
   }
 
   const uploadedScene = uploadedSceneId
@@ -1119,7 +1131,11 @@ function SceneControlPanelContent({
                 {selectedSceneIsActive ? <FrameImageOverlayControls frame={frame} sceneId={scene.id} /> : null}
                 {sceneIsCompiledForFrame(scene, frame.mode) ? (
                   <div className="absolute left-2 top-10 z-10">
-                    <CompiledSceneTag className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm" />
+                    <CompiledSceneTag
+                      frameId={frame.id}
+                      sceneId={scene.id}
+                      className="!bg-white/95 !border-slate-500/45 !text-slate-700 shadow-sm backdrop-blur-sm"
+                    />
                   </div>
                 ) : null}
                 {!saved ? (

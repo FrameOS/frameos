@@ -1,5 +1,5 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createFrameosMcpServer } from "./server";
+import { createFrameosMcpServer, posthog } from "./server";
 
 // Local (stdio) entry point, for MCP clients that cannot speak Streamable
 // HTTP or that prefer a subprocess:
@@ -30,3 +30,8 @@ const server = createFrameosMcpServer({
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+process.on("SIGTERM", async () => {
+  await posthog.shutdown();
+  process.exit(0);
+});

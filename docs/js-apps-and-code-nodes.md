@@ -26,6 +26,13 @@ Globals available inside a code node — and nothing else:
 | `format(ts, pattern)` | formats a timestamp in the frame's time zone |
 | `parseTs(pattern, text)` | parses text into seconds since epoch |
 
+Argument names are checked against those globals: a `codeArgs` entry named
+`state`, `args`, `context`, `console`, `getargor`, `parseTs`, `format` or
+`now` (case-insensitive) is **not declared** — the code sees the global of
+that name instead of the input, silently. Name the argument something else
+(`heaterState`, not `state`); the converter renames such arguments and their
+edges for you.
+
 There is **no `frameos` object, no `fetch`, no HTTP** in a code node. Fetch
 data with a data app (`data/downloadUrl`, `data/parseJson`, `data/xmlToJson`,
 …) and wire its `fieldOutput` into a code node argument. Standard JavaScript
@@ -74,12 +81,31 @@ when the label shown should differ from the value stored in config or state.
 
 App nodes then use `keyword: "myPanel"`. Inside `app.ts` the app sees
 `app.config` (its fields), `app.state`, `app.frame` (`width`, `height`,
-`rotate`, `timeZone`), `context`, and the `frameos` helpers:
-`frameos.fetchJson(url)`, `frameos.fetchText(url)`, `frameos.svg(svg, spec)`,
-`frameos.image(spec)`, `frameos.log()`, `frameos.setState()`,
-`frameos.setNextSleep()`. It does **not** see the scene's state or the code
-node helpers (`format`, `now`, `parseTs`); pass such values in through fields.
-`Date` is UTC-only here as well.
+`rotate`, `timeZone`), `context` (`imageWidth`/`imageHeight` when an image
+is flowing through), and the `frameos` helpers — the full bridge, as the
+type declarations (`frontend/src/utils/appTypeDeclarations.ts`,
+`cloud/apps/auth-web/scripts/generate-ai-context.mjs`) list it:
+`frameos.fetchJson(url)`, `frameos.fetchText(url)`,
+`frameos.httpRequest(url, {method, headers, body, bodyBase64, base64,
+timeoutMs})`, `frameos.svg(svg, spec)`, `frameos.image(spec)`,
+`frameos.log()`, `frameos.error()`, `frameos.setState()`,
+`frameos.setNextSleep()`, `frameos.getSetting("namespace", "key")` (only
+namespaces the app's `config.json` declares under `settings`), the asset
+calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
+`appendAsset`, `deleteAsset`, `loadAssetImage`, and the stream calls
+`openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
+`streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out).
+`app.state` **is** the scene's state — read any
+key from it, write with `frameos.setState(key, value)` and state nodes see the
+change. What an app does **not** have are the code-node time helpers
+(`format`, `now`, `parseTs`); take such values in through a field fed by a
+code node or `data/clock`. `Date` is UTC-only here as well.
+
+JavaScript is the format apps are written in. The Nim apps under
+`frameos/src/apps/` are the built-in catalog that ships inside the FrameOS
+binary (`render/text`, `data/clock`, …) — not something a scene carries or a
+user edits. A scene that still holds Nim sources or Nim code nodes is a
+legacy *compiled* scene; `docs/nim-to-js-conversion.md` is the way out.
 
 ### More than one file
 

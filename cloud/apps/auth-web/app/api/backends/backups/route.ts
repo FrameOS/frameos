@@ -23,7 +23,7 @@ import {
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
-import { maxBackupBytesPerAccount } from "../../../../src/lib/usage";
+import { accountLimits } from "../../../../src/lib/usage";
 
 export const runtime = "nodejs";
 
@@ -170,9 +170,16 @@ export async function POST(request: NextRequest) {
   }
   const bytesAfterSave =
     accountBytes - (existing?.sizeBytes ?? 0) + content.length;
-  if (bytesAfterSave > maxBackupBytesPerAccount) {
+  // The plan's account budget, not the free tier's: the number that refuses
+  // has to be the number the account page promises (src/lib/usage.ts).
+  // Distinct from `maxBackupBytes` above, which caps ONE backup.
+  const { backupBytes: maxAccountBackupBytes } = await accountLimits(
+    db,
+    linkedClient.accountId,
+  );
+  if (bytesAfterSave > maxAccountBackupBytes) {
     return jsonError("backup_storage_quota_exceeded", 403, {
-      max_bytes: maxBackupBytesPerAccount,
+      max_bytes: maxAccountBackupBytes,
       used_bytes: Math.round(accountBytes),
     });
   }

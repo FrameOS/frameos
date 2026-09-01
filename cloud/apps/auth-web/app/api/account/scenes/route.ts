@@ -6,7 +6,7 @@ import {
   maxSceneNameChars,
 } from "../../../../src/lib/account-scene-create";
 import { sceneSummary } from "../../../../src/lib/store";
-import { sceneHasAnyImageSql } from "../../../../src/lib/store-preview";
+import { sceneHasImageSql } from "../../../../src/lib/store-listing";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import {
   jsonError,
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
       downloadCount: storeScenes.downloadCount,
       featuredAt: storeScenes.featuredAt,
       frameosVersion: storeScenes.frameosVersion,
-      hasPreview: sceneHasAnyImageSql,
+      hasPreview: sceneHasImageSql,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,

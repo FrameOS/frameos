@@ -7,7 +7,6 @@ import {
   accounts,
   createDb,
   frames,
-  storeSceneImages,
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
@@ -18,6 +17,7 @@ import { SceneMarkdown } from "../../../src/components/SceneMarkdown";
 import { SceneViewTracker } from "../../../src/components/SceneViewTracker";
 import {
   getAccountBaseUrl,
+  getAccountUrl,
   getCloudBaseUrl,
   getFramesUrl,
   getScenesBaseUrl,
@@ -35,7 +35,8 @@ import {
   defaultSceneDescription,
   socialDescription,
 } from "../../../src/lib/social-description";
-import { sceneHasPrimaryPreviewSql } from "../../../src/lib/store-preview";
+import { listingForVersion } from "../../../src/lib/store-listing";
+import { imageSetForVersion, imageSetForVersionId } from "../../../src/lib/store-images";
 
 export const dynamic = "force-dynamic";
 
@@ -68,11 +69,8 @@ export async function generateMetadata({
   const [scene] = await db
     .select({
       description: storeScenes.description,
-      hasPreview: sceneHasPrimaryPreviewSql,
       id: storeScenes.id,
       name: storeScenes.name,
-      previewImageHeight: storeScenes.previewImageHeight,
-      previewImageWidth: storeScenes.previewImageWidth,
       publisher: accounts.displayName,
       shareToken: storeScenes.shareToken,
       status: storeScenes.status,
@@ -100,32 +98,21 @@ export async function generateMetadata({
     scene.description,
     defaultSceneDescription(scene.publisher),
   );
-  const [galleryImage] = scene.hasPreview
-    ? []
-    : await db
-        .select({ id: storeSceneImages.id })
-        .from(storeSceneImages)
-        .where(eq(storeSceneImages.sceneId, scene.id))
-        .orderBy(storeSceneImages.position, storeSceneImages.createdAt)
-        .limit(1);
-  const imagePath = scene.hasPreview
-    ? `/api/store/scenes/${scene.id}/image`
-    : galleryImage
-      ? `/api/store/scenes/${scene.id}/images/${galleryImage.id}`
-      : undefined;
-  const imageUrl = imagePath
-    ? new URL(`${imagePath}${shareSuffix}`, getScenesBaseUrl()).toString()
-    : undefined;
-  const images = imageUrl
+  const [cover] = await imageSetForVersion(db, scene.id, null);
+  const images = cover
     ? [
         {
-          url: imageUrl,
-          width: scene.previewImageWidth ?? undefined,
-          height: scene.previewImageHeight ?? undefined,
+          url: new URL(
+            `/api/store/scenes/${scene.id}/image${shareSuffix}`,
+            getScenesBaseUrl(),
+          ).toString(),
+          width: cover.width ?? undefined,
+          height: cover.height ?? undefined,
           alt: scene.name,
         },
       ]
     : undefined;
+  const imageUrl = images?.[0]?.url;
   return {
     title: scene.name,
     description,
@@ -166,12 +153,9 @@ export default async function ScenePage({
       downloadCount: storeScenes.downloadCount,
       featuredAt: storeScenes.featuredAt,
       frameosVersion: storeScenes.frameosVersion,
-      hasPreview: sceneHasPrimaryPreviewSql,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,
-      previewImageHeight: storeScenes.previewImageHeight,
-      previewImageWidth: storeScenes.previewImageWidth,
       publisher: accounts.displayName,
       pulledReason: storeScenes.pulledReason,
       riskFlags: storeScenes.riskFlags,
@@ -196,13 +180,21 @@ export default async function ScenePage({
     session?.accountId && session.accountId === scene.accountId,
   );
   let isAdmin = false;
-  if (session?.accountId && !isOwner) {
+  // The AI switch (Account → AI usage). Read here so the panel can say AI is
+  // off BEFORE accepting a prompt: the gate would refuse the turn anyway, but
+  // discovering that after typing and waiting is a bad way to learn it.
+  let aiDisabled = false;
+  if (session?.accountId) {
     const [row] = await db
-      .select({ isSuperadmin: accounts.isSuperadmin })
+      .select({
+        aiDisabledAt: accounts.aiDisabledAt,
+        isSuperadmin: accounts.isSuperadmin,
+      })
       .from(accounts)
       .where(eq(accounts.id, session.accountId))
       .limit(1);
-    isAdmin = row?.isSuperadmin ?? false;
+    aiDisabled = Boolean(row?.aiDisabledAt);
+    isAdmin = isOwner ? false : (row?.isSuperadmin ?? false);
   }
 
   // Private and pulled scenes exist only for their owner and moderators;
@@ -237,11 +229,16 @@ export default async function ScenePage({
 
   const versions = await db
     .select({
+      category: storeSceneVersions.category,
       createdAt: storeSceneVersions.createdAt,
+      description: storeSceneVersions.description,
       frameosVersion: storeSceneVersions.frameosVersion,
+      id: storeSceneVersions.id,
+      listingRecorded: storeSceneVersions.listingRecorded,
       message: storeSceneVersions.message,
       sha256: storeSceneVersions.sha256,
       sizeBytes: storeSceneVersions.sizeBytes,
+      tags: storeSceneVersions.tags,
       version: storeSceneVersions.version,
       yankedAt: storeSceneVersions.yankedAt,
     })
@@ -249,12 +246,18 @@ export default async function ScenePage({
     .where(eq(storeSceneVersions.sceneId, scene.id))
     .orderBy(desc(storeSceneVersions.version));
 
-  // Owner-uploaded gallery images shown next to the zip's preview image.
-  const galleryImages = await db
-    .select({ id: storeSceneImages.id })
-    .from(storeSceneImages)
-    .where(eq(storeSceneImages.sceneId, scene.id))
-    .orderBy(storeSceneImages.position, storeSceneImages.createdAt);
+  // Each version's image set (versions from before sets were recorded show
+  // the latest's), and the latest's, which is the page's own.
+  const latestImages = await imageSetForVersion(db, scene.id, null);
+  const versionImages = new Map<number, string[]>();
+  for (const version of versions) {
+    versionImages.set(
+      version.version,
+      version.listingRecorded
+        ? (await imageSetForVersionId(db, version.id)).map((image) => image.sha256)
+        : latestImages.map((image) => image.sha256),
+    );
+  }
 
   // ?version=N pins the page to that published version. The latest version
   // counts as "viewing" by default; only pinning an OLDER version changes
@@ -305,6 +308,7 @@ export default async function ScenePage({
     withShare(`/s/${scene.slug}`),
     getScenesBaseUrl(),
   ).toString();
+  const shownListing = pinnedVersion ? listingForVersion(pinnedVersion, scene) : scene;
   const zipUrl = new URL(
     withShare(`/api/store/scenes/${scene.id}/download`),
     getScenesBaseUrl(),
@@ -314,7 +318,7 @@ export default async function ScenePage({
   // workspace is a client component).
   const info: SceneInfoData = {
     framesUrl,
-    imageIds: galleryImages.map((image) => image.id),
+    images: latestImages.map((image) => image.sha256),
     installableFrames,
     isAdmin,
     isOwner,
@@ -325,7 +329,6 @@ export default async function ScenePage({
       description: scene.description,
       downloadCount: scene.downloadCount,
       frameosVersion: scene.frameosVersion,
-      hasPreview: scene.hasPreview,
       id: scene.id,
       latestVersion: scene.latestVersion,
       name: scene.name,
@@ -340,15 +343,20 @@ export default async function ScenePage({
     },
     share,
     signedIn: Boolean(session),
-    versions: versions.map((version) => ({
-      createdAt: version.createdAt.toISOString(),
-      frameosVersion: version.frameosVersion,
-      message: version.message,
-      sha256: version.sha256,
-      sizeBytes: version.sizeBytes,
-      version: version.version,
-      yankedAt: version.yankedAt ? version.yankedAt.toISOString() : null,
-    })),
+    versions: versions.map((version) => {
+      const listing = listingForVersion(version, scene);
+      return {
+        createdAt: version.createdAt.toISOString(),
+        frameosVersion: listing.frameosVersion,
+        images: versionImages.get(version.version) ?? [],
+        listing,
+        message: version.message,
+        sha256: version.sha256,
+        sizeBytes: version.sizeBytes,
+        version: version.version,
+        yankedAt: version.yankedAt ? version.yankedAt.toISOString() : null,
+      };
+    }),
   };
 
   return (
@@ -385,11 +393,11 @@ export default async function ScenePage({
             · {scene.downloadCount} download
             {scene.downloadCount === 1 ? "" : "s"} · updated{" "}
             {formatDate(scene.updatedAt)}
-            {scene.frameosVersion
-              ? ` · requires FrameOS ${scene.frameosVersion} or newer`
+            {shownListing.frameosVersion
+              ? ` · requires FrameOS ${shownListing.frameosVersion} or newer`
               : ""}
           </p>
-          <SceneMarkdown description={scene.description} />
+          <SceneMarkdown description={shownListing.description} />
         </div>
         <div className="button-row">
           <a className="button" href={downloadHref}>
@@ -412,14 +420,16 @@ export default async function ScenePage({
       {/* The diagram is part of what a shared scene IS: everyone gets to
           look behind it. Only the owner can save a new version. */}
       <SceneEditorModal
+        aiDisabled={aiDisabled}
+        aiSettingsUrl={getAccountUrl("/account/ai")}
         backUrl={getStorePath()}
         canFork={Boolean(session?.accountId)}
         canPreview={scene.status !== "pulled"}
         canRemix={scene.status === "active"}
         canSave={isOwner && scene.status === "active"}
-        description={scene.description}
+        description={shownListing.description}
         downloadUrl={downloadHref}
-        height={scene.previewImageHeight}
+        height={latestImages[0]?.height ?? null}
         info={info}
         loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
         signupUrl={new URL("/signup", getCloudBaseUrl()).toString()}
@@ -429,7 +439,7 @@ export default async function ScenePage({
         share={share}
         signedIn={Boolean(session?.accountId)}
         versions={info.versions}
-        width={scene.previewImageWidth}
+        width={latestImages[0]?.width ?? null}
       />
     </PublicShell>
   );

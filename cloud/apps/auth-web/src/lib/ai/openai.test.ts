@@ -29,7 +29,7 @@ afterEach(() => {
 
 describe("model resolution", () => {
   it("prefers chatModel, then model, then the default", () => {
-    expect(resolveChatModel({})).toBe("gpt-5.5");
+    expect(resolveChatModel({})).toBe("gpt-5.6-terra");
     expect(resolveChatModel({ model: "gpt-4.1" })).toBe("gpt-4.1");
     expect(resolveChatModel({ chatModel: "gpt-5.5-mini", model: "gpt-4.1" })).toBe(
       "gpt-5.5-mini",

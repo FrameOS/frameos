@@ -690,6 +690,18 @@ The PostHog event is `cloud user signed up` with the account id as
 `distinct_id`, sent server-side to the `/capture` endpoint using the same
 public project key as the browser SDK (no extra secret required).
 
+**The browser SDK does not read this from the server's env file.**
+`NEXT_PUBLIC_*` values are inlined into the client bundle when `next build`
+runs, and the bundle is built wherever the deploy is run from — the GitHub
+Actions runner for automatic deploys (the `NEXT_PUBLIC_POSTHOG_KEY`
+repository variable, wired through `.github/workflows/cloud-ci.yml`), or the
+local checkout for a manual `pnpm deploy:prod` (`.env.local`). The entry in
+`/etc/frameos-cloud/auth-web.env` only feeds the server-side uses above. A
+build without the key ships with browser analytics off entirely: the SDK is
+never initialised and the consent banner does not render. turbo.json declares
+the variable as an env input of `@frameos-cloud/auth-web#build`, so a keyed
+build never replays a cached keyless one (or vice versa).
+
 ## Legal Pages
 
 `/legal/terms`, `/legal/privacy` and `/legal/imprint` are served from the

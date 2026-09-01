@@ -359,6 +359,26 @@ html.theme-dark .button-primary {
   display: contents;
 }
 
+/* The AI usage row is a link, not a meter: the only number it could fill a
+   bar against today is the daily cap, and a bar that empties every midnight
+   says nothing useful. See cloud/docs/accounting-todo.md §5.2. */
+.storage-usage__link {
+  display: contents;
+  color: inherit;
+  text-decoration: none;
+}
+
+.storage-usage__link:hover .storage-usage__value,
+.storage-usage__link:focus-visible .storage-usage__value {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.storage-usage__note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .compact-header {
   align-items: center;
   margin-bottom: 0;
@@ -1319,6 +1339,39 @@ a.tag-pill--active:hover {
 
 .subnav--store + .section-block {
   margin-top: 0;
+}
+
+/* The "…" at the right end of the store tabs (StoreTabsMenu). */
+.subnav__menu {
+  margin-left: auto;
+  align-self: center;
+}
+
+.row-menu__panel--wide {
+  min-width: 280px;
+  max-width: 340px;
+}
+
+.row-menu__item--link {
+  text-decoration: none;
+  align-items: flex-start;
+}
+
+.row-menu__item--link:hover {
+  text-decoration: none;
+}
+
+.row-menu__label {
+  display: block;
+  font-weight: 600;
+}
+
+.row-menu__hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .subnav__link {
@@ -2618,6 +2671,18 @@ a.stat-tile:hover {
   white-space: nowrap;
 }
 
+/* The restored-draft pill's Discard: a link-style button inside the pill. */
+.editor-modal__discard {
+  margin-left: 6px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* The bar's version dropdown, right after the panel toggles. */
 .editor-modal__version-select.input {
   flex: 0 1 auto;
@@ -3252,12 +3317,6 @@ a.stat-tile:hover {
   font-weight: 650;
 }
 
-.ai-panel__beta {
-  margin-left: auto;
-  padding: 2px 7px;
-  font-size: 11px;
-}
-
 .ai-panel__transcript {
   display: flex;
   flex-direction: column;
@@ -3460,6 +3519,32 @@ a.stat-tile:hover {
   background: #ffffff;
 }
 
+/* The frame and, under it, the way into the Preview panel. */
+.ai-panel__render-block {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+/* An action, styled as the link people look for under the picture. */
+.ai-panel__render-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-panel__render-open:hover {
+  color: var(--primary-strong);
+  text-decoration: underline;
+}
+
 .ai-panel__render-link:hover .ai-panel__render {
   border-color: color-mix(in srgb, var(--primary), var(--line) 45%);
 }
@@ -3637,6 +3722,7 @@ html.theme-dark .ai-panel__render {
   color: var(--text);
   font: inherit;
   text-align: left;
+  text-decoration: none;
   cursor: pointer;
   transition:
     transform 160ms ease,
@@ -3672,12 +3758,21 @@ html.theme-dark .ai-panel__render {
   --card-ink: #155e4e;
 }
 
+.action-card--slate {
+  --card-tint: #4a5b78;
+  --card-ink: #35435c;
+}
+
 html.theme-dark .action-card--gold {
   --card-ink: #e2c468;
 }
 
 html.theme-dark .action-card--teal {
   --card-ink: #6fbfa9;
+}
+
+html.theme-dark .action-card--slate {
+  --card-ink: #9fb2d1;
 }
 
 html.theme-dark .action-card {
@@ -3950,4 +4045,80 @@ html.theme-dark .action-card__ghost {
   line-height: 1.5;
   overflow-x: auto;
   white-space: pre;
+}
+
+/* Nim → JavaScript scene converter (app/nim-converter). */
+.nim-converter {
+  max-width: 860px;
+}
+
+.nim-converter__drop {
+  border: 2px dashed var(--border);
+  text-align: center;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.nim-converter__drop--active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.nim-converter__drop-copy {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.nim-converter__drop-copy .button-row {
+  justify-content: center;
+}
+
+.nim-converter__paste {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.nim-converter__key summary,
+.nim-converter__api summary,
+.nim-converter__report summary {
+  cursor: pointer;
+}
+
+.nim-converter__key summary {
+  font-weight: 600;
+}
+
+.nim-converter__key > .section-description {
+  margin: 10px 0;
+}
+
+.nim-converter__key .input {
+  max-width: 420px;
+}
+
+.nim-converter__busy {
+  align-self: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.nim-converter__lines {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.nim-converter__lines code {
+  white-space: pre-wrap;
+  word-break: break-word;
 }

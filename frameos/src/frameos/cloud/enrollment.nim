@@ -377,6 +377,12 @@ proc pendingPersonalization*(pending: JsonNode): JsonNode =
   let timeZone = pending{"time_zone"}.getStr("").strip()
   if timeZone.len > 0:
     result["timezone"] = %timeZone
+  # Not an admin-API key: `network` is replaced wholesale by
+  # persistFrameApiUpdate, so the caller folds this into the stored network
+  # object rather than sending a one-key replacement (hub_client.nim).
+  let wifiCountry = pending{"wifi_country"}.getStr("").strip().toUpperAscii()
+  if wifiCountry.len == 2 and wifiCountry[0] in {'A'..'Z'} and wifiCountry[1] in {'A'..'Z'}:
+    result["wifiCountry"] = %wifiCountry
 
 proc writePendingEnrollment*(claimToken, providerUrl, name: string): bool {.gcsafe.} =
   ## Queues a claim-token enrollment for the hub thread to redeem. Entry point

@@ -8,6 +8,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -43,6 +44,12 @@ export const deviceAuthorizationStatus = pgEnum("device_authorization_status", [
 
 export const accounts = pgTable("accounts", {
   id: uuid("id").defaultRandom().primaryKey(),
+  // The AI opt-out (migration 0044). Set = the account has explicitly turned
+  // AI features off and nothing it does may incur AI cost;
+  // resolveAiCredentials() refuses before it looks at any key. A timestamp so
+  // "since when" is answerable, and null for every account that never touched
+  // the switch.
+  aiDisabledAt: timestamp("ai_disabled_at", { withTimezone: true }),
   displayName: text("display_name"),
   isSuperadmin: boolean("is_superadmin").default(false).notNull(),
   // Null for accounts that only sign in through an external provider.
@@ -574,6 +581,19 @@ export const storeSceneVersions = pgTable(
     // normalizeVersionMessage). Null for versions published without one —
     // everything before this column existed, and every zip upload.
     message: text("message"),
+    // The listing as it was when this version was published: description,
+    // tags and category travel with the version (and inside the zip's
+    // template.json) like frameosVersion always did, so a pinned version
+    // says what it said. The store_scenes columns of the same names are the
+    // projection of the latest version — what the store's SQL filters on.
+    description: text("description"),
+    tags: text("tags").array().default([]).notNull(),
+    category: text("category"),
+    // False on versions published before the listing and the image set were
+    // recorded per version (migration 0041 stamps the latest one true);
+    // readers fall back to the scene row for those. "No description, no
+    // images" is a legitimate recorded state, hence a flag and not nulls.
+    listingRecorded: boolean("listing_recorded").default(false).notNull(),
     publishedByLinkedClientId: uuid("published_by_linked_client_id").references(
       () => linkedClients.id,
       { onDelete: "set null" },
@@ -623,6 +643,45 @@ export const storeSceneImages = pgTable(
     sceneIdx: index("store_scene_images_scene_idx").on(
       table.sceneId,
       table.position,
+    ),
+  }),
+);
+
+// Every image the store holds, once: keyed by the digest of its bytes, which
+// is also the tail of its object key. Versions link to these
+// (storeSceneVersionImages) rather than carrying rows of their own, so a
+// screenshot reused across ten versions of a scene — or by a fork — is one
+// object and one row. Nothing here says which scene an image belongs to;
+// the links do, and an image nobody links is what the sweep script removes.
+export const storeImages = pgTable("store_images", {
+  sha256: text("sha256").primaryKey(),
+  objectKey: text("object_key").notNull(),
+  contentType: text("content_type").default("image/jpeg").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  width: integer("width"),
+  height: integer("height"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// The ordered image set of one version: position 0 is the cover the store
+// shows for it. Immutable with the version — reordering publishes a new one.
+export const storeSceneVersionImages = pgTable(
+  "store_scene_version_images",
+  {
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => storeSceneVersions.id, { onDelete: "cascade" }),
+    imageSha256: text("image_sha256")
+      .notNull()
+      .references(() => storeImages.sha256),
+    position: integer("position").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.versionId, table.position] }),
+    imageIdx: index("store_scene_version_images_image_idx").on(
+      table.imageSha256,
     ),
   }),
 );
@@ -1103,5 +1162,396 @@ export const aiChatMessages = pgTable(
   },
   (table) => ({
     chatIdx: index("ai_chat_messages_chat_idx").on(table.chatId, table.id),
+  }),
+);
+
+// Double-entry accounting (migration 0042). Product code emits an immutable
+// financial_events row; a versioned posting rule in packages/ledger turns it
+// into balanced ledger_entries + ledger_postings; ledger_balances caches the
+// running sum. Design: cloud/docs/accounting-todo.md.
+//
+// No foreign key points out of the ledger. account_id and owner_account_id
+// hold an accounts uuid as a plain column, so a deleted account can neither
+// take its books with it nor anonymize them — "we paid OpenAI $4.20 on
+// behalf of somebody" is not an accounting record, and a provider-cost entry
+// touches no customer account to recover the id from. It also keeps these
+// tables a self-contained module that could move to its own database. See
+// the migration header for the full argument.
+//
+// Database triggers make financial_events, ledger_entries and
+// ledger_postings append-only — drizzle cannot express them, so read the
+// migration for the one change financial_events still allows (the one-way
+// processed_at stamp).
+export const financialEvents = pgTable(
+  "financial_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    eventType: text("event_type").notNull(),
+    // An accounts uuid, deliberately unreferenced. NULL means the event
+    // belongs to no customer (a provider invoice, an opening balance), never
+    // "we forgot whose it was".
+    accountId: uuid("account_id"),
+    // Which product surface stated the fact: chat_route, stripe_webhook,
+    // admin, cron, backfill.
+    source: text("source").notNull(),
+    sourceRef: text("source_ref"),
+    // The dedupe handle — "turn:<uuid>", "stripe:evt_...". Unique, and what
+    // makes replaying an event a no-op instead of a double charge.
+    idempotencyKey: text("idempotency_key").notNull(),
+    // Economic time (when the tokens were burned), not write time.
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    payload: jsonb("payload").default({}).notNull(),
+    // Stamped when the posting rule ran. NULL means pending or failed, which
+    // is what the unposted sweep looks for.
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    accountOccurredIdx: index("financial_events_account_occurred_idx").on(
+      table.accountId,
+      table.occurredAt,
+    ),
+    idempotencyUnique: uniqueIndex("financial_events_idempotency_unique").on(
+      table.idempotencyKey,
+    ),
+  }),
+);
+
+// Reporting hierarchy only: re-pointing an account at another group
+// re-buckets every report and touches no posting. Moving an amount between
+// accounts is a reclassification entry instead.
+export const ledgerAccountGroups = pgTable(
+  "ledger_account_groups",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    parentId: uuid("parent_id").references(
+      (): AnyPgColumn => ledgerAccountGroups.id,
+    ),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    codeUnique: uniqueIndex("ledger_account_groups_code_unique").on(table.code),
+  }),
+);
+
+// The chart of accounts. System accounts are seeded by the migration with
+// owner_account_id NULL; per-customer subaccounts
+// ("liability:credits:customer:<uuid>") are created on first touch. Posting
+// rules name accounts by `code`, never by id.
+export const ledgerAccounts = pgTable(
+  "ledger_accounts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    code: text("code").notNull(),
+    // asset | liability | equity | revenue | contra_revenue | expense
+    type: text("type").notNull(),
+    // debit | credit — the side a positive balance sits on.
+    normalSide: text("normal_side").notNull(),
+    currency: text("currency").default("USD").notNull(),
+    // The customer a subaccount belongs to; NULL on system accounts. Same
+    // unreferenced accounts uuid, also spelled out inside `code`.
+    ownerAccountId: uuid("owner_account_id"),
+    groupId: uuid("group_id").references(() => ledgerAccountGroups.id),
+    metadata: jsonb("metadata").default({}).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    codeUnique: uniqueIndex("ledger_accounts_code_unique").on(table.code),
+    ownerIdx: index("ledger_accounts_owner_idx").on(table.ownerAccountId),
+  }),
+);
+
+// Journal entry header. One event may produce several entries: a metered AI
+// turn posts the customer charge and our provider cost as two independent
+// balanced entries from the one fact.
+export const ledgerEntries = pgTable(
+  "ledger_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => financialEvents.id),
+    // The posting rule that built it, and the version of that rule. Old
+    // entries keep the version they were posted under; rules never
+    // retroactively change what they already produced.
+    entryType: text("entry_type").notNull(),
+    ruleVersion: integer("rule_version").notNull(),
+    description: text("description").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    postedAt: timestamp("posted_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    reversesEntryId: uuid("reverses_entry_id").references(
+      (): AnyPgColumn => ledgerEntries.id,
+    ),
+    // Stripe charge / balance transaction / payout id: the reconciliation
+    // hook, indexed for the day the books are matched against a statement.
+    externalRef: text("external_ref"),
+    // Pricing snapshot (token counts, unit prices, the margin in force) so an
+    // entry stays explainable after the settings behind it change.
+    metadata: jsonb("metadata").default({}).notNull(),
+  },
+  (table) => ({
+    eventIdx: index("ledger_entries_event_idx").on(table.eventId),
+    occurredIdx: index("ledger_entries_occurred_idx").on(table.occurredAt),
+  }),
+);
+
+// Entry lines, balanced per entry per currency. Amounts are always positive
+// bigint micro-dollars; the direction carries the sign.
+export const ledgerPostings = pgTable(
+  "ledger_postings",
+  {
+    id: bigint("id", { mode: "number" })
+      .generatedAlwaysAsIdentity()
+      .primaryKey(),
+    entryId: uuid("entry_id")
+      .notNull()
+      .references(() => ledgerEntries.id),
+    ledgerAccountId: uuid("ledger_account_id")
+      .notNull()
+      .references(() => ledgerAccounts.id),
+    // debit | credit
+    direction: text("direction").notNull(),
+    amountMicros: bigint("amount_micros", { mode: "bigint" }).notNull(),
+    currency: text("currency").default("USD").notNull(),
+  },
+  (table) => ({
+    accountIdx: index("ledger_postings_account_idx").on(table.ledgerAccountId),
+    entryIdx: index("ledger_postings_entry_idx").on(table.entryId),
+  }),
+);
+
+// Derived cache, signed so positive means "on this account's normal side".
+// The nightly integrity check proves it equals the sum over postings; if the
+// two ever disagree, the postings win.
+export const ledgerBalances = pgTable("ledger_balances", {
+  ledgerAccountId: uuid("ledger_account_id")
+    .primaryKey()
+    .references(() => ledgerAccounts.id),
+  balanceMicros: bigint("balance_micros", { mode: "bigint" })
+    .default(0n)
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// AI metering (migration 0043). The metering subledger every ledger entry
+// for a chat turn is derived from, plus the effective-dated provider price
+// table and the first global settings table. Design:
+// cloud/docs/accounting-todo.md §3.2.
+//
+// Same rule as the ledger tables above: no foreign key points out of the
+// accounting module. account_id, chat_id and updated_by hold uuids as plain
+// columns; event_id points *into* the module, which is allowed.
+
+// What the provider charges, effective-dated. Micro-dollars per MILLION
+// tokens — per-token cannot represent a cached gpt-4o-mini token ($0.075 per
+// 1M, i.e. 0.075 micro-dollars, which as a bigint is zero).
+export const aiModelPrices = pgTable(
+  "ai_model_prices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    model: text("model").notNull(),
+    inputMicrosPerMtok: bigint("input_micros_per_mtok", {
+      mode: "bigint",
+    }).notNull(),
+    cachedInputMicrosPerMtok: bigint("cached_input_micros_per_mtok", {
+      mode: "bigint",
+    }).notNull(),
+    // Reasoning tokens bill as output; there is deliberately no third price.
+    outputMicrosPerMtok: bigint("output_micros_per_mtok", {
+      mode: "bigint",
+    }).notNull(),
+    currency: text("currency").default("USD").notNull(),
+    effectiveFrom: timestamp("effective_from", {
+      withTimezone: true,
+    }).notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    modelFromUnique: uniqueIndex("ai_model_prices_model_from_unique").on(
+      table.model,
+      table.effectiveFrom,
+    ),
+    modelIdx: index("ai_model_prices_model_idx").on(
+      table.model,
+      table.effectiveFrom,
+    ),
+  }),
+);
+
+// Margin, overdraft, metering mode. Superadmin-writable and audited; every
+// key has a code-level fallback so a fresh database boots with sane numbers.
+export const billingSettings = pgTable("billing_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  // An accounts uuid, deliberately unreferenced.
+  updatedBy: uuid("updated_by"),
+});
+
+// One row per AI turn: what it cost us, what it would cost the customer, and
+// the pricing snapshot behind both numbers.
+//
+// Token counts here are DISJOINT, unlike the provider's: `inputTokens` is
+// the UNCACHED input, `cachedInputTokens` the rest of what was sent, so each
+// multiplies by its own price without a subtraction anybody can forget.
+// `reasoningTokens` stays a subset of `outputTokens` and is recorded for
+// analysis only — it bills as output, which is how the provider bills it.
+export const aiUsageRecords = pgTable(
+  "ai_usage_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id"),
+    chatId: uuid("chat_id"),
+    // The turn's own id, and the idempotency handle: this row's ledger event
+    // is keyed "turn:<turnId>", so re-posting it is a replay.
+    turnId: uuid("turn_id").notNull(),
+    surface: text("surface"),
+    model: text("model").notNull(),
+    // Whose key paid the provider: "account" (the customer's own — we incur
+    // nothing and charge nothing), "shared" (the operator's key, our cost,
+    // not billed), "platform" (our key, billed — Phase 3).
+    credentialSource: text("credential_source").notNull(),
+    inputTokens: integer("input_tokens").default(0).notNull(),
+    cachedInputTokens: integer("cached_input_tokens").default(0).notNull(),
+    outputTokens: integer("output_tokens").default(0).notNull(),
+    reasoningTokens: integer("reasoning_tokens").default(0).notNull(),
+    rounds: integer("rounds").default(0).notNull(),
+    costMicros: bigint("cost_micros", { mode: "bigint" }).default(0n).notNull(),
+    priceMicros: bigint("price_micros", { mode: "bigint" })
+      .default(0n)
+      .notNull(),
+    currency: text("currency").default("USD").notNull(),
+    pricing: jsonb("pricing").default({}).notNull(),
+    // "shadow" rows are measurement only and never post, whatever they
+    // priced at; "live" rows post, and the sweep chases the ones that did
+    // not. Stamped per row rather than read from settings at sweep time, so
+    // flipping the switch cannot retroactively bill a week of shadow turns.
+    meteringMode: text("metering_mode").default("shadow").notNull(),
+    eventId: uuid("event_id").references(() => financialEvents.id),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    accountCreatedIdx: index("ai_usage_records_account_created_idx").on(
+      table.accountId,
+      table.createdAt,
+    ),
+    // The daily cap and the /account/ai page both window on occurred_at —
+    // when the tokens burned, not when the row was written (migration 0044).
+    accountOccurredIdx: index("ai_usage_records_account_occurred_idx").on(
+      table.accountId,
+      table.occurredAt,
+    ),
+    turnUnique: uniqueIndex("ai_usage_records_turn_unique").on(table.turnId),
+  }),
+);
+
+// Plans and subscriptions (migration 0045). What varies down the ladder is
+// the MARGIN on metered AI rather than access to a feature — a plan is a
+// better rate on something everybody may already use, which is why there is
+// no "has_ai" column here. Design: cloud/docs/accounting-todo.md §0.1, §3.6.
+//
+// These are NOT ledger tables: they reference `accounts` normally, because a
+// subscription is product state. What the ledger sees is the entries §3.6's
+// recipes post, and those name the account the same unreferenced way every
+// other financial event does.
+export const billingPlans = pgTable("billing_plans", {
+  code: text("code").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  priceMicros: bigint("price_micros", { mode: "bigint" }).notNull(),
+  currency: text("currency").default("USD").notNull(),
+  period: text("period").default("month").notNull(),
+  // Overrides the global `ai_margin_percent` for accounts on this plan, and
+  // is snapshotted per usage record exactly as the global one always was.
+  marginBasisPoints: integer("margin_basis_points").notNull(),
+  // cloud_rendered_frames, backup_bytes, frame_log_bytes,
+  // private_scene_bytes, frames. Read by src/lib/usage.ts, never by the
+  // ledger: a plan's entitlements are not accounting facts.
+  entitlements: jsonb("entitlements").default({}).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  public: boolean("public").default(true).notNull(),
+  ...timestamps,
+});
+
+// One row per account, at most. No row means PAYG — the same thing as a row
+// pointing at the payg plan, so that enrolling every existing account is not
+// a prerequisite for shipping.
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    planCode: text("plan_code")
+      .notNull()
+      .references(() => billingPlans.code),
+    status: text("status").default("active").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    // Set when the user cancels: the plan runs to the end of the paid period
+    // and stops. Nothing is refunded by default.
+    cancelAt: timestamp("cancel_at", { withTimezone: true }),
+    canceledAt: timestamp("canceled_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => ({
+    accountUnique: uniqueIndex("subscriptions_account_unique").on(
+      table.accountId,
+    ),
+  }),
+);
+
+// One row per billed period: charged at period start, recognized at period
+// end, both idempotent on this row's id so the nightly job may run twice or
+// miss a night without double-charging or losing a period.
+export const subscriptionPeriods = pgTable(
+  "subscription_periods",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    subscriptionId: uuid("subscription_id")
+      .notNull()
+      .references(() => subscriptions.id, { onDelete: "cascade" }),
+    // Snapshotted, not joined: a period is billed at the price and margin in
+    // force when it started, whatever the plan row says afterwards.
+    planCode: text("plan_code").notNull(),
+    priceMicros: bigint("price_micros", { mode: "bigint" }).notNull(),
+    marginBasisPoints: integer("margin_basis_points").notNull(),
+    currency: text("currency").default("USD").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    chargedAt: timestamp("charged_at", { withTimezone: true }),
+    recognizedAt: timestamp("recognized_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    periodUnique: uniqueIndex("subscription_periods_unique").on(
+      table.subscriptionId,
+      table.periodStart,
+    ),
   }),
 );

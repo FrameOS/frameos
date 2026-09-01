@@ -30,15 +30,26 @@ import {
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { withStoreSceneOrigin } from "./scene-origin";
+import { compiledSceneNames } from "./store";
 import { maxSceneZipEntries, maxSceneZipUncompressedBytes } from "./store";
 import { frameosVersionSatisfies } from "./store-versions";
+import {
+  allContractSettingKeys,
+  contractSettingKeys,
+  contractSettingKeysSince,
+  contractSettingRule,
+  contractSettingSince,
+  checkContractSettings,
+  validateContractSetting,
+  type ContractProfile,
+} from "./cloud-frames-contract";
 import { fetchTzSlice } from "./tz-slice";
 import { logWarn, reportError } from "./log";
 // usage.ts only type-imports from this module, so no runtime cycle.
 import {
   cullFrameLogsOverBudget,
   frameLogBytesForAccount,
-  maxFrameLogBytesPerAccount,
+  accountLimits,
 } from "./usage";
 
 type Database = ReturnType<typeof createDb>;
@@ -117,108 +128,47 @@ export const maxLogLineBytes = 8 * 1024;
 // scenes_payload_too_large rather than queueing a push the device will drop.
 export const maxScenesPayloadBytes = 3 * 1024 * 1024;
 
-// The declarative settings a set_settings push may carry. Everything else —
-// network config, credentials, agent state, update URLs — is absent by
-// design; the device enforces the same list independently.
-//
-// These are the device's wire names, and they must stay exactly in sync with
-// CLOUD_SETTINGS_ALLOWLIST in frameos/src/frameos/cloud/hub_client.nim: the
-// hub forwards keys verbatim and the device refuses the WHOLE verb when it
-// sees one it does not know, so a single wrong spelling here silently drops
-// every setting in the push. (`brightness` joins the list once the runtime
-// grows a brightness setting — see docs/cloud-frames.md `set_settings`.)
+// The declarative settings a set_settings push may carry, and their value
+// rules, come from the verb contract (docs/cloud-frames-contract.json →
+// cloud-frames-contract.gen.ts, walked by cloud-frames-contract.ts). The
+// Linux runtime and the ESP32 firmware validate against the same document
+// and docs/cloud-frames-fixtures.json pins all three to one verdict — the
+// device refuses the WHOLE verb when it sees a key it does not know, so a
+// list declared three times was a push silently dropped waiting to happen.
 //
 // A Map, not a plain object: `allowedFrameSettings["toString"]` on an object
 // resolves through Object.prototype to a truthy, callable function that
 // returns a truthy string, so a prototype key would pass validation — and
 // "__proto__" / "valueOf" would throw a TypeError instead.
+//
+// Each check is "acceptable on SOME profile"; the settings route applies the
+// exact profile once it knows the device (checkContractSettings). Companion
+// keys (the ESP32's tzdata slice) are not here: the cloud attaches them
+// itself in frameSettingsDevicePayload, a client never sends them.
 export const allowedFrameSettings = new Map<
   string,
   (value: unknown) => boolean
->([
-  ["debug", (v) => typeof v === "boolean"],
-  ["interval", (v) => typeof v === "number" && v >= 1 && v <= 60 * 60 * 24],
-  ["name", (v) => typeof v === "string" && v.length > 0 && v.length <= 256],
-  ["rotate", (v) => v === 0 || v === 90 || v === 180 || v === 270],
-  [
-    "scaling_mode",
-    (v) =>
-      v === "contain" || v === "cover" || v === "stretch" || v === "center",
-  ],
-  // An IANA name in the shape the device console and fos_tz accept; the
-  // length cap alone let "not a zone; drop table" through to the device.
-  ["timezone", isValidTimeZoneName],
-  // Power management (ESP32 profile — the Nim runtime has no consumer, so
-  // the SPA only sends these for esp32 frames; see esp32PowerSettingKeys in
-  // frontend/src/utils/cloudFrameSettings.ts).
-  ["deep_sleep", (v) => typeof v === "boolean"],
-  ["deep_sleep_on_battery", (v) => typeof v === "boolean"],
-  [
-    "wake_check_seconds",
-    (v) =>
-      typeof v === "number" &&
-      Number.isInteger(v) &&
-      (v === 0 || (v >= 60 && v <= 86400)),
-  ],
-  ["battery_pin", isValidGpioPinOrNone],
-  [
-    "battery_divider",
-    (v) => typeof v === "number" && v >= 0.5 && v <= 20,
-  ],
-  // GPIO driven high to switch the battery divider on while sampling
-  // (reTerminal E1004: GPIO 21); -1 = always on. Same -1..48 range the
-  // firmware's fos_settings.c / console accept.
-  ["battery_enable_pin", isValidGpioPinOrNone],
-  // The 2026.8.30 batch (Pi/Linux runtime only). Gated per frame on its
-  // reported frameos_version — see extendedFrameSettingKeys — because a frame
-  // on older firmware refuses the WHOLE push on any of them. Value rules
-  // mirror validateCloudSetting in hub_client.nim; the device re-checks.
-  ["flip", (v) => v === "" || v === "horizontal" || v === "vertical" || v === "both"],
-  ["error_behavior", isValidErrorBehavior],
-  ["control_code", isValidControlCode],
-  [
-    "metrics_interval",
-    // 0 disables the sampler; anything else is a period in seconds.
-    (v) => typeof v === "number" && v >= 0 && v <= 24 * 60 * 60,
-  ],
-  [
-    "max_http_response_bytes",
-    (v) =>
-      typeof v === "number" &&
-      Number.isInteger(v) &&
-      v >= minMaxHttpResponseBytes &&
-      v <= maxMaxHttpResponseBytes,
-  ],
-  ["save_assets", isValidSaveAssets],
-  ["timezone_updater", isValidTimezoneUpdater],
-  // The hardware batch (Pi/Linux runtime from 2026.8.31, see
-  // hardwareFrameSettingKeys). All three are read by the display driver at
-  // init, so the device restarts its runtime after persisting them.
-  ["palette", isValidPalette],
-  ["device_config", isValidPartialRefreshDeviceConfig],
-  ["gpio_buttons", isValidGpioButtons],
-]);
+>(allContractSettingKeys().map((key) => [key, (value) => validateContractSetting(key, value)]));
 
-// Bounds shared with the device (CloudMaxHttpResponseBytes* in
-// hub_client.nim): the ceiling is the runtime's own default (64 MiB), so a
-// push can lower a Pi Zero's per-request memory bound but never raise it.
-export const minMaxHttpResponseBytes = 64 * 1024;
-export const maxMaxHttpResponseBytes = 64 * 1024 * 1024;
+function ruleBound(key: string, profile: ContractProfile, bound: "min" | "max"): number {
+  const value = contractSettingRule(key, profile)?.[bound];
+  if (value === undefined) throw new Error(`contract: ${key} has no ${bound} on ${profile}`);
+  return value;
+}
 
-// A key that only exists in the 2026.8.30+ Pi/Linux runtime. Every one of
-// them here must ALSO be in allowedFrameSettings; the settings route refuses
-// them for frames whose reported firmware predates the batch (and for
-// esp32 frames, whose firmware has no consumer for any of them).
+// Bounds shared with the device (the contract's max_http_response_bytes rule):
+// the ceiling is the runtime's own default (64 MiB), so a push can lower a Pi
+// Zero's per-request memory bound but never raise it.
+export const minMaxHttpResponseBytes = ruleBound("max_http_response_bytes", "linux", "min");
+export const maxMaxHttpResponseBytes = ruleBound("max_http_response_bytes", "linux", "max");
+
+// The batches the Linux runtime learned keys in, by firmware floor (the
+// contract's `since`). Every one of them must ALSO be in allowedFrameSettings
+// (it is — same table); the settings route refuses them for frames whose
+// reported firmware predates the batch (and for esp32 frames, whose firmware
+// has no consumer for any of them).
 export const extendedFrameSettingsMinVersion = "2026.8.30";
-export const extendedFrameSettingKeys = new Set([
-  "flip",
-  "error_behavior",
-  "control_code",
-  "metrics_interval",
-  "max_http_response_bytes",
-  "save_assets",
-  "timezone_updater",
-]);
+export const extendedFrameSettingKeys = new Set(contractSettingKeysSince("linux", extendedFrameSettingsMinVersion));
 
 /**
  * Does a frame reporting `frameosVersion` understand the extended settings
@@ -240,14 +190,8 @@ export function frameSupportsExtendedSettings(
 }
 
 // The 2026.8.31 hardware batch: keys the display driver reads at init.
-// Same gating as the extended batch, one floor later; every key here must
-// ALSO be in allowedFrameSettings, and none of them exists on esp32.
 export const hardwareFrameSettingsMinVersion = "2026.8.31";
-export const hardwareFrameSettingKeys = new Set([
-  "palette",
-  "device_config",
-  "gpio_buttons",
-]);
+export const hardwareFrameSettingKeys = new Set(contractSettingKeysSince("linux", hardwareFrameSettingsMinVersion));
 
 export function frameSupportsHardwareSettings(
   frameosVersion: string | null | undefined,
@@ -271,6 +215,11 @@ export function frameHardwareIsEsp32(frame: {
   );
 }
 
+/** The contract profile a frame validates against. */
+export function frameContractProfile(frame: { hardware: unknown }): ContractProfile {
+  return frameHardwareIsEsp32(frame) ? "esp32" : "linux";
+}
+
 /** The three-way answer above, for any floor. */
 export function frameSupportsSettingsFrom(
   minVersion: string,
@@ -282,191 +231,51 @@ export function frameSupportsSettingsFrom(
   return frameosVersionSatisfies(minVersion, frameosVersion);
 }
 
-const positiveNumber = (v: unknown, max: number) =>
-  typeof v === "number" && v > 0 && v <= max;
-
-// An ESP32 GPIO number, or -1 for "none" (the firmware's int8 pin fields:
-// battery_pin, battery_enable_pin). A function declaration so the
-// allowedFrameSettings Map above can name it before this line runs.
-function isValidGpioPinOrNone(v: unknown): boolean {
-  return typeof v === "number" && Number.isInteger(v) && v >= -1 && v <= 48;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-// The frontend/backend spelling of the error handling block; the device's
-// frontendErrorBehaviorToRuntime maps it onto errorBehavior in frame.json.
-// Unknown sub-keys refuse the value, exactly as unknown top-level keys do.
-function isValidErrorBehavior(value: unknown): boolean {
-  if (!isPlainRecord(value)) return false;
-  const daySeconds = 24 * 60 * 60;
-  const weekMinutes = 7 * 24 * 60;
-  for (const [key, v] of Object.entries(value)) {
-    switch (key) {
-      case "mode":
-        if (v !== "safe_mode" && v !== "show_error_retry" && v !== "silent_retry") return false;
-        break;
-      case "silent_retry_forever":
-        if (typeof v !== "boolean") return false;
-        break;
-      case "silent_window_minutes":
-        if (!positiveNumber(v, weekMinutes)) return false;
-        break;
-      case "retry_seconds":
-      case "silent_retry_seconds":
-      case "show_error_retry_seconds":
-        if (!positiveNumber(v, daySeconds)) return false;
-        break;
-      default:
-        return false;
-    }
+/**
+ * Why a device of `frame`'s profile and firmware would refuse `settings`,
+ * before anything is queued: a key its profile does not take
+ * (settings_not_supported_by_device), a key its firmware is too old for
+ * (settings_need_newer_firmware, with the lowest floor that would do), or a
+ * value outside the profile's rules (invalid_settings — e.g. nine GPIO
+ * buttons for a chip whose table holds eight). null when the push would be
+ * accepted. Every answer is the contract's, so this and the device agree.
+ */
+export function frameSettingsRefusal(
+  frame: { frameosVersion: string | null | undefined; hardware: unknown },
+  settings: Record<string, unknown>,
+): { error: string; minFrameosVersion?: string } | null {
+  const profile = frameContractProfile(frame);
+  const keys = Object.keys(settings);
+  if (keys.some((key) => contractSettingSince(key, profile) === undefined)) {
+    return { error: "settings_not_supported_by_device" };
   }
-  return true;
-}
-
-const htmlHexColor = /^#[0-9a-fA-F]{6}$/;
-const controlCodePositions = new Set([
-  "top-left",
-  "top-right",
-  "bottom-left",
-  "bottom-right",
-  "center",
-]);
-
-// The runtime's controlCode shape (config.nim loadControlCode): a boolean
-// `enabled`, numbers, #rrggbb colours — NOT the SPA form's string spellings,
-// which cloudFrameSettingsPayload converts before sending.
-function isValidControlCode(value: unknown): boolean {
-  if (!isPlainRecord(value)) return false;
-  for (const [key, v] of Object.entries(value)) {
-    switch (key) {
-      case "enabled":
-        if (typeof v !== "boolean") return false;
-        break;
-      case "position":
-        if (typeof v !== "string" || !controlCodePositions.has(v)) return false;
-        break;
-      case "size":
-        if (typeof v !== "number" || v < 1 || v > 50) return false;
-        break;
-      case "padding":
-        if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 50) return false;
-        break;
-      case "offsetX":
-      case "offsetY":
-        if (typeof v !== "number" || !Number.isInteger(v) || v < -4096 || v > 4096) return false;
-        break;
-      case "qrCodeColor":
-      case "backgroundColor":
-        if (typeof v !== "string" || !htmlHexColor.test(v)) return false;
-        break;
-      default:
-        return false;
-    }
+  const floors = keys
+    .map((key) => contractSettingSince(key, profile))
+    .filter((since): since is string => typeof since === "string" && !frameSupportsSettingsFrom(since, frame.frameosVersion))
+    .sort((a, b) => (frameosVersionSatisfies(a, b) ? 1 : -1));
+  const lowestFloor = floors[0];
+  if (lowestFloor !== undefined) {
+    return { error: "settings_need_newer_firmware", minFrameosVersion: lowestFloor };
   }
-  return true;
+  if (checkContractSettings(settings, profile) !== null) {
+    return { error: "invalid_settings" };
+  }
+  return null;
 }
 
-// One switch, or a per-app-keyword map of switches (what frame.json's
-// saveAssets already holds).
-function isValidSaveAssets(value: unknown): boolean {
-  if (typeof value === "boolean") return true;
-  if (!isPlainRecord(value)) return false;
-  const entries = Object.entries(value);
-  if (entries.length > 64) return false;
-  return entries.every(
-    ([key, v]) => key.length > 0 && key.length <= 64 && typeof v === "boolean",
-  );
+// Palette / partial-refresh / GPIO bounds, from the contract's rules.
+function ruleNumber(value: number | undefined, what: string): number {
+  if (value === undefined) throw new Error(`contract: ${what} is not in the table`);
+  return value;
 }
-
-// enabled/hour only. The download URL is deliberately not a thing a provider
-// can set: the endpoint stays FrameOS-owned (or whatever the local admin
-// chose) — the device carries its own URL across the write.
-function isValidTimezoneUpdater(value: unknown): boolean {
-  if (!isPlainRecord(value)) return false;
-  for (const [key, v] of Object.entries(value)) {
-    if (key === "enabled") {
-      if (typeof v !== "boolean") return false;
-    } else if (key === "hour") {
-      if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 23) return false;
-    } else {
-      return false;
-    }
-  }
-  return true;
-}
-
-// The SPA's Palette shape (what frame.json stores under `palette`): "#rrggbb"
-// colours with an optional name and per-colour names. Empty `colors` is a
-// value — it hands the panel back its built-in palette. Mirrors the device's
-// validateCloudSetting("palette").
-export const maxPaletteColors = 16;
-function isValidPalette(value: unknown): boolean {
-  if (!isPlainRecord(value)) return false;
-  for (const key of Object.keys(value)) {
-    if (key !== "name" && key !== "colors" && key !== "colorNames") return false;
-  }
-  const colors = value.colors;
-  if (!Array.isArray(colors) || colors.length > maxPaletteColors) return false;
-  if (!colors.every((c) => typeof c === "string" && htmlHexColor.test(c))) return false;
-  if ("name" in value && !(typeof value.name === "string" && value.name.length <= 64)) return false;
-  if ("colorNames" in value) {
-    const names = value.colorNames;
-    if (!Array.isArray(names) || names.length !== colors.length) return false;
-    if (!names.every((n) => typeof n === "string" && n.length <= 32)) return false;
-  }
-  return true;
-}
-
-// STRICTLY the partial-refresh policy of device_config. VCOM, pins, upload
-// URL/headers, SD-card wiring and render mode stay the device's own; the
-// device patches deviceConfig with what is sent and refuses anything else.
-export const maxPartialRefreshesBeforeFull = 1000;
-function isValidPartialRefreshDeviceConfig(value: unknown): boolean {
-  if (!isPlainRecord(value)) return false;
-  const entries = Object.entries(value);
-  if (entries.length === 0) return false;
-  for (const [key, v] of entries) {
-    switch (key) {
-      case "partial":
-        if (typeof v !== "boolean") return false;
-        break;
-      case "partialMaxAreaPercent":
-        if (typeof v !== "number" || v < 0 || v > 100) return false;
-        break;
-      case "partialMaxRefreshesBeforeFull":
-        if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > maxPartialRefreshesBeforeFull) return false;
-        break;
-      default:
-        return false;
-    }
-  }
-  return true;
-}
-
-// [{pin, label}] — the whole list, replaced. BCM 0..27 on a Pi header, up
-// to 48 on the ESP32 boards; a duplicate pin is refused (the driver would
-// register the line twice).
-export const maxGpioButtons = 16;
-export const maxGpioButtonPin = 48;
-function isValidGpioButtons(value: unknown): boolean {
-  if (!Array.isArray(value) || value.length > maxGpioButtons) return false;
-  const pins = new Set<number>();
-  for (const button of value) {
-    if (!isPlainRecord(button)) return false;
-    for (const key of Object.keys(button)) {
-      if (key !== "pin" && key !== "label") return false;
-    }
-    const { pin, label } = button;
-    if (typeof pin !== "number" || !Number.isInteger(pin) || pin < 0 || pin > maxGpioButtonPin) return false;
-    if (typeof label !== "string" || label.trim().length === 0 || label.trim().length > 32) return false;
-    if (pins.has(pin)) return false;
-    pins.add(pin);
-  }
-  return true;
-}
+export const maxPaletteColors = ruleNumber(
+  contractSettingRule("palette", "linux")?.keys?.colors?.maxItems, "palette.colors.maxItems");
+export const maxPartialRefreshesBeforeFull = ruleNumber(
+  contractSettingRule("device_config", "linux")?.keys?.partialMaxRefreshesBeforeFull?.max,
+  "device_config.partialMaxRefreshesBeforeFull.max");
+export const maxGpioButtons = ruleNumber(contractSettingRule("gpio_buttons", "linux")?.maxItems, "gpio_buttons.maxItems");
+export const maxGpioButtonPin = ruleNumber(
+  contractSettingRule("gpio_buttons", "linux")?.items?.keys?.pin?.max, "gpio_buttons.items.pin.max");
 
 export const allowedFrameCommandTypes = new Set([
   "get_metrics",
@@ -486,6 +295,7 @@ export const allowedFrameCommandTypes = new Set([
 
 export function validateFrameSettings(
   value: unknown,
+  profile?: ContractProfile,
 ): { settings?: Record<string, unknown>; error?: string } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { error: "invalid_settings" };
@@ -493,6 +303,11 @@ export function validateFrameSettings(
   const entries = Object.entries(value as Record<string, unknown>);
   if (entries.length === 0) {
     return { error: "invalid_settings" };
+  }
+  if (profile) {
+    // The device's exact verdict (the same one it would ack).
+    const error = checkContractSettings(Object.fromEntries(entries), profile);
+    return error ? { error } : { settings: Object.fromEntries(entries) };
   }
   for (const [key, entryValue] of entries) {
     const check = allowedFrameSettings.get(key);
@@ -505,90 +320,37 @@ export function validateFrameSettings(
   return { settings: Object.fromEntries(entries) };
 }
 
-// The subset the ESP32 firmware really applies in its `set_settings` handler
-// (embedded/esp32/main/fos_cloud.c ws_handle_set_settings): `interval`
-// (interval_sec), `name` (the DHCP hostname), `rotate` (validated with the
-// same 0/90/180/270 normalization the backend settings poll uses, then
-// deferred-rebooted so the renderer re-inits), `scaling_mode`
-// (contain/cover/stretch/center, applied live — a per-decode fallback, no
-// reboot), the power keys, from 2026.8.31 `debug` (debug_logging, live),
-// `max_http_response_bytes` and `gpio_buttons` (both read at boot → deferred
-// reboot), and from 2026.8.34 `timezone` (an IANA name the firmware maps to
-// a POSIX TZ rule — fos_tz.c — live, no reboot). Everything else has no
+// The ESP32 firmware's profile of set_settings, from the contract: the keys
+// that map onto its NVS config and no other. Everything else has no
 // on-device consumer, so the firmware refuses the WHOLE verb on them and the
-// route refuses them up front instead of half-applying a push.
-// Keys only the ESP32 firmware knows: the Pi runtime's
-// CLOUD_SETTINGS_ALLOWLIST refuses the whole verb on any of them, so the
-// settings route refuses them up front for non-esp32 frames.
-export const esp32OnlySettableKeys = new Set([
-  "deep_sleep",
-  "deep_sleep_on_battery",
-  "wake_check_seconds",
-  "battery_pin",
-  "battery_divider",
-  "battery_enable_pin",
-]);
+// route refuses them up front instead of half-applying a push. The keys only
+// the chip knows (the power management block) are refused up front for
+// non-esp32 frames for the same reason.
+export const esp32SettableKeys = new Set(contractSettingKeys("esp32"));
+export const esp32OnlySettableKeys = new Set(
+  contractSettingKeys("esp32").filter((key) => contractSettingSince(key, "linux") === undefined),
+);
 
-export const esp32SettableKeys = new Set([
-  "interval",
-  "name",
-  "rotate",
-  "scaling_mode",
-  // Power management: deep_sleep / deep_sleep_on_battery / wake_check_seconds
-  // apply on the next render pass; battery_pin / battery_divider cost a
-  // deferred reboot (the ADC is set up once at boot).
-  "deep_sleep",
-  "deep_sleep_on_battery",
-  "wake_check_seconds",
-  "battery_pin",
-  "battery_divider",
-  // 2026.8.31 (esp32ExtendedFrameSettingKeys): debug applies live, the
-  // other two are read once at boot and cost a deferred reboot.
-  "debug",
-  "max_http_response_bytes",
-  "gpio_buttons",
-  // 2026.8.34 (esp32TimeZoneFrameSettingKeys): applied live.
-  "timezone",
-  // 2026.8.39 (esp32BatteryEnablePinFrameSettingKeys): the divider's enable
-  // GPIO, read at boot next to battery_pin → deferred reboot.
-  "battery_enable_pin",
-]);
-
-// The ESP32 firmware learned these in 2026.8.31; older firmware refuses the
-// whole verb on them, so the route gates them on the reported version like
-// the Pi batches. Its button table is smaller than the Pi's (FOS_GPIO_BUTTONS_MAX).
+// The floors at which the firmware learned keys (the contract's `since`);
+// older firmware refuses the whole verb on them, so the route gates each on
+// the reported version, like the Linux batches.
 export const esp32ExtendedFrameSettingsMinVersion = "2026.8.31";
-export const esp32ExtendedFrameSettingKeys = new Set([
-  "debug",
-  "max_http_response_bytes",
-  "gpio_buttons",
-]);
-export const esp32MaxGpioButtons = 8;
+export const esp32ExtendedFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32ExtendedFrameSettingsMinVersion));
+export const esp32MaxGpioButtons = ruleNumber(contractSettingRule("gpio_buttons", "esp32")?.maxItems, "gpio_buttons.maxItems (esp32)");
 
-// 2026.8.34: the ESP32 firmware maps an IANA zone name onto a POSIX TZ rule
-// (embedded/esp32/main/fos_tz.c), so the Pi's `timezone` wire key applies
-// there too — behind its own floor, like the 2026.8.31 tail.
 export const esp32TimeZoneFrameSettingsMinVersion = "2026.8.34";
-export const esp32TimeZoneFrameSettingKeys = new Set(["timezone"]);
+export const esp32TimeZoneFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32TimeZoneFrameSettingsMinVersion));
 
-// 2026.8.39: the battery divider's enable GPIO (reTerminal E1004) joined the
-// firmware's set_settings allowlist next to battery_pin. Older firmware
-// refuses the whole verb on it — its own floor, like the two tails above.
 export const esp32BatteryEnablePinFrameSettingsMinVersion = "2026.8.39";
-export const esp32BatteryEnablePinFrameSettingKeys = new Set([
-  "battery_enable_pin",
-]);
+export const esp32BatteryEnablePinFrameSettingKeys = new Set(
+  contractSettingKeysSince("esp32", esp32BatteryEnablePinFrameSettingsMinVersion),
+);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata
 // slice lookup is what rejects unknown-but-well-formed names later.
 export function isValidTimeZoneName(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= 64 &&
-    /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(value)
-  );
+  return validateContractSetting("timezone", value);
 }
 
 /**
@@ -1455,6 +1217,16 @@ export async function buildScenesPayloadForFrame(
     if (!extracted) {
       return { error: "invalid_scene_payload" };
     }
+    // A cloud frame runs the interpreter only: a legacy compiled scene would
+    // deploy and then log `not_interpreted`. Refuse here, before anything is
+    // committed, and count it.
+    if (compiledSceneNames(extracted.scenes).length > 0) {
+      logWarn("frames.assign.refused_compiled_scene", {
+        frameId,
+        sceneId: assignment.sceneId,
+      });
+      return { error: "scene_requires_compilation" };
+    }
     // Running bound on the raw scenes.json bytes, so 20 scenes at the store's
     // 32 MiB per-zip ceiling can never all be held at once. The exact check on
     // the serialized payload follows.
@@ -1543,7 +1315,7 @@ export async function storeFrameLogs(
     if (accountId) {
       const overBudget =
         (await frameLogBytesForAccount(tx, accountId)) >
-        maxFrameLogBytesPerAccount;
+        (await accountLimits(tx, accountId)).frameLogBytes;
       if (overBudget) {
         await cullFrameLogsOverBudget(tx, accountId);
       }

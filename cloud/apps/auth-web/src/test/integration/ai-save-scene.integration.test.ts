@@ -9,12 +9,13 @@
 // race: picking a free name and then inserting it is a check-then-act, and
 // two concurrent saves used to both land on the same "name 2".
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import {
   auditEvents,
   createDb,
-  storeSceneImages,
+  storeImages,
+  storeSceneVersionImages,
   storeScenes,
   storeSceneVersions,
   upsertAccountFromIdentity,
@@ -22,6 +23,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readBlob } from "../../lib/blobs";
 import { extractScenesFromZip } from "../../lib/scene-title";
+import { imageSetForVersion, registerStoreImage } from "../../lib/store-images";
 import { executeTool, type ToolContext } from "../../lib/ai/tools";
 
 // recordAuditEvent reads request headers for the client IP; there is no
@@ -62,7 +64,8 @@ function sceneZip(name: string, scenes: unknown[]) {
   );
 }
 
-/** A published-looking store scene with everything a fork should carry. */
+/** A published-looking store scene with everything a fork should carry:
+ * a listing and a two-image set (cover first) on its one version. */
 async function storeScene(
   accountId: string,
   options: { name: string; visibility?: "private" | "public" } = {
@@ -80,11 +83,6 @@ async function storeScene(
       description: "Wakes up with the sun",
       latestVersion: 1,
       name: options.name,
-      previewImage: previewBytes,
-      previewImageHeight: 448,
-      previewImageSizeBytes: previewBytes.length,
-      previewImageType: "image/jpeg",
-      previewImageWidth: 600,
       slug: `${options.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${sceneCounter}`,
       status: "active",
       tags: ["clock", "sunrise"],
@@ -94,22 +92,28 @@ async function storeScene(
   if (!scene) {
     throw new Error("scene insert failed");
   }
-  await db.insert(storeSceneVersions).values({
-    content: sceneZip(options.name, scenes),
-    contentType: "application/zip",
-    riskFlags: [],
-    sceneId: scene.id,
-    sha256: `test-${sceneCounter}`,
-    sizeBytes: 1000,
-    version: 1,
-  });
-  await db.insert(storeSceneImages).values({
-    content: Buffer.from([0x89, 0x50, 0x4e, 0x47, 3]),
-    contentType: "image/png",
-    position: 1,
-    sceneId: scene.id,
-  });
-  return { scene, scenes };
+  const [version] = await db
+    .insert(storeSceneVersions)
+    .values({
+      content: sceneZip(options.name, scenes),
+      contentType: "application/zip",
+      description: "Wakes up with the sun",
+      listingRecorded: true,
+      riskFlags: [],
+      sceneId: scene.id,
+      sha256: `test-${sceneCounter}`,
+      sizeBytes: 1000,
+      tags: ["clock", "sunrise"],
+      version: 1,
+    })
+    .returning({ id: storeSceneVersions.id });
+  const cover = await registerStoreImage(db, previewBytes, "image/jpeg");
+  const gallery = await registerStoreImage(db, Buffer.from([0x89, 0x50, 0x4e, 0x47, 3]), "image/png");
+  await db.insert(storeSceneVersionImages).values([
+    { imageSha256: cover.sha256, position: 0, versionId: version!.id },
+    { imageSha256: gallery.sha256, position: 1, versionId: version!.id },
+  ]);
+  return { images: [cover.sha256, gallery.sha256], scene, scenes };
 }
 
 function toolContext(accountId: string): ToolContext {
@@ -158,13 +162,13 @@ describe("save_scene", () => {
       visibility: "private",
     });
     // Nothing to inherit: a scene built in the chat has no source.
-    expect(saved?.previewImage).toBeNull();
+    expect(await imageSetForVersion(db, saved!.id, null)).toEqual([]);
     expect(saved?.tags).toEqual([]);
   });
 
   it("forks with lineage when the scene came from the store", async () => {
     const owner = await account();
-    const { scene: source, scenes } = await storeScene(owner, {
+    const { images, scene: source, scenes } = await storeScene(owner, {
       name: "Sunrise clock",
     });
     const forker = await account();
@@ -184,15 +188,11 @@ describe("save_scene", () => {
       tags: ["clock", "sunrise"],
       visibility: "private",
     });
-    expect(forked?.previewImage).toEqual(previewBytes);
-    expect(forked?.previewImageWidth).toBe(600);
-
-    // The gallery comes along, by reference where the source used objects.
-    const images = await db
-      .select()
-      .from(storeSceneImages)
-      .where(eq(storeSceneImages.sceneId, forked!.id));
-    expect(images).toHaveLength(1);
+    // The image set comes along as links to the same rows — the cover
+    // first — and nothing was copied.
+    expect((await imageSetForVersion(db, forked!.id, null)).map((image) => image.sha256)).toEqual(images);
+    const [imageRows] = await db.select({ count: sql<number>`count(*)::int` }).from(storeImages);
+    expect(imageRows?.count).toBe(2);
 
     // The edit the chat made is what got saved, not the source bytes.
     const [version] = await db

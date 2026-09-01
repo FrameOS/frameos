@@ -35,8 +35,9 @@ import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { ReactJsonComponent as ReactJson } from '../../../../utils/reactJsonView'
 
 export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchNodeData>): JSX.Element {
-  const { frameId, sceneId, sceneOptions } = useValues(diagramLogic)
-  const { updateNodeConfig, copyAppJSON, duplicateNode, deleteApp, forkSceneApp } = useActions(diagramLogic)
+  const { frameId, sceneId, sceneOptions, convertingSceneId } = useValues(diagramLogic)
+  const { updateNodeConfig, copyAppJSON, duplicateNode, deleteApp, forkSceneApp, convertSceneToInterpreted } =
+    useActions(diagramLogic)
   const { editApp } = useActions(frameEditorsLogic)
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
   const {
@@ -51,6 +52,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     isSceneApp,
     isJavaScriptSceneApp,
     isNimAppInInterpretedScene,
+    isLegacyNimApp,
     isDataApp,
     configJsonError,
     output,
@@ -142,9 +144,30 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
               }}
             />
           ) : null}
-          <div className="flex-1">
-            {name}
-            {isSceneApp ? ' (scene)' : isCustomApp ? ' (edited)' : ''}
+          <div className="flex-1 flex items-center gap-2 min-w-0">
+            <span className="truncate">
+              {name}
+              {isSceneApp ? ' (scene)' : isCustomApp ? ' (edited)' : ''}
+            </span>
+            {isLegacyNimApp ? (
+              <span
+                className="text-[10px] leading-tight px-1 py-0.5 rounded bg-amber-200 text-amber-950 whitespace-nowrap inline-flex items-center gap-1.5"
+                title="This app only has Nim sources, which run only in a compiled scene (legacy: a whole-frame recompilation on every deploy). Convert converts the whole scene — this app and every other Nim node and app in it — to an interpreted scene, in place, unsaved."
+              >
+                Legacy Nim
+                <button
+                  type="button"
+                  className="rounded bg-amber-950 px-1.5 py-px font-semibold text-amber-50 hover:bg-amber-800 disabled:opacity-60"
+                  disabled={convertingSceneId === sceneId}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    convertSceneToInterpreted(sceneId)
+                  }}
+                >
+                  {convertingSceneId === sceneId ? 'Converting…' : 'Convert scene'}
+                </button>
+              </span>
+            ) : null}
           </div>
           <DropdownMenu
             className="w-fit"

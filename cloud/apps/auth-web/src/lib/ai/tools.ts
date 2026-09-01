@@ -47,6 +47,8 @@ import {
   supersedePendingCommands,
 } from "../frames";
 import { createAccountScene } from "../account-scene-create";
+import { storeCategories } from "../categories";
+import { maxSceneDescriptionChars, parseListingChanges } from "../store-listing";
 import { forkStoreScene, sceneIdPattern } from "../store-fork";
 import { readBlob } from "../blobs";
 import { extractScenesFromZip } from "../scene-title";
@@ -58,6 +60,19 @@ export type ScenesEvent = {
   scenes: unknown[];
 };
 
+/** A listing edit delivered to the editor's draft — description, tags,
+ * category, minimum FrameOS version — published by the user's Save, like
+ * scenes. Only the fields named change. */
+export type ListingEvent = {
+  type: "listing";
+  listing: {
+    category?: string | null;
+    description?: string | null;
+    frameosVersion?: string | null;
+    tags?: string[];
+  };
+};
+
 export type ToolContext = {
   db: ReturnType<typeof createDb>;
   accountId: string;
@@ -66,6 +81,11 @@ export type ToolContext = {
   currentScene?: JsonObject | null;
   currentSceneId?: string | null;
   emitScenes: (event: ScenesEvent) => void;
+  // Delivers a listing edit to the editor's draft (update_scene_listing).
+  emitListing?: ((event: ListingEvent) => void) | undefined;
+  // The draft's listing as the editor holds it, unsaved edits included —
+  // what "the description" means to the user right now.
+  currentListing?: ListingEvent["listing"] | null;
   // Set when a create_scenes/update_scene call validated and was delivered;
   // the loop reports it as the overall "tool" of the turn.
   deliveredTool?: "build_scene" | "modify_scene";
@@ -467,6 +487,43 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
   },
   {
     description:
+      "Edit the scene's LISTING in the editor's draft: the description shown on its store page, its tags, " +
+      "its category and its minimum FrameOS version. Lands unsaved next to the diagram — the user's Save " +
+      "publishes it with the scene as one version, so say that. This is what \"update the description\" " +
+      "means for a scene: the listing's own description, NOT an app's `description` field inside the scene " +
+      "(for those use patch_scene). Only fields you name change. Works on the scene the user has open.",
+    name: "update_scene_listing",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        category: {
+          description:
+            "Category slug for the store's shelves, or null to clear it. One of: " +
+            storeCategories.map((category) => category.slug).join(", ") + ".",
+          type: ["string", "null"],
+        },
+        description: {
+          description:
+            `The store page's description (markdown, up to ${maxSceneDescriptionChars} characters), or null to clear it. ` +
+            "Send the complete new text, not a diff.",
+          type: ["string", "null"],
+        },
+        frameos_version: {
+          description: "The oldest FrameOS release that can run the scene (e.g. 2026.7.5), or null to clear it.",
+          type: ["string", "null"],
+        },
+        tags: {
+          description: "Up to 5 lowercase tags (letters, digits, hyphens). Replaces the current set.",
+          items: { type: "string" },
+          type: "array",
+        },
+      },
+      type: "object",
+    },
+    type: "function",
+  },
+  {
+    description:
       "Deliver a modified version of the user's CURRENT scene to the editor. Send the complete updated " +
       "scene JSON (not a diff). Keeps the current scene id. Validates first; fix reported issues and retry.",
     name: "update_scene",
@@ -605,6 +662,7 @@ export const toolLabels: Record<string, string> = {
   search_examples: "Searching examples",
   search_store_scenes: "Searching the store",
   update_scene: "Updating scene",
+  update_scene_listing: "Editing the listing",
   patch_scene: "Patching scene",
   edit_app_source: "Editing app source",
 };
@@ -697,6 +755,39 @@ function partialSceneIssue(current: JsonObject, delivered: JsonObject): string |
   );
 }
 
+// `scenes` is documented as an array of scene objects, but the tool schema is
+// free-form (`items: { type: "object" }`) so nothing enforces that. Accept the
+// three shapes models reach for anyway — a lone scene, the array re-encoded as
+// a JSON string, the array wrapped in another `{ scenes }` — rather than
+// telling them their scene has no nodes.
+function coerceDeliveredScenes(rawScenes: unknown): unknown[] {
+  if (Array.isArray(rawScenes)) {
+    return rawScenes;
+  }
+  if (typeof rawScenes === "string") {
+    const text = rawScenes.trim();
+    if (!text) {
+      return [];
+    }
+    try {
+      return coerceDeliveredScenes(JSON.parse(text));
+    } catch {
+      return [];
+    }
+  }
+  if (rawScenes && typeof rawScenes === "object") {
+    const entry = rawScenes as JsonObject;
+    if (Array.isArray(entry.scenes)) {
+      return entry.scenes;
+    }
+    // A single scene object, unwrapped.
+    if (entry.nodes !== undefined || entry.id !== undefined || entry.name !== undefined) {
+      return [entry];
+    }
+  }
+  return [];
+}
+
 function deliverScenes(
   ctx: ToolContext,
   rawScenes: unknown,
@@ -704,7 +795,21 @@ function deliverScenes(
   title?: string,
   options: { rewrite?: boolean } = {},
 ): string {
-  const scenes = Array.isArray(rawScenes) ? rawScenes : [];
+  const scenes = coerceDeliveredScenes(rawScenes);
+  if (scenes.length === 0) {
+    // Nothing was inspected, so say so plainly: a model told "the payload has
+    // no scenes" after sending a scene concludes the editor is broken.
+    return JSON.stringify({
+      issues: [
+        "No scene arrived: the call carried no scene JSON, so nothing was validated and " +
+          "nothing reached the editor. This is not a judgement on the scene you wrote. " +
+          (tool === "build_scene"
+            ? "Call create_scenes again with the complete scene JSON as `scenes`, an array of scene objects."
+            : "Call update_scene again with the complete scene JSON as `scene`, a single scene object."),
+      ],
+      ok: false,
+    });
+  }
   const payload: JsonObject = { scenes };
   if (tool === "modify_scene" && scenes.length > 0) {
     const first = scenes[0];
@@ -1181,6 +1286,44 @@ function withChanges(delivered: string, changes: string[]): string {
   }
 }
 
+// Deliver a listing edit to the editor's draft. Like patch_scene it writes
+// nothing: the listing is part of a version, and the user's Save publishes
+// the draft — diagram, listing and images together. The field rules are the
+// store's own (shared with the content route through parseListingChanges),
+// so a bad tag bounces back here instead of at Save.
+function updateSceneListing(ctx: ToolContext, args: JsonObject): string {
+  if (!ctx.emitListing) {
+    return JSON.stringify({
+      error: "There is no scene editor in this chat to hold a listing edit. Ask the user to open the scene on the store.",
+      ok: false,
+    });
+  }
+  const parsed = parseListingChanges({
+    ...(args.category !== undefined ? { category: args.category } : {}),
+    ...(args.description !== undefined ? { description: args.description } : {}),
+    ...(args.frameos_version !== undefined ? { frameosVersion: args.frameos_version } : {}),
+    ...(args.tags !== undefined ? { tags: args.tags } : {}),
+  });
+  if ("error" in parsed) {
+    return JSON.stringify({ error: parsed.error, ok: false });
+  }
+  const { changes } = parsed;
+  if (Object.keys(changes).length === 0) {
+    return JSON.stringify({
+      error: "nothing_to_update — pass at least one of description, tags, category or frameos_version.",
+      ok: false,
+    });
+  }
+  ctx.emitListing({ listing: changes, type: "listing" });
+  return JSON.stringify({
+    listing: { ...(ctx.currentListing ?? {}), ...changes },
+    note:
+      "Delivered to the editor's draft, unsaved — next to the diagram. The user's Save publishes it with the " +
+      "scene as one new version; nothing is on the store page until then. Tell them so, in one line.",
+    ok: true,
+  });
+}
+
 // Save whatever the chat is holding into the user's account as a NEW private
 // scene. Never an overwrite: a chat that could rewrite a saved scene in place
 // would be one bad turn away from destroying work the user did not ask it to
@@ -1190,9 +1333,10 @@ async function saveSceneToAccount(
   ctx: ToolContext,
   args: JsonObject,
 ): Promise<string> {
-  const explicit = Array.isArray(args.scenes) ? (args.scenes as unknown[]) : null;
+  const explicit =
+    args.scenes === undefined ? null : coerceDeliveredScenes(args.scenes);
   const scenes =
-    explicit ??
+    (explicit && explicit.length > 0 ? explicit : null) ??
     ctx.deliveredScenes ??
     (ctx.currentScene ? [ctx.currentScene] : null);
   if (!scenes || scenes.length === 0) {
@@ -1644,12 +1788,15 @@ export async function executeTool(
             "There is no current scene in this chat. Use create_scenes to build a new one, or ask the user to open a scene.",
         });
       }
-      return deliverScenes(ctx, args.scene ? [args.scene] : [], "modify_scene", undefined, {
+      return deliverScenes(ctx, args.scene ?? args.scenes, "modify_scene", undefined, {
         rewrite: args.rewrite === true,
       });
     }
     case "patch_scene": {
       return patchScene(ctx, args);
+    }
+    case "update_scene_listing": {
+      return updateSceneListing(ctx, args);
     }
     case "edit_app_source": {
       return editAppSource(ctx, args);

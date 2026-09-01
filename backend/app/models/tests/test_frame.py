@@ -470,3 +470,16 @@ def test_normalize_reboot_crontab_fixes_legacy_hour_minute_swap():
     assert normalize_reboot_crontab("23 0 * * *") == "0 23 * * *"
     assert normalize_reboot_crontab("0 4 * * *") == "0 4 * * *"
     assert normalize_reboot_crontab("*/15 * * * *") == "*/15 * * * *"
+
+
+def test_compiled_scene_count_counts_only_the_legacy_path():
+    from app.models.frame import compiled_scene_count
+
+    scenes = [
+        {"id": "a", "settings": {"execution": "compiled"}},
+        {"id": "b", "settings": {"execution": "interpreted"}},
+        {"id": "c"},  # absent means interpreted
+        "junk",
+    ]
+    assert compiled_scene_count(scenes) == 1
+    assert compiled_scene_count(None) == 0

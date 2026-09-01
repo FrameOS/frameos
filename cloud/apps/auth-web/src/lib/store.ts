@@ -1,5 +1,7 @@
+import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
 import { randomBytes } from "node:crypto";
 import { strToU8, unzipSync, unzlibSync, zipSync } from "fflate";
+import { normalizeCategory } from "./categories";
 
 // FrameOS store constants and helpers (STORE-TODO). Payloads are the frameos
 // template interchange zip: {name}/template.json + scenes.json + image.jpg.
@@ -116,6 +118,32 @@ const shellAppKeywordPattern =
 const shellCodePattern =
   /\b(execShellCmd|execCmdEx|execCmd|execProcess|startProcess|runShellWithParentStreams|runShellCapture|osproc|quoteShell|child_process)\b/;
 
+// The scenes that would force a source build on a self-hosted frame and that
+// no cloud frame can run at all: Nim code nodes with no codeJS, Nim app
+// sources with no JS sibling, source nodes, or an explicit
+// settings.execution = "compiled". The store refuses them at publish and at
+// assign, naming the converter (docs/nim-to-js-conversion.md).
+export function compiledSceneNames(scenes: unknown): string[] {
+  if (!Array.isArray(scenes)) {
+    return [];
+  }
+  const names: string[] = [];
+  for (const scene of scenes) {
+    if (!scene || typeof scene !== "object" || typeof (scene as { id?: unknown }).id !== "string") {
+      continue;
+    }
+    const record = scene as { id: string; name?: unknown; settings?: unknown };
+    const explicit = (record.settings as { execution?: unknown } | undefined)?.execution;
+    if (explicit === "compiled" || sceneRequiresCompilation(record as Parameters<typeof sceneRequiresCompilation>[0])) {
+      names.push(typeof record.name === "string" && record.name.trim() ? record.name.trim() : record.id);
+    }
+  }
+  return names;
+}
+
+export const compiledSceneHint =
+  "Legacy compiled scenes (Nim code nodes, Nim apps) cannot run on a cloud frame. Convert it to an interpreted scene at /nim-converter (docs/nim-to-js-conversion.md) and publish the result.";
+
 export function detectRiskFlags(scenes: unknown): string[] {
   const flags = new Set<string>();
   if (!Array.isArray(scenes)) {
@@ -207,6 +235,48 @@ export function detectImageContentType(content: Buffer): string | undefined {
 //   scanning is not sound), and scan every alpha byte.
 // - 16-bit, Adam7-interlaced, palette+tRNS, oversized (> 64 MB of raw pixel
 //   data), or malformed/truncated input: cannot cheaply prove, so accept.
+// Pixel dimensions from the header, PNG and baseline/progressive JPEG only
+// (WebP and GIF read as unknown). Best effort: the store shows an image
+// without knowing its size; the size only feeds social-card metadata.
+export function imageDimensions(
+  content: Buffer,
+): { height: number; width: number } | undefined {
+  if (
+    content.length >= 24 &&
+    content.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) {
+    const width = content.readUInt32BE(16);
+    const height = content.readUInt32BE(20);
+    return width > 0 && height > 0 ? { height, width } : undefined;
+  }
+  if (content.length >= 4 && content[0] === 0xff && content[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < content.length) {
+      if (content[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const marker = content[offset + 1]!;
+      if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+        offset += 2;
+        continue;
+      }
+      const length = content.readUInt16BE(offset + 2);
+      // SOF0..SOF15 except the DHT/JPG/DAC markers that share the range.
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        const height = content.readUInt16BE(offset + 5);
+        const width = content.readUInt16BE(offset + 7);
+        return width > 0 && height > 0 ? { height, width } : undefined;
+      }
+      if (length < 2) {
+        return undefined;
+      }
+      offset += 2 + length;
+    }
+  }
+  return undefined;
+}
+
 export function isProvablyFullyTransparentImage(content: Uint8Array): boolean {
   const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (content.length < 8 + 25 || pngSignature.some((byte, i) => content[i] !== byte)) {
@@ -374,11 +444,18 @@ export function slugSuffix() {
 
 export type ValidatedSceneZip = {
   appKeywords: string[];
+  /** Names of scenes on the legacy compiled path (Nim the interpreter cannot run). */
+  compiledScenes: string[];
   frameosVersion: string | undefined;
   imageHeight: number | undefined;
   imageWidth: number | undefined;
+  // The listing the manifest carries (template.json has always had a name
+  // and a description; tags and category joined them when the listing
+  // became part of the version). Malformed values read as absent.
+  manifestCategory: string | null | undefined;
   manifestDescription: string | undefined;
   manifestName: string | undefined;
+  manifestTags: string[] | undefined;
   previewImage: Buffer | undefined;
   riskFlags: string[];
   sceneCount: number;
@@ -461,9 +538,12 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
     ok: true,
     value: {
       appKeywords: extractAppKeywords(scenes),
+      compiledScenes: compiledSceneNames(scenes),
       frameosVersion: normalizeFrameosVersion(record.frameosVersion),
       imageHeight: dimension(record.imageHeight),
       imageWidth: dimension(record.imageWidth),
+      manifestCategory:
+        record.category === undefined ? undefined : normalizeCategory(record.category),
       manifestDescription:
         typeof record.description === "string" && record.description.trim()
           ? record.description.trim().slice(0, 2000)
@@ -472,6 +552,7 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
         typeof record.name === "string" && record.name.trim()
           ? record.name.trim().slice(0, 128)
           : undefined,
+      manifestTags: record.tags === undefined ? undefined : normalizeTags(record.tags),
       previewImage: imageRaw ? Buffer.from(imageRaw) : undefined,
       riskFlags: detectRiskFlags(scenes),
       sceneCount: scenes.length,
@@ -479,162 +560,134 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
   };
 }
 
-// Swap scenes.json inside the template interchange zip, keeping template.json
-// and image.jpg byte-identical — unless `renameTo` is given, which also
-// rewrites the manifest's display name (used when forking a scene).
+/** What a rebuilt manifest should say. `null` removes the key; an omitted
+ * key is left as it was. Empty tags are removed rather than written. */
+export type ManifestPatch = {
+  category?: string | null | undefined;
+  description?: string | null | undefined;
+  frameosVersion?: string | null | undefined;
+  name?: string | undefined;
+  tags?: string[] | undefined;
+};
+
+// Rebuild the template interchange zip with some of its three files changed
+// and the rest byte-identical: new scenes.json, manifest fields patched, the
+// cover swapped (`previewImage: null` removes it). The manifest is
+// re-serialized only when something in it changes, so a rebuild that only
+// swaps scenes.json leaves template.json untouched. Every write path that
+// mints a version from an existing zip goes through here.
+export function rebuildZip(
+  zipBytes: Buffer,
+  changes: {
+    manifest?: ManifestPatch | undefined;
+    previewImage?: Buffer | null | undefined;
+    scenesJson?: string | undefined;
+  },
+): Buffer | undefined {
+  try {
+    const files = unzipSync(new Uint8Array(zipBytes), {
+      filter: (file) =>
+        /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(file.name),
+    });
+    const manifestPath = Object.keys(files)
+      .filter((name) => /(^|\/)template\.json$/.test(name))
+      .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))[0];
+    const manifestBytes = manifestPath ? files[manifestPath] : undefined;
+    if (!manifestPath || !manifestBytes) {
+      return undefined;
+    }
+    const folder = manifestPath.slice(
+      0,
+      manifestPath.length - "template.json".length,
+    );
+    const scenes = changes.scenesJson
+      ? strToU8(changes.scenesJson)
+      : files[`${folder}scenes.json`];
+    if (!scenes) {
+      return undefined;
+    }
+
+    let manifest: Uint8Array = manifestBytes;
+    const patch = changes.manifest ?? {};
+    const swappingPreview = changes.previewImage !== undefined;
+    if (Object.keys(patch).length > 0 || swappingPreview) {
+      const parsed = parseJson(manifestBytes);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return undefined;
+      }
+      const record = { ...(parsed as Record<string, unknown>) };
+      if (patch.name !== undefined) {
+        record.name = patch.name;
+      }
+      for (const key of ["description", "category", "frameosVersion"] as const) {
+        const value = patch[key];
+        if (value === null) {
+          delete record[key];
+        } else if (value !== undefined) {
+          record[key] = value;
+        }
+      }
+      if (patch.tags !== undefined) {
+        if (patch.tags.length > 0) {
+          record.tags = patch.tags;
+        } else {
+          delete record.tags;
+        }
+      }
+      if (swappingPreview) {
+        // Dimensions describe the previous image; FrameOS recomputes them
+        // on import and the store reads its own.
+        delete record.imageHeight;
+        delete record.imageWidth;
+        if (changes.previewImage) {
+          record.image = "./image.jpg";
+        } else {
+          delete record.image;
+        }
+      }
+      manifest = strToU8(JSON.stringify(record, null, 2));
+    }
+
+    const next: Record<string, Uint8Array> = {
+      [manifestPath]: manifest,
+      [`${folder}scenes.json`]: scenes,
+    };
+    // The interchange format knows one cover path. Cloud galleries hold
+    // several images; FrameOS/Pillow sniffs the real raster format from the
+    // bytes, so PNG/WebP/GIF go under the conventional name untranscoded.
+    const image = swappingPreview
+      ? changes.previewImage
+        ? new Uint8Array(changes.previewImage)
+        : undefined
+      : files[`${folder}image.jpg`];
+    if (image) {
+      next[`${folder}image.jpg`] = image;
+    }
+    return Buffer.from(zipSync(next));
+  } catch {
+    return undefined;
+  }
+}
+
+// Swap scenes.json, keeping template.json and image.jpg byte-identical —
+// unless `renameTo` is given, which also rewrites the manifest's name.
 export function rebuildZipWithScenes(
   zipBytes: Buffer,
   scenesJson: string,
   renameTo?: string,
 ): Buffer | undefined {
-  try {
-    const files = unzipSync(new Uint8Array(zipBytes), {
-      filter: (file) =>
-        /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(file.name),
-    });
-    const manifestPath = Object.keys(files)
-      .filter((name) => /(^|\/)template\.json$/.test(name))
-      .sort(
-        (a, b) =>
-          a.split("/").length - b.split("/").length || a.localeCompare(b),
-      )[0];
-    let manifest = manifestPath ? files[manifestPath] : undefined;
-    if (!manifestPath || !manifest) {
-      return undefined;
-    }
-    if (renameTo) {
-      const parsed = JSON.parse(Buffer.from(manifest).toString("utf8"));
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return undefined;
-      }
-      manifest = strToU8(JSON.stringify({ ...parsed, name: renameTo }, null, 2));
-    }
-    const folder = manifestPath.slice(
-      0,
-      manifestPath.length - "template.json".length,
-    );
-    const next: Record<string, Uint8Array> = {
-      [manifestPath]: manifest,
-      [`${folder}scenes.json`]: strToU8(scenesJson),
-    };
-    const image = files[`${folder}image.jpg`];
-    if (image) {
-      next[`${folder}image.jpg`] = image;
-    }
-    return Buffer.from(zipSync(next));
-  } catch {
-    return undefined;
-  }
+  return rebuildZip(zipBytes, {
+    ...(renameTo ? { manifest: { name: renameTo } } : {}),
+    scenesJson,
+  });
 }
 
-// Set the minimum FrameOS version in the template manifest while keeping the
-// scene and preview bytes unchanged. Changing compatibility metadata publishes
-// a new archive version, so past downloads remain auditable.
-export function rebuildZipWithFrameosVersion(
-  zipBytes: Buffer,
-  frameosVersion: string | null,
-): Buffer | undefined {
-  try {
-    const files = unzipSync(new Uint8Array(zipBytes), {
-      filter: (file) =>
-        /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(file.name),
-    });
-    const manifestPath = Object.keys(files)
-      .filter((name) => /(^|\/)template\.json$/.test(name))
-      .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))[0];
-    const manifestBytes = manifestPath ? files[manifestPath] : undefined;
-    if (!manifestPath || !manifestBytes) {
-      return undefined;
-    }
-
-    const parsed = parseJson(manifestBytes);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return undefined;
-    }
-    const manifest = { ...(parsed as Record<string, unknown>) };
-    if (frameosVersion) {
-      manifest.frameosVersion = frameosVersion;
-    } else {
-      delete manifest.frameosVersion;
-    }
-
-    const folder = manifestPath.slice(
-      0,
-      manifestPath.length - "template.json".length,
-    );
-    const scenes = files[`${folder}scenes.json`];
-    if (!scenes) {
-      return undefined;
-    }
-    const next: Record<string, Uint8Array> = {
-      [manifestPath]: strToU8(JSON.stringify(manifest, null, 2)),
-      [`${folder}scenes.json`]: scenes,
-    };
-    const image = files[`${folder}image.jpg`];
-    if (image) {
-      next[`${folder}image.jpg`] = image;
-    }
-    return Buffer.from(zipSync(next));
-  } catch {
-    return undefined;
-  }
-}
-
-// Replace the single preview understood by FrameOS with the current lead
-// storefront image. Cloud galleries can contain several images, but the
-// template interchange format exposes only `image.jpg`; FrameOS/Pillow sniffs
-// the real raster format from the bytes, so PNG/WebP/GIF uploads can be stored
-// under that conventional path without transcoding them. Dimensions from the
-// previous image are removed because FrameOS recomputes them on import.
+// Replace (or with no image, remove) the zip's single cover.
 export function rebuildZipWithPreview(
   zipBytes: Buffer,
   previewImage?: Buffer,
 ): Buffer | undefined {
-  try {
-    const files = unzipSync(new Uint8Array(zipBytes), {
-      filter: (file) =>
-        /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(file.name),
-    });
-    const manifestPath = Object.keys(files)
-      .filter((name) => /(^|\/)template\.json$/.test(name))
-      .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))[0];
-    const manifestBytes = manifestPath ? files[manifestPath] : undefined;
-    if (!manifestPath || !manifestBytes) {
-      return undefined;
-    }
-
-    const parsed = parseJson(manifestBytes);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return undefined;
-    }
-    const manifest = { ...(parsed as Record<string, unknown>) };
-    delete manifest.imageHeight;
-    delete manifest.imageWidth;
-    if (previewImage) {
-      manifest.image = "./image.jpg";
-    } else {
-      delete manifest.image;
-    }
-
-    const folder = manifestPath.slice(
-      0,
-      manifestPath.length - "template.json".length,
-    );
-    const scenes = files[`${folder}scenes.json`];
-    if (!scenes) {
-      return undefined;
-    }
-    const next: Record<string, Uint8Array> = {
-      [manifestPath]: strToU8(JSON.stringify(manifest, null, 2)),
-      [`${folder}scenes.json`]: scenes,
-    };
-    if (previewImage) {
-      next[`${folder}image.jpg`] = new Uint8Array(previewImage);
-    }
-    return Buffer.from(zipSync(next));
-  } catch {
-    return undefined;
-  }
+  return rebuildZip(zipBytes, { previewImage: previewImage ?? null });
 }
 
 function depth(path: string) {

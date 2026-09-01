@@ -80,6 +80,31 @@ afterEach(() => {
 });
 
 describe("SceneAiPanel", () => {
+  it("applies a listing event to the draft and sends the draft listing with each turn", async () => {
+    fetchMock.mockResolvedValueOnce(
+      ndjson([
+        { chatId: "chat-1", type: "chat" },
+        { label: "Editing the listing", name: "update_scene_listing", status: "start", type: "tool" },
+        { listing: { description: "A map of everywhere I have been." }, type: "listing" },
+        { label: "Editing the listing", name: "update_scene_listing", status: "done", type: "tool" },
+        { reply: "Rewrote the description — Save publishes it.", tool: "reply", type: "done" },
+      ]),
+    );
+    const onListing = vi.fn();
+    renderPanel({
+      getListing: () => ({ description: "Old text", tags: ["maps"] }),
+      onListing,
+    });
+
+    sendPrompt("update the description");
+
+    await waitFor(() =>
+      expect(onListing).toHaveBeenCalledWith({ description: "A map of everywhere I have been." }),
+    );
+    const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+    expect(body.listing).toEqual({ description: "Old text", tags: ["maps"] });
+  });
+
   it("streams the reply, applies delivered scenes and reports the render check", async () => {
     fetchMock.mockResolvedValueOnce(
       ndjson([
@@ -257,6 +282,35 @@ describe("SceneAiPanel", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // The switch is known before the first turn, so the panel must say so up
+  // front. Letting somebody type a prompt, wait for a round trip and only
+  // then learn AI is off is the failure this replaces.
+  it("says AI is off before a prompt can be sent, not after", () => {
+    renderPanel({
+      aiDisabled: true,
+      aiSettingsUrl: "https://cloud.example/account/ai",
+    });
+
+    expect(screen.getByText("AI features are switched off.")).toBeDefined();
+    const box = screen.getByLabelText("Message the AI") as HTMLTextAreaElement;
+    expect(box.disabled).toBe(true);
+    expect(box.placeholder).toBe("AI features are off for this account");
+    const link = screen.getByRole("link", {
+      name: "Turn AI back on",
+    }) as HTMLAnchorElement;
+    expect(link.href).toBe("https://cloud.example/account/ai");
+
+    // And nothing reaches the server even if a keystroke gets through.
+    sendPrompt("make it blue");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // An initial prompt is submitted on mount; with AI off it must not be.
+  it("does not auto-submit an initial prompt when AI is off", () => {
+    renderPanel({ aiDisabled: true, initialPrompt: "make it blue" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("submits the initial prompt on mount and shows suggestion chips otherwise", async () => {
     fetchMock.mockResolvedValueOnce(ndjson([{ reply: "Hi", tool: "reply", type: "done" }]));
     const { unmount } = renderPanel({ initialPrompt: "make it blue" });
@@ -266,5 +320,96 @@ describe("SceneAiPanel", () => {
 
     renderPanel();
     expect(screen.getByRole("button", { name: "Change the colour scheme" })).toBeDefined();
+  });
+});
+
+describe("SceneAiPanel rendered frames", () => {
+  it("offers Show in preview under the frame, with the scenes it was drawn from", async () => {
+    const delivered = [{ id: "scene-1", name: "Counter", nodes: [{ id: "n1" }], edges: [] }];
+    fetchMock.mockResolvedValueOnce(
+      ndjson([
+        { chatId: "chat-1", type: "chat" },
+        { scenes: delivered, tool: "modify_scene", type: "scenes" },
+        { reply: "Made the title bigger.", tool: "modify_scene", type: "done" },
+      ]),
+    );
+    const onShowInPreview = vi.fn();
+    renderPanel({ onShowInPreview });
+
+    sendPrompt("make the title text bigger");
+    const button = await screen.findByRole("button", { name: "Show in preview" });
+    // Right under the frame, in the same bubble.
+    expect(
+      button.closest(".ai-panel__render-block")?.querySelector("img"),
+    ).not.toBeNull();
+
+    fireEvent.click(button);
+    // getScenes reports what the editor holds; that is what was rendered.
+    expect(onShowInPreview).toHaveBeenCalledWith({ sceneId: "scene-1", scenes });
+  });
+
+  it("leaves the frame alone when there is no preview panel to show it in", async () => {
+    fetchMock.mockResolvedValueOnce(
+      ndjson([
+        { chatId: "chat-1", type: "chat" },
+        { scenes: [{ id: "scene-1", name: "Counter", nodes: [], edges: [] }], tool: "modify_scene", type: "scenes" },
+        { reply: "Done.", tool: "modify_scene", type: "done" },
+      ]),
+    );
+    renderPanel();
+
+    sendPrompt("make the title text bigger");
+    expect(await screen.findByRole("img", { name: "Rendered preview of the scene" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Show in preview" })).toBeNull();
+  });
+});
+
+describe("SceneAiPanel conversations", () => {
+  it("reopens a stored transcript and keeps its chat going", async () => {
+    renderPanel({
+      initialChat: {
+        chatId: "chat-9",
+        messages: [
+          { content: "show a big pineapple", role: "user" },
+          { content: "Made a bold, sunny pineapple.", role: "assistant" },
+        ],
+      },
+    });
+    expect(screen.getByText("show a big pineapple")).toBeTruthy();
+    expect(screen.getByText("Made a bold, sunny pineapple.")).toBeTruthy();
+
+    fetchMock.mockResolvedValueOnce(ndjson([{ reply: "Sure.", tool: "reply", type: "done" }]));
+    sendPrompt("make it smaller");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(body.chatId).toBe("chat-9");
+    expect(body.history).toEqual([
+      { content: "show a big pineapple", role: "user" },
+      { content: "Made a bold, sunny pineapple.", role: "assistant" },
+    ]);
+  });
+
+  it("reports the settled transcript, text only, for whoever stores it", async () => {
+    fetchMock.mockResolvedValueOnce(
+      ndjson([
+        { chatId: "chat-1", type: "chat" },
+        { text: "Made a bold, sunny pineapple.", type: "delta" },
+        { reply: "Made a bold, sunny pineapple.", tool: "reply", type: "done" },
+      ]),
+    );
+    const onChatChange = vi.fn();
+    renderPanel({ onChatChange });
+    expect(onChatChange).not.toHaveBeenCalled();
+
+    sendPrompt("show a big pineapple");
+    await waitFor(() =>
+      expect(onChatChange).toHaveBeenLastCalledWith({
+        chatId: "chat-1",
+        messages: [
+          { content: "show a big pineapple", role: "user" },
+          { content: "Made a bold, sunny pineapple.", role: "assistant" },
+        ],
+      }),
+    );
   });
 });

@@ -3,7 +3,7 @@
 // Extracted from app/api/account/scenes/[sceneId]/fork/route.ts so the AI
 // chat's save_scene tool (given a `source_scene_id`) records the SAME lineage
 // the workspace's fork button does: the source scene id in the audit event,
-// the carried-over preview image, gallery images, tags and description. A
+// the carried-over images (linked, never copied), tags and description. A
 // tool with its own "save these bytes as a new scene" path would fork a store
 // scene in practice while recording none of that.
 //
@@ -14,7 +14,6 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import {
   createDb,
-  storeSceneImages,
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
@@ -24,7 +23,7 @@ import {
   withAccountSceneNameLock,
 } from "./account-scene-create";
 import { recordAuditEvent } from "./audit";
-import { blobNamespaces, readBlob, storeBlob } from "./blobs";
+import { readBlob } from "./blobs";
 import { jsonError } from "./device-flow";
 import { moderateStoreContent } from "./moderation";
 import { identityRateLimitResponse } from "./rate-limit";
@@ -32,15 +31,18 @@ import {
   maxNewScenesPerDay,
   maxSceneZipBytes,
   maxScenesPerAccount,
-  rebuildZipWithScenes,
+  rebuildZip,
   sceneSummary,
   slugifyName,
   slugSuffix,
   validateSceneZip,
 } from "./store";
+import { imageSetForVersion } from "./store-images";
+import type { SceneListing } from "./store-listing";
 import type { PublishActor } from "./store-publish";
+import { alignZipCover, writeSceneVersion } from "./store-version-write";
 import {
-  maxPrivateSceneBytesPerAccount,
+  accountLimits,
   privateSceneBytesForAccount,
 } from "./usage";
 
@@ -143,53 +145,59 @@ async function forkStoreSceneLocked(db: Database, input: ForkInput) {
     return jsonError("version_not_found", 404);
   }
 
-  // Copied by reference, not by value: object keys are content digests, so a
-  // fork of a 6 MB scene pack re-uses the same objects and uploads nothing.
-  // Legacy rows that still hold their bytes in Postgres copy those instead.
-  const sourceImages = await db
-    .select({
-      content: storeSceneImages.content,
-      contentType: storeSceneImages.contentType,
-      createdAt: storeSceneImages.createdAt,
-      objectKey: storeSceneImages.objectKey,
-      position: storeSceneImages.position,
-      sizeBytes: storeSceneImages.sizeBytes,
-    })
-    .from(storeSceneImages)
-    .where(eq(storeSceneImages.sceneId, source.id))
-    .orderBy(storeSceneImages.position, storeSceneImages.createdAt);
+  // The source's image set carries over as links to the same rows — a fork
+  // of a 6 MB scene pack uploads nothing and stores nothing twice.
+  const sourceImages = await imageSetForVersion(db, source.id, null);
 
   const name = await forkName(db, accountId, source.name, input.name);
   if (!name) {
     return jsonError("too_many_copies", 400);
   }
   const description = input.description?.trim() || source.description;
+  // The listing the copy starts from: the source's, minus its category —
+  // a private copy is not on the shelf the original was filed under.
+  const listing: SceneListing = {
+    category: null,
+    description,
+    frameosVersion: latest.frameosVersion,
+    tags: source.tags,
+  };
 
-  const content = rebuildZipWithScenes(
-    Buffer.from(latestContent),
-    JSON.stringify(input.scenes, null, 2),
-    name,
-  );
-  if (!content) {
+  const rebuilt = rebuildZip(Buffer.from(latestContent), {
+    manifest: {
+      category: null,
+      description,
+      name,
+      tags: source.tags,
+    },
+    scenesJson: JSON.stringify(input.scenes, null, 2),
+  });
+  if (!rebuilt) {
     return jsonError("invalid_scene_zip", 500);
   }
-  if (content.length > maxSceneZipBytes) {
+  if (rebuilt.length > maxSceneZipBytes) {
     return jsonError("scene_too_large", 413, { max_bytes: maxSceneZipBytes });
   }
-  if (privateBytes + content.length > maxPrivateSceneBytesPerAccount) {
+  const { privateSceneBytes: maxPrivateBytes } = await accountLimits(db, accountId);
+  if (privateBytes + rebuilt.length > maxPrivateBytes) {
     return jsonError("storage_quota_exceeded", 403, {
-      max_bytes: maxPrivateSceneBytesPerAccount,
+      max_bytes: maxPrivateBytes,
       private_bytes: Math.round(privateBytes),
     });
   }
 
-  const validated = validateSceneZip(content);
-  if (!validated.ok) {
-    return jsonError(validated.error, 400);
+  const validation = validateSceneZip(rebuilt);
+  if (!validation.ok) {
+    return jsonError(validation.error, 400);
+  }
+  listing.frameosVersion = validation.value.frameosVersion ?? latest.frameosVersion;
+  const aligned = await alignZipCover(rebuilt, validation.value, sourceImages);
+  if ("error" in aligned) {
+    return jsonError(aligned.error, aligned.error === "scene_too_large" ? 413 : 500);
   }
 
   // The name (and a caller-supplied description) is new text on a (future)
-  // public page; the preview image carries over from an already-hosted scene.
+  // public page; the images carry over from an already-hosted scene.
   const moderation = await moderateStoreContent({
     texts: [name, description],
   });
@@ -202,90 +210,41 @@ async function forkStoreSceneLocked(db: Database, input: ForkInput) {
     return jsonError("moderation_unavailable", 503);
   }
 
-  const storedFork = await storeBlob(
-    blobNamespaces.sceneVersion,
-    content,
-    "application/zip",
-    { extension: "zip" },
-  );
-
+  // Globally unique slug, random suffix on collision (same as publishing).
   const base = slugifyName(name);
-  const result = await db.transaction(async (tx) => {
-    // Globally unique slug, random suffix on collision (same as publishing).
-    let created;
-    for (const candidate of [
-      base,
-      `${base}-${slugSuffix()}`,
-      `${base}-${slugSuffix()}`,
-    ]) {
-      [created] = await tx
-        .insert(storeScenes)
-        .values({ accountId, name, slug: candidate })
-        .onConflictDoNothing({ target: storeScenes.slug })
-        .returning();
-      if (created) {
-        break;
-      }
-    }
-    if (!created) {
-      return { error: "scene_create_failed" as const };
-    }
-
-    await tx.insert(storeSceneVersions).values({
-      contentType: "application/zip",
-      frameosVersion: validated.value.frameosVersion ?? latest.frameosVersion,
-      objectKey: storedFork.objectKey,
-      riskFlags: validated.value.riskFlags,
-      sceneId: created.id,
-      sha256: storedFork.sha256,
-      sizeBytes: storedFork.sizeBytes,
-      version: 1,
-    });
-
-    const [updated] = await tx
-      .update(storeScenes)
-      .set({
-        description,
-        frameosVersion: validated.value.frameosVersion ?? latest.frameosVersion,
-        latestVersion: 1,
-        previewImage: source.previewImage,
-        previewImageHeight: source.previewImageHeight,
-        previewImageSizeBytes: source.previewImageSizeBytes,
-        previewImageType: source.previewImageType,
-        previewImageWidth: source.previewImageWidth,
-        previewObjectKey: source.previewObjectKey,
-        riskFlags: validated.value.riskFlags,
-        tags: source.tags,
-        updatedAt: new Date(),
-        visibility: "private",
-      })
-      .where(eq(storeScenes.id, created.id))
+  let created;
+  for (const candidate of [
+    base,
+    `${base}-${slugSuffix()}`,
+    `${base}-${slugSuffix()}`,
+  ]) {
+    [created] = await db
+      .insert(storeScenes)
+      .values({ accountId, name, slug: candidate })
+      .onConflictDoNothing({ target: storeScenes.slug })
       .returning();
-    if (!updated) {
-      return { error: "scene_fork_failed" as const };
+    if (created) {
+      break;
     }
-
-    if (sourceImages.length > 0) {
-      await tx.insert(storeSceneImages).values(
-        sourceImages.map((image) => ({
-          content: image.content,
-          contentType: image.contentType,
-          createdAt: image.createdAt,
-          objectKey: image.objectKey,
-          position: image.position,
-          sceneId: updated.id,
-          sizeBytes: image.sizeBytes,
-        })),
-      );
-    }
-
-    return { updated };
-  });
-
-  if ("error" in result) {
-    return jsonError(result.error, 500);
   }
-  const { updated } = result;
+  if (!created) {
+    return jsonError("scene_create_failed", 500);
+  }
+
+  const written = await writeSceneVersion(db, {
+    content: aligned.content,
+    images: sourceImages,
+    listing,
+    rowChanges: { visibility: "private" },
+    sceneId: created.id,
+    validated: aligned.validated,
+    version: 1,
+  });
+  if ("error" in written) {
+    await db.delete(storeScenes).where(eq(storeScenes.id, created.id));
+    return jsonError("scene_fork_failed", 500);
+  }
+  const { updated } = written;
 
   await recordAuditEvent(db, {
     accountId,
@@ -294,7 +253,7 @@ async function forkStoreSceneLocked(db: Database, input: ForkInput) {
     metadata: {
       name: updated.name,
       imageCount: sourceImages.length,
-      sceneCount: validated.value.sceneCount,
+      sceneCount: aligned.validated.sceneCount,
       sourceSceneId: source.id,
       sourceSceneName: source.name,
       ...(input.via ? { via: input.via } : {}),
@@ -303,7 +262,7 @@ async function forkStoreSceneLocked(db: Database, input: ForkInput) {
   });
 
   return NextResponse.json({
-    scene: sceneSummary({ ...updated, latestVersion: 1 }),
+    scene: sceneSummary(updated),
     status: "forked",
   });
 }

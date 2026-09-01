@@ -130,7 +130,9 @@ export interface RemoteUpgradeNotice {
 type PlannedRebootSchedule = NonNullable<NonNullable<FullDeployPlanResponse['post_deploy']>['reboot_schedule']>
 
 export const CURRENT_FRAMEOS_VERSION = (versions.frameos || 'dev').split('+')[0]
-export const CURRENT_FRAMEOS_REMOTE_VERSION = ((versions as any).remote || (versions as any).agent || 'dev').split('+')[0]
+export const CURRENT_FRAMEOS_REMOTE_VERSION = ((versions as any).remote || (versions as any).agent || 'dev').split(
+  '+'
+)[0]
 export const FRAMEOS_GITHUB_RELEASES_URL = 'https://github.com/FrameOS/frameos/releases'
 
 const INKY_BUTTON_DEVICES = new Set([
@@ -266,9 +268,19 @@ function inferFrameDriverNames(frame?: Partial<FrameType> | null): string[] {
   return [...drivers].sort()
 }
 
+function frameCompiledSceneNames(frame?: Partial<FrameType> | null): string[] {
+  return (frame?.scenes ?? [])
+    .filter((scene) => sceneIsCompiledForFrame(scene, frame?.mode))
+    .map((scene) => scene.name || scene.id || 'Unnamed scene')
+}
+
 function precompiledSkipReason(frame?: Partial<FrameType> | null): string | null {
   const compiledSceneCount = frameCompiledSceneCount(frame)
-  return compiledSceneCount > 0 ? `${pluralize(compiledSceneCount, 'compiled scene')} configured` : null
+  return compiledSceneCount > 0
+    ? `${pluralize(compiledSceneCount, 'legacy compiled scene')} configured: ${frameCompiledSceneNames(frame).join(
+        ', '
+      )}`
+    : null
 }
 
 function canUsePrecompiledFrameos(frame?: Partial<FrameType> | null, plan?: DeployPlanResponse | null): boolean {
@@ -299,7 +311,7 @@ function inferBuildStrategy(frame?: Partial<FrameType> | null): string {
     if (!skipReason) {
       return 'Download and install the precompiled FrameOS release'
     }
-    return `${crossCompileText} as a single executable; precompiled release skipped (${skipReason})`
+    return `Legacy path — ${crossCompileText} as a single executable; precompiled release skipped (${skipReason}). Convert those scenes to interpreted scenes to install the release instead.`
   }
 
   return crossCompileText
@@ -500,7 +512,7 @@ export function buildFullDeployPlanSummary(
       label: 'Compilation',
       value: fullPlan.binary.will_attempt_precompiled
         ? 'Precompiled FrameOS binary and shared driver libraries'
-        : `Single executable; precompiled release skipped${
+        : `Legacy path — single executable; precompiled release skipped${
             fullPlan.binary.precompiled_skip_reason ? ` (${fullPlan.binary.precompiled_skip_reason})` : ''
           }`,
     }
@@ -637,12 +649,29 @@ export function buildDeployRecommendation(
 
   if (fullDeployChanges.length > 0) {
     const usesPrecompiledFrameos = canUsePrecompiledFrameos(frame, plan)
+    const compiledSceneCount = frameCompiledSceneCount(frame)
+    if (!usesPrecompiledFrameos && compiledSceneCount > 0) {
+      // The legacy path is the headline: the compiled scenes are why this
+      // deploy builds from source, and converting them is the recommended
+      // move ahead of the full deploy.
+      const names = frameCompiledSceneNames(frame).join(', ')
+      return {
+        mode: 'full',
+        title: 'Suggested: convert the legacy compiled scenes, then deploy',
+        description: `${pluralize(compiledSceneCount, 'legacy compiled scene')} (${names}) ${
+          compiledSceneCount === 1 ? 'forces' : 'force'
+        } a full FrameOS source build on every deploy. Convert ${
+          compiledSceneCount === 1 ? 'it' : 'them'
+        } to interpreted scenes at scenes.frameos.net/nim-converter and the precompiled release installs instead. Otherwise, a full deploy will be rebuilding FrameOS (legacy path).`,
+        descriptionEmphasis: 'rebuilding',
+      }
+    }
     return {
       mode: 'full',
       title: 'Suggested: full deploy',
       description: usesPrecompiledFrameos
         ? 'You have changes that require reinstalling FrameOS.'
-        : 'You have changes that require rebuilding FrameOS.',
+        : 'You have changes that require rebuilding FrameOS (legacy path).',
       descriptionEmphasis: usesPrecompiledFrameos ? undefined : 'rebuilding',
     }
   }

@@ -1,0 +1,168 @@
+// Double-entry accounting for FrameOS Cloud. Product code emits financial
+// events; the kernel turns them into balanced, immutable journal entries
+// through versioned posting rules; every balance and every report is a query
+// over those postings. Design and reasoning: cloud/docs/accounting-todo.md.
+export {
+  accountBalanceFromPostings,
+  accountBalanceMicros,
+  availableCreditMicros,
+} from "./balances";
+export {
+  accountAiSpendMicros,
+  accountAiUsage,
+  recentAccountAiTurns,
+  utcDayWindow,
+  utcMonthWindow,
+  type AccountAiTurn,
+  type AccountAiUsage,
+  type AccountAiUsageBucket,
+  type UsageWindow,
+} from "./account-usage";
+export {
+  accountMarginBasisPoints,
+  fallbackPaygPlan,
+  listPlans,
+  paygPlanCode,
+  readAccountMargin,
+  readAccountPlan,
+  readPlan,
+  type AccountPlan,
+  type BillingPlan,
+  type PlanEntitlements,
+} from "./plans";
+export {
+  addMonth,
+  cancelAccountPlan,
+  chargePeriod,
+  recognizePeriod,
+  refundUnearnedPeriod,
+  runSubscriptionCycle,
+  setAccountPlan,
+  type SubscriptionCycleResult,
+  type SubscriptionRecord,
+} from "./subscriptions";
+export {
+  customerCreditsCode,
+  customerPromoCreditsCode,
+  customerReceivableCode,
+  describeAccountCode,
+  ensureLedgerAccount,
+  normalSideForType,
+  systemAccountCodes,
+  type LedgerAccountDefinition,
+  type ResolvedLedgerAccount,
+} from "./chart";
+export {
+  checkAccountingEquation,
+  checkBalanceCache,
+  checkCustomerCreditFloor,
+  checkDailyCapRespected,
+  checkEntriesBalance,
+  checkEventsPostedOnce,
+  checkImmutabilityTriggers,
+  checkLedgerIntegrity,
+  checkMeteringCompleteness,
+  checkReversalsMirror,
+  type LedgerIntegrityOptions,
+  type LedgerIntegrityViolation,
+} from "./integrity";
+export {
+  findUnpostedEvents,
+  postEvent,
+  reverseEntry,
+  validateDrafts,
+  type PostEventOptions,
+} from "./kernel";
+export {
+  absorbedSurfaces,
+  postUsageRecord,
+  recordAiUsage,
+  surfaceIsAbsorbed,
+  sweepUnpostedUsage,
+  type AiUsageInput,
+  type AiUsageRecord,
+  type CredentialSource,
+  type RecordAiUsageOptions,
+  type RecordAiUsageResult,
+  type SweepResult,
+} from "./metering";
+export {
+  dollarsToMicros,
+  formatMicros,
+  microsPerDollar,
+  parseMicros,
+} from "./money";
+export {
+  applyMarginMicros,
+  divideRoundHalfUp,
+  fallbackModelPrice,
+  fallbackModelPrices,
+  priceUsage,
+  providerCostMicros,
+  resolveModelPrice,
+  splitProviderUsage,
+  unknownModelPrice,
+  type ModelPrice,
+  type PricedUsage,
+  type TokenUsage,
+} from "./pricing";
+export {
+  aiUsageSummary,
+  createAccountGroup,
+  customerStatement,
+  dailySummary,
+  listAccountGroups,
+  listJournalEntries,
+  setAccountGroup,
+  trialBalance,
+  type AiUsageSummaryRow,
+  type CustomerStatement,
+  type CustomerStatementLine,
+  type DailySummary,
+  type JournalEntry,
+  type JournalFilter,
+  type JournalPosting,
+  type LedgerAccountGroup,
+  type TrialBalance,
+  type TrialBalanceRow,
+} from "./reports";
+export {
+  aiUsageEventType,
+  aiUsageRule,
+  manualJournalEventType,
+  manualJournalRule,
+  postingRules,
+  reclassificationEventType,
+  reclassificationRule,
+  reversalEventType,
+  reversalRule,
+} from "./rules";
+export {
+  billingSettingKeys,
+  defaultBillingSettings,
+  readBillingSettings,
+  readRawBillingSettings,
+  writeBillingSetting,
+  type BillingSettingKey,
+  type BillingSettings,
+  type MeteringMode,
+} from "./settings";
+export {
+  LedgerError,
+  type EntryDraft,
+  type FinancialEventInput,
+  type FinancialEventRecord,
+  type LedgerAccountType,
+  type LedgerDb,
+  type LedgerErrorCode,
+  type LedgerExecutor,
+  type LedgerTx,
+  type PostEventResult,
+  type PostedEntry,
+  type PostedPosting,
+  type PostingDirection,
+  type PostingDraft,
+  type PostingRule,
+  type PostingRuleRegistry,
+  type RuleContext,
+} from "./types";

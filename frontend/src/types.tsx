@@ -268,6 +268,8 @@ export interface FrameType {
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]
+  /** How many scenes are on the legacy compiled path (a source build on every deploy). */
+  compiled_scene_count?: number
   debug?: boolean
   last_log_at?: string
   log_to_file?: string
@@ -328,6 +330,9 @@ export interface FrameType {
     wifiHotspotSsid?: string
     wifiHotspotPassword?: string
     wifiHotspotTimeoutSeconds?: number
+    // ISO 3166-1 alpha-2 regulatory domain for the Wi-Fi radio ("FR"); ""
+    // leaves the kernel's world domain, where channels 12/13 cannot be joined.
+    wifiCountry?: string
   }
   agent?: {
     agentEnabled?: boolean

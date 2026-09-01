@@ -41,6 +41,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
+import { convertSceneWithFeedback, requestSceneConversion } from '../../utils/sceneConvert'
 import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
 import {
   cloudFrameSettingKeys,
@@ -59,6 +60,7 @@ import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { secureToken } from '../../utils/secureToken'
 import { generateFrameTlsMaterial } from '../../utils/tlsCertificates'
 import { normalizeSceneApps } from '../../utils/sceneApps'
+import { sortScenesAlphabetically } from '../../utils/sortScenes'
 import {
   type ChangeDetail,
   CURRENT_FRAMEOS_REMOTE_VERSION,
@@ -1835,6 +1837,7 @@ export interface frameLogicValues {
   frames: Record<FrameId, FrameType> // framesModel
   latestPublishedRelease: string | null // publishedReleaseModel
   changedScenes: Set<string>
+  convertingSceneId: string | null
   defaultInterval: number
   defaultScene: string
   deployChangeDetails: ChangeDetail[]
@@ -1916,6 +1919,9 @@ export interface frameLogicActions {
   }
   clearNextAction: () => {
     value: true
+  }
+  convertSceneToInterpreted: (sceneId: string) => {
+    sceneId: string
   }
   createBlankScene: (
     name?: string,
@@ -2007,6 +2013,13 @@ export interface frameLogicActions {
   }
   saveFrame: () => {
     value: true
+  }
+  sceneConversionFinished: (
+    sceneId: string,
+    ok: boolean
+  ) => {
+    ok: boolean
+    sceneId: string
   }
   sendEvent: (
     event: string,
@@ -2200,6 +2213,10 @@ export const frameLogic = kea<frameLogicType>([
   })),
   actions({
     updateScene: (sceneId: string, scene: Partial<FrameScene>) => ({ sceneId, scene }),
+    // The Nim → interpreted converter, applied to the editor's unsaved copy of
+    // the scene; the result replaces it in the form (utils/sceneConvert.ts).
+    convertSceneToInterpreted: (sceneId: string) => ({ sceneId }),
+    sceneConversionFinished: (sceneId: string, ok: boolean) => ({ sceneId, ok }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Record<string, any>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
     saveAndDeployFrame: true,
@@ -2319,6 +2336,13 @@ export const frameLogic = kea<frameLogicType>([
     },
   })),
   reducers({
+    convertingSceneId: [
+      null as string | null,
+      {
+        convertSceneToInterpreted: (_, { sceneId }) => sceneId,
+        sceneConversionFinished: () => null,
+      },
+    ],
     nextAction: [
       null as FrameNextAction,
       {
@@ -2481,7 +2505,34 @@ export const frameLogic = kea<frameLogicType>([
       },
     ],
   }),
-  listeners(({ asyncActions, actions, values }) => ({
+  listeners(({ asyncActions, actions, values, props }) => ({
+    convertSceneToInterpreted: async ({ sceneId }) => {
+      // getCurrentFrameForm, not frameForm: the tag offers this from surfaces
+      // (the frames home, a dashboard tile) where the form was never touched
+      // and would find no scene at all.
+      const scene = getCurrentFrameForm(values.frame, values.frameForm).scenes?.find((s) => s.id === sceneId)
+      if (!scene) {
+        actions.sceneConversionFinished(sceneId, false)
+        return
+      }
+      const converted = await convertSceneWithFeedback(scene, (s) => requestSceneConversion(props.frameId, s))
+      if (!converted) {
+        actions.sceneConversionFinished(sceneId, false)
+        return
+      }
+      // In place and unsaved: the diagram, apps and settings follow the
+      // form, and Save or Deploy is the user's call. The converted scene
+      // REPLACES the old one rather than merging into it — the converter
+      // returns the whole scene, and a merge would leave behind whatever it
+      // dropped (a ported app's Nim sources, say).
+      const frameForm = getCurrentFrameForm(values.frame, values.frameForm)
+      actions.setFrameFormValues({
+        scenes: (frameForm.scenes ?? []).map((s) =>
+          s.id === sceneId ? sanitizeScene({ ...converted, id: sceneId }, frameForm) : s
+        ),
+      })
+      actions.sceneConversionFinished(sceneId, true)
+    },
     resetUnsavedChanges: () => {
       if (!values.frame) {
         return
@@ -2696,7 +2747,7 @@ export const frameLogic = kea<frameLogicType>([
     ],
     sortedScenes: [
       (s) => [s.scenes],
-      (scenes: frameLogicValues['scenes']): FrameScene[] => scenes.toSorted((a, b) => a.name.localeCompare(b.name)),
+      (scenes: frameLogicValues['scenes']): FrameScene[] => sortScenesAlphabetically(scenes),
     ],
     unsavedChanges: [
       (s) => [s.frame, s.frameForm],

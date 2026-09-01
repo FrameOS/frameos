@@ -10,8 +10,13 @@ Each one is replaced by its modern equivalent:
 - State setters (haSensor, openaiText) become `logic/setAsState` fed by
   `data/haSensor` / `data/openaiText`.
 - `legacy/resize` and `legacy/rotate` mutate the canvas mid-chain and have no
-  modern counterpart, so their Nim source is inlined into the node
-  (`data.sources`), turning them into self-contained edited apps.
+  modern counterpart. They used to get their Nim source inlined into the node
+  (`data.sources`), which manufactured a compiled scene out of every old
+  backup or template that used them. Since 2026-08-30 no migration produces
+  Nim: the node keeps its keyword and config and gets a
+  `data.needsConversion` note that the editor shows and the Nim → JavaScript
+  converter (docs/nim-to-js-conversion.md) picks up. Nodes that already
+  carry the inlined sources are left alone, as before.
 
 `cacheSeconds`-style fields translate to the node-level cache config the new
 data apps use. Field values are materialized explicitly (falling back to the
@@ -80,159 +85,19 @@ _LEGACY_ALIASES = {
     "unsplash": "legacy/unsplash",
 }
 
-# legacy/resize inlined verbatim, except `parseHtmlColor(self.frameConfig.color)`:
-# FrameConfig lost its `color` field, so the legacy app no longer compiled at
-# all. The fill now uses the scene background, like legacy/rotate always did.
-_RESIZE_APP_NIM = '''import pixie
-import frameos/types
-import frameos/utils/image
-
-type
-  AppConfig* = object
-    scalingMode*: string
-    width*: int
-    height*: int
-
-  App* = ref object
-    nodeId*: NodeId
-    frameConfig*: FrameConfig
-    scene*: FrameScene
-    appConfig*: AppConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-  )
-
-proc run*(self: App, context: ExecutionContext) =
-  let image = newImage(self.appConfig.width, self.appConfig.height)
-  case self.appConfig.scalingMode:
-    of "center", "contain", "":
-      image.fill(self.scene.backgroundColor)
-  image.scaleAndDrawImage(context.image, self.appConfig.scalingMode)
-  context.image = image
-'''
-
-_RESIZE_CONFIG_JSON = '''{
-  "name": "Resize (legacy)",
-  "description": "Scale or stretch the image",
-  "category": "render",
-  "version": "1.0.0",
-  "fields": [
-    { "name": "width", "type": "integer", "required": true, "label": "New Width", "placeholder": "e.g., 1024" },
-    { "name": "height", "type": "integer", "required": true, "label": "New Height", "placeholder": "e.g., 1024" },
-    {
-      "name": "scalingMode",
-      "type": "select",
-      "options": ["cover", "contain", "stretch", "center"],
-      "value": "contain",
-      "required": true,
-      "label": "Scaling mode"
-    }
-  ]
-}
-'''
-
-_ROTATE_APP_NIM = '''import pixie
-import json
-import strformat
-import frameos/types
-import frameos/utils/image
-
-type
-  AppConfig* = object
-    rotationDegree*: float
-    scalingMode*: string
-
-  App* = ref object
-    nodeId*: NodeId
-    scene*: FrameScene
-    frameConfig*: FrameConfig
-    appConfig*: AppConfig
-
-proc init*(nodeId: NodeId, scene: FrameScene, appConfig: AppConfig): App =
-  result = App(
-    nodeId: nodeId,
-    scene: scene,
-    frameConfig: scene.frameConfig,
-    appConfig: appConfig,
-  )
-
-proc log*(self: App, message: string) =
-  self.scene.logger.log(%*{"event": &"{self.nodeId}:log", "message": message})
-
-proc run*(self: App, context: ExecutionContext) =
-  let originalImage = context.image
-  let rotationAngle = degToRad(self.appConfig.rotationDegree).float32
-
-  # Calculate the new dimensions after rotation
-  let cosAngle = abs(cos(rotationAngle))
-  let sinAngle = abs(sin(rotationAngle))
-  let newWidth = int(ceil(originalImage.width.float32 * cosAngle +
-      originalImage.height.float32 * sinAngle))
-  let newHeight = int(ceil(originalImage.width.float32 * sinAngle +
-      originalImage.height.float32 * cosAngle))
-
-  # Create a new target image with the calculated dimensions
-  let targetImage = newImage(newWidth, newHeight)
-  targetImage.fill(self.scene.backgroundColor)
-
-  # Calculate the center of the original and target images
-  let originalCenterX = originalImage.width.float32 / 2
-  let originalCenterY = originalImage.height.float32 / 2
-  let targetCenterX = newWidth.float32 / 2
-  let targetCenterY = newHeight.float32 / 2
-
-  # Create a transformation that translates the image to the center of the target image, rotates it, and then translates it back
-  let transform =
-    translate(vec2(targetCenterX, targetCenterY)) *
-    rotate(rotationAngle) *
-    translate(vec2(-originalCenterX, -originalCenterY))
-
-  targetImage.draw(
-    originalImage,
-    transform,
-    OverwriteBlend
-  )
-
-  if self.appConfig.scalingMode == "expand":
-    context.image = targetImage
-  else:
-    context.image.scaleAndDrawImage(targetImage, self.appConfig.scalingMode)
-'''
-
-_ROTATE_CONFIG_JSON = '''{
-  "name": "Rotate (legacy)",
-  "description": "Rotate the image",
-  "category": "render",
-  "version": "1.0.0",
-  "fields": [
-    {
-      "name": "rotationDegree",
-      "type": "float",
-      "value": "0",
-      "required": true,
-      "label": "Rotation Degree",
-      "placeholder": "e.g., 45"
-    },
-    {
-      "name": "scalingMode",
-      "type": "select",
-      "options": ["expand", "cover", "contain", "stretch", "center"],
-      "value": "cover",
-      "required": true,
-      "label": "Scaling mode"
-    }
-  ]
-}
-'''
-
-_INLINE_SOURCES = {
-    "legacy/resize": {"app.nim": _RESIZE_APP_NIM, "config.json": _RESIZE_CONFIG_JSON},
-    "legacy/rotate": {"app.nim": _ROTATE_APP_NIM, "config.json": _ROTATE_CONFIG_JSON},
+# legacy/resize and legacy/rotate: no modern counterpart (they replace the
+# canvas mid-chain). The node is kept as-is and marked for conversion rather
+# than turned into an inline Nim app, which would force a source build.
+_NEEDS_CONVERSION = {
+    "legacy/resize": (
+        "legacy/resize scaled the whole canvas to a new size mid-chain; no built-in app does that. "
+        "Rebuild it with render/image placement (cover/contain/center) on the nodes that draw into it, "
+        "or port it as a JavaScript app that returns the resized image."
+    ),
+    "legacy/rotate": (
+        "legacy/rotate rotated the whole canvas mid-chain; no built-in app does that. "
+        "Rotate the frame in its settings instead, or port it as a JavaScript app that returns the rotated image."
+    ),
 }
 
 
@@ -291,8 +156,8 @@ def _migrate_node(node: dict, config: dict) -> tuple[list[dict], list[dict]]:
     keyword = node["data"]["keyword"]
     node_id = node["id"]
 
-    if keyword in _INLINE_SOURCES:
-        node["data"]["sources"] = dict(_INLINE_SOURCES[keyword])
+    if keyword in _NEEDS_CONVERSION:
+        node["data"]["needsConversion"] = {"reason": _NEEDS_CONVERSION[keyword], "source": keyword}
         return [], []
 
     if keyword == "legacy/clock":

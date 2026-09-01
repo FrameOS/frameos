@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
-import { accountSettings } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
+import { aiRefusalResponse } from "../../../../../src/lib/ai/access";
+import { resolveAiAccess } from "../../../../../src/lib/ai/api-key";
 import {
   readAppSources,
   runAppChat,
@@ -10,11 +10,8 @@ import {
   ensureChat,
   historyForModel,
 } from "../../../../../src/lib/ai/chat-store";
-import {
-  resolveChatModel,
-  resolveReasoningEffort,
-} from "../../../../../src/lib/ai/openai";
 import { formatAiException } from "../../../../../src/lib/ai/scene-utils";
+import { meterAiUsage } from "../../../../../src/lib/billing";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
   jsonError,
@@ -75,21 +72,16 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  const settingsRows = await db
-    .select()
-    .from(accountSettings)
-    .where(eq(accountSettings.accountId, accountId));
-  const openaiValue = settingsRows.find((row) => row.key === "openAI")?.value;
-  const openaiSettings =
-    openaiValue && typeof openaiValue === "object" && !Array.isArray(openaiValue)
-      ? (openaiValue as Record<string, unknown>)
-      : {};
-  const apiKey = openaiSettings.backendApiKey;
-  if (typeof apiKey !== "string" || !apiKey.trim()) {
-    return jsonError("missing_api_key", 400, {
-      detail: "OpenAI backend API key not set",
-    });
+  // Same key resolution as the scene chat, which this route used to
+  // duplicate by reading the account's setting directly: the account's own
+  // key wins, the operator's shared key stands in where the deployment
+  // allows it, and the answer says which — so the turn can be metered
+  // against whoever actually paid for it.
+  const access = await resolveAiAccess(db, accountId, { surface: "app_chat" });
+  if (!access.ok) {
+    return aiRefusalResponse(access.refusal);
   }
+  const credentials = access.credentials;
 
   // A frame id the account does not own is dropped rather than refused: the
   // chat is about the app's code, and the frame is only how the panel groups
@@ -139,19 +131,32 @@ export async function POST(request: NextRequest) {
 
   await appendChatMessage(db, chat.id, { content: prompt, role: "user" });
 
+  // The metering handle for this call. The panel makes one model call per
+  // request, so the request is the turn.
+  const turnId = crypto.randomUUID();
   try {
     const result = await runAppChat({
-      apiKey: apiKey.trim(),
+      apiKey: credentials.apiKey,
       appKeyword: stringOrNull(body.appKeyword),
       appName: stringOrNull(body.appName),
       history,
-      model: resolveChatModel(openaiSettings),
+      model: credentials.model,
       nodeId,
       prompt,
-      reasoningEffort: resolveReasoningEffort(openaiSettings),
+      reasoningEffort: credentials.reasoningEffort,
       sceneId,
       signal: request.signal,
       sources,
+    });
+    await meterAiUsage({
+      accountId,
+      chatId: chat.id,
+      credentialSource: credentials.source,
+      model: credentials.model,
+      rounds: 1,
+      surface: "app_chat",
+      turnId,
+      usage: result.usage,
     });
     await appendChatMessage(db, chat.id, {
       content: result.reply,

@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import posthog from "posthog-js";
 import { useEffect } from "react";
 import {
+  analyticsConfigured,
   consentChangeEvent,
   readConsentFromDocument,
 } from "../lib/analytics-consent";
@@ -43,8 +44,16 @@ export function PostHogProvider({
   const pathname = usePathname();
 
   useEffect(() => {
+    if (!analyticsConfigured()) {
+      return;
+    }
     posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "", {
-      api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
+      // `|| default`, not `??`: CI may inline an empty string here, and an
+      // empty api_host would send events nowhere (matches error-tracking.ts
+      // and signup-notifications.ts).
+      api_host:
+        process.env.NEXT_PUBLIC_POSTHOG_HOST?.trim() ||
+        "https://eu.i.posthog.com",
       defaults: "2026-05-30",
       // Analytics runs on every route of this app, including pages whose URL
       // is itself a credential (/recovery?token=…, /s/<slug>?share=…). These
@@ -82,6 +91,9 @@ export function PostHogProvider({
 
   // Client-side navigation into or out of a suppressed path.
   useEffect(() => {
+    if (!analyticsConfigured()) {
+      return;
+    }
     applyConsent(pathname);
   }, [pathname]);
 

@@ -132,6 +132,11 @@ def _serialize_https_proxy(https_proxy: Optional[dict]) -> dict:
     }
 
 
+def compiled_scene_count(scenes) -> int:
+    """How many of a frame's scenes are on the legacy compiled path."""
+    return sum(1 for scene in (scenes or []) if isinstance(scene, dict) and not scene_is_interpreted(scene))
+
+
 def normalize_frame_admin_auth(frame_admin_auth: Optional[dict]) -> dict:
     auth = dict(frame_admin_auth or {})
     user = auth.get('user') or ''
@@ -398,6 +403,10 @@ class Frame(Base):
             'background_color': self.background_color,
             'debug': self.debug,
             'scenes': self.scenes,
+            # Legacy compiled scenes force a source build on every deploy; the
+            # workspace shows the count so the owner knows which frames still
+            # carry Nim to convert (docs/nim-to-js-conversion.md).
+            'compiled_scene_count': compiled_scene_count(self.scenes),
             'last_log_at': self.last_log_at.replace(tzinfo=timezone.utc).isoformat() if self.last_log_at else None,
             'log_to_file': self.log_to_file,
             'assets_path': self.assets_path,
@@ -664,6 +673,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
             "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
             "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 300)),
+            # Regulatory domain for the radio (ISO 3166-1 alpha-2); "" keeps
+            # the kernel's world domain, where channels 12/13 cannot be joined.
+            "wifiCountry": str(network.get('wifiCountry') or "").strip().upper()[:2],
         },
         "agent": {
             "agentEnabled": bool(agent.get('agentEnabled', False)),

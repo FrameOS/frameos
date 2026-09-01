@@ -104,6 +104,11 @@ type
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
     wifiHotspotTimeoutSeconds*: float
+    # ISO 3166-1 alpha-2 regulatory domain for the Wi-Fi radio ("FR"). ""
+    # leaves the kernel's world domain, where 2.4 GHz channels 12/13 cannot
+    # be joined. Written into wpa_supplicant's `country=` and applied with
+    # `iw reg set` at boot on every backend.
+    wifiCountry*: string
     # "auto" (default), "networkManager" or "supplicant". Frames without
     # NetworkManager (armv6 buildroot) auto-detect the wpa_supplicant backend;
     # this pins it for debugging. FRAMEOS_NETWORK_BACKEND overrides it.

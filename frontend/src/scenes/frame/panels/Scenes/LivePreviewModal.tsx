@@ -22,6 +22,8 @@ import { frameLogic } from '../../frameLogic'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { BrowserAssetsModal } from './BrowserAssetsModal'
 import { livePreviewLogic, type LivePreviewLogLine } from './livePreviewLogic'
+import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
+import { previewSkipsNimMessage } from '../../../../utils/sceneExecution'
 import { scenesLogic } from './scenesLogic'
 import { StateFieldEdit } from './StateFieldEdit'
 import type { FrameId } from '../../../../types'
@@ -352,6 +354,14 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
             </div>
           ) : null}
 
+          {livePreviewScene && sceneRequiresCompilation(livePreviewScene) ? (
+            <div
+              className="shrink-0 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-700"
+              data-testid="preview-skips-nim"
+            >
+              {previewSkipsNimMessage}
+            </div>
+          ) : null}
           {wasmUnsupportedApps.length > 0 ? (
             <div className="shrink-0 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-700">
               This scene uses {wasmUnsupportedApps.length === 1 ? 'an app' : 'apps'} not available in the browser

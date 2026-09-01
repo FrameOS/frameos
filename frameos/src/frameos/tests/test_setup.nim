@@ -574,3 +574,135 @@ block test_writable_mount_leaves_the_mount_alone_when_the_remount_fails:
     resetSetupCommandRunnerForTest()
     delEnv("FRAMEOS_PROC_MOUNTS")
     removeFile(mountsPath)
+
+block test_dropin_turns_dnssec_off:
+  doAssert dropinTurnsDnssecOff("[Resolve]\nDNSSEC=no\n")
+  doAssert dropinTurnsDnssecOff("# comment\n[Resolve]\n  DNSSEC=no  \n")
+  doAssert not dropinTurnsDnssecOff("")
+  doAssert not dropinTurnsDnssecOff("[Resolve]\nDNSSEC=allow-downgrade\n")
+  doAssert not dropinTurnsDnssecOff("# DNSSEC=no is what we want but never wrote\nDNSSEC=yes\n")
+
+block test_resolved_dnssec_writes_dropin_and_restarts_resolved:
+  let dropinDir = getTempDir() / ("frameos-resolved-" & $epochTime().int64)
+  createDir(dropinDir)
+  let dropinPath = dropinDir / "10-frameos.conf"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    discard setupResolvedDnssec(liveApply = true, dropinPath = dropinPath)
+    doAssert fileExists(dropinPath)
+    doAssert dropinTurnsDnssecOff(readFile(dropinPath))
+    doAssert commands.anyIt(it.contains("try-restart systemd-resolved"))
+
+    # Idempotent: a second run must neither rewrite nor restart.
+    commands = @[]
+    discard setupResolvedDnssec(liveApply = true, dropinPath = dropinPath)
+    doAssert not commands.anyIt(it.contains("try-restart"))
+    doAssert not commands.anyIt(it.contains("install -d"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(dropinDir)
+
+block test_resolved_dnssec_defers_restart_when_not_live_applying:
+  let dropinDir = getTempDir() / ("frameos-resolved-defer-" & $epochTime().int64)
+  createDir(dropinDir)
+  let dropinPath = dropinDir / "10-frameos.conf"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    discard setupResolvedDnssec(liveApply = false, dropinPath = dropinPath)
+    doAssert fileExists(dropinPath)
+    doAssert not commands.anyIt(it.contains("try-restart"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(dropinDir)
+
+block test_resolved_dnssec_skips_when_resolved_is_not_active:
+  let dropinDir = getTempDir() / ("frameos-resolved-inactive-" & $epochTime().int64)
+  createDir(dropinDir)
+  let dropinPath = dropinDir / "10-frameos.conf"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("is-active --quiet systemd-resolved"):
+      return ("", 3)
+    ("", 0)
+  )
+  try:
+    discard setupResolvedDnssec(liveApply = true, dropinPath = dropinPath)
+    doAssert not fileExists(dropinPath)
+    doAssert not commands.anyIt(it.contains("try-restart"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(dropinDir)
+
+block test_network_service_guard_writes_dropin_and_restarts_only_failed_unit:
+  let dropinDir = getTempDir() / ("frameos-netguard-" & $epochTime().int64)
+  createDir(dropinDir)
+  let dropinPath = dropinDir / "10-frameos.conf"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    # network.service present and failed -> drop-in + daemon-reload + restart
+    discard setupNetworkServiceEth0Guard(liveApply = true, dropinPath = dropinPath)
+    doAssert fileExists(dropinPath)
+    doAssert readFile(dropinPath).contains("/sys/class/net/eth0")
+    doAssert commands.anyIt(it.contains("daemon-reload"))
+    doAssert commands.anyIt(it.contains("restart network.service"))
+
+    # Idempotent on the second pass.
+    commands = @[]
+    discard setupNetworkServiceEth0Guard(liveApply = true, dropinPath = dropinPath)
+    doAssert not commands.anyIt(it.contains("daemon-reload"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(dropinDir)
+
+block test_network_service_guard_does_not_restart_a_healthy_unit:
+  # On an Ethernet board (Pi 1 B/B+) network.service is active and carries the
+  # deploy's own link; restarting it would ifdown eth0 mid-deploy.
+  let dropinDir = getTempDir() / ("frameos-netguard-healthy-" & $epochTime().int64)
+  createDir(dropinDir)
+  let dropinPath = dropinDir / "10-frameos.conf"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("is-failed --quiet network.service"):
+      return ("", 1)
+    ("", 0)
+  )
+  try:
+    discard setupNetworkServiceEth0Guard(liveApply = true, dropinPath = dropinPath)
+    doAssert fileExists(dropinPath)
+    doAssert commands.anyIt(it.contains("daemon-reload"))
+    doAssert not commands.anyIt(it.contains("restart network.service"))
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(dropinDir)
+
+block test_network_service_guard_skips_without_the_unit:
+  let dropinDir = getTempDir() / ("frameos-netguard-absent-" & $epochTime().int64)
+  createDir(dropinDir)
+  let dropinPath = dropinDir / "10-frameos.conf"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    if command.contains("systemctl cat network.service"):
+      return ("", 1)
+    ("", 0)
+  )
+  try:
+    discard setupNetworkServiceEth0Guard(liveApply = true, dropinPath = dropinPath)
+    doAssert not fileExists(dropinPath)
+  finally:
+    resetSetupCommandRunnerForTest()
+    removeDir(dropinDir)
