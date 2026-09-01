@@ -26,6 +26,8 @@ import { storeFrameLogs } from "../../lib/frames";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { hashSecret } from "../../lib/secrets";
 import { createSession, sessionCookieName } from "../../lib/session";
+import { recordAiUsage } from "@frameos-cloud/ledger";
+import { resolveAiAccess } from "../../lib/ai/api-key";
 import {
   accountUsage,
   maxBackupBytesPerAccount,
@@ -185,6 +187,60 @@ async function linkBackend() {
   const { access_token: accessToken } = await readJson(pollResponse);
   return { accessToken: accessToken as string, accountId };
 }
+
+// The daily cap (cloud/docs/accounting-todo.md §5.3) refuses AT the cap; the
+// overdraft is how far a turn already running may overshoot, not extra
+// headroom for the next one. The gate used to refuse at cap + overdraft,
+// which made the real cap $11 and every honest overshoot a nightly alert
+// (§9.2 item 3).
+describe("the daily AI cap", () => {
+  const env = { FRAMEOS_AI_SHARED_KEY_ACCESS: "all", OPENAI_API_KEY: "sk-shared" };
+  const turn = (accountId: string, n: number) =>
+    recordAiUsage(db, {
+      accountId,
+      credentialSource: "shared",
+      model: "gpt-5.6-terra",
+      surface: "scene_chat",
+      turnId: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+      // 442,400 of provider cost; 575,120 at the 30% fallback margin the
+      // tests' empty plan table leaves in force.
+      usage: { cachedInputTokens: 12_000, inputTokens: 52_000, outputTokens: 30_000 },
+    });
+
+  it("lets a turn start under the cap and refuses at it", async () => {
+    const accountId = await signIn();
+    // 17 turns: 9,777,040 — under the $10 default cap, with the budget the
+    // runner keeps checking against handed back.
+    for (let n = 1; n <= 17; n += 1) {
+      await turn(accountId, n);
+    }
+    const under = await resolveAiAccess(db, accountId, { env, surface: "scene_chat" });
+    expect(under.ok).toBe(true);
+    if (under.ok) {
+      expect(under.budget).toMatchObject({
+        capMicros: 10_000_000n,
+        overdraftMicros: 1_000_000n,
+        spentMicros: 9_777_040n,
+      });
+    }
+
+    // One more: 10,352,160 — past the cap but inside cap + overdraft, which
+    // the old gate would still have let through.
+    await turn(accountId, 18);
+    const over = await resolveAiAccess(db, accountId, { env, surface: "scene_chat" });
+    expect(over.ok).toBe(false);
+    if (!over.ok) {
+      expect(over.refusal).toMatchObject({
+        capMicros: "10000000",
+        reason: "daily_cap_reached",
+        spentMicros: "10352160",
+      });
+    }
+    // An absorbed surface is never refused by the cap.
+    const absorbed = await resolveAiAccess(db, accountId, { env, surface: "scene_convert" });
+    expect(absorbed.ok).toBe(true);
+  });
+});
 
 describe("account storage usage and quotas", () => {
   it("splits scene bytes by visibility — public scenes are free", async () => {

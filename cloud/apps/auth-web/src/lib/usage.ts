@@ -17,6 +17,7 @@
 import { and, eq, gt, or, sql } from "drizzle-orm";
 import {
   accountAiUsage,
+  accountMarginBasisPoints,
   readAccountPlan,
   readBillingSettings,
   utcDayWindow,
@@ -394,12 +395,11 @@ async function accountAiSummary(
   known?: AccountPlan | undefined,
 ) {
   try {
-    const [thisMonth, lastMonth, today, settings, plan] = await Promise.all([
+    const [thisMonth, lastMonth, today, settings] = await Promise.all([
       accountAiUsage(db, accountId, utcMonthWindow(now)),
       accountAiUsage(db, accountId, utcMonthWindow(now, -1)),
       accountAiUsage(db, accountId, utcDayWindow(now)),
       readBillingSettings(db),
-      known ?? readAccountPlan(db, accountId),
     ]);
     const [account] = await db.execute<{ ai_disabled_at: string | null }>(
       sql`select ai_disabled_at from accounts where id = ${accountId}`,
@@ -410,9 +410,12 @@ async function accountAiSummary(
       billable_micros: thisMonth.billableMicros.toString(),
       daily_cap_micros: settings.dailyCapMicros.toString(),
       enabled: !account?.ai_disabled_at,
-      margin_basis_points: plan.subscribed
-        ? plan.plan.marginBasisPoints
-        : settings.marginBasisPoints,
+      // The same function metering prices with — one definition (plans.ts).
+      // `known` is the caller's already-read plan; the margin lookup reads it
+      // again only when nobody handed one in.
+      margin_basis_points: known?.plan.fromTable
+        ? known.plan.marginBasisPoints
+        : await accountMarginBasisPoints(db, accountId, settings),
       metering_mode: settings.meteringMode as string,
       month_micros: thisMonth.chargeableMicros.toString(),
       own_key_only: thisMonth.ownKeyOnly,

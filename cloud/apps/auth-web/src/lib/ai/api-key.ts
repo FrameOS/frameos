@@ -37,8 +37,17 @@ export type AiRefusal =
   // No key available to this account at all — the original meaning of null.
   | { detail: string; reason: "missing_api_key" };
 
+// What the cap looked like when the turn was let through, for the runner
+// to keep checking against while the turn runs. Absent when no cap applies
+// (their own key, an absorbed surface, a deployment with no cap).
+export type AiSpendBudget = {
+  capMicros: bigint;
+  overdraftMicros: bigint;
+  spentMicros: bigint;
+};
+
 export type AiAccess =
-  | { credentials: AiCredentials; ok: true }
+  | { budget?: AiSpendBudget; credentials: AiCredentials; ok: true }
   | { ok: false; refusal: AiRefusal };
 
 type SharedAccess = "none" | "superadmin" | "verified" | "all";
@@ -120,11 +129,13 @@ export async function resolveAiAccess(
   if (settings.dailyCapMicros > 0n) {
     const window = utcDayWindow();
     const spent = await accountAiSpendMicros(db, accountId, window);
-    // Checked before a turn, never during: a turn's cost is unknown until it
-    // ends, so the last turn of the day can cross the line. That accepted
-    // overshoot is what `payg_overdraft_micros` sizes, and it is why the cap
-    // is $10 rather than $10,000.
-    if (spent >= settings.dailyCapMicros + settings.overdraftMicros) {
+    // Refused AT the cap. A turn's cost is unknown until it ends, so a turn
+    // let through here can still cross the line; `payg_overdraft_micros` is
+    // how far past it the runner lets that turn go before stopping it
+    // mid-flight, and the tolerance the nightly check allows. The gate used
+    // to refuse at cap + overdraft, which made the real cap $11 and every
+    // honest overshoot a nightly alert (§9.2 item 3).
+    if (spent >= settings.dailyCapMicros) {
       return {
         ok: false,
         refusal: {
@@ -137,6 +148,15 @@ export async function resolveAiAccess(
         },
       };
     }
+    return {
+      budget: {
+        capMicros: settings.dailyCapMicros,
+        overdraftMicros: settings.overdraftMicros,
+        spentMicros: spent,
+      },
+      credentials,
+      ok: true,
+    };
   }
   return { credentials, ok: true };
 }

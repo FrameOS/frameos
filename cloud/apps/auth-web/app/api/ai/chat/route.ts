@@ -11,6 +11,12 @@ import {
   ensureChat,
   historyForModel,
 } from "../../../../src/lib/ai/chat-store";
+import {
+  priceUsage,
+  readAccountMargin,
+  resolveModelPrice,
+  splitProviderUsage,
+} from "@frameos-cloud/ledger";
 import { aiRefusalResponse } from "../../../../src/lib/ai/access";
 import { resolveAiAccess } from "../../../../src/lib/ai/api-key";
 import { meterAiUsageInBackground } from "../../../../src/lib/billing";
@@ -239,6 +245,18 @@ export async function POST(request: NextRequest) {
   }
   const { apiKey, model, reasoningEffort, source: credentialSource } =
     access.credentials;
+  // The in-turn budget (§5.3): the gate let the turn start under the cap,
+  // and this is what stops it once its own rounds have carried the day past
+  // cap + overdraft. Priced the way metering will price it, from the same
+  // price row and the same margin, so the number the runner stops on is the
+  // number the record will say.
+  const budget = access.budget
+    ? {
+        ...access.budget,
+        marginBasisPoints: await readAccountMargin(db, accountId),
+        price: await resolveModelPrice(db, model),
+      }
+    : undefined;
 
   const requestedChatId = stringOrNull(body.chatId) ?? crypto.randomUUID();
   const scenePayload = objectOrNull(body.scene);
@@ -345,8 +363,18 @@ export async function POST(request: NextRequest) {
 
   await appendChatMessage(db, chat.id, { content: prompt, role: "user" });
 
-  const surface =
-    typeof body.surface === "string" && body.surface ? body.surface : frameId ? "frame" : "editor";
+  // The metered surface is the gate's, never the client's. `surface` decides
+  // whether a turn is absorbed — free and uncapped — so a client-chosen value
+  // was free AI for anyone who sent "scene_convert" (§9.2 item 1). What the
+  // client says about where it is ("editor", "frame", "store") is kept as
+  // context for the usage page, and nothing prices on it.
+  const surface = "scene_chat";
+  const context =
+    typeof body.surface === "string" && /^[a-z0-9_-]{1,32}$/i.test(body.surface)
+      ? body.surface.toLowerCase()
+      : frameId
+        ? "frame"
+        : "editor";
   const scenesDelivered: { tool: string; title?: string; count: number }[] = [];
   const deliveredScenes: unknown[] = [];
   const roundToolCalls: string[] = [];
@@ -397,6 +425,7 @@ export async function POST(request: NextRequest) {
       meterAiUsageInBackground({
         accountId,
         chatId: chat.id,
+        context,
         credentialSource,
         model,
         rounds: roundsSeen,
@@ -456,6 +485,32 @@ export async function POST(request: NextRequest) {
                 outputTokens: usageSeen.outputTokens + report.usage.outputTokens,
                 reasoningTokens: usageSeen.reasoningTokens + report.usage.reasoningTokens,
               };
+              if (budget && !signal.aborted) {
+                const soFar = priceUsage({
+                  billable: true,
+                  marginBasisPoints: budget.marginBasisPoints,
+                  price: budget.price,
+                  usage: splitProviderUsage(usageSeen),
+                }).priceMicros;
+                if (budget.spentMicros + soFar >= budget.capMicros + budget.overdraftMicros) {
+                  // The turn crossed the day's line mid-flight: stop it here
+                  // rather than let a long tool loop run the overshoot up.
+                  // The tokens already burned are metered in onFinish.
+                  logWarn("ai.chat.turn_over_budget", {
+                    accountId,
+                    chatId: chat.id,
+                    round: report.round,
+                    soFarMicros: soFar.toString(),
+                    spentMicros: budget.spentMicros.toString(),
+                    turnId,
+                  });
+                  turn.controller.abort(
+                    new Error(
+                      "This account reached its daily AI limit during this reply. Today's limit resets at midnight UTC.",
+                    ),
+                  );
+                }
+              }
             }
             captureAiGeneration({
               accountId,

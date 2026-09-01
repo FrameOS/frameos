@@ -17,6 +17,7 @@ import {
   createDb,
   storeScenes,
   storeSceneVersions,
+  aiUsageRecords,
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { NextRequest } from "next/server";
@@ -218,6 +219,22 @@ describe("AI chat on a store scene", () => {
     expect(context).toContain("does not own this scene");
     expect(context).toContain("FORK");
     expect(context).not.toContain("this is the user's own scene");
+  });
+
+  // §9.2 item 1 of cloud/docs/accounting-todo.md: the metered surface is the
+  // gate's, never the client's. `scene_convert` is an absorbed surface —
+  // free and uncapped — and a client used to be able to name it.
+  it("meters the gate's surface, whatever the client claims", async () => {
+    const { accountId } = await signIn();
+    const { response } = await chat({ prompt: "hello", surface: "scene_convert" });
+    expect(response.status).toBe(200);
+    await waitForPendingAiMetering();
+
+    const [record] = await db
+      .select({ context: aiUsageRecords.context, surface: aiUsageRecords.surface })
+      .from(aiUsageRecords)
+      .where(eq(aiUsageRecords.accountId, accountId));
+    expect(record).toEqual({ context: "scene_convert", surface: "scene_chat" });
   });
 
   it("describes an owned scene as saveable in place", async () => {

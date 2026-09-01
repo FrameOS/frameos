@@ -99,6 +99,10 @@ type ChatMessage = {
 type FatalState =
   | { kind: "login_required" }
   | { kind: "missing_api_key" }
+  // The account switched AI off (403): nothing is broken, they asked.
+  | { kind: "ai_disabled" }
+  // Today's spend is at the cap (402): back tomorrow on its own.
+  | { kind: "daily_cap_reached"; resetAt: string | null }
   | { kind: "rate_limited" }
   | { kind: "error"; message: string };
 
@@ -663,6 +667,10 @@ export function SceneAiPanel({
             setFatal({ kind: "login_required" });
           } else if (error.code === "missing_api_key") {
             setFatal({ kind: "missing_api_key" });
+          } else if (error.code === "ai_disabled") {
+            setFatal({ kind: "ai_disabled" });
+          } else if (error.code === "daily_cap_reached") {
+            setFatal({ kind: "daily_cap_reached", resetAt: error.resetAt ?? null });
           } else if (error.code === "rate_limited" || error.status === 429) {
             setFatal({ kind: "rate_limited" });
           } else {
@@ -994,6 +1002,26 @@ export function SceneAiPanel({
               ) : (
                 " Add it in your account's settings (OpenAI → API key for AI chat), then try again."
               )}
+            </p>
+          </div>
+        ) : null}
+        {fatal?.kind === "ai_disabled" ? (
+          <div className="notice ai-panel__notice" role="alert">
+            <strong className="ai-panel__notice-title">AI is switched off for this account.</strong>
+            <p className="copy">
+              Nothing is wrong — it was turned off under Account → AI usage,
+              and it can be turned back on there in one click.
+            </p>
+          </div>
+        ) : null}
+        {fatal?.kind === "daily_cap_reached" ? (
+          <div className="notice ai-panel__notice" role="alert">
+            <strong className="ai-panel__notice-title">Today&rsquo;s AI limit is used up.</strong>
+            <p className="copy">
+              The daily limit keeps a runaway loop from costing more than a
+              bounded amount. It resets
+              {fatal.resetAt ? ` at ${new Date(fatal.resetAt).toLocaleString()}` : " at midnight UTC"}
+              ; the reply so far is kept.
             </p>
           </div>
         ) : null}
