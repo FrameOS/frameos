@@ -24,6 +24,9 @@ interface CloudAppConfig {
   cloud_logout_url?: string
   cloud_origin?: string
   cloud_scenes_url?: string
+  /** The account's settings page (service API keys, SSH keys). Read by the
+   * shared SPA's urls.settings() (frontend/src/urls.ts), not here. */
+  cloud_settings_url?: string
   cloud_theme_cookie_domain?: string
   /** Read by livePreviewLogic straight off FRAMEOS_APP_CONFIG: the wasm
    * preview's same-origin HTTP proxy (/api/store/preview-proxy). */

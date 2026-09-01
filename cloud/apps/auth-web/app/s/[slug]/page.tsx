@@ -19,7 +19,6 @@ import {
   getAccountBaseUrl,
   getAccountUrl,
   getCloudBaseUrl,
-  getFramesUrl,
   getScenesBaseUrl,
   getStorePath,
   hasDatabaseUrl,
@@ -435,7 +434,7 @@ export default async function ScenePage({
         signupUrl={new URL("/signup", getCloudBaseUrl()).toString()}
         pinnedVersion={pinnedVersion ? pinnedVersion.version : null}
         sceneId={scene.id}
-        settingsUrl={`${getFramesUrl()}/settings#settings-openai`}
+        settingsUrl={`${getAccountUrl("/account/settings")}#settings-openai`}
         share={share}
         signedIn={Boolean(session?.accountId)}
         versions={info.versions}

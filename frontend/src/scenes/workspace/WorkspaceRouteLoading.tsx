@@ -29,6 +29,7 @@ import {
   workspaceLogic,
 } from './workspaceLogic'
 import { workspaceModeForSceneOrFrames, type WorkspaceMode } from './workspaceModes'
+import { AccountSettingsRailLink } from './AccountSettingsRailLink'
 
 function LoadingNavButton({
   active,
@@ -318,17 +319,21 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
           >
             {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
           </button>
-          <LoadingNavButton
-            active={mode === 'settings'}
-            href={urls.settings()}
-            pending={spinnerMode === 'settings'}
-            preloadScene="settings"
-            sidebarOpen={secondarySidebarOpen}
-            title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
-            onActiveClick={toggleSecondarySidebar}
-          >
-            <Cog6ToothIcon className="h-8 w-8" />
-          </LoadingNavButton>
+          {isCloudMode() ? (
+            <AccountSettingsRailLink />
+          ) : (
+            <LoadingNavButton
+              active={mode === 'settings'}
+              href={urls.settings()}
+              pending={spinnerMode === 'settings'}
+              preloadScene="settings"
+              sidebarOpen={secondarySidebarOpen}
+              title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
+              onActiveClick={toggleSecondarySidebar}
+            >
+              <Cog6ToothIcon className="h-8 w-8" />
+            </LoadingNavButton>
+          )}
         </div>
         <div
           className={clsx(
