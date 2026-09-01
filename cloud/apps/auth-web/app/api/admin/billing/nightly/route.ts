@@ -35,9 +35,11 @@ export const maxDuration = 300;
 //   1. Sweep the usage records whose ledger entries never landed. Idempotent
 //      by turn id, so a night that already posted is a no-op.
 //   2. Run the subscription cycle: open the periods that are due, charge the
-//      ones that have started, recognize the ones that have ended. Idempotent
-//      on each period row, so a night that runs twice charges nobody twice
-//      and a night that never ran is caught up rather than skipped.
+//      ones that have started, earn what the running ones have served so
+//      far (daily recognition, §3.6), and close out the ones that have
+//      ended. Idempotent on each period row, so a night that runs twice
+//      charges nobody twice and a night that never ran is caught up rather
+//      than skipped.
 //   3. Run every invariant and report each violation. A violation is an
 //      alert, not a failure to fix automatically: books that disagree with
 //      themselves need a human, and quietly "correcting" them is how a
@@ -87,6 +89,7 @@ export async function POST(request: NextRequest) {
   const violations = await checkLedgerIntegrity(db, {
     dailyCapMicros: settings.dailyCapMicros,
     overdraftMicros: settings.overdraftMicros,
+    sharedKeyDailyCapMicros: settings.sharedKeyDailyCapMicros,
   });
   for (const violation of violations) {
     // One report per violation, not one for the batch: each is its own
@@ -114,6 +117,8 @@ export async function POST(request: NextRequest) {
     meteringMode: settings.meteringMode,
     netRevenueMicros: summary.netRevenueMicros.toString(),
     revenueMicros: summary.revenueMicros.toString(),
+    subscriptionsAccrued: subscriptionCycle.accrued,
+    subscriptionsAccruedMicros: subscriptionCycle.accruedMicros.toString(),
     subscriptionsCharged: subscriptionCycle.charged,
     subscriptionsFailed: subscriptionCycle.failures.length,
     subscriptionsOpened: subscriptionCycle.opened,
@@ -141,6 +146,8 @@ export async function POST(request: NextRequest) {
       until: until.toISOString(),
     },
     subscriptions: {
+      accrued: subscriptionCycle.accrued,
+      accrued_micros: subscriptionCycle.accruedMicros.toString(),
       charged: subscriptionCycle.charged,
       failed: subscriptionCycle.failures.length,
       opened: subscriptionCycle.opened,

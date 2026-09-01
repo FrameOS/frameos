@@ -36,6 +36,14 @@ need were all seeded in Phase 0.
   already rendered, which is the most ordinary transaction there is. It also
   deletes three open decisions outright (credit expiry, the prepaid refund
   path, and what a "credit" is worth).
+  *Precisely:* "already rendered" is true of **metered usage**. A
+  **subscription is billed in advance** — the period is charged the day it
+  starts — which is ordinary SaaS and not stored value (the customer is
+  buying a defined month of service, not a balance to spend later), and the
+  ledger treats it as such: deferred on the day it is charged, recognised as
+  it is served (§3.6). The invoice copy has to say both things: the plan fee
+  for the coming period, the AI usage for the past month. `/account/ai` says
+  so already.
 - **Subscriptions after postpay, not instead of it.** Not in the first
   shippable thing — metering, a cap, a visible number and an invoice have to
   work before a plan can promise anything — but they are the destination,
@@ -688,13 +696,27 @@ Entry 'subscription_charge'        (occurred_at: period start)
   Cr liability:deferred:subscriptions        1.990000
 ```
 
-Recognition over the period (daily, or one entry at period end):
+Recognition over the period — **daily, from the nightly job** (built
+2026-09-02, §9.3; it used to be one entry at period end, which made a
+calendar-month P&L lag by up to a month). Each night earns
+`(price − refunded) × whole days served ÷ period length` less what was
+already recognised, with `subscription_periods.recognized_micros` as the
+cursor that makes it idempotent; the close-out at period end earns whatever
+is left and stamps `recognized_at`. Whole days, so a job that runs twice in
+a night posts nothing the second time. A month of Maker therefore reads as
+~31 entries of $0.064:
 
 ```
-Entry 'subscription_recognition'
-  Dr liability:deferred:subscriptions        1.990000
-  Cr revenue:subscriptions                   1.990000
+Entry 'subscription_recognition'        (one per day served)
+  Dr liability:deferred:subscriptions        0.064194
+  Cr revenue:subscriptions                   0.064194
 ```
+
+Refunds and accruals bound each other: a refund may return only what is
+still deferred (`price − refunded − recognized`), and an accrual never
+earns past it, so the deferred account cannot go negative whichever order
+the two land in. Revenue already recognised is not handed back from the
+deferral — that is a reversal, a separate act.
 
 and the same month-end invoice (§3.2) collects the subscription and the
 metered AI together, because both are already sitting on the same
@@ -935,10 +957,17 @@ Shape:
   is actually standing when the thought occurs to them. Turning it off states
   plainly what stops working; turning it back on is one click and audited
   (`recordAuditEvent`) in both directions.
-- **Superadmin side** (*not built as of 2026-09-01 — §9.3*): the same flag
-  readable on `/admin/billing`, and settable by an operator as the terminal
-  step of dunning (§3.2) — an account that has not paid stops accruing
-  before it stops being a customer.
+- **Superadmin side** (built 2026-09-02, §9.3): the same flag, read and
+  thrown from the customer statement page (`/admin/billing/customers`) via
+  `PUT /api/admin/billing/customers/<id>/ai` — reason required, audited as
+  `admin.ai_disabled` / `admin.ai_enabled` with the reason in the metadata.
+  The terminal step of dunning (§3.2): an account that has not paid stops
+  accruing before it stops being a customer. The same page moves an
+  account between plans (`…/plan`, `admin.plan_changed` /
+  `admin.plan_canceled`), non-public plans included and regardless of the
+  self-serve gate — that gate exists because a *customer* subscribing runs
+  up a receivable 3b cannot settle; an operator doing it with a reason on
+  record is the exception it was written around.
 
 ### 5.2 "AI usage": a row in the header, a page behind it
 
@@ -1018,6 +1047,20 @@ $10/day per account (§0), as `billing_settings.payg_daily_cap_micros` so it
 is a superadmin edit rather than a deploy (the field is on the form since
 2026-09-02), with a per-account override column for the accounts that
 eventually need one (*not built*).
+
+**Two caps, since 2026-09-02 (§9.3).** The cap counts every turn on one
+of *our* keys, which for an account on the operator's shared key
+(`FRAMEOS_AI_SHARED_KEY_ACCESS`, the free tier) meant being "limited" at
+$10 on money it does not owe, and seeing a dollar figure with "nothing is
+billed" under it. The shared key now has its own
+`billing_settings.shared_key_daily_cap_micros` — our money, our (usually
+smaller) number; it falls back to the main cap until set — and the
+refusal says whose allowance ran out: the 402 body carries
+`allowance: "shared" | "billable"`, the panel's copy and `/account/ai`'s
+wording differ accordingly, and the nightly check judges a shared-key
+account-day against the shared ceiling. `resolveAiAccess` picks the cap
+from the credential source it already resolved, so it is one query either
+way.
 
 - **Measured** as `SUM(price_micros)` over the account's `ai_usage_records`
   for the current UTC day. Not the ledger: the cap must hold for shadow-mode
@@ -1161,6 +1204,12 @@ Still open, and the gate on Phase 3:
 - [ ] Run a week in production and compare `ai_usage_records` totals against
       PostHog `$ai_generation` sums **and against the provider's own
       invoice** — the second comparison is the one that settles §8.2.
+      **Scripted 2026-09-02** as
+      `apps/auth-web/scripts/ai-metering-compare.mjs` (three optional
+      sides — `DATABASE_URL`, PostHog personal key + project, OpenAI *admin*
+      key — compared per UTC day and model, token vocabularies normalised,
+      exit 1 above 1% disagreement) so it re-runs on the next model change.
+      First run: see §9.6 — there was no week to compare yet.
 
 ### Phase 3 — postpay billing (first revenue)
 
@@ -1216,8 +1265,8 @@ not a one-off hosted checkout (§3.2).
 - [ ] Choose the provider; SDK + env plumbing; webhook endpoint
       `app/api/webhooks/<provider>/route.ts` (signature check, provider
       event id as idempotency key, raw-body handling).
-- [ ] Migration `0047` (0045 went to plans, 0046 to the §9 fixes):
-      `invoices` (period bounds,
+- [ ] Migration `0048` (0045 went to plans, 0046 to the §9 fixes, 0047 to
+      §9.3's daily recognition): `invoices` (period bounds,
       sequential number, status, provider payment ref) and the
       stored-payment-method reference. The
       invoice holds no amount the ledger does not — §3.2 says why.
@@ -1244,10 +1293,11 @@ not a one-off hosted checkout (§3.2).
       satisfied, not before.
 - [ ] Golden-file test: turns → cap refusal → month close → invoice →
       payment → fee → an unpaid month → write-off.
-- [ ] Legal/pricing page copy: that AI is billed monthly in arrears, what
-      the margin is, what the cap is, and how to turn it off. Plus §8.8's
+- [ ] Legal/pricing page copy: that AI is billed monthly in arrears, that
+      a plan is billed in advance for the coming period (§0), what the
+      margin is, what the cap is, and how to turn it off. Plus §8.8's
       billing-records retention line, which must land before the first
-      invoice, not after.
+      invoice, not after — and §8.15's answer (which entity invoices).
 
 ### Phase 4 — books you can actually read + ops — shipped 2026-08-31
 
@@ -1531,6 +1581,35 @@ question that will be asked again.
     product shows is what it costs. Tied to §8.3's allowance question — a
     free monthly allowance makes opt-in-by-default unremarkable, and no
     allowance makes it a decision worth being deliberate about.
+15. **Which legal entity invoices, and from where** (raised by §9.3,
+    2026-09-02; *a decision only the owner can take*, and it comes before
+    §8.7's provider choice, not after). Nothing in this document or the
+    code names the party on the invoice. What has to be settled, in order:
+    - **The entity.** The name, address and registration that go on
+      `invoices` — presumably the operating company, but "presumably" is
+      not a line on an invoice.
+    - **Its VAT position.** Registered or not; if registered, the number
+      goes on every invoice and §8.6's `liability:vat_payable` leg becomes
+      real for domestic B2C sales the day the first invoice is cut.
+    - **Gapless numbering.** Many EU jurisdictions require invoice numbers
+      to be sequential without gaps, per entity (sometimes per series).
+      `invoices.number` was designed for that and nothing assigns it; the
+      assignment must be a database sequence taken inside the same
+      transaction that creates the invoice, never a counter in the app,
+      and a voided invoice keeps its number. If the entity's jurisdiction
+      does not require it, do it anyway — it is cheaper than the argument.
+    - **OSS / cross-border B2C.** Selling to consumers in other EU member
+      states above the €10k union-wide threshold means charging the
+      *customer's* country's VAT and remitting through the One-Stop-Shop
+      — or letting a merchant-of-record do it (§8.7 again). Below the
+      threshold, home-country VAT. Either way the invoice needs the
+      customer's country, which `accounts` does not hold today.
+    - **B2B reverse charge.** A customer with a valid VAT number in
+      another member state is invoiced net with the reverse-charge
+      wording; needs a VAT-number field and a VIES check.
+    Until these are answered 3b's invoice has no header, and the recipes
+    in §3.2 have no tax leg. Decide, then write the answers into this
+    item.
 
 ---
 
@@ -1778,48 +1857,52 @@ right moment to fix it.
 
 - [x] Fix §9.2 items 1–4 and 7–9 first; they are bugs with tests missing,
       not decisions. Items 5 and 6 are decisions and small code; 11 is
-      the biggest piece of new work and gates the first invoice. — All 18
-      done 2026-09-02, migration 0046 (§9.5).
-- [ ] **Run the Phase 2 gate.** It has been open since 2026-08-31 and is
+      the biggest piece of new work and gates the first invoice. *Done in
+      PR #432 (§9.5).* The rest of this list: 2026-09-02, §9.6.
+- [x] **Run the Phase 2 gate.** (Scripted and run 2026-09-02, §9.6 — the
+      meter agrees with PostHog on everything there was to compare, and
+      there was one day of it; the provider side needs an admin key nobody
+      has put in an env yet.) It has been open since 2026-08-31 and is
       the only thing that would tell us the meter is right: a week of
       `ai_usage_records` against PostHog `$ai_generation` sums (turn count
       and token totals) *and* against OpenAI's usage export (§8.2 settles
       there). It is one query on each side and it has not been run. Write
       it as a script so it can be re-run on the next model change.
-- [ ] **Which legal entity invoices, and from where.** Not in this
+- [ ] **Which legal entity invoices, and from where.** *Written up as
+      §8.15 with the questions in order — the answer is the owner's.* Not in this
       document anywhere, and prior to the provider choice: the entity on
       the invoice, its VAT registration, whether it must number invoices
       sequentially by law (many EU jurisdictions require gapless
       sequences — `invoices.number` is designed for that but nothing
       assigns it), and whether B2C sales to other EU countries trigger
       OSS. §8.6/§8.7 assume this is answered.
-- [ ] **Subscriptions are billed in advance**, which is normal SaaS and
+- [x] **Subscriptions are billed in advance**, which is normal SaaS and
       not stored value, but §0's "we invoice for a service already
       rendered" is only true of metered usage. Say so in §0 and in the
       invoice copy; the ledger already treats it correctly (deferred
       until recognised).
-- [ ] **Subscription revenue is recognised only at period end**, so a
+- [x] **Subscription revenue is recognised only at period end**, so a
       calendar-month P&L lags by up to a month. Fine at this size; either
       say so in §3.6 or recognise daily from the nightly job (one more
       idempotent step per period, `recognized_micros` on the row).
-- [ ] **The cap counts shared-key usage** at the customer's margin. That
+- [x] **The cap counts shared-key usage** at the customer's margin. That
       bounds our exposure, which is its job, but a free-tier user is then
       "limited" on money they do not owe and the page shows them a dollar
       figure with "nothing is billed" under it. Either the message for
       shared-key refusals says "the operator's daily allowance", or the
       shared key gets its own smaller cap — it is our money either way.
-- [ ] **Operator surfaces are missing.** §5.1's superadmin view of the AI
+- [x] **Operator surfaces are missing.** §5.1's superadmin view of the AI
       switch, and any way to put an account on a plan other than psql
       ("an operator moves accounts by hand" has no route). Both are small
       admin routes plus audit events; both are needed before 3b's dunning
       step, which ends by throwing the switch.
-- [ ] **The nightly job runs as one person's API token.** If that
+- [x] **The nightly job runs as one person's API token.** If that
       superadmin revokes the token or is removed, the job dies; the
       healthchecks ping is optional in the env example. Make the ping
       mandatory on the production box (verify it is set), and consider a
       dedicated service account for the token.
-- [x] Phase 3b's `invoices` migration is **0047**: Phase 5 took 0045 and
-      the §9 fixes took 0046 (§7 corrected 2026-09-02).
+- [x] Phase 3b's `invoices` migration is **0048**, not 0045 — Phase 5 took
+      that number, the §9 fixes 0046, daily recognition 0047.
 
 ### 9.4 Where this document said something the code did not do
 
@@ -1913,5 +1996,64 @@ Every §9.2 item, with the decision where one had to be made:
 
 Not done here, still §9.3: the Phase 2 comparison against PostHog and the
 provider invoice, the legal-entity/VAT question, the operator surfaces for
-the switch and for plans, and the service account for the nightly token.
-(`docs/todo.md`'s two stale lines were updated the same day.)
+the switch and for plans, the service account for the nightly token, and
+`docs/todo.md`'s two stale lines.
+
+### 9.6 What the pre-3b pass did — 2026-09-02, migration 0047
+
+Every §9.3 item, with the decision where one had to be made:
+
+1. **The Phase 2 gate, run.** `apps/auth-web/scripts/ai-metering-compare.mjs`
+   compares `ai_usage_records` with PostHog `$ai_generation` (and
+   `scene_convert`) and with OpenAI's usage/costs API, per UTC day and
+   model. What production had to compare on 2026-09-02: metering went
+   live at 22:27 UTC on 2026-08-31, so there was **one full day**, not a
+   week. On it the meter and PostHog agree **exactly** — 2026-09-01,
+   gpt-5.6-terra: 7 turns / 18 rounds, 302,723 input (218,110 cached),
+   11,488 output, 986 reasoning on both sides — and the five metered scene
+   conversions match PostHog token-for-token by request id. What is still
+   unproven is the provider's invoice: the script's OpenAI side needs an
+   *organisation admin* key (`OPENAI_ADMIN_KEY`) that nobody has put in an
+   env yet, and §8.2 (reasoning billed as output) is settled only there.
+   **Re-run the script over a real week before flipping metering to live**;
+   the meter-vs-PostHog half is not in doubt any more, the meter-vs-invoice
+   half has not been looked at.
+2. **Invoicing entity** — written up as §8.15 in decision order (entity,
+   VAT position, gapless numbering, OSS, reverse charge). Not decided; it
+   cannot be from here.
+3. **Subscriptions billed in advance** — §0 says so now, `/account/ai` says
+   so on the plan line, and 3b's copy item carries it.
+4. **Daily recognition** — built, not merely documented (§3.6):
+   `subscription_periods.recognized_micros` (0047) is the cursor, the
+   nightly cycle gained an accrual step between charging and close-out,
+   `earnedToDateMicros` is whole-days pro rata of `price − refunded`, and
+   a refund is bounded by what is still deferred after accruals. The
+   deferred-revenue invariant subtracts `recognized_micros`. Tests: the
+   day-by-day walk (10 days → 641,935 of a Maker month; nothing twice for
+   the same day; the close-out books the remainder on the period's last
+   day, not the night the job ran) and a refund after accruals.
+5. **Shared-key cap** — *decided: both.* Its own
+   `shared_key_daily_cap_micros` (falls back to the main cap until set,
+   so nothing changes on its own) AND the refusal names whose allowance
+   it was: `allowance: "shared" | "billable"` on the 402, the panel and
+   `/account/ai` word it as the operator's allowance, and the nightly
+   check judges shared-only account-days against the shared ceiling.
+6. **Operator surfaces** — `PUT /api/admin/billing/customers/<id>/ai` and
+   `…/plan`, both reason-required and audited (`admin.ai_disabled`,
+   `admin.ai_enabled`, `admin.plan_changed`, `admin.plan_canceled`), on the
+   customer statement page, which also now leads with the receivable and
+   hides the prepaid shelf statements unless something posted to them.
+7. **Nightly job identity** — `scripts/accounting-service-account.sh`
+   mints the token on a dedicated superadmin account with no login
+   identity (psql only, so it runs on the box; hash and hint match
+   `api-tokens.ts`); the healthchecks ping is **required** (`none` opts
+   out on purpose) and `install.sh` refuses to arm the timer on
+   placeholders. Found while verifying: **the job had never been
+   installed on production** — no env file, no timer. Installed the same
+   day: token minted on the box for `accounting-job@frameos.net`, a
+   healthchecks check, timer at 04:20 UTC; the first run passed with no
+   violations.
+8. **Numbers** — 3b's `invoices` migration is 0048.
+
+Also in this round: `docs/todo.md`'s two stale lines now point here.
+

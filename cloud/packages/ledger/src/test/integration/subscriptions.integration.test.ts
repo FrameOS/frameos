@@ -151,23 +151,85 @@ describe("a subscriber's life through the books", () => {
     expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
   });
 
-  it("recognizes the period once it has actually been served", async () => {
+  // §9.3: revenue is recognised daily, pro rata by whole days served, so a
+  // calendar-month P&L does not lag a month behind the periods. Jan 10 → Feb
+  // 10 is 31 days; the second period, Feb 10 → Mar 10, is 28.
+  it("earns the period day by day, never twice for the same day, and closes it out at the end", async () => {
     const accountId = await createAccount();
-    await setAccountPlan(db, accountId, "maker");
+    await setAccountPlan(db, accountId, "maker", { now: t0 });
+    const revenue = () =>
+      accountBalanceMicros(db, systemAccountCodes.revenueSubscriptions);
 
-    // Nothing is earned until the period ends, however many nights run.
-    await runSubscriptionCycle(db);
+    // The night it was taken: nothing served yet, nothing earned.
+    expect(await runSubscriptionCycle(db, { now: t0 })).toMatchObject({ accrued: 0, recognized: 0 });
+    expect(await revenue()).toBe(0n);
+
+    // Ten days in: 1,990,000 × 10/31 = 641,935.48 → 641,935, and the rest
+    // stays deferred.
+    const tenDays = new Date(t0.getTime() + 10 * day);
+    expect(await runSubscriptionCycle(db, { now: tenDays })).toMatchObject({
+      accrued: 1,
+      accruedMicros: 641_935n,
+      recognized: 0,
+    });
+    expect(await revenue()).toBe(641_935n);
+    expect(await deferred()).toBe(1_990_000n - 641_935n);
+
+    // The same night again, and five hours later: no new whole day, no
+    // new entry. This is what lets the job run twice without double-earning.
+    expect(await runSubscriptionCycle(db, { now: tenDays })).toMatchObject({ accrued: 0 });
     expect(
-      await accountBalanceMicros(db, systemAccountCodes.revenueSubscriptions),
-    ).toBe(0n);
+      await runSubscriptionCycle(db, { now: new Date(tenDays.getTime() + 5 * 3600 * 1000) }),
+    ).toMatchObject({ accrued: 0 });
+    expect(await revenue()).toBe(641_935n);
 
-    // Forty days on, the first period is over and a second has opened.
-    const later = new Date(Date.now() + 40 * day);
+    // Forty days on: the first period is over (its remainder earned and the
+    // row closed out) and the second, charged tonight, has served nine of
+    // its 28 days: 1,990,000 × 9/28 = 639,642.86 → 639,643.
+    const later = new Date(t0.getTime() + 40 * day);
     const result = await runSubscriptionCycle(db, { now: later });
     expect(result).toMatchObject({ charged: 1, opened: 1, recognized: 1 });
+    expect(result.accruedMicros).toBe(1_990_000n - 641_935n + 639_643n);
+    expect(await revenue()).toBe(1_990_000n + 639_643n);
+    expect(await deferred()).toBe(1_990_000n - 639_643n);
+    const [first, second] = await periodsFor(accountId);
+    expect(first).toMatchObject({ recognizedMicros: 1_990_000n });
+    expect(first?.recognizedAt).not.toBeNull();
+    expect(second).toMatchObject({ recognizedMicros: 639_643n, recognizedAt: null });
+    // The remainder of the first period was booked on its last day, not on
+    // the night the job happened to run.
+    const closing = (await listJournalEntries(db, { limit: 100 })).filter(
+      (entry) =>
+        entry.entryType === "subscription_recognition" &&
+        entry.postings[0]?.amountMicros === 1_990_000n - 641_935n,
+    );
+    expect(closing).toHaveLength(1);
+    expect(closing[0]?.occurredAt).toEqual(first?.periodEnd);
+    expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
+  });
+
+  it("refunds only what the daily accruals have not already earned", async () => {
+    const accountId = await createAccount();
+    await setAccountPlan(db, accountId, "studio", { now: t0 });
+    // Ten days earned: 6,990,000 × 10/31 = 2,254,838.7 → 2,254,839.
+    await runSubscriptionCycle(db, { now: new Date(t0.getTime() + 10 * day) });
+    const [period] = await periodsFor(accountId);
+    expect(period?.recognizedMicros).toBe(2_254_839n);
+
+    // The whole price is no longer refundable from the deferral: part of it
+    // is revenue now, and that needs a reversal, not a refund.
+    await expect(refundUnearnedPeriod(db, period!, 6_990_000n)).rejects.toThrow(/no larger than/);
+    const left = 6_990_000n - 2_254_839n;
+    await refundUnearnedPeriod(db, period!, left);
+    expect(await deferred()).toBe(0n);
+
+    // Nothing more to earn, tonight or at the end.
+    const [refunded] = await periodsFor(accountId);
+    expect(await runSubscriptionCycle(db, { now: new Date(t0.getTime() + 20 * day) })).toMatchObject({ accrued: 0 });
+    await recognizePeriod(db, refunded!);
     expect(
       await accountBalanceMicros(db, systemAccountCodes.revenueSubscriptions),
-    ).toBe(1_990_000n);
+    ).toBe(2_254_839n);
     expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
   });
 
@@ -267,7 +329,9 @@ describe("a subscriber's life through the books", () => {
     expect(await accountBalanceMicros(db, receivable)).toBe(995_000n + 6_990_000n);
     expect(await deferred()).toBe(995_000n + 6_990_000n);
 
-    // The next cycle recognizes the Maker half that was served, no more.
+    // The next cycle recognizes the Maker half that was served, no more —
+    // and a minute into the Studio period is not a whole day, so nothing of
+    // it is earned yet.
     const cycle = await runSubscriptionCycle(db, { now: new Date(halfway.getTime() + 60_000) });
     expect(cycle).toMatchObject({ charged: 0, opened: 0, recognized: 1 });
     expect(

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { subscriptionPeriods, subscriptions } from "@frameos-cloud/db";
 import { postEvent, type PostEventOptions } from "./kernel";
 import { readPlan, type BillingPlan } from "./plans";
@@ -39,6 +39,15 @@ import { LedgerError, type LedgerExecutor } from "./types";
 //    now, open one at the new price); a downgrade waits for the rollover
 //    (`next_plan_code`). Recognition earns `price − refunded`, never the full
 //    price over a refund (item 6, and the deferred-revenue invariant).
+//
+// And one the pre-3b pass (§9.3) added: revenue is recognised DAILY, not
+// only at period end. Each night earns `(price − refunded) × whole days
+// served / period length` less what was already recognised, so a
+// calendar-month P&L no longer lags by up to a month. `recognized_micros`
+// on the period row is the cursor; the final step at period end earns
+// whatever is left and stamps `recognized_at`. Whole days on purpose: a job
+// that runs at 04:20 and again at 04:25 must not post a second entry for
+// five minutes of subscription.
 
 /** One calendar month on from `at`, clamped for short months — a
  *  subscription started on the 31st renews on the 30th, the 28th, and so on,
@@ -278,15 +287,20 @@ export async function closeOutSubscriptionForDeletedAccount(
 }
 
 export interface SubscriptionCycleResult {
+  // Daily recognition entries posted tonight, and the revenue they earned.
+  accrued: number;
+  accruedMicros: bigint;
   charged: number;
   failures: { error: unknown; periodId: string }[];
   opened: number;
+  // Periods closed out: earned to the end and stamped `recognized_at`.
   recognized: number;
 }
 
 /**
  * The nightly cycle: open the periods that are due, charge the ones that have
- * started, recognize the ones that have ended. Safe to run repeatedly.
+ * started, earn what the running ones have served so far, and close out the
+ * ones that have ended. Safe to run repeatedly.
  */
 export async function runSubscriptionCycle(
   db: LedgerExecutor,
@@ -294,6 +308,8 @@ export async function runSubscriptionCycle(
 ): Promise<SubscriptionCycleResult> {
   const now = options.now ?? new Date();
   const result: SubscriptionCycleResult = {
+    accrued: 0,
+    accruedMicros: 0n,
     charged: 0,
     failures: [],
     opened: 0,
@@ -324,6 +340,32 @@ export async function runSubscriptionCycle(
       result.charged += 1;
     } catch (error) {
       // One bad period must not stop the rest of the night's work.
+      result.failures.push({ error, periodId: period.id });
+    }
+  }
+
+  // Earn what every running period has served so far. Read after the charge
+  // loop so a period charged tonight accrues tonight too — and only charged
+  // ones, for the same reason the close-out below skips the rest.
+  const running = await db
+    .select()
+    .from(subscriptionPeriods)
+    .where(
+      and(
+        isNotNull(subscriptionPeriods.chargedAt),
+        isNull(subscriptionPeriods.recognizedAt),
+        lte(subscriptionPeriods.periodStart, now),
+      ),
+    )
+    .orderBy(asc(subscriptionPeriods.periodStart));
+  for (const period of running) {
+    try {
+      const earned = await accruePeriod(db, period, now, options);
+      if (earned > 0n) {
+        result.accrued += 1;
+        result.accruedMicros += earned;
+      }
+    } catch (error) {
       result.failures.push({ error, periodId: period.id });
     }
   }
@@ -479,8 +521,21 @@ async function currentPeriod(
   return row;
 }
 
+// What is still sitting in liability:deferred:subscriptions for this period:
+// the price, less what was returned to the customer, less what has already
+// been recognised as revenue. Both a refund and tonight's recognition are
+// bounded by it, which is what keeps the deferred account from going
+// negative whichever order the two happen in.
+export function deferredMicros(period: PeriodRow): bigint {
+  const left = period.priceMicros - period.refundedMicros - period.recognizedMicros;
+  return left > 0n ? left : 0n;
+}
+
+const dayMs = 24 * 60 * 60 * 1000;
+
 // The part of a period's price that has not been earned yet at `at`,
-// pro rata by time, less anything already refunded. Rounded half up once.
+// pro rata by time, less anything already refunded or recognised. Rounded
+// half up once.
 export function unearnedMicros(period: PeriodRow, at: Date): bigint {
   const total = BigInt(period.periodEnd.getTime() - period.periodStart.getTime());
   const remaining = BigInt(
@@ -490,12 +545,41 @@ export function unearnedMicros(period: PeriodRow, at: Date): bigint {
     return 0n;
   }
   const unearned = divideRoundHalfUp(period.priceMicros * (total - remaining), total);
-  const left = period.priceMicros - period.refundedMicros;
+  const left = deferredMicros(period);
   return unearned > left ? left : unearned;
 }
 
-// Ends a period now. What recognition then earns is price − refunded, which
-// after a prorated refund is exactly the part that was served.
+/**
+ * How much of a period has been EARNED by `at`: the earnable amount
+ * (price − refunded) pro rata by whole days served. Whole days, so that the
+ * nightly job posts one entry per day however many times it runs; and the
+ * earnable amount rather than the price, so that a period an upgrade closed
+ * early — whose price − refunded is exactly the served part — is earned over
+ * its shortened length rather than over-recognised on its first night. At
+ * or past the period end it is everything earnable, whatever the rounding
+ * said the night before.
+ */
+export function earnedToDateMicros(period: PeriodRow, at: Date): bigint {
+  const totalMs = period.periodEnd.getTime() - period.periodStart.getTime();
+  const earnable = period.priceMicros - period.refundedMicros;
+  if (totalMs <= 0 || earnable <= 0n) {
+    return earnable > 0n ? earnable : 0n;
+  }
+  const elapsedMs = at.getTime() - period.periodStart.getTime();
+  if (elapsedMs >= totalMs) {
+    return earnable;
+  }
+  if (elapsedMs <= 0) {
+    return 0n;
+  }
+  const servedMs = Math.floor(elapsedMs / dayMs) * dayMs;
+  const earned = divideRoundHalfUp(earnable * BigInt(servedMs), BigInt(totalMs));
+  return earned > earnable ? earnable : earned;
+}
+
+// Ends a period now. What recognition then earns is price − refunded −
+// already recognised, which after a prorated refund is exactly the part
+// that was served and not yet earned.
 async function closePeriodAt(db: LedgerExecutor, period: PeriodRow, at: Date): Promise<void> {
   const end = at.getTime() > period.periodStart.getTime() ? at : new Date(period.periodStart.getTime() + 1);
   await db
@@ -583,7 +667,10 @@ export async function recognizePeriod(
     .where(eq(subscriptionPeriods.id, period.id))
     .limit(1);
   const current = fresh ?? period;
-  const earned = current.priceMicros - current.refundedMicros;
+  // What the daily accruals have not earned yet. With the nightly job
+  // running that is the last day or so; with it broken for a month it is
+  // the whole period, and either way the period ends fully recognised.
+  const earned = deferredMicros(current);
   if (earned > 0n) {
     await postEvent(
       db,
@@ -597,6 +684,7 @@ export async function recognizePeriod(
         payload: {
           ...periodPayload(current, await planNameFor(db, current.planCode)),
           priceMicros: earned.toString(),
+          recognizedMicros: current.recognizedMicros.toString(),
           refundedMicros: current.refundedMicros.toString(),
         },
         source: "subscriptions",
@@ -608,8 +696,84 @@ export async function recognizePeriod(
   // A fully refunded period has nothing to recognize; it is still done.
   await db
     .update(subscriptionPeriods)
-    .set({ recognizedAt: new Date() })
+    .set({
+      recognizedAt: new Date(),
+      recognizedMicros: current.recognizedMicros + earned,
+    })
     .where(eq(subscriptionPeriods.id, period.id));
+}
+
+/**
+ * The daily step: earn what this period has served up to `now` that has not
+ * been recognised yet, and move the cursor. Returns what it earned tonight.
+ * Idempotent on `recognized_micros`: a second run the same night computes
+ * the same "earned so far", finds the cursor already there, and posts
+ * nothing; a crash between the post and the cursor update replays the same
+ * idempotency key next time and then moves the cursor.
+ */
+export async function accruePeriod(
+  db: LedgerExecutor,
+  period: PeriodRow,
+  now: Date,
+  options: PostEventOptions = {},
+): Promise<bigint> {
+  const subscription = await subscriptionFor(db, period);
+  if (!subscription) {
+    throw new LedgerError("invalid_draft", "Period has no subscription");
+  }
+  if (!period.chargedAt || period.recognizedAt) {
+    return 0n;
+  }
+  // Re-read: a refund since the caller loaded the row changes what is
+  // earnable, and the cursor must be the one the last accrual left.
+  const [fresh] = await db
+    .select()
+    .from(subscriptionPeriods)
+    .where(eq(subscriptionPeriods.id, period.id))
+    .limit(1);
+  const current = fresh ?? period;
+  const earned = earnedToDateMicros(current, now);
+  const delta = earned - current.recognizedMicros;
+  if (delta <= 0n) {
+    return 0n;
+  }
+  // Never past what is still deferred: a refund that landed after an
+  // accrual can leave earned-so-far above the remainder, and the deferred
+  // account must not go negative for it (the close-out invariant, §6 check 9).
+  const left = deferredMicros(current);
+  const amount = delta > left ? left : delta;
+  if (amount <= 0n) {
+    return 0n;
+  }
+  const at = now.getTime() < current.periodEnd.getTime() ? now : current.periodEnd;
+  await postEvent(
+    db,
+    {
+      accountId: subscription.accountId,
+      eventType: subscriptionRecognitionEventType,
+      // One key per cursor position, like refunds: the second accrual is a
+      // second fact, not a replay of the first.
+      idempotencyKey: `subscription_recognition:${period.id}:${current.recognizedMicros.toString()}`,
+      // Tonight, not the period end: this is the entry that puts the revenue
+      // in the month it was served. Capped at the period end so a late job
+      // cannot push a finished period's revenue past it.
+      occurredAt: at,
+      payload: {
+        ...periodPayload(current, await planNameFor(db, current.planCode)),
+        priceMicros: amount.toString(),
+        recognizedMicros: current.recognizedMicros.toString(),
+        refundedMicros: current.refundedMicros.toString(),
+      },
+      source: "subscriptions",
+      sourceRef: period.id,
+    },
+    options,
+  );
+  await db
+    .update(subscriptionPeriods)
+    .set({ recognizedMicros: current.recognizedMicros + amount })
+    .where(eq(subscriptionPeriods.id, period.id));
+  return amount;
 }
 
 /**
@@ -638,7 +802,10 @@ export async function refundUnearnedPeriod(
       "This period has already been recognized; refund it with a reversal, not a deferral",
     );
   }
-  const left = period.priceMicros - period.refundedMicros;
+  // What is still deferred, after refunds AND after the daily accruals:
+  // revenue already recognised cannot be handed back from the deferral, it
+  // needs a reversal (a different, deliberate act).
+  const left = deferredMicros(period);
   if (amountMicros <= 0n || amountMicros > left) {
     throw new LedgerError(
       "invalid_amount",

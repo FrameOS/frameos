@@ -26,6 +26,10 @@ export interface LedgerIntegrityOptions {
   // How far a customer's credit balance may go below zero before it counts
   // as a violation. Mirrors the payg_overdraft_micros setting.
   overdraftMicros?: bigint | undefined;
+  // The ceiling for account-days that ran entirely on the operator's shared
+  // key (shared_key_daily_cap_micros). Omitted means the same ceiling as
+  // everybody else's, which is also what the setting falls back to.
+  sharedKeyDailyCapMicros?: bigint | undefined;
   // How long an event may sit unposted before it is a problem rather than a
   // sweep still in flight.
   pendingEventGraceMs?: number | undefined;
@@ -255,7 +259,13 @@ export async function checkDailyCapRespected(
   if (cap === undefined || cap <= 0n) {
     return [];
   }
-  const ceiling = cap + (options.overdraftMicros ?? 0n);
+  const overdraft = options.overdraftMicros ?? 0n;
+  const ceiling = cap + overdraft;
+  // An account-day served entirely by the operator's shared key is judged
+  // against the shared key's own cap — the one the gate applied to it. A
+  // day with any billable turn in it is judged against the main cap, which
+  // is the larger of the two whenever the shared one is set at all.
+  const sharedCeiling = (options.sharedKeyDailyCapMicros ?? cap) + overdraft;
   const now = options.now ?? new Date();
   const windowDays = Math.max(1, options.capWindowDays ?? 7);
   const since = new Date(
@@ -263,22 +273,29 @@ export async function checkDailyCapRespected(
   );
   const rows = await db.execute<{
     account_id: string;
+    ceiling: string;
     day: string;
     spent: string;
   }>(sql`
     select account_id::text as account_id,
            to_char(date_trunc('day', occurred_at at time zone 'UTC'), 'YYYY-MM-DD') as day,
-           sum(${chargeableExpression})::text as spent
+           sum(${chargeableExpression})::text as spent,
+           (case when bool_and(credential_source = 'shared')
+                 then ${sharedCeiling.toString()}::numeric
+                 else ${ceiling.toString()}::numeric end)::text as ceiling
       from ai_usage_records
      where account_id is not null
        and occurred_at >= ${since.toISOString()}::timestamptz
        and ${notAbsorbedSurfaceCondition}
      group by 1, 2
-    having sum(${chargeableExpression}) > ${ceiling.toString()}::numeric
+    having sum(${chargeableExpression}) >
+           case when bool_and(credential_source = 'shared')
+                then ${sharedCeiling.toString()}::numeric
+                else ${ceiling.toString()}::numeric end
   `);
   return rows.map((row) => ({
     check: "daily_cap_respected",
-    detail: `Account ${row.account_id} metered ${row.spent} micros on ${row.day}, past the ${ceiling.toString()} ceiling`,
+    detail: `Account ${row.account_id} metered ${row.spent} micros on ${row.day}, past the ${row.ceiling} ceiling`,
   }));
 }
 
@@ -351,7 +368,7 @@ export async function checkDeferredSubscriptions(
          from ledger_postings p
          join ledger_accounts a on a.id = p.ledger_account_id
         where a.code = 'liability:deferred:subscriptions') as deferred,
-      (select coalesce(sum(price_micros - refunded_micros), 0)
+      (select coalesce(sum(price_micros - refunded_micros - recognized_micros), 0)
          from subscription_periods
         where charged_at is not null and recognized_at is null) as booked
   `);

@@ -101,8 +101,10 @@ type FatalState =
   | { kind: "missing_api_key" }
   // The account switched AI off (403): nothing is broken, they asked.
   | { kind: "ai_disabled" }
-  // Today's spend is at the cap (402): back tomorrow on its own.
-  | { kind: "daily_cap_reached"; resetAt: string | null }
+  // Today's spend is at the cap (402): back tomorrow on its own. `shared`
+  // when the cap was the operator's free allowance, which is not money the
+  // account owes and must not be described as their limit.
+  | { kind: "daily_cap_reached"; resetAt: string | null; shared: boolean }
   | { kind: "rate_limited" }
   | { kind: "error"; message: string };
 
@@ -670,7 +672,11 @@ export function SceneAiPanel({
           } else if (error.code === "ai_disabled") {
             setFatal({ kind: "ai_disabled" });
           } else if (error.code === "daily_cap_reached") {
-            setFatal({ kind: "daily_cap_reached", resetAt: error.resetAt ?? null });
+            setFatal({
+              kind: "daily_cap_reached",
+              resetAt: error.resetAt ?? null,
+              shared: error.allowance === "shared",
+            });
           } else if (error.code === "rate_limited" || error.status === 429) {
             setFatal({ kind: "rate_limited" });
           } else {
@@ -1016,12 +1022,20 @@ export function SceneAiPanel({
         ) : null}
         {fatal?.kind === "daily_cap_reached" ? (
           <div className="notice ai-panel__notice" role="alert">
-            <strong className="ai-panel__notice-title">Today&rsquo;s AI limit is used up.</strong>
+            <strong className="ai-panel__notice-title">
+              {fatal.shared
+                ? "Today\u2019s free AI allowance is used up."
+                : "Today\u2019s AI limit is used up."}
+            </strong>
             <p className="copy">
-              The daily limit keeps a runaway loop from costing more than a
-              bounded amount. It resets
+              {fatal.shared
+                ? "This account runs on the operator\u2019s shared key, so nothing is billed for it \u2014 and the allowance is the operator\u2019s daily budget, not yours. It resets"
+                : "The daily limit keeps a runaway loop from costing more than a bounded amount. It resets"}
               {fatal.resetAt ? ` at ${new Date(fatal.resetAt).toLocaleString()}` : " at midnight UTC"}
               ; the reply so far is kept.
+              {fatal.shared
+                ? " Add your own OpenAI key under Settings to keep going without it."
+                : ""}
             </p>
           </div>
         ) : null}

@@ -55,6 +55,7 @@ export default async function AdminBillingPage() {
     checkLedgerIntegrity(db, {
       dailyCapMicros: settings.dailyCapMicros,
       overdraftMicros: settings.overdraftMicros,
+      sharedKeyDailyCapMicros: settings.sharedKeyDailyCapMicros,
     }),
     dailySummary(db, window),
     aiUsageSummary(db, window),
@@ -347,6 +348,7 @@ export default async function AdminBillingPage() {
               dailyCapMicros: settings.dailyCapMicros.toString(),
               meteringMode: settings.meteringMode,
               overdraftMicros: settings.overdraftMicros.toString(),
+              sharedKeyDailyCapMicros: settings.sharedKeyDailyCapMicros.toString(),
             }}
           />
         </section>

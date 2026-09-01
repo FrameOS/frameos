@@ -129,7 +129,7 @@ file's "Current gaps".
   ladder, double-entry ledger, one invoice a month
   (`cloud/docs/accounting-todo.md` §0). Still open there, and blocking the
   first invoice: the payment provider (merchant-of-record vs direct PSP,
-  §8.7), which legal entity invoices and from where (§9.3), and the plan
+  §8.7), which legal entity invoices and from where (§8.15), and the plan
   numbers (§8.13).
 - `store:publish` human review: always, only for the public store, or
   pre-review for risky (shell-app) scenes? Today it is automated moderation +

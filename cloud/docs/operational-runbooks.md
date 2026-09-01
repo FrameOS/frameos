@@ -211,16 +211,32 @@ appear.
 
 `ops/accounting/frameos-cloud-accounting.timer` runs
 `scripts/accounting-nightly.sh` at 04:20, which curls
-`POST /api/admin/billing/nightly`. Two things happen: AI usage records whose
-ledger entries never landed are re-posted (idempotent by turn id, so a night
-that already posted is a no-op), and every ledger invariant runs — each
-violation is `reportError`ed and the run exits non-zero.
+`POST /api/admin/billing/nightly`. Three things happen: AI usage records
+whose ledger entries never landed are re-posted (idempotent by turn id, so a
+night that already posted is a no-op), the subscription cycle runs (open,
+charge, earn the day's share of every running period, close out the ended
+ones), and every ledger invariant runs — each violation is `reportError`ed
+and the run exits non-zero.
 
-Install with `cloud/ops/accounting/install.sh`. The one manual step is the
-token: create a personal API token as a superadmin at `/account/api-tokens`
-and put it in `/etc/frameos-cloud/accounting.env` as
-`ACCOUNTING_API_TOKEN`. Optionally set `ACCOUNTING_HEALTHCHECKS_URL` for the
-same dead-man pattern the backup and uptime jobs use.
+Install with `cloud/ops/accounting/install.sh`. Two manual values in
+`/etc/frameos-cloud/accounting.env`, and the installer refuses to enable the
+timer until both are real:
+
+- `ACCOUNTING_API_TOKEN`: mint it on a **dedicated service account** with
+  `cloud/scripts/accounting-service-account.sh` (run from a machine with
+  `DATABASE_URL` for production — the prod box itself, or an SSH tunnel).
+  The account is a superadmin with no login identity, so nobody can sign in
+  as it, and the token is its only door. Not a person's token: that is
+  revoked on their way out and the job dies with it, silently. Rotate by
+  running the script again (`--rotate`) and replacing the value.
+- `ACCOUNTING_HEALTHCHECKS_URL`: a healthchecks.io ping, the same dead-man
+  pattern the backup and uptime jobs use. **Required**, because the failure
+  that matters is a night that never ran, and only something expecting a
+  ping can notice. `none` opts out deliberately.
+
+**As of 2026-09-02 the job had never been installed on production** — no
+env file, no timer — which is how the doc's "optional" ping stayed
+theoretical. Installing it is the next operator step after this lands.
 
 **A violation is an alert, not something to fix by hand from the psql
 prompt.** The ledger is append-only in the database — `UPDATE` and `DELETE`
