@@ -82,8 +82,9 @@ link scope, nginx `proxy_read_timeout` checked against the route's 300 s.
 
 Gated on nothing; gates everything else in practice. Today: 420 unit-test
 files on the server planes, six C unit tests and QEMU on the ESP32, zero
-frontend tests, no CI that ever lights a panel, and 14 open boxes in
-`docs/manual-testing-todo.md`.
+frontend tests, no CI that ever lights a panel, and a standing list of
+open boxes in `docs/manual-testing-todo.md` that shrinks only when a
+person sits at a bench.
 
 - [ ] One shelf: a Pi (HDMI + one SPI e-ink), a Seeed E1004, one 7-colour
   Waveshare, on a self-hosted runner with power control.
@@ -94,22 +95,23 @@ frontend tests, no CI that ever lights a panel, and 14 open boxes in
 - [ ] Exit: "shipped" and "renders on hardware" mean the same thing for
   at least one board per architecture.
 
-## 3. Decide thin vs fat rendering — a ruling, not a project
+## 3. Thin vs fat rendering — ruled, not yet enforced
 
 Both architectures exist and work: `localRenderSupported` already forks
 esp32-s3 (17.5k lines of local-render C) from esp32-c3/Pico (539-line
-backend FOSB path + 2k Pico C). What is missing is the decision that
-makes the fork policy instead of accretion:
+backend FOSB path + 2k Pico C). The two decisions that make the fork
+policy instead of accretion are taken: the "no image proxies, ever"
+principle is bounded in `CLOUD-TODO.md` (a hub rendering a whole *scene*
+for a board below the capability line is the thin-client design, not a
+proxy), and the money question is answered in
+`cloud/docs/accounting-todo.md` §0.2 — cloud rendering is a paid-plan
+entitlement, N frames *and* a minimum refresh interval (proposal 5 min),
+none on the free tier. What is left is code:
 
-- [ ] Write the ruling on "no image proxies, ever" vs hub-rendered
-  scenes: the principle bans proxying *external images* for capable
-  frames; a hub rendering a *scene* for a board below the capability
-  line is the thin-client design, not a proxy. Put it in
-  `CLOUD-TODO.md` next to the principle it bounds.
-- [ ] Answer the money question that blocks C3 boards from the cloud
-  flasher (`docs/todo.md` open questions): who pays for hub rendering,
-  at what cadence, with what cap. Until answered, thin clients stay
-  backend-only — decide, don't drift.
+- [ ] Enforce the entitlement: a count check at frame creation plus the
+  refresh-interval floor (the plan row already carries the number,
+  enforced nowhere). Until it exists, C3 boards stay out of the cloud
+  flasher — decide, don't drift.
 - [ ] Then: the capability line is data, not per-board fights. New boards
   declare PSRAM and get a renderer assigned; the fat path stops being
   re-earned 8 MB board by 8 MB board.

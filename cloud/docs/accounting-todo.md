@@ -1216,7 +1216,8 @@ not a one-off hosted checkout (§3.2).
 - [ ] Choose the provider; SDK + env plumbing; webhook endpoint
       `app/api/webhooks/<provider>/route.ts` (signature check, provider
       event id as idempotency key, raw-body handling).
-- [ ] Migration `0046` (0045 went to plans): `invoices` (period bounds,
+- [ ] Migration `0047` (0045 went to plans, 0046 to the §9 fixes):
+      `invoices` (period bounds,
       sequential number, status, provider payment ref) and the
       stored-payment-method reference. The
       invoice holds no amount the ledger does not — §3.2 says why.
@@ -1775,9 +1776,10 @@ right moment to fix it.
 
 ### 9.3 Design changes to make before Phase 3b, in order
 
-- [ ] Fix §9.2 items 1–4 and 7–9 first; they are bugs with tests missing,
+- [x] Fix §9.2 items 1–4 and 7–9 first; they are bugs with tests missing,
       not decisions. Items 5 and 6 are decisions and small code; 11 is
-      the biggest piece of new work and gates the first invoice.
+      the biggest piece of new work and gates the first invoice. — All 18
+      done 2026-09-02, migration 0046 (§9.5).
 - [ ] **Run the Phase 2 gate.** It has been open since 2026-08-31 and is
       the only thing that would tell us the meter is right: a week of
       `ai_usage_records` against PostHog `$ai_generation` sums (turn count
@@ -1816,8 +1818,8 @@ right moment to fix it.
       healthchecks ping is optional in the env example. Make the ping
       mandatory on the production box (verify it is set), and consider a
       dedicated service account for the token.
-- [ ] Phase 3b's `invoices` migration is **0046**, not 0045 — Phase 5 took
-      that number.
+- [x] Phase 3b's `invoices` migration is **0047**: Phase 5 took 0045 and
+      the §9 fixes took 0046 (§7 corrected 2026-09-02).
 
 ### 9.4 Where this document said something the code did not do
 
@@ -1842,7 +1844,7 @@ reader knows which sentences to distrust when the two drift again:
 - §4 reports.ts "never `ledger_balances`" — `dailySummary` does (item 15).
 - `docs/todo.md` still lists "Billing mechanics — Stripe?" and "free cloud
   rendering forever" as open; §0.2 here decided the second and this
-  document is the first. Update it.
+  document is the first. Updated 2026-09-02.
 
 ### 9.5 What the fix did — 2026-09-02, migration 0046
 
@@ -1911,5 +1913,5 @@ Every §9.2 item, with the decision where one had to be made:
 
 Not done here, still §9.3: the Phase 2 comparison against PostHog and the
 provider invoice, the legal-entity/VAT question, the operator surfaces for
-the switch and for plans, the service account for the nightly token, and
-`docs/todo.md`'s two stale lines.
+the switch and for plans, and the service account for the nightly token.
+(`docs/todo.md`'s two stale lines were updated the same day.)

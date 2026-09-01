@@ -12,8 +12,12 @@ backups (`/api/backends/backups`, 8 MB per blob / 500 per account), the
 scene store, the cloud-managed frames control plane + `apps/frame-hub`
 (design: `docs/cloud-frames.md`), optional 2FA plus re-authentication for
 sensitive actions and the audit trail (`docs/auth.md`), Postgres-backed rate
-limiting (`rate_limit_buckets`), hand-written SQL migrations, and cross-repo
-E2E (`scripts/e2e-frameos.sh`).
+limiting (`rate_limit_buckets`), hand-written SQL migrations, cross-repo
+E2E (`scripts/e2e-frameos.sh`), and the accounting module — a double-entry
+ledger in `packages/ledger`, AI metering (shadow mode), the per-account AI
+switch and daily cap, plans and subscriptions with self-serve purchase
+behind `FRAMEOS_CLOUD_PLANS_SELF_SERVE`, and `/admin/billing`
+(`docs/accounting-todo.md`, which also holds the billing todo).
 
 Keep out until there is a concrete product design (scope names for these
 are already reserved in the device-flow allowlist, but no feature
@@ -21,6 +25,7 @@ endpoints exist):
 
 - Cloud organizations, projects, memberships, and invitations.
 - Hosted backend lifecycle.
-- Billing and metered quotas (config backups exist with fixed caps; asset
-  backups / storage billing do not).
+- A payment provider integration before `docs/accounting-todo.md` §8.7
+  (provider) and §9.3 (legal entity, VAT) are answered; storage and asset
+  backup billing (config backups have fixed caps only).
 - Placeholder service packages or UI packages.

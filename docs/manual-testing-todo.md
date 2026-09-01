@@ -1,16 +1,16 @@
-# Manual testing todo — pre-release sweep (compiled 2026-08-20)
+# Manual testing todo — pre-release sweep (compiled 2026-08-20, refreshed 2026-09-02)
 
 Everything below shipped with green automated suites but an unticked manual
-checkbox, or a "Not verified — needs hardware" note. PRs #374–#382 are all
-unreleased on top of v2026.8.31, so the hardware tests need firmware/images
-built from `main`. **Tick items as they pass; delete sections when empty;
-delete the file when done.**
+checkbox, or a "Not verified — needs hardware" note. Releases since
+v2026.8.31 carry most of it; anything merged after the last release needs
+firmware/images built from `main`. **Tick items as they pass; delete
+sections when empty; delete the file when done.**
 
-Suggested order: §1 first (pure browser), then one Pi session covering §2+§3
-(those tests share a bench), then one ESP32 session for §4, and schedule the
-release so §6 can be watched live. The riskiest untested surfaces are the
-E1004 panel init (never touched hardware) and the enrollment auto-confirm
-flow (changes first-boot behavior for every new user).
+Suggested order: §1 is done, so one Pi session covering §2+§3 (those tests
+share a bench), then one ESP32 session for §4. The riskiest untested
+surfaces left are the Pi-side items no bench has run since their PRs
+(DNSSEC-off enrollment from a composed SD card, scheduled reboot, the
+hardware-settings batch) and the battery ADC rounds of #426.
 
 ## 1. Browser only — cloud auth (no hardware, ~30 min)
 
@@ -68,20 +68,24 @@ flow (changes first-boot behavior for every new user).
   tick it in the SD image builder, boot the card → `ssh root@<frame>` works
   with that key. Older images log "Ignoring unknown key 'authorized_key'"
   and boot without it.
-- [ ] **ESP32 time zone (needs 2026.8.34 firmware):** set Europe/Brussels
-  from the cloud settings panel → weather scene hours match local time,
-  schedule entries fire in local time, `config` on the console shows it.
-- [ ] **First-boot cloud enrollment on a router that strips DNSSEC (PR #384):**
-  2026-08-20 a Pi 5 card booted, joined WiFi, then every lookup failed with
-  `systemd-resolved: DNSSEC validation failed ... no-signature`; the 30 s
-  network check expired, the setup hotspot took over and the frame never
-  enrolled. Fixes: `DNSSEC=no` drop-in on the image, 90 s check window, and
-  the cloud-chosen display is now applied by `frameos set-display` (the
-  python3 patcher never ran — Buildroot ships no python3; the log said
-  `could not apply display device 'http.upload'`). Re-flash from `main`,
-  boot behind the GL-BE3600, confirm: enrolled within ~1 min, no hotspot,
-  `frame.json` carries the chosen device, postboot log shows
-  `Applied display device`.
+- [ ] **ESP32 time zone (#388 + #416, needs firmware built after
+  2026-08-30):** set Europe/Brussels from the cloud settings panel → weather
+  scene hours match local time (a code node's `format()` too), schedule
+  entries fire in local time, `config` on the console shows it.
+- [ ] **First-boot cloud enrollment on a router that strips DNSSEC (#384,
+  #420):** 2026-08-20 a Pi 5 card booted, joined WiFi, then every lookup
+  failed with `systemd-resolved: DNSSEC validation failed ... no-signature`;
+  the 30 s network check expired, the setup hotspot took over and the frame
+  never enrolled. #384 added the `DNSSEC=no` drop-in, a 90 s window and
+  `frameos set-display` for the cloud-chosen display — but the drop-in was
+  only staged by the full base-image build, so SD cards composed from a
+  cached base kept validating (a Pi Zero W hit it again on 2026-08-30).
+  #420 stages it on both build paths and `frameos setup` retrofits it on
+  every deploy/OTA. The diagnosis is confirmed on the affected frame (the
+  drop-in applied by hand healed it); the fixed image is hardware-unverified.
+  Re-flash from `main`, boot behind the GL-BE3600, confirm: enrolled within
+  ~1 min, no hotspot, `frame.json` carries the chosen device, postboot log
+  shows `Applied display device`.
 - [ ] **Panel link code (#379):** boot an unclaimed frame in cloud mode with
   no claim code → the panel renders the link code + QR → complete the claim
   from an account, and confirm the code retires once connected.
@@ -126,13 +130,25 @@ flow (changes first-boot behavior for every new user).
   build `usb_api upload-scenes` answered `__FRAMEOS_USB_READY__` well after
   `render:done`. Re-check the full browser flow (flash → push scenes) once
   a release carries it.
-- [ ] **reTerminal E1004 first light (#375):** a real render on the E1004 —
-  the T133A01 init/tuning values came from the vendor driver via ESPHome and
-  have never touched hardware; failure mode is ghosting or a failed refresh,
-  not a brick.
-- [ ] **1200×1600 PSRAM low-water measurement (#375):** on the 8 MB board —
-  the 1.5 MiB reserve was sized at 800×480 and this is the number the PR
-  says to take first.
+- [x] **reTerminal E1004 first light (#375):** passed 2026-08-26 in #398,
+  debugged over serial on the board — the T133A01 refresh completes (CCSET
+  before DTM), a streamed 1.67 MB gallery PNG rendered and the panel
+  updated; the frame has run the Weather scene on a 15-minute cycle since.
+- [x] **1200×1600 PSRAM low-water measurement (#375):** taken in #428 on
+  2026-09-01 on the 8 MB board — low-water free PSRAM was 34 KB with the
+  transpiler's three token copies alive and 873 KB after the fix; the
+  1.5 MiB reserve stands.
+- [ ] **Battery ADC rounds (#426):** hardware-unverified. The misread is
+  intermittent (~9 of the E1004's ~400 daily on-battery samples read
+  ~2 V instead of ~3.95 V), so confirming it means watching
+  `batteryRawMillivolts` appear without `batteryMillivolts` moving for a
+  day or two on a frame on battery, and no spurious "critical" parking.
+- [ ] **Sleep-aware cloud side (#409):** the device half was captured over
+  three boots on the E1004; the hub half — the frame's `render`
+  announcement → a queued `image_get`, and command TTLs stretched past
+  `next_wake_at` — was not exercised before deploy. On a deep-sleeping
+  E1004: the fleet tile's image updates after a wake, and an `image_get`
+  queued mid-sleep survives the 15-minute nap instead of expiring.
 - [ ] **Scheduled reboot on ESP32 (#376):** same schedule-entry test as the
   Pi, on a board.
 - [ ] **Dual console — reTerminal E1002 over its CH340:** the cloud flasher

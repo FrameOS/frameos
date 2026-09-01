@@ -677,9 +677,12 @@ RGBA buffer. Never route the frame's downloads through the backend, and don't
 lean on host-side resize params. Proxying has been built and reverted before;
 do not build it again.
 
-TODO: streaming PNG decode into target (`decodePngScaledInto` currently does a
-full `decodePng` first — that is what OOMs on multi-MB PNGs under PSRAM
-fragmentation; the gallery scenes hit this on the 13.3" Spectra-6 frame).
+What exists: `decodePngScaledInto` is a streamed scanline decode bounded by
+pixie's own decode budget, and since #398 any image with a decode target is
+decoded straight off the socket (`image:streamed` / `image:stream:fallback`
+in the log). What does not stream on 8 MB boards is progressive JPEG and
+WebP — prefer PNG or baseline JPEG URLs for new sources; the analysis is in
+`docs/esp32-progressive-jpeg.md`.
 
 Default pins target the XIAO ESP32-S3: CS=GPIO3 (D2), DC=GPIO4 (D3), RST=GPIO5 (D4),
 BUSY=GPIO6 (D5), SCK=GPIO7 (D8), MOSI=GPIO9 (D10). Remap at runtime with `set pins`,

@@ -12,7 +12,8 @@ Two sides are involved:
 - **FrameOS Cloud** (`cloud/`) — the hosted service: accounts, linked
   backends, the device-authorization flow, the scene store, and the paid
   services below. Store decisions and threat model: `cloud/STORE-TODO.md`;
-  cloud-app scope guardrails: `cloud/TODO.md`.
+  cloud-app scope guardrails: `cloud/TODO.md`; billing model and ledger:
+  `cloud/docs/accounting-todo.md`.
 
 Remaining work, open questions, and the ideas parking lot are tracked in
 one place: `docs/todo.md`. This file keeps the principles, the scope
@@ -50,6 +51,12 @@ table, and the protocol summary.
    Frames that keep working without the cloud are insurance against lock-in
    on FrameOS Cloud, and staying out of every image request protects us
    against rising bandwidth and compute costs as the fleet grows.
+   Boundary (ruled 2026-09-02): this bans proxying *external images* for
+   frames that can render them. A hub rendering a whole *scene* for a board
+   below the capability line (ESP32-C3, Pico — the thin-client design) is
+   not a proxy: it is a paid-plan entitlement, N frames and a minimum
+   refresh interval, none on the free tier (`cloud/docs/accounting-todo.md`
+   §0.2). It is not enforced yet (`docs/convergence-todo.md` item 3).
 
 ## Permission scopes
 

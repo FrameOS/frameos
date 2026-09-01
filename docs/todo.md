@@ -6,7 +6,8 @@ missing from it. Reference material — principles, permission scopes, threat
 models, wire protocols, measurements — lives in the linked docs; this file only
 carries the work. **When an item ships, delete it.** Larger tracks keep their
 own files: architecture convergence in `docs/convergence-todo.md`, store
-content in `docs/scenes-todo.md`, the JSX widget UI in `docs/ui-todo.md`.
+content in `docs/scenes-todo.md`, the JSX widget UI in `docs/ui-todo.md`,
+cloud billing in `cloud/docs/accounting-todo.md`.
 
 **Compiled scenes are deprecated (2026-08-30).** No editor action produces
 new Nim, every surface that shows a compiled scene warns and points at the
@@ -37,18 +38,19 @@ Two rules that shape most entries:
 - **Verify on hardware** (docs/esp32-memory.md, 2026-08-24): the Weather
   scene renders on the 16 MB 13.3" (frame 529463b4) after a reboot with no
   `memory:oomAbort`; post-render idle PSRAM stays near the ~6.9 MB
-  baseline; the sky gradient shows no strip seams. Then the same on an
-  8 MB 13.3" (565 canvas), where the strips are the only thing that fits.
+  baseline; the sky gradient shows no strip seams. The 8 MB half is done:
+  the E1004 (565 canvas, strips are the only thing that fits) renders
+  Weather with an 873 KB PSRAM low-water mark since the transpiler fix
+  (#428, measured on the board 2026-09-01).
 - **Verify on hardware** (docs/esp32-memory.md, 2026-08-23): a 24 MP photo
   cover-rendered on the 16 MB 13.3" is sharp (no `render:degraded` in the
   log — the cover window keeps the plan at 2.9 MB inside the RGBX canvas's
-  ~5 MB headroom); the 7.3"
-  weather sky renders without bands (RGBX canvas now; boot line
-  `canvas: 800x480 rgbx`); the E1004 logs `canvas: 1200x1600 rgb565
-  (dithered stores)` and its gradients are band-free; after a text
-  render idle PSRAM should drop ~0.5 MB, not 1.6 MB; `render:degraded` and
-  `memory:oomAbort` appear in the cloud log when provoked (force the budget
-  low with an oversized photo); the leak-percent restart fires.
+  ~5 MB headroom); the 7.3" weather sky renders without bands (RGBX canvas
+  now; boot line `canvas: 800x480 rgbx`); the E1004's gradients are
+  band-free on its `canvas: 1200x1600 rgb565 (dithered stores)`; after a
+  text render idle PSRAM should drop ~0.5 MB, not 1.6 MB; `render:degraded`
+  and `memory:oomAbort` appear in the cloud log when provoked (force the
+  budget low with an oversized photo); the leak-percent restart fires.
 
 ## Get the TypeScript transpiler off the device
 
@@ -58,38 +60,38 @@ frame compiles it itself: ~4,000 lines of Nim (`transpiler.nim`, `tokens.nim`,
 TS-erasure pass, run once per JS app node per render. The QuickJS bridge around
 it (`burrito.nim`, `app_runtime.nim`, `runtime.nim`) stays either way.
 
-The plan is to move that to publish/deploy time — the cloud emits `app.js`
-beside the `app.ts`, and the device only ever evaluates JavaScript.
-
-It was shelved on the grounds that a ~3.3 s cold-boot transpile is cheap and
-readable source on the device is a feature. That reasoning missed the real
+It was left alone on the grounds that a ~3.3 s cold-boot transpile is cheap
+and readable source on the device is a feature. That reasoning missed the real
 cost, which is **memory, not time**: the token array is the largest allocation
-in a render. A 36 KB app tokenizes to 8,989 tokens, and until the fix in this
-area it held three copies at once — a doubling-grown 16,384-slot array, an
-exact-sized return copy, and the processor's own — about **1.4 MB for one app**
-on a 13.3" board with ~2.2 MB of render headroom. That is what stopped the
-E1004 rendering the Weather scene. Even one array is ~430 KB, plus ~1 s of
-CPU per app per render and 80-90 KB of flash for the transpiler itself.
+in a render. A 36 KB app tokenizes to 8,989 tokens, and until #428 it held
+three copies at once — a doubling-grown 16,384-slot array, an exact-sized
+return copy, and the processor's own — about **1.4 MB for one app** on a
+13.3" board with ~2.2 MB of render headroom. That is what stopped the E1004
+rendering the Weather scene. Even one array is ~430 KB, plus ~1 s of CPU per
+app per render and 80-90 KB of flash for the transpiler itself.
 
-- Emit the transpiled module at publish/deploy time and ship it in the scene
-  payload; teach the runtime to prefer it and skip `transpileAppSource`.
-- Keep the on-device transpiler working for one release: scenes already on
-  frames carry only `.ts`, and shipped code keeps working when asked for
-  (`docs/convergence-todo.md`). Delete it once no assigned scene needs it.
-- Decide whether `.ts` still ships alongside for on-device readability, or
-  whether the source map is enough. Shipping both keeps the source bytes but
-  costs no transpile.
-- Both control planes: the self-hosted backend deploy path needs the same
-  step, not just the cloud publish path.
-- `quickts` (parking lot) is the alternative route to the same end — it keeps
-  readable `.ts` on the device instead of moving the work off it. Pick one.
+- **The route being taken is quickts** —
+  <https://github.com/FrameOS/quickts> (built 2026-09-01, upstream QuickJS
+  plus one commit) strips TypeScript at parse time, so apps keep shipping
+  readable `.ts` and both the transpiler pass and the transpiled copy every
+  runtime keeps disappear. Measured: +15.8 KB of code, +4% parse time,
+  against the transpiler's ~4,300 lines, 80–90 KB of flash and up to 1.4 MB
+  of RAM; it parses 1,026 of this repo's 1,027 `.ts`/`.tsx` files and all
+  three Weather apps from source. The FrameOS integration — fetch quickts,
+  set the eval flags in `burrito.nim`, delete the four transpiler files — is
+  in progress on the `worktree-quickts-feasibility` branch (write-up:
+  `docs/quickts.md` there). When it merges this section goes.
+- The fallback if quickts falls through: transpile at publish/deploy time on
+  both control planes (the cloud publish path *and* the self-hosted backend
+  deploy), ship `app.js` beside `app.ts`, teach the runtime to prefer it, and
+  keep the on-device transpiler one release for scenes already on frames.
 
 ---
 
 ## Pre-release manual test sweep
 
 `docs/manual-testing-todo.md` collects every unticked manual checkbox and
-"needs hardware" note from PRs #362–#382, grouped by test bench. Work it
+"needs hardware" note from PRs #362 onward, grouped by test bench. Work it
 before the next release; delete it when empty.
 
 ---
@@ -123,8 +125,12 @@ file's "Current gaps".
 
 ## Open questions (decisions, not code)
 
-- Billing mechanics — Stripe? bundled tiers vs per-service metering? Decide
-  before anything paid ships.
+- Billing — decided 2026-09-01: postpay AI metering plus a three-plan
+  ladder, double-entry ledger, one invoice a month
+  (`cloud/docs/accounting-todo.md` §0). Still open there, and blocking the
+  first invoice: the payment provider (merchant-of-record vs direct PSP,
+  §8.7), which legal entity invoices and from where (§9.3), and the plan
+  numbers (§8.13).
 - `store:publish` human review: always, only for the public store, or
   pre-review for risky (shell-app) scenes? Today it is automated moderation +
   badges + post-moderation only.
@@ -135,10 +141,12 @@ file's "Current gaps".
 - Asset-backup key recovery UX. The answer has to remain "we cannot read your
   photos".
 - One backend link per installation, or per organization/project?
-- Thin-client frames on the cloud (ESP32-C3, embedded Pi/Pico): serving them
-  means the cloud renders every frame for them — free cloud rendering forever,
-  for everyone. Decide before building; until then C3 boards stay out of the
-  cloud flasher.
+- Thin-client frames on the cloud (ESP32-C3, embedded Pi/Pico) — decided
+  2026-09-01: cloud rendering is a paid-plan entitlement, enforced as N
+  frames *and* a minimum refresh interval, none on the free tier
+  (`cloud/docs/accounting-todo.md` §0.2). C3 boards stay out of the cloud
+  flasher until that entitlement is enforced at frame creation — item 3 of
+  `docs/convergence-todo.md`.
 
 ---
 
@@ -199,11 +207,6 @@ Everything else parked:
   The workspace advisory reads device metrics, so a frame too low on internal
   RAM to connect reports nothing and cannot be flagged. A frame already over the
   edge is visible over USB and nowhere else.
-- **quickts: parse TypeScript straight into QuickJS** — strip TS syntax at parse
-  time, so apps ship `.ts` source and both the transpiler pass and the
-  transpiled copy every runtime keeps disappear. The alternative to moving
-  transpilation off the device (section above); it keeps readable source on the
-  frame, at the cost of carrying a patched QuickJS.
 - Fleet features: one cloud account administering many backends (installer /
   digital signage); a cloud-side "all my frames" dashboard.
 - Shared household access: invite a second account to a backend with a role

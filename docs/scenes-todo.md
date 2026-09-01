@@ -3,16 +3,16 @@
 Ideas for practical scenes the store at [scenes.frameos.net](https://scenes.frameos.net) doesn't have yet.
 Focus: glanceable, high-contrast, low-refresh content that plays to e-ink strengths (always-on, no glow, readable in sunlight). Cadence notes assume typical e-ink refresh budgets (Spectra 6 ≈ minutes, faster B/W panels ≈ seconds).
 
-Already covered (don't duplicate): photo slideshows (Google Photos, Immich, SD card, Unsplash, Wikimedia, URL), curated art galleries, monthly calendar, iCal agenda, weather, chart, GitHub stars, XKCD, counter, message board, Chromium screenshot, Ken Burns, RTSP webcam, MiniGPT, OpenAI image, haiku of the hour, bird field journal.
+Already covered (don't duplicate): photo slideshows (Google Photos, Immich, SD card, Unsplash, Wikimedia, URL), curated art galleries, monthly calendar, iCal agenda, weather, chart, GitHub stars, XKCD, counter, message board, Chromium screenshot, Ken Burns, RTSP webcam, MiniGPT, OpenAI image, haiku of the hour, bird field journal, visited world map, DVD logo bounce — plus the ticked items below (in the store since 2026-08-30).
 
 Legend: **S** = simple (one HTTP source + layout), **M** = medium (auth / multiple sources / state), **L** = larger (protocol work, new app, or heavy layout).
 
 ## Clocks & time
 
-- [ ] **Word clock** — "IT IS HALF PAST NINE" in a big letter grid or as typeset text. The classic e-ink build; zero dependencies. Refresh every 5 min. **S**
-- [ ] **Big typographic clock** — huge numerals filling the panel, date beneath. Optional dithered background from the art galleries. Works best on fast-refresh B/W panels (per-minute). **S**
-- [ ] **Analog clock face** — SVG-rendered dial, selectable styles (station clock, minimal, roman). Refresh per minute. **S**
-- [ ] **Year progress / memento mori** — dot grid of the year (or a life calendar in weeks), today highlighted, percentage complete. Refresh daily; the definition of low-power content. **S**
+- [x] **Word clock** (`/s/word-clock`) — "IT IS HALF PAST NINE" in a big letter grid or as typeset text. The classic e-ink build; zero dependencies. Refresh every 5 min. **S**
+- [x] **Big typographic clock** (`/s/big-typographic-clock`) — huge numerals filling the panel, date beneath. Optional dithered background from the art galleries. Works best on fast-refresh B/W panels (per-minute). **S**
+- [x] **Analog clock face** (`/s/analog-clock-face`) — SVG-rendered dial, selectable styles (station clock, minimal, roman). Refresh per minute. **S**
+- [x] **Year progress / memento mori** (`/s/year-progress-memento-mori`) — dot grid of the year (or a life calendar in weeks), today highlighted, percentage complete. Refresh daily; the definition of low-power content. **S**
 - [ ] **Countdown / count-up board** — "142 days until the wedding", "38 days smoke-free". Multiple configurable events, biggest one dominates. Refresh daily. **S**
 - [ ] **Week planner** — 7-column layout of the coming week from an .ics feed; today's column emphasized. Complements the existing monthly Calendar and linear agenda. Refresh hourly. **M**
 
