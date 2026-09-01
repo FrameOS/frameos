@@ -24,9 +24,9 @@ import {
   frameTelemetryLogsScope,
   frameTelemetryMetricsScope,
   isValidEd25519PublicKey,
-  maxFramesPerAccount,
   redeemClaimToken,
 } from "../../../../src/lib/frames";
+import { accountLimits } from "../../../../src/lib/usage";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createEncryptedSecretToken, hashSecret } from "../../../../src/lib/secrets";
 import { reportError } from "../../../../src/lib/log";
@@ -186,7 +186,11 @@ interface EnrollInput {
 // backends/rotate-token uses).
 const rotationGraceWindowSeconds = 5 * 60;
 
-class QuotaExceededError extends Error {}
+class QuotaExceededError extends Error {
+  constructor(readonly maxFrames: number) {
+    super("frame_quota_exceeded");
+  }
+}
 
 async function enrollWithClaimToken(
   db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
@@ -245,11 +249,12 @@ async function enrollWithClaimToken(
         return undefined;
       }
 
-      if (
-        (await countFramesForAccount(tx, token.accountId)) >=
-        maxFramesPerAccount
-      ) {
-        throw new QuotaExceededError();
+      // The plan's frame allowance, not the deployment constant: every
+      // quota reads from accountLimits so the display and the refusal
+      // cannot disagree (§9.2 item 16).
+      const maxFrames = (await accountLimits(tx, token.accountId)).frames;
+      if ((await countFramesForAccount(tx, token.accountId)) >= maxFrames) {
+        throw new QuotaExceededError(maxFrames);
       }
 
       // The claim token's name outranks the device's: the owner typed it at
@@ -320,7 +325,7 @@ async function enrollWithClaimToken(
   } catch (error) {
     if (error instanceof QuotaExceededError) {
       return jsonError("frame_quota_exceeded", 403, {
-        max_frames: maxFramesPerAccount,
+        max_frames: error.maxFrames,
       });
     }
     throw error;
@@ -640,12 +645,10 @@ async function enrollLinkedFrame(
     });
   }
 
-  if (
-    (await countFramesForAccount(db, linkedClient.accountId)) >=
-    maxFramesPerAccount
-  ) {
+  const maxFrames = (await accountLimits(db, linkedClient.accountId)).frames;
+  if ((await countFramesForAccount(db, linkedClient.accountId)) >= maxFrames) {
     return jsonError("frame_quota_exceeded", 403, {
-      max_frames: maxFramesPerAccount,
+      max_frames: maxFrames,
     });
   }
 

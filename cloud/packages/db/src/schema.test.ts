@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   accountIdentities,
   accounts,
+  aiModelPrices,
+  aiUsageRecords,
+  billingPlans,
+  billingSettings,
   connectedBackends,
   consentEvents,
   deviceAuthorizationRequests,
@@ -14,6 +18,8 @@ import {
   ledgerPostings,
   linkedClients,
   auditEvents,
+  subscriptionPeriods,
+  subscriptions,
 } from "./schema";
 
 describe("cloud schema", () => {
@@ -46,6 +52,11 @@ describe("cloud schema", () => {
   // that says whose they were — a provider-cost entry touches no customer
   // account and would otherwise become attributable to nobody. It also keeps
   // the module movable to its own database.
+  //
+  // Every billing table, not just the 0042 six: migration 0045 slipped a
+  // cascading reference from subscriptions to accounts past the first
+  // version of this test, and deleting a subscriber then took a charged
+  // period with it (cloud/docs/accounting-todo.md §9.2 item 4).
   it("points no foreign key out of the ledger", () => {
     const ledgerTables = [
       financialEvents,
@@ -54,6 +65,12 @@ describe("cloud schema", () => {
       ledgerEntries,
       ledgerPostings,
       ledgerBalances,
+      aiModelPrices,
+      aiUsageRecords,
+      billingSettings,
+      billingPlans,
+      subscriptions,
+      subscriptionPeriods,
     ];
     const ledgerTableNames = new Set(
       ledgerTables.map((table) => getTableConfig(table).name),
@@ -67,6 +84,7 @@ describe("cloud schema", () => {
     // The uuid columns are still there — unreferenced, not removed.
     expect(financialEvents.accountId.getSQLType()).toBe("uuid");
     expect(ledgerAccounts.ownerAccountId.getSQLType()).toBe("uuid");
+    expect(subscriptions.accountId.getSQLType()).toBe("uuid");
     expect(accounts.id.getSQLType()).toBe("uuid");
   });
 });

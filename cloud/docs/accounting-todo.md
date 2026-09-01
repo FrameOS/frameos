@@ -5,7 +5,10 @@ Status: written 2026-08-31, **direction revised 2026-09-01** (§0). Phases 0,
 admin/ops surfaces that make it readable, the account's own view of its
 usage with the switch that turns AI off, the daily cap, and plans with their
 subscription lifecycle. **Phase 3b — the payment provider — is the only
-thing left**, and it is what everything else is waiting on. Metering runs in
+thing left**, and it is what everything else is waiting on. §9 is the
+review of 2026-09-01 — one billing bypass, three accounting bugs and a plan
+ladder that did not do what §0.1 says — and §9.5 is what the fix
+(2026-09-02, migration 0046) did about each. Metering runs in
 **shadow mode**: every turn is measured and priced, and no entry is posted.
 Nothing charges anybody, and self-serve plan purchase is gated off
 (`FRAMEOS_CLOUD_PLANS_SELF_SERVE`) for the same reason — subscribing accrues
@@ -82,8 +85,12 @@ they were already free to use. Nothing is gated; the meter just runs slower.
 
 Where the numbers come from, so the next person can move them on purpose:
 
-- **The margins are the user's numbers** (100 / 50 / 20). They are also the
-  whole ladder: at provider cost *c* per month, PAYG bills `2c`, Maker
+- **The margins are the user's numbers** (100 / 50 / 20), and since
+  2026-09-02 the PAYG row's 100% is what an account with no subscription
+  actually pays — one number, read from the plan row by the meter and the
+  page alike (§9.2 item 5; the global `ai_margin_percent` is now only the
+  fallback for a deployment with no plan rows). They are also the whole
+  ladder: at provider cost *c* per month, PAYG bills `2c`, Maker
   `1.99 + 1.5c`, Studio `6.99 + 1.2c`. So **Maker pays for itself at about
   $4/month of provider cost** (≈ $8 of PAYG spend, ≈ 9 turns at today's
   ~$0.44/turn) and **Studio overtakes Maker at about $16.70** (≈ 38 turns).
@@ -416,7 +423,8 @@ CREATE TABLE "billing_settings" (
   "updated_by" uuid                    -- accounts uuid, no foreign key (§2.1)
 );
 
--- Phase 3b: one invoice per account per month (§3.2). Deliberately holds no
+-- Phase 3b (migration 0046 — 0045 went to plans): one invoice per account per
+-- month (§3.2). Deliberately holds no
 -- amount the ledger does not: the receivable IS the balance owed, and a
 -- second copy of it here is a second thing to be wrong. What the row exists
 -- for is the things the ledger has no opinion about — where the period was
@@ -668,7 +676,7 @@ balances, refunds of unspent money, and a "1 credit = $0.01" fake currency
 to explain. §0 judged that a poor trade for a product whose median invoice
 is a few dollars.
 
-### 3.6 Subscriptions (§0.1) — built 2026-09-01 (Phase 5)
+### 3.6 Subscriptions (§0.1) — built 2026-09-01 (Phase 5), corrected 2026-09-02
 
 Under postpay a subscription is *simpler* than the prepaid version this
 section used to model, because there is no balance to charge from. At period
@@ -721,8 +729,13 @@ Entry 'subscription_refund_to_receivable'   (cancel halfway, $1.00 unearned)
   It nets against what they owe rather than becoming cash we have to send —
   under postpay that is usually the entire answer, and it is one more thing
   prepaid would have handed us as a problem. An upgrade mid-period is
-  reverse-and-rebook (§3.3): reverse the remaining deferral at the old
-  price, charge the new one prorated. The cash-refund path
+  reverse-and-rebook (§3.3): refund the unearned remainder of the period
+  pro rata by time, close the period now, open one at the new price from
+  now. A downgrade waits for the rollover (`subscriptions.next_plan_code`):
+  they keep what they are paying for. Recognition at period end earns
+  `price − refunded` (`subscription_periods.refunded_micros`), never the
+  full price over a refund — the deferred-revenue invariant (§6 check 9)
+  is what proves it. The cash-refund path
   (`Dr liability:deferred:subscriptions / Cr liability:refunds_payable`,
   then `Dr liability:refunds_payable / Cr asset:psp:main`) stays on the
   shelf for the case where somebody has already paid and is leaving.
@@ -922,9 +935,10 @@ Shape:
   is actually standing when the thought occurs to them. Turning it off states
   plainly what stops working; turning it back on is one click and audited
   (`recordAuditEvent`) in both directions.
-- **Superadmin side**: the same flag readable on `/admin/billing`, and
-  settable by an operator as the terminal step of dunning (§3.2) — an
-  account that has not paid stops accruing before it stops being a customer.
+- **Superadmin side** (*not built as of 2026-09-01 — §9.3*): the same flag
+  readable on `/admin/billing`, and settable by an operator as the terminal
+  step of dunning (§3.2) — an account that has not paid stops accruing
+  before it stops being a customer.
 
 ### 5.2 "AI usage": a row in the header, a page behind it
 
@@ -1001,8 +1015,9 @@ business carrying a hundred rows.
 ### 5.3 The daily cap
 
 $10/day per account (§0), as `billing_settings.payg_daily_cap_micros` so it
-is a superadmin edit rather than a deploy, with a per-account override
-column for the accounts that eventually need one.
+is a superadmin edit rather than a deploy (the field is on the form since
+2026-09-02), with a per-account override column for the accounts that
+eventually need one (*not built*).
 
 - **Measured** as `SUM(price_micros)` over the account's `ai_usage_records`
   for the current UTC day. Not the ledger: the cap must hold for shadow-mode
@@ -1015,8 +1030,16 @@ column for the accounts that eventually need one.
   case one turn's worth, which is why the cap is $10 and not $10,000.
 - **Refusal**: `jsonError("daily_cap_reached", 402)` with the cap, the
   day's spend and the reset time in the body, rendered by the SPA's AI panel
-  as its own state rather than as a generic error. It resets at midnight
-  UTC and the message says so.
+  as its own state rather than as a generic error (the panel has had the
+  state since 2026-09-02). It resets at midnight UTC and the message says
+  so.
+- **Refused at the cap, stopped at the overdraft.** The gate refuses a new
+  turn once the day's chargeable usage has reached the cap. A turn already
+  running keeps its own tally (`access.budget` from `resolveAiAccess`, priced
+  round by round the way metering will price it) and is aborted once the
+  day would pass `cap + overdraft` — which is what bounds a long tool loop,
+  the thing "one turn's overshoot" never bounded on its own. The nightly
+  check tolerates exactly that much.
 - **`payg_overdraft_micros` keeps its meaning** and loses its old job: it no
   longer guards a prepaid balance going negative (there is no balance), it
   sizes the cap's permitted overshoot.
@@ -1039,9 +1062,12 @@ data by the nightly job, and shown live on `/admin/billing`.
 
 1. **Every entry balances**: per `entry_id` per currency,
    SUM(debit amounts) = SUM(credit amounts).
-2. **Accounting equation**: SUM over all postings, signed by account
-   `normal_side`, per type: assets = liabilities + equity + (revenue −
-   contra − expenses). Globally: total debits = total credits.
+2. **Accounting equation**: assets + expenses + contra-revenue = liabilities
+   + equity + revenue, each account signed by the side its *type* says is
+   normal — and every account's stored `normal_side` agrees with its type.
+   (Summing raw debits against raw credits, which this used to do, is
+   implied by check 1 and catches nothing; the type-side disagreement is
+   the thing double entry cannot catch on its own.)
 3. **Cache is honest**: `ledger_balances` = SUM(postings) per account,
    exactly.
 4. **Events post exactly once**: no `processed_at IS NULL` older than N
@@ -1067,6 +1093,14 @@ data by the nightly job, and shown live on `/admin/billing`.
    negating its target.
 8. **Immutability**: the update/delete triggers exist and fire (tested by
    attempting an UPDATE and expecting the exception).
+9. **Deferred subscription revenue is its periods**
+   (`checkDeferredSubscriptions`): the balance of
+   `liability:deferred:subscriptions` equals Σ(`price − refunded`) over
+   periods charged and not yet recognised. A vanished period row or a
+   recognition that ignored a refund both show up here.
+10. **Prices came from the table** (`checkPricesCameFromTheTable`): no turn
+    in the last day priced off the code fallback. A new model id is an
+    alert the night it first runs, not a 2.5× surprise on an invoice.
 
 Plus Airbnb-style **golden-file lifecycle tests**: scripted scenarios
 asserting the full journal and every balance at each step. The live one
@@ -1182,8 +1216,9 @@ not a one-off hosted checkout (§3.2).
 - [ ] Choose the provider; SDK + env plumbing; webhook endpoint
       `app/api/webhooks/<provider>/route.ts` (signature check, provider
       event id as idempotency key, raw-body handling).
-- [ ] Migration `0045`: `invoices` (period bounds, sequential number, status,
-      provider payment ref) and the stored-payment-method reference. The
+- [ ] Migration `0046` (0045 went to plans): `invoices` (period bounds,
+      sequential number, status, provider payment ref) and the
+      stored-payment-method reference. The
       invoice holds no amount the ledger does not — §3.2 says why.
 - [x] `ai_usage` rule **v2** (done 2026-09-01, ahead of the rest of 3b
       because a subscription accruing on the receivable while metered usage
@@ -1278,13 +1313,18 @@ whole of it is schema, a lifecycle job and three two-leg recipes.
       step is idempotent on its period row, so the nightly job may run twice
       in a night or miss three nights without double-charging anybody or
       losing a period — and a job that has not run for two months opens both
-      months, because both were served.
+      months, because both were served. Never from before the subscription's
+      `started_at`, which a return after a cancellation resets: the months in
+      between were not served (§9.2 item 2, fixed 2026-09-02). The first
+      period opens and charges the moment a plan is taken, not at the next
+      nightly run.
 - [x] Per-plan margin: `accountMarginBasisPoints()` resolves the plan's rate
       and `metering.ts` snapshots it into the record exactly as it always
       snapshotted the global one, so a plan change is never retroactive.
 - [x] Per-plan entitlements: `accountLimits()` in `src/lib/usage.ts`, and
       **every enforcement point moved onto it** — backups, private scenes at
-      all four write paths, the frame-log cull. A display that promises 10 GB
+      all four write paths, the frame-log cull, and (since 2026-09-02) the
+      frame count at enroll and claim-token minting. A display that promises 10 GB
       while the refusal still fires at 100 MB would be worse than having no
       plans at all.
 - [x] Nightly: `runSubscriptionCycle` runs between the usage sweep and the
@@ -1340,9 +1380,10 @@ clients land — which is the product this entitlement exists to unblock.
       net-against-receivable case Phase 5 builds covers most of it).
 - [ ] **Accounting in its own Postgres database** (stated intention,
       2026-08-31). §2.1 already pays the entry price: no ledger table
-      references anything outside the ledger, and a schema test fails if one
-      ever does, so the tables can be dumped and restored elsewhere as a
-      unit. What still has to be answered when it happens: the kernel takes
+      references anything outside the ledger, and a schema test over every
+      billing table fails if one ever does (0045 slipped a cascading FK past
+      the first version of that test; 0046 removed it — §9.2 item 4), so the
+      tables can be dumped and restored elsewhere as a unit. What still has to be answered when it happens: the kernel takes
       a `LedgerExecutor` so callers can post inside *their* transaction
       (§4.1) — two databases means that guarantee is gone for the
       purchase/webhook paths, and they need either an outbox in the product
@@ -1489,3 +1530,386 @@ question that will be asked again.
     product shows is what it costs. Tied to §8.3's allowance question — a
     free monthly allowance makes opt-in-by-default unremarkable, and no
     allowance makes it a decision worth being deliberate about.
+
+---
+
+## 9. Review of what shipped — 2026-09-01
+
+A read of every file in `packages/ledger`, migrations 0042–0045, every
+call site that meters or gates, the admin and account surfaces, the tests
+and the ops units, against this document. Four PRs (#423, #425, #427 and
+#424's absorbed-surface change) landed in two days; this is the pass that
+should have happened between them. Verdict first: **the kernel and the
+money model are right and worth keeping exactly as they are. The layer on
+top of them — gates, plans, subscriptions, the two pages — has one
+exploitable hole, three real accounting bugs, and a plan ladder whose
+numbers do not do what §0.1 says they do.** Nothing here touches a
+customer yet (shadow mode, self-serve off), which is exactly why it is the
+right moment to fix it.
+
+### 9.1 What is good, and why it should not be touched
+
+- **The kernel is the design proving itself.** One writer, idempotent on
+  a key that stands for one fact, balanced per currency inside the
+  transaction, balance rows taken in sorted order, codes canonicalised so a
+  customer cannot be split across casings, and append-only enforced by the
+  database rather than by promise. The tests that matter exist: replay,
+  rollback of an unbalanced draft, concurrent posting to one account, the
+  triggers actually firing, and the books surviving the deletion of the
+  account they bill. Keep all of it.
+- **Events → rules → postings held under pressure twice.** Postpay was a
+  `version: 2` bump on one rule; plans added three two-leg recipes and
+  `rules/ai-usage.ts` still does not know they exist. That is the property
+  §1 promised and it is the reason the fixes below are all small.
+- **Money handling is correct in the places that are usually wrong.**
+  Bigint micro-dollars, prices per million tokens (per-token could not
+  represent a cached gpt-4o-mini token), one rounding step per record,
+  amounts as decimal strings through jsonb, disjoint token counts with one
+  door (`splitProviderUsage`) for the provider's overlapping ones.
+- **Record-before-post plus a sweep** is the right at-least-once shape,
+  and stamping `metering_mode` per row (so flipping to live cannot
+  retroactively bill the shadow period) is the kind of decision that is
+  obvious only after somebody has been bitten by the alternative.
+- **No foreign key out of the ledger**, with the reasoning written down
+  in three places and a test — for the 0042 tables (§9.2 item 4 is about
+  the tables that came after).
+- **Reversal vs reclassification** is a real distinction with an invariant
+  behind it, and the admin journal route refuses to post without a reason.
+- **The nightly job as an endpoint** — one definition of "consistent",
+  report-never-repair, dead-man ping — is the right call for a standalone
+  Next bundle with no tsx.
+- **The document itself.** Every decision carries its reason and its
+  reversal. That is what made this review possible in an afternoon, and
+  it is what makes §9.4's list of places where the doc and the code have
+  drifted a list rather than an archaeology.
+
+### 9.2 Mistakes that need fixing, most serious first
+
+1. **The metered surface is client-controlled, and the surface decides
+   whether a turn is billable.** `app/api/ai/chat/route.ts` gates with the
+   literal `"scene_chat"` but meters `body.surface` verbatim (line 348),
+   which is why the records say `editor` / `frame` / `store` /
+   `store-new` and `/account/ai` needed a second label map. A client that
+   sends `surface: "scene_convert"` gets a turn that `billing()` in
+   `metering.ts` treats as absorbed: `price_micros = 0`, no charge entry
+   once metering is live, zero against the daily cap, and a "free" pill
+   on their own usage page. Today that is a cap bypass; the day
+   `platform` credentials exist it is free AI for anyone who reads the
+   network tab. **Fix:** the record's `surface` is the gate's surface, an
+   enum the server owns; the client's hint becomes a separate `context`
+   (or a key in the pricing snapshot) that nothing prices on. Add the test
+   that sends `scene_convert` from the client and asserts the turn is
+   charged. Then decide what the existing `editor`/`frame`/`store` rows
+   should be called (they are shadow rows, so a one-off `UPDATE` is
+   honest — the metering subledger is not the journal).
+2. **Re-subscribing after a gap bills the gap.** `setAccountPlan` keeps
+   `started_at` on conflict, and `openDuePeriods` starts the next period
+   at the *latest period's end*, catching up "because both months were
+   served" (§7 Phase 5). An account that subscribed to Maker, cancelled,
+   and comes back to Studio six months later gets six Studio periods
+   opened and charged to its receivable the same night — for months it
+   was not subscribed. **Fix:** a subscription's periods may not start
+   before its current `started_at`; on re-subscribe from `canceled` (or a
+   passed `cancel_at`) set `started_at = now` and start from there.
+   Catch-up stays, bounded to the interval the row was actually active
+   for. Test: subscribe → cancel → wait two months → subscribe → exactly
+   one period.
+3. **The cap gate and the cap invariant disagree by one overdraft.**
+   `resolveAiAccess` refuses at `spent >= cap + overdraft` (api-key.ts
+   line 127); `checkDailyCapRespected` tolerates up to `cap + overdraft`.
+   So the effective cap is $11, and a turn legitimately started at $10.99
+   that costs 50¢ is reported as a violation every night. **Fix:** the
+   gate refuses at `spent >= cap`; the overdraft is the invariant's
+   tolerance, as §5.3 already says. Two adjacent things the same fix
+   should absorb: (a) N concurrent turns each pass the gate and can each
+   overshoot — either reserve in flight or accept it and widen the
+   tolerance to a few turns rather than one; (b) a turn's cost is not
+   bounded by the overdraft at all, because a tool loop of many rounds is
+   one turn — the runner needs a per-turn budget (re-check the cap between
+   rounds, or a max-rounds that implies a max cost), or "$1 of overshoot"
+   is a wish rather than a bound.
+4. **Migration 0045 broke the §2.1 rule, and account deletion now leaves
+   the books wrong.** `subscriptions.account_id REFERENCES accounts ON
+   DELETE CASCADE`, and `subscription_periods` cascades from that. Delete
+   a subscriber mid-period: the charged-but-unrecognised period row
+   vanishes, so `liability:deferred:subscriptions` keeps a balance no row
+   accounts for and nothing will ever recognise or refund it; the
+   receivable for that period stays open with no way to net the unearned
+   part against it. The schema test that §7 Phase 6 says would catch this
+   only covers the six 0042 tables — `ai_usage_records`, `billing_settings`,
+   `billing_plans`, `subscriptions` and `subscription_periods` are outside
+   it. **Fix:** plain uuid on `subscriptions.account_id` like everything
+   else; the schema test enumerates every billing table (ideally by
+   name-prefix or a shared marker, so the next table cannot be forgotten);
+   `POST /api/account/delete` closes the subscription out *before* the
+   cascade — refund the unearned remainder to the receivable (§3.6), then
+   leave the receivable to the write-off decision. And an invariant:
+   `liability:deferred:subscriptions` equals the sum of
+   `price_micros` over periods with `charged_at` set and `recognized_at`
+   null, less refunds — today nothing checks that account at all.
+5. **The plan ladder is upside down for every existing account.** An
+   account with no subscription row prices at the *global* margin (30%),
+   deliberately, so that migration 0045 would not double anyone's price
+   overnight — the right instinct. But the PAYG row says 100%, Maker 50%,
+   Studio 20%, so **Maker is a worse AI rate than doing nothing**, and
+   Studio only beats the default by ten points for $6.99. The
+   `/api/account/ai` payload says both at once: `margin_basis_points:
+   3000` next to `plan.margin_basis_points: 10000`, and the page says "You
+   are on the Pay as you go plan" while charging 30%. §0.1's crossover
+   arithmetic (Maker pays for itself at ~$4 of provider cost) assumes a
+   100% baseline that nobody is on. **Fix:** one number for "the margin
+   when you have not chosen a plan" — either the PAYG row *is* the default
+   (retire `ai_margin_percent`, make `accountMarginBasisPoints` fall back
+   to the PAYG row) or the global setting is what PAYG means (seed the
+   row from it). Then re-derive §0.1 from whichever baseline is chosen,
+   because the ladder's whole argument is the spacing between its rungs.
+6. **Plan changes mid-period are not what §3.6 says.** `setAccountPlan`
+   swaps `plan_code` in place: the new margin and entitlements apply
+   immediately, the current period keeps the old price, the new price
+   starts at the next rollover, nothing is prorated and nothing is
+   reversed. Upgrade = the higher tier free until rollover; downgrade =
+   the lower margin immediately while still owing the higher fee. Also:
+   subscribe and cancel before 04:20 and no period is ever opened, so a
+   day of Studio costs nothing (moot while self-serve is off; not moot
+   after). **Fix:** decide the simple rule and implement it in one place —
+   proposal: a downgrade takes effect at the next period (`cancel_at`
+   semantics with a target plan), an upgrade is §3.6's reverse-and-rebook
+   (refund the unearned remainder, open a period at the new price from
+   now). Test both.
+7. **"Absorbed surfaces" exists in three places and they disagree.**
+   `absorbedSurfaces` in metering.ts is `["scene_convert"]`;
+   `checkDailyCapRespected` hardcodes `surface is distinct from
+   'scene_convert'` in SQL; `/account/ai` has its own `freeSurfaces` with
+   `store_classify` and `store_recategorize` added — and those two are
+   *not* absorbed in the ledger. Store classification is metered to the
+   publisher's account on the shared key, so publishing scenes spends
+   the publisher's $10/day cap on a model call they did not ask for, and
+   the moment a `platform` credential reaches `store-publish.ts` it
+   becomes a line on their bill while their page says "free". **Fix:** one
+   exported list; add the two store surfaces to it (the classifier is our
+   moderation cost, the same argument as the converter); integrity.ts
+   takes the list as a parameter; the page imports it. This is the second
+   copy-paste in integrity.ts — the whole chargeable expression is
+   duplicated from account-usage.ts there, the thing that file's header
+   says must not happen. Export the SQL fragment and reuse it.
+8. **`/admin/billing` says "All checks pass" without running the cap
+   check.** The page calls `checkLedgerIntegrity(db, { overdraftMicros })`
+   and never passes `dailyCapMicros`, so invariant 5 silently returns
+   nothing there; only the nightly job runs it. The settings form on the
+   same page has margin, overdraft and mode but no daily-cap field, though
+   §5.3 says the cap is "a superadmin edit rather than a deploy". Fix both.
+9. **The SPA does not know the new refusals.** `SceneAiPanel` handles
+   `missing_api_key` only; `daily_cap_reached` (402) and `ai_disabled`
+   (403) fall through to the generic error, in both the cloud components
+   and the shared frontend. §5.3 claims they render as their own state.
+   Three call sites (scene chat, new-scene chat, app chat) need the two
+   states, with the reset time and the link to the switch.
+10. **`checkDailyCapRespected` scans all of history every night, against
+    today's cap.** It has no date bound, so it grows linearly forever and
+    re-judges last year by this year's setting. Window it (the last 7 days
+    is plenty; the point is to catch a missing gate, not to audit history)
+    and, if the cap ever changes, snapshot the cap into the record's
+    pricing the way the margin already is.
+11. **Two definitions of "what you owe", and only one of them is the
+    invoice.** The page, the header row and the cap all read
+    `ai_usage_records`; the receivable in the ledger is what the month-end
+    run will collect. They agree only while nothing but metered turns
+    exists. A reversal of an `ai_usage_charge` leaves the record untouched
+    (the page still shows it, the cap still counts it); a promo grant, a
+    subscription charge, a refund to receivable, a write-off — none of them
+    reach the page. Under postpay the receivable *is* the bill (§3.2), so
+    before the first invoice the account page has to show the receivable
+    balance (with the subscription fee and any credits as lines), and the
+    usage table is the breakdown beneath it, not the total. Metering rows
+    that were reversed need a mark (`credited_at`, or a join to the
+    reversal) so they stop counting against the cap.
+12. **The lifecycle golden file walks the model the doc rejects.**
+    `lifecycle.integration.test.ts` books a prepaid purchase and a promo
+    grant into `liability:credits*`, then meters turns against the
+    *receivable* — the same customer both owes us and is owed by us,
+    which is exactly "two models in one book" (§7 Phase 3b). §6 also
+    claims a postpay walk through invoice → payment → fee, and those
+    recipes do not exist yet. Split it: a shelf walk for §3.5 (purchase →
+    spend at rule v1 → refund) that only proves the shelved recipes still
+    compile, and the postpay walk that grows as 3b lands.
+13. **Invariant 2 is invariant 1 restated.** `checkAccountingEquation` sums
+    debits and credits across the book, which is guaranteed by every entry
+    balancing. The equation worth checking is *by type*: assets −
+    liabilities − equity − revenue + contra + expenses = 0 with each
+    account signed by its normal side — that is the check that catches an
+    account seeded with the wrong `normal_side`, which nothing catches
+    today.
+14. **Invariant 4's "pending events" half is dead code.** The kernel
+    inserts the event and stamps `processed_at` in the same transaction,
+    so an unstamped event cannot be observed after commit;
+    `findUnpostedEvents` and `financial_events_pending_idx` guard a state
+    that cannot exist. Either delete them or keep them and say in the code
+    that they are a tripwire for a future second writer — not "the
+    sweep's queue", which they are not (the sweep's queue is
+    `ai_usage_records`).
+15. **`dailySummary` calls every expense "provider cost".** It sums
+    `a.type = 'expense'`, so the moment `psp_fee` or `receivable_writeoff`
+    posts, the admin tile labelled "Provider cost" and the margin beside
+    it include fees and bad debt. Sum the `cost_of_revenue` group, or the
+    COGS account, and give fees and write-offs their own lines. (The same
+    function reads `ledger_balances` for the two customer totals while the
+    file's header says nothing in it reads the cache — the header is wrong
+    by one function, and it is fine that it does, but say so.)
+16. **Frame count still ignores the plan.** `accountLimits()` carries
+    `frames`, but `enroll` and `claim-tokens` read `maxFramesPerAccount`
+    directly. Harmless while every plan says 50; false as a claim (§7
+    Phase 5 says every enforcement point moved) and a trap the first time
+    a plan row changes the number.
+17. **An unknown model prices at 2.5× silently.** `resolveModelPrice`
+    falls back to the "unknown" row ($5/$0.5/$30) for any model id not in
+    the table — a dated snapshot id, a rename, a new tier — and the only
+    trace is `priceSource: "fallback"` inside the pricing jsonb. That is
+    the right direction to err in and the wrong way to find out. Add a
+    nightly check: any record in the last day with `priceSource <>
+    'table'` is a violation. And the price table has no admin editor and
+    duplicates `fallbackModelPrices` in code: a provider price change is a
+    SQL insert nobody is reminded to make, in two places.
+18. **The sweep is bounded at 500 rows a night** and stops there; a
+    backlog larger than a night's limit never drains. Loop until the
+    scan comes back empty, or at least alert when `scanned == limit`.
+
+### 9.3 Design changes to make before Phase 3b, in order
+
+- [ ] Fix §9.2 items 1–4 and 7–9 first; they are bugs with tests missing,
+      not decisions. Items 5 and 6 are decisions and small code; 11 is
+      the biggest piece of new work and gates the first invoice.
+- [ ] **Run the Phase 2 gate.** It has been open since 2026-08-31 and is
+      the only thing that would tell us the meter is right: a week of
+      `ai_usage_records` against PostHog `$ai_generation` sums (turn count
+      and token totals) *and* against OpenAI's usage export (§8.2 settles
+      there). It is one query on each side and it has not been run. Write
+      it as a script so it can be re-run on the next model change.
+- [ ] **Which legal entity invoices, and from where.** Not in this
+      document anywhere, and prior to the provider choice: the entity on
+      the invoice, its VAT registration, whether it must number invoices
+      sequentially by law (many EU jurisdictions require gapless
+      sequences — `invoices.number` is designed for that but nothing
+      assigns it), and whether B2C sales to other EU countries trigger
+      OSS. §8.6/§8.7 assume this is answered.
+- [ ] **Subscriptions are billed in advance**, which is normal SaaS and
+      not stored value, but §0's "we invoice for a service already
+      rendered" is only true of metered usage. Say so in §0 and in the
+      invoice copy; the ledger already treats it correctly (deferred
+      until recognised).
+- [ ] **Subscription revenue is recognised only at period end**, so a
+      calendar-month P&L lags by up to a month. Fine at this size; either
+      say so in §3.6 or recognise daily from the nightly job (one more
+      idempotent step per period, `recognized_micros` on the row).
+- [ ] **The cap counts shared-key usage** at the customer's margin. That
+      bounds our exposure, which is its job, but a free-tier user is then
+      "limited" on money they do not owe and the page shows them a dollar
+      figure with "nothing is billed" under it. Either the message for
+      shared-key refusals says "the operator's daily allowance", or the
+      shared key gets its own smaller cap — it is our money either way.
+- [ ] **Operator surfaces are missing.** §5.1's superadmin view of the AI
+      switch, and any way to put an account on a plan other than psql
+      ("an operator moves accounts by hand" has no route). Both are small
+      admin routes plus audit events; both are needed before 3b's dunning
+      step, which ends by throwing the switch.
+- [ ] **The nightly job runs as one person's API token.** If that
+      superadmin revokes the token or is removed, the job dies; the
+      healthchecks ping is optional in the env example. Make the ping
+      mandatory on the production box (verify it is set), and consider a
+      dedicated service account for the token.
+- [ ] Phase 3b's `invoices` migration is **0046**, not 0045 — Phase 5 took
+      that number.
+
+### 9.4 Where this document said something the code did not do
+
+Corrected in place above on 2026-09-02; the list is kept so the next
+reader knows which sentences to distrust when the two drift again:
+
+- §2.1 / §7 Phase 6: "a schema test fails if one ever does" — only for
+  the 0042 tables; 0043 and 0045 tables are not in the test, and 0045 has
+  a cascading FK (§9.2 item 4).
+- §5.1 "Superadmin side" — not built. §5.3 "a per-account override
+  column" — does not exist. §5.3 "rendered by the SPA's AI panel as its
+  own state" — not built (item 9).
+- §5.2's wire shape — the real `ai` block is `{billable_micros,
+  daily_cap_micros, enabled, margin_basis_points, metering_mode,
+  month_micros, own_key_only, previous_month_micros, today_micros,
+  turns_this_month}`; there is no `credential_source` or
+  `month_cost_micros`.
+- §6 golden files — the live one is still the prepaid walk (item 12).
+- §7 Phase 2: "walks a customer from purchase through usage" describes
+  the prepaid model; §7 Phase 5: "every enforcement point moved onto
+  `accountLimits`" — frames did not (item 16).
+- §4 reports.ts "never `ledger_balances`" — `dailySummary` does (item 15).
+- `docs/todo.md` still lists "Billing mechanics — Stripe?" and "free cloud
+  rendering forever" as open; §0.2 here decided the second and this
+  document is the first. Update it.
+
+### 9.5 What the fix did — 2026-09-02, migration 0046
+
+Every §9.2 item, with the decision where one had to be made:
+
+1. **Surface** — the chat route meters the literal `scene_chat`; the
+   client's hint is `ai_usage_records.context` and nothing prices on it.
+   0046 rewrites the shadow rows that carried the hint as their surface.
+   Test: a chat sent with `surface: "scene_convert"` meters as
+   `scene_chat`.
+2. **Gap billing** — periods never start before `started_at`, and a return
+   after a cancellation resets it. Test: cancel, 200 days, return → one
+   period.
+3. **Cap** — the gate refuses at `cap`; a running turn is stopped at
+   `cap + overdraft` by a per-round budget check in the chat route; the
+   nightly check tolerates `cap + overdraft`. Concurrent turns can still
+   each overshoot; accepted as a rare alert at today's volume rather than
+   an in-flight reservation.
+4. **Cascade** — `subscriptions.account_id` is a plain uuid; the schema test
+   covers every billing table; both account-deletion routes call
+   `closeOutSubscriptionForDeletedAccount` first (refund the unearned
+   remainder, close the period, cancel); invariant 9 watches the account.
+5. **Ladder** — *decided:* one number, the plan row's. An account with no
+   subscription prices at the PAYG row (100%, the user's figure), and
+   `ai_margin_percent` is only the fallback for a deployment with no plan
+   rows. Nothing has ever been billed, so this changes shadow-mode display
+   numbers and nothing else. The ledger tests pin the PAYG row to 30% so
+   their worked examples stay readable; one test asserts the seeded 100%.
+6. **Plan changes** — upgrade = prorated refund + close + new period now;
+   downgrade = `next_plan_code`, applied at the rollover (a downgrade to
+   free at the rollover is a cancellation); the first period is opened and
+   charged inside `setAccountPlan`. Both directions have a golden test.
+7. **Absorbed surfaces** — one list in `metering.ts`, now including
+   `store_classify` and `store_recategorize`; the cap check builds its SQL
+   from it; the page imports it. The chargeable SQL is exported from
+   `account-usage.ts` and the invariant reuses it.
+8. **Admin page** — runs the cap check with the real cap; the settings form
+   has the daily-cap field and the margin field is labelled as the
+   fallback it now is.
+9. **SPA** — `SceneAiPanel` renders `ai_disabled` and `daily_cap_reached`
+   (with the reset time) as their own states. The app-chat client in the
+   shared frontend shows the route's `detail` text, which is already the
+   human sentence.
+10. **Cap window** — the nightly check looks at the last 7 days
+    (`capWindowDays`).
+11. **One number owed** — the receivable is shown on `/account/ai` ("Your
+    balance") with the non-turn statement lines under it; a reversed charge
+    stamps `credited_at` on its usage record (`markUsageRecordsCredited`,
+    called by the admin reversal route) and the page and cap stop counting
+    it. Still open: the page's "this month" figure is the metered usage,
+    not the receivable — deliberately, because in shadow mode the
+    receivable is zero and the usage is the honest number.
+12. **Golden files** — split into the postpay walk (turns → reversal +
+    credit → reclassification) and the prepaid shelf walk (manual journals
+    only).
+13. **Invariant 2** — by type, plus a check that every account's
+    `normal_side` matches its type.
+14. **Pending events** — kept, relabelled a tripwire in the kernel.
+15. **Daily summary** — COGS is `expense:cogs:*`; fees and bad debt are
+    their own fields and show beneath the margin tile.
+16. **Frame count** — enroll and claim-tokens read
+    `accountLimits().frames`.
+17. **Unknown model** — invariant 10. No admin price editor yet (§9.3).
+18. **Sweep** — loops in batches until the queue is empty or a batch posts
+    nothing.
+
+Not done here, still §9.3: the Phase 2 comparison against PostHog and the
+provider invoice, the legal-entity/VAT question, the operator surfaces for
+the switch and for plans, the service account for the nightly token, and
+`docs/todo.md`'s two stale lines.

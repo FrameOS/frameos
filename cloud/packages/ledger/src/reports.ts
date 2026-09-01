@@ -13,10 +13,14 @@ import {
 // report table, and no nightly rollup, which is what makes a number on the
 // admin page debuggable by drilling into it rather than by re-deriving it.
 //
-// All of it reads from `ledger_postings` rather than from `ledger_balances`.
-// The cache exists to make the spend gate fast on one account; a report that
-// trusted it would be a report that cannot notice the cache is wrong, and
-// noticing that is invariant 3's whole job.
+// All of it reads from `ledger_postings` rather than from `ledger_balances`,
+// with one exception: the two customer totals in `dailySummary` come off the
+// cache, because summing every customer's postings nightly is the one query
+// here that would not stay cheap. The cache exists to make the spend gate
+// fast on one account; a report that trusted it would be a report that
+// cannot notice the cache is wrong, and noticing that is invariant 3's whole
+// job — which is why the two cached totals sit next to a check that proves
+// the cache every night.
 
 export interface TrialBalanceRow {
   accountCode: string;
@@ -430,6 +434,12 @@ export async function setAccountGroup(
 }
 
 export interface DailySummary {
+  // Invoices we gave up collecting (expense:bad_debt), in the window.
+  badDebtMicros: bigint;
+  // Provider cost of the metered usage — the expense:cogs:* accounts only.
+  // Fees and write-offs are expenses too and used to be summed in here,
+  // which would have made "provider cost" read as fees plus bad debt the
+  // day either first posted (§9.2 item 15).
   cogsMicros: bigint;
   // Promo credit granted in the window. Kept apart from revenue rather than
   // folded into it, because the two move at different times: a grant is
@@ -444,9 +454,12 @@ export interface DailySummary {
   // matters, and a nightly line without it would be a line about a model we
   // no longer sell.
   customerReceivableMicros: bigint;
-  // Revenue net of contra, less cost. The number the business runs on.
+  // Revenue net of contra, less provider cost: gross margin on the product.
+  // Fees and bad debt sit below it, not inside it.
   marginMicros: bigint;
   netRevenueMicros: bigint;
+  // Payment-provider fees (expense:psp_fees), in the window.
+  pspFeesMicros: bigint;
   revenueMicros: bigint;
   since: Date;
   until: Date;
@@ -462,8 +475,10 @@ export async function dailySummary(
   window: { since: Date; until: Date },
 ): Promise<DailySummary> {
   const [row] = await db.execute<{
+    bad_debt: string;
     cogs: string;
     contra: string;
+    psp_fees: string;
     revenue: string;
   }>(sql`
     select
@@ -473,9 +488,15 @@ export async function dailySummary(
       coalesce(sum(case when a.type = 'contra_revenue'
                         then case when p.direction = 'debit' then p.amount_micros else -p.amount_micros end
                         else 0 end), 0)::text as contra,
-      coalesce(sum(case when a.type = 'expense'
+      coalesce(sum(case when a.type = 'expense' and a.code like 'expense:cogs:%'
                         then case when p.direction = 'debit' then p.amount_micros else -p.amount_micros end
-                        else 0 end), 0)::text as cogs
+                        else 0 end), 0)::text as cogs,
+      coalesce(sum(case when a.code = 'expense:psp_fees'
+                        then case when p.direction = 'debit' then p.amount_micros else -p.amount_micros end
+                        else 0 end), 0)::text as psp_fees,
+      coalesce(sum(case when a.code = 'expense:bad_debt'
+                        then case when p.direction = 'debit' then p.amount_micros else -p.amount_micros end
+                        else 0 end), 0)::text as bad_debt
       from ledger_postings p
       join ledger_accounts a on a.id = p.ledger_account_id
       join ledger_entries l on l.id = p.entry_id
@@ -500,12 +521,14 @@ export async function dailySummary(
   const cogsMicros = BigInt(row?.cogs ?? "0");
   const netRevenueMicros = revenueMicros - contraRevenueMicros;
   return {
+    badDebtMicros: BigInt(row?.bad_debt ?? "0"),
     cogsMicros,
     contraRevenueMicros,
     customerLiabilityMicros: BigInt(liability?.owed ?? "0"),
     customerReceivableMicros: BigInt(receivable?.owed ?? "0"),
     marginMicros: netRevenueMicros - cogsMicros,
     netRevenueMicros,
+    pspFeesMicros: BigInt(row?.psp_fees ?? "0"),
     revenueMicros,
     since: window.since,
     until: window.until,

@@ -50,7 +50,12 @@ export default async function AdminBillingPage() {
   };
   const [balance, violations, summary, usage] = await Promise.all([
     trialBalance(db),
-    checkLedgerIntegrity(db, { overdraftMicros: settings.overdraftMicros }),
+    // Every check the nightly job runs, with the same inputs: the page used
+    // to leave the cap out and still say "All checks pass" (§9.2 item 8).
+    checkLedgerIntegrity(db, {
+      dailyCapMicros: settings.dailyCapMicros,
+      overdraftMicros: settings.overdraftMicros,
+    }),
     dailySummary(db, window),
     aiUsageSummary(db, window),
   ]);
@@ -99,6 +104,9 @@ export default async function AdminBillingPage() {
             <div className="stat-tile__value">{formatMicrosUsd(summary.marginMicros)}</div>
             <div className="stat-tile__detail">
               Never stored: net revenue less what the provider charged us.
+              {summary.pspFeesMicros !== 0n || summary.badDebtMicros !== 0n
+                ? ` Below it: ${formatMicrosUsd(summary.pspFeesMicros)} of payment fees and ${formatMicrosUsd(summary.badDebtMicros)} written off.`
+                : null}
             </div>
           </div>
           <div className="stat-tile">
@@ -214,8 +222,10 @@ export default async function AdminBillingPage() {
           <section className="card">
             <p>
               <span className="pill pill-ok">All checks pass</span> Every entry
-              balances, debits equal credits, the balance cache matches the
-              postings, and the append-only triggers are installed.
+              balances, the accounting equation holds, the balance cache
+              matches the postings, no account-day ran past the cap, deferred
+              subscription revenue matches its periods, recent turns priced
+              off the price table, and the append-only triggers are installed.
             </p>
           </section>
         ) : (
@@ -334,6 +344,7 @@ export default async function AdminBillingPage() {
           <BillingSettingsForm
             values={{
               aiMarginPercent: String(settings.marginBasisPoints / 100),
+              dailyCapMicros: settings.dailyCapMicros.toString(),
               meteringMode: settings.meteringMode,
               overdraftMicros: settings.overdraftMicros.toString(),
             }}

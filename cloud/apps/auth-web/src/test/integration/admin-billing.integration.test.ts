@@ -11,6 +11,7 @@ import {
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import {
+  accountAiUsage,
   accountBalanceMicros,
   billingSettingKeys,
   customerCreditsCode,
@@ -19,6 +20,7 @@ import {
   readBillingSettings,
   recordAiUsage,
   systemAccountCodes,
+  utcDayWindow,
   writeBillingSetting,
 } from "@frameos-cloud/ledger";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -276,6 +278,38 @@ describe("admin billing routes", () => {
     );
     expect((await again.json()).replayed).toBe(true);
     expect(await listJournalEntries(db)).toHaveLength(2);
+  });
+
+  // A reversed AI charge is a turn the customer no longer owes for, and the
+  // usage page and the daily cap read the metering subledger, not the
+  // journal — so the route tells it (§9.2 item 11).
+  it("credits the metered turn when its charge is reversed", async () => {
+    const customer = await signIn();
+    await signIn({ superadmin: true });
+    await writeBillingSetting(db, billingSettingKeys.aiMeteringMode, "live");
+    const metered = await recordAiUsage(db, {
+      accountId: customer,
+      credentialSource: "platform",
+      model: "gpt-5.6-terra",
+      rounds: 1,
+      surface: "scene_chat",
+      turnId: "00000000-0000-4000-8000-0000000000f2",
+      usage: { cachedInputTokens: 12_000, inputTokens: 52_000, outputTokens: 30_000 },
+    });
+    const charge = metered.entries.find((entry) => entry.entryType === "ai_usage_charge")!;
+    expect((await accountAiUsage(db, customer, utcDayWindow())).chargeableMicros).toBe(575_120n);
+
+    const reversal = await postJournal(
+      postJson("/api/admin/billing/journal", {
+        accountId: customer,
+        action: "reverse",
+        entryId: charge.id,
+        reason: "Disputed and upheld",
+      }),
+    );
+    expect(reversal.status).toBe(200);
+    expect(await accountBalanceMicros(db, customerReceivableCode(customer))).toBe(0n);
+    expect((await accountAiUsage(db, customer, utcDayWindow())).chargeableMicros).toBe(0n);
   });
 
   it("moves an amount between accounts with a reclassification", async () => {

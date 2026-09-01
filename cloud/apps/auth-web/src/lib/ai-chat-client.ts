@@ -70,12 +70,15 @@ export type AiChatRequest = {
 export class AiChatRequestError extends Error {
   readonly code: string;
   readonly status: number;
+  // When the daily cap refused the turn: the moment today's number resets.
+  readonly resetAt: string | undefined;
 
-  constructor(code: string, status: number, detail?: string) {
+  constructor(code: string, status: number, detail?: string, resetAt?: string) {
     super(detail || code);
     this.name = "AiChatRequestError";
     this.code = code;
     this.status = status;
+    this.resetAt = resetAt;
   }
 }
 
@@ -237,6 +240,7 @@ export async function streamAiChat(
     const payload = (await response.json().catch(() => ({}))) as {
       error?: unknown;
       detail?: unknown;
+      reset_at?: unknown;
     };
     const code =
       typeof payload.error === "string" && payload.error
@@ -248,6 +252,7 @@ export async function streamAiChat(
       code,
       response.status,
       typeof payload.detail === "string" ? payload.detail : undefined,
+      typeof payload.reset_at === "string" ? payload.reset_at : undefined,
     );
   }
 

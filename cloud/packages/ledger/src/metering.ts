@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
-import { aiUsageRecords } from "@frameos-cloud/db";
+import { aiUsageRecords, ledgerEntries } from "@frameos-cloud/db";
 import { postEvent, type PostEventOptions } from "./kernel";
 import { accountMarginBasisPoints } from "./plans";
 import {
@@ -40,8 +40,14 @@ export interface AiUsageInput {
   // applies and which period the revenue lands in.
   occurredAt?: Date | undefined;
   rounds?: number | undefined;
+  // Where in the product the client says the turn came from ("editor",
+  // "frame", "store"). Display only — nothing may price on it, because the
+  // client chooses it. The gate's surface is what decides billing.
+  context?: string | null | undefined;
   // Which product surface spent the tokens: "scene_chat", "app_chat",
-  // "scene_convert", "store_classify", ...
+  // "scene_convert", "store_classify", ... The SERVER's name for the route,
+  // never a value a client sent: an absorbed surface is free and uncapped,
+  // so a client-chosen surface was free AI (§9.2 item 1).
   surface?: string | null | undefined;
   // The turn's id, and the idempotency handle. One row per turn, forever.
   turnId: string;
@@ -89,11 +95,21 @@ export interface RecordAiUsageOptions extends PostEventOptions {
 // Surfaces whose cost the platform absorbs on purpose, whichever of OUR keys
 // paid for it: they book as COGS and are billed to nobody, ever. Scene
 // conversion is here because it is our own migration off the legacy compiled
-// path — we asked people to convert, so we pay for the conversion. Phase 3
-// turns platform-key turns into revenue; an absorbed surface stays a pure
-// cost line through that change, which is the point of naming it here rather
-// than relying on nobody wiring the billable key into that route.
-export const absorbedSurfaces: readonly string[] = ["scene_convert"];
+// path — we asked people to convert, so we pay for the conversion. Store
+// classification (at publish and at recategorize) is our moderation and
+// curation cost: the publisher did not ask for a model call, so it neither
+// bills them nor eats their daily cap. Phase 3 turns platform-key turns into
+// revenue; an absorbed surface stays a pure cost line through that change,
+// which is the point of naming it here rather than relying on nobody wiring
+// the billable key into those routes.
+//
+// THE list. The cap invariant and the account page both read it from here;
+// there used to be three copies and they disagreed (§9.2 item 7).
+export const absorbedSurfaces: readonly string[] = [
+  "scene_convert",
+  "store_classify",
+  "store_recategorize",
+];
 
 export function surfaceIsAbsorbed(surface: string | null | undefined): boolean {
   return typeof surface === "string" && absorbedSurfaces.includes(surface);
@@ -151,6 +167,7 @@ export async function recordAiUsage(
       accountId: input.accountId ?? null,
       cachedInputTokens: usage.cachedInputTokens,
       chatId: input.chatId ?? null,
+      context: input.context ?? null,
       costMicros,
       credentialSource: input.credentialSource,
       currency: priced.currency,
@@ -267,43 +284,86 @@ export interface SweepResult {
 }
 
 // The nightly catch-up: every live billable record whose entries never
-// landed. Bounded per run and oldest first, so a bad night is worked off in
-// order rather than all at once.
+// landed. Oldest first, in batches, until the queue is empty — a backlog
+// bigger than one batch used to be left for tomorrow, and tomorrow's batch
+// was the same size, so it never drained (§9.2 item 18). `maxBatches` is the
+// only bound, and it exists so a record that fails every time cannot spin
+// the job forever: a failed row stays in the queue, so a batch that posted
+// nothing is the signal to stop.
 export async function sweepUnpostedUsage(
   db: LedgerExecutor,
   options: PostEventOptions & {
     limit?: number | undefined;
+    maxBatches?: number | undefined;
     // Grace period: a record written seconds ago may still be mid-post in
     // the request that made it.
     olderThan?: Date | undefined;
   } = {},
 ): Promise<SweepResult> {
   const olderThan = options.olderThan ?? new Date(Date.now() - 5 * 60 * 1000);
-  const rows = await db
-    .select()
-    .from(aiUsageRecords)
-    .where(
-      and(
-        isNull(aiUsageRecords.eventId),
-        eq(aiUsageRecords.meteringMode, "live"),
-        lt(aiUsageRecords.createdAt, olderThan),
-        sql`(${aiUsageRecords.costMicros} > 0 or ${aiUsageRecords.priceMicros} > 0)`,
-      ),
-    )
-    .orderBy(asc(aiUsageRecords.createdAt))
-    .limit(options.limit ?? 500);
+  const limit = options.limit ?? 500;
+  const result: SweepResult = { failures: [], posted: 0, scanned: 0 };
+  for (let batch = 0; batch < (options.maxBatches ?? 50); batch += 1) {
+    const rows = await db
+      .select()
+      .from(aiUsageRecords)
+      .where(
+        and(
+          isNull(aiUsageRecords.eventId),
+          eq(aiUsageRecords.meteringMode, "live"),
+          lt(aiUsageRecords.createdAt, olderThan),
+          sql`(${aiUsageRecords.costMicros} > 0 or ${aiUsageRecords.priceMicros} > 0)`,
+        ),
+      )
+      .orderBy(asc(aiUsageRecords.createdAt))
+      .limit(limit);
+    result.scanned += rows.length;
 
-  const result: SweepResult = { failures: [], posted: 0, scanned: rows.length };
-  for (const row of rows) {
-    try {
-      await postUsageRecord(db, row, options);
-      result.posted += 1;
-    } catch (error) {
-      // One poisonous record must not stop the rest of the night's work.
-      result.failures.push({ error, turnId: row.turnId });
+    let postedThisBatch = 0;
+    for (const row of rows) {
+      try {
+        await postUsageRecord(db, row, options);
+        result.posted += 1;
+        postedThisBatch += 1;
+      } catch (error) {
+        // One poisonous record must not stop the rest of the night's work.
+        result.failures.push({ error, turnId: row.turnId });
+      }
+    }
+    if (rows.length < limit || postedThisBatch === 0) {
+      break;
     }
   }
   return result;
+}
+
+// A reversed charge is a turn the customer no longer owes for. The journal
+// says so (the reversal entry mirrors the charge); this makes the metering
+// subledger say so too, so the account page and the daily cap — which read
+// `ai_usage_records`, not postings, because they must work in shadow mode —
+// stop counting it. Called after the reversal posts; idempotent, and a
+// no-op for any entry that is not an ai_usage_charge.
+export async function markUsageRecordsCredited(
+  db: LedgerExecutor,
+  reversedEntryId: string,
+  at: Date = new Date(),
+): Promise<number> {
+  const [entry] = await db
+    .select({ entryType: ledgerEntries.entryType, eventId: ledgerEntries.eventId })
+    .from(ledgerEntries)
+    .where(eq(ledgerEntries.id, reversedEntryId))
+    .limit(1);
+  if (!entry || entry.entryType !== "ai_usage_charge") {
+    return 0;
+  }
+  const updated = await db
+    .update(aiUsageRecords)
+    .set({ creditedAt: at })
+    .where(
+      and(eq(aiUsageRecords.eventId, entry.eventId), isNull(aiUsageRecords.creditedAt)),
+    )
+    .returning({ id: aiUsageRecords.id });
+  return updated.length;
 }
 
 async function loadRecordByTurn(

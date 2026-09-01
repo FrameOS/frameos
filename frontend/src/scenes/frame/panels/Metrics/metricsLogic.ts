@@ -22,6 +22,8 @@ import { apiFetch } from '../../../../utils/apiFetch'
 import { urls } from '../../../../urls'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { withoutBatteryMisreads, type BatteryCheckedMetrics } from '../../../../utils/batteryMisreads'
+import { prepareChartSeriesByCategory, type ChartSeries } from './chartData'
+import { brushChartPlotWidth, metricChartPlotWidth } from './chartLayout'
 
 export interface metricsLogicProps {
   frameId: FrameId
@@ -133,6 +135,8 @@ const DEFAULT_VISIBLE_MS = 60 * 60 * 1000
 const HEADER_VISIBLE_MS = 60 * 60 * 1000
 const MIN_VISIBLE_MS = 1000
 const CURRENT_TIME_UPDATE_MS = 60 * 1000
+/** Brush drags fire per pointer move; the URL only needs the range they settle on. */
+const TIME_RANGE_HASH_DEBOUNCE_MS = 150
 const GAP_THRESHOLD_MULTIPLIER = 1.75
 const MIN_GAP_CONNECTION_MS = 20 * 60 * 1000
 const LOG_REBOOT_MARKER_DUPLICATE_WINDOW_MS = 5 * 60 * 1000
@@ -907,6 +911,7 @@ export interface metricsLogicValues {
   apiRebootMarkers: RebootMarker[]
   batteryCheckedMetrics: BatteryCheckedMetrics
   batteryMisreadCount: number
+  chartWidth: number
   currentTime: number
   defaultSelectedTimeRange: TimeRange | null
   headerMetricsByCategory: Record<string, MetricSeries[]>
@@ -920,11 +925,13 @@ export interface metricsLogicValues {
   metricsByCategory: Record<string, MetricSeries[]>
   metricsLoading: boolean
   metricsTimeRange: TimeRange | null
+  overviewChartSeriesByCategory: Record<string, ChartSeries[]>
   rebootMarkers: RebootMarker[]
   requestMetricsLoading: boolean
   selectedTimeRange: TimeRange | null
   selectedTimeRangePreset: MetricsTimeRangePreset
   sortedMetrics: MetricsType[]
+  visibleChartSeriesByCategory: Record<string, ChartSeries[]>
   visibleMetricsByCategory: Record<string, MetricSeries[]>
   visibleTimeRange: TimeRange | null
 }
@@ -975,6 +982,9 @@ export interface metricsLogicActions {
   }
   setApiRebootMarkers: (markers: RebootMarker[]) => {
     markers: RebootMarker[]
+  }
+  setChartWidth: (width: number) => {
+    width: number
   }
   setCurrentTime: (currentTime: number) => {
     currentTime: number
@@ -1034,6 +1044,17 @@ export interface metricsLogicMeta {
       hiddenMetricSeries: Record<string, boolean>
     ) => Record<string, MetricSeries[]>
     latestMetricSummariesByCategory: (sortedMetrics: MetricsType[]) => Record<string, string>
+    visibleChartSeriesByCategory: (
+      visibleMetricsByCategory: Record<string, MetricSeries[]>,
+      visibleTimeRange: TimeRange | null,
+      chartWidth: number,
+      metricGapThresholdMs: number | null
+    ) => Record<string, ChartSeries[]>
+    overviewChartSeriesByCategory: (
+      visibleMetricsByCategory: Record<string, MetricSeries[]>,
+      chartWidth: number,
+      metricGapThresholdMs: number | null
+    ) => Record<string, ChartSeries[]>
   }
 }
 
@@ -1051,6 +1072,7 @@ export const metricsLogic = kea<metricsLogicType>([
     setSelectedTimeRangePreset: (preset: MetricsTimeRangePreset) => ({ preset }),
     syncSelectedTimeRangeFromHash: (hash: Record<string, unknown>) => ({ hash }),
     setCurrentTime: (currentTime: number) => ({ currentTime }),
+    setChartWidth: (width: number) => ({ width }),
     toggleMetricSeries: (category: string, seriesKey: string) => ({ category, seriesKey }),
     setApiRebootMarkers: (markers: RebootMarker[]) => ({ markers }),
     requestMetrics: true,
@@ -1126,13 +1148,19 @@ export const metricsLogic = kea<metricsLogicType>([
     selectedTimeRange: [
       null as TimeRange | null,
       {
+        // Whole milliseconds, so the range survives the trip through the URL
+        // hash unchanged and the sync below keeps this object's identity —
+        // every chart selector downstream is memoised on it.
         setSelectedTimeRange: (state, { start, end }) => {
-          const next = normalizeTimeRange(start, end)
+          const next = normalizeTimeRange(Math.round(start), Math.round(end))
           return sameTimeRange(state, next) ? state : next
         },
         resetSelectedTimeRange: () => null,
         setSelectedTimeRangePreset: () => null,
-        syncSelectedTimeRangeFromHash: (_, { hash }) => metricsTimeRangeFromHash(hash)?.timeRange ?? null,
+        syncSelectedTimeRangeFromHash: (state, { hash }) => {
+          const next = metricsTimeRangeFromHash(hash)?.timeRange ?? null
+          return sameTimeRange(state, next) ? state : next
+        },
       },
     ],
     selectedTimeRangePreset: [
@@ -1149,6 +1177,14 @@ export const metricsLogic = kea<metricsLogicType>([
       Date.now(),
       {
         setCurrentTime: (_, { currentTime }) => currentTime,
+      },
+    ],
+    // The metric cards' width in CSS pixels, reported by the panel; it sets
+    // how many points each chart is worth drawing.
+    chartWidth: [
+      0,
+      {
+        setChartWidth: (state, { width }) => (Number.isFinite(width) && width > 0 ? Math.round(width) : state),
       },
     ],
     hiddenMetricSeries: [
@@ -1245,9 +1281,12 @@ export const metricsLogic = kea<metricsLogicType>([
       },
     ],
   })),
-  listeners(({ actions, props }) => ({
-    setSelectedTimeRange: ({ start, end }) => {
-      updateMetricsTimeRangeHash(props.frameId, 'custom', normalizeTimeRange(start, end))
+  listeners(({ actions, props, values }) => ({
+    setSelectedTimeRange: async (_, breakpoint) => {
+      await breakpoint(TIME_RANGE_HASH_DEBOUNCE_MS)
+      if (values.selectedTimeRange) {
+        updateMetricsTimeRangeHash(props.frameId, 'custom', values.selectedTimeRange)
+      }
     },
     resetSelectedTimeRange: () => {
       updateMetricsTimeRangeHash(props.frameId, DEFAULT_TIME_RANGE_PRESET, null)
@@ -1412,6 +1451,42 @@ export const metricsLogic = kea<metricsLogicType>([
       (s) => [s.sortedMetrics],
       (metrics: metricsLogicValues['sortedMetrics']): Record<string, string> =>
         latestMetricSummariesByCategoryFromMetrics(metrics),
+    ],
+    // What each card's main plot draws: the visible window of every series,
+    // cut at gaps and thinned to a couple of points per pixel of plot width.
+    // Computed here, once per change, rather than per card per render — a
+    // brush drag re-runs it per pointer move, and the window slice is a
+    // binary search so that stays cheap however long the history is.
+    visibleChartSeriesByCategory: [
+      (s) => [s.visibleMetricsByCategory, s.visibleTimeRange, s.chartWidth, s.metricGapThresholdMs],
+      (
+        visibleMetricsByCategory: metricsLogicValues['visibleMetricsByCategory'],
+        visibleTimeRange: metricsLogicValues['visibleTimeRange'],
+        chartWidth: metricsLogicValues['chartWidth'],
+        metricGapThresholdMs: metricsLogicValues['metricGapThresholdMs']
+      ): Record<string, ChartSeries[]> =>
+        prepareChartSeriesByCategory(visibleMetricsByCategory, {
+          timeRange: visibleTimeRange,
+          pixelWidth: metricChartPlotWidth(chartWidth),
+          gapThresholdMs: metricGapThresholdMs,
+        }),
+    ],
+    // What the overview strip under each card draws: the whole history at
+    // the strip's own point budget. Independent of the visible window, so
+    // dragging the brush never touches it.
+    overviewChartSeriesByCategory: [
+      (s) => [s.visibleMetricsByCategory, s.chartWidth, s.metricGapThresholdMs],
+      (
+        visibleMetricsByCategory: metricsLogicValues['visibleMetricsByCategory'],
+        chartWidth: metricsLogicValues['chartWidth'],
+        metricGapThresholdMs: metricsLogicValues['metricGapThresholdMs']
+      ): Record<string, ChartSeries[]> =>
+        prepareChartSeriesByCategory(visibleMetricsByCategory, {
+          timeRange: null,
+          pixelWidth: brushChartPlotWidth(chartWidth),
+          gapThresholdMs: metricGapThresholdMs,
+          pointsPerPixel: 1,
+        }),
     ],
   }),
   afterMount(({ actions, cache, props }) => {
