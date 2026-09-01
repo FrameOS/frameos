@@ -599,6 +599,20 @@ jobs:
       - name: Install redis
         run: sudo apt-get -y update && sudo apt-get install -y redis-server
 
+      # The editor's JavaScript validation (tools/js_check.nim, built by the
+      # backend on first use) links the bundled QuickJS, so the prebuilt
+      # library has to be here. Same cache key as the Nim jobs.
+      - name: Cache QuickJS
+        uses: actions/cache@v4
+        with:
+          path: frameos/quickjs
+          key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
+
+      - name: FrameOS QuickJS
+        run: |
+          cd frameos
+          nimble build_quickjs --silent
+
       - name: Cache pip packages
         uses: actions/cache@v4
         with:

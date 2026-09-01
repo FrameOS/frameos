@@ -113,8 +113,9 @@ RUN set -eux; \
 FROM nim-toolchain AS app-builder
 
 ARG FRAMEOS_ARCHIVE_BASE_URL=https://archive.frameos.net
-ARG QUICKJS_VERSION=2026-06-04
-ARG QUICKJS_SHA256=b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a
+# quickts: QuickJS plus native TypeScript/JSX (github.com/FrameOS/quickts)
+ARG QUICKJS_VERSION=2026-06-04-quickts.1
+ARG QUICKJS_SHA256=94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f
 # emscripten, for the wasm live-preview bundle served by the frontend
 ARG EMSCRIPTEN_VERSION=6.0.2
 
@@ -173,6 +174,7 @@ RUN set -eux; \
     for quickjs_file in \
       LICENSE VERSION \
       quickjs.c dtoa.c libregexp.c libunicode.c cutils.c \
+      quickts.h quickts_enum.h quickts_jsx.h \
       quickjs.h quickjs-libc.h cutils.h list.h dtoa.h libregexp.h libregexp-opcode.h libunicode.h libunicode-table.h quickjs-atom.h quickjs-opcode.h; \
     do \
       cp -a "${quickjs_source_root}/${quickjs_file}" "/app/frameos/quickjs/${quickjs_file}"; \
@@ -259,13 +261,14 @@ RUN find /app/frameos -path '*/tests' -type d -prune -exec rm -rf {} + \
       /app/frameos/remote/build \
       /app/frameos/remote/tmp
 
+# The editor's JavaScript validation links the same QuickJS the frames run.
 WORKDIR /app/frameos
-RUN nim c \
-      --nimCache:/tmp/frameos-native-js-transpile-nimcache \
-      --out:/app/frameos/build/native_js_transpile \
-      tools/native_js_transpile.nim \
-    && test -x /app/frameos/build/native_js_transpile \
-    && rm -rf /tmp/frameos-native-js-transpile-nimcache
+RUN nim c -d:release --hints:off \
+      --nimCache:/tmp/frameos-js-check-nimcache \
+      --out:/app/frameos/build/js_check \
+      tools/js_check.nim \
+    && test -x /app/frameos/build/js_check \
+    && rm -rf /tmp/frameos-js-check-nimcache
 
 FROM esp-idf-toolchain AS esp32-ci
 
@@ -314,7 +317,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV VIRTUAL_ENV=/app/backend/.venv
-ENV FRAMEOS_NATIVE_JS_TRANSPILE=/app/frameos/build/native_js_transpile
+ENV FRAMEOS_JS_CHECK=/app/frameos/build/js_check
 ENV IDF_PATH=/opt/esp/esp-idf
 ENV IDF_TOOLS_PATH=/opt/esp/idf-tools
 ENV PATH="/opt/nim/bin:${VIRTUAL_ENV}/bin:${PATH}"

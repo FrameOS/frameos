@@ -6,10 +6,12 @@ runtime. It covers two related paths:
 - Scene snippets and code nodes, compiled by `runtime.nim`.
 - Repository JavaScript apps, compiled and hosted by `app_runtime.nim`.
 
-Both paths end by passing JavaScript directly to the bundled QuickJS engine. The
-native transpiler therefore only removes or rewrites syntax that QuickJS cannot
-run in the form FrameOS receives it. Modern JavaScript that the bundled QuickJS
-accepts should pass through unchanged.
+Both paths hand the source straight to the bundled QuickJS engine. That engine
+is [quickts](https://github.com/FrameOS/quickts): upstream QuickJS plus native
+TypeScript erasure and JSX lowering, switched on per eval with
+`JS_EVAL_FLAG_TYPESCRIPT` / `JS_EVAL_FLAG_JSX` (`burrito.quicktsFlagsFor`).
+Nothing in this directory transforms source text any more; the only generated
+JavaScript is the envelope a snippet is wrapped in.
 
 ## File Origins and Licenses
 
@@ -28,43 +30,20 @@ from Burrito under MIT and modified locally. The file-level lineage is below.
   calls, handles image references, and converts JS return values back to
   FrameOS values.
 - `source_map.nim` is FrameOS code. It is not a standard source-map generator.
-  It stores a compact generated line/column table that is enough to rewrite
-  QuickJS compile/runtime error locations back to the original app or snippet
-  source.
+  It stores a compact generated line/column table for the snippet envelope,
+  enough to rewrite a QuickJS error location back to the snippet's own line.
 
-### Native Sucrase-Compatible Port
+### The transpiler that used to be here
 
-- `tokens.nim`, `parser.nim`, `token_processor.nim`, and `transpiler.nim` are
-  FrameOS code written as a native Nim reimplementation of the subset of
-  Sucrase needed by FrameOS.
-- The public shape intentionally mirrors Sucrase concepts such as
-  `TransformOptions`, `TransformResult`, token labels, parser annotations, and
-  `TokenProcessor`-style rewriting so behavior can be compared against
-  upstream Sucrase.
-- The implementation is not a vendored copy of Sucrase. It is a compatibility
-  slice designed for single-file FrameOS apps/snippets and for the QuickJS
-  execution target.
-
-Sucrase attribution:
-
-- Upstream project: https://github.com/alangpierce/sucrase
-- Version used for parity and dependency reference: `3.35.1` from
-  `frameos/frontend/package.json` and `pnpm-lock.yaml`.
-- License: MIT.
-- Copyright notice used by Sucrase: `Copyright (c) 2012-2018 various
-  contributors (see AUTHORS)`.
-- Primary author/project maintainer attribution: Alan Pierce and Sucrase
-  contributors.
-- Sucrase also credits Babel/Babylon and Acorn ancestry. Babel/Babylon and
-  Acorn contributors should be preserved in attribution when copying concepts
-  from those parser layers through Sucrase.
-
-The native port started from the runtime need to remove the QuickJS-hosted
-Sucrase compiler bundle from devices. During development, upstream-style
-fixtures were checked against npm Sucrase through
-`tools/tests/test_native_js_transpiler_parity.py`, while the native CLI in
-`tools/native_js_transpile.nim` exposed `script`, `module`, `tokens`, and
-`parse` modes for parity tests and diagnostics.
+Until September 2026 this directory carried a native Nim port of the subset
+of Sucrase FrameOS needed (`tokens.nim`, `parser.nim`, `token_processor.nim`,
+`transpiler.nim`, ~4,300 lines): TypeScript erasure, JSX lowering and a
+CommonJS rewrite, run on the device for every app on every render. Its token
+array reached 1.4 MB for the 36 KB Weather app, which is what stopped a 13.3"
+ESP32 frame rendering that scene. It was replaced by quickts, which does the
+same work inside the QuickJS parser for +16 KB of code and no extra memory
+(`docs/quickts.md`). The parity harness and the `native_js_transpile` CLI went
+with it; `tools/js_check.nim` is what validates sources now.
 
 ### QuickJS and Burrito
 
@@ -75,7 +54,7 @@ runtime stack:
   https://github.com/tapsterbot/burrito/blob/main/src/burrito/qjs.nim and then
   adjusted for FrameOS build/runtime needs. Burrito is MIT licensed with
   copyright attribution to Tapster Robotics, Inc.
-- QuickJS is downloaded/built by `frameos.nimble` as `quickjs-2026-06-04`.
+- QuickJS is [quickts](https://github.com/FrameOS/quickts) (upstream plus native TypeScript/JSX parsing), downloaded/built by `frameos.nimble` as `quickjs-2026-06-04-quickts.1`.
   QuickJS is MIT licensed with copyright attribution to Fabrice Bellard and
   Charlie Gordon.
 
@@ -107,8 +86,8 @@ uses QuickJS only to execute the resulting JavaScript.
 
 `app_runtime.nim` handles repo JavaScript apps:
 
-- Builds a CommonJS-style module wrapper around app source.
-- Runs the native module transform before loading the wrapper into QuickJS.
+- Evaluates the app's main file as a real ES module, TypeScript and JSX
+  included, and publishes its namespace to the prelude.
 - Exposes a `frameos` API object to JS apps, including logging, state updates,
   image operations, sleep scheduling, HTTP helpers, and context access:
   - `fetchText(url)` / `fetchJson(url)`: bounded GET requests.
@@ -138,7 +117,8 @@ uses QuickJS only to execute the resulting JavaScript.
 - Calls exported app lifecycle functions such as `init` and `get`.
 - Tracks persistent and transient image references so overwritten dynamic image
   fields can be released.
-- Maps app runtime errors through the same compact source-location mechanism.
+- Leaves error locations alone: with no generated source there is nothing to
+  map, and QuickJS already names the app's own file and line.
 
 ## Module Loading
 
@@ -153,100 +133,61 @@ runtime (`burrito.setModuleLoader`):
   `.ts/.tsx/.js/.jsx/.json`, then `./x.js` → `x.ts`). Canonical names are
   what QuickJS keys loaded modules by, so a file evaluates once however many
   importers spell its path differently.
-- `jsAppModuleLoader` transpiles a script file (TypeScript erased, JSX only for
-  `.tsx`/`.jsx`) and compiles it with `JS_EVAL_FLAG_COMPILE_ONLY`; a `.json`
-  file becomes a synthetic C module whose default export is the parsed value.
-  Transpiled output is kept per file, like the main module's, so an evicted
-  and re-created interpreter does not transpile again.
+- `jsAppModuleLoader` compiles a script file straight from the scene JSON
+  with `JS_EVAL_FLAG_COMPILE_ONLY` and the flags its extension implies
+  (`quicktsFlagsFor`); a `.json` file becomes a synthetic C module whose
+  default export is the parsed value. Nothing is copied or kept per file.
 - Bare specifiers and files the app does not have fail with a ReferenceError
   that says so; compile and JSON errors are re-thrown with the file name and
   position in the message.
-- Every loaded file registers its own lazy line map under its file name, so
-  runtime stacks read `util.ts:5:3` in source lines. `rewriteQuickJsLocations`
-  matches names at path boundaries only (`util.ts:` never matches inside
-  `lib/util.ts:`).
+- Runtime stacks read `util.ts:5:3` in the file's own lines, because that is
+  the text QuickJS parsed.
 
 There is no package registry, no `require()`, and no dynamic `import()` (the
 app runtime is synchronous and does not pump the job queue).
 
-## Native Transpiler Policy
+## What QuickJS parses
 
-The native transpiler is intentionally smaller than Sucrase. It should support
-the TypeScript/JSX/module syntax that FrameOS users paste into single-file apps
-or snippets, then preserve the rest for QuickJS.
+quickts handles TypeScript erasure (annotations, `interface`/`type`/`declare`,
+generics, `as`/`satisfies`/`!`, class modifiers, overload signatures, type-only
+imports), lowers enums, constructor parameter properties and JSX to bytecode,
+and leaves everything else to the ordinary parser. The supported and
+unsupported lists, and the tests behind them, live in the quickts README.
 
-The current transform set is:
+`quicktsFlagsFor(filename)` decides what a source gets: `.js`/`.mjs`/`.cjs`
+nothing, `.jsx` JSX only, everything else both passes — a scene app's main
+file has always had both run over it whatever it was called. Code nodes and
+inline expressions always get both (`runtime.snippetEvalFlags`).
 
-- TypeScript erasure for common annotations, type-only declarations/imports
-  (including inline `import { a, type B }` specifiers),
-  interfaces, type aliases, assertions, `satisfies`, non-null assertions,
-  modifiers, overloads, `declare`, abstract members, generics, constructor
-  parameter properties, and enums.
-- JSX lowering to the FrameOS classic runtime:
-  `__frameosJsx(type, props, ...children)` and `__frameosFragment`.
-- Module rewriting for app modules into the CommonJS-style `exports` object
-  expected by the app wrapper.
-- Modern ES preservation for syntax accepted by bundled QuickJS, including
-  optional chaining, nullish coalescing, numeric separators, optional catch
-  binding, regex literals, class fields, private fields, BigInt, and logical
-  assignment.
-
-The current non-goals are:
-
-- Full Babel/Sucrase parser parity.
-- React automatic JSX runtime or development metadata.
-- Babel/Sucrase interop helpers unless FrameOS runtime behavior needs them.
-- Lowering JavaScript that QuickJS already runs natively.
-- Standard `.map` source-map file generation. Runtime diagnostics only need the
-  compact line/column table in `source_map.nim`.
-
-Backend/editor validation still uses npm Sucrase from `frameos/frontend` for
-user-facing diagnostics. The device runtime no longer needs a vendored Sucrase
-compiler bundle.
+The JSX factory is the FrameOS classic runtime the prelude defines:
+`__frameosJsx(type, props, ...children)` and `__frameosFragment`.
 
 ## Source Locations
 
-Transpiled code is passed directly to QuickJS, so there is no consumer for a
-separate source-map file during normal execution. Instead, transform functions
-return a `SourceLineMap` alongside generated code.
-
-The map records:
-
-- Generated filename and original source filename.
-- Generated line to original source line.
-- Sparse generated line/column segments to original source line/column.
-
-Runtime wrappers compose their wrapper map with the transpiler map and register
-the result per QuickJS context. When QuickJS returns an error stack containing
-`filename:line:column`, `rewriteQuickJsLocations` rewrites it to the original
-source location before it is logged.
-
-This is deliberately compact: it gives better compile/runtime error positions
-without carrying a full source-map artifact through the runtime.
+App sources are parsed as-is, so a QuickJS location in an app is already a
+source location. The one place FrameOS still generates JavaScript is the
+envelope `buildEnvelopeFunctionWithMap` wraps around a snippet; it records a
+`SourceLineMap` for that wrapper and registers it per context, and
+`rewriteQuickJsLocations` rewrites `filename:line:column` in error text back
+to the snippet's lines before it is logged.
 
 ## Test Coverage
 
 Focused tests for this directory live in:
 
-- `src/frameos/js_runtime/tests/test_js_tokens.nim`
-- `src/frameos/js_runtime/tests/test_js_parser_processor.nim`
-- `src/frameos/js_runtime/tests/test_js_transpiler.nim`
 - `src/frameos/js_runtime/tests/test_js_runtime_helpers.nim`
 - `src/frameos/js_runtime/tests/test_js_app_runtime.nim`
 - `src/frameos/js_runtime/tests/test_scene_runtime_cleanup.nim`
-- `tools/tests/test_native_js_transpiler_parity.py`
+- `src/frameos/js_runtime/tests/test_source_map_lines.nim`
 
-The parity harness compares selected native output or runtime behavior against
-npm Sucrase. Prefer adding a focused fixture there when changing tokenizer,
-parser, TypeScript, JSX, or module behavior.
+TypeScript and JSX parsing itself is tested in the quickts repository
+(`make test-quickts` there). Add a case there when a construct fails to parse.
 
 ## Maintenance Notes
 
-- Add transforms only for syntax QuickJS cannot execute or for TypeScript/JSX
-  syntax that must be erased before QuickJS sees it.
-- Keep runtime errors mapped back to original app/snippet source. If a transform
-  moves user code across lines or columns, update the compact source map.
+- Syntax QuickJS cannot parse is a quickts change, not a FrameOS one; bump the
+  pinned `quickjs-<version>` everywhere `frameos.nimble` lists.
+- Keep snippet errors mapped back to snippet lines: if the envelope changes
+  shape, update the map `buildEnvelopeFunctionWithMap` builds.
 - Keep source attribution in this README if code is copied or closely ported
   from an upstream project.
-- Keep npm Sucrase available for backend/editor diagnostics unless native
-  diagnostics become good enough for that user-facing path.

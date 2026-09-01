@@ -732,9 +732,10 @@ suite "js app source handling":
     check value.kind == fkImage
     check value.asImage().width == 4
 
-  test "JSX in a .ts source still works, via the retry":
-    # TypeScript would reject this, and the JSX pass is skipped for .ts — but
-    # apps written before that gate existed must keep working.
+  test "JSX in a .ts source still works":
+    # TypeScript would reject this, but apps written before the extension
+    # mattered must keep working; quicktsFlagsFor gives every non-.js source
+    # both passes, so there is no retry to get wrong.
     let config = testConfig()
     let scene = FrameScene(id: "tests/js-legacy".SceneId, frameConfig: config, state: %*{},
                            logger: testLogger(config))
@@ -745,17 +746,14 @@ suite "js app source handling":
       category = "data", outputType = "image",
       source = """export const get = () => <image width={5} height={2} color="#445566" />""",
       sourceName = "app.ts")
-    check runtime.allowJsx == false
     let value = runtime.get(owner, %*{}, context)
     check value.kind == fkImage
     check value.asImage().width == 5
-    check runtime.allowJsx == true  # the retry stuck, so later renders skip it
 
-  test "a runtime error still names the original source line":
-    # The map is no longer built up front, so the error path has to build it —
-    # and it has to be a real map, not identity. The interface below is erased,
-    # so the failing call sits on a different line in the generated code (3)
-    # than in what the author wrote (7).
+  test "a runtime error names the original source line":
+    # There is no generated code any more: QuickJS parses the TypeScript, so
+    # the interface below costs nothing and the stack names the line the
+    # author wrote (7), with no map involved.
     let config = testConfig()
     var logged: seq[JsonNode] = @[]
     var logger = Logger(frameConfig: config, enabled: true)
@@ -786,7 +784,7 @@ export const get = () => helper()""",
         stack = entry{"stack"}.getStr()
     check logged.len > 0
     check stack.len > 0
-    # helper's body is line 7 of the source; without the map it would be 3.
+    # helper's body is line 7 of the source
     check ":7:" in stack
 
   test "export default still resolves through the module namespace":

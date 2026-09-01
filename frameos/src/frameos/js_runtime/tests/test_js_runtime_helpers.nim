@@ -79,25 +79,6 @@ suite "js runtime helper seams":
     check coerced.kind == fkInteger
     check coerced.asInt() == 12
 
-  test "transpileSource removes types and lowers jsx":
-    let transpiled = transpileSourceForTest(
-      """
-function demo(input: number) {
-  return <card active={input > 0}>{input as number}</card>;
-}
-"""
-    )
-    check "input: number" notin transpiled
-    check "__frameosJsx(" in transpiled
-    cleanupCompilerJs()
-
-  test "transpileSource does not initialize a scene runtime":
-    var scene = testScene()
-    discard transpileSourceForTest("const answer: number = 42;")
-    check scene.jsReady == false
-    check scene.js.context == nil
-    cleanupCompilerJs()
-
   test "evalSnippet runs typescript and jsx through quickjs":
     var scene = testScene()
     let value = evalSnippet(

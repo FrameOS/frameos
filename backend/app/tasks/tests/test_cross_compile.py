@@ -135,7 +135,7 @@ def test_cross_compiler_bakes_target_cross_packages_into_amd64_toolchain_image(
 @pytest.mark.parametrize(
     ("component", "version"),
     [
-        ("quickjs", "2026-06-04"),
+        ("quickjs", "2026-06-04-quickts.1"),
     ],
 )
 async def test_ensure_prebuilt_component_refreshes_incomplete_cached_artifacts(
@@ -170,8 +170,8 @@ async def test_ensure_prebuilt_component_refreshes_incomplete_cached_artifacts(
 
 @pytest.mark.asyncio
 async def test_ensure_prebuilt_component_rejects_invalid_download(tmp_path, monkeypatch: pytest.MonkeyPatch):
-    compiler = make_cross_compiler(tmp_path, monkeypatch, component="quickjs", version="2026-06-04")
-    dest_dir = compiler.prebuilt_dir / "quickjs-2026-06-04"
+    compiler = make_cross_compiler(tmp_path, monkeypatch, component="quickjs", version="2026-06-04-quickts.1")
+    dest_dir = compiler.prebuilt_dir / "quickjs-2026-06-04-quickts.1"
 
     async def fake_download(_url: str, extract_dir, _expected_md5: str | None) -> None:
         write_component_payload("quickjs", extract_dir, valid=False)
@@ -295,7 +295,7 @@ async def test_quickjs_preparation_is_quiet_on_success(tmp_path, monkeypatch: py
         prebuilt_entry=None,
         logger=logger,
     )
-    prebuilt_dir = tmp_path / "prebuilt" / "quickjs-2026-06-04"
+    prebuilt_dir = tmp_path / "prebuilt" / "quickjs-2026-06-04-quickts.1"
     source_dir = tmp_path / "source"
     build_dir = tmp_path / "build"
     prebuilt_dir.mkdir(parents=True)
