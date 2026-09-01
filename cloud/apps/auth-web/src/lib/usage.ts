@@ -16,6 +16,14 @@
 
 import { and, eq, gt, or, sql } from "drizzle-orm";
 import {
+  accountAiUsage,
+  readAccountPlan,
+  readBillingSettings,
+  utcDayWindow,
+  utcMonthWindow,
+  type AccountPlan,
+} from "@frameos-cloud/ledger";
+import {
   clientBackups,
   frameLogs,
   frames,
@@ -75,6 +83,96 @@ export const maxFrameLogBytesPerAccount = megabyteLimitFromEnv(
   "FRAMEOS_CLOUD_MAX_FRAME_LOG_MB",
   100,
 );
+
+/**
+ * The quota numbers that apply to ONE account: its plan's entitlements
+ * (cloud/docs/accounting-todo.md §0.1), falling back to the free-tier
+ * constants above for a deployment with no plans seeded.
+ *
+ * Every enforcement point takes its limit from here rather than from the
+ * constants, because a display that promises 10 GB while the refusal fires
+ * at 100 MB is worse than having no plans at all. The constants stay
+ * exported as the free tier and the fallback — the numbers migration 0045
+ * seeds for `payg` are deliberately identical to them, so nothing an
+ * existing account has today gets smaller the day plans land.
+ */
+export interface AccountLimits {
+  backupBytes: number;
+  // Frames the cloud renders because there is no computer at the other end
+  // (§0.2). Zero on the free plan: it is the one entitlement with a real
+  // marginal cost.
+  cloudRenderedFrames: number;
+  frameLogBytes: number;
+  frames: number;
+  plan: {
+    code: string;
+    marginBasisPoints: number;
+    name: string;
+    priceMicros: bigint;
+  };
+  privateSceneBytes: number;
+  subscribed: boolean;
+}
+
+export const freeTierLimits: Omit<AccountLimits, "plan" | "subscribed"> = {
+  backupBytes: maxBackupBytesPerAccount,
+  cloudRenderedFrames: 0,
+  frameLogBytes: maxFrameLogBytesPerAccount,
+  frames: maxFramesPerAccount,
+  privateSceneBytes: maxPrivateSceneBytesPerAccount,
+};
+
+export async function accountLimits(
+  db: FramesDatabase,
+  accountId: string,
+  // The caller's already-read plan, when it has one. accountUsage() reads it
+  // once and hands it to both consumers rather than paying for the same
+  // lookup twice on a page that renders one account.
+  known?: AccountPlan | undefined,
+): Promise<AccountLimits> {
+  let accountPlan: AccountPlan | undefined = known;
+  try {
+    accountPlan ??= await readAccountPlan(db, accountId);
+  } catch {
+    // A deployment whose plan tables have not been migrated yet must keep
+    // enforcing the free tier rather than failing every quota check. The
+    // fallback is the same numbers, so nothing changes for anyone.
+    accountPlan = undefined;
+  }
+  if (!accountPlan) {
+    return {
+      ...freeTierLimits,
+      plan: {
+        code: "payg",
+        marginBasisPoints: 10_000,
+        name: "Pay as you go",
+        priceMicros: 0n,
+      },
+      subscribed: false,
+    };
+  }
+  const { entitlements } = accountPlan.plan;
+  return {
+    // The larger of the plan and the deployment's configured floor: an
+    // operator who raised FRAMEOS_CLOUD_MAX_BACKUP_MB for everybody must not
+    // have it silently lowered by a plan row.
+    backupBytes: Math.max(entitlements.backupBytes, maxBackupBytesPerAccount),
+    cloudRenderedFrames: entitlements.cloudRenderedFrames,
+    frameLogBytes: Math.max(entitlements.frameLogBytes, maxFrameLogBytesPerAccount),
+    frames: Math.max(entitlements.frames, maxFramesPerAccount),
+    plan: {
+      code: accountPlan.plan.code,
+      marginBasisPoints: accountPlan.plan.marginBasisPoints,
+      name: accountPlan.plan.name,
+      priceMicros: accountPlan.plan.priceMicros,
+    },
+    privateSceneBytes: Math.max(
+      entitlements.privateSceneBytes,
+      maxPrivateSceneBytesPerAccount,
+    ),
+    subscribed: accountPlan.subscribed,
+  };
+}
 
 export interface SceneBytesBreakdown {
   privateBytes: number;
@@ -221,16 +319,23 @@ export async function frameLogBytesForAccount(
  * third-party reimplementations.
  */
 export async function accountUsage(db: FramesDatabase, accountId: string) {
-  const [scenes, backups, logs, frameCount] = await Promise.all([
+  const now = new Date();
+  // One plan lookup for both the quota limits and the AI summary; `undefined`
+  // when the accounting tables are not migrated, which both handle.
+  const plan = await readAccountPlan(db, accountId).catch(() => undefined);
+  const [scenes, backups, logs, frameCount, limits, ai] = await Promise.all([
     sceneBytesForAccount(db, accountId),
     backupBytesForAccount(db, accountId),
     frameLogBytesForAccount(db, accountId),
     countFramesForAccount(db, accountId),
+    accountLimits(db, accountId, plan),
+    accountAiSummary(db, accountId, now, plan),
   ]);
   return {
+    ai,
     backups: {
       bytes: Math.round(backups),
-      max_bytes: maxBackupBytesPerAccount,
+      max_bytes: limits.backupBytes,
     },
     // Not bytes, but the same shape of promise to the account: here is the
     // limit, here is where you are against it. Revoked frames still hold a
@@ -238,15 +343,27 @@ export async function accountUsage(db: FramesDatabase, accountId: string) {
     // display cannot disagree with the refusal.
     frames: {
       count: frameCount,
-      max_count: maxFramesPerAccount,
+      max_count: limits.frames,
     },
     frame_logs: {
       bytes: Math.round(logs),
-      max_bytes: maxFrameLogBytesPerAccount,
+      max_bytes: limits.frameLogBytes,
+    },
+    // Which plan these limits came from, so a UI can say "on the Maker plan"
+    // beside the numbers rather than presenting them as laws of nature.
+    plan: {
+      code: limits.plan.code,
+      // Basis points, and a string price: the payload crosses the AGPL
+      // boundary to third-party reimplementations, and a micro-dollar amount
+      // is a bigint that JSON's single number type would quietly round.
+      margin_basis_points: limits.plan.marginBasisPoints,
+      name: limits.plan.name,
+      price_micros: limits.plan.priceMicros.toString(),
+      subscribed: limits.subscribed,
     },
     scenes: {
       private_bytes: Math.round(scenes.privateBytes),
-      private_max_bytes: maxPrivateSceneBytesPerAccount,
+      private_max_bytes: limits.privateSceneBytes,
       // Public scenes are free; reported so UIs can say so instead of
       // summing everything into one misleading number.
       public_bytes: Math.round(scenes.publicBytes),
@@ -255,6 +372,65 @@ export async function accountUsage(db: FramesDatabase, accountId: string) {
 }
 
 export type AccountUsage = Awaited<ReturnType<typeof accountUsage>>;
+
+/**
+ * AI spend in the same "here is the limit, here is where you are against it"
+ * shape as every storage bucket (cloud/docs/accounting-todo.md §5.2).
+ *
+ * `month_micros` is what this month WOULD be billed at, not what has been
+ * charged: while `metering_mode` is "shadow" nothing is charged at all, and
+ * `price_micros` is zero on every row — a figure built on it would tell
+ * every user they had used nothing. Any UI must read `metering_mode` before
+ * putting a currency symbol in front of this and calling it a bill.
+ *
+ * Degrades to a disabled-looking zero rather than throwing: a deployment
+ * whose accounting tables have not been migrated must still render an
+ * account page.
+ */
+async function accountAiSummary(
+  db: FramesDatabase,
+  accountId: string,
+  now: Date,
+  known?: AccountPlan | undefined,
+) {
+  try {
+    const [thisMonth, lastMonth, today, settings, plan] = await Promise.all([
+      accountAiUsage(db, accountId, utcMonthWindow(now)),
+      accountAiUsage(db, accountId, utcMonthWindow(now, -1)),
+      accountAiUsage(db, accountId, utcDayWindow(now)),
+      readBillingSettings(db),
+      known ?? readAccountPlan(db, accountId),
+    ]);
+    const [account] = await db.execute<{ ai_disabled_at: string | null }>(
+      sql`select ai_disabled_at from accounts where id = ${accountId}`,
+    );
+    return {
+      daily_cap_micros: settings.dailyCapMicros.toString(),
+      enabled: !account?.ai_disabled_at,
+      margin_basis_points: plan.subscribed
+        ? plan.plan.marginBasisPoints
+        : settings.marginBasisPoints,
+      metering_mode: settings.meteringMode as string,
+      month_micros: thisMonth.chargeableMicros.toString(),
+      own_key_only: thisMonth.ownKeyOnly,
+      previous_month_micros: lastMonth.chargeableMicros.toString(),
+      today_micros: today.chargeableMicros.toString(),
+      turns_this_month: thisMonth.turns,
+    };
+  } catch {
+    return {
+      daily_cap_micros: "0",
+      enabled: true,
+      margin_basis_points: 0,
+      metering_mode: "shadow" as string,
+      month_micros: "0",
+      own_key_only: false,
+      previous_month_micros: "0",
+      today_micros: "0",
+      turns_this_month: 0,
+    };
+  }
+}
 
 /**
  * Cull the OLDEST frame-log rows across the whole account until the total is
@@ -267,6 +443,7 @@ export async function cullFrameLogsOverBudget(
   db: FramesDatabase,
   accountId: string,
 ): Promise<void> {
+  const { frameLogBytes } = await accountLimits(db, accountId);
   await db.execute(sql`
     with ordered as (
       select fl.id,
@@ -277,7 +454,7 @@ export async function cullFrameLogsOverBudget(
     )
     delete from ${frameLogs}
     where id in (
-      select id from ordered where running > ${maxFrameLogBytesPerAccount}
+      select id from ordered where running > ${frameLogBytes}
     )
   `);
 }

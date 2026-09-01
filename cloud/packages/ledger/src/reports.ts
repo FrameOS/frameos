@@ -436,7 +436,14 @@ export interface DailySummary {
   // recognized when it is made, and the revenue it will offset arrives
   // whenever the customer gets round to spending it.
   contraRevenueMicros: bigint;
+  // What we owe customers in prepaid credit. Zero under postpay (§0) and
+  // kept because the shelved prepaid model (§3.5) would fill it again.
   customerLiabilityMicros: bigint;
+  // What customers owe US: the postpay number, and the one the month-end
+  // invoice run collects against. Under postpay this is the balance that
+  // matters, and a nightly line without it would be a line about a model we
+  // no longer sell.
+  customerReceivableMicros: bigint;
   // Revenue net of contra, less cost. The number the business runs on.
   marginMicros: bigint;
   netRevenueMicros: bigint;
@@ -446,9 +453,10 @@ export interface DailySummary {
 }
 
 // The one line the nightly job logs: what the books did today. Revenue and
-// COGS over the window, the margin between them, and the total we currently
-// owe customers in prepaid credit — the number that is a liability rather
-// than money we have earned.
+// COGS over the window, the margin between them, and both customer balances:
+// what customers owe us (postpay's receivable, the number the month-end
+// invoice collects) and what we owe them (prepaid credit, zero under §0 and
+// kept because the shelved model would fill it again).
 export async function dailySummary(
   db: LedgerExecutor,
   window: { since: Date; until: Date },
@@ -480,6 +488,12 @@ export async function dailySummary(
       join ledger_accounts a on a.id = b.ledger_account_id
      where a.code like 'liability:credits%:customer:%'
   `);
+  const [receivable] = await db.execute<{ owed: string }>(sql`
+    select coalesce(sum(b.balance_micros), 0)::text as owed
+      from ledger_balances b
+      join ledger_accounts a on a.id = b.ledger_account_id
+     where a.code like 'asset:receivable:customer:%'
+  `);
 
   const revenueMicros = BigInt(row?.revenue ?? "0");
   const contraRevenueMicros = BigInt(row?.contra ?? "0");
@@ -489,6 +503,7 @@ export async function dailySummary(
     cogsMicros,
     contraRevenueMicros,
     customerLiabilityMicros: BigInt(liability?.owed ?? "0"),
+    customerReceivableMicros: BigInt(receivable?.owed ?? "0"),
     marginMicros: netRevenueMicros - cogsMicros,
     netRevenueMicros,
     revenueMicros,

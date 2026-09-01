@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveAiCredentials } from "../../../../../src/lib/ai/api-key";
+import { aiRefusalResponse } from "../../../../../src/lib/ai/access";
+import { resolveAiAccess } from "../../../../../src/lib/ai/api-key";
 import {
   readAppSources,
   runAppChat,
@@ -76,12 +77,11 @@ export async function POST(request: NextRequest) {
   // key wins, the operator's shared key stands in where the deployment
   // allows it, and the answer says which — so the turn can be metered
   // against whoever actually paid for it.
-  const credentials = await resolveAiCredentials(db, accountId);
-  if (!credentials) {
-    return jsonError("missing_api_key", 400, {
-      detail: "OpenAI backend API key not set",
-    });
+  const access = await resolveAiAccess(db, accountId, { surface: "app_chat" });
+  if (!access.ok) {
+    return aiRefusalResponse(access.refusal);
   }
+  const credentials = access.credentials;
 
   // A frame id the account does not own is dropped rather than refused: the
   // chat is about the app's code, and the frame is only how the panel groups

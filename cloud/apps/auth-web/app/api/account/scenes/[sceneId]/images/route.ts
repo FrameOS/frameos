@@ -11,7 +11,7 @@ import {
 import { registerStoreImage } from "../../../../../../src/lib/store-images";
 import { loadOwnedScene } from "../../../../../../src/lib/store-owner";
 import {
-  maxPrivateSceneBytesPerAccount,
+  accountLimits,
   privateSceneBytesForAccount,
 } from "../../../../../../src/lib/usage";
 
@@ -63,10 +63,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
   // links them; refusing here rather than at Save keeps the draft honest.
   // Public scenes are free (usage.ts).
   if (scene.visibility !== "public") {
-    const privateBytes = await privateSceneBytesForAccount(db, session.accountId!);
-    if (privateBytes + content.length > maxPrivateSceneBytesPerAccount) {
+    const [privateBytes, { privateSceneBytes: maxBytes }] = await Promise.all([
+      privateSceneBytesForAccount(db, session.accountId!),
+      accountLimits(db, session.accountId!),
+    ]);
+    if (privateBytes + content.length > maxBytes) {
       return jsonError("storage_quota_exceeded", 403, {
-        max_bytes: maxPrivateSceneBytesPerAccount,
+        max_bytes: maxBytes,
         private_bytes: Math.round(privateBytes),
       });
     }

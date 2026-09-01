@@ -1,4 +1,4 @@
-import { customerCreditsCode, systemAccountCodes } from "../chart";
+import { customerReceivableCode, systemAccountCodes } from "../chart";
 import { parseMicros } from "../money";
 import {
   LedgerError,
@@ -18,7 +18,7 @@ import {
 // sit between.
 //
 //   Entry 'ai_usage_charge'   (only when the turn is billable)
-//     Dr liability:credits:customer:<id>     the price
+//     Dr asset:receivable:customer:<id>      the price
 //     Cr revenue:ai_usage                    the price
 //
 //   Entry 'ai_usage_cost'     (only when the key was ours)
@@ -30,6 +30,15 @@ import {
 // accounting simple in a way subscriptions are not. The accrued liability is
 // cleared when the provider's invoice is actually paid, and the gap between
 // our accrual and their invoice is exactly what reconciliation measures.
+//
+// **Version 2** (2026-09-01) moved the customer leg from a prepaid liability
+// to a receivable, which is the whole of what §0's postpay decision cost the
+// posting rules. Nobody pre-pays; usage accrues as money owed and one invoice
+// a month collects it, so the charge debits an asset (what they owe us)
+// rather than drawing down a balance they handed us in advance. Everything
+// else — the cost entry, the metadata, the independence of the two entries —
+// is untouched, and v1 stays readable above because a version bump is a
+// promise that old entries still mean what they said.
 //
 // A turn on the customer's own key produces neither entry, which means it
 // produces no event at all — the kernel refuses a rule that builds nothing,
@@ -70,7 +79,7 @@ export const aiUsageRule: PostingRule = {
         occurredAt: event.occurredAt,
         postings: [
           {
-            accountCode: customerCreditsCode(event.accountId),
+            accountCode: customerReceivableCode(event.accountId),
             amountMicros: priceMicros,
             direction: "debit",
           },
@@ -113,7 +122,7 @@ export const aiUsageRule: PostingRule = {
     return entries;
   },
   name: "ai_usage",
-  version: 1,
+  version: 2,
 };
 
 // The pricing snapshot, copied onto both entries: token counts, the unit

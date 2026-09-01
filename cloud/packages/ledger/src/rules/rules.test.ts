@@ -4,6 +4,11 @@ import { manualJournalRule } from "./manual-journal";
 import { reclassificationRule } from "./reclassification";
 import { reversalRule } from "./reversal";
 import {
+  subscriptionChargeRule,
+  subscriptionRecognitionRule,
+  subscriptionRefundRule,
+} from "./subscription";
+import {
   LedgerError,
   type FinancialEventRecord,
   type PostedEntry,
@@ -192,7 +197,7 @@ describe("ai usage rule", () => {
     ]);
     expect(entries[0]?.postings).toEqual([
       {
-        accountCode: `liability:credits:customer:${customerId}`,
+        accountCode: `asset:receivable:customer:${customerId}`,
         amountMicros: 575_120n,
         direction: "debit",
       },
@@ -286,5 +291,120 @@ describe("reclassification rule", () => {
         context({ loadEntry: async () => undefined }),
       ),
     ).rejects.toThrow(/does not exist/);
+  });
+});
+
+describe("subscription rules", () => {
+  const period = {
+    marginBasisPoints: 5_000,
+    periodEnd: "2026-10-01T00:00:00.000Z",
+    periodId: "55555555-5555-5555-5555-555555555555",
+    periodStart: "2026-09-01T00:00:00.000Z",
+    planCode: "maker",
+    planName: "Maker",
+    priceMicros: "1990000",
+  };
+  const subscriptionEvent = (overrides: Record<string, unknown> = {}) => ({
+    ...event({ ...period, ...overrides }),
+    accountId: customerId,
+  });
+
+  // The charge accrues on the RECEIVABLE, not on a prepaid balance: under
+  // postpay a subscription is one more thing the month-end invoice collects
+  // off the same account as the metered usage.
+  it("accrues the charge against the customer's receivable", async () => {
+    const [entry] = await subscriptionChargeRule.build(
+      subscriptionEvent(),
+      context(),
+    );
+    expect(entry?.entryType).toBe("subscription_charge");
+    expect(entry?.postings).toEqual([
+      {
+        accountCode: `asset:receivable:customer:${customerId}`,
+        amountMicros: 1_990_000n,
+        direction: "debit",
+      },
+      {
+        accountCode: "liability:deferred:subscriptions",
+        amountMicros: 1_990_000n,
+        direction: "credit",
+      },
+    ]);
+    // Charging is not earning: the money sits in deferred revenue until the
+    // period it paid for has actually been served.
+    expect(entry?.postings.map((posting) => posting.accountCode)).not.toContain(
+      "revenue:subscriptions",
+    );
+  });
+
+  it("recognizes the period out of deferred revenue", async () => {
+    const [entry] = await subscriptionRecognitionRule.build(
+      subscriptionEvent(),
+      context(),
+    );
+    expect(entry?.entryType).toBe("subscription_recognition");
+    expect(entry?.postings).toEqual([
+      {
+        accountCode: "liability:deferred:subscriptions",
+        amountMicros: 1_990_000n,
+        direction: "debit",
+      },
+      {
+        accountCode: "revenue:subscriptions",
+        amountMicros: 1_990_000n,
+        direction: "credit",
+      },
+    ]);
+  });
+
+  // A refund nets against what they owe rather than becoming cash we have to
+  // send — which under postpay is usually the whole answer.
+  it("returns an unearned remainder to the receivable", async () => {
+    const [entry] = await subscriptionRefundRule.build(
+      subscriptionEvent({ priceMicros: "995000" }),
+      context(),
+    );
+    expect(entry?.entryType).toBe("subscription_refund_to_receivable");
+    expect(entry?.postings).toEqual([
+      {
+        accountCode: "liability:deferred:subscriptions",
+        amountMicros: 995_000n,
+        direction: "debit",
+      },
+      {
+        accountCode: `asset:receivable:customer:${customerId}`,
+        amountMicros: 995_000n,
+        direction: "credit",
+      },
+    ]);
+  });
+
+  // `build` is synchronous here, so these throw rather than reject — the
+  // rule refuses before an event that names nobody can reach the kernel.
+  it("refuses an entry with nobody to bill and an amount of nothing", () => {
+    expect(() => subscriptionChargeRule.build(event(period), context())).toThrow(
+      /account/,
+    );
+    expect(() =>
+      subscriptionChargeRule.build(
+        subscriptionEvent({ priceMicros: "0" }),
+        context(),
+      ),
+    ).toThrow(/positive/);
+  });
+
+  // The pricing snapshot travels onto the entry: an entry has to stay
+  // explainable after the plan's price and margin have both moved on.
+  it("snapshots the plan and the period onto the entry", async () => {
+    const [entry] = await subscriptionChargeRule.build(
+      subscriptionEvent(),
+      context(),
+    );
+    expect(entry?.metadata).toMatchObject({
+      marginBasisPoints: 5_000,
+      periodId: period.periodId,
+      planCode: "maker",
+      priceMicros: "1990000",
+    });
   });
 });

@@ -118,6 +118,11 @@ export async function POST(request: NextRequest) {
       distinctId = session.accountId;
       accountId = session.accountId;
       if (!apiKey && hasDatabaseUrl()) {
+        // Deliberately `resolveAiCredentials` and not the `resolveAiAccess`
+        // gate the chat routes use (§5.1/§5.3): conversion is an absorbed
+        // surface, so it is billed to nobody, capped for nobody, and works
+        // without an account at all. Neither the daily cap nor the AI switch
+        // may turn a free migration tool we asked people to run into a 402.
         const credentials = await resolveAiCredentials(createDb(), session.accountId);
         if (credentials?.source === "account") {
           apiKey = credentials.apiKey;

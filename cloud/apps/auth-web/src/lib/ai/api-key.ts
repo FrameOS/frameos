@@ -9,6 +9,12 @@
 // env key already pays for store moderation/classification, so nothing new
 // is provisioned; this only widens who it serves.
 import { eq } from "drizzle-orm";
+import {
+  accountAiSpendMicros,
+  readBillingSettings,
+  surfaceIsAbsorbed,
+  utcDayWindow,
+} from "@frameos-cloud/ledger";
 import { accounts, accountSettings, type createDb } from "@frameos-cloud/db";
 import { resolveChatModel, resolveReasoningEffort } from "./openai";
 
@@ -18,6 +24,22 @@ export type AiCredentials = {
   reasoningEffort: string;
   source: "account" | "shared";
 };
+
+// Why a turn was refused. Three different situations that used to collapse
+// into one null, and telling a user who switched AI off that they should go
+// set an API key is exactly the dead end the switch exists to avoid
+// (cloud/docs/accounting-todo.md §5.1).
+export type AiRefusal =
+  // The account turned AI off. Nothing is wrong; they asked for this.
+  | { detail: string; reason: "ai_disabled" }
+  // Today's spend is at the cap. Comes back tomorrow on its own.
+  | { detail: string; reason: "daily_cap_reached"; resetAt: string; capMicros: string; spentMicros: string }
+  // No key available to this account at all — the original meaning of null.
+  | { detail: string; reason: "missing_api_key" };
+
+export type AiAccess =
+  | { credentials: AiCredentials; ok: true }
+  | { ok: false; refusal: AiRefusal };
 
 type SharedAccess = "none" | "superadmin" | "verified" | "all";
 
@@ -40,6 +62,83 @@ export function sharedKeyAllowedFor(
     default:
       return false;
   }
+}
+
+/**
+ * The one door every AI surface goes through, and therefore the one place
+ * the AI switch and the daily cap can be enforced without relying on nobody
+ * forgetting them at a call site added next month.
+ *
+ * Order matters: the switch first (an account that opted out must not have
+ * its spend queried, let alone be told about a cap), then the key, then the
+ * cap — which only binds when the key is OURS, because a turn on the
+ * customer's own key costs us nothing and capping it would be gratuitous.
+ */
+export async function resolveAiAccess(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+  options: {
+    env?: Record<string, string | undefined> | undefined;
+    // The product surface, so an absorbed one (the legacy scene converter,
+    // which we pay for on purpose) is never turned into a 402 by a cap.
+    surface?: string | null | undefined;
+  } = {},
+): Promise<AiAccess> {
+  const env = options.env ?? process.env;
+  const [account] = await db
+    .select({ aiDisabledAt: accounts.aiDisabledAt })
+    .from(accounts)
+    .where(eq(accounts.id, accountId))
+    .limit(1);
+  if (account?.aiDisabledAt) {
+    return {
+      ok: false,
+      refusal: {
+        detail:
+          "AI features are switched off for this account. Turn them back on under Account → AI usage.",
+        reason: "ai_disabled",
+      },
+    };
+  }
+
+  const credentials = await resolveAiCredentials(db, accountId, env);
+  if (!credentials) {
+    return {
+      ok: false,
+      refusal: {
+        detail: "OpenAI backend API key not set",
+        reason: "missing_api_key",
+      },
+    };
+  }
+  // Their key, their bill: no cap, and no query to run.
+  if (credentials.source === "account" || surfaceIsAbsorbed(options.surface)) {
+    return { credentials, ok: true };
+  }
+
+  const settings = await readBillingSettings(db, env);
+  if (settings.dailyCapMicros > 0n) {
+    const window = utcDayWindow();
+    const spent = await accountAiSpendMicros(db, accountId, window);
+    // Checked before a turn, never during: a turn's cost is unknown until it
+    // ends, so the last turn of the day can cross the line. That accepted
+    // overshoot is what `payg_overdraft_micros` sizes, and it is why the cap
+    // is $10 rather than $10,000.
+    if (spent >= settings.dailyCapMicros + settings.overdraftMicros) {
+      return {
+        ok: false,
+        refusal: {
+          capMicros: settings.dailyCapMicros.toString(),
+          detail:
+            "This account has reached its daily AI limit. It resets at midnight UTC.",
+          reason: "daily_cap_reached",
+          resetAt: window.until.toISOString(),
+          spentMicros: spent.toString(),
+        },
+      };
+    }
+  }
+  return { credentials, ok: true };
 }
 
 export async function resolveAiCredentials(
