@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 // workspace and the private scene list is a tab of the scene store.
 const sections = [
   { href: "/account/installs", key: "installs", label: "Backends" },
+  { href: "/account/settings", key: "settings", label: "Settings" },
   { href: "/account/ai", key: "ai", label: "AI usage" },
   { href: "/account/backups", key: "backups", label: "Backups" },
   { href: "/account/activity", key: "activity", label: "Activity" },

@@ -8,6 +8,7 @@ import {
 import { NextRequest, NextResponse } from "next/server";
 import {
   filterAccountSettings,
+  storedAccountSettings,
   type FilteredAccountSettings,
 } from "../../../src/lib/account-settings";
 import { recordAuditEvent } from "../../../src/lib/audit";
@@ -34,17 +35,8 @@ export const runtime = "nodejs";
 // unchanged in cloud mode: GET returns the merged {group: value} object,
 // POST replaces each posted group wholesale and returns the updated merge.
 // Which groups and fields are storable is the account-settings.ts allowlist.
-
-async function storedAccountSettings(
-  db: ReturnType<typeof createDb>,
-  accountId: string,
-): Promise<Record<string, unknown>> {
-  const rows = await db
-    .select()
-    .from(accountSettings)
-    .where(eq(accountSettings.accountId, accountId));
-  return Object.fromEntries(rows.map((row) => [row.key, row.value]));
-}
+// The account settings page (app/account/settings) renders the same merged
+// object server-side and posts here from its form.
 
 // Tell every cloud-managed frame that holds `settings:services` to re-pull.
 // The nudge carries NO payload — the keys ride the device-authed HTTPS pull

@@ -479,6 +479,38 @@ html.theme-dark .button-primary {
   gap: 12px;
 }
 
+/* /account/settings: the service-key cards and the SSH key list. */
+.account-settings__fields {
+  margin-top: 14px;
+}
+
+.account-settings__hint {
+  font-size: 13px;
+}
+
+.account-settings__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* A Save with nothing to save: visibly inert, not a green promise. */
+.account-settings__actions .button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.account-settings__textarea {
+  min-height: 0;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
 /* The new-token form on /account/developer: one row — the name grows, the
    two selects and the button take what they need — over a one-line hint.
    Not .actions: that grid stretches a button to the card's full width,

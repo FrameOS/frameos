@@ -57,6 +57,7 @@ describe("surface routing", () => {
       ["/account/installs", "/backends"],
       ["/account/frames", "/frames"],
       ["/account/ai", "/ai"],
+      ["/account/settings", "/settings"],
       ["/account/backups", "/backups"],
       ["/account/activity", "/activity"],
       ["/account/developer", "/developer"],
@@ -140,6 +141,7 @@ describe("surface routing", () => {
     for (const [external, internal] of [
       ["/backends", "/account/installs"],
       ["/ai", "/account/ai"],
+      ["/settings", "/account/settings"],
       ["/backups", "/account/backups"],
       ["/activity", "/account/activity"],
       ["/security", "/account/security"],
@@ -193,6 +195,10 @@ describe("surface routing", () => {
     expectRoute("https://cloud.frameos.net/developer", {
       kind: "rewrite",
       url: "https://cloud.frameos.net/account/developer",
+    });
+    expectRoute("https://cloud.frameos.net/settings", {
+      kind: "rewrite",
+      url: "https://cloud.frameos.net/account/settings",
     });
     // Full-form paths serve directly instead of redirect-looping.
     for (const path of [

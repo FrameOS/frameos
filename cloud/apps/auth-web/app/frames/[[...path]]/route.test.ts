@@ -239,6 +239,28 @@ describe("frames SPA shell", () => {
     // Baked into SD images and ESP32 NVS: the deployment's public URL, never
     // the browser's address bar.
     expect(lines).toContain('cloud_origin: "https://account.frameos.net",');
+    // The SPA's settings gear links out to the account page, shortened the
+    // way every other /account/* path is on a split-host deployment.
+    expect(lines).toContain(
+      'cloud_settings_url: "https://account.frameos.net/settings",',
+    );
+  });
+
+  // The global settings were a SPA scene at /frames/settings until 2026.9;
+  // the scene editors still hold links to it with an #settings-openai
+  // fragment, which the browser carries across a fragment-less redirect.
+  it("redirects the old /frames/settings scene to the account page", async () => {
+    process.env.FRAMEOS_CLOUD_APP_URL = "https://frameos.net";
+    process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
+    process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
+    for (const path of ["/frames/settings", "/frames/settings/"]) {
+      const response = await get(`https://account.frameos.net${path}`);
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe("https://account.frameos.net/settings");
+      expect(response.headers.get("cache-control")).toBe("no-store");
+    }
+    // Only that path: a frame that happens to be called "settings-…" is a frame.
+    expect((await get("https://account.frameos.net/frames/settings-x")).status).toBe(200);
   });
 
   it("substitutes the machine's LAN address for a localhost enrollment origin", async () => {
