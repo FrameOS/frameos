@@ -68,13 +68,13 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
   if not dirExists(folder):
     return @[]
 
-  let searchQuery = search.toLowerAscii()
+  let searchQuery = search.toLower()
   var images: seq[string] = @[]
   # walkDirRecNoJunk skips hidden/OS-junk files (`._IMG.jpg`, `.DS_Store`,
   # `Thumbs.db`, `*.crdownload`, …) and never descends into junk directories
   # (`.thumbs`, `.frameos`, `@eaDir`, `System Volume Information`, …).
   for file in walkDirRecNoJunk(folder, relative = true):
-    if isImage(file) and (searchQuery == "" or file.toLowerAscii().contains(searchQuery)):
+    if isImage(file) and (searchQuery == "" or file.toLower().contains(searchQuery)):
       # An empty file is not an image, whatever it is called. The Waveshare
       # demo card ships a zero-byte `sys_decode.bmp`, and enumerating it meant
       # the rotation landed on an error frame every Nth render for a file that

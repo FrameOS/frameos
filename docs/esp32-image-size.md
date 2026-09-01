@@ -168,8 +168,8 @@ IPv6 (≈14 KB in `nd6`/`ip6`/`mld6`) is deliberately kept.
 `ci_build_image.sh` builds; every number is a measured delta between two of
 them, not an estimate.*
 
-**3,286,224 → 3,208,992 bytes (−77,232, −2.35%). OTA slot 91.2% → 89.0% full,
-395 KB free.** Nim is 45% of the image (1,474,196 B of the 3,264,613 the map
+**3,286,224 → 3,210,560 bytes (−75,664, −2.30%). OTA slot 91.2% → 89.1% full,
+393 KB free.** Nim is 45% of the image (1,474,196 B of the 3,264,613 the map
 attributes); hand-written C for the whole firmware is 110,687.
 
 ## Where it came from
@@ -179,7 +179,7 @@ attributes); hand-written C for the whole firmware is 110,687.
 | App loaders describe their config fields in data instead of code | −60,896 |
 | One CRC-32 table instead of two (crunchy → zippy) | −8,445 |
 | App registry: a sorted proc table instead of four `case keyword:` chains | −4,618 |
-| ASCII case folding where the input is ASCII | −3,188 |
+| ASCII case folding where the input is ASCII | −1,632 |
 
 **App loaders.** `backend/app/codegen/app_loader_nim.py` used to inline a full
 JSON-coercion `block:` per config field, per app: 38 loaders, ~700 fields,
@@ -202,12 +202,13 @@ both are linked. `config.nims` now `patchFile`s crunchy's `crc32` to forward to
 zippy's on embedded builds only (`src/embedded/patched_crc32.nim`).
 
 **ASCII case folding.** `std/unicode`'s `toLower`/`toUpper` were reached from
-six places whose input is ASCII by definition — RFC 5545 weekday tokens in
-`ical.nim`, file-extension matching in `localImage`. Those are now
-`toLowerAscii`/`toUpperAscii`. Note the filename *search* in `localImage` folds
-ASCII only now, so "Ä" no longer matches "ä" in a filename. The 9,872 B of
-`toUpperSinglets`/`toLowerSinglets` survive anyway: `--gc-sections` drops the
-procs but keeps the tables.
+places whose input is ASCII by definition — RFC 5545 weekday tokens in
+`ical.nim`, file-extension matching in `localImage` — and those are now
+`toLowerAscii`/`toUpperAscii`. The filename *search* in `localImage`
+deliberately still folds Unicode, so "Ä" keeps matching "ä"; that costs 1,568 B
+and is worth it. The 9,872 B of `toUpperSinglets`/`toLowerSinglets` were never
+going anywhere regardless: `--gc-sections` drops the procs but keeps the
+tables.
 
 ## Compiler flags: measured, and mostly not levers
 
