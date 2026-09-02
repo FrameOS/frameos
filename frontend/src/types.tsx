@@ -276,6 +276,10 @@ export interface FrameType {
   assets_path?: string
   save_assets?: boolean | Record<string, boolean>
   upload_fonts?: string
+  /** Backend only: the SSH server key pinned on the first connect ("<type> <base64>"),
+   * and its SHA256 fingerprint. Null until the first SSH connection records it. */
+  ssh_host_key?: string | null
+  ssh_host_key_fingerprint?: string | null
   /** Backend only: the frame as it was last deployed, minus its secrets
    * (each replaced by an HMAC fingerprint under `secret_fingerprints`). */
   last_successful_deploy?: Record<string, any>
@@ -1113,6 +1117,9 @@ export interface FrameOSSettings {
     port?: number
     sshKey?: string
     sshPublicKey?: string
+    /** The build host's SSH key pinned on first connect (utils/ssh_host_keys.py); empty = record on next connect. */
+    hostKey?: string
+    hostKeyFingerprint?: string
   }
   modalSandbox?: {
     enabled?: boolean

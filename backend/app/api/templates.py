@@ -30,6 +30,7 @@ from app.redis import get_redis
 from app.tenancy import current_project_id, get_user_project
 from app.utils.jwt_tokens import validate_scoped_token
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
+from app.utils.network import assert_url_target_allowed
 from app.utils.upload_limits import (
     MAX_TEMPLATE_MEMBER_BYTES,
     MAX_TEMPLATE_ZIP_BYTES,
@@ -238,6 +239,7 @@ async def create_template(
         # token attached so private cloud scenes install.
         from app.utils.cloud_backup import cloud_headers_for_url
 
+        await assert_url_target_allowed(url, what="Template URL")
         async with httpx.AsyncClient(timeout=30) as client:
             content = await fetch_body_limited(
                 client, url, MAX_TEMPLATE_ZIP_BYTES, headers=cloud_headers_for_url(db, url)
@@ -252,6 +254,8 @@ async def create_template(
                         status_code=422,
                         detail="URL is neither a template .zip nor a page with a frameos:zip meta tag",
                     )
+                # The page chose this URL, not the user: same guard again.
+                await assert_url_target_allowed(zip_url, what="Template zip URL")
                 content = await fetch_body_limited(
                     client, zip_url, MAX_TEMPLATE_ZIP_BYTES, headers=cloud_headers_for_url(db, zip_url)
                 )
@@ -296,6 +300,7 @@ async def create_template(
             elif img_val.startswith('http:') or img_val.startswith('https:'):
                 from app.utils.cloud_backup import cloud_headers_for_url
 
+                await assert_url_target_allowed(img_val, what="Template image URL")
                 async with httpx.AsyncClient(timeout=30) as client:
                     img_val = await fetch_body_limited(
                         client, img_val, MAX_TEMPLATE_MEMBER_BYTES, headers=cloud_headers_for_url(db, img_val)

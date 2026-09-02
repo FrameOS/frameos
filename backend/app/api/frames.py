@@ -11,14 +11,12 @@ import asyncssh
 import gzip
 import hashlib
 import io
-import ipaddress
 import json
 import mimetypes
 import os
 import re
 from pathlib import Path
 import shlex
-import socket
 import shutil
 import sys
 import tempfile
@@ -93,7 +91,7 @@ from app.schemas.frames import (
 )
 from app.api.auth import get_current_user_from_request
 from app.config import config
-from app.utils.network import is_safe_host
+from app.utils.network import TargetBlocked, assert_target_allowed, check_target_host, is_safe_host
 from app.utils.upload_limits import MAX_ASSET_UPLOAD_BYTES, read_upload_limited, reject_oversized_content_length
 from app.utils.scene_execution import normalize_scenes_execution
 from app.utils.remote_exec import (
@@ -1375,6 +1373,7 @@ async def api_frame_ping(
 
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
+    await assert_target_allowed(frame.frame_host, what="Frame host")
 
     if mode_normalised == "icmp":
         ok, elapsed_ms, message = await _icmp_ping_host(frame.frame_host)
@@ -1402,7 +1401,9 @@ async def api_frame_ping(
             frame, redis, path=ping_path, method="GET"
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
-        message = _format_body_preview(body) or f"HTTP {status}"
+        # Only a success body is worth showing; an error page from whatever
+        # answered on that address is not reflected back to the browser.
+        message = (_format_body_preview(body) if 200 <= status < 300 else "") or f"HTTP {status}"
         return FramePingResponse(
             ok=200 <= status < 400,
             mode="http",
@@ -2053,33 +2054,22 @@ async def api_frame_scene_preview_settings(
     return {"settings": frame_json.get("settings") or {}}
 
 
-def _preview_proxy_host_is_blocked(host: str) -> bool:
-    """Best-effort SSRF guard for the live-preview HTTP proxy: reject hosts that
-    resolve to loopback / private / link-local / reserved addresses so an
-    authenticated project user can't turn the backend into an internal-network
-    probe. DNS is resolved once here; a rebind between this check and the fetch
-    is a residual risk accepted for a project-authenticated preview feature."""
+# The largest upstream body the live-preview proxy relays (generated images
+# are a few MB); the rest is dropped mid-stream instead of buffered.
+PREVIEW_PROXY_MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+
+
+async def _preview_proxy_host_is_blocked(host: str) -> bool:
+    """SSRF guard for the live-preview HTTP proxy, on the shared resolver-based
+    check (app/utils/network.py) with private ranges refused as well: an
+    authenticated project user must not turn the backend into an
+    internal-network probe."""
     if not host:
         return True
     try:
-        infos = socket.getaddrinfo(host, None)
-    except OSError:
+        await check_target_host(host, allow_private=False, allow_loopback=False)
+    except TargetBlocked:
         return True
-    for info in infos:
-        addr = info[4][0]
-        try:
-            ip = ipaddress.ip_address(addr.split("%", 1)[0])
-        except ValueError:
-            return True
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        ):
-            return True
     return False
 
 
@@ -2120,7 +2110,7 @@ async def api_frame_scene_preview_proxy(
     parsed = httpx.URL(url) if url else None
     if parsed is None or parsed.scheme not in ("http", "https") or not parsed.host:
         _bad_request(f"Invalid proxy URL: {url}")
-    if _preview_proxy_host_is_blocked(parsed.host):
+    if await _preview_proxy_host_is_blocked(parsed.host):
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Proxy target host is not allowed")
 
     body_bytes = base64.b64decode(body_b64) if body_b64 else None
@@ -2134,16 +2124,30 @@ async def api_frame_scene_preview_proxy(
     # Short connect timeout, long read timeout for slow APIs (image generation).
     timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 15.0))
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
-            upstream = await client.request(method, url, headers=forward_headers, content=body_bytes)
+        # No redirects: the host check covered the URL the app asked for, not
+        # wherever it might bounce to. The body is streamed under a cap.
+        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+            async with client.stream(method, url, headers=forward_headers, content=body_bytes) as upstream:
+                upstream_status = upstream.status_code
+                media_type = upstream.headers.get("content-type", "application/octet-stream")
+                declared = upstream.headers.get("content-length") or ""
+                if declared.isdigit() and int(declared) > PREVIEW_PROXY_MAX_RESPONSE_BYTES:
+                    raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Proxy response too large")
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in upstream.aiter_bytes():
+                    total += len(chunk)
+                    if total > PREVIEW_PROXY_MAX_RESPONSE_BYTES:
+                        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Proxy response too large")
+                    chunks.append(chunk)
+                upstream_body = b"".join(chunks)
     except httpx.HTTPError as exc:
         # Timeout exceptions often stringify empty; include the type so the
         # failure is diagnosable in the preview's runtime log.
         detail = str(exc).strip() or type(exc).__name__
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Proxy fetch failed: {detail}")
 
-    media_type = upstream.headers.get("content-type", "application/octet-stream")
-    return Response(content=upstream.content, status_code=upstream.status_code, media_type=media_type)
+    return Response(content=upstream_body, status_code=upstream_status, media_type=media_type)
 
 
 @api_project.get("/frames/{id:int}/sync")
@@ -3040,6 +3044,23 @@ def _reject_embedded_frame(frame: Frame, reason: str) -> None:
     """
     if _is_embedded_frame(frame):
         _bad_request(reason)
+
+
+@api_project.post("/frames/{id:int}/ssh_host_key/forget")
+async def api_frame_forget_ssh_host_key(
+    id: int, redis: Redis = Depends(get_redis), db: Session = Depends(get_db)
+):
+    """Drop the SSH host key pinned on first connect, so a reinstalled frame
+    (new host key at the same address) can be reached again. The next
+    connection records whatever key it is offered."""
+    frame = _project_frame(db, id) or _not_found()
+    frame.ssh_host_key = None
+    await update_frame(db, redis, frame)
+    await log(
+        db, redis, id, "stdinfo",
+        "Forgot the stored SSH host key; the next SSH connection records the key it is offered",
+    )
+    return {"frame": frame.to_dict()}
 
 
 @api_project.post("/frames/{id:int}/clear_build_cache")

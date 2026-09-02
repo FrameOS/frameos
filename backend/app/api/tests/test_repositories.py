@@ -445,3 +445,62 @@ async def test_get_repositories_does_not_seed_store_without_link(async_client, d
     response = await async_client.get('/api/repositories')
     assert response.status_code == 200
     assert all("/api/store/" not in (r["url"] or "") for r in response.json())
+
+
+@pytest.mark.asyncio
+async def test_repository_urls_go_through_the_target_guard(async_client, db):
+    response = await async_client.post('/api/repositories', json={'url': 'http://169.254.169.254/repo.json'})
+    assert response.status_code == 403
+
+    repo = Repository(project_id=async_client.project_id, name="Repo", url="http://example.com/old.json")
+    db.add(repo)
+    db.commit()
+    response = await async_client.patch(f'/api/repositories/{repo.id}', json={"url": "http://[fe80::1]/repo.json"})
+    assert response.status_code == 403
+    db.refresh(repo)
+    assert repo.url == "http://example.com/old.json"
+
+
+@pytest.mark.asyncio
+async def test_update_templates_caps_and_guards_the_fetch(monkeypatch):
+    from app.models import repository as repository_module
+    from app.utils import upload_limits
+
+    repo = Repository(project_id=1, name="Repo", url="http://169.254.169.254/repo.json", templates=[{"name": "kept"}])
+    await repo.update_templates()
+    assert repo.templates == [{"name": "kept"}]  # blocked target: cache untouched
+
+    class FakeStream:
+        headers = {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self):
+            for _ in range(100):
+                yield b"x" * 1024
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def stream(self, method, url, **kwargs):
+            return FakeStream()
+
+    monkeypatch.setattr(repository_module.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(upload_limits, "MAX_REPOSITORY_JSON_BYTES", 4096)
+    repo.url = "http://example.com/huge.json"
+    await repo.update_templates()
+    assert repo.templates == [{"name": "kept"}]  # over the cap: cache untouched

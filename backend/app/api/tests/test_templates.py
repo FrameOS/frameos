@@ -172,7 +172,12 @@ async def test_create_template_from_scene_page_url(async_client, db, monkeypatch
     )
 
     import app.api.templates as templates_module
+    from app.utils import network
 
+    async def resolve_public(host):
+        return [__import__("ipaddress").ip_address("93.184.216.34")]
+
+    monkeypatch.setattr(network, "resolve_target", resolve_public)
     monkeypatch.setattr(
         templates_module.httpx, "AsyncClient", fake_http_client({page_url: page_html, zip_url: zip_bytes})
     )
@@ -331,3 +336,21 @@ async def test_export_template_strips_scene_prompts(async_client, db):
     # The stored template is untouched.
     db.refresh(t)
     assert t.scenes[0]['settings']['prompt'] == 'secret request'
+
+
+@pytest.mark.asyncio
+async def test_create_template_refuses_internal_urls(async_client, db, monkeypatch):
+    """The pasted URL — and the zip URL a page's meta tag points at — go
+    through the resolver guard: link-local (cloud metadata) is refused."""
+    import app.api.templates as templates_module
+
+    response = await async_client.post(
+        "/api/templates", json={"url": "http://169.254.169.254/latest/meta-data/"}
+    )
+    assert response.status_code == 403, response.text
+
+    page_url = "https://example.com/scene"
+    page = b'<html><head><meta name="frameos:zip" content="http://169.254.169.254/x.zip"/></head></html>'
+    monkeypatch.setattr(templates_module.httpx, "AsyncClient", fake_http_client({page_url: page}))
+    response = await async_client.post("/api/templates", json={"url": page_url})
+    assert response.status_code == 403, response.text

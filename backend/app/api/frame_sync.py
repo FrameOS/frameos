@@ -775,8 +775,26 @@ async def _load_live_frame_api_payload(
             return _extract_remote_frame_payload(json.loads(body.decode("utf-8")))
         except json.JSONDecodeError as exc:
             raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Frame returned invalid JSON: {exc}")
-    detail = _decode_bytes(last_body) if last_body else "Unable to load frame sync payload"
-    raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Frame sync load failed: {last_status} {detail}")
+    # Whatever answered on that address does not get its body relayed to the
+    # browser; a structured `detail`/`error` from a FrameOS runtime does.
+    raise HTTPException(
+        status_code=HTTPStatus.BAD_GATEWAY,
+        detail=f"Frame sync load failed: HTTP {last_status} {_frame_error_detail(last_body)}".rstrip(),
+    )
+
+
+def _frame_error_detail(body: bytes) -> str:
+    try:
+        payload = json.loads(body.decode("utf-8")) if body else None
+    except (ValueError, UnicodeDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("detail", "error", "message"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:200]
+    return ""
 
 
 async def _frame_admin_session_headers(

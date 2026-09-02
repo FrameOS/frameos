@@ -17,7 +17,7 @@ from app.api.project_scope import project_get_or_404, project_query
 from app.models.settings import Settings
 from app.models.repository import Repository
 from app.tenancy import current_project_id
-from app.utils.network import is_safe_host
+from app.utils.network import assert_url_target_allowed, is_safe_host
 from app.schemas.repositories import (
     RepositoryCreateRequest,
     RepositoryUpdateRequest,
@@ -236,9 +236,7 @@ async def create_repository(data: RepositoryCreateRequest, db: Session = Depends
     if not url:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Missing URL")
 
-    hostname = urlparse(url).hostname
-    if not hostname or not is_safe_host(hostname):
-        raise HTTPException(status_code=400, detail="URL not allowed")
+    await assert_url_target_allowed(url, what="Repository URL")
 
     try:
         new_repository = Repository(project_id=project_id, name="", url=url)
@@ -467,6 +465,7 @@ async def update_repository(repository_id: str, data: RepositoryUpdateRequest, d
         if data.name is not None:
             repository.name = data.name
         if data.url is not None:
+            await assert_url_target_allowed(data.url, what="Repository URL")
             repository.url = data.url
         await repository.update_templates()
         db.commit()

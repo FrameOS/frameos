@@ -667,6 +667,18 @@ export const settingsLogic = kea<settingsLogicType>([
           const data = await response.json().catch(() => null)
           throw new Error(data?.detail || 'Build host connection check failed')
         }
+        // The check pins the host key it was offered (trust on first use);
+        // it lands in the form next to the credentials and is saved with them.
+        const data = await response.json().catch(() => null)
+        if (data?.hostKey && !values.settings.buildHost?.hostKey) {
+          actions.setSettingsValues({
+            buildHost: {
+              ...(values.settings.buildHost ?? {}),
+              hostKey: data.hostKey,
+              hostKeyFingerprint: data.hostKeyFingerprint ?? '',
+            },
+          })
+        }
         workingMessage.success('Build host connection check succeeded')
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Build host connection check failed'

@@ -11,6 +11,8 @@ MAX_ASSET_UPLOAD_BYTES = 64 * 1024 * 1024
 # graph is well under a megabyte; the caps leave room for a large cover.
 MAX_TEMPLATE_ZIP_BYTES = 32 * 1024 * 1024
 MAX_TEMPLATE_MEMBER_BYTES = 16 * 1024 * 1024
+# A template repository's repository.json (a listing, not the zips it points at).
+MAX_REPOSITORY_JSON_BYTES = 4 * 1024 * 1024
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 # Boundaries, part headers and the other form fields around the file.
 MULTIPART_OVERHEAD_BYTES = 64 * 1024

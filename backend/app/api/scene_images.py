@@ -19,7 +19,7 @@ from app.models.frame import Frame
 from app.models.template import Template
 from . import api_open, api_project
 from app.utils.jwt_tokens import validate_scoped_token
-from app.utils.network import is_safe_host
+from app.utils.network import assert_target_allowed, is_safe_host
 from app.api.auth import get_current_user_from_request
 from app.tenancy import current_project_id, get_user_project
 
@@ -327,6 +327,7 @@ async def _fetch_repository_image(db: Session, project_id: int, url: str) -> byt
             status_code=HTTPStatus.BAD_REQUEST,
             detail="Image URL does not belong to a known repository",
         )
+    await assert_target_allowed(parsed.hostname, what="Image host")
 
     from app.utils.cloud_backup import cloud_headers_for_url
 

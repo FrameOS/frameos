@@ -1340,6 +1340,7 @@ export function FrameSettings({
     touchFrameFormField,
     setFrameFormValues,
     updateDeployedSshKeys,
+    forgetSshHostKey,
     generateFrameAdminCredentials,
     generateTlsCertificates,
     verifyTlsCertificates,
@@ -3310,6 +3311,32 @@ export function FrameSettings({
                   <Field name="ssh_port" label="SSH port">
                     <TextInput name="ssh_port" placeholder="22" required />
                   </Field>
+                  <div className="@md:flex @md:gap-2">
+                    <Label className="@md:w-1/3">SSH host key</Label>
+                    <div className="w-full space-y-2">
+                      {frame.ssh_host_key ? (
+                        <>
+                          <div className="text-sm break-all">
+                            {frame.ssh_host_key.split(' ')[0]} {frame.ssh_host_key_fingerprint}
+                          </div>
+                          <div className="flex gap-2">
+                            <Button size="small" color="secondary" onClick={() => forgetSshHostKey()}>
+                              Forget host key
+                            </Button>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            Pinned on the first connection; any other key is refused. Forget it only after
+                            reinstalling the frame, then the next connection records the new key.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-xs text-gray-500">
+                          Not recorded yet. The key the frame offers on the next SSH connection is pinned, and
+                          any other key is refused from then on.
+                        </p>
+                      )}
+                    </div>
+                  </div>
                   <div className="@md:flex @md:gap-2">
                     <Label className="@md:w-1/3">SSH Keys</Label>
                     <div className="w-full space-y-2">

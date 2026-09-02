@@ -1,8 +1,11 @@
+import ipaddress
+
 import httpx
 import pytest
 
 from app.models.frame import Frame
 import app.utils.frame_http as frame_http
+from app.utils import network
 from app.utils.tls import generate_frame_tls_material
 from app.utils.frame_http import (
     _auth_headers,
@@ -147,6 +150,31 @@ def _linux_frame_with_both_keys():
     return frame
 
 
+class _FakeStream:
+    """What `client.stream(...)` hands back: the response, with the body
+    delivered the way frame_http reads it (aiter_bytes under a cap)."""
+
+    def __init__(self, response):
+        self.response = response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    @property
+    def status_code(self):
+        return self.response.status_code
+
+    @property
+    def headers(self):
+        return self.response.headers
+
+    async def aiter_bytes(self, chunk_size=None):
+        yield self.response.content
+
+
 def _fake_client_factory(calls, respond):
     class FakeAsyncClient:
         def __init__(self, verify=True):
@@ -158,9 +186,9 @@ def _fake_client_factory(calls, respond):
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def request(self, method, url, headers=None, content=None, timeout=None):
+        def stream(self, method, url, headers=None, content=None, timeout=None):
             calls.append((method, url, dict(headers or {})))
-            return respond(headers or {})
+            return _FakeStream(respond(headers or {}))
 
     return FakeAsyncClient
 
@@ -248,17 +276,21 @@ async def test_fetch_frame_http_bytes_falls_back_after_tls_candidate_error(monke
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def request(self, method, url, headers=None, content=None, timeout=None):
+        def stream(self, method, url, headers=None, content=None, timeout=None):
             calls.append((method, url, self.verify, headers, content, timeout))
             if url.startswith("https://"):
                 raise httpx.ConnectError(
                     "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
                     "Hostname mismatch, certificate is not valid for 'espvaarikas.local'."
                 )
-            return httpx.Response(200, content=b"queued", headers={"x-frameos": "ok"})
+            return _FakeStream(httpx.Response(200, content=b"queued", headers={"x-frameos": "ok"}))
+
+    async def resolve_lan(host):
+        return [ipaddress.ip_address("10.8.0.232")]
 
     monkeypatch.setattr(frame_http, "_use_remote", fake_use_remote)
     monkeypatch.setattr(frame_http.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(network, "resolve_target", resolve_lan)
 
     status, body, headers = await frame_http._fetch_frame_http_bytes(
         frame,

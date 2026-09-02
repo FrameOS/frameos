@@ -36,31 +36,24 @@ medium / low list below.
 
 ### Self-hosted backend
 
-- **User-supplied Nim is compiled on the backend host with no sandbox.**
-  `nim compile --compileOnly` runs via `LocalBuildExecutor` on the host for
-  any non-precompiled deploy and for `download_c_source_zip`; only the C
-  stage is wrapped in Docker/Modal. `staticExec` in any app `app.nim` (or a
-  `{.compile.}` pragma) runs on the backend. `POST /apps/validate_source`
-  runs `nim check` on raw source (macros evaluate). Run the Nim stage
-  inside the same sandbox as the C stage, refuse the local executor for
-  frames with inline `sources` unless an operator opts in, drop or sandbox
-  `nim check`, and sanitise `config.json` field names before they are
-  interpolated into generated Nim identifiers/strings
-  (`codegen/app_loader_nim.py`, `codegen/scene_nim.py`). Compiled scenes are
-  deprecated; this is one more reason to finish `docs/convergence-todo.md`
-  item 1.
-- **SSH host keys are never verified** (`known_hosts=None` for frames and
-  the build host). With password auth a LAN impostor receives `ssh_pass`
-  and the whole `frame.json`. TOFU: store the fingerprint on the frame row
-  on first connect and refuse a change without an explicit reset.
-- **SSRF via `frame_host` / `frame_port` with body reflection.**
-  `is_safe_host` is syntax-only; `/ping?mode=http&path=`, `/state`,
-  `/states` and the adopt flow reflect upstream bodies. Resolve and deny
-  loopback / link-local / metadata (share one resolver-based guard with the
-  preview proxy, which itself follows redirects — set
-  `follow_redirects=False`), stop reflecting non-2xx bodies, cap body size.
-  Same guard for repository URLs (PATCH skips the check entirely) and
-  template `url` / `image` fetches.
+- **SSH host keys: trust on first use, pinned after.** The key a frame (or
+  the build host) offers on the first connect is stored (`frame.ssh_host_key`,
+  `buildHost.hostKey`) and every later connect refuses any other
+  (`app/utils/ssh_host_keys.py`); "Forget host key" in the frame's SSH
+  settings / the build-host settings is the explicit reset. What remains:
+  frames set up before this pin whatever they answer with next, so a frame
+  that was already impersonated stays impersonated until its key is
+  forgotten — the fingerprint is shown so an owner can compare it against
+  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the device.
+- **SSRF residue.** One resolver-based guard (`app/utils/network.py`) now
+  fronts every fetch the backend makes on a user's behalf — frame HTTP,
+  ping, the preview proxy (no redirects, private ranges refused), repository
+  and template / cover URLs — with bodies streamed under caps and non-2xx
+  bodies no longer reflected. DNS is resolved once per request; a rebind
+  between check and connect is the accepted residual for
+  project-authenticated features (frame hosts are IP literals in practice).
+  Loopback targets are allowed only under `FRAMEOS_ALLOW_LOOPBACK_TARGETS`
+  (development / e2e).
 - **`curl | sudo sh` bootstrap defaults to `http://` and downloads
   `frameos-*.tar.gz` unverified**; the precompiled SD image and Remote
   binary are likewise unverified server-side (the Buildroot base image is
@@ -78,16 +71,19 @@ medium / low list below.
 
 ### Device runtime (Nim) and ESP32
 
-- **Self-hosted-backend OTA is unsigned and allowed over plain HTTP** on the
-  ESP32 (`CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y`, no signature on the backend
-  path, secure boot off, checked every 24 h). A LAN MITM of the backend host
-  is persistent firmware RCE and captures the frame's `api_key`. Verify with
-  the same minisign key as the cloud path (backend serves `.minisig`), or at
-  least require https unless the host is local *and* the user opted in;
-  refuse `ALLOW_HTTP` in release profiles. Consider Secure Boot v2 and flash
-  + NVS encryption for production images (the NVS holds the Wi-Fi PSK, the
-  cloud token, the Ed25519 seed, the API key, the admin password, the TLS
-  key and the cached service keys).
+- **Self-hosted-backend OTA is now signed per install** — the backend derives
+  an Ed25519 key from `SECRET_KEY` (`app/utils/embedded_ota_signing.py`),
+  bakes the public key into every image it builds
+  (`FRAMEOS_DEFAULT_OTA_PUBKEY`) and signs the OTA artifact in minisign's
+  pre-hashed format; the device hashes what it wrote to the slot and refuses
+  to switch boot partitions on a bad or missing signature. A generic image
+  (no baked key) still applies unsigned backend images until it is
+  reflashed with a backend build. Still open: plain HTTP for the manifest
+  and download (`CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y` — the signature covers
+  integrity, the bearer `api_key` still travels in clear on http backends),
+  and Secure Boot v2 / flash + NVS encryption for production images (the
+  NVS holds the Wi-Fi PSK, the cloud token, the Ed25519 seed, the API key,
+  the admin password, the TLS key and the cached service keys).
 - **The ESP32 frame JSON returns secrets** (`GET /api/frames`:
   `network.wifiPassword`, `admin.pass`, `server_api_key`,
   `certs.server_key`), and the backend's sync pull list depends on that
@@ -202,6 +198,26 @@ medium / low list below.
   works; still worth setting explicitly); `requirements.txt` has no
   `--hash` lines; the OpenAI service-account key and R2 keys sit in
   plaintext `.env*` files on the dev laptop (rotate / scope).
+
+## Accepted — the deprecated source-build path (not a priority)
+
+Compiled scenes are deprecated and not recommended, and the path is not
+being deleted before October 2026 (`docs/convergence-todo.md` item 1). Its
+findings are recorded here so they are not rediscovered, not scheduled:
+a self-hosted operator who chooses source builds runs user-supplied Nim on
+their own host, and the fix is to use interpreted scenes.
+
+- **User-supplied Nim is compiled on the backend host with no sandbox.**
+  `nim compile --compileOnly` runs via `LocalBuildExecutor` on the host for
+  any non-precompiled deploy and for `download_c_source_zip`; only the C
+  stage is wrapped in Docker/Modal. `staticExec` in any app `app.nim` (or a
+  `{.compile.}` pragma) runs on the backend. `POST /apps/validate_source`
+  runs `nim check` on raw source (macros evaluate). `config.json` field
+  names are interpolated into generated Nim identifiers/strings
+  (`codegen/app_loader_nim.py`, `codegen/scene_nim.py`). If it ever has to
+  be fixed rather than deleted: run the Nim stage inside the same sandbox
+  as the C stage, refuse the local executor for frames with inline
+  `sources` unless an operator opts in, drop or sandbox `nim check`.
 
 ## Medium / low — worth a pass
 

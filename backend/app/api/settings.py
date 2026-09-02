@@ -20,6 +20,7 @@ from app.tenancy import current_project_id
 from app.utils.build_environment import selected_build_environment_provider
 from app.utils.build_executor import create_build_executor
 from app.utils.build_host import BuildHostConfig
+from app.utils.ssh_host_keys import host_key_fingerprint
 from app.utils.modal_sandbox import ModalSandboxConfig
 from app.utils.posthog import initialize_posthog
 from . import api_project
@@ -226,6 +227,8 @@ async def test_build_host(data: SettingsUpdateRequest):
                 log_command=False,
                 log_output=False,
             )
+            session = getattr(executor, "session", None)
+            observed_host_key = getattr(session, "observed_host_key", None) if session else None
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=HTTPStatus.BAD_GATEWAY, detail=_probe_failure_detail("Build host connection failed", exc)
@@ -237,7 +240,15 @@ async def test_build_host(data: SettingsUpdateRequest):
             detail=err or out or "Build host is missing Docker or the Docker Buildx plugin",
         )
 
-    return {"ok": True, "output": (out or "").strip()}
+    # The key this check pinned (or the one already pinned): the settings form
+    # stores it next to the credentials so every later connect refuses any other.
+    host_key = observed_host_key or build_host_config.host_key
+    return {
+        "ok": True,
+        "output": (out or "").strip(),
+        "hostKey": host_key,
+        "hostKeyFingerprint": host_key_fingerprint(host_key),
+    }
 
 
 @api_project.post("/settings/test_modal_sandbox")

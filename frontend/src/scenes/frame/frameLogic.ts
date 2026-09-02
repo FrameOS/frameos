@@ -1959,6 +1959,9 @@ export interface frameLogicActions {
   fastDeployFrame: () => {
     value: true
   }
+  forgetSshHostKey: () => {
+    value: true
+  }
   fullDeployFrame: () => {
     value: true
   }
@@ -2246,6 +2249,7 @@ export const frameLogic = kea<frameLogicType>([
     }),
     restartRemote: (transport: RemoteTaskTransport = 'auto') => ({ transport }),
     updateDeployedSshKeys: true,
+    forgetSshHostKey: true,
     clearNextAction: true,
     resetUnsavedChanges: true,
     resetUndeployedChanges: true,
@@ -2569,6 +2573,14 @@ export const frameLogic = kea<frameLogicType>([
       })
       if (!response.ok) {
         throw new Error('Failed to update deployed SSH keys')
+      }
+    },
+    forgetSshHostKey: async () => {
+      // The pinned key is dropped server-side; the update_frame broadcast
+      // clears it here. The next SSH connection records the key it is offered.
+      const response = await apiFetch(`/api/frames/${values.frameId}/ssh_host_key/forget`, { method: 'POST' })
+      if (!response.ok) {
+        throw new Error('Failed to forget the SSH host key')
       }
     },
     generateFrameAdminCredentials: () => {
