@@ -363,7 +363,10 @@ jobs:
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          git fetch --no-tags --depth=1 origin "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF"
+          # No depth limit: the branch may already carry a commit from the
+          # other snapshot job, and the rebase must see head.sha as its
+          # ancestor rather than try to apply it again.
+          git fetch --no-tags origin "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF"
           git checkout -B "$HEAD_REF"
           git branch --set-upstream-to "origin/$HEAD_REF"
 
@@ -571,7 +574,10 @@ jobs:
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          git fetch --no-tags --depth=1 origin "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF"
+          # No depth limit: the branch may already carry a commit from the
+          # other snapshot job, and the rebase must see head.sha as its
+          # ancestor rather than try to apply it again.
+          git fetch --no-tags origin "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF"
           git checkout -B "$HEAD_REF"
           git branch --set-upstream-to "origin/$HEAD_REF"
 
