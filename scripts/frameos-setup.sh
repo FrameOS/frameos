@@ -28,7 +28,10 @@ FRAMEOS_CLAIM_TOKEN="${FRAMEOS_CLAIM_TOKEN:-}"
 # at the wrong provider.
 FRAMEOS_CLOUD_URL_DEFAULT="https://cloud.frameos.net" # __FRAMEOS_CLOUD_URL_DEFAULT__
 FRAMEOS_CLOUD_URL="${FRAMEOS_CLOUD_URL:-$FRAMEOS_CLOUD_URL_DEFAULT}"
-SUPPORTED_RELEASES="debian:buster debian:bullseye debian:bookworm debian:trixie ubuntu:22.04 ubuntu:24.04 ubuntu:26.04"
+# One entry per release tarball (backend/app/utils/release_targets.py keeps
+# the matrix; a test holds this line to it). Older releases cannot borrow a
+# newer build: bookworm's binary needs glibc 2.34+, bullseye ships 2.31.
+SUPPORTED_RELEASES="debian:bookworm debian:trixie ubuntu:24.04 ubuntu:26.04"
 SUPPORTED_ARCHES="arm64 armhf armv6 amd64"
 TTY="/dev/tty"
 GENERATED_ADMIN_PASSWORD=""
@@ -318,8 +321,9 @@ release_supported() {
 
 print_supported_targets() {
   warn "Supported OS releases:"
-  warn "  Debian: buster, bullseye, bookworm, trixie"
-  warn "  Ubuntu: 22.04, 24.04, 26.04"
+  warn "  Debian / Raspberry Pi OS: bookworm, trixie"
+  warn "  Ubuntu: 24.04, 26.04"
+  warn "Older releases (bullseye, buster, 22.04) have no FrameOS build; upgrade the OS first."
   warn "Supported architectures: $SUPPORTED_ARCHES"
 }
 

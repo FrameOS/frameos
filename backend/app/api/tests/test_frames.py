@@ -3448,3 +3448,28 @@ async def test_api_frame_new_ssh_connection_string_keeps_password(async_client):
     assert frame['ssh_pass'] == 's3cr:et@p@ss'
     assert frame['frame_host'] == '192.168.1.20'
     assert frame['ssh_port'] == 2222
+
+
+@pytest.mark.asyncio
+async def test_api_frame_bootstrap_script_only_accepts_released_distros(async_client, no_auth_client, db, redis):
+    # Raspberry Pi OS bullseye has no release tarball, and bookworm's binary
+    # will not load there (glibc 2.34+ vs 2.31), so the installer refuses it
+    # with a reason instead of 404ing on the download.
+    frame = await new_frame(db, redis, 'BootstrapReleaseFrame', 'frame.local', 'backend.local')
+    frame.device = 'framebuffer'
+    frame.scenes = []
+    db.add(frame)
+    db.commit()
+
+    command_response = await async_client.post(f'/api/frames/{frame.id}/frame_bootstrap')
+    assert command_response.status_code == 200
+    script_url = command_response.json()['script_url']
+    script_path = urlparse(script_url).path
+    script_response = await no_auth_client.get(script_path)
+    assert script_response.status_code == 200
+    script = script_response.text
+    assert 'bookworm|trixie|24.04|26.04) ;;' in script
+    assert 'bullseye|' not in script
+    assert 'FrameOS releases are built for debian bookworm/trixie, ubuntu 24.04/26.04' in script
+    syntax_check = subprocess.run(['sh', '-n'], input=script, capture_output=True, text=True)
+    assert syntax_check.returncode == 0, syntax_check.stderr
