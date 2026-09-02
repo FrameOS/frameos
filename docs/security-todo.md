@@ -71,7 +71,11 @@ medium / low list below.
 
 ### Device runtime (Nim) and ESP32
 
-- **Self-hosted-backend OTA is now signed per install** — the backend derives
+- **Self-hosted-backend OTA is signed per install for now** — decided
+  2026-09-03 that the backend stops building firmware and serves the signed
+  release image like the cloud (`docs/todo.md`, "the self-hosted backend
+  flashes what the cloud flashes"); the per-install key below is the interim
+  until then. The backend derives
   an Ed25519 key from `SECRET_KEY` (`app/utils/embedded_ota_signing.py`),
   bakes the public key into every image it builds
   (`FRAMEOS_DEFAULT_OTA_PUBKEY`) and signs the OTA artifact in minisign's

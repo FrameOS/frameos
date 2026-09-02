@@ -34,6 +34,61 @@ Two rules that shape most entries:
 
 ---
 
+## ESP32: the self-hosted backend flashes what the cloud flashes
+
+Decided 2026-09-03. Today a self-hosted backend builds a per-frame ESP32
+image with ESP-IDF inside its own container (`app/tasks/embedded_firmware.py`,
+2.8k lines, a 275 MB build cache under `/data/embedded-build`) and bakes ~40
+settings into `generated_config.h` — Wi-Fi, backend URL, API key, frame id,
+panel, pins, hardware preset, hostname, buttons, SD pins, TLS material, admin
+auth, the tzdata slice. The cloud never builds: it flashes the generic
+release image (`esp32-s3-generic`, `esp32-c3-generic`, signed with the
+release minisign key) and provisions the device over the USB console, and
+the device pulls the rest from `/embedded/settings`. The self-hosted backend
+should do exactly that. It removes ESP-IDF from the backend image and the
+whole build subsystem, and makes the backend OTA path the cloud's path: one
+release key, one verifier, no per-install signing (PR #440's
+`app/utils/embedded_ota_signing.py` + `FRAMEOS_DEFAULT_OTA_PUBKEY` are the
+interim and go away with the builds).
+
+Order of work — each step ships on its own, the builds are deleted last:
+
+1. **Release images per flash layout.** The generic pair covers one
+   partition table each; the per-frame profiles span 2 MB (no OTA), 4 MB
+   (no OTA), 8, 16 and 32 MB on both chips. Add the missing
+   `esp32-{s3,c3}-{4mb,8mb,16mb,32mb}` assets to the release job (the
+   `esp32-c3-16mb` item in the parking lot is the first of these), each
+   with its `.minisig` and `-size.json`. `EMBEDDED_FLASH_PROFILES` becomes a
+   map from board/flash size to release asset, not to a partition table.
+2. **Everything baked becomes provisioned.** The USB setup screen
+   (`EmbeddedUsbSetup.tsx`) provisions only Wi-Fi today; extend it — via the
+   existing `usbSet` verbs — to backend URL, API key, frame id, panel, pins /
+   hardware preset, buttons, SD pins, hostname, so "flash + set up" from the
+   New Frame flow is one guided pass, like the cloud flasher. What the
+   console cannot set yet gets a runtime path: TLS server cert/key and
+   `max_http_response_bytes` join the `/embedded/settings` pull (the tzdata
+   slice already did), admin auth is confirmed settable (`set auth`).
+3. **Backend OTA = release OTA.** `/embedded/ota/manifest` serves the
+   release manifest (version, size, `minisig`, a download URL the backend
+   proxies from GitHub like `firmware_release.py` already does for the
+   flasher); the device runs `cloud_ota_download_verify` against the baked
+   release key for both control planes, and the `esp_https_ota` unsigned
+   path plus `FRAMEOS_DEFAULT_OTA_PUBKEY` are deleted. Same version-skew
+   caveat as the cloud: a self-hosted install can only offer what a release
+   ships, so a firmware fix reaches self-hosted frames with the next
+   release, not the next backend deploy.
+4. **Delete the builds.** `embedded_firmware.py` build/queue code, the
+   ESP-IDF layer of the backend Dockerfile, `/data/embedded-build`, the
+   `configHash` / `sourceFingerprint` staleness machinery, the
+   "Timed out waiting for the firmware build" paths in the web flasher. Keep
+   `firmware_release.py` (asset listing + proxy) and the flash-offset /
+   partition metadata the flasher needs. Frames on the old per-frame images
+   keep working: they OTA to the release image once step 3 serves it.
+
+Not in scope: custom boards that need pins the generic image does not
+default — they are provisioned, not compiled, which is already how the cloud
+supports them.
+
 ## ESP32 memory
 
 - **Verify on hardware** (docs/esp32-memory.md, 2026-08-24): the Weather
@@ -191,10 +246,10 @@ Everything else parked:
   XTEINK X4 from the 4MB no-OTA generic image today, which works but leaves
   three quarters of the chip and OTA unused — the flasher warns about exactly
   this. A `esp32-c3-16mb` asset in the release job removes the warning.
-- ESP32 board nice-to-haves: parallel firmware builds (shared
-  `generated_config.h` and nimcache serialise under the build lock), a portal
-  Wi-Fi scan list and AP password, mDNS advertisement, log persistence across
-  offline periods, firmware artifact GC, deep-sleep improvements.
+- ESP32 board nice-to-haves: a portal Wi-Fi scan list and AP password, mDNS
+  advertisement, log persistence across offline periods, deep-sleep
+  improvements. (Parallel firmware builds and artifact GC drop out with the
+  builds — see "the self-hosted backend flashes what the cloud flashes".)
 - ESP32 internal-RAM headroom, only if it gets tight again: move QuickJS
   allocations to PSRAM (`JS_NewRuntime2` with PSRAM-backed
   `js_malloc_functions`; `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384`) and cJSON
