@@ -16,6 +16,7 @@ import json
 import mimetypes
 import os
 import re
+from pathlib import Path
 import shlex
 import socket
 import shutil
@@ -140,6 +141,7 @@ from app.utils.versions import current_frameos_version
 from app.utils.ssh_authorized_keys import _install_authorized_keys, resolve_authorized_keys_update
 from app.tasks.binary_builder import FrameBinaryBuilder
 from app.tasks.embedded_firmware import (
+    embedded_artifact_dir,
     cancel_embedded_firmware_ota,
     ensure_embedded_frame_defaults,
     pending_frame_commands,
@@ -157,6 +159,7 @@ from app.tasks.embedded_firmware import (
     with_embedded_firmware_layout,
 )
 from app.tasks.buildroot_image import (
+    buildroot_artifact_dir,
     buildroot_agent_defaults,
     buildroot_sd_image_no_build_environment_message,
     buildroot_sd_image_config_fingerprint,
@@ -229,6 +232,23 @@ async def _public_project_frame(
     if frame is None:
         _not_found()
     return frame
+
+
+def _require_artifact_path(path: str, artifact_dir) -> None:
+    """Refuse to serve a build artifact that does not live under its directory.
+
+    Artifact paths are persisted on the frame row, and several client-facing
+    writes (frame update/import, backup restore) can set them; without this
+    check a crafted path turned the download routes into an arbitrary file
+    read on the backend host.
+    """
+    try:
+        resolved = Path(path).resolve(strict=True)
+        root = Path(artifact_dir).resolve()
+    except (OSError, RuntimeError, ValueError):
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Artifact not found")
+    if resolved == root or root not in resolved.parents:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Artifact not found")
 
 
 def _bad_request(msg: str):
@@ -3300,6 +3320,10 @@ async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(g
     path = sd_image.get("path")
     if not isinstance(path, str) or not os.path.isfile(path):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated SD card image file not found")
+    # The path is stored on the frame row, which clients can write (update,
+    # import, backup restore). Only ever serve — or gzip next to — a file that
+    # the builder itself put under the artifact directory.
+    _require_artifact_path(path, buildroot_artifact_dir())
 
     filename = str(sd_image.get("filename") or f"frameos-{id}.img")
     download_path = path
@@ -3424,6 +3448,9 @@ async def api_frame_embedded_firmware_download(id: int, db: Session = Depends(ge
     path = firmware.get("path")
     if not isinstance(path, str) or not os.path.isfile(path):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Generated firmware file not found")
+    # Same rule as the SD image: `embedded.firmware.path` is client-writable
+    # frame state, so the file must live under the firmware artifact directory.
+    _require_artifact_path(path, embedded_artifact_dir())
 
     filename = str(firmware.get("filename") or f"frameos-esp32-{id}.bin")
     return FileResponse(

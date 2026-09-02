@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "./csrf";
 import { verifyPasswordWithDummyFallback } from "./passwords";
 import { identityRateLimitResponse, rateLimitResponse } from "./rate-limit";
+import { requireRecentAuth } from "./recent-auth";
 import { readSession } from "./session";
 import { secondFactorStatus, verifySecondFactorCode } from "./two-factor";
 
@@ -32,7 +33,15 @@ export type AccountSessionContext = {
 export async function accountSecurityContext(
   request: NextRequest,
   db: ReturnType<typeof createDb>,
-  options: { action: string; limit?: number; mutating?: boolean } = {
+  options: {
+    action: string;
+    limit?: number;
+    mutating?: boolean;
+    // Strengthening routes (enrolling a passkey or an authenticator) demand
+    // it: a credential added with nothing but a stolen cookie is permanent,
+    // and the passkey then satisfies sudo mode on its own.
+    recentAuth?: boolean;
+  } = {
     action: "two-factor",
   },
 ): Promise<AccountSessionContext | { response: NextResponse }> {
@@ -56,6 +65,17 @@ export async function accountSecurityContext(
       response: NextResponse.json({ error: "login_required" }, { status: 401 }),
     };
   }
+  // The second-factor routes prove the account with a live secret in the
+  // body, or change what such a proof will be from now on; neither is a
+  // thing a bearer token minted from an old session gets to do.
+  if (options.mutating && session.apiToken) {
+    return {
+      response: NextResponse.json(
+        { error: "api_token_not_allowed" },
+        { status: 403 },
+      ),
+    };
+  }
   if (options.mutating) {
     const accountLimited = await identityRateLimitResponse(
       session.accountId,
@@ -64,6 +84,12 @@ export async function accountSecurityContext(
     );
     if (accountLimited) {
       return { response: accountLimited };
+    }
+  }
+  if (options.recentAuth) {
+    const stale = await requireRecentAuth(db, session.accountId);
+    if (stale) {
+      return { response: stale };
     }
   }
   const [account] = await db

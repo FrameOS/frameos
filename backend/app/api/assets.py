@@ -1,4 +1,5 @@
 import uuid
+import re
 from typing import Optional
 from http import HTTPStatus
 from fastapi import Depends, HTTPException, File, Form, UploadFile, Query
@@ -16,6 +17,28 @@ from app.tenancy import current_project_id
 from . import api_project
 
 # This file handles assets uploaded under /settings. For assets on frames, see frame.py.
+
+
+# Asset paths are relative names under the project's asset tree ("fonts/x.ttf").
+# They are later joined onto local build folders and onto the frame's asset
+# directory, so a path with ".." segments or a leading "/" would write outside
+# both. Any printable name is fine; only the separators and dot segments matter.
+def _validated_asset_path(path: str) -> str:
+    value = (path or "").strip().replace("\\", "/")
+    segments = value.split("/")
+    if (
+        not value
+        or len(value) > 512
+        or any(
+            seg == "" or seg in (".", "..") or any(ord(ch) < 0x20 or ch == "\x7f" for ch in seg)
+            for seg in segments
+        )
+    ):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="Asset path must be a relative path of plain file and folder names",
+        )
+    return value
 
 @api_project.get("/assets", response_model=list[AssetResponse])
 async def list_assets(
@@ -83,6 +106,7 @@ async def create_asset(
       - `file` is the actual file data
     """
     project_id = current_project_id()
+    path = _validated_asset_path(path)
     existing = db.query(Assets).filter_by(project_id=project_id, path=path).first()
     if existing:
         raise HTTPException(
@@ -128,6 +152,8 @@ async def update_asset(
     asset = project_get_or_404(db, Assets, asset_id, detail="Asset not found")
 
     # If user wants to update the path:
+    if path:
+        path = _validated_asset_path(path)
     if path and path != asset.path:
         # check uniqueness of new path
         conflict = db.query(Assets).filter_by(project_id=project_id, path=path).first()

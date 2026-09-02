@@ -131,8 +131,15 @@ export function isLocalHostname(hostname: string) {
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
     return true;
   }
-  if (host === "::1" || host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) {
-    return true;
+  // IPv6 literals only: loopback, link-local and unique-local. The prefix
+  // tests must never run against a DNS name — "fdcloud.example.com" starts
+  // with "fd" too, and this allowlist decides where login codes may be sent.
+  if (host.includes(":")) {
+    return (
+      host === "::1" ||
+      host.startsWith("fe80:") ||
+      /^f[cd][0-9a-f]{2}:/.test(host)
+    );
   }
 
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);

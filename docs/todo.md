@@ -5,7 +5,8 @@ cold: each section says what that part of FrameOS *is* before it says what is
 missing from it. Reference material — principles, permission scopes, threat
 models, wire protocols, measurements — lives in the linked docs; this file only
 carries the work. **When an item ships, delete it.** Larger tracks keep their
-own files: architecture convergence in `docs/convergence-todo.md`, store
+own files: security findings in `docs/security-todo.md`, architecture
+convergence in `docs/convergence-todo.md`, store
 content in `docs/scenes-todo.md`, the JSX widget UI in `docs/ui-todo.md`,
 cloud billing in `cloud/docs/accounting-todo.md`.
 

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { csrfResponse } from "../../../../src/lib/csrf";
 import { jsonError, readJsonObject } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
-import { hostIsBlocked } from "../../../../src/lib/ssrf";
+import { guardedFetch } from "../../../../src/lib/ssrf";
 import { storeRoute } from "../../../../src/lib/store-cache";
 
 export const runtime = "nodejs";
@@ -25,6 +26,17 @@ async function handlePost(request: NextRequest) {
   if (limited) {
     return limited;
   }
+  // Only the preview worker (a same-origin XHR sending JSON) may call this.
+  // Without these two checks a cross-site form POST could reach it, and the
+  // response — bytes we did not author — would render on our origin.
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    return jsonError("invalid_content_type", 415);
+  }
+  const csrf = csrfResponse(request);
+  if (csrf) {
+    return csrf;
+  }
 
   const body = await readJsonObject(request);
   const method = String(body.method ?? "GET").toUpperCase();
@@ -40,9 +52,6 @@ async function handlePost(request: NextRequest) {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return jsonError("invalid_url", 400);
-  }
-  if (await hostIsBlocked(url.hostname)) {
-    return jsonError("host_not_allowed", 403);
   }
 
   const requestBody =
@@ -62,9 +71,14 @@ async function handlePost(request: NextRequest) {
     )) {
       if (
         typeof value === "string" &&
-        !["host", "content-length", "connection", "cookie"].includes(
-          key.toLowerCase(),
-        )
+        ![
+          "authorization",
+          "connection",
+          "content-length",
+          "cookie",
+          "host",
+          "proxy-authorization",
+        ].includes(key.toLowerCase())
       ) {
         headers.set(key, value);
       }
@@ -77,18 +91,23 @@ async function handlePost(request: NextRequest) {
       ? Math.min(requestedTimeout, maxTimeoutMs)
       : maxTimeoutMs;
 
+  // guardedFetch re-checks the host on every redirect hop, so a public URL
+  // cannot bounce to a loopback or metadata address.
   let upstream: Response;
   try {
-    upstream = await fetch(url, {
+    upstream = await guardedFetch(url.toString(), {
       body: (requestBody ?? null) as BodyInit | null,
       headers,
       method,
-      redirect: "follow",
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === "host_not_allowed") {
+      return jsonError("host_not_allowed", 403);
+    }
     return jsonError("proxy_fetch_failed", 502, {
-      detail: error instanceof Error ? error.message || error.name : String(error),
+      detail: message || (error instanceof Error ? error.name : "error"),
     });
   }
 
@@ -97,10 +116,16 @@ async function handlePost(request: NextRequest) {
     return jsonError("response_too_large", 502);
   }
 
+  // Never mirror the upstream type: the worker only wants the bytes, and a
+  // text/html answer must not be something a browser would render on this
+  // origin. The upstream type travels in a side header for callers that care.
   return new NextResponse(bytes as BodyInit, {
     headers: {
       "cache-control": "no-store",
-      "content-type":
+      "content-disposition": "attachment",
+      "content-security-policy": "sandbox",
+      "content-type": "application/octet-stream",
+      "x-upstream-content-type":
         upstream.headers.get("content-type") ?? "application/octet-stream",
     },
     status: upstream.status,

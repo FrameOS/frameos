@@ -11,6 +11,11 @@ import { decryptSecret, hashSecret } from "../../../../src/lib/secrets";
 
 export const runtime = "nodejs";
 
+// How long after the request's own deadline an approval may still be
+// collected. The client polls every 5 s, so this covers an approval given in
+// the flow's final seconds many times over.
+const approvalCollectionGraceMs = 5 * 60 * 1000;
+
 export async function POST(request: NextRequest) {
   // Deliberately not IP-keyed. The protocol tells a client to poll every 5s
   // for up to 10 minutes — 120 requests, exactly the old per-IP budget — so a
@@ -91,6 +96,41 @@ export async function POST(request: NextRequest) {
   }
 
   if (deviceRequest.status === "expired") {
+    return jsonError("expired_token", 400);
+  }
+
+  // An approval the client never collected must not stay redeemable forever:
+  // until it is polled, the linked client row still holds a decryptable copy
+  // of the link token, which is exactly the "database dump yields live
+  // tokens" case that nulling it on redemption exists to close. Give a
+  // client that was approved right at the deadline a few polls' worth of
+  // grace, then expire the request, drop the stored token and retire the
+  // client nobody ever held a credential for.
+  if (
+    deviceRequest.status === "approved" &&
+    !deviceRequest.redeemedAt &&
+    deviceRequest.expiresAt.getTime() + approvalCollectionGraceMs <= Date.now()
+  ) {
+    const now = new Date();
+    await db
+      .update(deviceAuthorizationRequests)
+      .set({ status: "expired", updatedAt: now })
+      .where(eq(deviceAuthorizationRequests.id, deviceRequest.id));
+    if (deviceRequest.linkedClientId && !deviceRequest.upgradeLinkedClientId) {
+      await db
+        .update(linkedClients)
+        .set({
+          encryptedRefreshToken: null,
+          revokedAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(linkedClients.id, deviceRequest.linkedClientId),
+            isNull(linkedClients.revokedAt),
+          ),
+        );
+    }
     return jsonError("expired_token", 400);
   }
 

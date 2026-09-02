@@ -11,6 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
+import { redirectToReauthIfRequired } from "../lib/reauth-client";
 
 export type TwoFactorStatusPayload = {
   enabled: boolean;
@@ -157,6 +158,11 @@ export function TwoFactorSettings({
   ): Promise<Record<string, unknown>> {
     const { payload, response } = await postJson(url, body, method);
     if (!response.ok) {
+      // Enrolling a passkey or an authenticator asks for a recent proof of
+      // the credentials; the reauth page brings the user straight back here.
+      if (redirectToReauthIfRequired(response, payload)) {
+        return new Promise<never>(() => {});
+      }
       throw new Error(describeError(response, payload));
     }
     return payload ?? {};

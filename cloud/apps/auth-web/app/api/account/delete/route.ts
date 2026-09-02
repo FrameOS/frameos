@@ -49,6 +49,15 @@ export async function POST(request: NextRequest) {
   if (!accountId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  // Erasure is proved with the password, or for password-less accounts with
+  // the primary email — which any token can read. A bearer token is a
+  // script's credential, not the person's; it does not get to end the account.
+  if (session.apiToken) {
+    return NextResponse.json(
+      { error: "api_token_not_allowed" },
+      { status: 403 },
+    );
+  }
 
   const limited =
     (await rateLimitResponse(request, "account:delete", {

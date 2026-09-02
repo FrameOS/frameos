@@ -466,3 +466,16 @@ describe("edge cases", () => {
     await expect(convertScene({} as Scene)).rejects.toThrow(/string id/);
   });
 });
+
+describe("lintConvertedCodeNode — argument names are data, not regex", () => {
+  it("does not throw on a name that is not a valid regex", async () => {
+    const { lintConvertedCodeNode } = await import("./lint");
+    expect(() => lintConvertedCodeNode("1 + 1", ["["])).not.toThrow();
+    expect(() => lintConvertedCodeNode("1 + 1", ["(a*)*c"])).not.toThrow();
+    expect(
+      lintConvertedCodeNode("const x = 1; x", ["x"]).some((problem) =>
+        problem.includes("redeclares"),
+      ),
+    ).toBe(true);
+  });
+});

@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
     action: "two-factor-totp-confirm",
     limit: 15,
     mutating: true,
+    recentAuth: true,
   });
   if ("response" in context) {
     return context.response;

@@ -1677,8 +1677,30 @@ describe("store publish and distribution", () => {
     expect(templates[0]?.tags).toEqual(["clock", "e-ink"]);
   });
   it("guards the live-preview proxy against SSRF and junk", async () => {
+    // The preview worker's XHR: same-origin, JSON. Anything else — a
+    // cross-site form post, say — must be turned away before the fetch.
     const proxied = (body: Record<string, unknown>) =>
-      previewProxy(request("/api/store/preview-proxy", "POST", { body }));
+      previewProxy(
+        request("/api/store/preview-proxy", "POST", {
+          body,
+          headers: { origin: baseUrl },
+        }),
+      );
+    const noOrigin = await previewProxy(
+      request("/api/store/preview-proxy", "POST", {
+        body: { url: "https://example.com/" },
+      }),
+    );
+    expect(noOrigin.status).toBe(403);
+    expect((await readJson(noOrigin)).error).toBe("missing_origin");
+    const formPost = await previewProxy(
+      new NextRequest(new URL("/api/store/preview-proxy", baseUrl), {
+        body: JSON.stringify({ url: "https://example.com/" }),
+        headers: { "content-type": "text/plain", origin: baseUrl },
+        method: "POST",
+      }),
+    );
+    expect(formPost.status).toBe(415);
 
     // Loopback, private ranges, and IPv6 loopback are refused.
     for (const url of [
@@ -1717,7 +1739,15 @@ describe("store publish and distribution", () => {
         url: "https://example.com/data",
       });
       expect(response.status).toBe(201);
-      expect(response.headers.get("content-type")).toBe("text/x-upstream");
+      // The upstream type is reported, never served: whatever the bytes are,
+      // a browser must not render them on this origin.
+      expect(response.headers.get("content-type")).toBe(
+        "application/octet-stream",
+      );
+      expect(response.headers.get("x-upstream-content-type")).toBe(
+        "text/x-upstream",
+      );
+      expect(response.headers.get("content-disposition")).toBe("attachment");
       expect(await response.text()).toBe("upstream-bytes");
       const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
       const [, init] = fetchMock.mock.calls[0] as [unknown, RequestInit];

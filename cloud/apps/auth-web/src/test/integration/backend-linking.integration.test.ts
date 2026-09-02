@@ -345,6 +345,66 @@ describe("backend linking flow", () => {
     expect(oldTokenAfterUse.status).toBe(401);
   });
 
+  it("refuses to rotate again with the retiring token", async () => {
+    const { accessToken } = await linkBackend();
+
+    const first = await rotateToken(
+      postJson("/api/backends/rotate-token", {}, bearer(accessToken)),
+    );
+    expect(first.status).toBe(200);
+    const newToken = (await readJson(first)).access_token as string;
+
+    // The old token is still accepted for reads during the grace window, but
+    // rotating with it would let whoever holds it replace the new token and
+    // lock the legitimate backend out.
+    const second = await rotateToken(
+      postJson("/api/backends/rotate-token", {}, bearer(accessToken)),
+    );
+    expect(second.status).toBe(401);
+
+    const newTokenStillValid = await backendGrants(
+      getJson("/api/backends/grants", bearer(newToken)),
+    );
+    expect(newTokenStillValid.status).toBe(200);
+  });
+
+  it("expires an approval that was never collected and retires its client", async () => {
+    const { deviceCode, userCode } = await startDeviceRequest();
+    await signIn();
+    const authorizeResponse = await authorizeDevice(
+      postJson("/api/device/authorize", { user_code: userCode }, { origin: baseUrl }),
+    );
+    expect(authorizeResponse.status).toBe(200);
+    const { linked_client_id: linkedClientId } = await readJson(authorizeResponse);
+
+    // Long past the deadline plus the collection grace.
+    await db
+      .update(deviceAuthorizationRequests)
+      .set({ expiresAt: new Date(Date.now() - 60 * 60 * 1000) })
+      .where(
+        eq(deviceAuthorizationRequests.deviceCodeHash, hashSecret(deviceCode)),
+      );
+
+    const pollResponse = await pollDevice(
+      postJson("/api/device/poll", { device_code: deviceCode }),
+    );
+    expect(pollResponse.status).toBe(400);
+    expect((await readJson(pollResponse)).error).toBe("expired_token");
+
+    const [client] = await db
+      .select()
+      .from(linkedClients)
+      .where(eq(linkedClients.id, linkedClientId as string));
+    expect(client?.encryptedRefreshToken).toBeNull();
+    expect(client?.revokedAt).not.toBeNull();
+
+    // And the request is not redeemable on a retry either.
+    const again = await pollDevice(
+      postJson("/api/device/poll", { device_code: deviceCode }),
+    );
+    expect(again.status).toBe(400);
+  });
+
   it("keeps allowlisted scopes and drops unknown ones from device requests", async () => {
     const { deviceCode, userCode } = await startDeviceRequest({
       public_display_name: "Scoped Backend",

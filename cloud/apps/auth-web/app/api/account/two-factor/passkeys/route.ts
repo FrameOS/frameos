@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
   const context = await accountSecurityContext(request, db, {
     action: "two-factor-passkeys",
     mutating: true,
+    recentAuth: true,
   });
   if ("response" in context) {
     return context.response;

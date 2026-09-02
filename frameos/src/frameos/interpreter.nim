@@ -15,6 +15,10 @@ import frameos/runtime_diagnostics
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
 
+# Runtime verbs a scene's dispatch node must not reach. Keep in step with
+# schedulerRefusedEvents in scheduler.nim.
+const sceneRefusedDispatchEvents* = ["uploadScenes", "reboot", "restart", "reload"]
+
 const TRACING = false
 when defined(frameosEmbedded):
   const EmbeddedMaxCachedImageBytes = 1024 * 1024
@@ -800,6 +804,18 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
           "nodeId": currentNodeId.int,
           "eventName": eventName,
           "reason": "renderSelfDispatch"
+        })
+      elif eventName in sceneRefusedDispatchEvents:
+        # Scene code is untrusted (it may be anyone's store scene). A dispatch
+        # node may drive scenes and state; it may not replace the installed
+        # scene set (skipping every guard the push path applies) or take the
+        # runtime down on each render.
+        self.logger.log(%*{
+          "event": "interpreter:dispatch:ignored",
+          "sceneId": self.id.string,
+          "nodeId": currentNodeId.int,
+          "eventName": eventName,
+          "reason": "runtimeVerb"
         })
       else:
         sendEvent(eventName, finalPayload)

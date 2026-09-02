@@ -346,11 +346,27 @@ static void log_http_denied(httpd_req_t *req, int status)
 
 static esp_err_t require_protected_access(httpd_req_t *req)
 {
-    if (s_portal_mode) return ESP_OK;
-
     fos_config_t *config = fos_config();
+
+    /* The provisioning portal is open on purpose for a device that holds no
+     * credentials yet — there is nothing to prove them with. A device that
+     * already has an API key or admin login keeps demanding them even on the
+     * portal: the portal also comes up when the stored Wi-Fi simply fails to
+     * answer at boot (router down, out of range, deauthed), on an open access
+     * point, and its /api/frames answer carries the Wi-Fi password, the API
+     * key and the admin login. Those must never be one unauthenticated GET
+     * away from anyone in radio range. */
+    bool credentials_configured = config->api_key[0] != '\0' || admin_auth_configured(config);
+    if (s_portal_mode && !credentials_configured) return ESP_OK;
+
     if (request_bearer_matches(req, config) || request_basic_matches(req, config)) {
         return ESP_OK;
+    }
+
+    if (s_portal_mode) {
+        log_http_denied(req, 401);
+        httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"FrameOS\"");
+        return httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Authentication required");
     }
 
     if (!admin_auth_configured(config)) {

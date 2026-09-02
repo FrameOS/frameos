@@ -22,6 +22,8 @@ password; rotating the frame's server API key invalidates it.
 from __future__ import annotations
 
 import io
+import urllib.parse
+from html import escape as html_escape
 import json
 from http import HTTPStatus
 
@@ -420,7 +422,7 @@ async def api_virtual_frame_page(
     # it already arrived with; JS swaps the image in place so e-ink-style
     # updates do not flash white on kiosk browsers.
     html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>{(frame.name or f"Frame {frame.id}")}</title>
+<html><head><meta charset="utf-8"><title>{html_escape(frame.name or f"Frame {frame.id}")}</title>
 <style>
   html, body {{ margin: 0; height: 100%; background: #000; }}
   body {{ display: flex; align-items: center; justify-content: center; }}
@@ -429,7 +431,7 @@ async def api_virtual_frame_page(
 </style></head>
 <body>
 <img id="frame" width="{width}" height="{height}"
-     src="/api/frames/{frame.id}/virtual/image?k={k}" alt="">
+     src="/api/frames/{frame.id}/virtual/image?k={html_escape(urllib.parse.quote(k, safe=''), quote=True)}" alt="">
 <script>
   const img = document.getElementById('frame');
   const base = img.src;

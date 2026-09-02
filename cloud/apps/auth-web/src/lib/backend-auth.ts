@@ -36,10 +36,13 @@ export async function authenticateLinkedClient(
     return undefined;
   }
 
+  const authenticatedWithPreviousToken =
+    linkedClient.tokenReference !== tokenHash;
+
   // First use of the new token proves the backend received it; retire the
   // previous token immediately instead of letting the grace window run out.
   if (
-    linkedClient.tokenReference === tokenHash &&
+    !authenticatedWithPreviousToken &&
     linkedClient.previousTokenReference
   ) {
     await db
@@ -52,7 +55,11 @@ export async function authenticateLinkedClient(
       .where(eq(linkedClients.id, linkedClient.id));
   }
 
-  return linkedClient;
+  // Which credential proved the request matters to exactly one caller:
+  // rotate-token must not accept the retiring token, or whoever holds the old
+  // one could rotate again inside the grace window and lock the real backend
+  // out with its own freshly issued token.
+  return { ...linkedClient, authenticatedWithPreviousToken };
 }
 
 // The scopes the user approved on the consent screen, as stored on the linked

@@ -33,6 +33,13 @@ export async function POST(request: NextRequest) {
   if (!linkedClient) {
     return jsonError("invalid_link_token", 401);
   }
+  // Only the current token may rotate. The previous one is still accepted
+  // for a few minutes so a backend that missed the rotation response can
+  // retry — but letting it rotate again would hand a stolen old token the
+  // power to replace the new one and lock the legitimate backend out.
+  if (linkedClient.authenticatedWithPreviousToken) {
+    return jsonError("invalid_link_token", 401);
+  }
 
   let credential: ReturnType<typeof createEncryptedSecretToken>;
   try {

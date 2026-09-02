@@ -22,7 +22,7 @@ async def post_api_log(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     parts = authorization.split(' ')
-    if len(parts) != 2:
+    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1]:
         raise HTTPException(status_code=401, detail="Invalid Authorization header")
 
     server_api_key = parts[1]

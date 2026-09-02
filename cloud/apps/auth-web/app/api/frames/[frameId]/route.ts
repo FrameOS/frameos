@@ -19,6 +19,7 @@ import {
   supersedePendingCommands,
 } from "../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { requireRecentAuth } from "../../../../src/lib/recent-auth";
 import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -182,6 +183,15 @@ export async function DELETE(
   const { db, response } = requireDatabase();
   if (!db) {
     return response;
+  }
+
+  // Deleting revokes first, and revoking is the sudo-mode action: the same
+  // recent-auth window /revoke demands applies here, which also keeps API
+  // tokens out (their freshness is never recorded) — a stolen token or an
+  // idle cookie must not erase the account's frames.
+  const stale = await requireRecentAuth(db, session.accountId);
+  if (stale) {
+    return stale;
   }
 
   const { frameId } = await params;

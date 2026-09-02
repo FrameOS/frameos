@@ -338,7 +338,8 @@ async def test_firmware_build_queues_job(async_client, db, redis):
 
 
 @pytest.mark.asyncio
-async def test_firmware_download(async_client, db, tmp_path):
+async def test_firmware_download(async_client, db, tmp_path, monkeypatch):
+    monkeypatch.setenv('FRAMEOS_EMBEDDED_ARTIFACT_DIR', str(tmp_path))
     frame = await create_embedded_frame(async_client)
 
     artifact = tmp_path / 'frameos-esp32-s3.bin'

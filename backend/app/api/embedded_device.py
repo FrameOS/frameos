@@ -93,7 +93,7 @@ def _embedded_frame_from_bearer(db: Session, frame_id: int, authorization: str |
     if not authorization:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
     parts = authorization.split(" ")
-    if len(parts) != 2 or parts[0].lower() != "bearer":
+    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1]:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Invalid Authorization header")
     frame = db.query(Frame).filter_by(server_api_key=parts[1]).first()
     if not frame or int(frame.id) != frame_id:

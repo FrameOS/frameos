@@ -44,6 +44,12 @@ describe("safeAuthReturnPath", () => {
 
     expect(safeAuthReturnPath("https://evil.example/account")).toBeUndefined();
     expect(safeAuthReturnPath("//evil.example/account")).toBeUndefined();
+    // Dot segments must not resolve into a protocol-relative URL.
+    expect(safeAuthReturnPath("/..//evil.example")).toBeUndefined();
+    expect(safeAuthReturnPath("/.//evil.example/account")).toBeUndefined();
+    expect(safeAuthReturnPath("/account/..//evil.example")).toBeUndefined();
+    expect(safeAuthReturnPath("/..\\\\evil.example")).toBeUndefined();
+    expect(safeAuthReturnPath("/account/../scenes")).toBe("/scenes");
     expect(
       safeAuthReturnPath("https://user@scenes.frameos.net/account/scenes"),
     ).toBeUndefined();

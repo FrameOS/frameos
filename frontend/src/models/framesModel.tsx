@@ -1681,6 +1681,20 @@ export const framesModel = kea<framesModelType>([
     },
     deleteFrame: async ({ id }) => {
       const response = await apiFetch(`/api/frames/${id}`, { method: 'DELETE' })
+      // The cloud gates deletion behind a recent proof of credentials, like
+      // revoking: send the user through /login/reauth and back to this page,
+      // where they repeat the action with a fresh session.
+      if (response.status === 403 && isCloudMode()) {
+        const detail = (await response
+          .clone()
+          .json()
+          .catch(() => ({}))) as { error?: string; reauth?: { path?: string } }
+        if (detail.error === 'reauth_required') {
+          const path = detail.reauth?.path ?? '/login/reauth'
+          window.location.assign(`${path}?return_to=${encodeURIComponent(window.location.href)}`)
+          return
+        }
+      }
       if (router.values.location.pathname.includes('/frames/' + id)) {
         router.actions.push(urls.frames())
       }

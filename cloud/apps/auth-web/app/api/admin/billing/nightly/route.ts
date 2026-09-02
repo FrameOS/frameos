@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
   if (limited) {
     return limited;
   }
-  const admin = await getSuperadminContext();
+  const admin = await getSuperadminContext({ allowApiToken: true });
   if (admin.kind !== "ok") {
     return jsonError(
       admin.kind === "forbidden" ? "forbidden" : "unauthenticated",

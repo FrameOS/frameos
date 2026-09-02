@@ -286,6 +286,35 @@ suite "interpreter error paths":
       check ignored["reason"].getStr() == "renderSelfDispatch"
     clearEventChannel()
 
+  test "a scene's dispatch node cannot fire runtime verbs":
+    # Scene code is untrusted: dispatching uploadScenes would replace the
+    # installed scenes past every guard, and reboot on every render is a loop.
+    for verb in ["uploadScenes", "reboot", "restart", "reload"]:
+      clearEventChannel()
+      let sceneId = ("tests/interpreter-errors/dispatch-" & verb).SceneId
+      let exported = ExportedInterpretedScene(
+        name: "dispatch " & verb,
+        backgroundColor: parseHtmlColor("#000000"),
+        refreshInterval: 1.0,
+        publicStateFields: @[],
+        nodes: @[
+          node(10, "event", %*{"keyword": "render"}),
+          node(20, "dispatch", %*{"keyword": verb, "config": {}})
+        ],
+        edges: @[
+          edge(100, 10, "next", 20, "prev")
+        ]
+      )
+      withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+        discard render(scene, ctx(scene, "render"))
+        let (ok, _) = eventChannel.tryRecv()
+        check not ok
+        let ignored = eventPayload(store, "interpreter:dispatch:ignored")
+        check not ignored.isNil
+        check ignored["eventName"].getStr() == verb
+        check ignored["reason"].getStr() == "runtimeVerb"
+      clearEventChannel()
+
   test "malformed field path is handled as literal key during edge wiring":
     var scene = InterpretedFrameScene(nodes: initTable[NodeId, DiagramNode]())
     scene.nodes[1.NodeId] = node(1, "app", %*{"name": "newImage", "keyword": "data/newImage"})

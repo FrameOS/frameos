@@ -49,6 +49,29 @@ from app.tasks.utils import find_nim_v2
 from app.codegen.apps_nim import write_apps_nim
 from app.codegen.app_loader_nim import write_app_loader_nim
 
+
+# Scene JSON is user-supplied (templates, store imports, cloud restores), and
+# the `sources` map keys become file names under the build tree. Anything but
+# a plain file name — "../x", "/etc/cron.d/x", a nested path — would let a
+# scene write anywhere the backend process can, so refuse it outright rather
+# than trying to normalise it.
+_SAFE_SOURCE_FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_SAFE_NODE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
+
+
+def _scene_source_path(app_dir: str, filename: str) -> str:
+    name = str(filename)
+    if (
+        not _SAFE_SOURCE_FILENAME.fullmatch(name)
+        or name in (".", "..")
+        or os.path.basename(name) != name
+    ):
+        raise ValueError(f"Refusing to build: scene source file name {name!r} is not a plain file name")
+    target = os.path.join(app_dir, name)
+    if os.path.dirname(os.path.realpath(target)) != os.path.realpath(app_dir):
+        raise ValueError(f"Refusing to build: scene source {name!r} resolves outside its app directory")
+    return target
+
 # useMalloc routes Nim's heap through glibc malloc so the mallopt/malloc_trim
 # tuning in setupRenderMemory()/reclaimRenderMemory() actually governs image
 # buffers ("-d:malloc" was a typo that left Nim's page allocator in charge,
@@ -382,7 +405,7 @@ class FrameDeployer:
             app_dir = os.path.join(source_dir, "src", "apps", app_id)
             os.makedirs(app_dir, exist_ok=True)
             for filename, code in sources.items():
-                with open(os.path.join(app_dir, filename), "w") as f:
+                with open(_scene_source_path(app_dir, filename), "w") as f:
                     f.write(code)
             config_json = sources["config.json"] if "config.json" in sources else '{}'
             config = json.loads(config_json)
@@ -391,11 +414,13 @@ class FrameDeployer:
                 lf.write(app_loader_nim)
 
         for node_id, sources in get_apps_from_scenes(scenes).items():
+            if not _SAFE_NODE_ID.fullmatch(str(node_id)):
+                raise ValueError(f"Refusing to build: scene node id {node_id!r} is not a plain identifier")
             app_id = "nodeapp_" + node_id.replace('-', '_')
             app_dir = os.path.join(source_dir, "src", "apps", app_id)
             os.makedirs(app_dir, exist_ok=True)
             for filename, code in sources.items():
-                with open(os.path.join(app_dir, filename), "w") as f:
+                with open(_scene_source_path(app_dir, filename), "w") as f:
                     f.write(code)
             config_json = sources["config.json"] if "config.json" in sources else '{}'
             config = json.loads(config_json)

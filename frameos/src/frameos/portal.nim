@@ -214,9 +214,15 @@ proc maskedPasswordArgs*(args: seq[string]): seq[string] =
 
 proc run(cmd: string, loggedCmd: string = ""): (string, int) {.gcsafe.} =
   ## Execute a shell command (through /bin/sh -c) and log the result.
-  ## Pass loggedCmd when cmd contains secrets that must not reach the logs.
+  ## Pass loggedCmd when the command or its OUTPUT carries secrets: the log
+  ## line then shows loggedCmd and no output at all. The log stream leaves the
+  ## device (backend log POST, cloud get_logs), so a keyfile read back with
+  ## `cat` must never be echoed into it.
   let (output, rc) = portalRunHook(cmd)
-  pLog("portal:exec", %*{"cmd": (if loggedCmd.len > 0: loggedCmd else: cmd), "rc": rc, "output": output.strip()})
+  if loggedCmd.len > 0:
+    pLog("portal:exec", %*{"cmd": loggedCmd, "rc": rc, "output": "[redacted]", "outputBytes": output.len})
+  else:
+    pLog("portal:exec", %*{"cmd": cmd, "rc": rc, "output": output.strip()})
   (output, rc)
 
 # ---------------------------------------------------------------------------

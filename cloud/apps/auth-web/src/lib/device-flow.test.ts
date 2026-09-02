@@ -53,6 +53,20 @@ describe("safeLocalOrigin", () => {
     expect(safeLocalOrigin("https://172.32.0.1")).toBeUndefined();
     expect(safeLocalOrigin("https://192.169.1.1")).toBeUndefined();
   });
+
+  it("applies the IPv6 prefix checks to IPv6 literals only", () => {
+    // "fd…" and "fc…" are unique-local IPv6 prefixes — for literals. A DNS
+    // name that happens to start with those letters is a public host.
+    expect(safeLocalOrigin("https://fdcloud.example.com")).toBeUndefined();
+    expect(safeLocalOrigin("https://fc.attacker.net")).toBeUndefined();
+    expect(safeLocalOrigin("https://fe80.example.com")).toBeUndefined();
+    expect(safeLocalOrigin("http://[fd12:3456::1]:8989")).toBe(
+      "http://[fd12:3456::1]:8989",
+    );
+    expect(safeLocalOrigin("http://[fe80::1]")).toBe("http://[fe80::1]");
+    expect(safeLocalOrigin("http://[::1]:8989")).toBe("http://[::1]:8989");
+    expect(safeLocalOrigin("http://[2001:db8::1]")).toBeUndefined();
+  });
 });
 
 describe("parseClientKind", () => {

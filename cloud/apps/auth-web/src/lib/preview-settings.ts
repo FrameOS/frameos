@@ -159,3 +159,50 @@ export function paidServicesForScenes(
 ): PreviewSettingsGroup[] {
   return requiredSettingsForScenes(rawScenes).filter((group) => group.paid);
 }
+
+// Settings groups a scene claims through app sources it carries itself
+// (a config.json under sources), as opposed to the stock apps' catalogue.
+// Scene code is untrusted — a published scene can be anyone's — and an app
+// that ships its own config.json decides which of the viewer's stored keys
+// it may read. The stock apps are ours; these are not.
+export function embeddedSourceSettingsForScenes(
+  rawScenes: Record<string, unknown>[],
+): PreviewSettingsGroup[] {
+  const scenes = rawScenes as SceneJson[];
+  const keys = new Set<string>();
+  for (const scene of scenes) {
+    for (const node of scene.nodes ?? []) {
+      if (node.type !== "app") {
+        continue;
+      }
+      const keyword = node.data?.keyword;
+      const sources =
+        node.data?.sources ??
+        (keyword ? scene.apps?.[keyword]?.sources : undefined);
+      for (const key of settingsFromSources(sources)) {
+        keys.add(key);
+      }
+    }
+  }
+  return Object.values(previewSettingsGroups).filter((group) =>
+    keys.has(group.key),
+  );
+}
+
+// What the live preview must wait for a click on before rendering: paid
+// services (every render bills), and any service a scene's own bundled app
+// code asks for (every render hands that code the viewer's stored key).
+export function gatedServicesForScenes(
+  rawScenes: Record<string, unknown>[],
+): PreviewSettingsGroup[] {
+  const paid = paidServicesForScenes(rawScenes);
+  const embedded = embeddedSourceSettingsForScenes(rawScenes);
+  const seen = new Set<string>();
+  return [...paid, ...embedded].filter((group) => {
+    if (seen.has(group.key)) {
+      return false;
+    }
+    seen.add(group.key);
+    return true;
+  });
+}

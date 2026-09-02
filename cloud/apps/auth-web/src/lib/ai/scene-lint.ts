@@ -276,7 +276,9 @@ export function lintCodeNodeJs(code: string, argNames: string[] = []): string[] 
   // snippet; redeclaring one in the same scope is a SyntaxError on the frame
   // ("invalid redefinition of lexical identifier") that names no line.
   for (const name of argNames) {
-    if (new RegExp(`(^|[^.\\w])(?:const|let|var|function|class)\\s+${name}\\b`).test(code)) {
+    // The name is scene-supplied: escape it, or "[" throws and "(a*)*c" backtracks forever.
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(^|[^.\\w])(?:const|let|var|function|class)\\s+${escaped}\\b`).test(code)) {
       problems.push(
         `Code node redeclares its argument "${name}" (it is already defined as a const from codeArgs). Use it directly or copy it into a differently named variable.`,
       );

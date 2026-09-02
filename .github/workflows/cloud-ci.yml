@@ -291,27 +291,6 @@ jobs:
             echo "proceed=true" >>"$GITHUB_OUTPUT"
           fi
 
-      - name: Configure SSH
-        if: steps.freshness.outputs.proceed == 'true'
-        env:
-          DEPLOY_KEY: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_KEY }}
-          KNOWN_HOSTS: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_KNOWN_HOSTS }}
-        run: |
-          set -euo pipefail
-          test -n "$DEPLOY_KEY" || { echo "FRAMEOS_CLOUD_DEPLOY_KEY is not set" >&2; exit 1; }
-          test -n "$KNOWN_HOSTS" || { echo "FRAMEOS_CLOUD_DEPLOY_KNOWN_HOSTS is not set" >&2; exit 1; }
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_KEY" >~/.ssh/frameos-cloud-deploy
-          chmod 600 ~/.ssh/frameos-cloud-deploy
-          # Pinned, never learned on first use: an unauthenticated host key is
-          # a deploy bundle handed to whoever answers the address.
-          printf '%s\n' "$KNOWN_HOSTS" >>~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-          # Absolute: deploy.sh passes this to `ssh -i "$ssh_key"` quoted, and
-          # a literal ~ inside quotes is a path that does not exist.
-          echo "FRAMEOS_CLOUD_DEPLOY_SSH_KEY=$HOME/.ssh/frameos-cloud-deploy" >>"$GITHUB_ENV"
-
       # Production is allowed to run a branch — some frame-facing work can
       # only be exercised against the real cloud — and an automatic deploy
       # must not silently take that away while someone is using it. Deploying
@@ -402,6 +381,30 @@ jobs:
             echo "::warning::the build left the tree dirty; the deploy will refuse it"
             git status --porcelain
           fi
+
+      # Written only now, after every third-party action in this job has
+      # run: the key is root on the production box, and nothing that is
+      # not ours should execute with it on disk.
+      - name: Configure SSH
+        if: steps.freshness.outputs.proceed == 'true'
+        env:
+          DEPLOY_KEY: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_KEY" || { echo "FRAMEOS_CLOUD_DEPLOY_KEY is not set" >&2; exit 1; }
+          test -n "$KNOWN_HOSTS" || { echo "FRAMEOS_CLOUD_DEPLOY_KNOWN_HOSTS is not set" >&2; exit 1; }
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" >~/.ssh/frameos-cloud-deploy
+          chmod 600 ~/.ssh/frameos-cloud-deploy
+          # Pinned, never learned on first use: an unauthenticated host key is
+          # a deploy bundle handed to whoever answers the address.
+          printf '%s\n' "$KNOWN_HOSTS" >>~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          # Absolute: deploy.sh passes this to `ssh -i "$ssh_key"` quoted, and
+          # a literal ~ inside quotes is a path that does not exist.
+          echo "FRAMEOS_CLOUD_DEPLOY_SSH_KEY=$HOME/.ssh/frameos-cloud-deploy" >>"$GITHUB_ENV"
 
       # The same script a human runs. `-- main` rather than the bare form so
       # the server records the ref as "main": that is what the branch check

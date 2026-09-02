@@ -37,7 +37,7 @@ import {
   type ReactNode,
 } from "react";
 import {
-  paidServicesForScenes,
+  gatedServicesForScenes,
   requiredSettingsForScenes,
   type PreviewSettingsGroup,
 } from "../lib/preview-settings";
@@ -262,7 +262,7 @@ export function SceneLivePreviewPanel({
   // takes it back, so an editor (or AI) edit cannot quietly bill a render.
   // Restart, Resize and new settings keep the go-ahead: they are clicks.
   const paidServices = useMemo(
-    () => (scenes ? paidServicesForScenes(scenes) : []),
+    () => (scenes ? gatedServicesForScenes(scenes) : []),
     [scenes],
   );
   const [paidRunJson, setPaidRunJson] = useState<string | null>(null);
@@ -1109,10 +1109,11 @@ export function SceneLivePreviewPanel({
               This preview waits for you to start it
             </p>
             <p className="live-preview__gate-copy">
-              This scene calls {joinNames(paidServices.map((group) => group.title))},
-              which bills per request. To keep that under your control, nothing
-              renders until you ask for it — and every change to the scene
-              needs a fresh go-ahead.
+              This scene calls {joinNames(paidServices.map((group) => group.title))}
+              with your stored keys — and a scene&apos;s own code decides what it
+              sends where, while OpenAI bills per request. To keep that under
+              your control, nothing renders until you ask for it — and every
+              change to the scene needs a fresh go-ahead.
             </p>
             <button
               className="button button-primary"

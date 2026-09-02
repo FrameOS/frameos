@@ -31,10 +31,22 @@ export type SuperadminContext =
 
 // Superadmin is checked against the accounts row on every request, not a
 // session claim, so revoking the flag takes effect immediately.
-export async function getSuperadminContext(): Promise<SuperadminContext> {
+//
+// Superadmin is a property of the person at the keyboard, so by default only
+// a session cookie counts: a personal API token minted by a superadmin must
+// not carry the power to grant superadmin, delete accounts or post journal
+// entries from a script or a leaked ops box. The one caller that needs a
+// token (the nightly accounting job, curl + a superadmin token from cron)
+// opts in explicitly.
+export async function getSuperadminContext(
+  options: { allowApiToken?: boolean } = {},
+): Promise<SuperadminContext> {
   const session = await readSession();
   if (!session?.accountId || !hasDatabaseUrl()) {
     return { kind: "unauthenticated" };
+  }
+  if (session.apiToken && !options.allowApiToken) {
+    return { kind: "forbidden" };
   }
 
   const [account] = await createDb()
