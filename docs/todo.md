@@ -158,11 +158,12 @@ Everything else parked:
   Pi 2 (BCM2836, ARMv7) is deliberately unsupported: it is the only Pi needing
   its own 32-bit `kernel7.img`, and Buildroot builds one kernel per image.
 - **Remove the scene-report Discord webhook** (`DISCORD_REPORTS_WEBHOOK_URL`,
-  `discord.ts`, used only by the store report route). The signup half of this
-  path is gone: new-user messages come from a PostHog webhook on the
-  `cloud user signed up` event. Scene reports still post straight to Discord
-  because nothing captures them to PostHog yet; add that capture, watch one
-  real report arrive through it, then delete `discord.ts` and the env var.
+  `discord.ts`, used only by the store report route). Reports now also
+  capture a `store scene reported` PostHog event (the signup path already
+  moved: new-user messages come from a PostHog webhook on
+  `cloud user signed up`). Wire a PostHog webhook on the report event, watch
+  one real report arrive through it, then delete `discord.ts`, its test, the
+  env var and the `/admin` system check.
 - **A second transactional email provider.** Postmark is a single point of
   failure gating every login; its failure is visible (`/admin` live check, error
   tracking) but not survivable. Deferred not because it is hard but because

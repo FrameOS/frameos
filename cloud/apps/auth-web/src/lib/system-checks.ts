@@ -116,7 +116,7 @@ export function runSystemChecks(): SystemCheck[] {
     {
       configured: isSet("NEXT_PUBLIC_POSTHOG_KEY"),
       detail:
-        "PostHog analytics AND error tracking (browser exceptions, server-side reportError, signup capture).",
+        "PostHog analytics AND error tracking (browser exceptions, server-side reportError, signup and scene-report capture).",
       name: "NEXT_PUBLIC_POSTHOG_KEY",
       required: false,
     },

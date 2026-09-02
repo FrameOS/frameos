@@ -688,12 +688,12 @@ queues behind a cursor that cannot advance until the write runs. It does not
 error; it hangs, with Postgres reporting `ClientRead`. Page with `limit N`
 instead.
 
-## Signup Notifications
+## Operational Notifications
 
-When a brand new account is created (password signup or first Google
-sign-in), auth-web fires an optional fire-and-forget PostHog capture
-(`src/lib/signup-notifications.ts`). It is skipped silently when the key is
-unset, and failures never affect the signup:
+auth-web fires optional fire-and-forget server-side PostHog captures
+(`src/lib/posthog-capture.ts`) for a few operational events. They are
+skipped silently when the key is unset, and failures never affect the flow
+that triggered them:
 
 ```text
 NEXT_PUBLIC_POSTHOG_KEY=…                    # PostHog project key; also used
@@ -702,11 +702,17 @@ NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
                                              # https://eu.i.posthog.com
 ```
 
-The PostHog event is `cloud user signed up` with the account id as
-`distinct_id`, sent server-side to the `/capture` endpoint using the same
-public project key as the browser SDK (no extra secret required). The
-"new user" Discord message is a PostHog webhook destination on that event,
-configured in PostHog, not in auth-web.
+| Event                  | `distinct_id`        | Fired by                                          |
+| ---------------------- | -------------------- | ------------------------------------------------- |
+| `cloud user signed up` | the new account id   | password signup, first Google sign-in             |
+| `store scene reported` | the reporter account | `POST /api/store/scenes/<id>/report` (new report) |
+
+Both go to the `/capture` endpoint using the same public project key as the
+browser SDK (no extra secret required). The Discord messages for these
+("new user", "scene reported") are PostHog webhook destinations on the
+events, configured in PostHog, not in auth-web. `DISCORD_REPORTS_WEBHOOK_URL`
+(`src/lib/discord.ts`) is the older direct post for scene reports and is on
+its way out (`docs/todo.md`).
 
 **The browser SDK does not read this from the server's env file.**
 `NEXT_PUBLIC_*` values are inlined into the client bundle when `next build`
