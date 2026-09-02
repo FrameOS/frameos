@@ -149,15 +149,21 @@ function median(values: number[]): number | null {
   }
   const sorted = [...values].sort((a, b) => a - b)
   const middle = sorted.length >> 1
-  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
+  const upper = sorted[middle]
+  const lower = sorted[middle - 1]
+  if (upper === undefined) {
+    return null
+  }
+  return sorted.length % 2 === 1 || lower === undefined ? upper : (lower + upper) / 2
 }
 
 /** Least-squares slope of percent over hours; positive = discharging. */
 function fittedDrainPerHour(samples: BatterySample[]): number {
-  if (samples.length < 2) {
+  const first = samples[0]
+  if (!first || samples.length < 2) {
     return 0
   }
-  const t0 = samples[0].t
+  const t0 = first.t
   let sumX = 0
   let sumY = 0
   for (const sample of samples) {
@@ -176,13 +182,19 @@ function fittedDrainPerHour(samples: BatterySample[]): number {
   return variance === 0 ? 0 : -covariance / variance
 }
 
+/** `samples` must be non-empty. */
 function segmentFrom(samples: BatterySample[]): DischargeSegment {
+  const first = samples[0]
+  const last = samples[samples.length - 1]
+  if (!first || !last) {
+    throw new Error('segmentFrom needs at least one sample')
+  }
   return {
-    start: samples[0].t,
-    end: samples[samples.length - 1].t,
+    start: first.t,
+    end: last.t,
     samples,
-    startPercent: samples[0].percent,
-    endPercent: samples[samples.length - 1].percent,
+    startPercent: first.percent,
+    endPercent: last.percent,
     slopePerHour: fittedDrainPerHour(samples),
   }
 }
@@ -223,7 +235,12 @@ export function dischargeSegments(samples: BatterySample[]): DischargeSegment[] 
 export function batteryCadence(samples: BatterySample[]): BatteryCadence {
   const gaps: number[] = []
   for (let i = 1; i < samples.length; i++) {
-    const gap = (samples[i].t - samples[i - 1].t) / 1000
+    const current = samples[i]
+    const previous = samples[i - 1]
+    if (!current || !previous) {
+      continue
+    }
+    const gap = (current.t - previous.t) / 1000
     if (gap > 0 && gap < SEGMENT_GAP_MS / 1000) {
       gaps.push(gap)
     }
@@ -297,7 +314,7 @@ export function analyzeBattery(
   frame: Pick<FrameType, 'deep_sleep' | 'deep_sleep_on_battery'>
 ): BatteryAnalysis {
   const { samples, misreadCount } = batterySamplesFromMetrics(metrics)
-  const latest = samples.length > 0 ? samples[samples.length - 1] : null
+  const latest = samples[samples.length - 1] ?? null
   const cadence = batteryCadence(samples)
   const deepSleep = frameDeepSleeps(frame, latest?.onBattery ?? null)
   const base: BatteryAnalysis = {
@@ -345,13 +362,14 @@ export function forecastCycleOptions(observedCycleSeconds: number | null): numbe
 
 /** The option nearest to a cadence (the slider's starting stop). */
 export function nearestCycleOption(options: number[], cycleSeconds: number | null): number {
-  if (options.length === 0) {
+  const first = options[0]
+  if (first === undefined) {
     return 900
   }
   if (cycleSeconds === null) {
-    return options.includes(900) ? 900 : options[0]
+    return options.includes(900) ? 900 : first
   }
-  let best = options[0]
+  let best = first
   for (const option of options) {
     if (Math.abs(Math.log(option / cycleSeconds)) < Math.abs(Math.log(best / cycleSeconds))) {
       best = option

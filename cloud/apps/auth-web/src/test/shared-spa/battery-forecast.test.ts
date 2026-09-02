@@ -103,10 +103,10 @@ describe("dischargeSegments", () => {
     ];
     const segments = dischargeSegments(batterySamplesFromMetrics(metrics).samples);
     expect(segments).toHaveLength(2);
-    expect(segments[0].startPercent).toBe(40);
-    expect(segments[0].samples).toHaveLength(8);
-    expect(segments[1].startPercent).toBe(100);
-    expect(segments[1].samples).toHaveLength(8);
+    expect(segments[0]!.startPercent).toBe(40);
+    expect(segments[0]!.samples).toHaveLength(8);
+    expect(segments[1]!.startPercent).toBe(100);
+    expect(segments[1]!.samples).toHaveLength(8);
   });
 
   it("treats a jump up on battery as a charge too, and a long silence as a break", () => {
@@ -133,7 +133,7 @@ describe("dischargeSegments", () => {
     const [segment] = dischargeSegments(
       batterySamplesFromMetrics(discharge(96, 900, 90, 4)).samples,
     );
-    expect(segment.slopePerHour * 24).toBeCloseTo(4, 0);
+    expect(segment!.slopePerHour * 24).toBeCloseTo(4, 0);
   });
 });
 
@@ -189,7 +189,7 @@ describe("analyzeBattery + batteryForecast", () => {
     // Four days at 15 minutes, 4 points a day: 96 → 80.
     const metrics = discharge(4 * 96, 900, 96, 4);
     const analysis = analyzeBattery(metrics, deepSleepFrame);
-    const now = Date.parse(metrics[metrics.length - 1].timestamp);
+    const now = Date.parse(metrics[metrics.length - 1]!.timestamp);
     expect(analysis.confidence).toBe("good");
     expect(analysis.reason).toBeNull();
     expect(analysis.deepSleep).toBe(true);
@@ -213,7 +213,7 @@ describe("analyzeBattery + batteryForecast", () => {
   it("counts the time since the newest reading against what is left", () => {
     const metrics = discharge(4 * 96, 900, 96, 4);
     const analysis = analyzeBattery(metrics, deepSleepFrame);
-    const latestAt = Date.parse(metrics[metrics.length - 1].timestamp);
+    const latestAt = Date.parse(metrics[metrics.length - 1]!.timestamp);
     const fresh = batteryForecast(analysis, 900, latestAt)!;
     const later = batteryForecast(analysis, 900, latestAt + 12 * hour)!;
     expect(fresh.hoursRemaining - later.hoursRemaining).toBeCloseTo(12, 5);

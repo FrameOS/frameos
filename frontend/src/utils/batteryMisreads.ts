@@ -56,7 +56,9 @@ export interface BatteryCheckedMetrics {
 
 function median(sorted: number[]): number {
   const middle = sorted.length >> 1
-  return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
+  const upper = sorted[middle] ?? 0
+  const lower = sorted[middle - 1] ?? upper
+  return sorted.length % 2 === 1 ? upper : (lower + upper) / 2
 }
 
 function medianOf(values: number[]): number {
@@ -76,7 +78,7 @@ export function batteryMisreadFlags(values: (number | null)[], floor: number): b
     const neighbours: number[] = []
     for (let i = Math.max(0, index - NEIGHBOURS); i <= Math.min(values.length - 1, index + NEIGHBOURS); i++) {
       const neighbour = values[i]
-      if (i !== index && neighbour !== null) {
+      if (i !== index && neighbour !== null && neighbour !== undefined) {
         neighbours.push(neighbour)
       }
     }
