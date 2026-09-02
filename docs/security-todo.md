@@ -261,37 +261,34 @@ Two rules that came out of the review and apply to new code:
   iframe or a dedicated origin and talk over postMessage.
 - Smaller: `X-Forwarded-For` positional trust is spoofable if the origin is
   reachable around Cloudflare (verify nginx allowlists CF ranges or uses
-  `real_ip` + `CF-Connecting-IP`; make `clientIpFromHeaders` refuse chains
-  shorter than the trusted count — done); runtime Docker stage runs as
-  root and compose sets no `SECRET_KEY` (the key now persists to a file,
-  so compose works; still worth setting); `requirements.txt` has no
+  `real_ip` + `CF-Connecting-IP`); runtime Docker stage runs as root and
+  compose sets no `SECRET_KEY` (the key now persists to a file, so compose
+  works; still worth setting explicitly); `requirements.txt` has no
   `--hash` lines; the OpenAI service-account key and R2 keys sit in
   plaintext `.env*` files on the dev laptop (rotate / scope).
 
 ## Medium / low — worth a pass
 
-Cloud: `backends/{grants,inventory,rotate-token,scopes}` check no base scope or
-`client_kind` (a frame-kind link can create `connected_backends` rows;
-`parseScopes` allows `frame:*` for backends); backups are only
+Cloud: `backends/{grants,inventory,rotate-token,scopes}` check no base
+scope or `client_kind` (a frame-kind link can create `connected_backends`
+rows; `parseScopes` allows `frame:*` for backends); backups are only
 encrypted client-side (verify the envelope on POST or say so);
 `csrfResponse` skips the Origin check when the bearer merely *looks* like a
 token while the cookie is the credential actually used (harmless without
 CORS, but ignore the bearer when a cookie is present); `ssrf.ts` does not
-pin the resolved address (DNS rebinding);
-identity-keyed login / reset limits are a cheap lockout; passwordless
-passkey profile picks an arbitrary identity row; scene image redirects are
-cached a year and nothing purges the CDN when a scene goes private or is
-pulled; convert/lint have quadratic paths on anonymous input
-(`uniqueName`, `importSpecifierPattern`, gradient scan) and no parser
-depth cap (a `RangeError` is an unhandled 500); `?ai=` / `?prompt=` links
-auto-submit an AI turn; public scenes are unmetered storage; image-set
-binding accepts any known digest; markdown
-images load from any https host; `download_count` inflates on anonymous
-requests; `frame_commands` keeps base64
-chunk bodies after ack; per-IP OTA budgets starve fleets behind one NAT;
-`replayEnrollment` binds by
-account not by frame; model choice is client-controlled on the shared key;
-`@posthog/mcp` would capture tool arguments if a token were ever set.
+pin the resolved address (DNS rebinding); identity-keyed login / reset
+limits are a cheap lockout; passwordless passkey profile picks an arbitrary
+identity row; scene image redirects are cached a year and nothing purges
+the CDN when a scene goes private or is pulled; convert/lint have quadratic
+paths on anonymous input (`uniqueName`, `importSpecifierPattern`, gradient
+scan) and no parser depth cap (a `RangeError` is an unhandled 500); `?ai=`
+/ `?prompt=` links auto-submit an AI turn; public scenes are unmetered
+storage; image-set binding accepts any known digest; markdown images load
+from any https host; `download_count` inflates on anonymous requests;
+`frame_commands` keeps base64 chunk bodies after ack; per-IP OTA budgets
+starve fleets behind one NAT; `replayEnrollment` binds by account not by
+frame; model choice is client-controlled on the shared key; `@posthog/mcp`
+would capture tool arguments if a token were ever set.
 
 Backend: `scene_module_suffix` collisions; no artifact cleanup for SD
 images and firmware.
