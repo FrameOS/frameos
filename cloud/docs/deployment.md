@@ -691,14 +691,11 @@ instead.
 ## Signup Notifications
 
 When a brand new account is created (password signup or first Google
-sign-in), auth-web fires two optional fire-and-forget notifications
-(`src/lib/signup-notifications.ts`). Each is skipped silently when its
-environment variable is unset, and failures never affect the signup:
+sign-in), auth-web fires an optional fire-and-forget PostHog capture
+(`src/lib/signup-notifications.ts`). It is skipped silently when the key is
+unset, and failures never affect the signup:
 
 ```text
-FRAMEOS_CLOUD_DISCORD_REPORTS_WEBHOOK_URL=…  # Discord webhook for a one-line
-                                             # "new user" message in the
-                                             # reports channel
 NEXT_PUBLIC_POSTHOG_KEY=…                    # PostHog project key; also used
                                              # by the browser SDK
 NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
@@ -707,7 +704,9 @@ NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
 
 The PostHog event is `cloud user signed up` with the account id as
 `distinct_id`, sent server-side to the `/capture` endpoint using the same
-public project key as the browser SDK (no extra secret required).
+public project key as the browser SDK (no extra secret required). The
+"new user" Discord message is a PostHog webhook destination on that event,
+configured in PostHog, not in auth-web.
 
 **The browser SDK does not read this from the server's env file.**
 `NEXT_PUBLIC_*` values are inlined into the client bundle when `next build`

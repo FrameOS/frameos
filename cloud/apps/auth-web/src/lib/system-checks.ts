@@ -114,12 +114,6 @@ export function runSystemChecks(): SystemCheck[] {
       required: false,
     },
     {
-      configured: isSet("FRAMEOS_CLOUD_DISCORD_REPORTS_WEBHOOK_URL"),
-      detail: "Discord heads-up when a new account signs up.",
-      name: "FRAMEOS_CLOUD_DISCORD_REPORTS_WEBHOOK_URL",
-      required: false,
-    },
-    {
       configured: isSet("NEXT_PUBLIC_POSTHOG_KEY"),
       detail:
         "PostHog analytics AND error tracking (browser exceptions, server-side reportError, signup capture).",

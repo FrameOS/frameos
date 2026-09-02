@@ -157,13 +157,12 @@ Everything else parked:
   to `raspberry-pi-5` for free — widen `BR2_LINUX_KERNEL_INTREE_DTS_NAME` then.
   Pi 2 (BCM2836, ARMv7) is deliberately unsupported: it is the only Pi needing
   its own 32-bit `kernel7.img`, and Buildroot builds one kernel per image.
-- **Remove the Discord webhook path** (`DISCORD_REPORTS_WEBHOOK_URL`,
-  `signup-notifications.ts`, `discord.ts`) — notifications go through PostHog
-  now. Held deliberately: the PostHog path has not had a live report to prove
-  itself on, and deleting the fallback first would mean finding out it does not
-  work by missing a report. Delete on the first real notification through the
-  new path. The privacy policy already omits Discord, so the env var stays
-  unset until then.
+- **Remove the scene-report Discord webhook** (`DISCORD_REPORTS_WEBHOOK_URL`,
+  `discord.ts`, used only by the store report route). The signup half of this
+  path is gone: new-user messages come from a PostHog webhook on the
+  `cloud user signed up` event. Scene reports still post straight to Discord
+  because nothing captures them to PostHog yet; add that capture, watch one
+  real report arrive through it, then delete `discord.ts` and the env var.
 - **A second transactional email provider.** Postmark is a single point of
   failure gating every login; its failure is visible (`/admin` live check, error
   tracking) but not survivable. Deferred not because it is hard but because
