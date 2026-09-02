@@ -1,9 +1,11 @@
 # Security — what is still open
 
 Written 2026-09-02 after a full-repo security review (cloud, self-hosted
-backend, device runtime, ESP32 firmware, frontends, CI). Open work only,
-most severe first; what has shipped is in git history (the review commit
-77e583d7 and the batches after it). **When an item ships, delete it.**
+backend, device runtime, ESP32 firmware, frontends, CI); trimmed 2026-09-03
+after #438, #439 and #440. Open work only, most severe first; what has
+shipped is in git history (the review commit 77e583d7 and the batches after
+it). **When an item ships, delete it** — a residue worth remembering goes
+to the medium / low list, not into a "what remains" paragraph here.
 Prior review of the cloud-link flow: `docs/cloud-security-review.md`.
 
 Two rules that came out of the review and apply to new code:
@@ -36,24 +38,6 @@ medium / low list below.
 
 ### Self-hosted backend
 
-- **SSH host keys: trust on first use, pinned after.** The key a frame (or
-  the build host) offers on the first connect is stored (`frame.ssh_host_key`,
-  `buildHost.hostKey`) and every later connect refuses any other
-  (`app/utils/ssh_host_keys.py`); "Forget host key" in the frame's SSH
-  settings / the build-host settings is the explicit reset. What remains:
-  frames set up before this pin whatever they answer with next, so a frame
-  that was already impersonated stays impersonated until its key is
-  forgotten — the fingerprint is shown so an owner can compare it against
-  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the device.
-- **SSRF residue.** One resolver-based guard (`app/utils/network.py`) now
-  fronts every fetch the backend makes on a user's behalf — frame HTTP,
-  ping, the preview proxy (no redirects, private ranges refused), repository
-  and template / cover URLs — with bodies streamed under caps and non-2xx
-  bodies no longer reflected. DNS is resolved once per request; a rebind
-  between check and connect is the accepted residual for
-  project-authenticated features (frame hosts are IP literals in practice).
-  Loopback targets are allowed only under `FRAMEOS_ALLOW_LOOPBACK_TARGETS`
-  (development / e2e).
 - **`curl | sudo sh` bootstrap defaults to `http://` and downloads
   `frameos-*.tar.gz` unverified**; the precompiled SD image and Remote
   binary are likewise unverified server-side (the Buildroot base image is
@@ -71,23 +55,20 @@ medium / low list below.
 
 ### Device runtime (Nim) and ESP32
 
-- **Self-hosted-backend OTA is signed per install for now** — decided
-  2026-09-03 that the backend stops building firmware and serves the signed
-  release image like the cloud (`docs/todo.md`, "the self-hosted backend
-  flashes what the cloud flashes"); the per-install key below is the interim
-  until then. The backend derives
-  an Ed25519 key from `SECRET_KEY` (`app/utils/embedded_ota_signing.py`),
-  bakes the public key into every image it builds
-  (`FRAMEOS_DEFAULT_OTA_PUBKEY`) and signs the OTA artifact in minisign's
-  pre-hashed format; the device hashes what it wrote to the slot and refuses
-  to switch boot partitions on a bad or missing signature. A generic image
-  (no baked key) still applies unsigned backend images until it is
-  reflashed with a backend build. Still open: plain HTTP for the manifest
-  and download (`CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y` — the signature covers
-  integrity, the bearer `api_key` still travels in clear on http backends),
-  and Secure Boot v2 / flash + NVS encryption for production images (the
-  NVS holds the Wi-Fi PSK, the cloud token, the Ed25519 seed, the API key,
-  the admin password, the TLS key and the cached service keys).
+- **Self-hosted-backend OTA still runs over plain HTTP, and a generic
+  image applies it unsigned.** #440's per-install signature (an Ed25519 key
+  derived from `SECRET_KEY`, baked as `FRAMEOS_DEFAULT_OTA_PUBKEY`) covers
+  integrity on backend-built images only; `CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y`
+  stays, so the bearer `api_key` crosses the LAN in clear on http backends,
+  and a generic image with no baked key takes unsigned backend images until
+  it is reflashed. The fix is step 3 of "the self-hosted backend flashes
+  what the cloud flashes" (`docs/todo.md`): the backend serves the release
+  manifest, the device verifies against the release key on both control
+  planes, and the unsigned `esp_https_ota` path plus the per-install key are
+  deleted. Separately: Secure Boot v2 and flash + NVS encryption for
+  production images (the NVS holds the Wi-Fi PSK, the cloud token, the
+  Ed25519 seed, the API key, the admin password, the TLS key and the cached
+  service keys).
 - **The ESP32 frame JSON returns secrets** (`GET /api/frames`:
   `network.wifiPassword`, `admin.pass`, `server_api_key`,
   `certs.server_key`), and the backend's sync pull list depends on that
@@ -96,11 +77,11 @@ medium / low list below.
   request, so anyone with the WPA2 PSK can still read it. Make those fields
   write-only on the device (return `""`), fix the backend pull list to
   match, and push `tls_enable` on when material exists.
-- **The provisioning AP is open.** Auth is enforced on the portal once
-  credentials exist, and the AP now goes down the moment the stored network
-  answers (`fos_wifi.c` portal exit → httpd restarts in status mode); what
-  remains is a per-device PSK shown on the status screen, so a fresh device
-  cannot be provisioned by whoever is nearest.
+- **The ESP32 provisioning AP has no PSK.** It goes down as soon as the
+  stored network answers (#440) and the portal enforces auth once
+  credentials exist, but a fresh device is still provisioned by whoever is
+  nearest. Mint a per-device PSK at first boot and show it on the status
+  screen — the same answer as the Pi hotspot below.
 - **Cloud OTA has no downgrade protection** (only "same version → skip";
   `version` is outside the signed payload). Sign `version || image` and
   refuse `≤ running` unless forced, or enable app anti-rollback.
@@ -167,12 +148,6 @@ medium / low list below.
 
 ### Frontends, wasm preview, CI
 
-- **Fork PRs and the runner pool.** Fork PRs now run on GitHub-hosted
-  runners (`pull-request-tests.yml` picks the runner per event), so nothing
-  from a fork touches the shared `/mnt/cache` the Buildroot base-image and
-  release jobs read. Still worth doing on the box: mount the cache read-only
-  (or a scratch subtree) for any VM that is not building a release, and keep
-  "require approval for all outside collaborators" on in the repo settings.
 - **The CI deploy key is root on the production box and runs
   `scripts/db-migrate.sh` *from the shipped archive* with the whole env
   file exported**, then self-updates the two root scripts from the archive.
@@ -195,7 +170,11 @@ medium / low list below.
   are refused in `frameos_library.js`, but the worker still shares the app
   origin. Host `preview-worker.js` + wasm in a sandboxed
   iframe or a dedicated origin and talk over postMessage.
-- Smaller: `X-Forwarded-For` positional trust is spoofable if the origin is
+- Smaller: the runner pool's `/mnt/cache` is writable from every VM (fork
+  PRs no longer land there since #440 — mount it read-only or a scratch
+  subtree for any job that is not building a release, and keep "require
+  approval for all outside collaborators" on); `X-Forwarded-For` positional
+  trust is spoofable if the origin is
   reachable around Cloudflare (verify nginx allowlists CF ranges or uses
   `real_ip` + `CF-Connecting-IP`); runtime Docker stage runs as root and
   compose sets no `SECRET_KEY` (the key now persists to a file, so compose
@@ -260,4 +239,10 @@ frame; model choice is client-controlled on the shared key; `@posthog/mcp`
 would capture tool arguments if a token were ever set.
 
 Backend: `scene_module_suffix` collisions; no artifact cleanup for SD
-images and firmware.
+images and firmware; the resolver-based target guard (`app/utils/network.py`)
+resolves once per request, so a DNS rebind between check and connect is
+accepted for project-authenticated features (frame hosts are IP literals in
+practice); a frame whose SSH host key was already impersonated before the
+TOFU pin stays pinned to the impostor until "Forget host key" — the
+fingerprint is shown so an owner can compare it with
+`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the device.
