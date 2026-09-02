@@ -319,6 +319,25 @@ describe("AI metering", () => {
     expect(after.record.costMicros).toBe(884_800n);
   });
 
+  // The provider reports the dated snapshot it served (`gpt-5.5` comes back
+  // as `gpt-5.5-2026-04-23`); the record keeps that name and prices at the
+  // base model's row, so the nightly prices_from_table check stays quiet
+  // and the snapshot says which row did the pricing.
+  it("prices a dated snapshot name at its base model's table row", async () => {
+    await goLive();
+    const accountId = await createAccount();
+    const result = await recordAiUsage(db, {
+      ...turn(accountId, uuid(18)),
+      model: "gpt-5.6-terra-2026-04-23",
+    });
+
+    expect(result.record.model).toBe("gpt-5.6-terra-2026-04-23");
+    expect(result.record.costMicros).toBe(442_400n);
+    expect(result.entries[0]?.metadata).toMatchObject({
+      pricing: { model: "gpt-5.6-terra", priceSource: "table" },
+    });
+  });
+
   // A model nobody priced must not meter free — that would hide the whole of
   // its spend — and the entry has to say the number was a guess.
   it("falls back to an estimated price for an unpriced model, and says so", async () => {

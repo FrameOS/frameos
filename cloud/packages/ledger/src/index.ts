@@ -104,6 +104,7 @@ export {
   applyMarginMicros,
   divideRoundHalfUp,
   fallbackModelPrice,
+  baseModelName,
   fallbackModelPrices,
   priceUsage,
   providerCostMicros,

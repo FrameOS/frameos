@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyMarginMicros,
+  baseModelName,
   divideRoundHalfUp,
   fallbackModelPrice,
   priceUsage,
@@ -138,5 +139,27 @@ describe("pricing a turn", () => {
     expect(unknown.source).toBe("fallback");
     expect(unknown.inputMicrosPerMtok).toBeGreaterThan(0n);
     expect(unknown.outputMicrosPerMtok).toBeGreaterThan(0n);
+  });
+});
+
+describe("dated model snapshots", () => {
+  // OpenAI serves `gpt-5.5` as `gpt-5.5-2026-04-23` and reports the latter;
+  // the price is the base model's, whatever the date.
+  it("strips exactly one trailing -YYYY-MM-DD", () => {
+    expect(baseModelName("gpt-5.5-2026-04-23")).toBe("gpt-5.5");
+    expect(baseModelName("gpt-5.6-terra")).toBe("gpt-5.6-terra");
+    expect(baseModelName("gpt-4o-mini-2024-07-18")).toBe("gpt-4o-mini");
+    expect(baseModelName("2026-04-23")).toBe("2026-04-23");
+    expect(baseModelName("gpt-5.5-2026-04-23-preview")).toBe(
+      "gpt-5.5-2026-04-23-preview",
+    );
+  });
+
+  it("prices a dated snapshot from its base model's fallback, not the unknown row", () => {
+    const dated = fallbackModelPrice("gpt-5.6-terra-2026-04-23");
+    expect(dated.inputMicrosPerMtok).toBe(2_000_000n);
+    expect(dated.cachedInputMicrosPerMtok).toBe(200_000n);
+    expect(dated.outputMicrosPerMtok).toBe(12_000_000n);
+    expect(dated.source).toBe("fallback");
   });
 });
