@@ -1,6 +1,44 @@
+import json
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from app.models.repository import Repository
+
+
+def _fake_client(payload: dict, calls: list):
+    """httpx.AsyncClient as update_templates uses it: `.stream("GET", url)`
+    yielding the repository JSON."""
+    body = json.dumps(payload).encode()
+
+    class FakeStream:
+        headers = {"content-length": str(len(body))}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self):
+            yield body
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            calls.append(("init", kwargs))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def stream(self, method, url, **kwargs):
+            calls.append((method, url))
+            return FakeStream()
+
+    return FakeClient
 
 @pytest.mark.asyncio
 async def test_repository_create(db, default_project):
@@ -11,22 +49,19 @@ async def test_repository_create(db, default_project):
 
 
 @pytest.mark.asyncio
-@patch("app.models.repository.httpx.AsyncClient")   # ➊ patch the *class*
-async def test_repository_update_templates(mock_async_client_cls, db, default_project):
-    fake_response = MagicMock()
-    fake_response.status_code = 200
-    fake_response.json.return_value = {
-        "name": "My Repo",
-        "description": "A sample repository",
-        "templates": [{"title": "Template1"}],
-    }
-
-    mock_client = AsyncMock()
-    mock_client.get.return_value = fake_response
-    mock_async_client_cls.return_value = mock_client
-
-    mock_client.__aenter__.return_value = mock_client
-    mock_client.__aexit__.return_value = False   # propagate exceptions normally
+async def test_repository_update_templates(db, default_project, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.models.repository.httpx.AsyncClient",
+        _fake_client(
+            {
+                "name": "My Repo",
+                "description": "A sample repository",
+                "templates": [{"title": "Template1"}],
+            },
+            calls,
+        ),
+    )
 
     repo = Repository(project_id=default_project.id, name="OldName", url="http://example.com/repo")
     db.add(repo)
@@ -39,28 +74,25 @@ async def test_repository_update_templates(mock_async_client_cls, db, default_pr
     assert repo.description == "A sample repository"
     assert len(repo.templates) == 1
 
-    mock_client.get.assert_awaited_once_with("http://example.com/repo", timeout=10)
+    assert calls == [("init", {"timeout": 10}), ("GET", "http://example.com/repo")]
 
 
 @pytest.mark.asyncio
-@patch("app.models.repository.httpx.AsyncClient")
-async def test_repository_resolves_relative_assets(mock_async_client_cls, db, default_project):
+async def test_repository_resolves_relative_assets(db, default_project, monkeypatch):
     """"./" assets resolve against the index URL; a null image is not fatal."""
-    fake_response = MagicMock()
-    fake_response.status_code = 200
-    fake_response.json.return_value = {
-        "templates": [
-            {"name": "Relative", "image": "./scenes/abc/image", "zip": "./scenes/abc/download"},
-            {"name": "Absolute", "image": "https://scenes.example.com/scenes/def/image"},
-            {"name": "No preview", "image": None},
-        ],
-    }
-
-    mock_client = AsyncMock()
-    mock_client.get.return_value = fake_response
-    mock_async_client_cls.return_value = mock_client
-    mock_client.__aenter__.return_value = mock_client
-    mock_client.__aexit__.return_value = False
+    monkeypatch.setattr(
+        "app.models.repository.httpx.AsyncClient",
+        _fake_client(
+            {
+                "templates": [
+                    {"name": "Relative", "image": "./scenes/abc/image", "zip": "./scenes/abc/download"},
+                    {"name": "Absolute", "image": "https://scenes.example.com/scenes/def/image"},
+                    {"name": "No preview", "image": None},
+                ],
+            },
+            [],
+        ),
+    )
 
     repo = Repository(
         project_id=default_project.id,

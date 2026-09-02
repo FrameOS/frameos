@@ -16,6 +16,7 @@ import { router } from 'kea-router'
 import { framesModel, type RemoteTaskTransport } from '../../models/framesModel'
 import { publishedReleaseModel } from '../../models/publishedReleaseModel'
 import { subscriptions } from '../../utils/keaSubscriptions'
+import { restoreDeployedSecrets } from '../../utils/frameSecrets'
 import {
   AppNodeData,
   DiagramEdge,
@@ -276,7 +277,10 @@ function deployedFrameBaseline(frame: FrameType | null | undefined): Partial<Fra
     return null
   }
   if (frame.last_successful_deploy) {
-    return frame.last_successful_deploy
+    // The snapshot holds fingerprints, not secrets: a secret whose
+    // fingerprint still matches the row is filled in from the frame so it
+    // compares equal below; a rotated one stays out and reads as a change.
+    return restoreDeployedSecrets(frame.last_successful_deploy, frame) ?? null
   }
   if ((frame.mode ?? 'rpios') === 'embedded' && frameHasActivityLog(frame)) {
     return { ...frame, frameos_version: CURRENT_FRAMEOS_VERSION } as Partial<FrameType>
@@ -1955,6 +1959,9 @@ export interface frameLogicActions {
   fastDeployFrame: () => {
     value: true
   }
+  forgetSshHostKey: () => {
+    value: true
+  }
   fullDeployFrame: () => {
     value: true
   }
@@ -2242,6 +2249,7 @@ export const frameLogic = kea<frameLogicType>([
     }),
     restartRemote: (transport: RemoteTaskTransport = 'auto') => ({ transport }),
     updateDeployedSshKeys: true,
+    forgetSshHostKey: true,
     clearNextAction: true,
     resetUnsavedChanges: true,
     resetUndeployedChanges: true,
@@ -2565,6 +2573,14 @@ export const frameLogic = kea<frameLogicType>([
       })
       if (!response.ok) {
         throw new Error('Failed to update deployed SSH keys')
+      }
+    },
+    forgetSshHostKey: async () => {
+      // The pinned key is dropped server-side; the update_frame broadcast
+      // clears it here. The next SSH connection records the key it is offered.
+      const response = await apiFetch(`/api/frames/${values.frameId}/ssh_host_key/forget`, { method: 'POST' })
+      if (!response.ok) {
+        throw new Error('Failed to forget the SSH host key')
       }
     },
     generateFrameAdminCredentials: () => {

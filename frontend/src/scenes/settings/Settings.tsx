@@ -405,6 +405,7 @@ export function Settings() {
     deleteCustomFont,
     toggleSshKeyExpanded,
     toggleOpenAiModelOverrides,
+    setSettingsValues,
   } = useActions(settingsLogic)
   const { isHassioIngress } = useValues(sceneLogic)
   const { logout } = useActions(sceneLogic)
@@ -850,6 +851,40 @@ export function Settings() {
                               >
                                 <TextArea rows={3} />
                               </Field>
+                              <div className="@md:flex @md:gap-2">
+                                <Label className="@md:w-1/3">Host key</Label>
+                                <div className="w-full space-y-1">
+                                  {settings.buildHost?.hostKey ? (
+                                    <>
+                                      <div className="text-sm break-all">
+                                        {settings.buildHost.hostKey.split(' ')[0]}{' '}
+                                        {settings.buildHost.hostKeyFingerprint}
+                                      </div>
+                                      <Button
+                                        size="small"
+                                        color="secondary"
+                                        onClick={() =>
+                                          setSettingsValues({
+                                            buildHost: { ...settings.buildHost, hostKey: '', hostKeyFingerprint: '' },
+                                          })
+                                        }
+                                      >
+                                        Forget host key
+                                      </Button>
+                                      <p className="text-xs text-gray-500">
+                                        Pinned when the connection was first checked; any other key is refused. Forget
+                                        it only after reinstalling the build host, then save and check the connection
+                                        again.
+                                      </p>
+                                    </>
+                                  ) : (
+                                    <p className="text-xs text-gray-500">
+                                      Not recorded yet. Check the connection to pin the key the host offers; any other
+                                      key is refused from then on.
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
                               <div className="flex flex-wrap gap-2">
                                 <Button
                                   onClick={testBuildHost}

@@ -58,6 +58,15 @@
 #ifndef FRAMEOS_DEFAULT_ROTATE
 #define FRAMEOS_DEFAULT_ROTATE 0
 #endif
+/* The backend's OTA signing public key (64 hex chars) and its 8-byte key id
+ * (16 hex chars), baked by a backend build. Empty in a generic image: the
+ * backend OTA path then applies unsigned images, as it always did. */
+#ifndef FRAMEOS_DEFAULT_OTA_PUBKEY
+#define FRAMEOS_DEFAULT_OTA_PUBKEY ""
+#endif
+#ifndef FRAMEOS_DEFAULT_OTA_KEY_ID
+#define FRAMEOS_DEFAULT_OTA_KEY_ID ""
+#endif
 #ifndef FRAMEOS_DEFAULT_SCALING_MODE
 /* "cover" matches what the embedded runtime always hardcoded; the Pi's
  * frame.json default is "contain" — divergence kept deliberately so shipping

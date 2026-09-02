@@ -36,6 +36,7 @@ from arq import ArqRedis as Redis
 from arq.jobs import Job, JobStatus
 from sqlalchemy.orm import Session
 
+from app.utils.embedded_ota_signing import current_signing_key, sign_image
 from app.utils.tz_slice import tz_slice_json
 from app.drivers.waveshare import convert_waveshare_source, get_variant_folder, get_variant_keys
 from app.models.frame import (
@@ -1590,6 +1591,7 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         )
 
     backend_url = embedded_backend_url_for_frame(frame)
+    signing_key = current_signing_key()
     https_proxy = normalize_https_proxy(frame.https_proxy)
     tls_certs = https_proxy.get("certs", {})
     tls_port = https_proxy.get("port") or 8443
@@ -1626,6 +1628,11 @@ def _generated_config_header(frame: Frame, wifi_ssid: str = "", wifi_password: s
         f"#define FRAMEOS_DEFAULT_ADMIN_AUTH_USER {c_str(admin_auth['user'] if admin_auth_enabled else '')}",
         f"#define FRAMEOS_DEFAULT_ADMIN_AUTH_PASS {c_str(admin_auth['pass'] if admin_auth_enabled else '')}",
         f"#define FRAMEOS_DEFAULT_ASSETS_PATH {c_str('/srv/assets')}",
+        # This install's OTA signing public key (app/utils/embedded_ota_signing):
+        # with it baked in, the device refuses backend OTA images that are not
+        # signed by this backend.
+        f"#define FRAMEOS_DEFAULT_OTA_PUBKEY {c_str(signing_key.public_hex if signing_key else '')}",
+        f"#define FRAMEOS_DEFAULT_OTA_KEY_ID {c_str(signing_key.key_id_hex if signing_key else '')}",
     ]
     pins = embedded_pins_for_frame(frame)
     mapping = {"rst": "RST", "dc": "DC", "cs": "CS", "cs2": "CS2", "busy": "BUSY",
@@ -2716,11 +2723,20 @@ async def _build_firmware(db: Session, redis: Redis, frame: Frame, request_id: s
         "downloadUrl": embedded_firmware_download_url(int(frame.id), merged_sha256),
     }
     if flash_profile["otaSupported"]:
+        # Signed with every key this install honours (current SECRET_KEY and
+        # the previous ones), keyed by key id: the device that flashes this
+        # build trusts the current key, one built under an earlier SECRET_KEY
+        # still finds its own (app/utils/embedded_ota_signing.py).
+        minisigs = sign_image(ota_artifact_path)
+        current_key = current_signing_key()
         ready_status = {
             **ready_status,
             "otaPath": str(ota_artifact_path),
             "otaSize": ota_artifact_path.stat().st_size,
             "otaSha256": _sha256(ota_artifact_path),
+            "otaSigningKeyId": current_key.key_id_hex if current_key else None,
+            "otaMinisig": minisigs.get(current_key.key_id_hex) if current_key else None,
+            "otaMinisigs": minisigs,
         }
     await _set_firmware_status(db, redis, frame, ready_status)
     await log(db, redis, int(frame.id), "stdout",

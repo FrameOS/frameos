@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from app.conftest import MockResponse
 from app.config import normalize_ingress_path
+from app.utils.request_ip import HASSIO_INGRESS_PROXY
 
 HASSIO_ENV_KEYS = ("HASSIO_RUN_MODE", "HASSIO_TOKEN", "SUPERVISOR_TOKEN")
 
@@ -159,7 +160,8 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     assert conf.HASSIO_RUN_MODE == "ingress"
     assert conf.ingress_path == custom_ingress, f"Expected conf.ingress_path={custom_ingress}, got '{conf.ingress_path}'"
 
-    client = TestClient(app)
+    # Only the Supervisor's ingress proxy gets through (see the test below).
+    client = TestClient(app, client=(HASSIO_INGRESS_PROXY, 40000))
 
     resp_no_auth = client.get("/api/has_first_user")
     assert resp_no_auth.status_code == 200
@@ -198,3 +200,45 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     resp_root_with_header = client.get("/", headers={"x-ingress-path": "/api/hassio_ingress/runtime/"})
     assert resp_root_with_header.status_code == 200
     assert '"ingress_path": "/api/hassio_ingress/runtime"' in resp_root_with_header.text
+
+
+@pytest.mark.asyncio
+async def test_hassio_ingress_refuses_peers_other_than_the_supervisor(clear_env, monkeypatch):
+    """The ingress uvicorn mounts every router without user auth, so it must
+    answer nobody but the Supervisor's proxy: another add-on on the hassio
+    network gets 403 on HTTP and a refused handshake on /ws."""
+    from starlette.websockets import WebSocketDisconnect
+
+    monkeypatch.setenv("HASSIO_TOKEN", "token")
+    monkeypatch.setenv("HASSIO_RUN_MODE", "ingress")
+    app, conf = _reload_app_and_config()
+    assert conf.HASSIO_RUN_MODE == "ingress"
+
+    stranger = TestClient(app, client=("172.30.33.7", 40000))
+    for path in ("/api/projects", "/api/has_first_user", "/"):
+        response = stranger.get(path)
+        assert response.status_code == 403, path
+        assert "Supervisor" in response.json()["detail"]
+    with pytest.raises(WebSocketDisconnect):
+        with stranger.websocket_connect("/ws"):
+            pass
+
+    supervisor = TestClient(app, client=(HASSIO_INGRESS_PROXY, 40000))
+    assert supervisor.get("/api/projects").status_code == 200
+    with supervisor.websocket_connect("/ws") as websocket:
+        websocket.send_text("ping")
+        assert websocket.receive_json()["event"] == "pong"
+
+    # A different proxy address can be trusted explicitly.
+    monkeypatch.setattr(conf, "FRAMEOS_INGRESS_TRUSTED_PEERS", "10.9.8.7, 172.30.32.2")
+    assert TestClient(app, client=("10.9.8.7", 1)).get("/api/projects").status_code == 200
+    assert TestClient(app, client=("172.30.33.7", 1)).get("/api/projects").status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_no_ingress_guard_outside_ingress_mode(clear_env):
+    """Docker / public modes keep their own auth; the peer guard is not mounted."""
+    app, conf = _reload_app_and_config()
+    assert conf.HASSIO_RUN_MODE is None
+    response = TestClient(app, client=("172.30.33.7", 1)).get("/api/has_first_user")
+    assert response.status_code == 200

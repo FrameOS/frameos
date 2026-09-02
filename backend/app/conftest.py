@@ -55,6 +55,29 @@ class ProjectAsyncClient(AsyncClient):
 
 
 @pytest.fixture(autouse=True)
+def fictional_hosts_resolve(monkeypatch):
+    """The outbound target guard (app/utils/network.py) resolves every host
+    the backend is asked to fetch from. Tests use made-up names
+    (frame.local, cloud.example.com, ...) with the HTTP client faked, so
+    those resolve to a public address here; literals are judged as
+    themselves, which is what the guard's own tests exercise. A test that
+    wants real DNS restores `network.resolve_target_dns`."""
+    import ipaddress
+
+    from app.utils import network
+
+    async def resolve(host: str):
+        literal = network.literal_address(host)
+        if literal is not None:
+            return [literal]
+        if not network.is_safe_host(host.strip("[]")):
+            raise network.TargetBlocked(host, "does not resolve")
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr(network, "resolve_target", resolve)
+
+
+@pytest.fixture(autouse=True)
 def setup_and_teardown_db():
     if not config.TEST:
         raise ValueError("Tests should only be run with TEST=1 (or via bin/tests) as doing otherwise may wipe your database")

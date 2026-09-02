@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.frame import Frame
 from app.models.log import new_log as log
 from app.utils.build_environment import BuildEnvironmentProvider
-from app.utils.build_host import BuildHostConfig, BuildHostSession
+from app.utils.build_host import persist_build_host_key, BuildHostConfig, BuildHostSession
 from app.utils.modal_sandbox import (
     ModalSandboxConfig,
     ModalSandboxSession,
@@ -291,16 +291,20 @@ class BuildHostExecutor(BuildExecutor):
         *,
         logger: LogFunc | None = None,
         workspace_prefix: str = "frameos-build-",
+        on_host_key: Callable[[str], Awaitable[None] | None] | None = None,
     ) -> None:
         self.config = config
         self.display_name = f"build host {config.user}@{config.host}:{config.port}"
         self.logger = logger
         self.workspace_prefix = workspace_prefix
+        self.on_host_key = on_host_key
         self.session: BuildHostSession | None = None
         self.remote_root: PurePosixPath | None = None
 
     async def __aenter__(self) -> "BuildHostExecutor":
-        self.session = await BuildHostSession(self.config, logger=self.logger).__aenter__()
+        self.session = await BuildHostSession(
+            self.config, logger=self.logger, on_host_key=self.on_host_key
+        ).__aenter__()
         self.remote_root = PurePosixPath(await self.session.mktemp_dir(self.workspace_prefix))
         return self
 
@@ -664,5 +668,14 @@ def create_build_executor(
     if isinstance(config, ModalSandboxConfig):
         return ModalBuildExecutor(config, logger=logger)
     if isinstance(config, BuildHostConfig):
-        return BuildHostExecutor(config, logger=logger, workspace_prefix=workspace_prefix)
+        project_id = getattr(frame, "project_id", None)
+
+        def pin_host_key(host_key_line: str) -> None:
+            # A deploy's first connect pins the key in the project settings,
+            # the same place "Check connection" writes it from.
+            persist_build_host_key(db, project_id, host_key_line)
+
+        return BuildHostExecutor(
+            config, logger=logger, workspace_prefix=workspace_prefix, on_host_key=pin_host_key
+        )
     return LocalBuildExecutor(db=db, redis=redis, frame=frame)

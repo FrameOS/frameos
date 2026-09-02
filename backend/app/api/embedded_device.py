@@ -515,6 +515,10 @@ async def api_embedded_device_ota_manifest(
         "elfSha256": firmware.get("otaElfSha256"),
         "size": firmware.get("otaSize"),
         "firmwareVersion": firmware.get("firmwareVersion"),
+        # minisign blobs over the image (app/utils/embedded_ota_signing):
+        # the device verifies with the key baked into the image it runs.
+        "minisig": firmware.get("otaMinisig"),
+        "minisigs": firmware.get("otaMinisigs") or {},
     }
 
 

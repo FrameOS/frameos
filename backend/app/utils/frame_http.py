@@ -13,7 +13,7 @@ from fastapi import HTTPException
 
 from app.models.frame import Frame, normalize_https_proxy
 from app.utils.env import get_env_float, get_env_int
-from app.utils.network import is_safe_host
+from app.utils.network import assert_target_allowed, is_safe_host
 from app.utils.remote_exec import _use_remote
 from app.ws.remote_ws import http_get_on_frame
 from arq import ArqRedis as Redis
@@ -28,6 +28,10 @@ FRAME_HTTP_TIMEOUT = httpx.Timeout(
 )
 _frame_http_semaphore = asyncio.Semaphore(FRAME_HTTP_MAX_CONCURRENCY)
 FRAME_HTTP_RETRIES = get_env_int("FRAME_HTTP_RETRIES", 2)
+# The largest body the backend buffers from a frame (screenshots, asset
+# downloads); anything bigger is dropped mid-stream instead of held in RAM.
+FRAME_HTTP_MAX_RESPONSE_BYTES = get_env_int("FRAME_HTTP_MAX_RESPONSE_BYTES", 64 * 1024 * 1024)
+FRAME_HTTP_READ_CHUNK_BYTES = 256 * 1024
 DEFAULT_FRAME_HTTPS_PROXY_PORT = 8443
 
 
@@ -304,6 +308,28 @@ async def _fetch_frame_http_bytes(
     return result
 
 
+async def _read_response_capped(response: Any, url: str) -> bytes:
+    """The body of a streamed response, refused past FRAME_HTTP_MAX_RESPONSE_BYTES
+    (on the declared length first, then on what actually arrives)."""
+    declared = str(response.headers.get("content-length") or "")
+    if declared.isdigit() and int(declared) > FRAME_HTTP_MAX_RESPONSE_BYTES:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=f"Frame response from {url} exceeds {FRAME_HTTP_MAX_RESPONSE_BYTES} bytes",
+        )
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes(FRAME_HTTP_READ_CHUNK_BYTES):
+        total += len(chunk)
+        if total > FRAME_HTTP_MAX_RESPONSE_BYTES:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"Frame response from {url} exceeds {FRAME_HTTP_MAX_RESPONSE_BYTES} bytes",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 async def _fetch_frame_http_bytes_once(
     frame: Frame,
     redis: Redis,
@@ -342,6 +368,13 @@ async def _fetch_frame_http_bytes_once(
             return status, body, hdrs
         raise HTTPException(status_code=500, detail="Bad remote response")
 
+    # The frame address is user data: resolve it and refuse loopback /
+    # link-local / reserved targets before any request (app/utils/network.py).
+    await assert_target_allowed(frame.frame_host, what="Frame host")
+    boot_ip = _embedded_last_boot_ip(frame)
+    if boot_ip and boot_ip != frame.frame_host:
+        await assert_target_allowed(boot_ip, what="Frame host")
+
     candidates = _frame_http_direct_candidates(frame, path, method)
     hdrs = headers
     timeout_errors = (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout)
@@ -352,14 +385,15 @@ async def _fetch_frame_http_bytes_once(
             async with httpx.AsyncClient(verify=verify) as client:
                 for attempt in range(1, attempts + 1):
                     try:
-                        response = await client.request(
+                        async with client.stream(
                             method,
                             url,
                             headers=hdrs,
                             content=body,
                             timeout=timeout if timeout is not None else FRAME_HTTP_TIMEOUT,
-                        )
-                        return response.status_code, response.content, dict(response.headers)
+                        ) as response:
+                            content = await _read_response_capped(response, url)
+                            return response.status_code, content, dict(response.headers)
                     except timeout_errors:
                         if attempt < attempts:
                             await asyncio.sleep(0.15 * attempt)
@@ -368,6 +402,9 @@ async def _fetch_frame_http_bytes_once(
                             status_code=HTTPStatus.REQUEST_TIMEOUT,
                             detail=f"Timeout to {url}",
                         )
+                    except HTTPException:
+                        # Our own verdict (an over-cap body): not a transport error.
+                        raise
                     except httpx.PoolTimeout:
                         raise HTTPException(
                             status_code=HTTPStatus.SERVICE_UNAVAILABLE,

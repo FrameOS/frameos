@@ -130,6 +130,14 @@ class Config:
     # covers the usual docker/reverse-proxy setups without letting a client
     # off the local network claim any origin it likes.
     FRAMEOS_TRUSTED_PROXIES = os.environ.get('FRAMEOS_TRUSTED_PROXIES') or ''
+    # Let the backend reach frames / repositories / template hosts on its own
+    # loopback (a runtime running next to the backend for development or
+    # e2e). Off by default: loopback is where the backend's own services live
+    # (app/utils/network.py). Tests always allow it.
+    FRAMEOS_ALLOW_LOOPBACK_TARGETS = os.environ.get('FRAMEOS_ALLOW_LOOPBACK_TARGETS') or ''
+    # Socket peers the ingress uvicorn (HASSIO_RUN_MODE=ingress) answers to;
+    # empty = the Supervisor's ingress proxy only (app/utils/ingress_guard.py).
+    FRAMEOS_INGRESS_TRUSTED_PEERS = os.environ.get('FRAMEOS_INGRESS_TRUSTED_PEERS') or ''
     HASSIO_RUN_MODE = os.environ.get('HASSIO_RUN_MODE', None)
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)

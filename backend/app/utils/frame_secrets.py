@@ -22,7 +22,17 @@ secrets out of those two places:
   as a change. The stored copy keeps an HMAC fingerprint per secret instead,
   and ``restore_snapshot_secrets`` fills the *current* value back in wherever
   the fingerprint still matches — so an unchanged secret compares equal and a
-  rotated one shows as changed, without the old value ever being kept.
+  rotated one shows as changed, without the old value ever being kept. Only
+  server-side consumers (the deploy planner, frame sync) restore; what
+  ``to_dict()`` serves is the stored, secret-free form.
+
+- ``frame_secret_fingerprints`` also rides on ``to_dict()`` itself as
+  ``secret_fingerprints`` (the fingerprints of the row's *current* secrets).
+  The browser holds the current secrets from its per-frame GET, so it can do
+  the same restore locally: a secret whose stored fingerprint equals the
+  current one is unchanged since the deploy, any other is a change
+  (frontend ``utils/frameSecrets.ts``). That way the nested snapshot inside
+  every ``update_frame`` broadcast carries fingerprints, never secrets.
 """
 from __future__ import annotations
 
@@ -100,11 +110,9 @@ def websocket_frame_payload(frame_dict: dict) -> dict:
     payload = dict(frame_dict)
     for key in TOP_LEVEL_SECRET_KEYS + SECRET_CONTAINER_KEYS:
         payload.pop(key, None)
-    # ``last_successful_deploy`` is left as ``to_dict()`` serialized it: the
-    # frontend diffs it key by key against its own copy of the frame, so a
-    # stripped baseline would report every secret as "changed since deploy"
-    # after each deploy. What it carries is only what already matches the
-    # current row (restore_snapshot_secrets), never a superseded value.
+    # ``last_successful_deploy`` and ``secret_fingerprints`` stay: both are
+    # secret-free (served_deploy_snapshot), and the browser needs the pair to
+    # tell an unchanged secret from a rotated one without ever seeing it.
     return payload
 
 
@@ -140,6 +148,16 @@ def deploy_snapshot(frame_dict: dict) -> dict:
     if fingerprints:
         snapshot[FINGERPRINTS_KEY] = fingerprints
     return snapshot
+
+
+def served_deploy_snapshot(snapshot: Any) -> Any:
+    """``last_successful_deploy`` as ``to_dict()`` serves it: the stored,
+    secret-free form. A snapshot recorded before fingerprints existed still
+    holds the secrets it was deployed with, so it is converted on the way out
+    (its own secrets fingerprinted, then dropped) rather than served raw."""
+    if not isinstance(snapshot, dict) or FINGERPRINTS_KEY in snapshot:
+        return snapshot
+    return deploy_snapshot(snapshot)
 
 
 def restore_snapshot_secrets(snapshot: Any, current: dict) -> Any:

@@ -258,7 +258,13 @@ async def test_build_host_test_runs_probe(async_client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "output": "frameos-build-host-ok"}
+    # No session on the fake executor: nothing pinned, nothing to report.
+    assert response.json() == {
+        "ok": True,
+        "output": "frameos-build-host-ok",
+        "hostKey": None,
+        "hostKeyFingerprint": None,
+    }
 
 
 @pytest.mark.asyncio

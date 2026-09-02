@@ -36,35 +36,24 @@ medium / low list below.
 
 ### Self-hosted backend
 
-- **Home Assistant ingress mode is an unauthenticated admin API on
-  0.0.0.0:8990.** `api_user` is mounted without `get_current_user` in
-  ingress mode and `/ws` is open; nothing checks that the peer is the
-  Supervisor (`172.30.32.2`). Any add-on on the `hassio` network (or the
-  LAN if the add-on maps the port) gets everything. Bind to the container
-  IP or reject peers other than the ingress proxy; do the same for `/ws`.
-- **SSH host keys are never verified** (`known_hosts=None` for frames and
-  the build host). With password auth a LAN impostor receives `ssh_pass`
-  and the whole `frame.json`. TOFU: store the fingerprint on the frame row
-  on first connect and refuse a change without an explicit reset.
-- **SSRF via `frame_host` / `frame_port` with body reflection.**
-  `is_safe_host` is syntax-only; `/ping?mode=http&path=`, `/state`,
-  `/states` and the adopt flow reflect upstream bodies. Resolve and deny
-  loopback / link-local / metadata (share one resolver-based guard with the
-  preview proxy, which itself follows redirects — set
-  `follow_redirects=False`), stop reflecting non-2xx bodies, cap body size.
-  Same guard for repository URLs (PATCH skips the check entirely) and
-  template `url` / `image` fetches.
-- **The `last_successful_deploy` nested in `update_frame` broadcasts is the
-  `to_dict()` form** — the stored snapshot now holds fingerprints, not
-  secrets, and the WS payload drops the secret-bearing keys, but `to_dict()`
-  fills a snapshot secret back in when it still matches the row so the
-  editor's "changed since deploy" diff keeps working. Teach
-  `frameLogic.ts` `frameKeyEqual` to compare secrets by presence /
-  fingerprint and stop restoring them server-side.
-- **Bodies buffered before auth, the two left**: the template zip fetch
-  and the in-memory `scenes.json` read (`/api/log`, asset uploads and gzip
-  bodies now check auth / `Content-Length` first and are capped). Stream
-  the template zip with a cap; cap `scenes.json`.
+- **SSH host keys: trust on first use, pinned after.** The key a frame (or
+  the build host) offers on the first connect is stored (`frame.ssh_host_key`,
+  `buildHost.hostKey`) and every later connect refuses any other
+  (`app/utils/ssh_host_keys.py`); "Forget host key" in the frame's SSH
+  settings / the build-host settings is the explicit reset. What remains:
+  frames set up before this pin whatever they answer with next, so a frame
+  that was already impersonated stays impersonated until its key is
+  forgotten — the fingerprint is shown so an owner can compare it against
+  `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the device.
+- **SSRF residue.** One resolver-based guard (`app/utils/network.py`) now
+  fronts every fetch the backend makes on a user's behalf — frame HTTP,
+  ping, the preview proxy (no redirects, private ranges refused), repository
+  and template / cover URLs — with bodies streamed under caps and non-2xx
+  bodies no longer reflected. DNS is resolved once per request; a rebind
+  between check and connect is the accepted residual for
+  project-authenticated features (frame hosts are IP literals in practice).
+  Loopback targets are allowed only under `FRAMEOS_ALLOW_LOOPBACK_TARGETS`
+  (development / e2e).
 - **`curl | sudo sh` bootstrap defaults to `http://` and downloads
   `frameos-*.tar.gz` unverified**; the precompiled SD image and Remote
   binary are likewise unverified server-side (the Buildroot base image is
@@ -82,16 +71,23 @@ medium / low list below.
 
 ### Device runtime (Nim) and ESP32
 
-- **Self-hosted-backend OTA is unsigned and allowed over plain HTTP** on the
-  ESP32 (`CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y`, no signature on the backend
-  path, secure boot off, checked every 24 h). A LAN MITM of the backend host
-  is persistent firmware RCE and captures the frame's `api_key`. Verify with
-  the same minisign key as the cloud path (backend serves `.minisig`), or at
-  least require https unless the host is local *and* the user opted in;
-  refuse `ALLOW_HTTP` in release profiles. Consider Secure Boot v2 and flash
-  + NVS encryption for production images (the NVS holds the Wi-Fi PSK, the
-  cloud token, the Ed25519 seed, the API key, the admin password, the TLS
-  key and the cached service keys).
+- **Self-hosted-backend OTA is signed per install for now** — decided
+  2026-09-03 that the backend stops building firmware and serves the signed
+  release image like the cloud (`docs/todo.md`, "the self-hosted backend
+  flashes what the cloud flashes"); the per-install key below is the interim
+  until then. The backend derives
+  an Ed25519 key from `SECRET_KEY` (`app/utils/embedded_ota_signing.py`),
+  bakes the public key into every image it builds
+  (`FRAMEOS_DEFAULT_OTA_PUBKEY`) and signs the OTA artifact in minisign's
+  pre-hashed format; the device hashes what it wrote to the slot and refuses
+  to switch boot partitions on a bad or missing signature. A generic image
+  (no baked key) still applies unsigned backend images until it is
+  reflashed with a backend build. Still open: plain HTTP for the manifest
+  and download (`CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y` — the signature covers
+  integrity, the bearer `api_key` still travels in clear on http backends),
+  and Secure Boot v2 / flash + NVS encryption for production images (the
+  NVS holds the Wi-Fi PSK, the cloud token, the Ed25519 seed, the API key,
+  the admin password, the TLS key and the cached service keys).
 - **The ESP32 frame JSON returns secrets** (`GET /api/frames`:
   `network.wifiPassword`, `admin.pass`, `server_api_key`,
   `certs.server_key`), and the backend's sync pull list depends on that
@@ -100,10 +96,11 @@ medium / low list below.
   request, so anyone with the WPA2 PSK can still read it. Make those fields
   write-only on the device (return `""`), fix the backend pull list to
   match, and push `tls_enable` on when material exists.
-- **Provisioning portal stays up after Wi-Fi recovers** and is an open AP.
-  Auth is enforced on it when credentials exist; still,
-  on `STA_GOT_IP` while the portal is active, stop the AP and restart httpd
-  without portal mode, and consider a per-device PSK on the AP.
+- **The provisioning AP is open.** Auth is enforced on the portal once
+  credentials exist, and the AP now goes down the moment the stored network
+  answers (`fos_wifi.c` portal exit → httpd restarts in status mode); what
+  remains is a per-device PSK shown on the status screen, so a fresh device
+  cannot be provisioned by whoever is nearest.
 - **Cloud OTA has no downgrade protection** (only "same version → skip";
   `version` is outside the signed payload). Sign `version || image` and
   refuse `≤ running` unless forced, or enable app anti-rollback.
@@ -170,12 +167,12 @@ medium / low list below.
 
 ### Frontends, wasm preview, CI
 
-- **Fork PRs run on the self-hosted runner pool with a shared writable
-  `/mnt/cache`** that the Buildroot base-image and release jobs read
-  (`ccache`, `dl/`, `nimcache`). A poisoned cache entry ends up in every
-  release SD image. Run fork PRs on GitHub-hosted runners (or require a
-  label), mount the cache read-only for PR VMs or give them a scratch
-  subtree. (Fork checkouts now pin `head.sha`.)
+- **Fork PRs and the runner pool.** Fork PRs now run on GitHub-hosted
+  runners (`pull-request-tests.yml` picks the runner per event), so nothing
+  from a fork touches the shared `/mnt/cache` the Buildroot base-image and
+  release jobs read. Still worth doing on the box: mount the cache read-only
+  (or a scratch subtree) for any VM that is not building a release, and keep
+  "require approval for all outside collaborators" on in the repo settings.
 - **The CI deploy key is root on the production box and runs
   `scripts/db-migrate.sh` *from the shipped archive* with the whole env
   file exported**, then self-updates the two root scripts from the archive.

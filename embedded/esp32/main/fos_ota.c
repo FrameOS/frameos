@@ -1,6 +1,8 @@
 #include "fos_ota.h"
 
 #include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -25,8 +27,11 @@
 #include "monocypher.h"
 #include "monocypher-ed25519.h"
 
+#include "esp_partition.h"
+
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_defaults.h"
 #include "fos_http.h"
 #include "fos_ota_pubkey.h"
 #include "fos_wifi.h"
@@ -55,7 +60,78 @@ static volatile bool s_ota_reboot_scheduled = false;
 typedef struct {
     char sha[80];
     char elf_sha[80];
+    /* base64 minisign blob (ED + key id + signature) for the key this image
+     * was built with, "" when the manifest carries none. */
+    char minisig[128];
 } ota_manifest_t;
+
+/* ----------------------------------------------------------- backend OTA
+ * signing. A backend build bakes that install's OTA public key into the
+ * image (FRAMEOS_DEFAULT_OTA_PUBKEY, app/utils/embedded_ota_signing.py);
+ * from then on the device applies only images the manifest signs with it,
+ * verified against what was actually written to the OTA slot before the
+ * boot partition switches. A generic image has no key and keeps the old
+ * unsigned behaviour. */
+
+static bool hex_decode(const char *hex, uint8_t *out, size_t out_len)
+{
+    if (strlen(hex) != out_len * 2) return false;
+    for (size_t i = 0; i < out_len; i++) {
+        unsigned value;
+        if (sscanf(hex + i * 2, "%2x", &value) != 1) return false;
+        out[i] = (uint8_t)value;
+    }
+    return true;
+}
+
+static bool backend_ota_pubkey(uint8_t pubkey[32], uint8_t key_id[8])
+{
+    if (FRAMEOS_DEFAULT_OTA_PUBKEY[0] == '\0') return false;
+    if (!hex_decode(FRAMEOS_DEFAULT_OTA_PUBKEY, pubkey, 32) ||
+        !hex_decode(FRAMEOS_DEFAULT_OTA_KEY_ID, key_id, 8)) {
+        ESP_LOGE(TAG, "baked OTA signing key is malformed; refusing backend OTA");
+        memset(pubkey, 0, 32);
+        memset(key_id, 0, 8);
+        return true; /* a key is configured, it just cannot match anything */
+    }
+    return true;
+}
+
+static bool parse_minisig_for_key(const char *minisig, const uint8_t key_id[8], uint8_t sig_out[64]);
+
+/* BLAKE2b-512 over the first image_len bytes of the slot esp_https_ota just
+ * filled, checked against the manifest signature. */
+static esp_err_t verify_written_image(const uint8_t pubkey[32], const uint8_t sig[64], size_t image_len)
+{
+    const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
+    if (target == NULL || image_len == 0 || image_len > target->size) return ESP_ERR_INVALID_SIZE;
+    const size_t chunk_len = 8 * 1024;
+    uint8_t *chunk = heap_caps_malloc(chunk_len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (chunk == NULL) chunk = malloc(chunk_len);
+    if (chunk == NULL) return ESP_ERR_NO_MEM;
+    crypto_blake2b_ctx hash_ctx;
+    crypto_blake2b_init(&hash_ctx, 64);
+    esp_err_t err = ESP_OK;
+    for (size_t offset = 0; offset < image_len; offset += chunk_len) {
+        size_t len = image_len - offset < chunk_len ? image_len - offset : chunk_len;
+        err = esp_partition_read(target, offset, chunk, len);
+        if (err != ESP_OK) break;
+        crypto_blake2b_update(&hash_ctx, chunk, len);
+    }
+    free(chunk);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA read-back failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    uint8_t digest[64];
+    crypto_blake2b_final(&hash_ctx, digest);
+    if (crypto_ed25519_check(sig, pubkey, digest, sizeof(digest)) != 0) {
+        ESP_LOGE(TAG, "OTA SIGNATURE VERIFICATION FAILED — image rejected");
+        return ESP_ERR_INVALID_CRC;
+    }
+    ESP_LOGI(TAG, "OTA image signature verified (%u bytes)", (unsigned)image_len);
+    return ESP_OK;
+}
 
 static const char *wifi_state_name(fos_wifi_state_t state)
 {
@@ -134,7 +210,8 @@ static esp_err_t ota_http_init_cb(esp_http_client_handle_t client)
 
 static esp_err_t perform_ota_download(const esp_https_ota_config_t *ota_config,
                                       int attempt, int max_attempts,
-                                      size_t *resume_bytes)
+                                      size_t *resume_bytes,
+                                      const uint8_t *pubkey, const uint8_t *sig)
 {
     esp_https_ota_handle_t handle = NULL;
     ESP_LOGW(TAG, "OTA attempt %d/%d begin: resume=%u internal=%u psram=%u wifi=%s",
@@ -180,6 +257,14 @@ static esp_err_t perform_ota_download(const esp_https_ota_config_t *ota_config,
 
     ESP_LOGW(TAG, "OTA download complete: %d bytes",
              esp_https_ota_get_image_len_read(handle));
+    if (pubkey != NULL && sig != NULL) {
+        err = verify_written_image(pubkey, sig, (size_t)esp_https_ota_get_image_len_read(handle));
+        if (err != ESP_OK) {
+            esp_https_ota_abort(handle);
+            if (resume_bytes) *resume_bytes = 0;
+            return err;
+        }
+    }
     err = esp_https_ota_finish(handle);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "OTA finish failed on attempt %d/%d: %s",
@@ -253,18 +338,32 @@ static esp_err_t fetch_manifest(const fos_config_t *config, ota_manifest_t *mani
     }
     int64_t content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
-    char body[768];
-    int read = esp_http_client_read(client, body, sizeof(body) - 1);
+    /* sha256 + elf sha + one minisig per signing key the backend honours. */
+    const size_t body_cap = 2048;
+    char *body = malloc(body_cap);
+    if (body == NULL) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return ESP_ERR_NO_MEM;
+    }
+    int read = 0;
+    while ((size_t)read < body_cap - 1) {
+        int r = esp_http_client_read(client, body + read, (int)(body_cap - 1 - (size_t)read));
+        if (r <= 0) break;
+        read += r;
+    }
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     if (status != 200 || read <= 0) {
         ESP_LOGI(TAG, "no OTA manifest (HTTP %d, length=%lld, read=%d)",
                  status, content_length, read);
+        free(body);
         return ESP_ERR_NOT_FOUND;
     }
     body[read] = '\0';
 
     cJSON *json = cJSON_Parse(body);
+    free(body);
     if (!json) {
         ESP_LOGW(TAG, "OTA manifest parse failed");
         return ESP_FAIL;
@@ -279,6 +378,16 @@ static esp_err_t fetch_manifest(const fos_config_t *config, ota_manifest_t *mani
     const cJSON *elf_sha_item = cJSON_GetObjectItem(json, "elfSha256");
     if (cJSON_IsString(elf_sha_item) && strlen(elf_sha_item->valuestring) >= 32) {
         strlcpy(manifest->elf_sha, elf_sha_item->valuestring, sizeof(manifest->elf_sha));
+    }
+    /* The signature made with the key this image was built with, if the
+     * backend still holds it; else whatever single signature it offers. */
+    manifest->minisig[0] = '\0';
+    const cJSON *minisigs = cJSON_GetObjectItem(json, "minisigs");
+    const cJSON *mine = (cJSON_IsObject(minisigs) && FRAMEOS_DEFAULT_OTA_KEY_ID[0])
+        ? cJSON_GetObjectItem(minisigs, FRAMEOS_DEFAULT_OTA_KEY_ID) : NULL;
+    if (!cJSON_IsString(mine)) mine = cJSON_GetObjectItem(json, "minisig");
+    if (cJSON_IsString(mine) && mine->valuestring[0]) {
+        strlcpy(manifest->minisig, mine->valuestring, sizeof(manifest->minisig));
     }
     cJSON_Delete(json);
     ESP_LOGI(TAG, "OTA manifest received: image=%.*s… elf=%s%.*s",
@@ -379,6 +488,23 @@ static esp_err_t ota_check_and_apply_locked(void)
         .max_http_request_size = FOS_OTA_REQUEST_SIZE,
     };
 
+    /* An image built by a backend carries that backend's signing key: from
+     * then on only images it signed get applied. */
+    uint8_t pubkey[32], key_id[8], sig[64];
+    bool signed_ota = backend_ota_pubkey(pubkey, key_id);
+    if (signed_ota) {
+        if (!manifest.minisig[0]) {
+            ESP_LOGE(TAG, "OTA manifest carries no signature; this image only applies signed updates");
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+        if (!parse_minisig_for_key(manifest.minisig, key_id, sig)) {
+            ESP_LOGE(TAG, "OTA manifest signature is not for this image's key (%s)", FRAMEOS_DEFAULT_OTA_KEY_ID);
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+    } else {
+        ESP_LOGW(TAG, "no OTA signing key baked into this image; applying unsigned backend image");
+    }
+
     bool stopped_http = false;
     esp_err_t last_err = ESP_FAIL;
     size_t resume_bytes = 0;
@@ -406,7 +532,12 @@ static esp_err_t ota_check_and_apply_locked(void)
         ota_config.ota_resumption = resume_bytes > 0;
         ota_config.ota_image_bytes_written = resume_bytes;
         last_err = perform_ota_download(&ota_config, attempt, FOS_OTA_MAX_ATTEMPTS,
-                                        &resume_bytes);
+                                        &resume_bytes,
+                                        signed_ota ? pubkey : NULL, signed_ota ? sig : NULL);
+        if (last_err == ESP_ERR_INVALID_CRC) {
+            ESP_LOGE(TAG, "OTA image rejected: signature does not verify; not retrying");
+            break;
+        }
         if (last_err == ESP_OK) {
             store_applied_sha(manifest.sha);
             ESP_LOGW(TAG, "OTA update applied, rebooting into new image");
@@ -600,6 +731,11 @@ static bool cloud_ota_gave_up(const char *version)
  * Trusted-comment lines are ignored (the device trusts only the key). */
 static bool parse_minisig(const char *minisig, uint8_t sig_out[64])
 {
+    return parse_minisig_for_key(minisig, FOS_OTA_SIGNING_KEY_ID, sig_out);
+}
+
+static bool parse_minisig_for_key(const char *minisig, const uint8_t key_id[8], uint8_t sig_out[64])
+{
     const char *line = minisig;
     while (line != NULL && *line != '\0') {
         while (*line == '\r' || *line == '\n' || *line == ' ') line++;
@@ -621,11 +757,11 @@ static bool parse_minisig(const char *minisig, uint8_t sig_out[64])
         return false;
     }
     if (blob_len != 74 || blob[0] != 'E' || blob[1] != 'D') {
-        ESP_LOGW(TAG, "cloud ota: unsupported signature format");
+        ESP_LOGW(TAG, "ota: unsupported signature format");
         return false;
     }
-    if (memcmp(blob + 2, FOS_OTA_SIGNING_KEY_ID, 8) != 0) {
-        ESP_LOGW(TAG, "cloud ota: signature key id mismatch");
+    if (memcmp(blob + 2, key_id, 8) != 0) {
+        ESP_LOGW(TAG, "ota: signature key id mismatch");
         return false;
     }
     memcpy(sig_out, blob + 10, 64);

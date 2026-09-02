@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from arq import ArqRedis as Redis
 from typing import Any, Optional
 from sqlalchemy.dialects.sqlite import JSON
-from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean
+from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean, Text
 from sqlalchemy.orm import Session, mapped_column
 from app.utils.scene_execution import scene_is_interpreted
 from app.database import Base
@@ -20,7 +20,8 @@ from app.drivers.devices import (
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.timezone import frame_timezone, stored_timezone
-from app.utils.frame_secrets import deploy_snapshot, restore_snapshot_secrets, websocket_frame_payload
+from app.utils.frame_secrets import deploy_snapshot, frame_secret_fingerprints, served_deploy_snapshot, websocket_frame_payload
+from app.utils.ssh_host_keys import host_key_fingerprint
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.versions import get_versions
@@ -314,6 +315,9 @@ class Frame(Base):
     ssh_pass = mapped_column(String(50), nullable=True)
     ssh_port = mapped_column(Integer, default=22)
     ssh_keys = mapped_column(JSON, nullable=True)
+    # The server host key recorded on the first SSH connect (OpenSSH
+    # "<type> <base64>" line); every later connect pins it (utils/ssh_host_keys).
+    ssh_host_key = mapped_column(Text, nullable=True)
     # receiving logs, connection from frame to us
     server_host = mapped_column(String(256), nullable=True)
     server_port = mapped_column(Integer, default=8989)
@@ -381,6 +385,8 @@ class Frame(Base):
             'ssh_pass': self.ssh_pass,
             'ssh_port': self.ssh_port,
             'ssh_keys': self.ssh_keys,
+            'ssh_host_key': self.ssh_host_key,
+            'ssh_host_key_fingerprint': host_key_fingerprint(self.ssh_host_key),
             'server_host': self.server_host,
             'server_port': self.server_port,
             'server_api_key': self.server_api_key,
@@ -426,12 +432,14 @@ class Frame(Base):
             'embedded': self.embedded,
             'rpios': self.rpios,
             'terminal_history': self.terminal_history,
-            'last_successful_deploy': None,
+            # Stored without secrets (app/utils/frame_secrets): fingerprints
+            # in place of the secret leaves. The browser compares them with
+            # the row's own fingerprints below, so the nested snapshot in an
+            # update_frame broadcast never carries a secret.
+            'last_successful_deploy': served_deploy_snapshot(self.last_successful_deploy),
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
-        # Stored without secrets (app/utils/frame_secrets); consumers diff it
-        # against the row, so the secrets that still match are filled back in.
-        result['last_successful_deploy'] = restore_snapshot_secrets(self.last_successful_deploy, result)
+        result['secret_fingerprints'] = frame_secret_fingerprints(result)
         return result
 
 async def new_frame(

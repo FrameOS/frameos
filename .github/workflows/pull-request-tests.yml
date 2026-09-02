@@ -30,7 +30,12 @@ jobs:
     # stay on GitHub-hosted runners on purpose: their auto-committed
     # Playwright/snapshot baselines must keep rendering on the image that
     # produced them.
-    runs-on: epyc-4
+    # Pull requests from forks run on GitHub-hosted runners: the self-hosted
+    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
+    # the base-image and release jobs, and a fork must not be able to seed
+    # what ends up in every release SD image. Same-repo PRs and main keep
+    # the pool.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
     strategy:
       fail-fast: false
       matrix:
@@ -200,7 +205,12 @@ jobs:
     # Pixie renders these snapshots in software from fonts in the repo — no
     # browser, no system fonts — so the host image does not shape the pixels
     # and the job can use the self-hosted pool like the Nim shards.
-    runs-on: epyc-4
+    # Pull requests from forks run on GitHub-hosted runners: the self-hosted
+    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
+    # the base-image and release jobs, and a fork must not be able to seed
+    # what ends up in every release SD image. Same-repo PRs and main keep
+    # the pool.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
     permissions:
       contents: read
     strategy:
@@ -411,7 +421,12 @@ jobs:
     # version in pnpm-lock.yaml; bump both together) fixes that environment
     # wherever it runs, so the job can move to the self-hosted pool. Browsers
     # ship in the image, hence no `playwright install` step.
-    runs-on: epyc-4
+    # Pull requests from forks run on GitHub-hosted runners: the self-hosted
+    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
+    # the base-image and release jobs, and a fork must not be able to seed
+    # what ends up in every release SD image. Same-repo PRs and main keep
+    # the pool.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
     container:
       image: mcr.microsoft.com/playwright:v1.60.0-noble
     permissions:
@@ -722,7 +737,12 @@ jobs:
     name: Deploy E2E SSH
     # Self-hosted 8-core slot: docker + SSH loopback deploy, no rendering.
     # The redis service container runs via the VM's own docker daemon.
-    runs-on: epyc-8
+    # Pull requests from forks run on GitHub-hosted runners: the self-hosted
+    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
+    # the base-image and release jobs, and a fork must not be able to seed
+    # what ends up in every release SD image. Same-repo PRs and main keep
+    # the pool.
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-8' }}
     # Redis for the runtime E2E test. A service container comes up during job
     # setup instead of costing an `apt-get update && apt-get install` step
     # (~30 s) inside it; the tests reach it through REDIS_URL, and the runtime
