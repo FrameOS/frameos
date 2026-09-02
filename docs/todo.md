@@ -16,10 +16,10 @@ converter (scenes.frameos.net/nim-converter, the editor button, MCP
 `scene_convert`, the CLI), deploys install release binaries, and
 `last_successful_deploy.build_kind` records which frames still build from
 source (`docs/legacy-source-builds.md`). Deleting the source-build path is
-item 1 of `docs/convergence-todo.md` — no earlier than one release after
-2026-08-30, once `build_kind` shows a clean cycle; until then the legacy
-path keeps working when asked for. The "Both control planes" rule below
-stands.
+item 1 of `docs/convergence-todo.md` — not before October 2026, maybe much
+later or never; until then the legacy path keeps working when asked for,
+and hardening it (the unsandboxed Nim stage in `docs/security-todo.md`) is
+not a priority. The "Both control planes" rule below stands.
 
 Two rules that shape most entries:
 
@@ -94,10 +94,11 @@ file's "Current gaps".
 
 - Billing — decided 2026-09-01: postpay AI metering plus a three-plan
   ladder, double-entry ledger, one invoice a month
-  (`cloud/docs/accounting-todo.md` §0). Still open there, and blocking the
-  first invoice: the payment provider (merchant-of-record vs direct PSP,
-  §8.7), which legal entity invoices and from where (§8.15), and the plan
-  numbers (§8.13).
+  (`cloud/docs/accounting-todo.md` §0). Metering is live; nothing is
+  invoiced. The payment provider (§8.7 — Stripe or a merchant-of-record),
+  the invoicing entity (§8.15) and the plan numbers (§8.13) are parked
+  until there are users to invoice (decided 2026-09-03); the integration
+  is small once needed.
 - `store:publish` human review: always, only for the public store, or
   pre-review for risky (shell-app) scenes? Today it is automated moderation +
   badges + post-moderation only.

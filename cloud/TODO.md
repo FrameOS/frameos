@@ -25,7 +25,8 @@ endpoints exist):
 
 - Cloud organizations, projects, memberships, and invitations.
 - Hosted backend lifecycle.
-- A payment provider integration before `docs/accounting-todo.md` §8.7
-  (provider) and §9.3 (legal entity, VAT) are answered; storage and asset
-  backup billing (config backups have fixed caps only).
+- A payment provider integration: parked until there are users to invoice
+  (2026-09-03), then `docs/accounting-todo.md` §8.15 (legal entity, VAT)
+  and §8.7 (provider — Stripe or a merchant-of-record) get answered first;
+  storage and asset backup billing (config backups have fixed caps only).
 - Placeholder service packages or UI packages.

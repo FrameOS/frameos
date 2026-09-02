@@ -82,8 +82,20 @@ function dollarsPerMtokToMicros(dollars: number): bigint {
   return BigInt(micros);
 }
 
+// OpenAI answers a request for `gpt-5.5` with `model: "gpt-5.5-2026-04-23"`
+// — the dated snapshot it actually served — and the meter records that
+// name, because it is what the provider's invoice will say. The price does
+// not change with the snapshot date, so a lookup that finds no row for the
+// dated name tries the base name before giving up. Only a trailing
+// `-YYYY-MM-DD` counts; the same suffix nowhere else is somebody's model
+// name, not a snapshot.
+export function baseModelName(model: string): string {
+  return model.replace(/-\d{4}-\d{2}-\d{2}$/, "");
+}
+
 export function fallbackModelPrice(model: string): ModelPrice {
-  const known = fallbackModelPrices[model];
+  const known =
+    fallbackModelPrices[model] ?? fallbackModelPrices[baseModelName(model)];
   const price = known ?? unknownModelPrice;
   return {
     cachedInputMicrosPerMtok: dollarsPerMtokToMicros(price.cached),
@@ -98,23 +110,36 @@ export function fallbackModelPrice(model: string): ModelPrice {
 
 // The price in force for a model at a moment. Effective-dated: a price
 // change is a new row, and a turn metered late still prices at what was
-// current when it ran.
+// current when it ran. A dated snapshot name with no row of its own prices
+// at its base model's row (see baseModelName); the snapshot written into
+// the record names the row that priced it, so `pricing.model` may be the
+// base name while `ai_usage_records.model` keeps what the provider said.
 export async function resolveModelPrice(
   db: LedgerExecutor,
   model: string,
   at: Date = new Date(),
 ): Promise<ModelPrice> {
-  const [row] = await db
-    .select()
-    .from(aiModelPrices)
-    .where(
-      and(eq(aiModelPrices.model, model), lte(aiModelPrices.effectiveFrom, at)),
-    )
-    .orderBy(desc(aiModelPrices.effectiveFrom))
-    .limit(1);
-  if (!row) {
-    return fallbackModelPrice(model);
+  const base = baseModelName(model);
+  const candidates = base === model ? [model] : [model, base];
+  for (const name of candidates) {
+    const [row] = await db
+      .select()
+      .from(aiModelPrices)
+      .where(
+        and(eq(aiModelPrices.model, name), lte(aiModelPrices.effectiveFrom, at)),
+      )
+      .orderBy(desc(aiModelPrices.effectiveFrom))
+      .limit(1);
+    if (row) {
+      return tablePrice(row);
+    }
   }
+  return fallbackModelPrice(model);
+}
+
+function tablePrice(
+  row: typeof aiModelPrices.$inferSelect,
+): ModelPrice {
   return {
     cachedInputMicrosPerMtok: row.cachedInputMicrosPerMtok,
     currency: row.currency,

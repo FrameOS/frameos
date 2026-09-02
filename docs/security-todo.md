@@ -36,19 +36,6 @@ medium / low list below.
 
 ### Self-hosted backend
 
-- **User-supplied Nim is compiled on the backend host with no sandbox.**
-  `nim compile --compileOnly` runs via `LocalBuildExecutor` on the host for
-  any non-precompiled deploy and for `download_c_source_zip`; only the C
-  stage is wrapped in Docker/Modal. `staticExec` in any app `app.nim` (or a
-  `{.compile.}` pragma) runs on the backend. `POST /apps/validate_source`
-  runs `nim check` on raw source (macros evaluate). Run the Nim stage
-  inside the same sandbox as the C stage, refuse the local executor for
-  frames with inline `sources` unless an operator opts in, drop or sandbox
-  `nim check`, and sanitise `config.json` field names before they are
-  interpolated into generated Nim identifiers/strings
-  (`codegen/app_loader_nim.py`, `codegen/scene_nim.py`). Compiled scenes are
-  deprecated; this is one more reason to finish `docs/convergence-todo.md`
-  item 1.
 - **Home Assistant ingress mode is an unauthenticated admin API on
   0.0.0.0:8990.** `api_user` is mounted without `get_current_user` in
   ingress mode and `/ws` is open; nothing checks that the peer is the
@@ -218,6 +205,26 @@ medium / low list below.
   works; still worth setting explicitly); `requirements.txt` has no
   `--hash` lines; the OpenAI service-account key and R2 keys sit in
   plaintext `.env*` files on the dev laptop (rotate / scope).
+
+## Accepted — the deprecated source-build path (not a priority)
+
+Compiled scenes are deprecated and not recommended, and the path is not
+being deleted before October 2026 (`docs/convergence-todo.md` item 1). Its
+findings are recorded here so they are not rediscovered, not scheduled:
+a self-hosted operator who chooses source builds runs user-supplied Nim on
+their own host, and the fix is to use interpreted scenes.
+
+- **User-supplied Nim is compiled on the backend host with no sandbox.**
+  `nim compile --compileOnly` runs via `LocalBuildExecutor` on the host for
+  any non-precompiled deploy and for `download_c_source_zip`; only the C
+  stage is wrapped in Docker/Modal. `staticExec` in any app `app.nim` (or a
+  `{.compile.}` pragma) runs on the backend. `POST /apps/validate_source`
+  runs `nim check` on raw source (macros evaluate). `config.json` field
+  names are interpolated into generated Nim identifiers/strings
+  (`codegen/app_loader_nim.py`, `codegen/scene_nim.py`). If it ever has to
+  be fixed rather than deleted: run the Nim stage inside the same sandbox
+  as the C stage, refuse the local executor for frames with inline
+  `sources` unless an operator opts in, drop or sandbox `nim check`.
 
 ## Medium / low — worth a pass
 
