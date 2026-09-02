@@ -442,10 +442,16 @@ jobs:
       # snapshot diff steps below; checkout itself falls back to the REST API
       # without it, but `git diff` does not — and it refuses a workspace owned
       # by another uid (the runner's) unless it is marked safe.
-      - name: Install redis
+      # fonts-inter: every font stack in the repo asks for Inter first, and
+      # without it the image resolves Inter / system-ui / sans-serif to
+      # WenQuanYi Zen Hei, a CJK face with no bold — the cloud stack (no
+      # Helvetica/Arial to alias onto Liberation Sans) then renders every
+      # weight as regular.
+      - name: Install redis and fonts
         run: |
           apt-get -y update
-          apt-get install -y --no-install-recommends redis-server git
+          apt-get install -y --no-install-recommends redis-server git fonts-inter
+          fc-cache -f >/dev/null
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           redis-server --daemonize yes
 

@@ -38,6 +38,7 @@ from app.utils.cross_compile import (
     build_binary_with_cross_toolchain,
     can_cross_compile_target,
 )
+from app.utils.release_targets import precompiled_release_published, release_distro_summary
 
 
 LogFn = Callable[[str, str], Awaitable[None]]
@@ -239,6 +240,16 @@ class FrameBinaryBuilder:
                 )
             elif not prebuilt_target:
                 precompiled_skip_reason = "no matching precompiled target"
+            elif not precompiled_release_published(prebuilt_target):
+                # The distro resolves to a prebuilt-deps slug but the release
+                # matrix has no tarball for it (Raspberry Pi OS bullseye, say).
+                # A newer distro's build is not a substitute — it wants a
+                # newer glibc than the device has — so this frame keeps the
+                # source build instead of failing on a 404.
+                precompiled_skip_reason = (
+                    f"no precompiled release is published for {prebuilt_target} "
+                    f"(releases cover {release_distro_summary()})"
+                )
             elif not precompiled_url:
                 precompiled_skip_reason = "no matching precompiled release URL"
             else:
