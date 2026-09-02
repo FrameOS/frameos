@@ -526,16 +526,48 @@ async def test_recorded_deploy_snapshot_stores_no_secrets_but_reads_back_matchin
     assert stored["secret_fingerprints"]["ssh_pass"]
     assert frame.last_successful_deploy_at is not None
 
-    # Unchanged secrets read back equal to the row, so nothing looks undeployed.
-    snapshot = frame.to_dict()["last_successful_deploy"]
-    assert "secret_fingerprints" not in snapshot
-    assert snapshot["ssh_pass"] == "raspberry"
-    assert snapshot["frame_admin_auth"] == {"enabled": True, "user": "admin", "pass": "hunter2"}
-    assert snapshot["https_proxy"]["certs"]["server_key"] == frame.https_proxy["certs"]["server_key"]
-    assert snapshot["agent"]["agentSharedSecret"] == frame.agent["agentSharedSecret"]
+    # What the API serves is the stored form: no secret anywhere in the
+    # nested snapshot, only fingerprints — and the row's own fingerprints
+    # beside it, so the browser can tell unchanged from rotated.
+    served = frame.to_dict()
+    snapshot = served["last_successful_deploy"]
+    assert snapshot == stored
+    assert served["secret_fingerprints"] == snapshot["secret_fingerprints"]
+    for secret in ("raspberry", "hunter2", frame.https_proxy["certs"]["server_key"], frame.agent["agentSharedSecret"]):
+        assert secret not in json.dumps(snapshot)
 
-    # A rotated secret is the one thing that shows as changed since the deploy.
+    # A rotated secret is the one thing whose fingerprint moves.
     frame.ssh_pass = "new-password"
-    snapshot = frame.to_dict()["last_successful_deploy"]
+    served = frame.to_dict()
+    assert served["secret_fingerprints"]["ssh_pass"] != snapshot["secret_fingerprints"]["ssh_pass"]
+    assert served["secret_fingerprints"]["frame_admin_auth.pass"] == snapshot["secret_fingerprints"]["frame_admin_auth.pass"]
+    assert served["last_successful_deploy"] == stored
+
+    # The broadcast carries the same secret-free pair.
+    await update_frame(db, redis, frame)
+    payload = _mock_publish.await_args.args[2]
+    assert payload["last_successful_deploy"] == stored
+    assert payload["secret_fingerprints"] == served["secret_fingerprints"]
+    assert "raspberry" not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_legacy_deploy_snapshot_is_served_without_its_secrets(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "Frame", "pi:raspberry@localhost", "server_host", "dev")
+    # A row deployed before fingerprints existed: the snapshot still holds
+    # the secrets it was deployed with.
+    frame.last_successful_deploy = {**frame.to_dict(), "ssh_pass": "raspberry"}
+    frame.last_successful_deploy.pop("last_successful_deploy", None)
+    frame.last_successful_deploy.pop("secret_fingerprints", None)
+
+    served = frame.to_dict()
+    snapshot = served["last_successful_deploy"]
     assert "ssh_pass" not in snapshot
-    assert snapshot["frame_admin_auth"]["pass"] == "hunter2"
+    assert "agentSharedSecret" not in snapshot["agent"]
+    assert "raspberry" not in json.dumps(snapshot)
+    # Converted on the way out, so an unchanged secret still reads as deployed.
+    assert snapshot["secret_fingerprints"]["ssh_pass"] == served["secret_fingerprints"]["ssh_pass"]
+
+    frame.ssh_pass = "rotated"
+    assert frame.to_dict()["secret_fingerprints"]["ssh_pass"] != snapshot["secret_fingerprints"]["ssh_pass"]

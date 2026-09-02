@@ -7,6 +7,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.database import SessionLocal
 from app.models.organization import OrganizationMember, Project
 
+from app import config as app_config
 from app.config import config
 from app.utils.env import get_env_float
 
@@ -154,8 +155,10 @@ def register_ws_routes(app):
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         project_ids = None
-        # Full access in the HASSIO ingress mode
-        if config.HASSIO_RUN_MODE != "ingress":
+        # Full access in the HASSIO ingress mode: Home Assistant authenticated
+        # the browser, and IngressPeerGuard (app/utils/ingress_guard.py) has
+        # already refused any peer other than the Supervisor's proxy.
+        if app_config.config.HASSIO_RUN_MODE != "ingress":
             from app.api.auth import get_current_user_from_websocket
 
             db = SessionLocal()

@@ -39,6 +39,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(GZipMiddleware)
 app.add_middleware(GzipRequestMiddleware)
+if config.HASSIO_RUN_MODE == "ingress":
+    # Added last = outermost: the ingress routers carry no user auth (Home
+    # Assistant does that), so nothing but the Supervisor's proxy may reach
+    # them — not another add-on on the hassio network, not /ws either.
+    from app.utils.ingress_guard import IngressPeerGuard
+
+    app.add_middleware(IngressPeerGuard)
 
 register_ws_routes(app)
 app.include_router(remote_ws_router)

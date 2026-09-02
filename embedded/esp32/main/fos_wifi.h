@@ -19,6 +19,13 @@ esp_err_t fos_wifi_init(void);
 esp_err_t fos_wifi_connect(uint32_t timeout_ms);
 /* SoftAP "FrameOS-XXXX" + DNS hijack; portal pages come from fos_http. */
 esp_err_t fos_wifi_start_portal(void);
+/* The provisioning portal keeps retrying the stored network in APSTA mode.
+ * Once the station gets an address the open AP is stopped and this callback
+ * runs (from a worker task, never the event loop) so the caller can restart
+ * its services in station mode. Registering after the recovery already
+ * happened runs the callback right away. */
+typedef void (*fos_wifi_portal_exit_cb)(void);
+void fos_wifi_set_portal_exit_cb(fos_wifi_portal_exit_cb cb);
 fos_wifi_state_t fos_wifi_state(void);
 /* IP as string when connected, AP IP in portal mode, else "". */
 const char *fos_wifi_ip(void);

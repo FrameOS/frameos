@@ -49,12 +49,6 @@ medium / low list below.
   (`codegen/app_loader_nim.py`, `codegen/scene_nim.py`). Compiled scenes are
   deprecated; this is one more reason to finish `docs/convergence-todo.md`
   item 1.
-- **Home Assistant ingress mode is an unauthenticated admin API on
-  0.0.0.0:8990.** `api_user` is mounted without `get_current_user` in
-  ingress mode and `/ws` is open; nothing checks that the peer is the
-  Supervisor (`172.30.32.2`). Any add-on on the `hassio` network (or the
-  LAN if the add-on maps the port) gets everything. Bind to the container
-  IP or reject peers other than the ingress proxy; do the same for `/ws`.
 - **SSH host keys are never verified** (`known_hosts=None` for frames and
   the build host). With password auth a LAN impostor receives `ssh_pass`
   and the whole `frame.json`. TOFU: store the fingerprint on the frame row
@@ -67,17 +61,6 @@ medium / low list below.
   `follow_redirects=False`), stop reflecting non-2xx bodies, cap body size.
   Same guard for repository URLs (PATCH skips the check entirely) and
   template `url` / `image` fetches.
-- **The `last_successful_deploy` nested in `update_frame` broadcasts is the
-  `to_dict()` form** — the stored snapshot now holds fingerprints, not
-  secrets, and the WS payload drops the secret-bearing keys, but `to_dict()`
-  fills a snapshot secret back in when it still matches the row so the
-  editor's "changed since deploy" diff keeps working. Teach
-  `frameLogic.ts` `frameKeyEqual` to compare secrets by presence /
-  fingerprint and stop restoring them server-side.
-- **Bodies buffered before auth, the two left**: the template zip fetch
-  and the in-memory `scenes.json` read (`/api/log`, asset uploads and gzip
-  bodies now check auth / `Content-Length` first and are capped). Stream
-  the template zip with a cap; cap `scenes.json`.
 - **`curl | sudo sh` bootstrap defaults to `http://` and downloads
   `frameos-*.tar.gz` unverified**; the precompiled SD image and Remote
   binary are likewise unverified server-side (the Buildroot base image is
@@ -113,10 +96,11 @@ medium / low list below.
   request, so anyone with the WPA2 PSK can still read it. Make those fields
   write-only on the device (return `""`), fix the backend pull list to
   match, and push `tls_enable` on when material exists.
-- **Provisioning portal stays up after Wi-Fi recovers** and is an open AP.
-  Auth is enforced on it when credentials exist; still,
-  on `STA_GOT_IP` while the portal is active, stop the AP and restart httpd
-  without portal mode, and consider a per-device PSK on the AP.
+- **The provisioning AP is open.** Auth is enforced on the portal once
+  credentials exist, and the AP now goes down the moment the stored network
+  answers (`fos_wifi.c` portal exit → httpd restarts in status mode); what
+  remains is a per-device PSK shown on the status screen, so a fresh device
+  cannot be provisioned by whoever is nearest.
 - **Cloud OTA has no downgrade protection** (only "same version → skip";
   `version` is outside the signed payload). Sign `version || image` and
   refuse `≤ running` unless forced, or enable app anti-rollback.
@@ -183,12 +167,12 @@ medium / low list below.
 
 ### Frontends, wasm preview, CI
 
-- **Fork PRs run on the self-hosted runner pool with a shared writable
-  `/mnt/cache`** that the Buildroot base-image and release jobs read
-  (`ccache`, `dl/`, `nimcache`). A poisoned cache entry ends up in every
-  release SD image. Run fork PRs on GitHub-hosted runners (or require a
-  label), mount the cache read-only for PR VMs or give them a scratch
-  subtree. (Fork checkouts now pin `head.sha`.)
+- **Fork PRs and the runner pool.** Fork PRs now run on GitHub-hosted
+  runners (`pull-request-tests.yml` picks the runner per event), so nothing
+  from a fork touches the shared `/mnt/cache` the Buildroot base-image and
+  release jobs read. Still worth doing on the box: mount the cache read-only
+  (or a scratch subtree) for any VM that is not building a release, and keep
+  "require approval for all outside collaborators" on in the repo settings.
 - **The CI deploy key is root on the production box and runs
   `scripts/db-migrate.sh` *from the shipped archive* with the whole env
   file exported**, then self-updates the two root scripts from the archive.

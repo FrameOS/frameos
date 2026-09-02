@@ -7,6 +7,7 @@ from app.utils.frame_secrets import (
     deployed_frame_snapshot,
     redact_frame_secrets,
     restore_snapshot_secrets,
+    served_deploy_snapshot,
     websocket_frame_payload,
 )
 
@@ -155,3 +156,29 @@ def test_deployed_frame_snapshot_reads_the_frame_columns():
 
     frame.last_successful_deploy = None
     assert deployed_frame_snapshot(frame) is None
+
+
+def test_served_snapshot_is_the_stored_form_and_converts_legacy_ones():
+    stored = deploy_snapshot(frame_dict())
+    assert served_deploy_snapshot(stored) is stored
+    assert served_deploy_snapshot(None) is None
+
+    legacy = {"name": "old", "ssh_pass": "raspberry", "agent": {"agentSharedSecret": "shared"}}
+    served = served_deploy_snapshot(legacy)
+    assert "ssh_pass" not in served
+    assert served["agent"] == {}
+    assert served[FINGERPRINTS_KEY] == deploy_snapshot(legacy)[FINGERPRINTS_KEY]
+    assert legacy["ssh_pass"] == "raspberry"  # the stored row is left alone
+
+
+def test_websocket_payload_keeps_the_secret_free_snapshot_and_fingerprints():
+    frame = frame_dict()
+    frame["last_successful_deploy"] = deploy_snapshot(frame)
+    frame["secret_fingerprints"] = frame["last_successful_deploy"][FINGERPRINTS_KEY]
+
+    payload = websocket_frame_payload(frame)
+
+    assert payload["last_successful_deploy"] == frame["last_successful_deploy"]
+    assert payload["secret_fingerprints"] == frame["secret_fingerprints"]
+    for secret in ("raspberry", "api-key", "access-key", "KEY", "shared", "hunter2", "p1"):
+        assert secret not in str(payload)

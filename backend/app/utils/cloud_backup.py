@@ -40,7 +40,8 @@ SENSITIVE_FRAME_FIELDS = {
     "server_api_key",
     "frame_admin_auth",
     "https_proxy",  # contains TLS private keys
-    "last_successful_deploy",  # a full nested snapshot incl. the same secrets
+    "last_successful_deploy",  # a full nested snapshot of the same fields
+    "secret_fingerprints",  # keyed to this install's SECRET_KEY, useless elsewhere
     "terminal_history",
 }
 

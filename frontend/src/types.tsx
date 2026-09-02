@@ -276,8 +276,15 @@ export interface FrameType {
   assets_path?: string
   save_assets?: boolean | Record<string, boolean>
   upload_fonts?: string
+  /** Backend only: the frame as it was last deployed, minus its secrets
+   * (each replaced by an HMAC fingerprint under `secret_fingerprints`). */
   last_successful_deploy?: Record<string, any>
   last_successful_deploy_at?: string
+  /** Backend only: fingerprints of the row's CURRENT secrets, keyed by dotted
+   * path (`ssh_pass`, `agent.agentSharedSecret`, ...). Compared with the ones
+   * in last_successful_deploy to tell an unchanged secret from a rotated one
+   * (utils/frameSecrets.ts). */
+  secret_fingerprints?: Record<string, string>
   active_scene_id?: string
   /** Cloud only: the device-reported state the hub mirrors onto the frame row (e.g. active_scene). */
   last_state?: Record<string, any>

@@ -93,6 +93,26 @@ static void action_render_now(void)
     fos_client_render_now();
 }
 
+static void log_bootup_event(bool online);
+
+/* The stored Wi-Fi came back while the provisioning portal was serving.
+ * fos_wifi has already dropped the open AP; bring the rest up the way the
+ * online boot path does, and replace the portal status screen. */
+static void on_portal_exit(void)
+{
+    ESP_LOGI(TAG, "Wi-Fi recovered; leaving the provisioning portal");
+    s_blink_period_ms = 2000;
+    fos_http_stop();
+    fos_http_start(false);
+    fos_wifi_sync_time(SNTP_TIMEOUT_MS);
+    /* Network up = this image is good; cancel any pending rollback. */
+    fos_ota_mark_boot_valid();
+    frameos_nim_set_log_upload_enabled(true);
+    log_bootup_event(true);
+    fos_ota_start_periodic_task(24);
+    fos_client_render_now();
+}
+
 static void log_bootup_event(bool online)
 {
     fos_config_t *config = fos_config();
@@ -386,6 +406,10 @@ void app_main(void)
         fos_wifi_start_portal();
         fos_http_start(true);
         fos_status_screen_show_portal(fos_wifi_ap_ssid(), fos_wifi_ip());
+        /* Registered after the portal httpd is up, so a station that comes
+         * back right away still ends with httpd in status mode (a recovery
+         * before this line is replayed by the call). */
+        fos_wifi_set_portal_exit_cb(on_portal_exit);
     }
 
     /* Buttons before the render loop: a button wake replays its press into

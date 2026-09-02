@@ -34,6 +34,10 @@ static bool s_time_synced = false;
 static bool s_scan_only = false;
 static bool s_portal_active = false;
 static bool s_portal_sta_retry = false;
+static volatile bool s_dns_hijack_run = false;
+static fos_wifi_portal_exit_cb s_portal_exit_cb = NULL;
+static bool s_portal_exit_pending = false;
+static portMUX_TYPE s_portal_exit_lock = portMUX_INITIALIZER_UNLOCKED;
 static esp_netif_t *s_sta_netif = NULL;
 static esp_netif_t *s_ap_netif = NULL;
 
@@ -131,6 +135,8 @@ static void apply_power_save_policy(void)
     }
 }
 
+static void portal_exit_task(void *arg);
+
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
@@ -177,6 +183,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         s_state = FOS_WIFI_CONNECTED;
         ESP_LOGI(TAG, "got ip %s", s_ip);
         xEventGroupSetBits(s_events, WIFI_CONNECTED_BIT);
+        if (s_portal_active) {
+            /* The stored network answered after all: the open AP has no job
+             * left and must not stay in radio range as a second front door.
+             * Cleared here so a later disconnect follows the plain station
+             * path; the teardown itself needs a real stack (httpd restart,
+             * SNTP wait in the callback), not the event task's. */
+            s_portal_active = false;
+            s_portal_sta_retry = false;
+            if (xTaskCreate(portal_exit_task, "fos_portal_exit", 6144, NULL, 5, NULL) != pdPASS) {
+                ESP_LOGW(TAG, "portal teardown task failed to start");
+            }
+        }
     }
 }
 
@@ -255,10 +273,13 @@ static void dns_hijack_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
+    /* Wake every half second so the loop notices the portal going away. */
+    struct timeval poll = { .tv_sec = 0, .tv_usec = 500000 };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &poll, sizeof(poll));
     ESP_LOGI(TAG, "dns hijack listening on :53");
 
     uint8_t buf[512];
-    while (true) {
+    while (s_dns_hijack_run) {
         struct sockaddr_in source;
         socklen_t source_len = sizeof(source);
         int len = recvfrom(sock, buf, sizeof(buf) - 16, 0, (struct sockaddr *)&source, &source_len);
@@ -285,6 +306,42 @@ static void dns_hijack_task(void *arg)
         buf[pos++] = 192; buf[pos++] = 168; buf[pos++] = 4; buf[pos++] = 1;
         sendto(sock, buf, pos, 0, (struct sockaddr *)&source, source_len);
     }
+    close(sock);
+    ESP_LOGI(TAG, "dns hijack stopped");
+    vTaskDelete(NULL);
+}
+
+/* Station recovered while the portal was up: drop the AP (APSTA -> STA keeps
+ * the station associated), stop answering DNS for it, put the modem back on
+ * the frame's power policy, then hand over to whoever registered for it. */
+static void portal_exit_task(void *arg)
+{
+    s_dns_hijack_run = false;
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "failed to stop the portal AP: %s", esp_err_to_name(err));
+    }
+    apply_power_save_policy();
+    ESP_LOGI(TAG, "station recovered (%s); provisioning portal %s stopped", s_ip, s_ap_ssid);
+
+    fos_wifi_portal_exit_cb cb;
+    taskENTER_CRITICAL(&s_portal_exit_lock);
+    cb = s_portal_exit_cb;
+    if (!cb) s_portal_exit_pending = true;
+    taskEXIT_CRITICAL(&s_portal_exit_lock);
+    if (cb) cb();
+    vTaskDelete(NULL);
+}
+
+void fos_wifi_set_portal_exit_cb(fos_wifi_portal_exit_cb cb)
+{
+    bool run_now;
+    taskENTER_CRITICAL(&s_portal_exit_lock);
+    s_portal_exit_cb = cb;
+    run_now = cb != NULL && s_portal_exit_pending;
+    if (run_now) s_portal_exit_pending = false;
+    taskEXIT_CRITICAL(&s_portal_exit_lock);
+    if (run_now) cb();
 }
 
 esp_err_t fos_wifi_start_portal(void)
@@ -325,6 +382,7 @@ esp_err_t fos_wifi_start_portal(void)
             ESP_LOGW(TAG, "failed to start portal station retry: %s", esp_err_to_name(err));
         }
     }
+    s_dns_hijack_run = true;
     xTaskCreate(dns_hijack_task, "fos_dns", 3072, NULL, 5, NULL);
     ESP_LOGI(TAG, "provisioning portal up: ssid=%s ip=%s", s_ap_ssid, s_ip);
     return ESP_OK;
