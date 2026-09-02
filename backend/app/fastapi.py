@@ -159,7 +159,10 @@ if serve_html:
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         posthog_capture_exception(exc, request)
-        return JSONResponse(status_code=500, content={"detail": str(exc)})
+        # Starlette re-raises after this handler, so uvicorn logs the full
+        # traceback; the response only echoes it in DEBUG.
+        detail = (str(exc) or exc.__class__.__name__) if config.DEBUG else "Internal server error"
+        return JSONResponse(status_code=500, content={"detail": detail})
 
 if __name__ == '__main__':
     # run migrations

@@ -58,6 +58,7 @@ from app.models.frame import (
     normalize_error_behavior,
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
+    record_successful_deploy,
     update_frame,
 )
 from app.models.log import FRAME_ACTIVITY_LOG_TYPES, Log, new_log as log
@@ -3660,8 +3661,7 @@ async def api_frame_embedded_usb_deploy_complete(
     if isinstance(frameos_version, str) and frameos_version:
         snapshot["frameos_version"] = frameos_version
     frame.status = "starting"
-    frame.last_successful_deploy = snapshot
-    frame.last_successful_deploy_at = datetime.now(timezone.utc)
+    record_successful_deploy(frame, snapshot)
     await update_frame(db, redis, frame)
     await log(
         db,

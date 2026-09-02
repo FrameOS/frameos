@@ -1,5 +1,6 @@
 import asyncio
 import json
+import traceback
 import uuid
 from http import HTTPStatus
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.config import config
 from app.database import get_db
 from app.ha import HA_SYNC_CHANNEL, HA_SYNC_REQUEST_KEY
 from app.models.settings import get_settings_dict, Settings
@@ -188,6 +190,16 @@ async def home_assistant_sync_now(db: Session = Depends(get_db), redis: Redis = 
     return _home_assistant_sync_response(reply, project_id)
 
 
+def _probe_failure_detail(prefix: str, exc: Exception) -> str:
+    """User-facing detail for a failed connection probe. The exception text
+    can quote hostnames, paths, or credentials the probe was given, so outside
+    DEBUG only the error class is echoed; the traceback goes to the log."""
+    traceback.print_exception(exc)
+    if config.DEBUG:
+        return f"{prefix}: {exc}"
+    return f"{prefix} ({exc.__class__.__name__})"
+
+
 @api_project.post("/settings/test_build_host")
 async def test_build_host(data: SettingsUpdateRequest):
     payload = data.to_dict()
@@ -215,7 +227,9 @@ async def test_build_host(data: SettingsUpdateRequest):
                 log_output=False,
             )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Build host connection failed: {exc}") from exc
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY, detail=_probe_failure_detail("Build host connection failed", exc)
+        ) from exc
 
     if status != 0:
         raise HTTPException(
@@ -250,7 +264,9 @@ async def test_modal_sandbox(data: SettingsUpdateRequest):
                 log_output=False,
             )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Modal sandbox test failed: {exc}") from exc
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY, detail=_probe_failure_detail("Modal sandbox test failed", exc)
+        ) from exc
 
     if status != 0:
         raise HTTPException(

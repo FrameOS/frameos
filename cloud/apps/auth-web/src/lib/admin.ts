@@ -21,13 +21,39 @@ import {
   storeSceneReports,
   storeScenes,
 } from "@frameos-cloud/db";
+import { NextResponse } from "next/server";
 import { hasDatabaseUrl } from "./env";
+import { requireRecentAuth } from "./recent-auth";
 import { readSession } from "./session";
 
 export type SuperadminContext =
   | { kind: "unauthenticated" }
   | { kind: "forbidden" }
+  | { kind: "reauth_required"; response: NextResponse }
   | { kind: "ok"; accountId: string };
+
+// Every /api/admin/* mutation answers a refusal the same way, and the
+// reauth one carries its own payload (which proofs /login/reauth offers).
+export function superadminRefusal(
+  admin: Exclude<SuperadminContext, { kind: "ok" }>,
+): NextResponse {
+  if (admin.kind === "reauth_required") {
+    return admin.response;
+  }
+  return NextResponse.json(
+    { error: admin.kind },
+    { status: admin.kind === "unauthenticated" ? 401 : 403 },
+  );
+}
+
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Path parameters naming an account are user-typed strings until proven
+// otherwise; a non-uuid here is a 404, not a database error to read.
+export function isUuid(value: string): boolean {
+  return uuidPattern.test(value);
+}
 
 // Superadmin is checked against the accounts row on every request, not a
 // session claim, so revoking the flag takes effect immediately.
@@ -38,8 +64,14 @@ export type SuperadminContext =
 // entries from a script or a leaked ops box. The one caller that needs a
 // token (the nightly accounting job, curl + a superadmin token from cron)
 // opts in explicitly.
+//
+// Mutations pass `mutation: true`: granting superadmin, deleting an account
+// or posting a journal entry is sudo-mode work, so a cookie that has not
+// proved its credentials in the last fifteen minutes (recent-auth.ts) is
+// sent through /login/reauth first, exactly like revoking a frame. Reads
+// (the tables, the pages) stay on the plain session.
 export async function getSuperadminContext(
-  options: { allowApiToken?: boolean } = {},
+  options: { allowApiToken?: boolean; mutation?: boolean } = {},
 ): Promise<SuperadminContext> {
   const session = await readSession();
   if (!session?.accountId || !hasDatabaseUrl()) {
@@ -60,6 +92,12 @@ export async function getSuperadminContext(
   }
   if (!account.isSuperadmin) {
     return { kind: "forbidden" };
+  }
+  if (options.mutation && !session.apiToken) {
+    const reauth = await requireRecentAuth(createDb(), session.accountId);
+    if (reauth) {
+      return { kind: "reauth_required", response: reauth };
+    }
   }
   return { accountId: session.accountId, kind: "ok" };
 }

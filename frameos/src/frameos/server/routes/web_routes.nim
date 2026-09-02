@@ -264,17 +264,25 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   router.post("/event/@name", proc(request: Request) {.gcsafe.} =
-    if not hasAccess(request, Write):
+    # Scene events take frame write access (the access key, or `public`
+    # mode). The control-plane verbs the runner handles itself — reload,
+    # restart, reboot, uploadScenes — take an admin session or the backend's
+    # serverApiKey bearer instead; see ControlEvents in auth.nim.
+    let eventName = request.pathParams["name"]
+    let allowed =
+      if isControlEvent(eventName): hasControlAccess(request)
+      else: hasAccess(request, Write)
+    if not allowed:
       request.respond(Http401, body = "Unauthorized")
       return
     log(%*{"event": "http", "post": request.path})
     let payload = parseJson(if request.body == "": "{}" else: request.body)
-    sendEvent(request.pathParams["name"], payload)
+    sendEvent(eventName, payload)
     jsonResponse(request, Http200, %*{"status": "ok"})
   )
 
   router.post("/uploadScenes", proc(request: Request) {.gcsafe.} =
-    if not hasAccess(request, Write):
+    if not hasControlAccess(request):
       request.respond(Http401, body = "Unauthorized")
       return
     log(%*{"event": "http", "post": request.path})
@@ -284,7 +292,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   router.post("/reload", proc(request: Request) {.gcsafe.} =
-    if not hasAccess(request, Write):
+    if not hasControlAccess(request):
       request.respond(Http401, body = "Unauthorized")
       return
     try:

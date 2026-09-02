@@ -6,7 +6,7 @@ from ipaddress import ip_address
 from typing import Any, Optional
 from arq import ArqRedis as Redis
 
-from .frame import Frame, update_frame
+from .frame import Frame, record_successful_deploy, update_frame
 from .metrics import new_metrics
 from app.database import Base
 from app.utils.timezone import stored_timezone
@@ -301,10 +301,11 @@ async def process_log(
         for key, value in changes.items():
             setattr(frame, key, value)
         if marked_buildroot_sd_image_booted and isinstance(frame.last_successful_deploy, dict):
-            frame.last_successful_deploy = buildroot_sd_image_deploy_snapshot(frame, frame.buildroot["sdImage"])
+            record_successful_deploy(
+                frame, buildroot_sd_image_deploy_snapshot(frame, frame.buildroot["sdImage"]), frame.last_successful_deploy_at
+            )
         if mark_embedded_boot_deployed and embedded_boot_metadata is not None:
-            frame.last_successful_deploy = _embedded_boot_deploy_snapshot(frame, embedded_boot_metadata)
-            frame.last_successful_deploy_at = timestamp
+            record_successful_deploy(frame, _embedded_boot_deploy_snapshot(frame, embedded_boot_metadata), timestamp)
         await update_frame(db, redis, frame)
 
     if event == 'metrics':

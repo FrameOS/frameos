@@ -314,6 +314,69 @@ suite "Server auth helpers":
     check hasAuthenticatedAdminSession(adminReq)
     check canAccessFrameSecrets(adminReq)
 
+  test "the backend's serverApiKey bearer counts as frame write access on POST only":
+    globalFrameConfig = FrameConfig(
+      frameAccess: "private",
+      frameAccessKey: "test-key",
+      serverApiKey: "backend-secret",
+      frameAdminAuth: %*{},
+    )
+    let post = makeRequest(httpMethod = "POST", headers = @[(AUTH_HEADER, AUTH_TYPE & " backend-secret")])
+    check hasServerApiKeyBearer(post)
+    check hasAccess(post, Read)
+    check hasAccess(post, Write)
+    let get = makeRequest(httpMethod = "GET", headers = @[(AUTH_HEADER, AUTH_TYPE & " backend-secret")])
+    check not hasServerApiKeyBearer(get)
+    check not hasAccess(get, Read)
+    let wrong = makeRequest(httpMethod = "POST", headers = @[(AUTH_HEADER, AUTH_TYPE & " backend-secre")])
+    check not hasServerApiKeyBearer(wrong)
+    check not hasAccess(wrong, Write)
+    # An empty serverApiKey never matches an empty bearer.
+    globalFrameConfig.serverApiKey = ""
+    let empty = makeRequest(httpMethod = "POST", headers = @[(AUTH_HEADER, AUTH_TYPE & " ")])
+    check not hasServerApiKeyBearer(empty)
+
+  test "control-plane verbs take an admin session or the serverApiKey bearer, never the access key":
+    setGlobalAdminSessionSalt("salt")
+    for event in ["reload", "restart", "reboot", "uploadScenes"]:
+      check isControlEvent(event)
+    for event in ["setCurrentScene", "setSceneState", "button", "render", "turnOn", "turnOff",
+                  "metrics", "Reboot", "custom"]:
+      check not isControlEvent(event)
+
+    globalFrameConfig = FrameConfig(
+      frameAccess: "private",
+      frameAccessKey: "test-key",
+      serverApiKey: "backend-secret",
+      frameAdminAuth: %*{
+        "enabled": true,
+        "user": "admin",
+        "pass": "secret",
+      },
+    )
+    # The QR-printed key, however presented, is not control access.
+    check not hasControlAccess(makeRequest(httpMethod = "POST", query = @[("k", "test-key")]))
+    check not hasControlAccess(makeRequest(httpMethod = "POST",
+      headers = @[("cookie", ACCESS_COOKIE & "=test-key")]))
+    check not hasControlAccess(makeRequest(httpMethod = "POST",
+      headers = @[(AUTH_HEADER, AUTH_TYPE & " test-key")]))
+    check not hasControlAccess(makeRequest(httpMethod = "POST"))
+    # The two credentials that are.
+    check hasControlAccess(makeRequest(httpMethod = "POST",
+      headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & createAdminSession())]))
+    check hasControlAccess(makeRequest(httpMethod = "POST",
+      headers = @[(AUTH_HEADER, AUTH_TYPE & " backend-secret")]))
+
+    # `public` mode opens scene events, not the control plane.
+    globalFrameConfig = FrameConfig(
+      frameAccess: "public",
+      frameAccessKey: "",
+      serverApiKey: "",
+      frameAdminAuth: %*{},
+    )
+    check hasAccess(makeRequest(httpMethod = "POST"), Write)
+    check not hasControlAccess(makeRequest(httpMethod = "POST"))
+
   test "hasAccess respects public and protected modes":
     globalFrameConfig = FrameConfig(
       frameAccess: "public",

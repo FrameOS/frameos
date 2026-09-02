@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import {
+  accountApiTokens,
   accountIdentities,
   accounts,
   createDb,
@@ -20,6 +21,7 @@ import { POST as logout } from "../../../app/api/auth/logout/route";
 import { POST as resetConfirm } from "../../../app/api/auth/reset/confirm/route";
 import { POST as resetRequest } from "../../../app/api/auth/reset/request/route";
 import { POST as signup } from "../../../app/api/auth/signup/route";
+import { POST as verifyEmail } from "../../../app/api/auth/verify-email/route";
 import LoginPage from "../../../app/login/page";
 import { confirmEmailVerification } from "../../lib/email-verification";
 import { resolveGoogleSignIn } from "../../lib/google-account";
@@ -355,6 +357,42 @@ describe("email verification", () => {
     expect(after?.emailVerified).toBe(true);
   });
 
+  it("consumes the verification token through the POST route only", async () => {
+    const { accountId } = await signUpUserUnverified();
+    const rawToken = createSecretToken("frev", 32);
+    await db.insert(emailVerificationTokens).values({
+      accountId,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      tokenHash: hashSecret(rawToken),
+    });
+
+    // A cross-site POST (a link scanner, a forged form) has no app Origin.
+    const noOrigin = await verifyEmail(
+      new NextRequest(new URL("/api/auth/verify-email", baseUrl), {
+        body: JSON.stringify({ token: rawToken }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+    expect(noOrigin.status).toBe(403);
+
+    const verified = await verifyEmail(
+      postJson("/api/auth/verify-email", { token: rawToken }),
+    );
+    expect(verified.status).toBe(200);
+    const [identity] = await db
+      .select({ emailVerified: accountIdentities.emailVerified })
+      .from(accountIdentities)
+      .where(eq(accountIdentities.accountId, accountId));
+    expect(identity?.emailVerified).toBe(true);
+
+    const replay = await verifyEmail(
+      postJson("/api/auth/verify-email", { token: rawToken }),
+    );
+    expect(replay.status).toBe(400);
+    expect(await replay.json()).toMatchObject({ error: "invalid_token" });
+  });
+
   it("rejects expired verification tokens", async () => {
     const { accountId } = await signUpUser();
     const rawToken = createSecretToken("frev", 32);
@@ -389,6 +427,13 @@ describe("password reset", () => {
     // so it must also verify the identity or the account stays locked out.
     const { accountId, email } = await signUpUserUnverified();
     await establishSession(accountId, email);
+    // A token minted before the reset is the foothold a reset must remove.
+    await db.insert(accountApiTokens).values({
+      accountId,
+      name: "script",
+      tokenHash: hashSecret("fc_api_before_reset"),
+      tokenHint: "fc_api_b",
+    });
 
     const rawToken = createSecretToken("frpr", 32);
     await db.insert(passwordResetTokens).values({
@@ -419,6 +464,12 @@ describe("password reset", () => {
       .where(eq(sessions.accountId, accountId));
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((row) => row.revokedAt !== null)).toBe(true);
+    const tokens = await db
+      .select({ revokedAt: accountApiTokens.revokedAt })
+      .from(accountApiTokens)
+      .where(eq(accountApiTokens.accountId, accountId));
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]?.revokedAt).not.toBeNull();
 
     const replay = await resetConfirm(
       postJson("/api/auth/reset/confirm", {

@@ -1,11 +1,10 @@
 # Security — what is still open
 
 Written 2026-09-02 after a full-repo security review (cloud, self-hosted
-backend, device runtime, ESP32 firmware, frontends, CI). Everything that
-was patched in that pass is listed at the end so the next reader knows what
-changed and why; everything above it is open work, most severe first.
-**When an item ships, delete it.** Prior review of the cloud-link flow:
-`docs/cloud-security-review.md`.
+backend, device runtime, ESP32 firmware, frontends, CI). Open work only,
+most severe first; what has shipped is in git history (the review commit
+77e583d7 and the batches after it). **When an item ships, delete it.**
+Prior review of the cloud-link flow: `docs/cloud-security-review.md`.
 
 Two rules that came out of the review and apply to new code:
 
@@ -32,8 +31,8 @@ Two rules that came out of the review and apply to new code:
   (`frame-service-settings.ts` ships every declared group;
   `app_runtime.nim` gates `getSetting` on the same self-declaration) and in
   the browser preview (`SceneLivePreview` seeds all stored groups). The
-  preview is now gated behind a click for scenes carrying their own sources
-  (this pass), but the device path is not. Make declared groups a
+  preview is gated behind a click for scenes carrying their own sources,
+  but the device path is not. Make declared groups a
   per-install permission: show them at install/assign time, store the
   granted set on the assignment, and have `buildServiceSettingsPayload`
   filter to *granted*, not *declared*. Consider refusing `getSetting` for
@@ -49,60 +48,36 @@ Two rules that came out of the review and apply to new code:
   mutators.
 - **Third-party credentials are stored in plaintext and returned verbatim.**
   `account_settings.value` holds OpenAI / Unsplash / Home Assistant / Immich
-  / GitHub keys unencrypted; `GET /api/settings` returns them to any session
-  or token, including `fc_apiro_` read-only tokens, and `GET
-  /api/account/export` embeds them despite its readme saying credentials
-  are excluded. `encryptSecret` already exists (TOTP uses it). Encrypt at
-  write, return masked hints from GET (the SPA treats them write-only; the
-  device pull path decrypts server-side), strip or mask `settings` in the
-  export, and refuse the export to read-only tokens.
-- **The hub admits `pending` frames as full device sessions.**
-  `deviceAuthError` refuses only `revoked`; a pending frame (anyone who
-  boots a leaked multi-use SD image) gets `telemetry:*` and
-  `settings:services` at enrol time, can ship logs that trigger the
-  account-wide log cull (deleting the owner's real history), overwrite
-  `last_state`, and — once the owner opens its page — answer `asset_get`
-  with arbitrary bytes and content type into the cache. Refuse
-  `status !== "active"` on the socket (or ignore telemetry/asset streams
-  until confirmed) and make the log-budget cull per frame.
+  / GitHub keys unencrypted and `GET /api/settings` returns them to any
+  session or token, including `fc_apiro_` read-only tokens. (The account
+  export now masks setting values and refuses read-only tokens.)
+  `encryptSecret` already exists (TOTP uses it). Encrypt at write, return
+  masked hints from GET (the SPA treats them write-only; the device pull
+  path decrypts server-side).
 - **First redeemer of a multi-use claim token is born `active`** with
   `settings:services` and the provisioning scenes, so whoever boots a
   leaked image first pulls the account's Home Assistant / OpenAI keys.
   Never auto-activate multi-use tokens, or defer the scope grant and
   `applyProvisioningScenes` until the owner's `/confirm`.
-- **Device-reported `content_type` is served verbatim from the app origin**
-  (`hub.ts` stores it from `asset_chunk`; `asset/route.ts` and
-  `image/route.ts` serve it, the former `inline`), and the prod CSP allows
-  inline script. Allowlist cached types to `image/*` via
-  `detectImageContentType`, else store `application/octet-stream` and serve
-  non-images as `attachment`.
-- **`POST /api/frames/{id}/event/uploadScenes` skips every assignment gate**
-  (no shell-flag lint, no compiled-scene refusal, no origin stamp, nothing
-  recorded in `frame_scene_assignments`). Run the store risk lint and
-  `compiledSceneNames` on the uploaded array, refuse `shell`, audit the push.
-- **Concurrent AI turns overshoot the daily cap by design**, and there is no
-  per-account limit on `/api/ai/chat` or `/api/ai/apps/chat` (per IP only).
-  On the shared operator key that is ~$11 per turn × 60 per 15 min per IP.
-  Add `identityRateLimitResponse` per account, cap unfinished turns per
-  account, reserve `cap − spent` in flight, bound context bytes.
-- **Email verification is consumed by a GET** (`app/verify-email/page.tsx`
-  on render) and a verified password account auto-links a later Google
-  sign-in. A link scanner at the victim's mail provider verifies an
-  attacker-created account under the victim's address; the victim's
-  Google login then lands in the attacker's account. Make verification a
-  POST behind a button; when Google is about to link into an existing
-  password account, require the password or an explicit confirmation,
-  revoke sessions, email both.
-- **API tokens survive every account-recovery action** (password reset,
-  admin "sign out everywhere", 2FA changes revoke `sessions` only) and can
-  be minted without expiry. Revoke tokens on password reset and admin
-  revocation, or at least surface them; default a TTL.
-- **Superadmin mutations have no re-auth gate.** Tokens are now refused
-  (this pass), but a 30-day-idle cookie can still grant superadmin or delete
-  any account. `requireRecentAuth` on every `/api/admin/*` mutation and a
-  reauth redirect in `AdminUsersTable`; uuid-validate `accountId` path
-  params and add rate limits to the three user routes. Give the nightly
-  accounting job its own token access level rather than superadmin.
+- **Concurrent AI turns can still overshoot the daily cap.** Per-account
+  rate limits (40 / 15 min) and a cap of three unfinished turns per account
+  now bound it on both chat routes; what is left is to reserve `cap − spent`
+  in flight so the third concurrent turn cannot be admitted under a cap the
+  first two have already spent, and to bound context bytes.
+- **A verified password account auto-links a later Google sign-in.**
+  Verification is now a POST behind a button (so a link scanner can no
+  longer verify an attacker-created account under the victim's address),
+  but the link step itself still trusts the flag alone. When Google is about
+  to link into an existing password account, require the password or an
+  explicit confirmation, revoke sessions, email both.
+- **API tokens can be minted without expiry** and survive 2FA changes
+  (password reset and the admin "sign out everywhere" now revoke them).
+  Default a TTL; consider revoking on `totp_enabled` / `passkey_added`.
+- **The nightly accounting job runs on a superadmin API token.** Every
+  `/api/admin/*` mutation is now behind `requireRecentAuth` (cookie
+  sessions) and refuses tokens, except `billing/nightly`, which the job
+  calls with a superadmin token from cron. Give it its own token access
+  level (or a dedicated service credential) rather than superadmin.
 - **Passkey / TOTP registration is now gated** (recent auth, no tokens) but
   does not yet require the password when one exists, and nothing emails the
   owner on `passkey_added` / `totp_enabled`. Do both.
@@ -128,13 +103,6 @@ Two rules that came out of the review and apply to new code:
   Supervisor (`172.30.32.2`). Any add-on on the `hassio` network (or the
   LAN if the add-on maps the port) gets everything. Bind to the container
   IP or reject peers other than the ingress proxy; do the same for `/ws`.
-- **`SECRET_KEY` production check is dead code** (`config.py` picks a random
-  key at class-definition time, so `is None` never fires), and the web and
-  worker processes each pick their own, so with `docker compose` the cloud
-  link token cannot be decrypted by the worker (`secret_key_changed`
-  forever, revocations never observed, backups never run). Refuse to boot in
-  production without it unless `HASSIO_TOKEN` is set, and in that case
-  generate once and persist to `/data`.
 - **SSH host keys are never verified** (`known_hosts=None` for frames and
   the build host). With password auth a LAN impostor receives `ssh_pass`
   and the whole `frame.json`. TOFU: store the fingerprint on the frame row
@@ -147,10 +115,13 @@ Two rules that came out of the review and apply to new code:
   `follow_redirects=False`), stop reflecting non-2xx bodies, cap body size.
   Same guard for repository URLs (PATCH skips the check entirely) and
   template `url` / `image` fetches.
-- **Secrets in every `update_frame` websocket broadcast and in
-  `last_successful_deploy` snapshots** (`ssh_pass`, `server_api_key`,
-  `frame_access_key`, TLS server key, agent shared secret, admin password,
-  mount passwords). Pop them from the WS payload and the stored snapshot.
+- **The `last_successful_deploy` nested in `update_frame` broadcasts is the
+  `to_dict()` form** — the stored snapshot now holds fingerprints, not
+  secrets, and the WS payload drops the secret-bearing keys, but `to_dict()`
+  fills a snapshot secret back in when it still matches the row so the
+  editor's "changed since deploy" diff keeps working. Teach
+  `frameLogic.ts` `frameKeyEqual` to compare secrets by presence /
+  fingerprint and stop restoring them server-side.
 - **Bodies are buffered before auth**: gzip bodies in `middleware.py`,
   `POST /api/log` (device key checked after parsing), asset uploads
   (`file.read()` into a `LargeBinary` with no cap), template zip fetch and
@@ -164,9 +135,6 @@ Two rules that came out of the review and apply to new code:
   trivial owner lockout, and across IPs it is no brute-force limit at all.
   Per-account exponential backoff; derive the IP through the trusted-proxy
   logic that `api/cloud.py` already has.
-- **Unhandled exceptions echo `str(exc)`** (`fastapi.py`
-  `unhandled_exception_handler`, plus `ai_scenes.py` and `settings.py`
-  test routes). Generic detail unless `DEBUG`.
 - Smaller: cross-project leak via the first-loaded project's MQTT broker in
   `ha/sync.py`; `replayEnrollment`-style sync pulls `mode` / `agent` /
   `frame_admin_auth` / `https_proxy.server_key` from the device; email
@@ -194,22 +162,18 @@ Two rules that came out of the review and apply to new code:
 - **The ESP32 frame JSON returns secrets** (`GET /api/frames`:
   `network.wifiPassword`, `admin.pass`, `server_api_key`,
   `certs.server_key`), and the backend's sync pull list depends on that
-  shape. The unauthenticated path to it is closed (this pass), but the
+  shape. The unauthenticated path to it is closed, but the
   backend↔frame transport is plain HTTP by default with a bearer in every
   request, so anyone with the WPA2 PSK can still read it. Make those fields
   write-only on the device (return `""`), fix the backend pull list to
   match, and push `tls_enable` on when material exists.
 - **Provisioning portal stays up after Wi-Fi recovers** and is an open AP.
-  Auth is now enforced on it when credentials exist (this pass); still,
+  Auth is enforced on it when credentials exist; still,
   on `STA_GOT_IP` while the portal is active, stop the AP and restart httpd
   without portal mode, and consider a per-device PSK on the AP.
 - **Cloud OTA has no downgrade protection** (only "same version → skip";
   `version` is outside the signed payload). Sign `version || image` and
   refuse `≤ running` unless forced, or enable app anti-rollback.
-- **Cloud `set_settings` can pin `gpio_buttons` / `battery_pin` to
-  flash/PSRAM pins** → boot loop until a USB console fix. Reject reserved
-  pins in the parser and the contract; skip invalid pins in
-  `fos_buttons_start`.
 - **Scene JS on a backend-managed frame has unrestricted LAN egress**
   (`netguard` is armed only when cloud-managed) and holds whatever keys it
   declared. Apply the private-network deny to store-origin scenes on
@@ -245,13 +209,8 @@ Two rules that came out of the review and apply to new code:
   the deny and the refused list on `origin.storeSceneId`; make the two
   spawning apps opt-in via a local-admin toggle; enforce `http(s)://` + the
   LAN policy on their URL before spawning. Scheduler and scene `dispatch`
-  can no longer fire `uploadScenes` (this pass), which closed the
-  compromised-cloud route into this; the provenance model is still the fix.
-- **Frame access key / `public` mode reaches runtime verbs**:
-  `POST /event/@name` and `POST /uploadScenes` need only `hasAccess(Write)`,
-  so the QR-printed key can reboot-loop or replace scenes. Restrict access-key
-  callers to scene events; require an admin session for `uploadScenes` /
-  `reboot` / `restart`.
+  can no longer fire `uploadScenes`, which closed the compromised-cloud
+  route into this; the provenance model is still the fix.
 - **Local-presence code is readable without presence**: the six-digit code
   is drawn into the image that `GET /image` and the cloud `image_get`
   return. Composite the overlay only on the driver path.
@@ -259,9 +218,6 @@ Two rules that came out of the review and apply to new code:
   GitHub metadata, so anyone with release-upload rights (no signing key) can
   attach an older or other-arch signed archive under a new tag. Verify the
   global signature / trusted comment naming version + target.
-- **Native HTTP client (Linux path) copies scene-controlled header values
-  and paths raw** into the request (CRLF / request-line injection, `Host`
-  override); mirror the embedded path's checks and reserve hop-by-hop names.
 - **Interpreter robustness**: no recursion depth guard on producer inputs
   (self-referencing node → SIGSEGV replayed from `uploaded.json` until the
   boot guard trips); no cap on scene-requested image / SVG `viewBox`
@@ -304,8 +260,8 @@ Two rules that came out of the review and apply to new code:
   file exported**, then self-updates the two root scripts from the archive.
   Run migrations as the service user with only `DATABASE_URL`, keep the
   runner script on the box (or verify a checksum), drop the automatic
-  self-update, fix the wrapper's comment. The key is now written only
-  after every third-party action in the job (this pass). Pin all actions in
+  self-update, fix the wrapper's comment. The key is written only after
+  every third-party action in the job. Pin all actions in
   the deploy job to commit SHAs; move ESP32 firmware signing to a
   GitHub-hosted job (the key currently lives in a VM on the same host as
   fork-PR VMs); pin `cryptography` there.
@@ -317,28 +273,23 @@ Two rules that came out of the review and apply to new code:
   and every env file** (`pg-backup.sh`); the privacy policy calls them
   encrypted. `rclone crypt` with a passphrase held outside the box; drop
   `/root/.ssh` and live certs from the tarball; align `legal.ts`.
-- **Migration runner is non-transactional** (`psql -f` per file in
-  autocommit): a mid-file failure leaves partial DDL with no
-  `schema_migrations` row and wedges every later deploy. `--single-transaction`
-  with the ledger insert inside it.
 - **Embedded editor postMessage protocol** accepts `init` /
   `previewProxyUrl` from any `event.source` / origin and replies to `'*'`
   (`EmbeddedEditor.tsx`, `mount.tsx`). Require an allowed-origin list at
   mount, check `event.origin`, reply to it, only honour a same-origin
   `previewProxyUrl`.
 - **Preview worker isolation.** Same-origin direct requests from scene code
-  are now refused in `frameos_library.js` (this pass), but the worker still
-  shares the app origin. Host `preview-worker.js` + wasm in a sandboxed
+  are refused in `frameos_library.js`, but the worker still shares the app
+  origin. Host `preview-worker.js` + wasm in a sandboxed
   iframe or a dedicated origin and talk over postMessage.
 - Smaller: `X-Forwarded-For` positional trust is spoofable if the origin is
   reachable around Cloudflare (verify nginx allowlists CF ranges or uses
   `real_ip` + `CF-Connecting-IP`; make `clientIpFromHeaders` refuse chains
   shorter than the trusted count); `DATABASE_SSL=require` disables cert
   verification in postgres.js (document `verify-full`); `/healthz` echoes
-  the driver error; nightly job passes the superadmin token on the curl
-  command line (use `-H @file`); integration global-setup drops `public`
-  on any `TEST_DATABASE_URL` (require a `_test` suffix); `cloud-ci.yml`
-  has no top-level `permissions:`; runtime Docker stage runs as root and
+  the driver error; integration global-setup drops `public`
+  on any `TEST_DATABASE_URL` (require a `_test` suffix); runtime Docker
+  stage runs as root and
   compose sets no `SECRET_KEY`; `requirements.txt` has no `--hash` lines;
   `FramesHome.tsx` renders `origin.href` without a scheme check;
   `rel="noreferer"` typos; the OpenAI service-account key and R2 keys sit
@@ -383,96 +334,3 @@ Backend: unquoted frame fields in a few frame-side shell strings
 escapers; no artifact cleanup for SD images and firmware; `js_apps.py`
 subprocesses have no timeout; `system_info` supervisor request has no
 timeout; `history[].role` unvalidated in AI app chat.
-
-## Fixed in this pass (2026-09-02)
-
-Cloud
-- `isLocalHostname` matched any DNS name starting with `fc` / `fd` /
-  `fe80` as an IPv6 literal — `https://fdcloud.example.com` passed the
-  device-flow `local_origin` allowlist that decides where login codes go.
-  IPv6 prefix checks now apply to literals only.
-- `rotate-token` accepted the retiring (previous) token, so a stolen old
-  token could rotate again inside the grace window and lock the real backend
-  out. `authenticateLinkedClient` reports which reference matched; rotation
-  refuses the previous one.
-- An approved device request that was never polled stayed redeemable
-  forever, with the decryptable link token kept on the client row. Expires
-  five minutes past the deadline, nulls the token, retires the client.
-- `safeAuthReturnPath("/..//evil.example")` resolved to `//evil.example`
-  (open redirect on login / reauth / Google callback / signup). Rejects a
-  resolved pathname starting with `//`.
-- Passkey and TOTP enrolment needed only a session or a full API token;
-  a stolen cookie became a permanent credential that also satisfied sudo
-  mode. `accountSecurityContext` refuses tokens on every mutation and the
-  four enrolment routes require recent auth; `TwoFactorSettings` follows
-  the reauth redirect.
-- `DELETE /api/frames/{id}` revoked and erased a frame with no sudo gate
-  (revoke has one) and was callable by API tokens / MCP. Now
-  `requireRecentAuth`; the SPA's `deleteFrame` follows the reauth redirect
-  on the cloud.
-- `POST /api/account/delete` and every `/api/admin/*` route accepted API
-  tokens. Both refuse them (`getSuperadminContext` takes
-  `allowApiToken` for the nightly job only). Integration tests pin all of
-  this (`api-token-boundaries.integration.test.ts`).
-- The anonymous preview proxy mirrored upstream `Content-Type`, took a
-  cross-site `text/plain` form POST, followed redirects with a single
-  host check, and forwarded `Authorization`. Requires JSON + Origin,
-  fetches through `guardedFetch` (per-hop SSRF check), strips
-  `Authorization` / `Proxy-Authorization`, and answers
-  `application/octet-stream` + `attachment` + `CSP: sandbox` with the
-  upstream type in `x-upstream-content-type`. The headless renderer's
-  fetch child follows redirects by hand with the same per-hop check and
-  streams with a cap.
-- `capitalizeAscii` emitted its receiver twice, so twenty nested calls in a
-  300-byte anonymous convert request were tens of megabytes of output; the
-  receiver is emitted once and every emitted fragment is capped at 256 KB
-  (`NimConvertError`). `codeArgs[].name` was interpolated into a `RegExp`
-  unescaped in both linters (`[` → 500, `(a*)*c` → ReDoS); escaped.
-- The public scene preview seeded every stored key of the viewer into any
-  scene and ran it on page open. Scenes carrying their own app sources that
-  declare settings groups now wait for the same "Run preview" click as
-  paid services, and the copy says why.
-- `cloud-ci.yml` wrote the production deploy key to disk before running
-  four tag-pinned third-party actions; the step now runs right before
-  Deploy.
-
-Self-hosted backend
-- Scene `sources` file names and node ids were joined onto the build tree
-  unchecked (`_frame_deployer.py`) — `"../../../../etc/cron.d/x"` in a
-  scene wrote anywhere the backend process could, reachable synchronously
-  via `download_build_zip`. Names must be plain file names and resolve
-  inside their app directory; node ids must be identifiers.
-- `embedded.firmware.path` and `buildroot.sdImage.path` are client-writable
-  frame state and the download routes served whatever file they named
-  (and gzip-wrote next to it). Both now require the path to resolve under
-  the builder's artifact directory.
-- Asset `path` accepted `..` and absolute segments and was later joined onto
-  the local build tree and the frame's asset dir; validated on create and
-  update.
-- Virtual-frame kiosk page interpolated `frame.name` and the view token
-  into HTML unescaped (stored XSS on the backend origin); escaped.
-- An empty `server_api_key` matched an empty bearer on `/api/log` and the
-  embedded device routes, and `/api/log` never checked the scheme word.
-
-Device / preview
-- ESP32: portal mode (open AP, also entered when the stored Wi-Fi merely
-  fails to answer within 45 s at boot, and never left) made
-  `require_protected_access` succeed unconditionally — `/api/frames`
-  returned the Wi-Fi PSK, API key, admin login and TLS key to anyone in
-  radio range. The bypass now applies only to a device with no API key and
-  no admin login; otherwise the portal demands the same credentials.
-- Nim runtime: the cloud's `set_schedule` was persisted verbatim and the
-  scheduler fired any event name, so a schedule entry `{event:
-  "uploadScenes"}` replaced the installed scenes with no origin stamp,
-  bypassing every cloud-push guard (and lifting the LAN deny after
-  demotion). The scheduler now refuses `uploadScenes`; scene `dispatch`
-  nodes refuse `uploadScenes` / `reboot` / `restart` / `reload`.
-- Nim runtime: reading a NetworkManager keyfile with `sudo cat` (non-root
-  images) logged the whole file — `psk=` included — into the log stream the
-  backend and the cloud `get_logs` read. `portal.run` withholds output when
-  a logged command name is given, and the keyfile read gives one.
-- Wasm preview: scene code could make a direct, cookie-bearing XHR to the
-  app's own API from the same-origin worker (read `/api/frames`,
-  `/api/settings`, and mutate). Same-origin targets are refused and go
-  through the server-side proxy instead (no cookies, SSRF-guarded); Node
-  renderers are unaffected.

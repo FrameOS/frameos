@@ -211,18 +211,63 @@ def _tls_connect_error_detail(frame: Frame, error: str) -> Optional[str]:
     )
 
 
+# Verbs the frame treats as control-plane work rather than scene events.
+# The runtime (server/auth.nim `ControlEvents`) refuses the frame access key
+# — the QR-printed viewer credential — on these and wants an admin session or
+# the frame's serverApiKey, the secret only the backend and the frame share.
+_CONTROL_EVENT_NAMES = frozenset({"reboot", "restart", "reload", "uploadScenes"})
+
+
+def _is_control_path(path: str) -> bool:
+    bare = path.split("?", 1)[0].rstrip("/")
+    if bare in ("/uploadScenes", "/reload"):
+        return True
+    if bare.startswith("/event/"):
+        return bare[len("/event/") :] in _CONTROL_EVENT_NAMES
+    return False
+
+
 def _auth_headers(
-    frame: Frame, hdrs: Optional[dict[str, str]] = None
+    frame: Frame,
+    hdrs: Optional[dict[str, str]] = None,
+    *,
+    prefer_server_key: bool = False,
 ) -> dict[str, str]:
     """
     Inject HTTP Authorization header when the frame is not public.
+
+    Embedded frames always take the serverApiKey. Linux frames take the
+    frame access key (what the viewer-facing routes check), except when the
+    caller asks for the server key — the control-plane paths above, which
+    newer runtimes refuse the access key on.
     """
     hdrs = dict(hdrs or {})
-    if _is_embedded_frame(frame) and frame.server_api_key:
+    if frame.server_api_key and (_is_embedded_frame(frame) or prefer_server_key):
         hdrs.setdefault("Authorization", f"Bearer {frame.server_api_key}")
     elif frame.frame_access != "public" and frame.frame_access_key:
         hdrs.setdefault("Authorization", f"Bearer {frame.frame_access_key}")
     return hdrs
+
+
+def _legacy_control_fallback_headers(
+    frame: Frame, hdrs: Optional[dict[str, str]]
+) -> Optional[dict[str, str]]:
+    """Headers for the one retry a 401 on a control path gets.
+
+    A Linux frame running a release from before the runtime learned to accept
+    `Bearer serverApiKey` on /uploadScenes and /event/* answers 401 to it and
+    still wants the access key. Retrying with the access key keeps every
+    already-deployed frame working until it is redeployed; a frame that
+    refuses both is a real 401."""
+    if _is_embedded_frame(frame) or not frame.server_api_key:
+        return None
+    if frame.frame_access == "public" or not frame.frame_access_key:
+        return None
+    if hdrs and "Authorization" in hdrs:
+        return None
+    fallback = dict(hdrs or {})
+    fallback["Authorization"] = f"Bearer {frame.frame_access_key}"
+    return fallback
 
 
 async def _fetch_frame_http_bytes(
@@ -239,6 +284,37 @@ async def _fetch_frame_http_bytes(
 
     `timeout` overrides FRAME_HTTP_TIMEOUT for requests that legitimately
     take long (e.g. asset uploads crawling over a weak WiFi link)."""
+    control = _is_control_path(path)
+    hdrs = _auth_headers(frame, headers, prefer_server_key=control)
+    result = await _fetch_frame_http_bytes_once(
+        frame, redis, path=path, method=method, body=body, headers=hdrs, timeout=timeout
+    )
+    if control and result[0] == HTTPStatus.UNAUTHORIZED:
+        fallback = _legacy_control_fallback_headers(frame, headers)
+        if fallback is not None:
+            result = await _fetch_frame_http_bytes_once(
+                frame,
+                redis,
+                path=path,
+                method=method,
+                body=body,
+                headers=fallback,
+                timeout=timeout,
+            )
+    return result
+
+
+async def _fetch_frame_http_bytes_once(
+    frame: Frame,
+    redis: Redis,
+    *,
+    path: str,
+    method: str,
+    body: bytes | str | None,
+    headers: dict[str, str],
+    timeout: Optional[httpx.Timeout],
+) -> tuple[int, bytes, dict[str, str]]:
+    """One request with the headers exactly as given (auth already decided)."""
     if await _use_remote(frame, redis):
         remote_body: str | None
         if isinstance(body, bytes):
@@ -250,7 +326,7 @@ async def _fetch_frame_http_bytes(
             _build_frame_path(frame, path, method),
             method=method,
             body=remote_body,
-            headers=_auth_headers(frame, headers),
+            headers=headers,
             redis=redis,
         )
         if isinstance(resp, dict):
@@ -267,7 +343,7 @@ async def _fetch_frame_http_bytes(
         raise HTTPException(status_code=500, detail="Bad remote response")
 
     candidates = _frame_http_direct_candidates(frame, path, method)
-    hdrs = _auth_headers(frame, headers)
+    hdrs = headers
     timeout_errors = (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout)
     attempts = max(1, FRAME_HTTP_RETRIES)
     last_error: HTTPException | None = None

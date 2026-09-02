@@ -14,6 +14,8 @@ import {
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as createApiToken } from "../../../app/api/account/api-tokens/route";
 import { POST as deleteAccount } from "../../../app/api/account/delete/route";
+import { GET as exportAccount } from "../../../app/api/account/export/route";
+import { PATCH as adminPatchUser } from "../../../app/api/admin/users/[accountId]/route";
 import { POST as passkeyOptions } from "../../../app/api/account/two-factor/passkeys/options/route";
 import { POST as beginTotp } from "../../../app/api/account/two-factor/totp/route";
 import { GET as adminUsers } from "../../../app/api/admin/users/route";
@@ -129,6 +131,39 @@ async function switchToApiToken(accountId: string, email: string) {
 }
 
 describe("what a personal API token may not do", () => {
+  it("cannot download the account export with a read-only token", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    await establishSession(accountId, email);
+    const minted = await createApiToken(
+      request("/api/account/api-tokens", { access: "read_only", name: "dash" }),
+    );
+    expect(minted.status).toBe(201);
+    const { token } = (await minted.json()) as { token: string };
+    expect(token).toMatch(/^fc_apiro_/);
+    cookieJar.clear();
+    requestHeaders.set("authorization", `Bearer ${token}`);
+
+    const refused = await exportAccount();
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ error: "read_only_token" });
+  });
+
+  it("never puts service-setting values in the export", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    await establishSession(accountId, email);
+    await db.execute(
+      sql`insert into account_settings (account_id, key, value) values (${accountId}, 'openAiApiKey', ${JSON.stringify("sk-proj-0123456789abcdef")}::jsonb)`,
+    );
+    const response = await exportAccount();
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).not.toContain("sk-proj-0123456789abcdef");
+    const parsed = JSON.parse(body) as { settings: { key: string; value: unknown }[] };
+    expect(parsed.settings).toEqual([
+      expect.objectContaining({ key: "openAiApiKey", value: "••••cdef" }),
+    ]);
+  });
+
   it("cannot enrol an authenticator or a passkey", async () => {
     const { accountId, email } = await signUpVerifiedUser();
     const token = await switchToApiToken(accountId, email);
@@ -188,6 +223,49 @@ describe("what a personal API token may not do", () => {
     );
     expect(withToken.status).toBe(403);
     expect((await withToken.json()).error).toBe("forbidden");
+  });
+});
+
+describe("superadmin mutations need a recent proof of credentials", () => {
+  it("sends a superadmin cookie through reauth before a mutation", async () => {
+    const admin = await signUpVerifiedUser();
+    const target = await signUpVerifiedUser();
+    await db
+      .update(accounts)
+      .set({ isSuperadmin: true })
+      .where(eq(accounts.id, admin.accountId));
+    const sessionToken = await establishSession(admin.accountId, admin.email);
+
+    const fresh = await adminPatchUser(
+      request(`/api/admin/users/${target.accountId}`, { is_superadmin: true }, "PATCH"),
+      { params: Promise.resolve({ accountId: target.accountId }) },
+    );
+    expect(fresh.status).toBe(200);
+    // A garbage id is a 404, never a database error.
+    const garbage = await adminPatchUser(
+      request(`/api/admin/users/not-a-uuid`, { is_superadmin: true }, "PATCH"),
+      { params: Promise.resolve({ accountId: "not-a-uuid" }) },
+    );
+    expect(garbage.status).toBe(404);
+
+    await db
+      .update(sessions)
+      .set({ authenticatedAt: new Date(Date.now() - 60 * 60 * 1000) })
+      .where(eq(sessions.tokenHash, hashSecret(sessionToken)));
+    const stale = await adminPatchUser(
+      request(`/api/admin/users/${target.accountId}`, { is_superadmin: false }, "PATCH"),
+      { params: Promise.resolve({ accountId: target.accountId }) },
+    );
+    expect(stale.status).toBe(403);
+    expect(await stale.json()).toMatchObject({
+      error: "reauth_required",
+      reauth: { path: "/login/reauth" },
+    });
+    const [row] = await db
+      .select({ isSuperadmin: accounts.isSuperadmin })
+      .from(accounts)
+      .where(eq(accounts.id, target.accountId));
+    expect(row?.isSuperadmin).toBe(true);
   });
 });
 

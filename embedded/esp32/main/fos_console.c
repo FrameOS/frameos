@@ -708,9 +708,17 @@ static int cmd_set(int argc, char **argv)
         config->wake_check_sec = seconds;
     }
     else if (strcmp(key, "wake_schedule") == 0) config->wake_schedule = atoi(value) != 0;
-    else if (strcmp(key, "battery_pin") == 0) config->battery_pin = (int8_t)atoi(value);
+    else if (strcmp(key, "battery_pin") == 0 || strcmp(key, "battery_enable_pin") == 0) {
+        int pin = atoi(value);
+        const char *why = pin >= 0 ? fos_config_gpio_pin_reserved(pin) : NULL;
+        if (why != NULL) {
+            printf("refusing %s GPIO %d: %s\n", key, pin, why);
+            return 1;
+        }
+        if (strcmp(key, "battery_pin") == 0) config->battery_pin = (int8_t)pin;
+        else config->battery_enable_pin = (int8_t)pin;
+    }
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
-    else if (strcmp(key, "battery_enable_pin") == 0) config->battery_enable_pin = (int8_t)atoi(value);
     else if (strcmp(key, "pins") == 0) {
         if (fos_config_parse_pins(value, &config->pins) != ESP_OK) {
             printf("bad pin spec, want e.g. rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1\n");

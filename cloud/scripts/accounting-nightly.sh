@@ -47,13 +47,21 @@ if [ "$ping_url" = "none" ]; then
   ping_url=""
 fi
 
-response="$(mktemp)"
-trap 'rm -f "$response"' EXIT
+# The token reaches curl through a header file (`-H @file`), never as an
+# argument: a process's command line is readable by every user on the box
+# in `ps` / /proc/*/cmdline for as long as the request runs — up to the
+# 300 s below — and this token is a superadmin's. The directory is created
+# 0700 by mktemp -d; the umask keeps the files inside it 0600.
+workdir="$(umask 077 && mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+header_file="$workdir/authorization"
+response="$workdir/response"
+(umask 077 && printf 'authorization: Bearer %s\n' "$token" >"$header_file")
 
 status="$(curl -sS -o "$response" -w '%{http_code}' \
   --max-time 300 \
   -X POST \
-  -H "authorization: Bearer ${token}" \
+  -H @"$header_file" \
   -H 'content-type: application/json' \
   --data '{}' \
   "$url" || echo 000)"

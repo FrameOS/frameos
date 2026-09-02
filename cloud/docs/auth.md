@@ -151,7 +151,13 @@ matched to what the action can do:
 
 - **15 minutes** (`recentAuthMaxAgeSeconds`) for the destructive pair:
   `POST /api/frames/{id}/revoke` (revoking a cloud-managed frame) and
-  `POST /api/device/revoke` (revoking a linked backend or frame).
+  `POST /api/device/revoke` (revoking a linked backend or frame), for
+  `DELETE /api/frames/{id}`, for second-factor enrolment, and for every
+  `/api/admin/*` mutation (`getSuperadminContext({ mutation: true })` —
+  granting superadmin, deleting an account, posting a journal entry; the
+  admin tables follow the 403 to `/login/reauth` like any other button).
+  The nightly accounting job is the one admin caller on an API token and is
+  exempt, since tokens never carry a session to stamp.
 - **2 hours** (`recentApprovalMaxAgeSeconds`) for
   `POST /api/device/authorize` — approving a device link or a scope change.
   Approvals are additive and come in batches ("setting up frames this

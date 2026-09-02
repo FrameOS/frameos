@@ -298,6 +298,10 @@ class CloudSync:
         link, access_token, private_key = self._load_link_for_backup()
         if link is None or access_token is None or private_key is None:
             return
+        # The broadcast is only the trigger: it omits the secret-bearing
+        # settings (mountpoints, agent, ...) that a restore needs, so the
+        # payload comes from the row itself.
+        frame_dict = self._load_frame_dict(frame_id) or frame_dict
         project_name = self._project_name(frame_dict.get("project_id"))
         try:
             status_code, response = await cloud_backup.push_frame_backup(
@@ -312,6 +316,16 @@ class CloudSync:
                 print(f"🟡 FrameOS Cloud: frame {frame_id} backup failed: {detail}")
         except Exception as e:  # noqa: BLE001
             print(f"🟡 FrameOS Cloud: frame {frame_id} backup failed: {e}")
+
+    def _load_frame_dict(self, frame_id) -> Optional[dict]:
+        from app.models.frame import Frame
+
+        db = SessionLocal()
+        try:
+            frame = db.get(Frame, frame_id)
+            return frame.to_dict() if frame is not None else None
+        finally:
+            db.close()
 
     def _load_link_for_backup(self) -> tuple[Optional[CloudBackendLink], Optional[str], Optional[bytes]]:
         """The link, token, and backup key iff frame backups may upload.

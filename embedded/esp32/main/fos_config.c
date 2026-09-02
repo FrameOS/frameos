@@ -5,9 +5,13 @@
 #include <string.h>
 #include <strings.h>
 
+#include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_private/esp_gpio_reserve.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "sdkconfig.h"
+#include "soc/soc_caps.h"
 
 #include "fos_defaults.h"
 
@@ -365,6 +369,42 @@ void fos_config_format_assets_sd_pins(const fos_assets_sd_config_t *assets_sd, c
              assets_sd->cs, assets_sd->sck, assets_sd->miso, assets_sd->mosi);
 }
 
+/* The chip's SPI flash / PSRAM pads, by target. esp_gpio_is_reserved below
+ * knows the same pins once the flash and PSRAM drivers have claimed them,
+ * but this table does not depend on that having happened yet, and names the
+ * reason. */
+static bool gpio_pin_is_memory_pad(int pin)
+{
+#if CONFIG_IDF_TARGET_ESP32S3
+    /* GPIO26-32: the in-package / module SPI flash (and a quad PSRAM).
+     * GPIO33-37: the four extra data lines of octal PSRAM / octal flash. */
+    if (pin >= 26 && pin <= 32) return true;
+#if CONFIG_SPIRAM_MODE_OCT || CONFIG_ESPTOOLPY_OCT_FLASH
+    if (pin >= 33 && pin <= 37) return true;
+#endif
+#elif CONFIG_IDF_TARGET_ESP32
+    /* GPIO6-11: SPI flash. GPIO16/17: PSRAM CS / CLK on the WROVER modules. */
+    if (pin >= 6 && pin <= 11) return true;
+#if CONFIG_SPIRAM
+    if (pin == 16 || pin == 17) return true;
+#endif
+#elif CONFIG_IDF_TARGET_ESP32C3
+    /* GPIO12-17: the in-package SPI flash of the C3 modules FrameOS runs on. */
+    if (pin >= 12 && pin <= 17) return true;
+#endif
+    return false;
+}
+
+const char *fos_config_gpio_pin_reserved(int pin)
+{
+    if (pin < 0 || pin >= SOC_GPIO_PIN_COUNT || !GPIO_IS_VALID_GPIO(pin)) {
+        return "not a GPIO on this chip";
+    }
+    if (gpio_pin_is_memory_pad(pin)) return "SPI flash / PSRAM pad";
+    if (esp_gpio_is_reserved(BIT64(pin))) return "claimed by a driver";
+    return NULL;
+}
+
 esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config)
 {
     if (!spec || !spec[0]) {
@@ -390,6 +430,13 @@ esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config)
         long pin = strtol(line, &end, 10);
         if (end == line || *end != '\0') return ESP_ERR_INVALID_ARG;
         if (pin < 0 || pin > 48) return ESP_ERR_INVALID_ARG;
+        const char *reserved = fos_config_gpio_pin_reserved((int)pin);
+        if (reserved != NULL) {
+            /* Every writer lands here — NVS at boot, the USB console, the
+             * cloud set_settings verb — so the refusal is logged once, here. */
+            ESP_LOGW(TAG, "GPIO %ld refused for a button: %s", pin, reserved);
+            return ESP_ERR_INVALID_ARG;
+        }
 
         char *label = sep + 1;
         while (*label == ' ' || *label == '\t') label++;

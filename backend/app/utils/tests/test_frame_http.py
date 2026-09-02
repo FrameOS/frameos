@@ -4,7 +4,12 @@ import pytest
 from app.models.frame import Frame
 import app.utils.frame_http as frame_http
 from app.utils.tls import generate_frame_tls_material
-from app.utils.frame_http import _auth_headers, _frame_http_direct_candidates, _tls_connect_error_detail
+from app.utils.frame_http import (
+    _auth_headers,
+    _frame_http_direct_candidates,
+    _is_control_path,
+    _tls_connect_error_detail,
+)
 
 
 def _frame(frame_host: str = "frame.local") -> Frame:
@@ -106,6 +111,119 @@ def test_embedded_auth_headers_use_server_api_key():
     frame.frame_access_key = "frame-access-key"
 
     assert _auth_headers(frame) == {"Authorization": "Bearer server-secret"}
+
+
+def test_linux_auth_headers_use_access_key_unless_server_key_preferred():
+    frame = _frame("10.8.0.232")
+    frame.mode = "rpios"
+    frame.server_api_key = "server-secret"
+    frame.frame_access = "private"
+    frame.frame_access_key = "frame-access-key"
+
+    assert _auth_headers(frame) == {"Authorization": "Bearer frame-access-key"}
+    assert _auth_headers(frame, prefer_server_key=True) == {
+        "Authorization": "Bearer server-secret"
+    }
+    # A caller-supplied Authorization header always wins.
+    assert _auth_headers(frame, {"Authorization": "Bearer x"}, prefer_server_key=True) == {
+        "Authorization": "Bearer x"
+    }
+
+
+def test_control_paths_are_the_runtime_control_events():
+    for path in ("/uploadScenes", "/reload", "/event/reboot", "/event/restart", "/event/reload", "/event/uploadScenes?x=1"):
+        assert _is_control_path(path), path
+    for path in ("/event/setCurrentScene", "/event/render", "/image", "/api/frames/1/reload"):
+        assert not _is_control_path(path), path
+
+
+def _linux_frame_with_both_keys():
+    frame = _frame("10.8.0.232")
+    frame.mode = "rpios"
+    frame.frame_port = 8787
+    frame.server_api_key = "server-secret"
+    frame.frame_access = "private"
+    frame.frame_access_key = "frame-access-key"
+    return frame
+
+
+def _fake_client_factory(calls, respond):
+    class FakeAsyncClient:
+        def __init__(self, verify=True):
+            self.verify = verify
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def request(self, method, url, headers=None, content=None, timeout=None):
+            calls.append((method, url, dict(headers or {})))
+            return respond(headers or {})
+
+    return FakeAsyncClient
+
+
+@pytest.mark.asyncio
+async def test_control_verbs_use_the_server_key_and_fall_back_to_the_access_key(monkeypatch):
+    """A frame from before the runtime accepted `Bearer serverApiKey` on
+    /uploadScenes answers 401 to it; the backend retries once with the access
+    key so deployed frames keep working until they are redeployed."""
+    frame = _linux_frame_with_both_keys()
+    calls = []
+
+    async def fake_use_remote(_frame, _redis):
+        return False
+
+    def legacy_runtime(headers):
+        if headers.get("Authorization") == "Bearer frame-access-key":
+            return httpx.Response(200, content=b"ok")
+        return httpx.Response(401, content=b"unauthorized")
+
+    monkeypatch.setattr(frame_http, "_use_remote", fake_use_remote)
+    monkeypatch.setattr(frame_http.httpx, "AsyncClient", _fake_client_factory(calls, legacy_runtime))
+
+    status, body, _ = await frame_http._fetch_frame_http_bytes(
+        frame, None, path="/uploadScenes", method="POST", body=b"[]"
+    )
+    assert status == 200 and body == b"ok"
+    assert [c[2]["Authorization"] for c in calls] == [
+        "Bearer server-secret",
+        "Bearer frame-access-key",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_control_verbs_do_not_retry_when_the_server_key_is_accepted(monkeypatch):
+    frame = _linux_frame_with_both_keys()
+    calls = []
+
+    async def fake_use_remote(_frame, _redis):
+        return False
+
+    def current_runtime(headers):
+        if headers.get("Authorization") == "Bearer server-secret":
+            return httpx.Response(200, content=b"ok")
+        return httpx.Response(401, content=b"unauthorized")
+
+    monkeypatch.setattr(frame_http, "_use_remote", fake_use_remote)
+    monkeypatch.setattr(frame_http.httpx, "AsyncClient", _fake_client_factory(calls, current_runtime))
+
+    status, _, _ = await frame_http._fetch_frame_http_bytes(
+        frame, None, path="/event/reboot", method="POST", body=b"{}"
+    )
+    assert status == 200
+    assert len(calls) == 1
+
+    # Scene events keep the access key (what every runtime accepts for them)
+    # and never retry: a 401 there is a real 401.
+    calls.clear()
+    status, _, _ = await frame_http._fetch_frame_http_bytes(
+        frame, None, path="/event/setCurrentScene", method="POST", body=b"{}"
+    )
+    assert status == 401
+    assert [c[2]["Authorization"] for c in calls] == ["Bearer frame-access-key"]
 
 
 @pytest.mark.asyncio

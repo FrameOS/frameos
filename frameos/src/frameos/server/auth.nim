@@ -145,6 +145,10 @@ template frameAccessKeyValue*(): string =
   {.gcsafe.}:
     globalFrameConfig.frameAccessKey
 
+template frameServerApiKeyValue(): string =
+  {.gcsafe.}:
+    (if globalFrameConfig.isNil: "" else: globalFrameConfig.serverApiKey)
+
 proc adminPanelEnabled*(): bool {.gcsafe.} =
   let adminAuth = frameAdminAuthSnapshot()
   adminAuth{"enabled"}.getBool(false) and
@@ -277,11 +281,24 @@ proc allowUnauthenticatedStaticAssets*(): bool =
     let access = frameAccessMode()
     adminPanelEnabled() or access == "public" or access == "protected"
 
+proc hasServerApiKeyBearer*(request: Request): bool {.gcsafe.} =
+  ## `Authorization: Bearer <serverApiKey>` on a POST — the frame's own
+  ## credential toward its backend (frame.json `serverApiKey`, the key
+  ## logger.nim posts logs with), which the backend presents when it calls the
+  ## frame's HTTP API. Never on GET, like the access-key bearer: a link must
+  ## not be able to carry it.
+  let apiKey = frameServerApiKeyValue()
+  if apiKey.len == 0 or request.httpMethod != "POST":
+    return false
+  constantTimeEquals(getHeaderValue(request, AUTH_HEADER), AUTH_TYPE & " " & apiKey)
+
 template hasAccess*(request: Request, accessType: AccessType): bool =
   {.gcsafe.}:
     block:
       let access = frameAccessMode()
       if access == "public" or (access == "protected" and accessType == Read):
+        true
+      elif hasServerApiKeyBearer(request):
         true
       else:
         let accessKey = frameAccessKeyValue()
@@ -299,6 +316,27 @@ template hasAccess*(request: Request, accessType: AccessType): bool =
 proc hasAdminAccess*(request: Request): bool =
   {.gcsafe.}:
     hasAdminSession(request)
+
+## Events that are control-plane verbs rather than something a scene reacts
+## to. The runner (frameos/runner.nim) handles these itself and never
+## dispatches them to the scene: `reload` re-reads frame.json and every
+## uploaded scene, `restart` exits the process, `reboot` reboots the device,
+## `uploadScenes` replaces the scene set. Everything else that arrives on
+## POST /event/@name (setCurrentScene, setSceneState, button presses, turnOn /
+## turnOff, render, metrics, custom scene events) is scene territory.
+const ControlEvents* = ["reload", "restart", "reboot", "uploadScenes"]
+
+proc isControlEvent*(name: string): bool =
+  name in ControlEvents
+
+proc hasControlAccess*(request: Request): bool {.gcsafe.} =
+  ## Who may fire a control-plane verb: an admin session, or the backend with
+  ## its serverApiKey bearer. Deliberately not the frame access key and not
+  ## `public` mode — that key is printed on the frame's QR code and handed to
+  ## whoever should be able to pick a scene, which must not extend to
+  ## replacing the scene set or reboot-looping the device.
+  {.gcsafe.}:
+    hasAdminSession(request) or hasServerApiKeyBearer(request)
 
 proc canAccessFrameSecrets*(request: Request): bool =
   {.gcsafe.}:

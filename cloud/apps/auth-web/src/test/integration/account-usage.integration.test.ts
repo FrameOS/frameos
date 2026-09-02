@@ -147,7 +147,7 @@ function rawPublicKeyBase64() {
   return Buffer.from(spki.subarray(spki.length - 32)).toString("base64");
 }
 
-async function seedFrame(accountId: string) {
+async function seedFrame(accountId: string, suffix = "") {
   const [client] = await db
     .insert(linkedClients)
     .values({
@@ -155,7 +155,7 @@ async function seedFrame(accountId: string) {
       clientKind: "frame",
       providerClientMetadata: { requestedScopes: ["frame:managed"] },
       publicDisplayName: "Usage frame",
-      tokenReference: hashSecret(`fc_link_usage_${accountId}`),
+      tokenReference: hashSecret(`fc_link_usage_${accountId}${suffix}`),
     })
     .returning();
   const [frame] = await db
@@ -419,6 +419,57 @@ describe("account storage usage and quotas", () => {
     expect(labels).not.toContain("oldest");
     expect(labels).toContain("newest");
     expect(labels).toContain("fresh");
+  });
+
+  it("culls the overflowing frame's own logs before a quiet frame's history", async () => {
+    const accountId = await signIn();
+    const quiet = await seedFrame(accountId, "-quiet");
+    const chatty = await seedFrame(accountId, "-chatty");
+    const fat = Math.floor(maxFrameLogBytesPerAccount * 0.3);
+    // Quiet frame: 30% of the budget as history, written first (lowest ids
+    // = the oldest rows, which the account-wide cull would take first).
+    await db.insert(frameLogs).values({
+      frameId: quiet.id,
+      payload: { label: "quiet-history" },
+      sizeBytes: fat,
+      timestamp: new Date(),
+    });
+    // Chatty frame: 3 × 30% → the account is at 120% of budget.
+    for (const label of ["chatty-old", "chatty-mid", "chatty-new"]) {
+      await db.insert(frameLogs).values({
+        frameId: chatty.id,
+        payload: { label },
+        sizeBytes: fat,
+        timestamp: new Date(),
+      });
+    }
+
+    await storeFrameLogs(
+      db,
+      chatty.id,
+      [{ payload: { line: "fresh" }, timestamp: new Date() }],
+      accountId,
+    );
+
+    const quietRows = await db
+      .select({ payload: frameLogs.payload })
+      .from(frameLogs)
+      .where(eq(frameLogs.frameId, quiet.id));
+    expect(quietRows).toHaveLength(1);
+    const chattyRows = await db
+      .select({ payload: frameLogs.payload, sizeBytes: frameLogs.sizeBytes })
+      .from(frameLogs)
+      .where(eq(frameLogs.frameId, chatty.id))
+      .orderBy(frameLogs.id);
+    const labels = chattyRows.map(
+      (row) => (row.payload as Record<string, unknown>).label ?? "fresh",
+    );
+    expect(labels).not.toContain("chatty-old");
+    expect(labels).toContain("chatty-new");
+    expect(labels).toContain("fresh");
+    const total =
+      fat + chattyRows.reduce((sum, row) => sum + row.sizeBytes, 0);
+    expect(total).toBeLessThanOrEqual(maxFrameLogBytesPerAccount);
   });
 
   it("reports usage with limits on the grants poll", async () => {

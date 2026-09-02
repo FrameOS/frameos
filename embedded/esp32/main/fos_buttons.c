@@ -142,6 +142,14 @@ esp_err_t fos_buttons_start(void)
     for (size_t i = 0; i < config->gpio_button_count; i++) {
         s_enabled[i] = false;
         const fos_gpio_button_t *button = &config->gpio_buttons[i];
+        /* A stored spec from before the parser refused these (or a pin a
+         * driver has since claimed): configuring a pull-up on a flash pad
+         * here is what turns a bad setting into a boot loop. Skip, say so. */
+        const char *reserved = fos_config_gpio_pin_reserved(button->pin);
+        if (reserved != NULL) {
+            ESP_LOGW(TAG, "GPIO %d (%s) skipped: %s", button->pin, button->label, reserved);
+            continue;
+        }
         gpio_config_t gpio = {
             .pin_bit_mask = 1ULL << button->pin,
             .mode = GPIO_MODE_INPUT,
@@ -329,8 +337,15 @@ esp_err_t fos_buttons_arm_wake(uint64_t *armed_mask)
             held |= 1ULL << pins[i];
         }
     }
+    /* Pins fos_buttons_start refused are not wake sources either. */
+    uint64_t valid = wake_valid_mask();
+    for (size_t i = 0; i < count; i++) {
+        if (pins[i] >= 0 && pins[i] < 64 && fos_config_gpio_pin_reserved(pins[i]) != NULL) {
+            valid &= ~(1ULL << pins[i]);
+        }
+    }
     uint64_t skipped = 0;
-    uint64_t mask = fos_wake_button_mask(pins, count, wake_valid_mask(), held, &skipped);
+    uint64_t mask = fos_wake_button_mask(pins, count, valid, held, &skipped);
     if (skipped != 0) {
         ESP_LOGW(TAG, "buttons not armed for wake (not wake-capable or held): GPIO mask 0x%llx",
                  (unsigned long long)skipped);

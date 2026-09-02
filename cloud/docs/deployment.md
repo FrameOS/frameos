@@ -87,7 +87,13 @@ The deploy builds locally and ships a self-contained bundle:
    the server.
 3. `frameos-cloud-update` applies the SQL migrations via `psql` from the new
    release (before anything is flipped, so a failed migration leaves the
-   running app untouched), then performs the zero-downtime flip below.
+   running app untouched), then performs the zero-downtime flip below. Each
+   migration file runs in one transaction together with its
+   `schema_migrations` row, so a failure part-way through a file leaves the
+   schema untouched too and the next deploy simply retries it (see the
+   header of `scripts/db-migrate.sh`, including the `-- migrate:
+   no-transaction` opt-out for statements Postgres refuses inside a
+   transaction).
 
 ### Zero-downtime deploys
 

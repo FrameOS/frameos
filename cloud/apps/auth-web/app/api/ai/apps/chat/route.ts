@@ -19,7 +19,10 @@ import {
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
 import { frameForAccount } from "../../../../../src/lib/frames";
-import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import {
+  identityRateLimitResponse,
+  rateLimitResponse,
+} from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -59,6 +62,15 @@ export async function POST(request: NextRequest) {
     return response;
   }
   const accountId = session.accountId;
+  // Per account as well as per IP: each turn spends the shared key's budget.
+  const accountLimited = await identityRateLimitResponse(
+    accountId,
+    "ai:apps-chat",
+    { limit: 40, windowMs: 15 * 60 * 1000 },
+  );
+  if (accountLimited) {
+    return accountLimited;
+  }
 
   const body = await readJsonObject(request);
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";

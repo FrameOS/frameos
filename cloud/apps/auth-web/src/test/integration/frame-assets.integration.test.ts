@@ -403,6 +403,58 @@ describe("POST /api/frames/{id}/event/{event}", () => {
     expect(after[1]!.status).toBe("pending");
   });
 
+  it("refuses shell and legacy compiled scenes on uploadScenes like an assignment would", async () => {
+    const { frame } = await activeFrame();
+    const shell = await postFrameEvent(
+      postJson(`/api/frames/${frame.id}/event/uploadScenes`, {
+        scenes: [
+          {
+            edges: [],
+            id: "scene1",
+            name: "Shelly",
+            nodes: [{ data: { keyword: "data/shell" }, id: "n1", type: "app" }],
+          },
+        ],
+      }),
+      eventParams(frame.id, "uploadScenes"),
+    );
+    expect(shell.status).toBe(422);
+    expect(await shell.json()).toMatchObject({
+      error: "scene_refused",
+      reason: "shell",
+    });
+
+    const compiled = await postFrameEvent(
+      postJson(`/api/frames/${frame.id}/event/uploadScenes`, {
+        scenes: [
+          {
+            edges: [],
+            id: "scene1",
+            name: "Old Nim",
+            nodes: [],
+            settings: { execution: "compiled" },
+          },
+        ],
+      }),
+      eventParams(frame.id, "uploadScenes"),
+    );
+    expect(compiled.status).toBe(422);
+    expect(await compiled.json()).toMatchObject({
+      error: "scene_refused",
+      reason: "compiled",
+      scenes: ["Old Nim"],
+    });
+
+    const garbage = await postFrameEvent(
+      postJson(`/api/frames/${frame.id}/event/uploadScenes`, {
+        scenes: ["not a scene"],
+      }),
+      eventParams(frame.id, "uploadScenes"),
+    );
+    expect(garbage.status).toBe(400);
+    expect(await commandsOfType(frame.id, "set_scenes")).toHaveLength(0);
+  });
+
   it("maps setCurrentScene (with state) and render onto their verbs", async () => {
     const { frame } = await activeFrame();
     const activate = await postFrameEvent(

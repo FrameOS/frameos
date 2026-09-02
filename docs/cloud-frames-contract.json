@@ -155,7 +155,7 @@
       "profiles": {"linux": {"since": "2026.8.31", "restart": true}}
     },
     "gpio_buttons": {
-      "$comment": "[{pin, label}] — the whole list, replaced; an empty list unbinds every button. The chip's table is smaller.",
+      "$comment": "[{pin, label}] — the whole list, replaced; an empty list unbinds every button. The chip's table is smaller, and the firmware refuses (invalid_settings) any pin that is an SPI flash / PSRAM pad or already a driver's on that chip (fos_config_gpio_pin_reserved): the range here is chip-agnostic, the reservation is not.",
       "rule": {
         "type": "array",
         "items": {"type": "object", "keys": {"pin": {"type": "int", "min": 0, "max": 48}, "label": {"type": "string", "format": "gpio_label"}}, "required": ["pin", "label"]},
@@ -185,7 +185,7 @@
       "profiles": {"esp32": {"since": null}}
     },
     "battery_pin": {
-      "$comment": "ADC GPIO; -1 = no battery sense. Read at boot.",
+      "$comment": "ADC GPIO; -1 = no battery sense. Read at boot. The firmware refuses (invalid_settings) an SPI flash / PSRAM pad or a driver-claimed pin for its chip.",
       "rule": {"type": "int", "min": -1, "max": 48},
       "profiles": {"esp32": {"since": null, "restart": true}}
     },
@@ -194,7 +194,7 @@
       "profiles": {"esp32": {"since": null, "restart": true}}
     },
     "battery_enable_pin": {
-      "$comment": "GPIO driven high to switch the divider on while sampling (reTerminal E1004: 21); -1 = always on.",
+      "$comment": "GPIO driven high to switch the divider on while sampling (reTerminal E1004: 21); -1 = always on. Same reserved-pin refusal as battery_pin.",
       "rule": {"type": "int", "min": -1, "max": 48},
       "profiles": {"esp32": {"since": "2026.8.39", "restart": true}}
     }

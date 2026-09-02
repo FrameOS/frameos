@@ -18,7 +18,8 @@ from sqlalchemy.orm import Session
 from app.drivers.devices import drivers_for_frame
 from app.codegen.drivers_nim import COMPILATION_MODE_PRECOMPILED, normalize_compilation_mode
 from app.models.assets import sync_assets
-from app.models.frame import Frame, normalize_https_proxy, normalize_reboot_crontab, update_frame
+from app.models.frame import Frame, normalize_https_proxy, normalize_reboot_crontab, record_successful_deploy, update_frame
+from app.utils.frame_secrets import deployed_frame_snapshot
 from app.models.log import new_log as log
 from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
@@ -440,7 +441,9 @@ def tls_settings_changed(frame: Frame) -> bool:
     if not frame.last_successful_deploy:
         return False
 
-    previous_deploy = frame.last_successful_deploy or {}
+    # The stored snapshot carries no TLS key; the current one is filled back
+    # in when it still matches, so only a real change reads as a change.
+    previous_deploy = deployed_frame_snapshot(frame) or {}
     previous_proxy = normalize_https_proxy(previous_deploy.get("https_proxy"))
     current_proxy = normalize_https_proxy(frame.https_proxy)
     return previous_proxy != current_proxy
@@ -1150,8 +1153,7 @@ class FrameDeployWorkflow:
             await self._upload_embedded_scenes_and_reload(frame)
 
             frame.status = "starting"
-            frame.last_successful_deploy = plan.frame_dict
-            frame.last_successful_deploy_at = datetime.now(timezone.utc)
+            record_successful_deploy(frame, plan.frame_dict)
             await update_frame(self.db, self.redis, frame)
             await log(
                 self.db,
@@ -1243,8 +1245,7 @@ class FrameDeployWorkflow:
             await self._upload_embedded_scenes_and_reload(frame)
 
             frame.status = "starting"
-            frame.last_successful_deploy = plan.frame_dict
-            frame.last_successful_deploy_at = datetime.now(timezone.utc)
+            record_successful_deploy(frame, plan.frame_dict)
             await update_frame(self.db, self.redis, frame)
             await log(
                 self.db,
@@ -1275,8 +1276,7 @@ class FrameDeployWorkflow:
             setup_requires_reboot = await self._run_current_setup()
             if setup_requires_reboot:
                 frame.status = "starting"
-                frame.last_successful_deploy = plan.frame_dict
-                frame.last_successful_deploy_at = datetime.now(timezone.utc)
+                record_successful_deploy(frame, plan.frame_dict)
                 await update_frame(self.db, self.redis, frame)
                 await self.deployer.exec_command("sudo systemctl enable frameos.service")
                 await log(self.db, self.redis, int(frame.id), "stdinfo", f"{icon} Deployed! Rebooting device after setup changes")
@@ -1298,8 +1298,7 @@ class FrameDeployWorkflow:
                     await self.deployer.restart_service("frameos")
 
             frame.status = "starting"
-            frame.last_successful_deploy = plan.frame_dict
-            frame.last_successful_deploy_at = datetime.now(timezone.utc)
+            record_successful_deploy(frame, plan.frame_dict)
             await update_frame(self.db, self.redis, frame)
         except Exception:
             frame.status = "uninitialized"
@@ -1353,8 +1352,7 @@ class FrameDeployWorkflow:
             frame.status = "starting"
             plan.frame_dict["frameos_version"] = current_frameos_version()
             plan.frame_dict["frameos_commands"] = list(FRAMEOS_AVAILABLE_COMMANDS)
-            frame.last_successful_deploy = plan.frame_dict
-            frame.last_successful_deploy_at = datetime.now(timezone.utc)
+            record_successful_deploy(frame, plan.frame_dict)
             await update_frame(self.db, self.redis, frame)
         except Exception:
             frame.status = "uninitialized"

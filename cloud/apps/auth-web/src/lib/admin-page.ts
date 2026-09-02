@@ -8,7 +8,8 @@ export async function requireSuperadmin(returnTo: string): Promise<string> {
   if (context.kind === "unauthenticated") {
     redirect(`/login?return_to=${encodeURIComponent(returnTo)}`);
   }
-  if (context.kind === "forbidden") {
+  if (context.kind !== "ok") {
+    // forbidden; reauth_required is only produced for mutations.
     redirect("/account");
   }
   return context.accountId;

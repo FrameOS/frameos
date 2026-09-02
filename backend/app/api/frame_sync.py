@@ -12,6 +12,7 @@ from arq import ArqRedis as Redis
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.utils.frame_secrets import deployed_frame_snapshot
 from app.models.frame import (
     Frame,
     compact_timezone_updater,
@@ -21,6 +22,7 @@ from app.models.frame import (
     normalize_error_behavior,
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
+    record_successful_deploy,
     update_frame,
 )
 from app.schemas.frames import FrameAdoptRequest, FrameSyncApplyRequest, FrameUpdateRequest
@@ -737,8 +739,7 @@ def _frame_sync_snapshot(frame: Frame) -> dict[str, Any]:
 
 
 def _mark_frame_sync_baseline(frame: Frame, synced_at: datetime | None = None) -> None:
-    frame.last_successful_deploy = _frame_sync_snapshot(frame)
-    frame.last_successful_deploy_at = synced_at or datetime.now(timezone.utc)
+    record_successful_deploy(frame, _frame_sync_snapshot(frame), synced_at)
 
 
 def _frame_sync_baseline_missing_version(frame: Frame) -> bool:
@@ -811,7 +812,9 @@ async def _frame_admin_session_headers(
 
 def _frame_sync_baseline(frame: Frame, backend_frame: dict[str, Any]) -> dict[str, Any]:
     if isinstance(frame.last_successful_deploy, dict):
-        return frame.last_successful_deploy
+        # Secrets are not stored in the baseline; the ones that still match
+        # the row come back so an untouched device does not read as changed.
+        return deployed_frame_snapshot(frame)
     return backend_frame
 
 

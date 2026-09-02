@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { accounts } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
-import { getSuperadminContext } from "../../../../../../../src/lib/admin";
+import { getSuperadminContext, isUuid, superadminRefusal } from "../../../../../../../src/lib/admin";
 import { recordAuditEvent } from "../../../../../../../src/lib/audit";
 import { isAccountUuid } from "../../../../../../../src/lib/billing-admin";
 import { csrfResponse } from "../../../../../../../src/lib/csrf";
@@ -39,14 +39,14 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   if (limited) {
     return limited;
   }
-  const admin = await getSuperadminContext();
+  const admin = await getSuperadminContext({ mutation: true });
   if (admin.kind !== "ok") {
-    return jsonError(
-      admin.kind === "forbidden" ? "forbidden" : "unauthenticated",
-      admin.kind === "forbidden" ? 403 : 401,
-    );
+    return superadminRefusal(admin);
   }
   const { accountId } = await context.params;
+  if (!isUuid(accountId)) {
+    return jsonError("not_found", 404);
+  }
   if (!isAccountUuid(accountId)) {
     return jsonError("not_found", 404);
   }

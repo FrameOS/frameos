@@ -3,6 +3,7 @@
 import { ShieldCheck, ShieldOff, Trash2, Unplug } from "lucide-react";
 import { useState } from "react";
 import { formatBytes, formatDate } from "../lib/format";
+import { redirectToReauthIfRequired } from "../lib/reauth-client";
 import { Ratio } from "./Ratio";
 
 export type AdminUser = {
@@ -51,6 +52,11 @@ export function AdminUsersTable({
         const payload = (await response.json().catch(() => undefined)) as
           | { error?: string }
           | undefined;
+        // Sudo mode: the route wants the credentials proved again first.
+        // The page comes back here afterwards; the admin repeats the click.
+        if (redirectToReauthIfRequired(response, payload)) {
+          return false;
+        }
         setError(actionError(payload?.error));
         return false;
       }

@@ -2246,6 +2246,40 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * round out the profile.
  * Any other key refuses the WHOLE verb with setting_not_allowed, mirroring
  * the Nim runtime, so the provider never half-applies a settings push. */
+/* The contract's pin ranges (-1..48) are chip-agnostic; whether a pin is an
+ * SPI flash / PSRAM pad or already a driver's is the chip's say
+ * (fos_config_gpio_pin_reserved). Checked before anything is applied so the
+ * verb stays atomic. Returns the offending pin, or -1 when all are fine. */
+static int set_settings_reserved_pin(const cJSON *settings, const char **key, const char **why)
+{
+    static const char *const pin_keys[] = {"battery_pin", "battery_enable_pin"};
+    for (size_t i = 0; i < sizeof(pin_keys) / sizeof(pin_keys[0]); i++) {
+        const cJSON *value = cJSON_GetObjectItem(settings, pin_keys[i]);
+        if (!cJSON_IsNumber(value)) continue;
+        int pin = (int)value->valuedouble;
+        if (pin < 0) continue; /* -1: none */
+        const char *reason = fos_config_gpio_pin_reserved(pin);
+        if (reason != NULL) {
+            *key = pin_keys[i];
+            *why = reason;
+            return pin;
+        }
+    }
+    const cJSON *buttons = cJSON_GetObjectItem(settings, "gpio_buttons");
+    const cJSON *button = NULL;
+    cJSON_ArrayForEach(button, buttons) {
+        const cJSON *pin = cJSON_IsObject(button) ? cJSON_GetObjectItem(button, "pin") : NULL;
+        if (!cJSON_IsNumber(pin)) continue;
+        const char *reason = fos_config_gpio_pin_reserved((int)pin->valuedouble);
+        if (reason != NULL) {
+            *key = "gpio_buttons";
+            *why = reason;
+            return (int)pin->valuedouble;
+        }
+    }
+    return -1;
+}
+
 static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
 {
     const cJSON *settings = cJSON_GetObjectItem(root, "settings");
@@ -2262,6 +2296,22 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (contract_error != NULL) {
         ws_ack(id, false, contract_error);
         return;
+    }
+    {
+        const char *pin_key = NULL;
+        const char *pin_why = NULL;
+        int bad_pin = set_settings_reserved_pin(settings, &pin_key, &pin_why);
+        if (bad_pin >= 0) {
+            ESP_LOGW(TAG, "ws: set_settings refused: %s GPIO %d is %s", pin_key, bad_pin, pin_why);
+            char line[200];
+            snprintf(line, sizeof(line),
+                     "{\"event\":\"settings:cloud\",\"source\":\"esp32\","
+                     "\"status\":\"rejected\",\"key\":\"%s\",\"pin\":%d,\"reason\":\"%s\"}",
+                     pin_key, bad_pin, pin_why);
+            frameos_nim_log_hook(line);
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
     }
     fos_config_t *config = fos_config();
     /* Snapshot to diff against once persisted: the `settings:cloud` line

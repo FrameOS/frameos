@@ -74,6 +74,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The token GitHub hands the jobs is read-only. Neither job comments on PRs,
+# writes checks or statuses, or uses OIDC: verify only checks out and builds,
+# and deploy reaches production over an SSH key held in the `production`
+# environment, not through the GitHub API. The only token use is
+# setup-nim-action's `repo-token`, which reads nim-lang releases (an
+# unauthenticated rate-limit dodge; `contents: read` is plenty).
+permissions:
+  contents: read
+
 # NEXT_PUBLIC_* values are inlined into the browser bundle when `next build`
 # runs — which is here, on the runner, not on the server. The key in
 # /etc/frameos-cloud/auth-web.env only reaches the server-side uses
@@ -97,6 +106,8 @@ jobs:
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     # Real Postgres for the backend-linking integration tests.
     services:
@@ -227,6 +238,8 @@ jobs:
          github.event.workflow_run.conclusion == 'success')
       )
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     # Deployment history, and the one place the deploy secrets live. Nothing
     # else in this repo can read them.

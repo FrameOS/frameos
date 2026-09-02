@@ -1,7 +1,5 @@
-import { createDb } from "@frameos-cloud/db";
 import { AuthCard } from "../../src/components/AuthCard";
-import { confirmEmailVerification } from "../../src/lib/email-verification";
-import { hasDatabaseUrl } from "../../src/lib/env";
+import { VerifyEmailForm } from "../../src/components/VerifyEmailForm";
 
 export const metadata = { title: "Verify email" };
 
@@ -9,6 +7,9 @@ type VerifyEmailPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
+// Rendering this page spends nothing: the token in the link is only consumed
+// by the button's POST (/api/auth/verify-email), so a mail provider's link
+// scanner cannot verify an address on the recipient's behalf.
 export default async function VerifyEmailPage({
   searchParams,
 }: VerifyEmailPageProps) {
@@ -16,23 +17,14 @@ export default async function VerifyEmailPage({
   const rawToken = Array.isArray(params.token) ? params.token[0] : params.token;
   const token = rawToken?.trim();
 
-  const result =
-    token && hasDatabaseUrl()
-      ? await confirmEmailVerification(createDb(), token)
-      : "invalid";
-
-  if (result === "verified") {
+  if (token) {
     return (
       <AuthCard
-        copy="Your email address is confirmed. Sign in to start using FrameOS Cloud."
-        eyebrow="Email verified"
-        title="You are all set"
+        copy="Press the button to confirm this is your email address."
+        eyebrow="Email verification"
+        title="Confirm your email"
       >
-        <div className="actions">
-          <a className="button button-primary" href="/login">
-            Continue to sign in
-          </a>
-        </div>
+        <VerifyEmailForm token={token} />
       </AuthCard>
     );
   }

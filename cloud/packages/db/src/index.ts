@@ -2,7 +2,13 @@ import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
-import { accountIdentities, accounts, auditEvents, sessions } from "./schema";
+import {
+  accountApiTokens,
+  accountIdentities,
+  accounts,
+  auditEvents,
+  sessions,
+} from "./schema";
 
 export * from "./schema";
 
@@ -345,6 +351,25 @@ export async function revokeSessionsForAccount(
     .update(sessions)
     .set({ revokedAt: new Date() })
     .where(and(eq(sessions.accountId, accountId), isNull(sessions.revokedAt)));
+}
+
+// Personal API tokens are the account's other bearer credential. Anything
+// that evicts every session because the account may be compromised (a
+// password reset, an admin "sign out everywhere") must evict them too, or the
+// attacker keeps a script-shaped foothold that outlives the reset.
+export async function revokeApiTokensForAccount(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+) {
+  await db
+    .update(accountApiTokens)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(accountApiTokens.accountId, accountId),
+        isNull(accountApiTokens.revokedAt),
+      ),
+    );
 }
 
 export async function recordAuditEvent(

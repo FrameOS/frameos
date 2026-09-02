@@ -24,10 +24,12 @@ import { secondFactorStatus } from "./two-factor";
 // What is deliberately NOT in it:
 //
 //   * Password hashes, session tokens, share tokens, encrypted linked-client
-//     credentials, device enrollment token hashes. These are credentials, not
-//     personal data the user is entitled to a copy of, and putting them in a
-//     file that then lives in a Downloads folder is a way to turn "I exported
-//     my data" into "I leaked my account".
+//     credentials, device enrollment token hashes, and the VALUES of the
+//     account's service settings (OpenAI / Unsplash / Home Assistant / Immich
+//     keys — the keys are listed with a masked hint, never in full). These
+//     are credentials, not personal data the user is entitled to a copy of,
+//     and putting them in a file that then lives in a Downloads folder is a
+//     way to turn "I exported my data" into "I leaked my account".
 //   * Binary blobs — scene zips, gallery images, uploaded frame assets,
 //     backup contents. They are described (name, size, sha256, type, download
 //     URL) rather than embedded: a base64 JSON blob of a few hundred MB is not
@@ -288,7 +290,7 @@ export async function buildAccountExport(
     // decision rather than something the reader has to notice.
     readme: {
       excluded:
-        "Credentials (password hash, session/share/enrollment tokens, encrypted backend credentials) and binary file contents. Binary items are listed with their size, checksum and download path.",
+        "Credentials (password hash, session/share/enrollment tokens, encrypted backend credentials, the values of service settings such as API keys — listed by key with a masked hint) and binary file contents. Binary items are listed with their size, checksum and download path.",
       format: "JSON, UTF-8. Timestamps are ISO 8601 UTC.",
       questions:
         "For anything this does not cover, see /legal/privacy for how to make a full access request.",
@@ -341,6 +343,36 @@ export async function buildAccountExport(
       totpEnabled: status.totpEnabled,
     })),
     sessions: accountSessions,
-    settings,
+    settings: settings.map((setting) => ({
+      createdAt: setting.createdAt,
+      key: setting.key,
+      updatedAt: setting.updatedAt,
+      value: maskSettingValue(setting.value),
+    })),
   };
+}
+
+// A setting's value is a third-party credential more often than not. The
+// export names the key and shows enough of the value to recognise it
+// (the last four characters of a string, the shape of anything else) and
+// nothing that could be pasted back into a request.
+export function maskSettingValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.length > 8 ? `••••${value.slice(-4)}` : "••••";
+  }
+  if (typeof value === "number" || typeof value === "boolean" || value === null) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => maskSettingValue(entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        maskSettingValue(entry),
+      ]),
+    );
+  }
+  return "••••";
 }

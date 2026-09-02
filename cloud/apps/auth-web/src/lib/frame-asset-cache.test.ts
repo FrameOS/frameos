@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizeAssetPath, sceneSnapshotAssetPath } from "./frame-asset-cache";
+import {
+  cachedAssetContentType,
+  isServableImageContentType,
+  normalizeAssetPath,
+  sceneSnapshotAssetPath,
+} from "./frame-asset-cache";
 import { hiddenWritePath, sanitizedUploadFilename } from "./frame-asset-write";
 
 // These mirror device-side Nim code byte for byte — sceneImageFilename in
@@ -68,5 +73,45 @@ describe("normalizeAssetPath", () => {
     expect(normalizeAssetPath("/photos/cat.jpg")).toBe("photos/cat.jpg");
     expect(normalizeAssetPath("photos/../secret")).toBeUndefined();
     expect(normalizeAssetPath("  ")).toBeUndefined();
+  });
+});
+
+// The device's own content_type claim is never stored: a frame (or the scene
+// code on it) must not be able to choose what the app origin serves. Only a
+// sniffed raster type survives; everything else is opaque bytes.
+describe("cachedAssetContentType", () => {
+  const pad = (head: Buffer) => Buffer.concat([head, Buffer.alloc(16)]);
+
+  it("keeps the raster formats a browser can only treat as images", () => {
+    expect(cachedAssetContentType(pad(Buffer.from("\x89PNG\r\n\x1a\n", "latin1")))).toBe("image/png");
+    expect(cachedAssetContentType(pad(Buffer.from([0xff, 0xd8, 0xff, 0xe0])))).toBe("image/jpeg");
+    expect(cachedAssetContentType(pad(Buffer.from("GIF89a", "latin1")))).toBe("image/gif");
+    expect(
+      cachedAssetContentType(Buffer.from("RIFF\0\0\0\0WEBPVP8 ", "latin1")),
+    ).toBe("image/webp");
+    // The ESP32 answers image_get straight from its framebuffer as BMP.
+    expect(cachedAssetContentType(pad(Buffer.from("BM", "latin1")))).toBe("image/bmp");
+  });
+
+  it("stores anything else — HTML, SVG, fonts, JSON — as opaque bytes", () => {
+    for (const body of [
+      "<!doctype html><script>alert(1)</script>",
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>',
+      '{"a":1}',
+      "OTTO\0\0\0\0\0\0\0\0\0",
+      "",
+    ]) {
+      expect(cachedAssetContentType(Buffer.from(body, "latin1"))).toBe(
+        "application/octet-stream",
+      );
+    }
+  });
+
+  it("only serves the sniffed types with a rendering content type", () => {
+    expect(isServableImageContentType("image/png")).toBe(true);
+    expect(isServableImageContentType("image/bmp")).toBe(true);
+    expect(isServableImageContentType("image/svg+xml")).toBe(false);
+    expect(isServableImageContentType("text/html")).toBe(false);
+    expect(isServableImageContentType("application/octet-stream")).toBe(false);
   });
 });

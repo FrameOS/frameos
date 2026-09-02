@@ -6,6 +6,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
+#include "fos_config.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -40,6 +41,18 @@ void fos_battery_init(int8_t gpio, float divider, int8_t enable_gpio)
     s_adc = NULL;
     if (gpio < 0) {
         ESP_LOGI(TAG, "no battery pin configured");
+        return;
+    }
+    /* Settings stored before the parsers refused these pins still reach
+     * here: driving the divider's enable pin, or muxing the ADC, onto a flash
+     * / PSRAM pad is a boot loop. Sensing off beats that. */
+    const char *reserved = fos_config_gpio_pin_reserved(gpio);
+    if (reserved != NULL) {
+        ESP_LOGW(TAG, "battery pin GPIO %d is %s; battery sensing off", gpio, reserved);
+        return;
+    }
+    if (enable_gpio >= 0 && (reserved = fos_config_gpio_pin_reserved(enable_gpio)) != NULL) {
+        ESP_LOGW(TAG, "battery enable pin GPIO %d is %s; battery sensing off", enable_gpio, reserved);
         return;
     }
     s_divider = divider > 0.1f ? divider : 2.0f;

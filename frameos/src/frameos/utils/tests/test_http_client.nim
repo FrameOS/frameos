@@ -28,6 +28,8 @@ proc serverLoop() {.thread.} =
     server.accept(client)
     var requestLine = ""
     var authHeader = ""
+    var hostHeader = ""
+    var extraHeader = ""
     try:
       requestLine = client.recvLine(timeout = 5000)
       # drain headers, remembering the credentials the client chose to send
@@ -37,6 +39,10 @@ proc serverLoop() {.thread.} =
           break
         if line.toLowerAscii().startsWith("authorization:"):
           authHeader = line.split(':', 1)[1].strip()
+        if line.toLowerAscii().startsWith("host:"):
+          hostHeader = line.split(':', 1)[1].strip()
+        if line.toLowerAscii().startsWith("x-frameos-test:"):
+          extraHeader = line.split(':', 1)[1].strip()
     except CatchableError:
       client.close()
       continue
@@ -60,6 +66,12 @@ proc serverLoop() {.thread.} =
     of "/echo-auth":
       respond(client, "HTTP/1.1 200 OK\r\nContent-Length: " & $authHeader.len &
         "\r\n\r\n" & authHeader)
+    of "/echo-host":
+      respond(client, "HTTP/1.1 200 OK\r\nContent-Length: " & $hostHeader.len &
+        "\r\n\r\n" & hostHeader)
+    of "/echo-extra":
+      respond(client, "HTTP/1.1 200 OK\r\nContent-Length: " & $extraHeader.len &
+        "\r\n\r\n" & extraHeader)
     of "/redirect-same-origin":
       respond(client, "HTTP/1.1 302 Found\r\nLocation: /echo-auth\r\nContent-Length: 0\r\n\r\n")
     of "/redirect-other-origin":
@@ -143,6 +155,70 @@ suite "bounded http client":
   test "rejects invalid urls":
     expect ValueError:
       discard boundedGetContent("ftp://example.com/x")
+
+  # Scene JS chooses the URL and the headers of `httpRequest` (js_runtime/
+  # app_runtime.nim), so the client has to refuse what would splice a second
+  # request or header into the stream, or take over the framing it owns.
+  test "refuses a URL carrying CR, LF, NUL, space or other control bytes":
+    for url in [
+      baseUrl() & "/x\r\nX-Injected: 1",
+      baseUrl() & "/x\nX-Injected: 1",
+      baseUrl() & "/x\rX",
+      baseUrl() & "/x\0",
+      baseUrl() & "/a b",
+      baseUrl() & "/x\x7f",
+      baseUrl() & "/x\x01",
+      "javascript://x",
+      "",
+    ]:
+      expect ValueError:
+        discard boundedRequestWithHeaders(url)
+
+  test "refuses header names that are not tokens":
+    for name in ["X-Bad\r\nInjected", "X-Bad\nInjected", "X-Bad:Colon", "X Bad", "X-Bad\0",
+                 "X-Bad\x7f", "X-Bad\x01"]:
+      expect ValueError:
+        discard boundedRequestWithHeaders(baseUrl() & "/echo-extra",
+          headers = @[(name, "value")])
+
+  test "refuses header values carrying control bytes":
+    for value in ["a\r\nInjected: 1", "a\nInjected: 1", "a\r", "a\0b", "a\x7f", "a\x01"]:
+      expect ValueError:
+        discard boundedRequestWithHeaders(baseUrl() & "/echo-extra",
+          headers = @[("X-FrameOS-Test", value)])
+
+  test "refuses caller-supplied hop-by-hop and framing headers, any case":
+    for name in ["Host", "host", "HOST", "Content-Length", "content-length",
+                 "Transfer-Encoding", "Connection", "Upgrade", "Keep-Alive", "TE", "Trailer",
+                 "Proxy-Authorization", "proxy-connection", "Proxy-Anything"]:
+      expect ValueError:
+        discard boundedRequestWithHeaders(baseUrl() & "/echo-host",
+          headers = @[(name, "evil")])
+    # The HttpHeaders entry point is the same client.
+    expect ValueError:
+      discard boundedRequest(baseUrl() & "/echo-host",
+        headers = newHttpHeaders({"Host": "evil"}))
+
+  test "the Host header always comes from the URL":
+    check boundedRequestContent(baseUrl() & "/echo-host") == "127.0.0.1:" & $int(serverPort)
+
+  test "ordinary headers still go out, with a tab allowed in the value":
+    check boundedRequestWithHeaders(baseUrl() & "/echo-extra",
+      headers = @[("X-FrameOS-Test", "one\ttwo")]).body == "one\ttwo"
+    check boundedRequestWithHeaders(baseUrl() & "/echo-extra",
+      headers = @[(" X-FrameOS-Test ", " padded ")]).body == "padded"
+
+  test "the validators are exported for the scene bridge":
+    validateHttpHeader("X-Ok", "fine")
+    validateHttpHeaders(@[("", "skipped-empty-name"), ("X-Ok", "fine")])
+    expect ValueError:
+      validateHttpHeader("Host", "x")
+    expect ValueError:
+      validateHttpHeader("X-Ok", "bad\r\n")
+    expect ValueError:
+      validateHttpRequestUrl("http://example.com/a\r\nb")
+    check isReservedHttpHeader("Proxy-Authorization")
+    check not isReservedHttpHeader("Authorization")
 
   test "an unresolvable host fails fast the second time":
     # The first attempt pays the resolver's own timeout; the failure is then

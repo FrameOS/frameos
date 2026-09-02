@@ -26,6 +26,7 @@ import { captureAiGeneration, captureAiTurn } from "../../../../src/lib/ai/telem
 import type { ListingEvent, ScenesEvent, ToolContext } from "../../../../src/lib/ai/tools";
 import {
   activeTurnForChat,
+  activeTurnCountForAccount,
   startTurn,
   turnStream,
 } from "../../../../src/lib/ai/turn-runner";
@@ -37,7 +38,10 @@ import {
 } from "../../../../src/lib/device-flow";
 import { frameForAccount } from "../../../../src/lib/frames";
 import { logInfo, logWarn, reportError } from "../../../../src/lib/log";
-import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import {
+  identityRateLimitResponse,
+  rateLimitResponse,
+} from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -208,6 +212,14 @@ async function storeSceneContextBlock(
   return { block: lines.join("\n"), storeSceneId: scene.id };
 }
 
+// Per account, on top of the per-IP window: a person iterating on a scene
+// sends a turn every minute or two; forty in fifteen minutes is a script.
+const aiTurnsPerAccountRateLimit = { limit: 40, windowMs: 15 * 60 * 1000 };
+// Unfinished turns one account may hold open across all its chats. Each one
+// is admitted under the daily cap before any of them has metered, so this
+// bounds how far past the cap concurrent turns can carry an account.
+const maxActiveTurnsPerAccount = 3;
+
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
   if (csrf) {
@@ -229,6 +241,22 @@ export async function POST(request: NextRequest) {
     return response;
   }
   const accountId = session.accountId;
+  // The IP limit above is per address; this one is per account, because a
+  // turn on the shared operator key costs real money and an account behind
+  // many addresses (or a token used from many boxes) is still one budget.
+  const accountLimited = await identityRateLimitResponse(
+    accountId,
+    "ai:chat",
+    aiTurnsPerAccountRateLimit,
+  );
+  if (accountLimited) {
+    return accountLimited;
+  }
+  if (activeTurnCountForAccount(accountId) >= maxActiveTurnsPerAccount) {
+    return jsonError("too_many_turns", 429, {
+      detail: `At most ${maxActiveTurnsPerAccount} AI turns can run at once. Wait for one to finish.`,
+    });
+  }
 
   const body = await readJsonObject(request);
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";

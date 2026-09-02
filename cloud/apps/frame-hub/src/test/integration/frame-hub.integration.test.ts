@@ -1064,6 +1064,60 @@ describe("telemetry", () => {
     browser.ws.close();
   });
 
+  it("drops telemetry and asset streams from a frame its owner has not confirmed", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    await db
+      .update(frames)
+      .set({ status: "pending" })
+      .where(eq(frames.id, frame.id));
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    const logMsgId = randomUUID();
+    device.send({
+      id: logMsgId,
+      logs: [{ payload: { event: "x", line: "y" }, timestamp: Date.now() / 1000 }],
+      type: "log_batch",
+    });
+    const logAck = await device.next(
+      (msg) => msg.type === "ack" && msg.id === logMsgId,
+      "log_batch unconfirmed ack",
+    );
+    expect(logAck.ok).toBe(false);
+    expect(logAck.error).toBe("frame_not_confirmed");
+
+    const metricsMsgId = randomUUID();
+    device.send({ id: metricsMsgId, metrics: { cpu: 1 }, type: "metrics" });
+    const metricsAck = await device.next(
+      (msg) => msg.type === "ack" && msg.id === metricsMsgId,
+      "metrics unconfirmed ack",
+    );
+    expect(metricsAck.error).toBe("frame_not_confirmed");
+    expect(
+      await db.select().from(frameLogs).where(eq(frameLogs.frameId, frame.id)),
+    ).toHaveLength(0);
+
+    // The owner confirms: the same socket is a full device from then on.
+    await db
+      .update(frames)
+      .set({ status: "active" })
+      .where(eq(frames.id, frame.id));
+    const afterId = randomUUID();
+    device.send({
+      id: afterId,
+      logs: [{ payload: { event: "x", line: "z" }, timestamp: Date.now() / 1000 }],
+      type: "log_batch",
+    });
+    await waitFor(async () => {
+      const rows = await db
+        .select()
+        .from(frameLogs)
+        .where(eq(frameLogs.frameId, frame.id));
+      return rows.length === 1 ? rows : undefined;
+    }, "log stored once confirmed");
+    device.ws.close();
+  });
+
   it("refuses telemetry without the matching scopes", async () => {
     const { frame, privateKey, token } = await createFrameFixture([
       frameManagedScope,

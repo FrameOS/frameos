@@ -322,9 +322,7 @@ async def mark_virtual_frame_deployed(db: Session, redis, frame: Frame) -> None:
     """Record a successful 'deploy' so the workspace stops showing the frame
     as waiting-for-first-deploy: for a virtual frame, rendering IS deploying.
     Mirrors what the USB deploy completion records for embedded frames."""
-    from datetime import datetime, timezone
-
-    from app.models.frame import update_frame
+    from app.models.frame import record_successful_deploy, update_frame
     from app.utils.versions import current_frameos_version
 
     snapshot = frame.to_dict()
@@ -334,8 +332,7 @@ async def mark_virtual_frame_deployed(db: Session, redis, frame: Frame) -> None:
     if isinstance(version, str) and version:
         snapshot["frameos_version"] = version
     frame.status = "ready"
-    frame.last_successful_deploy = snapshot
-    frame.last_successful_deploy_at = datetime.now(timezone.utc)
+    record_successful_deploy(frame, snapshot)
     await update_frame(db, redis, frame)
 
 

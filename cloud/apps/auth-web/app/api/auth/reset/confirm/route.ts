@@ -3,6 +3,7 @@ import {
   createDb,
   ensurePasswordIdentityForAccount,
   passwordResetTokens,
+  revokeApiTokensForAccount,
   revokeSessionsForAccount,
   setAccountPassword,
 } from "@frameos-cloud/db";
@@ -77,8 +78,10 @@ export async function POST(request: NextRequest) {
   // Google-first account is adding its first password.
   await ensurePasswordIdentityForAccount(db, claimed.accountId);
   // A reset proves control of the email, not of existing sessions; sign
-  // everything out so a session hijacker is evicted along the way.
+  // everything out so a session hijacker is evicted along the way — API
+  // tokens included, since whoever forced the reset may have minted one.
   await revokeSessionsForAccount(db, claimed.accountId);
+  await revokeApiTokensForAccount(db, claimed.accountId);
 
   await recordAuditEvent(db, {
     accountId: claimed.accountId,

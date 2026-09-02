@@ -49,7 +49,6 @@ proc get*(self: App, context: ExecutionContext): JsonNode =
     (name: "Authorization", value: "Bearer " & accessToken),
     (name: "Accept", value: "application/json"),
     (name: "Accept-Encoding", value: "identity"),
-    (name: "Connection", value: "close"),
   ]
   var slashlessUrl = haUrl
   slashlessUrl.removeSuffix("/")

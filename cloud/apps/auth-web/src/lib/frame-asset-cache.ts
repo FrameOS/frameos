@@ -220,3 +220,59 @@ export function sceneSnapshotAssetPath(sceneId: string): string {
   const digest = createHash("md5").update(publicId).digest("hex");
   return `.frameos/scene_images/${safe}-${digest}.png`;
 }
+
+// ---------------------------------------------------------------------------
+// Content types for device-supplied bytes
+// ---------------------------------------------------------------------------
+
+// The type stored (and later served from the app origin) for bytes a device
+// streamed back over `asset_chunk`. The device's own `content_type` claim is
+// never trusted: a frame that is not yet confirmed, or whose scene code was
+// compromised, could otherwise hand the owner's browser `text/html` on a
+// same-origin URL. Only plain raster formats the browser can only ever treat
+// as an image keep their type; everything else — fonts, JSON, text, SVG (a
+// script carrier when navigated to) — is opaque bytes, which the serving
+// routes hand out as a download.
+export function cachedAssetContentType(content: Buffer): string {
+  return sniffImageContentType(content) ?? "application/octet-stream";
+}
+
+export function isServableImageContentType(contentType: string): boolean {
+  return servableImageTypes.has(contentType);
+}
+
+const servableImageTypes = new Set([
+  "image/bmp",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+// PNG / JPEG / GIF / WebP as store.ts detectImageContentType, plus BMP —
+// the ESP32 answers image_get straight from its framebuffer as a BMP.
+export function sniffImageContentType(content: Buffer): string | undefined {
+  if (content.length < 12) {
+    return undefined;
+  }
+  if (content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (content.subarray(0, 8).equals(Buffer.from("\x89PNG\r\n\x1a\n", "latin1"))) {
+    return "image/png";
+  }
+  if (
+    content.subarray(0, 4).toString("latin1") === "RIFF" &&
+    content.subarray(8, 12).toString("latin1") === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  const gifHeader = content.subarray(0, 6).toString("latin1");
+  if (gifHeader === "GIF87a" || gifHeader === "GIF89a") {
+    return "image/gif";
+  }
+  if (content[0] === 0x42 && content[1] === 0x4d) {
+    return "image/bmp";
+  }
+  return undefined;
+}

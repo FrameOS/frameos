@@ -47,9 +47,8 @@ import { fetchTzSlice } from "./tz-slice";
 import { logWarn, reportError } from "./log";
 // usage.ts only type-imports from this module, so no runtime cycle.
 import {
+  cullFrameLogsForFrameOverBudget,
   cullFrameLogsOverBudget,
-  frameLogBytesForAccount,
-  accountLimits,
 } from "./usage";
 
 type Database = ReturnType<typeof createDb>;
@@ -1309,14 +1308,17 @@ export async function storeFrameLogs(
           and(eq(frameLogs.frameId, frameId), lt(frameLogs.id, cutoff.id + 1)),
         );
     }
-    // Account byte budget: logs are telemetry, so over budget the OLDEST
-    // lines across the whole account are culled — never refused (a frame
-    // must not learn its logs bounced; usage.ts owns the budget).
+    // Account byte budget: logs are telemetry, so over budget old lines are
+    // culled — never refused (a frame must not learn its logs bounced;
+    // usage.ts owns the budget). The frame that overflowed loses its own
+    // oldest lines first; the account-wide cull is the fallback.
     if (accountId) {
-      const overBudget =
-        (await frameLogBytesForAccount(tx, accountId)) >
-        (await accountLimits(tx, accountId)).frameLogBytes;
-      if (overBudget) {
+      const stillOver = await cullFrameLogsForFrameOverBudget(
+        tx,
+        accountId,
+        frameId,
+      );
+      if (stillOver) {
         await cullFrameLogsOverBudget(tx, accountId);
       }
     }

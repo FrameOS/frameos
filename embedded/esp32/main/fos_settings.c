@@ -356,6 +356,17 @@ static char *read_body(esp_http_client_handle_t client, int64_t content_length,
     return buf;
 }
 
+/* A pin the chip cannot spare (SPI flash / PSRAM pad, driver-claimed) is
+ * refused and the previous value kept; -1 ("none") always passes. */
+static bool settings_pin_usable(const char *key, int pin)
+{
+    if (pin < 0) return true;
+    const char *why = fos_config_gpio_pin_reserved(pin);
+    if (why == NULL) return true;
+    ESP_LOGW(TAG, "settings: %s GPIO %d refused: %s", key, pin, why);
+    return false;
+}
+
 /* Apply the `frame` object. Returns true when anything changed. */
 static bool apply_frame_settings(const cJSON *frame)
 {
@@ -429,7 +440,8 @@ static bool apply_frame_settings(const cJSON *frame)
     const cJSON *battery_pin = cJSON_GetObjectItem(frame, "batteryPin");
     if (cJSON_IsNumber(battery_pin) && battery_pin->valuedouble >= -1 &&
         battery_pin->valuedouble <= 48 &&
-        config->battery_pin != (int8_t)battery_pin->valuedouble) {
+        config->battery_pin != (int8_t)battery_pin->valuedouble &&
+        settings_pin_usable("batteryPin", (int)battery_pin->valuedouble)) {
         config->battery_pin = (int8_t)battery_pin->valuedouble;
         /* The ADC is set up once at boot (main.c) — re-init via restart. */
         s_restart_after_apply = true;
@@ -448,7 +460,8 @@ static bool apply_frame_settings(const cJSON *frame)
     const cJSON *battery_enable_pin = cJSON_GetObjectItem(frame, "batteryEnablePin");
     if (cJSON_IsNumber(battery_enable_pin) && battery_enable_pin->valuedouble >= -1 &&
         battery_enable_pin->valuedouble <= 48 &&
-        config->battery_enable_pin != (int8_t)battery_enable_pin->valuedouble) {
+        config->battery_enable_pin != (int8_t)battery_enable_pin->valuedouble &&
+        settings_pin_usable("batteryEnablePin", (int)battery_enable_pin->valuedouble)) {
         config->battery_enable_pin = (int8_t)battery_enable_pin->valuedouble;
         s_restart_after_apply = true;
         changed = true;

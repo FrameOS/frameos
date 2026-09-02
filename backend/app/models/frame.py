@@ -20,6 +20,7 @@ from app.drivers.devices import (
 from app.models.apps import get_app_configs
 from app.models.settings import get_settings_dict
 from app.utils.timezone import frame_timezone, stored_timezone
+from app.utils.frame_secrets import deploy_snapshot, restore_snapshot_secrets, websocket_frame_payload
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.versions import get_versions
@@ -365,7 +366,7 @@ class Frame(Base):
     background_color = mapped_column(String(64), nullable=True) # still used as fallback in frontend
 
     def to_dict(self):
-        return {
+        result = {
             'id': self.id,
             'project_id': self.project_id,
             'name': self.name,
@@ -425,9 +426,13 @@ class Frame(Base):
             'embedded': self.embedded,
             'rpios': self.rpios,
             'terminal_history': self.terminal_history,
-            'last_successful_deploy': self.last_successful_deploy,
+            'last_successful_deploy': None,
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
+        # Stored without secrets (app/utils/frame_secrets); consumers diff it
+        # against the row, so the secrets that still match are filled back in.
+        result['last_successful_deploy'] = restore_snapshot_secrets(self.last_successful_deploy, result)
+        return result
 
 async def new_frame(
     db: Session,
@@ -560,7 +565,15 @@ async def update_frame(db: Session, redis: Redis, frame: Frame):
     db.add(frame)
     db.commit()
     db.refresh(frame)
-    await publish_message(redis, "update_frame", frame.to_dict())
+    # The broadcast reaches every browser tab of the project; secrets stay
+    # behind the per-frame GET (see app/utils/frame_secrets for the shape).
+    await publish_message(redis, "update_frame", websocket_frame_payload(frame.to_dict()))
+
+
+def record_successful_deploy(frame: Frame, frame_dict: dict, deployed_at: Optional[datetime] = None) -> None:
+    """Store ``frame_dict`` as the frame's deploy baseline, minus its secrets."""
+    frame.last_successful_deploy = deploy_snapshot(frame_dict)
+    frame.last_successful_deploy_at = deployed_at or datetime.now(timezone.utc)
 
 
 async def delete_frame(db: Session, redis: Redis, frame_id: int, project_id: int):

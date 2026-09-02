@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { storeScenes } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
-import { getSuperadminContext } from "../../../../../src/lib/admin";
+import { getSuperadminContext, superadminRefusal } from "../../../../../src/lib/admin";
 import { normalizeCategory } from "../../../../../src/lib/categories";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
@@ -35,12 +35,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return limited;
   }
 
-  const admin = await getSuperadminContext();
+  const admin = await getSuperadminContext({ mutation: true });
   if (admin.kind !== "ok") {
-    return jsonError(
-      admin.kind === "forbidden" ? "forbidden" : "unauthenticated",
-      admin.kind === "forbidden" ? 403 : 401,
-    );
+    return superadminRefusal(admin);
   }
 
   const { db, response } = requireDatabase();
