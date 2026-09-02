@@ -46,7 +46,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       <AuthCard
         copy={`A FrameOS Cloud account already exists for ${
           mergeEmail ?? "this email"
-        }, but its address was never verified. To keep that account safe, reset its password first — the emailed link proves the address is yours — then sign in with Google. The two sign-in methods will be linked automatically.`}
+        }, but its address was never verified. To keep that account safe, reset its password first — the emailed link proves the address is yours — then sign in with Google and confirm that password once to connect the two.`}
         eyebrow="Almost there"
         title="One quick step before linking Google"
       >
@@ -103,6 +103,10 @@ function errorMessage(error: string) {
     return "The two-factor step timed out. Sign in again to get a fresh one.";
   }
 
+  if (error === "google_link_expired") {
+    return "The Google sign-in took too long to confirm. Start again.";
+  }
+
   if (error === "google_email_unverified") {
     return "Google could not confirm that email address, so it cannot be linked. Sign in with your password instead.";
   }
@@ -123,7 +127,7 @@ function statusMessage(status: string) {
   }
 
   if (status === "reset_complete") {
-    return "Your password was updated and your email is verified. Sign in with the new password — or with Google, which will now link automatically.";
+    return "Your password was updated and your email is verified. Sign in with the new password — or with Google, which will ask for that password once to connect the two.";
   }
 
   return "The account flow finished. Sign in to continue.";

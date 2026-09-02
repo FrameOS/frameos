@@ -1018,6 +1018,9 @@ export interface ChatMessageRecord {
   content: string
   tool?: string | null
   createdAt: string
+  /** Structured extras of the turn (cloud): delivered scenes, proposed
+   * frame installs. */
+  payload?: Record<string, any> | null
 }
 
 /** config.json schema */

@@ -5,6 +5,7 @@ import {
   Check,
   KeyRound,
   Loader2,
+  MonitorUp,
   Play,
   Send,
   Sparkles,
@@ -30,6 +31,13 @@ import {
   type AiChatHistoryItem,
   type AiListingChanges,
 } from "../lib/ai-chat-client";
+import {
+  approveAiInstallProposal,
+  isAiInstallProposal,
+  settingsGroupLabel,
+  type AiInstallProposal,
+  type AiInstallProposalStatus,
+} from "../lib/ai-install-proposal";
 import type { AiScenesEvent, SceneJson } from "../lib/ai-scenes-apply";
 import { renderSceneCheck } from "../lib/scene-render-check";
 
@@ -94,7 +102,11 @@ type ChatMessage = {
   check?: { ok: boolean; text: string } | null;
   /** What the render check drew; dropped from older messages to bound memory. */
   preview?: RenderPreview | null;
+  /** Frame installs the agent proposed in this turn, awaiting Approve. */
+  proposals?: ProposalCard[];
 };
+
+type ProposalCard = { proposal: AiInstallProposal; status: AiInstallProposalStatus };
 
 type FatalState =
   | { kind: "login_required" }
@@ -193,6 +205,7 @@ type RecoveredTurn = {
   content: string;
   tool: string | null;
   scenes: SceneJson[] | null;
+  proposals: AiInstallProposal[];
 };
 
 // Poll the chat history for the assistant reply of a turn whose stream was
@@ -225,7 +238,7 @@ function recoverFromHistory({
             content: string;
             createdAt: string;
             tool?: string | null;
-            payload?: { delivered?: unknown } | null;
+            payload?: { delivered?: unknown; proposals?: unknown } | null;
           }[];
         };
         const reply = [...(payload.messages ?? [])]
@@ -238,8 +251,10 @@ function recoverFromHistory({
           );
         if (reply && !cancelled) {
           const delivered = reply.payload?.delivered;
+          const proposals = reply.payload?.proposals;
           apply({
             content: reply.content,
+            proposals: Array.isArray(proposals) ? proposals.filter(isAiInstallProposal) : [],
             scenes: Array.isArray(delivered) && delivered.length > 0 ? (delivered as SceneJson[]) : null,
             tool: reply.tool ?? null,
           });
@@ -348,6 +363,90 @@ function AssistantMarkdown({ content }: { content: string }) {
       >
         {content}
       </ReactMarkdown>
+    </div>
+  );
+}
+
+// The Install card: what add_scene_to_frame proposed, what the frame would
+// be handed, and the one button that actually installs. The agent never
+// gets past this card on its own — see InstallProposalEvent in ai/tools.ts.
+function InstallProposalCard({
+  card,
+  onStatus,
+}: {
+  card: ProposalCard;
+  onStatus: (status: AiInstallProposalStatus) => void;
+}) {
+  const { proposal, status } = card;
+  const groups = proposal.declared_settings_groups;
+  const version = proposal.scene.version ? ` (version ${proposal.scene.version})` : "";
+  const approve = async () => {
+    onStatus({ state: "approving" });
+    try {
+      const result = await approveAiInstallProposal(proposal);
+      onStatus({ queued: result.queued, state: "installed" });
+    } catch (error) {
+      onStatus({ error: error instanceof Error ? error.message : String(error), state: "failed" });
+    }
+  };
+  return (
+    <div className="ai-panel__proposal" role="group" aria-label="Proposed frame install">
+      <strong className="ai-panel__proposal-title">
+        <MonitorUp aria-hidden size={14} />
+        {proposal.already_assigned ? "Re-deploy" : "Install"} “{proposal.scene.name}”{version} on{" "}
+        {proposal.frame.name}
+      </strong>
+      <p className="copy ai-panel__proposal-copy">
+        {groups.length > 0 ? (
+          <>
+            The scene declares that it uses your{" "}
+            {groups.map(settingsGroupLabel).join(", ")}; approving hands{" "}
+            {groups.length === 1 ? "that key" : "those keys"} to this frame.
+          </>
+        ) : (
+          "The scene declares no service keys."
+        )}
+        {proposal.frame.connected
+          ? " The frame is online, so it applies within seconds."
+          : " The frame is offline, so the deploy is queued until it reconnects."}
+      </p>
+      {status.state === "pending" || status.state === "approving" ? (
+        <div className="ai-panel__proposal-actions">
+          <button
+            className="button button--small button-primary"
+            disabled={status.state === "approving"}
+            onClick={() => void approve()}
+            type="button"
+          >
+            {status.state === "approving" ? (
+              <Loader2 aria-hidden className="ai-panel__spin" size={14} />
+            ) : (
+              <Check aria-hidden size={14} />
+            )}
+            Approve and install
+          </button>
+          <button
+            className="button button--small button--subtle"
+            disabled={status.state === "approving"}
+            onClick={() => onStatus({ state: "dismissed" })}
+            type="button"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+      {status.state === "installed" ? (
+        <span className="ai-panel__check ai-panel__check--ok">
+          <Check aria-hidden size={12} />
+          {status.queued ? "Installed; the deploy lands when the frame reconnects." : "Installed and deployed."}
+        </span>
+      ) : null}
+      {status.state === "dismissed" ? <span className="ai-panel__muted">Not installed.</span> : null}
+      {status.state === "failed" ? (
+        <p className="notice notice-error ai-panel__notice" role="alert">
+          {status.error}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -626,6 +725,16 @@ export function SceneAiPanel({
                 case "listing":
                   propsRef.current.onListing?.(event.listing);
                   break;
+                case "proposal":
+                  updateMessage(assistantId, (message) => ({
+                    proposals: [
+                      ...(message.proposals ?? []).filter(
+                        (card) => card.proposal.proposal_id !== event.proposal_id,
+                      ),
+                      { proposal: event, status: { state: "pending" } },
+                    ],
+                  }));
+                  break;
                 case "scenes": {
                   const applied = applyScenes(event);
                   const incomingId = event.scenes[0]?.id;
@@ -706,10 +815,18 @@ export function SceneAiPanel({
         // chat history, swap it in (scene included) so nothing is lost.
         recoveryRef.current = recoverFromHistory({
           apply: (recovered) => {
-            updateMessage(assistantId, {
+            updateMessage(assistantId, (message) => ({
               content: recovered.content,
               error: null,
-            });
+              ...(recovered.proposals.length > 0 && !(message.proposals?.length)
+                ? {
+                    proposals: recovered.proposals.map((proposal) => ({
+                      proposal,
+                      status: { state: "pending" as const },
+                    })),
+                  }
+                : {}),
+            }));
             if (recovered.scenes) {
               propsRef.current.onScenes({
                 scenes: recovered.scenes,
@@ -938,6 +1055,21 @@ export function SceneAiPanel({
                   {message.error}
                 </p>
               ) : null}
+              {(message.proposals ?? []).map((card) => (
+                <InstallProposalCard
+                  card={card}
+                  key={card.proposal.proposal_id}
+                  onStatus={(status) =>
+                    updateMessage(message.id, (current) => ({
+                      proposals: (current.proposals ?? []).map((entry) =>
+                        entry.proposal.proposal_id === card.proposal.proposal_id
+                          ? { ...entry, status }
+                          : entry,
+                      ),
+                    }))
+                  }
+                />
+              ))}
               {message.check ? (
                 <span
                   className={

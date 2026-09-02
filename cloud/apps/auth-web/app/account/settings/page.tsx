@@ -26,6 +26,8 @@ export default async function AccountSettingsPage() {
       </section>
     );
   }
+  // Masked: the form shows a saved key as `••••••••cdef` and posting that
+  // back keeps it (account-settings.ts). The page never holds a real key.
   const stored = await storedAccountSettings(createDb(), accountId);
 
   return (

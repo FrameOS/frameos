@@ -137,7 +137,25 @@ describe("POST /api/account/api-tokens", () => {
     expect((await POST(post({ access: "admin", name: "x" }))).status).toBe(400);
     expect((await POST(post({ expires_in_days: 0, name: "x" }))).status).toBe(400);
     expect((await POST(post({ expires_in_days: 400, name: "x" }))).status).toBe(400);
+    // "Never" is not an option: every token expires.
+    const never = await POST(post({ expires_in_days: null, name: "x" }));
+    expect(never.status).toBe(400);
+    expect(await never.json()).toEqual({ error: "invalid_expiry" });
     expect(inserted).toHaveLength(0);
+  });
+
+  it("defaults the expiry to ninety days when none is given", async () => {
+    const before = Date.now();
+    const response = await POST(post({ name: "laptop" }));
+    const after = Date.now();
+    expect(response.status).toBe(201);
+    const expiresAt = inserted[0]?.expiresAt as Date;
+    expect(expiresAt).toBeInstanceOf(Date);
+    const dayMs = 24 * 60 * 60 * 1000;
+    expect(expiresAt.getTime()).toBeGreaterThanOrEqual(before + 90 * dayMs);
+    expect(expiresAt.getTime()).toBeLessThanOrEqual(after + 90 * dayMs);
+    const payload = (await response.json()) as { api_token: { expires_at: string | null } };
+    expect(payload.api_token.expires_at).toBe(expiresAt.toISOString());
   });
 
   it("enforces the per-account cap", async () => {
@@ -166,8 +184,13 @@ describe("GET /api/account/api-tokens", () => {
     const response = await GET(
       new NextRequest("https://cloud.example/api/account/api-tokens"),
     );
-    const payload = (await response.json()) as { max_tokens: number; tokens: Record<string, unknown>[] };
+    const payload = (await response.json()) as {
+      default_ttl_days: number;
+      max_tokens: number;
+      tokens: Record<string, unknown>[];
+    };
     expect(payload.max_tokens).toBe(25);
+    expect(payload.default_ttl_days).toBe(90);
     expect(payload.tokens[0]).toMatchObject({ id: "tok-1", token_hint: "fc_api_abcd" });
     expect(JSON.stringify(payload)).not.toContain("should-not-leak");
   });

@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   apiTokenAccessFromPrefix,
   authenticateApiToken,
+  authenticateJobToken,
   bearerToken,
   isApiToken,
+  isJobToken,
   mintApiToken,
   serializeApiToken,
   tokenHint,
@@ -28,6 +30,15 @@ describe("api tokens", () => {
     expect(isApiToken(full.token)).toBe(true);
     expect(isApiToken("fc_link_abc")).toBe(false);
     expect(isApiToken(undefined)).toBe(false);
+  });
+
+  it("recognises the job-token prefix as its own kind", () => {
+    const job = "fc_apijob_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF";
+    expect(isApiToken(job)).toBe(true);
+    expect(isJobToken(job)).toBe(true);
+    expect(isJobToken(mintApiToken("full").token)).toBe(false);
+    expect(apiTokenAccessFromPrefix(job)).toBe("job");
+    expect(tokenHint(job)).toBe("fc_apijob_abcd");
   });
 
   it("parses the bearer header loosely", () => {
@@ -146,5 +157,54 @@ describe("api tokens", () => {
     const db = { select } as never;
     expect(await authenticateApiToken(db, "fc_link_something")).toBeUndefined();
     expect(select).not.toHaveBeenCalled();
+  });
+
+  describe("job tokens", () => {
+    const jobToken = "fc_apijob_" + "x".repeat(43);
+    const jobRow = () => ({
+      ...baseRow(jobToken),
+      access: "billing_nightly",
+      name: "nightly accounting job",
+    });
+
+    it("never resolve as a person: authenticateApiToken refuses them without a query", async () => {
+      const select = vi.fn();
+      expect(await authenticateApiToken({ select } as never, jobToken)).toBeUndefined();
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("open exactly the job their row names", async () => {
+      const { db, updates } = fakeDb(jobRow());
+      expect(
+        await authenticateJobToken(db, `Bearer ${jobToken}`, "billing_nightly"),
+      ).toEqual({
+        accountId: "acc-1",
+        token: { access: "billing_nightly", id: "tok-1", name: "nightly accounting job" },
+      });
+      expect(updates[0]?.lastUsedAt).toBeInstanceOf(Date);
+    });
+
+    it("refuse a personal token, a missing header, and a job prefix over a personal row", async () => {
+      const personal = mintApiToken("full");
+      const { db: personalDb } = fakeDb({ ...baseRow(personal.token) });
+      expect(
+        await authenticateJobToken(personalDb, `Bearer ${personal.token}`, "billing_nightly"),
+      ).toBeUndefined();
+      expect(await authenticateJobToken(personalDb, null, "billing_nightly")).toBeUndefined();
+
+      // A job prefix whose row says "full" is not a token we minted.
+      const forged = fakeDb({ ...baseRow(jobToken), access: "full" });
+      expect(
+        await authenticateJobToken(forged.db, `Bearer ${jobToken}`, "billing_nightly"),
+      ).toBeUndefined();
+      expect(forged.updates).toHaveLength(0);
+    });
+
+    it("refuse a row whose access is not a known value", async () => {
+      const { db } = fakeDb({ ...baseRow(jobToken), access: "admin" });
+      expect(
+        await authenticateJobToken(db, `Bearer ${jobToken}`, "billing_nightly"),
+      ).toBeUndefined();
+    });
   });
 });

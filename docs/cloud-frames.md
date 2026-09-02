@@ -107,22 +107,23 @@ device. The same token presented with a *different* device key is refused —
 `409 public_key_mismatch` — since that is a different device, not a retry.
 
 The frame stores its access token in a `0600` state file. Whether it needs a
-confirmation click depends on whether it is the token's first enrollment:
+confirmation click depends on the token's budget:
 
-- **The first enrollment of a token is born active.** Minting the token was
-  the owner's deliberate, authenticated act, and the overwhelmingly common
-  first redeemer is the owner's own board booting minutes later — asking the
-  owner to confirm their own two-minute-old token again is ceremony without
-  proof. (SD images mint multi-use tokens so a card can be reflashed, which
-  is why the rule keys on first use, not on a single-use budget.) If a
-  stolen token or leaked image beats the owner's board to it, the owner's
-  own card lands pending behind a foreign active frame — loud, auditable,
-  revocable. Provisioning scene intent (`scene_source_frame_id`) is applied
-  right at enrollment.
-- **Every later enrollment of a multi-use token appears as pending** and the
-  owner confirms it (a deliberate click, showing hardware details) before
-  any scene push is accepted — any card holding a fleet image can enroll, so
-  each additional board brings its own proof.
+- **A single-use token's enrollment is born active.** Minting the token was
+  the owner's deliberate, authenticated act for one device, and its budget
+  means only one device can ever redeem it — asking the owner to confirm
+  their own two-minute-old token again is ceremony without proof.
+  Provisioning scene intent (`scene_source_frame_id`) is applied right at
+  enrollment.
+- **Every enrollment of a multi-use token appears as pending** — the first
+  one included — and the owner confirms it (a deliberate click, showing
+  hardware details) before any scene push is accepted or the account's
+  service keys are pulled. A multi-use token is baked into an SD image that
+  can be copied or leaked, so whoever boots a card first is not thereby the
+  owner; if a foreign card raced the owner's board, it used to be born
+  active with `settings:services` and the provisioning scenes, and pulled
+  the account's Home Assistant / OpenAI keys. Now each board brings its own
+  proof, and the scope grant only becomes usable at the owner's Confirm.
 
 Re-enrolling a revoked frame needs a fresh claim token.
 
@@ -605,7 +606,10 @@ in every backup — long after the owner deleted it; it would pass through the
 WebSocket hub; and at-least-once redelivery could hand a device a credential
 that had already been revoked. So the socket carries only the zero-payload
 `refresh_service_settings` nudge, and the keys travel over a device-authed
-HTTPS request the device makes itself:
+HTTPS request the device makes itself. (In the provider's database the keys
+are encrypted at rest; this pull is one of the two places they are ever
+decrypted, and the owner's own settings API shows them only as a masked
+hint.)
 
 ```http
 GET {provider}/api/frames/{id}/service-settings
@@ -630,10 +634,28 @@ Response `200`:
   `frameOS{apiKey}`, `github{api_key}`, `homeAssistant{url,accessToken}`,
   `immich{url,apiKey}`, `openAI{apiKey}`, `unsplash{accessKey}`. An empty
   string counts as "not configured" and is omitted.
-- `groups` — every group the frame's **assigned scenes declare**, whether or
-  not the owner has filled it in. A group in `groups` but not in `settings` is
-  one the frame needs and the account has not set; the device may surface that
-  ("this frame needs an Unsplash key") but must not invent a value for it.
+- `groups` — every group the owner has **granted** the frame's assigned
+  scenes, whether or not the owner has filled it in. A group in `groups` but
+  not in `settings` is one the frame needs and the account has not set; the
+  device may surface that ("this frame needs an Unsplash key") but must not
+  invent a value for it.
+
+**A scene's own declaration is a request, not a grant.** A published scene
+is anyone's code, and the `settings` list in its bundled `config.json` says
+what it *wants*, not what it may have. The provider records, per assignment
+(scene × frame), what the assigned version **declares** and what the owner
+**granted** — the workspace shows the declared groups when a scene is
+installed and lets the owner tick or untick them per scene under the frame's
+service settings; `POST /api/frames/{id}/scenes` and `…/scenes/add` take a
+`settings_groups` list per scene, and `GET /api/frames/{id}/scenes` reports
+both lists per scene. A grant is always a subset of the declaration; a
+version that starts declaring a new group does **not** get it until the
+owner says so; an install that names no groups (an agent's, a script's) gets
+none. What the device is served is the union of the grants across the
+frame's assignments, and *only* that — a declared-but-ungranted group
+appears neither in `settings` nor in `groups`. Assignments made before this
+existed carry no grant and are served everything they declare until the
+owner next saves the frame's scene list, which makes the grant explicit.
 
 **The six groups are cloud-owned on a managed frame.** A group absent from
 `settings` is **deleted** on the device — not left at its previous value.
@@ -882,8 +904,8 @@ curl -fsSL {provider}/install.sh | \
 The script installs the prebuilt release binaries and services as usual,
 then writes the same `state/cloud_enroll_pending.json` handoff (mode `0600`,
 dir `0700`) the SD-image flow uses, so the frame enrolls via flow A on first
-start (the token's first enrollment is active right away; later enrollments
-of a multi-use image token stay pending behind a confirmation). Setting a claim token forces the backend
+start (a single-use token's enrollment is active right away; every
+enrollment of a multi-use image token stays pending behind a confirmation). Setting a claim token forces the backend
 connection off and refuses an explicit `FRAMEOS_BACKEND_ENABLED=true` — one
 control plane at a time. Display questions stay interactive (the script
 keeps its prompts); every prompt can be pre-answered with the script's
@@ -1048,8 +1070,11 @@ The frame summary those routes (and the hub's `update_frame` event) return
 also carries the service-settings picture, so the workspace can explain a
 scene that wants a key it does not have:
 
-- `service_setting_groups` — the group NAMES this frame's assigned scenes
-  declare (`[]` when they declare none). Never a field or a value.
+- `service_setting_groups` — the group NAMES the owner has granted this
+  frame's assigned scenes, as a union (`[]` when nothing is granted): what
+  the device pull ships. Never a field or a value. What each scene
+  *declares* vs *was granted* is per assignment on `GET /api/frames/{id}/scenes`
+  (`declared_settings_groups`, `granted_settings_groups`).
 - `service_settings_enabled` — whether the frame's link still holds
   `settings:services`. Omitted, never `false`, when the caller could not
   answer (a hub broadcast without the link row); the SPA merges summaries

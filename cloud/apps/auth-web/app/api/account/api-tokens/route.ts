@@ -3,6 +3,7 @@ import { accountApiTokens } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
   apiTokenAccessValues,
+  defaultApiTokenTtlDays,
   listApiTokens,
   maxApiTokenNameLength,
   maxApiTokensPerAccount,
@@ -51,7 +52,9 @@ export async function GET(request: NextRequest) {
     return response;
   }
   return NextResponse.json({
+    default_ttl_days: defaultApiTokenTtlDays,
     max_tokens: maxApiTokensPerAccount,
+    max_ttl_days: maxApiTokenTtlDays,
     tokens: await listApiTokens(db, session.accountId),
   });
 }
@@ -98,19 +101,20 @@ export async function POST(request: NextRequest) {
   if (!apiTokenAccessValues.includes(access as ApiTokenAccess)) {
     return jsonError("invalid_access", 400);
   }
-  let expiresAt: Date | null = null;
-  if (body.expires_in_days !== undefined && body.expires_in_days !== null) {
-    const days = body.expires_in_days;
-    if (
-      typeof days !== "number" ||
-      !Number.isInteger(days) ||
-      days < 1 ||
-      days > maxApiTokenTtlDays
-    ) {
-      return jsonError("invalid_expiry", 400);
-    }
-    expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  // Every token expires: omitted means the default, and an explicit `null`
+  // ("never") is refused rather than honoured — a token minted forever
+  // outlives the laptop it was pasted into and the reason it was made.
+  const days =
+    body.expires_in_days === undefined ? defaultApiTokenTtlDays : body.expires_in_days;
+  if (
+    typeof days !== "number" ||
+    !Number.isInteger(days) ||
+    days < 1 ||
+    days > maxApiTokenTtlDays
+  ) {
+    return jsonError("invalid_expiry", 400);
   }
+  const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
   const [existing] = await db
     .select({ count: count() })
@@ -150,7 +154,7 @@ export async function POST(request: NextRequest) {
       providerSubject: session.providerSubject,
     },
     eventType: "account.api_token_created",
-    metadata: { access, expires_at: expiresAt?.toISOString() ?? null, name },
+    metadata: { access, expires_at: expiresAt.toISOString(), name },
     target: { apiTokenId: row.id },
   });
 

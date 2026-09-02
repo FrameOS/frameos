@@ -7,6 +7,12 @@ import {
   identityRateLimitResponse,
   rateLimitResponse,
 } from "../../../../../src/lib/rate-limit";
+// Secret settings are sealed at rest (src/lib/account-settings.ts); the
+// route opens them with the deployment key, which no mock supplies.
+process.env.FRAMEOS_CLOUD_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString(
+  "base64",
+);
+
 import { GET } from "./route";
 
 // The device-authed service-settings pull (docs/cloud-frames.md, "Service
@@ -45,10 +51,15 @@ const openAiKey = "openai-secret-value";
 let settingsRows: { key: string; value: unknown }[] = [];
 
 // db.select().from(account_settings).where(...) is the only query the route
-// makes; everything else it needs is on the authenticated frame row.
+// makes; everything else it needs is on the authenticated frame row. The
+// update chain absorbs the read path's best-effort re-seal of the plaintext
+// rows seeded above (legacy rows are sealed on first read).
 const fakeDb = {
   select: () => ({
     from: () => ({ where: () => Promise.resolve(settingsRows) }),
+  }),
+  update: () => ({
+    set: () => ({ where: () => Promise.resolve([]) }),
   }),
 };
 

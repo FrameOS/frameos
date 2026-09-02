@@ -2044,9 +2044,11 @@ Every §9.3 item, with the decision where one had to be made:
    customer statement page, which also now leads with the receivable and
    hides the prepaid shelf statements unless something posted to them.
 7. **Nightly job identity** — `scripts/accounting-service-account.sh`
-   mints the token on a dedicated superadmin account with no login
-   identity (psql only, so it runs on the box; hash and hint match
-   `api-tokens.ts`); the healthchecks ping is **required** (`none` opts
+   mints the token on a dedicated account with no login identity (psql
+   only, so it runs on the box; hash and hint match `api-tokens.ts`). Since
+   the 2026-09 security pass it is a job token (`fc_apijob_…`,
+   `billing_nightly`) that opens only the nightly route, and the account is
+   no longer a superadmin; the healthchecks ping is **required** (`none` opts
    out on purpose) and `install.sh` refuses to arm the timer on
    placeholders. Found while verifying: **the job had never been
    installed on production** — no env file, no timer. Installed the same

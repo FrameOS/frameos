@@ -53,12 +53,19 @@ One account can carry both sign-in methods; merges are gated on proof of
 email ownership to block pre-hijacking:
 
 - **Password first, then Google** — if the password account's email is
-  verified and Google attests the same email, the Google identity links
-  automatically and both methods sign into the same account. If the password
+  verified and Google attests the same email, the callback does _not_ link
+  on Google's word alone: the verified claims are parked in a signed,
+  ten-minute `frameos_google_link_pending` cookie and the visitor is sent to
+  `/login/link-google`, which asks for the account's password.
+  `POST /api/auth/google/link` checks it, links the identity, revokes every
+  existing session (a fresh one is minted), emails the owner
+  (`google_linked`) and writes `account.google_linked` to the audit log; a
+  wrong password is `403 invalid_password` and `account.google_link_failed`.
+  From then on both methods sign into the same account. If the password
   account is _unverified_, the Google user is shown a warning and sent
   through the password reset flow first: the emailed link proves the address
   is theirs and evicts any password a squatter may have set. After the reset,
-  Google sign-in links automatically.
+  the same password confirmation connects Google.
 - **Google first, then password** — signup with that email is refused
   (`email_taken_google`) so a stranger can never plant a password on the
   account; instead, "Forgot password?" works for Google-first accounts and
@@ -129,6 +136,15 @@ FrameOS-backend SSO, the frames SPA) is therefore covered without changes.
 Code checks are rate-limited per IP and per account (10 / 15 min), and every
 failure is audited (`account.second_factor_failed`).
 
+**Strengthening the account** (starting authenticator enrollment,
+requesting passkey registration options) needs a recent sign-in (see
+re-authentication below) AND, when the account has a password, that password
+in the body (`requireStrengtheningProof`, `src/lib/account-security.ts`): a
+passkey added with nothing but a stolen cookie would satisfy sudo mode on its
+own from then on. The proof is checked at the start of enrollment; the
+confirm/attestation steps are bound to what the start minted (the pending
+secret, the single-use challenge cookie). Every enrollment emails the owner.
+
 **Weakening the account** (removing the authenticator or a passkey,
 regenerating recovery codes, turning 2FA off) re-asks for the password when
 the account has one, otherwise for a current authenticator/recovery code
@@ -156,8 +172,10 @@ matched to what the action can do:
   `/api/admin/*` mutation (`getSuperadminContext({ mutation: true })` —
   granting superadmin, deleting an account, posting a journal entry; the
   admin tables follow the 403 to `/login/reauth` like any other button).
-  The nightly accounting job is the one admin caller on an API token and is
-  exempt, since tokens never carry a session to stamp.
+  Every `/api/admin/*` route is cookie-only; the nightly accounting job
+  does not go through `getSuperadminContext` at all but through its own
+  job-token kind (`fc_apijob_…`, `authenticateJobToken`), which opens
+  `POST /api/admin/billing/nightly` and nothing else.
 - **2 hours** (`recentApprovalMaxAgeSeconds`) for
   `POST /api/device/authorize` — approving a device link or a scope change.
   Approvals are additive and come in batches ("setting up frames this
@@ -205,7 +223,12 @@ page hides the Google button and password sign-in keeps working.
 
 `accounts.is_superadmin` gates `/admin` and `/api/admin/*`. The flag is checked
 against the database on every request, so revoking it takes effect
-immediately. The panel lists accounts (search by email or name) and supports:
+immediately. Only a session cookie counts: a personal API token minted by a
+superadmin is refused on every `/api/admin/*` route (`getSuperadminContext`
+returns `forbidden` for tokens), and the one automated admin caller — the
+nightly accounting job — runs on a job token (`cloud/docs/mcp.md`, "Job
+tokens") on an account that is not a superadmin. The panel lists accounts
+(search by email or name) and supports:
 
 - Granting and revoking the superadmin flag (never on your own account).
 - Signing a user out everywhere (revokes all their sessions).

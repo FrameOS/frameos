@@ -1,9 +1,77 @@
 import { describe, expect, it } from "vitest";
 import {
   filterAccountSettings,
+  isMaskedSettingValue,
+  isSealedSettingValue,
+  isSecretSettingField,
+  maskSettingValue,
   maxAccountSettingValueLength,
+  openSettingValue,
+  sealSettingValue,
   storableAccountSettingsFields,
 } from "./account-settings";
+
+// secrets.ts reads the deployment key from the environment; the unit setup
+// (src/test/setup-env.ts) does not set one, and these tests only need a key
+// that is valid, not a particular one.
+process.env.FRAMEOS_CLOUD_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString(
+  "base64",
+);
+
+describe("secret setting fields", () => {
+  it("seals every storable field except the URLs and the model tuning", () => {
+    const secret: string[] = [];
+    const plain: string[] = [];
+    for (const [group, fields] of storableAccountSettingsFields) {
+      for (const field of fields) {
+        (isSecretSettingField(group, field) ? secret : plain).push(
+          `${group}.${field}`,
+        );
+      }
+    }
+    expect(secret.sort()).toEqual([
+      "frameOS.apiKey",
+      "github.api_key",
+      "homeAssistant.accessToken",
+      "immich.apiKey",
+      "openAI.apiKey",
+      "openAI.backendApiKey",
+      "unsplash.accessKey",
+    ]);
+    expect(plain.sort()).toEqual([
+      "homeAssistant.url",
+      "immich.url",
+      "openAI.chatModel",
+      "openAI.chatReasoningEffort",
+    ]);
+    // Unknown groups and fields are not secrets — they are not storable.
+    expect(isSecretSettingField("ssh_keys", "keys")).toBe(false);
+    expect(isSecretSettingField("openAI", "nope")).toBe(false);
+  });
+
+  it("seals and opens a value, and passes legacy plaintext through", () => {
+    const sealed = sealSettingValue("sk-1234567890abcdef");
+    expect(isSealedSettingValue(sealed)).toBe(true);
+    expect(sealed).not.toContain("1234567890");
+    expect(openSettingValue(sealed)).toBe("sk-1234567890abcdef");
+    // Empty is "not configured" and stays empty.
+    expect(sealSettingValue("")).toBe("");
+    // A row written before sealing shipped opens to itself.
+    expect(isSealedSettingValue("sk-plain")).toBe(false);
+    expect(openSettingValue("sk-plain")).toBe("sk-plain");
+  });
+
+  it("masks with the tail only when the secret is long enough to spare it", () => {
+    expect(maskSettingValue("sk-1234567890abcdef")).toBe("••••••••cdef");
+    expect(maskSettingValue("2024")).toBe("••••••••");
+    expect(maskSettingValue("12345678")).toBe("••••••••");
+    expect(maskSettingValue("")).toBe("");
+    expect(isMaskedSettingValue("••••••••cdef")).toBe(true);
+    expect(isMaskedSettingValue("••••••••")).toBe(true);
+    expect(isMaskedSettingValue("sk-new")).toBe(false);
+    expect(isMaskedSettingValue("")).toBe(false);
+  });
+});
 
 describe("storableAccountSettingsFields", () => {
   it("is exactly the service groups the preview settings define", () => {

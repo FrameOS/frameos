@@ -15,12 +15,19 @@ export type InstallableFrame = {
 // assigned and pushed. Pending/revoked frames are listed but disabled, so
 // the owner sees why a frame is missing rather than wondering.
 export function InstallOnFrameBox({
+  declaredSettingsGroups = [],
   frames,
   framesUrl,
   sceneId,
   sceneName,
   sceneVersion,
 }: {
+  // The service-settings groups the scene's apps declare (preview-settings'
+  // requiredSettingsForScenes), offered as pre-ticked checkboxes: a scene
+  // only asks for a key, the owner grants it per install
+  // (docs/cloud-frames.md, "Service settings"). Ticked = sent as
+  // settings_groups; the frame is served nothing the owner unticked.
+  declaredSettingsGroups?: { key: string; title: string }[];
   frames: InstallableFrame[];
   // The workspace URL for a frame id, minus the id (…/frames/).
   framesUrl: string;
@@ -30,6 +37,9 @@ export function InstallOnFrameBox({
 }) {
   const installable = frames.filter((frame) => frame.status === "active");
   const [frameId, setFrameId] = useState(installable[0]?.id ?? "");
+  const [granted, setGranted] = useState<string[]>(() =>
+    declaredSettingsGroups.map((group) => group.key),
+  );
   const [state, setState] = useState<
     | { kind: "idle" }
     | { kind: "busy" }
@@ -44,7 +54,13 @@ export function InstallOnFrameBox({
     setState({ kind: "busy" });
     try {
       const response = await fetch(`/api/frames/${frameId}/scenes/add`, {
-        body: JSON.stringify({ scene_id: sceneId, scene_version: sceneVersion }),
+        body: JSON.stringify({
+          scene_id: sceneId,
+          scene_version: sceneVersion,
+          settings_groups: granted.filter((key) =>
+            declaredSettingsGroups.some((group) => group.key === key),
+          ),
+        }),
         headers: { "content-type": "application/json" },
         method: "POST",
       });
@@ -84,6 +100,32 @@ export function InstallOnFrameBox({
             Adds <strong>{sceneName}</strong>{" "}to the frame&apos;s scenes and
             deploys it. Scenes already on the frame stay.
           </p>
+          {declaredSettingsGroups.length > 0 ? (
+            <fieldset className="install-box__grants">
+              <legend>This scene asks for your API keys</legend>
+              <p className="copy">
+                Tick what it may use on the frame. Keys come from your account settings; the
+                frame is never sent one you untick.
+              </p>
+              {declaredSettingsGroups.map((group) => (
+                <label className="install-box__grant" key={group.key}>
+                  <input
+                    checked={granted.includes(group.key)}
+                    disabled={state.kind === "busy"}
+                    onChange={(event) =>
+                      setGranted((current) =>
+                        event.target.checked
+                          ? [...current.filter((key) => key !== group.key), group.key]
+                          : current.filter((key) => key !== group.key),
+                      )
+                    }
+                    type="checkbox"
+                  />{" "}
+                  {group.title}
+                </label>
+              ))}
+            </fieldset>
+          ) : null}
           <div className="install-box__row">
             <select
               aria-label="Frame"

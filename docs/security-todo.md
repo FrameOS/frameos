@@ -25,62 +25,14 @@ Two rules that came out of the review and apply to new code:
 
 ### Cloud
 
-- **Scene-declared settings groups are honoured as-is.** A store scene's
-  own bundled `config.json` `settings` list decides which of the account's
-  stored keys reach the scene: on the frame
-  (`frame-service-settings.ts` ships every declared group;
-  `app_runtime.nim` gates `getSetting` on the same self-declaration) and in
-  the browser preview (`SceneLivePreview` seeds all stored groups). The
-  preview is gated behind a click for scenes carrying their own sources,
-  but the device path is not. Make declared groups a
-  per-install permission: show them at install/assign time, store the
-  granted set on the assignment, and have `buildServiceSettingsPayload`
-  filter to *granted*, not *declared*. Consider refusing `getSetting` for
-  embedded-source apps unless granted.
-- **Prompt injection reaches tools that deploy to frames.** `search_store_scenes`,
-  `get_store_scene`, `get_frame_logs` and `read_repo_file` return attacker
-  text straight into the model context, and `add_scene_to_frame` /
-  `save_scene` act immediately (`src/lib/ai/tools.ts`). MCP
-  `frame_scene_install` / `frame_scenes_set` / `frame_settings_update` /
-  `frame_service_settings_enable` need no `confirm`. Make deploy-to-frame a
-  proposal the SPA renders as an approve button; wrap tool results in an
-  explicit untrusted-data frame; require `confirm: true` on the MCP frame
-  mutators.
-- **Third-party credentials are stored in plaintext and returned verbatim.**
-  `account_settings.value` holds OpenAI / Unsplash / Home Assistant / Immich
-  / GitHub keys unencrypted and `GET /api/settings` returns them to any
-  session or token, including `fc_apiro_` read-only tokens. (The account
-  export now masks setting values and refuses read-only tokens.)
-  `encryptSecret` already exists (TOTP uses it). Encrypt at write, return
-  masked hints from GET (the SPA treats them write-only; the device pull
-  path decrypts server-side).
-- **First redeemer of a multi-use claim token is born `active`** with
-  `settings:services` and the provisioning scenes, so whoever boots a
-  leaked image first pulls the account's Home Assistant / OpenAI keys.
-  Never auto-activate multi-use tokens, or defer the scope grant and
-  `applyProvisioningScenes` until the owner's `/confirm`.
-- **Concurrent AI turns can still overshoot the daily cap.** Per-account
-  rate limits (40 / 15 min) and a cap of three unfinished turns per account
-  now bound it on both chat routes; what is left is to reserve `cap − spent`
-  in flight so the third concurrent turn cannot be admitted under a cap the
-  first two have already spent, and to bound context bytes.
-- **A verified password account auto-links a later Google sign-in.**
-  Verification is now a POST behind a button (so a link scanner can no
-  longer verify an attacker-created account under the victim's address),
-  but the link step itself still trusts the flag alone. When Google is about
-  to link into an existing password account, require the password or an
-  explicit confirmation, revoke sessions, email both.
-- **API tokens can be minted without expiry** and survive 2FA changes
-  (password reset and the admin "sign out everywhere" now revoke them).
-  Default a TTL; consider revoking on `totp_enabled` / `passkey_added`.
-- **The nightly accounting job runs on a superadmin API token.** Every
-  `/api/admin/*` mutation is now behind `requireRecentAuth` (cookie
-  sessions) and refuses tokens, except `billing/nightly`, which the job
-  calls with a superadmin token from cron. Give it its own token access
-  level (or a dedicated service credential) rather than superadmin.
-- **Passkey / TOTP registration is gated** (recent auth, no tokens, owner
-  emailed on every second-factor change) but does not yet require the
-  password when one exists.
+Nothing critical is open. The nine items that were here (scene-declared
+settings groups honoured as-is, prompt injection reaching deploy tools,
+plaintext third-party credentials, multi-use claim tokens born active,
+concurrent AI turns overshooting the cap, Google auto-linking into a
+password account, non-expiring API tokens surviving 2FA changes, the nightly
+job on a superadmin token, second-factor enrolment without the password)
+shipped in the batch after the third one; what they left behind is in the
+medium / low list below.
 
 ### Self-hosted backend
 
@@ -268,6 +220,19 @@ Two rules that came out of the review and apply to new code:
   plaintext `.env*` files on the dev laptop (rotate / scope).
 
 ## Medium / low — worth a pass
+
+Cloud, left behind by the critical batch: `save_scene` still acts
+immediately (it only creates a private copy in the account; the prompt now
+says to call it only on the user's ask, and it is not a proposal); the
+device's `app_runtime.nim` still gates `getSetting` on the scene's own
+declaration — harmless now that the cloud ships only granted groups, but an
+embedded-source app could still be refused there outright; personal API
+tokens minted before the 90-day default keep their `NULL` expiry (sweep or
+re-mint), and tokens are revoked on second-factor *enrolment* but not on
+removal; spend reservations live in process memory (one auth-web instance
+today — a second instance would need them in Postgres/Redis); the
+legacy-plaintext re-seal of `account_settings` happens on first read, so a
+row nobody reads stays plaintext until then (a one-off sweep would finish it).
 
 Cloud: `backends/{grants,inventory,rotate-token,scopes}` check no base
 scope or `client_kind` (a frame-kind link can create `connected_backends`

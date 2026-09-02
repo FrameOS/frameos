@@ -10,6 +10,8 @@ const eventLabels: Record<string, string> = {
   "account.password_reset_requested": "Password reset requested",
   "account.api_token_created": "API token created",
   "account.api_token_revoked": "API token revoked",
+  "account.google_link_failed": "Google sign-in link refused (wrong password)",
+  "account.google_linked": "Google sign-in connected",
   "account.passkey_added": "Passkey added",
   "account.passkey_removed": "Passkey removed",
   "account.passkey_renamed": "Passkey renamed",

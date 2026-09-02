@@ -60,7 +60,42 @@ describe("SceneInstallDialog", () => {
     fireEvent.click(within(box).getByRole("button", { name: "Install" }));
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/frames/f1/scenes/add",
-      expect.objectContaining({ body: JSON.stringify({ scene_id: "scene-1", scene_version: 1 }) }),
+      expect.objectContaining({
+        body: JSON.stringify({ scene_id: "scene-1", scene_version: 1, settings_groups: [] }),
+      }),
+    );
+  });
+
+  it("offers the scene's declared service keys as pre-ticked grants and sends only the ticked ones", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ already_assigned: false, connected: true, status: "queued" }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }),
+    );
+    render(
+      <SceneInstallDialog
+        {...props}
+        declaredSettingsGroups={[
+          { key: "unsplash", title: "Unsplash" },
+          { key: "openAI", title: "OpenAI" },
+        ]}
+      />,
+    );
+    const unsplash = within(dialog()).getByRole("checkbox", { name: "Unsplash" }) as HTMLInputElement;
+    const openAi = within(dialog()).getByRole("checkbox", { name: "OpenAI" }) as HTMLInputElement;
+    expect(unsplash.checked).toBe(true);
+    expect(openAi.checked).toBe(true);
+    fireEvent.click(openAi);
+    expect(openAi.checked).toBe(false);
+
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Install" }));
+    await screen.findByRole("status");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/frames/f1/scenes/add",
+      expect.objectContaining({
+        body: JSON.stringify({ scene_id: "scene-1", scene_version: null, settings_groups: ["unsplash"] }),
+      }),
     );
   });
 

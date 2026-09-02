@@ -26,6 +26,12 @@ export interface CloudFrameSceneRow {
   slug?: string | null
   position?: number | null
   visibility?: string | null
+  /** Service-settings groups the assigned version's apps DECLARE — a
+   * request. Names only (cloud/docs/cloud-frames.md, "Service settings"). */
+  declared_settings_groups?: string[]
+  /** The groups the owner GRANTED this scene on this frame: what the device
+   * is actually served. Always ⊆ declared. */
+  granted_settings_groups?: string[]
 }
 
 /** Cache key for a store scene's scenes.json fetch. */

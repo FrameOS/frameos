@@ -93,21 +93,18 @@ export function registerAccountTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "Account-level service settings that scenes and the AI use: openAI (apiKey, backendApiKey, chatModel, chatReasoningEffort), unsplash.accessKey, homeAssistant (url, accessToken), immich (url, apiKey), github.api_key, frameOS.apiKey, ssh_keys. Secrets are masked unless reveal=true.",
-      inputSchema: {
-        reveal: z
-          .boolean()
-          .optional()
-          .describe("Return secret values in the clear (default false)."),
-      },
+        "Account-level service settings that scenes and the AI use: openAI (apiKey, backendApiKey, chatModel, chatReasoningEffort), unsplash.accessKey, homeAssistant (url, accessToken), immich (url, apiKey), github.api_key, frameOS.apiKey, ssh_keys. Secrets are always masked (`••••••••cdef`): the cloud never reveals a stored key to an API token. account_settings_update can replace one.",
+      inputSchema: {},
     },
-    async ({ reveal }) =>
+    async () =>
       run(async () => {
+        // The cloud masks secrets for tokens itself; masking again here is
+        // belt and braces for a server that predates that.
         const settings = await ctx.client.json<Record<string, unknown>>(
           "GET",
           "/api/settings",
         );
-        return text(reveal ? settings : maskSettings(settings));
+        return text(maskSettings(settings));
       }),
   );
 

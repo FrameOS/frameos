@@ -15,7 +15,8 @@ import {
   surfaceIsAbsorbed,
   utcDayWindow,
 } from "@frameos-cloud/ledger";
-import { accounts, accountSettings, type createDb } from "@frameos-cloud/db";
+import { accounts, type createDb } from "@frameos-cloud/db";
+import { storedAccountSettings } from "../account-settings";
 import { resolveChatModel, resolveReasoningEffort } from "./openai";
 
 export type AiCredentials = {
@@ -55,6 +56,9 @@ export type AiSpendBudget = {
   allowance: "billable" | "shared";
   capMicros: bigint;
   overdraftMicros: bigint;
+  // What the ledger has recorded for today. Does NOT include the account's
+  // other unfinished turns — the runner reads those from the reservation
+  // registry as it goes (spend-reservations.ts), because they move.
   spentMicros: bigint;
 };
 
@@ -107,6 +111,11 @@ export async function resolveAiAccess(
     // The product surface, so an absorbed one (the legacy scene converter,
     // which we pay for on purpose) is never turned into a 402 by a cap.
     surface?: string | null | undefined;
+    // What the account's OTHER turns have reserved but not yet metered
+    // (spend-reservations.ts inFlightSpendMicros). The ledger only learns a
+    // turn's cost when it ends, so without this three turns started at once
+    // are all admitted under a cap the first one alone may exhaust.
+    inFlightMicros?: bigint | undefined;
   } = {},
 ): Promise<AiAccess> {
   const env = options.env ?? process.env;
@@ -148,13 +157,14 @@ export async function resolveAiAccess(
   if (capMicros > 0n) {
     const window = utcDayWindow();
     const spent = await accountAiSpendMicros(db, accountId, window);
-    // Refused AT the cap. A turn's cost is unknown until it ends, so a turn
+    const inFlight = options.inFlightMicros ?? 0n;
+    // Refused AT the cap, counting what is reserved in flight as spent. A turn's cost is unknown until it ends, so a turn
     // let through here can still cross the line; `payg_overdraft_micros` is
     // how far past it the runner lets that turn go before stopping it
     // mid-flight, and the tolerance the nightly check allows. The gate used
     // to refuse at cap + overdraft, which made the real cap $11 and every
     // honest overshoot a nightly alert (§9.2 item 3).
-    if (spent >= capMicros) {
+    if (spent + inFlight >= capMicros) {
       return {
         ok: false,
         refusal: {
@@ -163,7 +173,7 @@ export async function resolveAiAccess(
           detail: dailyCapDetail(allowance),
           reason: "daily_cap_reached",
           resetAt: window.until.toISOString(),
-          spentMicros: spent.toString(),
+          spentMicros: (spent + inFlight).toString(),
         },
       };
     }
@@ -196,11 +206,10 @@ export async function resolveAiCredentials(
   accountId: string,
   env: Record<string, string | undefined> = process.env,
 ): Promise<AiCredentials | null> {
-  const settingsRows = await db
-    .select()
-    .from(accountSettings)
-    .where(eq(accountSettings.accountId, accountId));
-  const raw = settingsRows.find((row) => row.key === "openAI")?.value;
+  // Opened, not masked: this is one of the two readers that get the sealed
+  // secrets back as bytes (account-settings.ts) — the key goes to OpenAI.
+  const raw = (await storedAccountSettings(db, accountId, { reveal: true }))
+    .openAI;
   const openaiSettings =
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)

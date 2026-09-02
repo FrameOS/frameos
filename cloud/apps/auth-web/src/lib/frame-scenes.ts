@@ -19,12 +19,14 @@ import {
 import { recordAuditEvent } from "./audit";
 import {
   buildScenesPayloadForFrame,
-  declaredServiceSettingGroups,
   enqueueFrameCommand,
   enqueueServiceSettingsRefreshIfScoped,
+  grantedServiceSettingGroupsUnion,
+  grantedSettingsGroupsForAssignment,
   pinnedSceneVersion,
   readServiceSettingGroups,
   supersedePendingCommands,
+  storeDeclaredSettingsGroups,
 } from "./frames";
 import { copySceneCoversIntoFrameCache } from "./scene-images";
 import { reportError } from "./log";
@@ -34,7 +36,82 @@ export const maxScenesPerFrame = 20;
 type Database = ReturnType<typeof createDb>;
 type FrameRow = typeof frames.$inferSelect;
 
-export type RequestedScene = { sceneId: string; sceneVersion: number | null };
+export type RequestedScene = {
+  sceneId: string;
+  sceneVersion: number | null;
+  // The service-settings groups the owner GRANTS this scene on this frame
+  // (docs/cloud-frames.md, "Service settings"). Stored as the intersection
+  // with what the assigned version actually declares. Omitted: an already
+  // assigned scene keeps its current grant; a NEW assignment grants nothing.
+  settingsGroups?: string[] | undefined;
+};
+
+// The most groups one assignment may name. Six are deliverable today; the
+// bound only stops a body from carrying a novel.
+export const maxSettingsGroupsPerScene = 16;
+
+// Narrow a caller's group list to names the device can be served at all.
+// Unknown names are dropped, not refused: the SPA posts whatever the scene
+// declared, and a group that has since left the deliverable list must not
+// break the owner's save.
+export function normalizeSettingsGroups(groups: readonly string[]): string[] {
+  return readServiceSettingGroups([...groups]) ?? [];
+}
+
+// The optional `settings_groups` of one scene entry on the wire: undefined
+// when absent (keep / none), the list when well-formed, false when
+// malformed. Names are short identifiers; anything else in the array is a
+// malformed body, not a group to silently drop.
+export function readSettingsGroupsField(
+  value: unknown,
+): string[] | undefined | false {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || value.length > maxSettingsGroupsPerScene) {
+    return false;
+  }
+  if (
+    !value.every(
+      (group) => typeof group === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(group),
+    )
+  ) {
+    return false;
+  }
+  return value as string[];
+}
+
+// The grant an assignment gets on (re)assignment. `explicit` is the
+// caller's list; `existing` the row this scene had on this frame before the
+// replacement (undefined when it is new). The result is always ⊆ declared:
+// a grant never outruns what the version asks for, and a version that
+// stopped declaring a group loses it. NULL is preserved for a legacy row
+// the caller did not touch, so an unrelated save (reordering, adding a
+// scene) does not silently freeze or drop a pre-grant frame's keys — that
+// row keeps reading as "all it declares" until the owner posts a list.
+export function resolveGrantedSettingsGroups({
+  declared,
+  existing,
+  explicit,
+}: {
+  declared: readonly string[];
+  existing?: { grantedSettingsGroups: unknown } | undefined;
+  explicit?: readonly string[] | undefined;
+}): string[] | null {
+  if (explicit !== undefined) {
+    return normalizeSettingsGroups(explicit).filter((group) =>
+      declared.includes(group),
+    );
+  }
+  if (!existing) {
+    return [];
+  }
+  const kept = readServiceSettingGroups(existing.grantedSettingsGroups);
+  if (kept === undefined) {
+    return null;
+  }
+  return kept.filter((group) => declared.includes(group));
+}
 
 // Failures carry the wire code and HTTP status the route already returned, so
 // delegating did not change a single response shape. Tools translate the same
@@ -49,6 +126,9 @@ export type AssignScenesSuccess = {
   assignedChecksum: string;
   commandId: string | undefined;
   sceneNames: string[];
+  // Store scene id → the groups it ends up granted, so a caller can tell the
+  // owner what a freshly installed scene still needs.
+  grantedSettingsGroups: Record<string, string[]>;
 };
 
 export type AssignScenesOutcome =
@@ -106,6 +186,18 @@ export async function redeployAssignedScenesToFrame(
   if ("error" in built) {
     return { ok: false, error: built.error };
   }
+  // An unpinned assignment may have resolved to a newer version here. What
+  // it declares is refreshed; what it was granted is not widened — a version
+  // that starts asking for a new key does not get it until the owner says so.
+  const serviceSettingGroups = await storeDeclaredSettingsGroups(
+    db,
+    frame.id,
+    built.assignments,
+  );
+  const previous = readServiceSettingGroups(frame.serviceSettingGroups) ?? [];
+  const groupsChanged =
+    previous.length !== serviceSettingGroups.length ||
+    !serviceSettingGroups.every((group) => previous.includes(group));
   await db
     .update(frames)
     .set({
@@ -126,6 +218,9 @@ export async function redeployAssignedScenesToFrame(
     },
     type: "set_scenes",
   });
+  if (groupsChanged) {
+    await enqueueServiceSettingsRefreshIfScoped(db, frame.id);
+  }
   return { ok: true, checksum: built.checksum, commandId: command?.id };
 }
 
@@ -135,6 +230,8 @@ export async function currentSceneAssignments(
 ): Promise<RequestedScene[]> {
   const rows = await db
     .select({
+      declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
+      grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       sceneId: frameSceneAssignments.sceneId,
       sceneVersion: frameSceneAssignments.sceneVersion,
     })
@@ -144,6 +241,13 @@ export async function currentSceneAssignments(
   return rows.map((row) => ({
     sceneId: row.sceneId,
     sceneVersion: row.sceneVersion,
+    // The effective grant, so a caller that feeds this list back in (the
+    // add route, a provisioning copy onto another frame) carries it. A row
+    // from before grants existed with nothing computed yet stays "omitted",
+    // which re-assignment on the same frame keeps as-is.
+    ...(row.grantedSettingsGroups === null && row.declaredSettingsGroups === null
+      ? {}
+      : { settingsGroups: grantedSettingsGroupsForAssignment(row) }),
   }));
 }
 
@@ -267,8 +371,24 @@ export async function assignScenesToFrame(
     Awaited<ReturnType<typeof buildScenesPayloadForFrame>>,
     { error: string }
   >;
+  // What every requested scene was granted, resolved inside the transaction
+  // and reported to the caller — group names only.
+  const grantedByScene: Record<string, string[]> = {};
+  let serviceSettingGroups: string[] = [];
   try {
     payload = await db.transaction(async (tx) => {
+      // The grants the scenes had on this frame before the replacement: a
+      // caller that omits settings_groups for a scene keeps them.
+      const existingRows = await tx
+        .select({
+          grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
+          sceneId: frameSceneAssignments.sceneId,
+        })
+        .from(frameSceneAssignments)
+        .where(eq(frameSceneAssignments.frameId, frame.id));
+      const existingByScene = new Map(
+        existingRows.map((row) => [row.sceneId, row]),
+      );
       await tx
         .delete(frameSceneAssignments)
         .where(eq(frameSceneAssignments.frameId, frame.id));
@@ -286,6 +406,42 @@ export async function assignScenesToFrame(
       if ("error" in built) {
         throw new PayloadBuildError(built.error);
       }
+      // Now that the versions are open and their declarations known, settle
+      // each assignment's grant: the caller's list (∩ declared), else the
+      // grant the scene already had here, else nothing.
+      const settled: {
+        declaredSettingsGroups: string[];
+        grantedSettingsGroups: string[] | null;
+      }[] = [];
+      for (const assignment of built.assignments) {
+        const entry = requested.find((r) => r.sceneId === assignment.sceneId);
+        const granted = resolveGrantedSettingsGroups({
+          declared: assignment.declaredSettingsGroups,
+          existing: existingByScene.get(assignment.sceneId),
+          explicit: entry?.settingsGroups,
+        });
+        await tx
+          .update(frameSceneAssignments)
+          .set({
+            declaredSettingsGroups: assignment.declaredSettingsGroups,
+            grantedSettingsGroups: granted,
+          })
+          .where(eq(frameSceneAssignments.id, assignment.id));
+        const row = {
+          declaredSettingsGroups: assignment.declaredSettingsGroups,
+          grantedSettingsGroups: granted,
+        };
+        settled.push(row);
+        grantedByScene[assignment.sceneId] =
+          grantedSettingsGroupsForAssignment(row);
+      }
+      // Which service-settings groups (unsplash, openAI, …) the device may
+      // receive: the union of the GRANTS, denormalized onto the frame row
+      // while we still hold the assembled scenes. The device's pull needs
+      // this on every poll, and deriving it there would mean unzipping every
+      // assigned scene version (32 MiB apiece at the store's cap) per
+      // request. Group NAMES only — no credential ever lands in a frames row.
+      serviceSettingGroups = grantedServiceSettingGroupsUnion(settled);
       return built;
     });
   } catch (error) {
@@ -295,13 +451,6 @@ export async function assignScenesToFrame(
     throw error;
   }
 
-  // Which service-settings groups (unsplash, openAI, …) these scenes declare,
-  // denormalized onto the frame row while we still hold the assembled scenes.
-  // The device's service-settings pull needs this on every poll, and deriving
-  // it there would mean unzipping every assigned scene version (32 MiB apiece
-  // at the store's cap) per request. Group NAMES only — no credential ever
-  // lands in a frames row.
-  const serviceSettingGroups = declaredServiceSettingGroups(payload.scenes);
   const previousGroups = readServiceSettingGroups(frame.serviceSettingGroups);
   await db
     .update(frames)
@@ -316,14 +465,14 @@ export async function assignScenesToFrame(
     })
     .where(eq(frames.id, frame.id));
 
-  // A scene set that declares a DIFFERENT group set changes what the device's
+  // A scene set with a DIFFERENT granted group set changes what the device's
   // pull answers, so nudge it to re-pull. Both directions matter: a newly
-  // declared group means keys the frame does not have yet (without this it
+  // granted group means keys the frame does not have yet (without this it
   // would render "please provide an API key" until its next `ready`), and a
   // group that fell away means keys it should stop holding — the pull deletes
   // every cloud-owned group absent from the answer. Order-insensitive compare:
-  // declaredServiceSettingGroups follows scene order, so reordering the same
-  // scenes must not cost a wake-up. The nudge carries no payload (the keys
+  // the union follows scene order, so reordering the same scenes must not
+  // cost a wake-up. The nudge carries no payload (the keys
   // travel over the device-authed pull only) and supersedes its own pending
   // rows, so N assignments while a frame is offline are one re-pull.
   // A NULL column counts as "declares nothing": a frame that never had the
@@ -358,6 +507,9 @@ export async function assignScenesToFrame(
       checksum: payload.checksum,
       sceneCount: requested.length,
       sceneNames: payload.sceneNames,
+      // Which keys each scene may now pull — names only. This is the consent
+      // record the security review asked for.
+      settingsGroups: grantedByScene,
       ...(via ? { via } : {}),
     },
     target: { commandId: command?.id, frameId: frame.id },
@@ -377,6 +529,7 @@ export async function assignScenesToFrame(
     result: {
       assignedChecksum: payload.checksum,
       commandId: command?.id,
+      grantedSettingsGroups: grantedByScene,
       sceneNames: payload.sceneNames,
     },
   };

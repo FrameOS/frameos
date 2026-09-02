@@ -1,6 +1,7 @@
 // Authenticator app enrollment.
 // POST  — start (or restart) enrollment: a fresh secret + QR code. Nothing is
-//         enforced until /confirm sees a valid code.
+//         enforced until /confirm sees a valid code. Needs the password when
+//         the account has one (requireStrengtheningProof).
 // DELETE — remove the authenticator (needs the weakening proof).
 import QRCode from "qrcode";
 import { NextRequest, NextResponse } from "next/server";
@@ -8,6 +9,7 @@ import {
   accountSecurityContext,
   notifySecurityChange,
   readJsonBody,
+  requireStrengtheningProof,
   requireWeakeningProof,
 } from "../../../../../src/lib/account-security";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
@@ -31,6 +33,14 @@ export async function POST(request: NextRequest) {
   });
   if ("response" in context) {
     return context.response;
+  }
+  const denied = await requireStrengtheningProof(
+    db,
+    context,
+    await readJsonBody(request),
+  );
+  if (denied) {
+    return denied;
   }
   const secret = await beginTotpEnrollment(db, context.accountId);
   if (!secret) {

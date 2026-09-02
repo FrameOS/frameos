@@ -19,6 +19,9 @@ export type SceneInstallDialogProps = {
   framesUrl: string;
   /** The version a cloud install pins (null: the latest). */
   installVersion: number | null;
+  /** The service-settings groups the scene declares, shown as grant
+   * checkboxes on a cloud install (InstallOnFrameBox). */
+  declaredSettingsGroups?: { key: string; title: string }[] | undefined;
   signedIn: boolean;
   /** The sign-in page; `return_to` is appended. */
   loginUrl: string;
@@ -42,6 +45,7 @@ export function SceneInstallDialog({
   installableFrames,
   framesUrl,
   installVersion,
+  declaredSettingsGroups,
   signedIn,
   loginUrl,
   signupUrl,
@@ -75,6 +79,7 @@ export function SceneInstallDialog({
         <div className="stack">
           {installableFrames ? (
             <InstallOnFrameBox
+              declaredSettingsGroups={declaredSettingsGroups ?? []}
               frames={installableFrames}
               framesUrl={framesUrl}
               sceneId={sceneId}

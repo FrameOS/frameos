@@ -390,7 +390,10 @@ export function SceneLivePreviewPanel({
     (async () => {
       const groups: Record<string, Record<string, string>> = {};
       try {
-        const response = await fetch("/api/settings");
+        // reveal=1: the preview runs the scene in THIS browser, so it needs the
+        // bytes, not the masked hint GET answers by default. Only a signed-in
+        // browser session gets them (app/api/settings/route.ts).
+        const response = await fetch("/api/settings?reveal=1");
         if (response.ok) {
           // {group: {field: value}} — keep the non-empty string fields; the
           // wasm runtime consumes exactly that shape.

@@ -1001,6 +1001,12 @@ html[data-frameos-theme='dark'] .scene-canvas-empty__icon {
   color: #334155;
 }
 
+/* The Install card a cloud-agent proposal renders inside an assistant bubble. */
+.frameos-chat-proposal {
+  background: rgba(241, 245, 249, 0.76);
+  border-color: rgba(203, 213, 225, 0.72);
+}
+
 /* Markdown inside assistant chat bubbles: restore the list/heading styling
    the Tailwind preflight strips, at chat-bubble scale. */
 .chat-markdown > div > * + * {
@@ -1519,6 +1525,12 @@ html[data-frameos-theme='dark'] .frameos-chat-bubble-log {
   background: rgba(30, 41, 59, 0.56);
   border-color: rgba(255, 255, 255, 0.1);
   color: #dbe3ee;
+}
+
+.frameos-theme-dark .frameos-chat-proposal,
+html[data-frameos-theme='dark'] .frameos-chat-proposal {
+  background: rgba(30, 41, 59, 0.56);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .frameos-theme-dark .frameos-segment-group {

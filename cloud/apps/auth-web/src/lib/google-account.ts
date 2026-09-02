@@ -3,7 +3,6 @@ import {
   findAccountByPasswordEmail,
   findIdentity,
   googleProviderKey,
-  linkIdentityToAccount,
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 
@@ -25,6 +24,14 @@ export type GoogleSignInResolution =
   // account (classic pre-hijacking). The Google user must reset the password
   // first: the emailed link proves address ownership and evicts any squatter.
   | { status: "requires_password_reset"; email: string }
+  // A verified password account exists for this email. Google attesting the
+  // address is not the same as holding the account: an attacker who signs up
+  // for Gmail under a recycled or look-alike address, or who has simply
+  // phished the Google side, must not walk into the password account's
+  // frames and keys. The visitor proves the password on /login/link-google
+  // (POST /api/auth/google/link does the linking) before the identity is
+  // attached.
+  | { status: "requires_link_confirmation"; accountId: string; email: string }
   // The password account is fine, but Google did not attest this email, so
   // the visitor has not proven they own it. Password sign-in is the way in.
   | { status: "google_email_unverified" };
@@ -46,15 +53,11 @@ export async function resolveGoogleSignIn(
         return { email: claims.email, status: "requires_password_reset" };
       }
 
-      await linkIdentityToAccount(db, {
+      return {
         accountId: passwordAccount.id,
         email: claims.email,
-        emailVerified: true,
-        providerIssuer: issuer,
-        providerKey: googleProviderKey,
-        providerSubject: claims.sub,
-      });
-      return { accountId: passwordAccount.id, created: false, status: "ok" };
+        status: "requires_link_confirmation",
+      };
     }
   }
 

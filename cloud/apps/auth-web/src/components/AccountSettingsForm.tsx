@@ -9,12 +9,24 @@ import {
   type ServiceGroupSpec,
   type ServiceSettingsValues,
 } from "../lib/account-settings-form";
+import { isMaskedSettingValue } from "../lib/setting-mask";
 
 // The service API keys on /account/settings. One form, one Save: the whole
 // object goes to POST /api/settings, which replaces every group wholesale
 // and answers with what it stored — the form resets from that answer, so
 // what is on screen after a save is what the database holds. Cloud-managed
 // frames are nudged to re-pull their keys by the route, not by us.
+//
+// Saved keys never come back in full: the page renders them as a mask
+// (`••••••••cdef`), and posting the mask back keeps the stored key. Typing
+// over it replaces the key; clearing the field removes it.
+
+// "A key ending in cdef is saved." — the mask carries the tail when the key
+// is long enough for one (setting-mask.ts).
+function describeSavedSecret(mask: string): string {
+  const tail = mask.replace(/•/g, "");
+  return tail ? `A key ending in ${tail} is saved.` : "A key is saved.";
+}
 
 function hasAdvancedValues(values: ServiceSettingsValues): boolean {
   return serviceSettingsGroups.some((group) =>
@@ -64,6 +76,12 @@ function FieldInput({
           value={value}
         />
       )}
+      {field.secret && isMaskedSettingValue(value) ? (
+        <p className="copy account-settings__hint">
+          {describeSavedSecret(value)} Type a new one to replace it, or clear
+          the field to remove it.
+        </p>
+      ) : null}
       {field.hint ? <p className="copy account-settings__hint">{field.hint}</p> : null}
     </div>
   );

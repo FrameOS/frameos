@@ -155,7 +155,10 @@ export async function readSession() {
 // A personal API token in the Authorization header stands in for the cookie:
 // same profile shape, so every route's `readSession()` gate accepts it
 // unchanged. Only consulted when there is no cookie — a browser tab never
-// sends a bearer, and a script never has the cookie.
+// sends a bearer, and a script never has the cookie. A JOB token
+// (`fc_apijob_`) never resolves here: authenticateApiToken refuses it, so it
+// satisfies no readSession() gate and is accepted only by the route that
+// calls authenticateJobToken itself (the nightly accounting sweep).
 async function readApiTokenSession(): Promise<SessionProfile | undefined> {
   try {
     const token = bearerToken((await headers()).get("authorization"));

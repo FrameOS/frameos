@@ -39,10 +39,22 @@ describe("buildServiceSettingsPayload", () => {
     homeAssistant: { url: "https://ha.local", accessToken: "ha-token" },
   };
 
-  it("sends only the groups the scenes declare", () => {
+  it("sends only the groups the owner granted", () => {
     const payload = buildServiceSettingsPayload(["unsplash"], stored);
     expect(payload.groups).toEqual(["unsplash"]);
     expect(payload.settings).toEqual({ unsplash: { accessKey: "unsplash-key" } });
+  });
+
+  it("never mentions a group a scene declared but was not granted", () => {
+    // The caller passes the GRANTED union (frames.service_setting_groups), so
+    // a scene that declares openAI without a grant leaves no trace here — not
+    // in settings, not in groups (which the device reads as "cloud-owned").
+    const granted = ["unsplash"];
+    const declaredByScene = ["unsplash", "openAI"];
+    const payload = buildServiceSettingsPayload(granted, stored);
+    expect(declaredByScene).toContain("openAI");
+    expect(payload.groups).not.toContain("openAI");
+    expect(payload.settings).not.toHaveProperty("openAI");
   });
 
   it("lists a declared group with no stored key, but sends no settings for it", () => {

@@ -31,6 +31,7 @@ import {
 } from "react";
 import { applyAiScenes, type AiScenesEvent, type SceneJson } from "../lib/ai-scenes-apply";
 import type { AiListingChanges } from "../lib/ai-chat-client";
+import { requiredSettingsForScenes } from "../lib/preview-settings";
 import { clearSceneDraft, readSceneDraft, writeSceneDraft } from "../lib/scene-draft";
 import {
   defaultSceneEditorPanels,
@@ -2245,6 +2246,14 @@ export function SceneEditorModal({
       ) : null}
       {installOpen && info ? (
         <SceneInstallDialog
+          declaredSettingsGroups={
+            previewScenes
+              ? requiredSettingsForScenes(previewScenes).map((group) => ({
+                  key: group.key,
+                  title: group.title,
+                }))
+              : []
+          }
           framesUrl={info.framesUrl}
           installVersion={installVersion}
           installableFrames={info.installableFrames}

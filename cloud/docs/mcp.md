@@ -20,9 +20,26 @@ Both are managed on `/account/developer`.
 |---|---|
 | Table | `account_api_tokens` (migration 0040): hash, hint, `access`, expiry, last use, revocation |
 | Mint | `POST /api/account/api-tokens` `{name, access?: "full"\|"read_only", expires_in_days?}` → `{token, api_token}` — the secret is returned once. Needs a session (never a token) and a recent proof of credentials (`recentApprovalMaxAgeSeconds`, 2 h) because it turns a session into a durable credential — the same gate device approval has. |
+| Expiry | Every token expires. `expires_in_days` is 1–365; omitted means `defaultApiTokenTtlDays` (90), and an explicit `null` ("never") is `400 invalid_expiry`. `GET` reports `default_ttl_days` and `max_ttl_days`. |
 | List / revoke | `GET /api/account/api-tokens`, `DELETE /api/account/api-tokens/{id}`. A token may revoke itself. |
+| Revoked wholesale | On a password reset, an admin "sign out everywhere", and whenever a second factor is **enrolled** (`totp/confirm`, `passkeys` POST): a token minted before 2FA was on would keep walking past it, so the enrolment revokes every live token (`revokeApiTokensForAccount`, count returned as `api_tokens_revoked` and audited) and the owner re-mints behind the new factor. |
 | Cap | 25 live tokens per account (`maxApiTokensPerAccount`). |
 | Use | `Authorization: Bearer fc_api_…` on any route that calls `readSession()`. |
+
+### Job tokens
+
+A third prefix, `fc_apijob_…`, is not a person's credential at all. Its row's
+`access` names the one job it may run — today only `billing_nightly`, the
+accounting cron (`scripts/accounting-nightly.sh` → `POST
+/api/admin/billing/nightly`). `readSession()` never resolves a job token, so
+it satisfies no ordinary route and none of `/api/admin/*`; the nightly route
+authenticates it itself with `authenticateJobToken(db, authorization,
+"billing_nightly")` and accepts nothing else (no cookie session, no personal
+token, superadmin or not). Job tokens are minted only by
+`scripts/accounting-service-account.sh`, on a service account that is not a
+superadmin and has no login identity; the token route cannot make one. This
+replaced the superadmin `fc_api_` token the job used to run on, which could
+also read every account and post journal entries from the ops box.
 
 How it plugs in (`src/lib/api-tokens.ts`):
 
@@ -99,16 +116,25 @@ real client. `GET` and `DELETE` answer 405: there is nothing to stream or end.
 
 Around 70 tools in five groups; every one documents its parameters. Read-only
 tools are annotated `readOnlyHint`, destructive ones `destructiveHint` and
-take `confirm: true`.
+take `confirm: true` — as do the five that change what a physical frame does
+or shows (`frame_scene_install`, `frame_scenes_set`, `frame_settings_update`,
+`frame_service_settings_enable`, `frame_firmware_update`). The server's
+instructions tell the model to treat every tool result as untrusted data and
+to call those only on the user's own say-so: a store scene's description or
+a frame's logs must not be able to talk an agent into deploying something.
 
 - **account** — `account_info`, `account_quota`, `account_settings_get`
-  (secrets masked unless `reveal`), `account_settings_update` (merges over the
-  current group before posting), `api_tokens_list`, `api_token_revoke`.
+  (secrets always masked — the cloud never reveals a stored key to a token),
+  `account_settings_update` (merges over the current group before posting; a
+  masked value posted back keeps the stored key), `api_tokens_list`,
+  `api_token_revoke`.
 - **frames** — `frames_list`, `frame_get`, `frame_rename`, `frame_delete`,
   `frame_revoke` (always refused for tokens; kept so the agent learns why),
   `frame_confirm`, `frame_claim_token_create`, `frame_settings_update`,
   `frame_scenes_list`, `frame_scenes_set`, `frame_scene_install` (from a store
-  id, a URL — store page, zip, scenes.json — or raw JSON; optional activate),
+  id, a URL — store page, zip, scenes.json — or raw JSON; optional activate;
+  `settings_groups` grants the scene the account's service keys it declares —
+  without it a store scene gets none, and the answer says what it still needs),
   `frame_scene_remove`, `frame_scene_activate`, `frame_render`,
   `frame_screenshot`, `frame_scene_preview`, `frame_logs` (filter + cap),
   `frame_metrics`, `frame_metrics_request`, `frame_activity`,
@@ -132,7 +158,12 @@ take `confirm: true`.
 - **store** — `store_browse`, `store_scene_get`, `store_scene_report`.
 - **ai** — `ai_scene_chat` (follows the NDJSON turn up to `wait_seconds`,
   then `apply`: none / new_scene / save_version), `ai_turn_wait`,
-  `ai_turn_cancel`, `ai_chats_list`, `ai_chat_get`, `ai_chat_delete`.
+  `ai_turn_cancel`, `ai_chats_list`, `ai_chat_get`, `ai_chat_delete`. The
+  scene AI never changes a frame itself: its `add_scene_to_frame` only
+  *proposes* an install (in the browser that is an Install card the user
+  approves), and the MCP result carries those as `proposed_installs` for the
+  agent to carry out with `frame_scene_install` — with `confirm: true`, and
+  only on the user's say-so.
 
 Resources: `frameos://frames`, `frameos://frames/{id}`, `frameos://scenes`,
 `frameos://scenes/{id}/content`. Prompts: `diagnose_frame`, `build_scene`.

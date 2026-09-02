@@ -41,9 +41,11 @@ fi
 # Refuse to arm the timer on placeholders. Both values are the difference
 # between a job that runs and one that fails quietly at 04:20 every night.
 env_ok=true
-if ! run "grep -Eq '^ACCOUNTING_API_TOKEN=fc_api_[A-Za-z0-9_-]{20,}\$' /etc/frameos-cloud/accounting.env" \
-   || run "grep -q '^ACCOUNTING_API_TOKEN=fc_api_replace_me' /etc/frameos-cloud/accounting.env"; then
-  echo "ACCOUNTING_API_TOKEN is not set in /etc/frameos-cloud/accounting.env (mint one with scripts/accounting-service-account.sh)" >&2
+# A JOB token (fc_apijob_…): a personal fc_api_ token — the pre-2026-09 shape —
+# no longer opens the nightly route, so it is refused here too.
+if ! run "grep -Eq '^ACCOUNTING_API_TOKEN=fc_apijob_[A-Za-z0-9_-]{20,}\$' /etc/frameos-cloud/accounting.env" \
+   || run "grep -q '^ACCOUNTING_API_TOKEN=fc_apijob_replace_me' /etc/frameos-cloud/accounting.env"; then
+  echo "ACCOUNTING_API_TOKEN is not a job token (fc_apijob_…) in /etc/frameos-cloud/accounting.env (mint one with scripts/accounting-service-account.sh; a personal fc_api_ token no longer works)" >&2
   env_ok=false
 fi
 if ! run "grep -Eq '^ACCOUNTING_HEALTHCHECKS_URL=(https://[^ ]+|none)\$' /etc/frameos-cloud/accounting.env" \
