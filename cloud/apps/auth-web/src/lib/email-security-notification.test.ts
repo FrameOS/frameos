@@ -38,6 +38,7 @@ describe("securityNotificationEmail", () => {
 
   it("has a line for every change kind, with no detail line when there is none", () => {
     for (const what of [
+      "google_linked",
       "passkey_added",
       "passkey_removed",
       "totp_enabled",

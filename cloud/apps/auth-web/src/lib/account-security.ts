@@ -154,6 +154,39 @@ export async function requireWeakeningProof(
   return undefined;
 }
 
+// The proof a STRENGTHENING action carries: enrolling an authenticator or a
+// passkey. Recent auth alone is a cookie that was fresh a quarter of an hour
+// ago; a passkey enrolled with it then satisfies sudo mode on its own, for
+// good. So when the account has a password the body must carry it, checked
+// here at the START of enrollment. The finishing steps (totp/confirm, the
+// passkey attestation) are bound to what the start minted — the pending
+// secret, the single-use challenge cookie — so nothing reaches them without
+// having passed this. Accounts without a password have nothing more to ask
+// for and stay on the recent-auth gate alone.
+export async function requireStrengtheningProof(
+  db: ReturnType<typeof createDb>,
+  context: AccountSessionContext,
+  body: Record<string, unknown> | undefined,
+): Promise<NextResponse | undefined> {
+  if (!context.hasPassword) {
+    return undefined;
+  }
+  const [account] = await db
+    .select({ passwordHash: accounts.passwordHash })
+    .from(accounts)
+    .where(eq(accounts.id, context.accountId))
+    .limit(1);
+  const password = typeof body?.password === "string" ? body.password : "";
+  const valid = await verifyPasswordWithDummyFallback(
+    password,
+    account?.passwordHash,
+  );
+  if (!valid) {
+    return NextResponse.json({ error: "invalid_password" }, { status: 403 });
+  }
+  return undefined;
+}
+
 export async function readJsonBody(request: NextRequest) {
   const body = (await request.json().catch(() => undefined)) as unknown;
   return body && typeof body === "object" && !Array.isArray(body)

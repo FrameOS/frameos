@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Mint (or rotate) the API token the nightly accounting job runs as, on a
-# dedicated superadmin service account rather than a person's.
+# Mint (or rotate) the JOB token the nightly accounting job runs as, on a
+# dedicated service account rather than a person's.
 #
 # Usage:
 #   scripts/accounting-service-account.sh            # create account if absent, mint a token
@@ -13,12 +13,24 @@
 # (no account_identities row), so nobody can sign in as it; the token is
 # its only door, and this script is the only thing that mints one.
 #
+# Why a JOB token and not a superadmin's (docs/security-todo.md, 2026-09):
+# the token is `fc_apijob_…` with access `billing_nightly`, which
+# api-tokens.ts accepts on exactly one route — POST /api/admin/billing/nightly
+# — and refuses everywhere readSession() is asked. The account is NOT a
+# superadmin (this script clears the flag if an earlier version set it): a
+# leaked accounting.env buys the sweep and nothing else, where the old
+# superadmin `fc_api_` token could read every account, post journal entries
+# and grant superadmin from the ops box.
+#
 # Prints the token ONCE. Put it in /etc/frameos-cloud/accounting.env as
 # ACCOUNTING_API_TOKEN. Uses DATABASE_URL from the environment or .env.local,
 # like grant-superadmin.sh — run it on the production box or over a tunnel.
+# After the deploy that introduced job tokens, run it with --rotate once:
+# the old superadmin token no longer opens the nightly route.
 #
 # The token format and hash match src/lib/api-tokens.ts + secrets.ts:
-# `fc_api_` + base64url(32 random bytes), stored as base64url(sha256(token)).
+# `fc_apijob_` + base64url(32 random bytes), stored as base64url(sha256(token));
+# the hint is the prefix plus the first four random characters.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -42,17 +54,23 @@ if [ -z "${DATABASE_URL:-}" ]; then
 fi
 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
-token="fc_api_$(openssl rand 32 | b64url)"
+token_prefix="fc_apijob_"
+token="${token_prefix}$(openssl rand 32 | b64url)"
 token_hash="$(printf '%s' "$token" | openssl dgst -sha256 -binary | b64url)"
-token_hint="${token:0:11}"
+token_hint="${token:0:$((${#token_prefix} + 4))}"
+token_access="billing_nightly"
+
+# The service account is deliberately NOT a superadmin: the job token is
+# what opens the nightly route, and the flag would only widen what a leaked
+# token's account could do if it ever grew a login identity.
 
 account_id="$(psql "$DATABASE_URL" --tuples-only --no-align -v ON_ERROR_STOP=1 \
   --set=email="$email" --set=name="$name" <<'SQL'
 INSERT INTO accounts (display_name, primary_email, is_superadmin)
-SELECT :'name', :'email', true
+SELECT :'name', :'email', false
 WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE primary_email = :'email');
-UPDATE accounts SET is_superadmin = true, updated_at = now()
- WHERE primary_email = :'email' AND NOT is_superadmin;
+UPDATE accounts SET is_superadmin = false, updated_at = now()
+ WHERE primary_email = :'email' AND is_superadmin;
 SELECT id FROM accounts WHERE primary_email = :'email';
 SQL
 )"
@@ -87,10 +105,10 @@ SQL
 fi
 
 psql "$DATABASE_URL" --tuples-only --no-align -v ON_ERROR_STOP=1 \
-  --set=id="$account_id" --set=token_name="$token_name" \
+  --set=id="$account_id" --set=token_name="$token_name" --set=token_access="$token_access" \
   --set=token_hash="$token_hash" --set=token_hint="$token_hint" >/dev/null <<'SQL'
 INSERT INTO account_api_tokens (account_id, name, access, token_hash, token_hint)
-VALUES (:'id', :'token_name', 'full', :'token_hash', :'token_hint');
+VALUES (:'id', :'token_name', :'token_access', :'token_hash', :'token_hint');
 INSERT INTO audit_events (account_id, actor, event_type, target, metadata)
 VALUES (:'id', '{"kind":"script","script":"accounting-service-account.sh"}'::jsonb,
         'api_token.created', json_build_object('accountId', :'id', 'kind', 'account')::jsonb,
@@ -98,8 +116,8 @@ VALUES (:'id', '{"kind":"script","script":"accounting-service-account.sh"}'::jso
 SQL
 
 cat <<MSG
-Service account: $email ($account_id)
-Token (shown once — put it in /etc/frameos-cloud/accounting.env as ACCOUNTING_API_TOKEN):
+Service account: $email ($account_id), not a superadmin
+Job token, access $token_access (shown once — put it in /etc/frameos-cloud/accounting.env as ACCOUNTING_API_TOKEN):
 
   $token
 

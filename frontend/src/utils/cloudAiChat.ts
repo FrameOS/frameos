@@ -21,9 +21,49 @@ export type CloudAiChatEvent =
       detail?: string
     }
   | { type: 'scenes'; tool: 'build_scene' | 'modify_scene'; title?: string; scenes: Record<string, any>[] }
+  // A frame change the agent proposes (add_scene_to_frame). Nothing is
+  // installed until the user approves the card the chat renders from it.
+  | CloudAiInstallProposal
   | { type: 'done'; tool: string; reply: string }
   | { type: 'error'; detail: string }
   | { type: 'ping' }
+
+export interface CloudAiInstallProposal {
+  type: 'proposal'
+  kind: 'install_scene'
+  proposal_id: string
+  frame: { id: string; name: string; connected: boolean; status: string }
+  scene: { id: string; name: string; slug: string; version: number | null }
+  /** Service-settings groups the scene declares — the account keys the
+   * install would hand the frame. Names only. */
+  declared_settings_groups: string[]
+  already_assigned: boolean
+}
+
+export function isCloudAiInstallProposal(value: unknown): value is CloudAiInstallProposal {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const record = value as Record<string, any>
+  return (
+    record.type === 'proposal' &&
+    record.kind === 'install_scene' &&
+    typeof record.proposal_id === 'string' &&
+    typeof record.frame?.id === 'string' &&
+    typeof record.scene?.id === 'string' &&
+    Array.isArray(record.declared_settings_groups)
+  )
+}
+
+/** Human names for the settings groups a scene can declare. */
+export const cloudSettingsGroupLabels: Record<string, string> = {
+  frameOS: 'FrameOS API key',
+  github: 'GitHub token',
+  homeAssistant: 'Home Assistant URL and access token',
+  immich: 'Immich URL and API key',
+  openAI: 'OpenAI API key',
+  unsplash: 'Unsplash access key',
+}
 
 export interface CloudAiChatRequest {
   prompt: string

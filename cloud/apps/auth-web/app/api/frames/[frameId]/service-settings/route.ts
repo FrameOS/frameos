@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
-import { accountSettings, type createDb } from "@frameos-cloud/db";
+import { type createDb } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
+import { storedAccountSettings } from "../../../../../src/lib/account-settings";
 import { linkedClientHasScope } from "../../../../../src/lib/backend-auth";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { authenticateFrameDevice } from "../../../../../src/lib/frame-device-auth";
@@ -48,17 +48,16 @@ export const runtime = "nodejs";
 // The account's stored service settings, narrowed to {group: {field: string}}.
 // buildServiceSettingsPayload filters again against the deliverable list; this
 // only makes the jsonb safe to hand it.
+//
+// This is one of the two readers that OPEN the sealed secrets
+// (account-settings.ts): the device is what the keys are for.
 async function storedServiceSettings(
   db: ReturnType<typeof createDb>,
   accountId: string,
 ): Promise<Record<string, Record<string, string>>> {
-  const rows = await db
-    .select()
-    .from(accountSettings)
-    .where(eq(accountSettings.accountId, accountId));
+  const revealed = await storedAccountSettings(db, accountId, { reveal: true });
   const stored: Record<string, Record<string, string>> = {};
-  for (const row of rows) {
-    const value = row.value;
+  for (const [group, value] of Object.entries(revealed)) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       continue;
     }
@@ -70,7 +69,7 @@ async function storedServiceSettings(
         fields[field] = fieldValue;
       }
     }
-    stored[row.key] = fields;
+    stored[group] = fields;
   }
   return stored;
 }
@@ -127,11 +126,12 @@ export async function GET(
     return identityLimited;
   }
 
-  // Which groups this frame's scenes declare. Denormalized on the frame row
-  // because recomputing means unzipping every assigned scene (32 MiB each at
-  // the store's cap) — far too much for a per-poll route. NULL means "never
-  // computed" (a frame assigned scenes before this column existed), so
-  // compute once here and backfill.
+  // Which groups the owner GRANTED this frame's scenes (the union over its
+  // assignments — a scene's own declaration is only a request). Denormalized
+  // on the frame row because recomputing means unzipping every assigned
+  // scene (32 MiB each at the store's cap) — far too much for a per-poll
+  // route. NULL means "never computed" (a frame assigned scenes before this
+  // column existed), so compute once here and backfill.
   let groups = readServiceSettingGroups(auth.frame.serviceSettingGroups);
   if (!groups) {
     try {

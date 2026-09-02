@@ -58,23 +58,30 @@ export function serviceSettingsEtag(body: string): string {
 }
 
 /**
- * Build what a frame receives, from the groups its scenes declare and the
- * account's stored settings.
+ * Build what a frame receives, from the groups the owner GRANTED its
+ * assigned scenes and the account's stored settings.
  *
- * `groups` lists every group the scenes declare, whether or not the account
- * filled it in — that is what lets the UI say "this frame needs an Unsplash
- * key" and what tells the device which groups are cloud-owned. `settings`
- * carries only the groups that have a usable value.
+ * A scene's own config.json only DECLARES what it wants; a published scene
+ * is anyone's code, so that declaration is a request. The grant is settled
+ * per assignment (frame-scenes.ts) and denormalized onto the frame row as
+ * `frames.service_setting_groups`, which is what callers pass here. A group
+ * a scene declares but was never granted must not appear anywhere in the
+ * answer — not in `settings`, not in `groups`.
  *
- * The six groups are cloud-owned on a managed frame: a group the scenes
- * declare but the account has not filled in is absent from `settings`, and
- * the device deletes its local copy rather than keeping a stale key.
+ * `groups` lists every granted group, whether or not the account filled it
+ * in — that is what lets the UI say "this frame needs an Unsplash key" and
+ * what tells the device which groups are cloud-owned. `settings` carries
+ * only the groups that have a usable value.
+ *
+ * The six groups are cloud-owned on a managed frame: a group that is granted
+ * but the account has not filled in is absent from `settings`, and the
+ * device deletes its local copy rather than keeping a stale key.
  */
 export function buildServiceSettingsPayload(
-  declaredGroups: readonly string[],
+  grantedGroups: readonly string[],
   storedSettings: Record<string, Record<string, string>>,
 ): ServiceSettingsPayload {
-  const groups = [...new Set(declaredGroups)]
+  const groups = [...new Set(grantedGroups)]
     .filter((group) => deviceDeliverableFields.has(group))
     .sort();
 

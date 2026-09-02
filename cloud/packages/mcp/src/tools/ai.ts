@@ -22,6 +22,10 @@ type StreamEvent = Record<string, unknown> & { type: string };
 type TurnOutcome = {
   chat_id: string | undefined;
   delivered: { scenes: Record<string, unknown>[]; title?: string; tool: string }[];
+  // Frame installs the AI proposed. The scene AI never deploys on its own:
+  // in the browser these become Install cards the user approves; here the
+  // caller decides, by calling frame_scene_install with confirm=true.
+  proposals: Record<string, unknown>[];
   error: string | undefined;
   events_seen: number;
   finished: boolean;
@@ -38,6 +42,7 @@ function newOutcome(): TurnOutcome {
     error: undefined,
     events_seen: 0,
     finished: false,
+    proposals: [],
     reply: "",
     reply_partial: "",
     tools: [],
@@ -72,6 +77,16 @@ function absorb(outcome: TurnOutcome, event: StreamEvent) {
           scenes: event.scenes as Record<string, unknown>[],
           ...(typeof event.title === "string" ? { title: event.title } : {}),
           tool: String(event.tool ?? "build_scene"),
+        });
+      }
+      break;
+    case "proposal":
+      if (event.kind === "install_scene") {
+        outcome.proposals.push({
+          declared_settings_groups: event.declared_settings_groups,
+          frame: event.frame,
+          proposal_id: event.proposal_id,
+          scene: event.scene,
         });
       }
       break;
@@ -204,6 +219,13 @@ async function finalize(
       : { delivered: null }),
     ...(saved ? { saved } : {}),
     ...(saveError ? { save_error: saveError } : {}),
+    ...(outcome.proposals.length > 0
+      ? {
+          proposed_installs: outcome.proposals,
+          proposed_installs_hint:
+            "The AI proposed putting these scenes on frames but installed NOTHING (it never deploys on its own). If the user wants them, call frame_scene_install with confirm=true for each — its declared_settings_groups are the account keys the scene would receive; grant them there only if the user agrees.",
+        }
+      : {}),
     ...(last && !saved && apply === "none"
       ? {
           hint: "The scenes above are not saved anywhere. Save them with scene_update_content (existing scene) or scene_create (new scene), or re-run with apply=save_version / new_scene.",
@@ -219,7 +241,7 @@ export function registerAiTools(server: McpServer, ctx: ToolContext) {
     "ai_scene_chat",
     {
       description:
-        "Ask the FrameOS scene AI to build a new scene or change an existing one, in plain language. Without scene_id it creates scenes from scratch; with scene_id (one of the account's scenes) the AI edits that scene's current JSON. It runs the cloud's own agent (app catalog, docs, examples, linting, frame context when frame_id is given). Waits up to wait_seconds (default 45, max 55) — if the turn is longer, you get a turn_id for ai_turn_wait. apply: none (default; returns the JSON), save_version (save as a new version of scene_id), new_scene (save as a new private scene). chat_id continues an earlier conversation.",
+        "Ask the FrameOS scene AI to build a new scene or change an existing one, in plain language. Without scene_id it creates scenes from scratch; with scene_id (one of the account's scenes) the AI edits that scene's current JSON. It runs the cloud's own agent (app catalog, docs, examples, linting, frame context when frame_id is given). Waits up to wait_seconds (default 45, max 55) — if the turn is longer, you get a turn_id for ai_turn_wait. apply: none (default; returns the JSON), save_version (save as a new version of scene_id), new_scene (save as a new private scene). chat_id continues an earlier conversation. The scene AI never changes a frame itself: an install it proposes comes back as proposed_installs for you to carry out with frame_scene_install (confirm=true) if the user wants it.",
       inputSchema: {
         apply: z.enum(["none", "new_scene", "save_version"]).optional(),
         chat_id: uuid().optional(),

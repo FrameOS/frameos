@@ -244,6 +244,7 @@ describe("frameos-cloud MCP server", () => {
     const result = await client.callTool({
       arguments: {
         activate: true,
+        confirm: true,
         frame_id: frameId,
         name: "Fresh",
         scenes: [{ id: "x", name: "Fresh", nodes: [], edges: [], fields: [], settings: {} }],
@@ -261,14 +262,49 @@ describe("frameos-cloud MCP server", () => {
     expect(JSON.parse(textOf(result))).toMatchObject({ created_private_scene: true, command_id: "cmd-2" });
   });
 
-  it("resolves a store page URL to its scene id for installs", async () => {
+  it("resolves a store page URL to its scene id for installs, passing the grant along", async () => {
     const client = await connect();
     await client.callTool({
-      arguments: { frame_id: frameId, url: "https://scenes.example/s/clock" },
+      arguments: {
+        confirm: true,
+        frame_id: frameId,
+        settings_groups: ["unsplash"],
+        url: "https://scenes.example/s/clock",
+      },
       name: "frame_scene_install",
     });
     const add = calls.find((call) => call.url.includes("/scenes/add"));
-    expect(add?.body).toEqual({ scene_id: sceneId });
+    expect(add?.body).toEqual({ scene_id: sceneId, settings_groups: ["unsplash"] });
+  });
+
+  it("refuses to deploy to a frame without confirm", async () => {
+    const client = await connect();
+    for (const [name, args] of [
+      ["frame_scene_install", { frame_id: frameId, scene_id: sceneId }],
+      ["frame_scenes_set", { frame_id: frameId, scenes: [{ scene_id: sceneId }] }],
+      ["frame_settings_update", { frame_id: frameId, settings: { interval: 60 } }],
+      ["frame_service_settings_enable", { enabled: true, frame_id: frameId }],
+      ["frame_firmware_update", { frame_id: frameId }],
+    ] as const) {
+      const result = await client.callTool({ arguments: { ...args }, name });
+      expect(result.isError, name).toBe(true);
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("posts per-scene grants with frame_scenes_set", async () => {
+    const client = await connect();
+    await client.callTool({
+      arguments: {
+        confirm: true,
+        frame_id: frameId,
+        scenes: [{ scene_id: sceneId, settings_groups: ["openAI"] }],
+      },
+      name: "frame_scenes_set",
+    });
+    expect(calls[0]?.body).toEqual({
+      scenes: [{ scene_id: sceneId, settings_groups: ["openAI"] }],
+    });
   });
 
   it("returns screenshots as image content", async () => {
@@ -293,17 +329,17 @@ describe("frameos-cloud MCP server", () => {
     expect(payload.newest_id).toBe(3);
   });
 
-  it("masks secrets in settings unless asked to reveal", async () => {
+  it("masks secrets in settings and offers no way to reveal them", async () => {
     const client = await connect();
     const masked = JSON.parse(textOf(await client.callTool({ arguments: {}, name: "account_settings_get" }))) as {
       openAI: { apiKey: string; chatModel: string };
     };
     expect(masked.openAI.apiKey).toMatch(/^•+cdef$/);
     expect(masked.openAI.chatModel).toBe("gpt-5.5");
-    const revealed = JSON.parse(
-      textOf(await client.callTool({ arguments: { reveal: true }, name: "account_settings_get" })),
-    ) as { openAI: { apiKey: string } };
-    expect(revealed.openAI.apiKey).toBe("sk-1234567890abcdef");
+    // `reveal` used to be an input; the cloud never hands a stored key to a
+    // token, so the tool no longer pretends it can.
+    const attempt = await client.callTool({ arguments: { reveal: true }, name: "account_settings_get" });
+    expect(JSON.parse(textOf(attempt)).openAI.apiKey).toMatch(/^•+cdef$/);
   });
 
   it("merges a settings update over the current group before posting", async () => {

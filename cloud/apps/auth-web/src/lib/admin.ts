@@ -58,12 +58,12 @@ export function isUuid(value: string): boolean {
 // Superadmin is checked against the accounts row on every request, not a
 // session claim, so revoking the flag takes effect immediately.
 //
-// Superadmin is a property of the person at the keyboard, so by default only
-// a session cookie counts: a personal API token minted by a superadmin must
-// not carry the power to grant superadmin, delete accounts or post journal
-// entries from a script or a leaked ops box. The one caller that needs a
-// token (the nightly accounting job, curl + a superadmin token from cron)
-// opts in explicitly.
+// Superadmin is a property of the person at the keyboard, so only a session
+// cookie counts: a personal API token minted by a superadmin must not carry
+// the power to grant superadmin, delete accounts or post journal entries
+// from a script or a leaked ops box. The nightly accounting job, which used
+// to be the one token caller here, now runs on its own job-token kind
+// (authenticateJobToken, `billing_nightly`) and never touches this.
 //
 // Mutations pass `mutation: true`: granting superadmin, deleting an account
 // or posting a journal entry is sudo-mode work, so a cookie that has not
@@ -71,13 +71,13 @@ export function isUuid(value: string): boolean {
 // sent through /login/reauth first, exactly like revoking a frame. Reads
 // (the tables, the pages) stay on the plain session.
 export async function getSuperadminContext(
-  options: { allowApiToken?: boolean; mutation?: boolean } = {},
+  options: { mutation?: boolean } = {},
 ): Promise<SuperadminContext> {
   const session = await readSession();
   if (!session?.accountId || !hasDatabaseUrl()) {
     return { kind: "unauthenticated" };
   }
-  if (session.apiToken && !options.allowApiToken) {
+  if (session.apiToken) {
     return { kind: "forbidden" };
   }
 
@@ -93,7 +93,7 @@ export async function getSuperadminContext(
   if (!account.isSuperadmin) {
     return { kind: "forbidden" };
   }
-  if (options.mutation && !session.apiToken) {
+  if (options.mutation) {
     const reauth = await requireRecentAuth(createDb(), session.accountId);
     if (reauth) {
       return { kind: "reauth_required", response: reauth };

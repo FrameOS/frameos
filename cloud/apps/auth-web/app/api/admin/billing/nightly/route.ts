@@ -6,7 +6,7 @@ import {
   sweepUnpostedUsage,
 } from "@frameos-cloud/ledger";
 import { NextRequest, NextResponse } from "next/server";
-import { getSuperadminContext } from "../../../../../src/lib/admin";
+import { authenticateJobToken } from "../../../../../src/lib/api-tokens";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { logInfo, reportError } from "../../../../../src/lib/log";
@@ -28,8 +28,14 @@ export const maxDuration = 300;
 // It runs here rather than as `tsx` on the server for a plain reason: the
 // release bundle is Next's standalone output and carries no tsx (which is
 // also why scripts/object-store-sweep.sh is bash). What ops has instead is
-// scripts/accounting-nightly.sh, which curls this with a superadmin API
-// token — an existing auth mechanism rather than a new shared secret.
+// scripts/accounting-nightly.sh, which curls this with a JOB token
+// (`fc_apijob_…`, access `billing_nightly`, minted by
+// scripts/accounting-service-account.sh on an account nobody can sign in
+// as). That token opens this route and nothing else: it satisfies no
+// readSession() gate, so it cannot read an account, post a journal entry or
+// reach any other /api/admin/* route. It used to be a superadmin's personal
+// token, which could do all of that from the ops box. No cookie session is
+// accepted here either — a person runs the sweep by running the script.
 //
 // Three things happen, in order:
 //   1. Sweep the usage records whose ledger entries never landed. Idempotent
@@ -60,16 +66,17 @@ export async function POST(request: NextRequest) {
   if (limited) {
     return limited;
   }
-  const admin = await getSuperadminContext({ allowApiToken: true });
-  if (admin.kind !== "ok") {
-    return jsonError(
-      admin.kind === "forbidden" ? "forbidden" : "unauthenticated",
-      admin.kind === "forbidden" ? 403 : 401,
-    );
-  }
   const { db, response } = requireDatabase();
   if (!db) {
     return response;
+  }
+  const job = await authenticateJobToken(
+    db,
+    request.headers.get("authorization"),
+    "billing_nightly",
+  );
+  if (!job) {
+    return jsonError("unauthenticated", 401);
   }
 
   const startedAt = Date.now();
@@ -108,6 +115,7 @@ export async function POST(request: NextRequest) {
   // The daily line, whether or not anything was wrong: a journal with a
   // number in it every night is how a missing night gets noticed.
   logInfo("billing.nightly", {
+    apiTokenId: job.token.id,
     cogsMicros: summary.cogsMicros.toString(),
     contraRevenueMicros: summary.contraRevenueMicros.toString(),
     customerLiabilityMicros: summary.customerLiabilityMicros.toString(),

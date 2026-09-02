@@ -2,6 +2,7 @@
 // credential. The first second factor on the account also mints recovery
 // codes, returned exactly once.
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
+import { revokeApiTokensForAccount } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
@@ -81,6 +82,10 @@ export async function POST(request: NextRequest) {
     before.enabled && before.recoveryCodesRemaining > 0
       ? undefined
       : await regenerateRecoveryCodes(db, context.accountId);
+  // Same rule as the authenticator confirm: tokens minted before this
+  // passkey existed would keep bypassing it, so they die with the enrolment
+  // and the owner re-mints behind the new factor.
+  const apiTokensRevoked = await revokeApiTokensForAccount(db, context.accountId);
   await recordAuditEvent(db, {
     accountId: context.accountId,
     actor: {
@@ -88,11 +93,12 @@ export async function POST(request: NextRequest) {
       providerSubject: context.providerSubject,
     },
     eventType: "account.passkey_added",
-    metadata: { method: "passkey", name },
+    metadata: { apiTokensRevoked, method: "passkey", name },
     target: { passkeyId },
   });
   await notifySecurityChange(context, "passkey_added", name);
   const result = NextResponse.json({
+    api_tokens_revoked: apiTokensRevoked,
     ok: true,
     passkey: { id: passkeyId, name },
     ...(recoveryCodes ? { recovery_codes: recoveryCodes } : {}),

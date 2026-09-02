@@ -16,6 +16,7 @@ import {
   executeTool,
   toolDefinitions,
   toolLabels,
+  type InstallProposalEvent,
   type ListingEvent,
   type ScenesEvent,
   type ToolContext,
@@ -38,6 +39,8 @@ export type ChatStreamEvent =
     }
   | ScenesEvent
   | ListingEvent
+  // A frame change for the user to approve in the UI (add_scene_to_frame).
+  | InstallProposalEvent
   | { type: "done"; tool: string; reply: string }
   | { type: "error"; detail: string }
   // Keepalive from the relay while nothing else is flowing; never buffered,

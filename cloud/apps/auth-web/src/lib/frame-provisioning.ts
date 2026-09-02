@@ -2,10 +2,11 @@
 // the SD image or flashing the board and carried on the frame row
 // (frames.scene_source_frame_id).
 //
-// Runs when the frame turns active: at the owner's Confirm click for
-// multi-use-token enrollments, and at enrollment itself for single-use
-// tokens (which are born active — the mint was the owner's deliberate act,
-// and a single-use budget means only one device can ever redeem it). In both
+// Runs when the frame turns active: at the owner's Confirm click for every
+// multi-use-token enrollment (an SD image can be copied, so its first
+// redeemer proves nothing), and at enrollment itself for single-use tokens
+// (which are born active — the mint was the owner's deliberate act, and a
+// single-use budget means only one device can ever redeem it). In both
 // cases the source frame is the token minter's, re-checked at use time, and
 // the copy goes through the same assignScenesToFrame gates a workspace
 // deploy does — accessibility, pinned version, shell-risk refusal.

@@ -284,21 +284,85 @@ export async function listCloudFrameScenes(frameId: FrameId): Promise<CloudFrame
  */
 export async function setCloudFrameScenes(
   frameId: FrameId,
-  scenes: readonly { scene_id: string; scene_version?: number | null }[],
+  scenes: readonly CloudSceneAssignmentInput[],
   activeSceneId?: string
 ): Promise<void> {
   const response = await apiFetch(`/api/frames/${frameId}/scenes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      scenes: scenes.map((scene) => ({
-        scene_id: scene.scene_id,
-        ...(scene.scene_version ? { scene_version: scene.scene_version } : {}),
-      })),
+      scenes: scenes.map(cloudSceneAssignmentEntry),
       ...(activeSceneId ? { scene_id: activeSceneId } : {}),
     }),
   })
   await assertOk(response, 'Failed to update the frame scene list')
+}
+
+/**
+ * One entry of POST /api/frames/{id}/scenes. `settings_groups` is the
+ * owner's GRANT of the account's service keys to this scene on this frame
+ * (cloud/docs/cloud-frames.md, "Service settings"): the server stores it
+ * narrowed to what the scene declares. Omitted keeps an assigned scene's
+ * current grant and gives a newly added scene none — so every caller that
+ * adds a scene the owner picked passes the declared groups here.
+ */
+export interface CloudSceneAssignmentInput {
+  scene_id: string
+  scene_version?: number | null
+  settings_groups?: string[] | undefined
+}
+
+function cloudSceneAssignmentEntry(scene: CloudSceneAssignmentInput): Record<string, unknown> {
+  return {
+    scene_id: scene.scene_id,
+    ...(scene.scene_version ? { scene_version: scene.scene_version } : {}),
+    ...(scene.settings_groups ? { settings_groups: scene.settings_groups } : {}),
+  }
+}
+
+/**
+ * Install (or re-pin) one store scene on a cloud frame, granting it the given
+ * service-settings groups — what the chat's Install card does when the user
+ * approves an AI proposal. Read-modify-write like assignCloudFrameStoreScene:
+ * the endpoint replaces the whole list. `settingsGroups` are the group NAMES
+ * the scene declares (unsplash, openAI, …); the server stores them on the
+ * assignment as the grant.
+ */
+export async function installCloudFrameStoreScene(
+  frameId: FrameId,
+  sceneId: string,
+  sceneVersion: number | null,
+  settingsGroups: string[]
+): Promise<void> {
+  const existing = await listCloudFrameScenes(frameId)
+  const entry = cloudSceneAssignmentEntry({
+    scene_id: sceneId,
+    scene_version: sceneVersion,
+    settings_groups: settingsGroups,
+  })
+  // Other rows keep their pin and their grant; the proposed scene takes the
+  // grant the card showed, in its current slot when it is already assigned.
+  const scenes = existing.map((scene) =>
+    scene.scene_id === sceneId
+      ? entry
+      : cloudSceneAssignmentEntry({
+          scene_id: scene.scene_id,
+          scene_version: scene.scene_version ?? null,
+          settings_groups: scene.granted_settings_groups,
+        })
+  )
+  if (!existing.some((scene) => scene.scene_id === sceneId)) {
+    scenes.push(entry)
+  }
+  const response = await apiFetch(`/api/frames/${frameId}/scenes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scenes }),
+  })
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({}))) as { error?: string; detail?: string }
+    throw new Error(detail.detail || cloudSceneDeployErrorMessage(detail.error, response.status))
+  }
 }
 
 /**
@@ -382,7 +446,16 @@ export async function updateCloudAccountSceneContent(
  * because the endpoint replaces the whole list. Returns false when the scene
  * was already assigned (nothing sent).
  */
-export async function assignCloudFrameStoreScene(frameId: FrameId, sceneId: string): Promise<boolean> {
+export async function assignCloudFrameStoreScene(
+  frameId: FrameId,
+  sceneId: string,
+  /**
+   * The service-settings groups to grant the new scene — the groups its apps
+   * declare, as the owner saw them when choosing it. Without this the scene
+   * is served no keys (cloud/docs/cloud-frames.md, "Service settings").
+   */
+  settingsGroups: readonly string[] = []
+): Promise<boolean> {
   const existing = await listCloudFrameScenes(frameId)
   if (existing.some((scene) => scene.scene_id === sceneId)) {
     return false
@@ -392,12 +465,17 @@ export async function assignCloudFrameStoreScene(frameId: FrameId, sceneId: stri
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       scenes: [
-        ...existing.map((scene) => ({
-          scene_id: scene.scene_id,
-          // null/undefined = track the latest published version.
-          ...(scene.scene_version ? { scene_version: scene.scene_version } : {}),
-        })),
-        { scene_id: sceneId },
+        // Existing rows keep their grant explicitly (a row from before the
+        // grant existed becomes explicit on this save, as the docs promise).
+        ...existing.map((scene) =>
+          cloudSceneAssignmentEntry({
+            scene_id: scene.scene_id,
+            // null/undefined = track the latest published version.
+            scene_version: scene.scene_version ?? null,
+            settings_groups: scene.granted_settings_groups ?? [],
+          })
+        ),
+        cloudSceneAssignmentEntry({ scene_id: sceneId, settings_groups: [...settingsGroups] }),
       ],
     }),
   })

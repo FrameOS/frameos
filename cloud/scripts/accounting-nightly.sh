@@ -14,11 +14,14 @@ set -euo pipefail
 # tsx, which is why this cannot simply be a Node script either — the same
 # reason object-store-sweep.sh is bash.)
 #
-# Authentication is an API token on a superadmin account, which is an auth
-# mechanism that already exists rather than a new shared secret:
+# Authentication is a JOB token (`fc_apijob_…`, access `billing_nightly`) on
+# a dedicated service account — an existing token mechanism rather than a
+# new shared secret, but a kind that opens this one route and nothing else
+# (src/lib/api-tokens.ts authenticateJobToken). The account is not a
+# superadmin and cannot be signed in to:
 #
 #   /etc/frameos-cloud/accounting.env
-#     ACCOUNTING_API_TOKEN=fc_api_...
+#     ACCOUNTING_API_TOKEN=fc_apijob_...
 #     ACCOUNTING_URL=https://cloud.frameos.net/api/admin/billing/nightly
 #     ACCOUNTING_HEALTHCHECKS_URL=https://hc-ping.com/...   # or "none"
 #
@@ -50,7 +53,7 @@ fi
 # The token reaches curl through a header file (`-H @file`), never as an
 # argument: a process's command line is readable by every user on the box
 # in `ps` / /proc/*/cmdline for as long as the request runs — up to the
-# 300 s below — and this token is a superadmin's. The directory is created
+# 300 s below. The directory is created
 # 0700 by mktemp -d; the umask keeps the files inside it 0600.
 workdir="$(umask 077 && mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT

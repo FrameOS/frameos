@@ -7,10 +7,16 @@ import {
 } from "../../../../../src/lib/ai/app-chat";
 import {
   appendChatMessage,
+  boundHistory,
   ensureChat,
   historyForModel,
 } from "../../../../../src/lib/ai/chat-store";
 import { formatAiException } from "../../../../../src/lib/ai/scene-utils";
+import {
+  inFlightSpendMicros,
+  releaseTurnSpend,
+  reserveTurnSpend,
+} from "../../../../../src/lib/ai/spend-reservations";
 import { meterAiUsage } from "../../../../../src/lib/billing";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
@@ -40,6 +46,10 @@ export const maxDuration = 300;
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
+
+// Same bound as the scene chat's prompt; the sources are bounded by
+// readAppSources (maxAppSourceChars) and the history by boundHistory.
+const maxPromptChars = 20_000;
 
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
@@ -77,6 +87,12 @@ export async function POST(request: NextRequest) {
   if (!prompt) {
     return jsonError("invalid_prompt", 400, { detail: "Prompt is required" });
   }
+  if (prompt.length > maxPromptChars) {
+    return jsonError("prompt_too_long", 400, {
+      detail: `A message can be at most ${maxPromptChars} characters.`,
+      max_chars: maxPromptChars,
+    });
+  }
   const sources = readAppSources(body.sources);
   if (!sources) {
     return jsonError("invalid_sources", 400, {
@@ -89,7 +105,10 @@ export async function POST(request: NextRequest) {
   // key wins, the operator's shared key stands in where the deployment
   // allows it, and the answer says which — so the turn can be metered
   // against whoever actually paid for it.
-  const access = await resolveAiAccess(db, accountId, { surface: "app_chat" });
+  const access = await resolveAiAccess(db, accountId, {
+    inFlightMicros: inFlightSpendMicros(accountId),
+    surface: "app_chat",
+  });
   if (!access.ok) {
     return aiRefusalResponse(access.refusal);
   }
@@ -139,13 +158,16 @@ export async function POST(request: NextRequest) {
         role: item.role as "user" | "assistant",
       }))
       .slice(-12);
+    history = boundHistory(history);
   }
 
   await appendChatMessage(db, chat.id, { content: prompt, role: "user" });
 
   // The metering handle for this call. The panel makes one model call per
-  // request, so the request is the turn.
+  // request, so the request is the turn. Reserved against the daily cap
+  // until metered (spend-reservations.ts).
   const turnId = crypto.randomUUID();
+  reserveTurnSpend(accountId, turnId);
   try {
     const result = await runAppChat({
       apiKey: credentials.apiKey,
@@ -170,6 +192,7 @@ export async function POST(request: NextRequest) {
       turnId,
       usage: result.usage,
     });
+    releaseTurnSpend(turnId);
     await appendChatMessage(db, chat.id, {
       content: result.reply,
       // File contents are NOT persisted: they are already in the user's
@@ -185,6 +208,7 @@ export async function POST(request: NextRequest) {
       ...(result.files ? { files: result.files } : {}),
     });
   } catch (error) {
+    releaseTurnSpend(turnId);
     const detail = `App chat failed: ${formatAiException(error)}`;
     try {
       await appendChatMessage(db, chat.id, {

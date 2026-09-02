@@ -5,6 +5,7 @@
 import { eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import {
+  accountApiTokens,
   accountIdentities,
   accounts,
   createDb,
@@ -16,9 +17,13 @@ import { POST as createApiToken } from "../../../app/api/account/api-tokens/rout
 import { POST as deleteAccount } from "../../../app/api/account/delete/route";
 import { GET as exportAccount } from "../../../app/api/account/export/route";
 import { PATCH as adminPatchUser } from "../../../app/api/admin/users/[accountId]/route";
+import { GET as listApiTokens } from "../../../app/api/account/api-tokens/route";
+import { GET as accountSettings } from "../../../app/api/settings/route";
 import { POST as passkeyOptions } from "../../../app/api/account/two-factor/passkeys/options/route";
 import { POST as beginTotp } from "../../../app/api/account/two-factor/totp/route";
+import { POST as confirmTotp } from "../../../app/api/account/two-factor/totp/confirm/route";
 import { GET as adminUsers } from "../../../app/api/admin/users/route";
+import { totpCodeAtStep, totpStepFor } from "../../lib/two-factor";
 import { POST as signup } from "../../../app/api/auth/signup/route";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { hashSecret } from "../../lib/secrets";
@@ -38,6 +43,7 @@ vi.mock("next/headers", () => ({
 }));
 
 const baseUrl = "http://localhost:3000";
+const password = "a long enough password";
 const db = createDb();
 let userCounter = 0;
 
@@ -85,7 +91,7 @@ async function signUpVerifiedUser() {
     request("/api/auth/signup", {
       email,
       name: `Token Tester ${userCounter}`,
-      password: "a long enough password",
+      password,
     }),
   );
   expect(response.status).toBe(200);
@@ -226,6 +232,72 @@ describe("what a personal API token may not do", () => {
   });
 });
 
+describe("a job token is not a person", () => {
+  it("opens no ordinary route, not even a read", async () => {
+    const { accountId } = await signUpVerifiedUser();
+    const token = `fc_apijob_${"k".repeat(43)}`;
+    await db.insert(accountApiTokens).values({
+      access: "billing_nightly",
+      accountId,
+      name: "nightly accounting job",
+      tokenHash: hashSecret(token),
+      tokenHint: token.slice(0, 14),
+    });
+    requestHeaders.set("authorization", `Bearer ${token}`);
+    const settings = await accountSettings(
+      request("/api/settings", undefined, "GET", { authorization: `Bearer ${token}` }),
+    );
+    expect(settings.status).toBe(401);
+    const tokens = await listApiTokens(
+      request("/api/account/api-tokens", undefined, "GET", {
+        authorization: `Bearer ${token}`,
+      }),
+    );
+    expect(tokens.status).toBe(401);
+  });
+});
+
+describe("enrolling a second factor revokes every API token", () => {
+  // A token never answers a second factor, so one minted before 2FA was on
+  // would keep bypassing it for as long as it lived.
+  it("kills the tokens minted before an authenticator was confirmed", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    await establishSession(accountId, email);
+    const minted = await createApiToken(
+      request("/api/account/api-tokens", { name: "script" }),
+    );
+    expect(minted.status).toBe(201);
+    const { token } = (await minted.json()) as { token: string };
+
+    const start = await beginTotp(
+      request("/api/account/two-factor/totp", { password }),
+    );
+    expect(start.status).toBe(200);
+    const { secret } = (await start.json()) as { secret: string };
+    const confirm = await confirmTotp(
+      request("/api/account/two-factor/totp/confirm", {
+        code: totpCodeAtStep(secret, totpStepFor()),
+      }),
+    );
+    expect(confirm.status).toBe(200);
+    expect(await confirm.json()).toMatchObject({ api_tokens_revoked: 1, ok: true });
+
+    // The token is dead: the row is revoked and the bearer no longer resolves.
+    const [row] = await db
+      .select({ revokedAt: accountApiTokens.revokedAt })
+      .from(accountApiTokens)
+      .where(eq(accountApiTokens.accountId, accountId));
+    expect(row?.revokedAt).not.toBeNull();
+    cookieJar.clear();
+    const asToken = await listApiTokens(
+      request("/api/account/api-tokens", undefined, "GET", {
+        authorization: `Bearer ${token}`,
+      }),
+    );
+    expect(asToken.status).toBe(401);
+  });
+});
+
 describe("superadmin mutations need a recent proof of credentials", () => {
   it("sends a superadmin cookie through reauth before a mutation", async () => {
     const admin = await signUpVerifiedUser();
@@ -274,7 +346,7 @@ describe("second-factor enrolment needs a recent proof of credentials", () => {
     const { accountId, email } = await signUpVerifiedUser();
     const sessionToken = await establishSession(accountId, email);
 
-    const fresh = await beginTotp(request("/api/account/two-factor/totp", {}));
+    const fresh = await beginTotp(request("/api/account/two-factor/totp", { password }));
     expect(fresh.status).toBe(200);
 
     await db
@@ -282,7 +354,7 @@ describe("second-factor enrolment needs a recent proof of credentials", () => {
       .set({ authenticatedAt: new Date(Date.now() - 60 * 60 * 1000) })
       .where(eq(sessions.tokenHash, hashSecret(sessionToken)));
 
-    const stale = await beginTotp(request("/api/account/two-factor/totp", {}));
+    const stale = await beginTotp(request("/api/account/two-factor/totp", { password }));
     expect(stale.status).toBe(403);
     const payload = (await stale.json()) as {
       error: string;

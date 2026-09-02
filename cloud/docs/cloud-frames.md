@@ -212,22 +212,59 @@ instead of re-shipping credentials, and — the part that matters most — it
 **stops the instant the scope is revoked**. There is nothing in flight to
 recall.
 
-**Narrowed by what the scenes declare.** A frame is served only the groups
-its assigned scenes actually ask for, derived from the apps' `settings` lists
-the same way the live preview derives them (`src/lib/preview-settings.ts`).
-A frame running a clock scene never sees the account's OpenAI key. The
-response also lists the declared groups that are *not* configured, so the UI
-can say "this frame needs an Unsplash key" — and so the device knows those
-six groups are cloud-owned: a group absent from `settings` is deleted
-on-device rather than left stale.
+**Sealed at rest, masked on the way out.** Every secret field in
+`account_settings` (the keys and tokens; not the Home Assistant / Immich
+URLs or the model tuning) is encrypted with the deployment key before it is
+written (`account-settings.ts`, the same AES-GCM the TOTP secrets use), and
+only two readers ever open it: this pull and the AI credential resolver.
+`GET /api/settings` answers a masked hint (`••••••••cdef`), and a settings
+form that posts the mask back keeps the stored key — so the shared SPA and
+the account page round-trip whole groups without holding a key. A browser
+session may ask for `?reveal=1` (the wasm preview runs the scene in the
+browser and needs the bytes); an API token never gets the real values, and
+the account export never did. Rows written before this shipped are plain
+JSON; they are re-sealed in place the first time they are read.
 
-**Why the declared groups are denormalized onto `frames`.** Deriving them
-means unzipping every assigned scene version (`buildScenesPayloadForFrame`;
+**Narrowed by what the owner granted, not by what the scenes declare.** A
+scene's apps declare the groups they want (`settings` in `config.json`,
+derived the same way the live preview derives them —
+`src/lib/preview-settings.ts`), but a published scene is anyone's code, so
+that declaration is a *request*. The 2026-09 security review found the old
+model — ship every declared group — let a store scene decide for itself
+which of the account's keys it received. Now each assignment
+(`frame_scene_assignments`, migration 0048) records two lists: what the
+assigned version **declares** (`declared_settings_groups`, computed by
+`buildScenesPayloadForFrame` while the bytes are open) and what the owner
+**granted** (`granted_settings_groups`, settled in `assignScenesToFrame`
+from the caller's `settings_groups` ∩ declared). The rules
+(`resolveGrantedSettingsGroups`): an explicit list is stored narrowed to
+the declaration; a scene already on the frame keeps its grant when the
+caller says nothing; a *new* assignment that names no groups gets none —
+so an agent's or a script's install never hands out a key by default; a
+re-push of an unpinned assignment that resolved to a newer version refreshes
+the declaration but never widens the grant. The workspace pre-ticks a
+scene's declared groups when the owner installs it (that click is the
+consent) and shows per-scene toggles under the frame's service settings;
+the store page's install dialog shows the same checkboxes. `NULL` granted is
+a row from before the column existed: it reads as "granted = declared" so no
+frame went dark on deploy, and it becomes explicit the next time the owner
+saves the scene list. A frame running a clock scene never sees the account's
+OpenAI key, and neither does a weather scene the owner did not grant it to.
+The response also lists the granted groups that are *not* configured, so the
+UI can say "this frame needs an Unsplash key" — and so the device knows those
+six groups are cloud-owned: a group absent from `settings` is deleted
+on-device rather than left stale. A declared-but-ungranted group appears
+nowhere in the answer.
+
+**Why the granted union is denormalized onto `frames`.** Deriving it means
+unzipping every assigned scene version (`buildScenesPayloadForFrame`;
 the store caps a scene zip at 32 MiB), which is unthinkable on a route
-devices poll. `frames.service_setting_groups` is written wherever scenes are
-assigned, from the payload that route already assembled; `NULL` means "never
-computed" and the pull route computes and backfills it once. The column holds
-group *names* only — no credential is ever stored on a frame row.
+devices poll. `frames.service_setting_groups` — now the union of the grants
+across the frame's assignments — is written wherever scenes are assigned or
+re-pushed, from the payload that route already assembled; `NULL` means
+"never computed" and the pull route computes and backfills it once (the
+per-assignment declarations with it). The column holds group *names* only —
+no credential is ever stored on a frame row.
 
 **Consent.** `settings:services` is a real scope, listed on the device
 approval screen and never in `autoGrantedDeviceScopes`; claim-token
@@ -258,7 +295,12 @@ spawning, no arbitrary paths, no device control.
 `frameConfig.settings[namespace]` only for the namespaces its own
 `config.json` lists. That makes credential access *auditable* — you can read
 what an app will touch before installing it — but a hostile app simply
-declares what it wants. The audit trail is the mitigation.
+declares what it wants. On a cloud-managed frame the declaration no longer
+decides anything by itself: the control plane only serves the groups the
+owner granted that scene on that frame ("Narrowed by what the owner
+granted" above), so an undeclared-then-declared key never arrives. On the
+device the declaration gate stays as the second layer, and the audit trail
+is the mitigation for a self-hosted frame.
 
 **Filesystem access is frame-wide by default, not per-scene.** Every asset
 call resolves through `resolveAssetPath`, which rejects absolute paths and
@@ -413,10 +455,10 @@ One button, three tiles, one shared enrollment endpoint.
   the image contains network credentials. Default flow leaves WiFi out and
   relies on the existing captive portal (`FrameOS-Setup` hotspot).
 - Boot sequence: flash → boot → portal if no network → dial cloud with
-  claim token → keypair enrollment → the token's first enrollment activates
-  the frame right away (the mint was the owner's deliberate act); each later
-  enrollment of the image's multi-use token stays **pending** until the
-  owner confirms it.
+  claim token → keypair enrollment → every enrollment of the image's
+  multi-use token lands **pending** until the owner confirms it (an image
+  can be copied or leaked, so its first redeemer is not proof of ownership);
+  only a single-use token's enrollment is born active.
 - Initial hardware support is whatever buildroot supports (today: Raspberry
   Pi Zero 2 W); `rpios` users can enroll via flow 2 instead.
 

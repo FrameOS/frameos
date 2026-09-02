@@ -8,6 +8,7 @@ import {
 import { NextRequest } from "next/server";
 import {
   appendChatMessage,
+  boundHistory,
   ensureChat,
   historyForModel,
 } from "../../../../src/lib/ai/chat-store";
@@ -23,7 +24,18 @@ import { meterAiUsageInBackground } from "../../../../src/lib/billing";
 import { buildInitialInput, runAgentLoop } from "../../../../src/lib/ai/loop";
 import { formatAiException, type JsonObject } from "../../../../src/lib/ai/scene-utils";
 import { captureAiGeneration, captureAiTurn } from "../../../../src/lib/ai/telemetry";
-import type { ListingEvent, ScenesEvent, ToolContext } from "../../../../src/lib/ai/tools";
+import {
+  inFlightSpendMicros,
+  releaseTurnSpend,
+  reserveTurnSpend,
+  updateTurnSpend,
+} from "../../../../src/lib/ai/spend-reservations";
+import type {
+  InstallProposalEvent,
+  ListingEvent,
+  ScenesEvent,
+  ToolContext,
+} from "../../../../src/lib/ai/tools";
 import {
   activeTurnForChat,
   activeTurnCountForAccount,
@@ -131,7 +143,7 @@ function parseDraftListing(value: unknown): ListingEvent["listing"] | null {
   }
   const draft: ListingEvent["listing"] = {};
   if (typeof record.description === "string" || record.description === null) {
-    draft.description = record.description;
+    draft.description = record.description?.slice(0, maxListingDescriptionChars) ?? null;
   }
   if (typeof record.category === "string" || record.category === null) {
     draft.category = record.category;
@@ -216,9 +228,21 @@ async function storeSceneContextBlock(
 // sends a turn every minute or two; forty in fifteen minutes is a script.
 const aiTurnsPerAccountRateLimit = { limit: 40, windowMs: 15 * 60 * 1000 };
 // Unfinished turns one account may hold open across all its chats. Each one
-// is admitted under the daily cap before any of them has metered, so this
-// bounds how far past the cap concurrent turns can carry an account.
+// is admitted under the daily cap before any of them has metered; this bounds
+// the count, and the spend reservations (spend-reservations.ts) bound the
+// money — the gate below counts what the other turns have reserved.
 const maxActiveTurnsPerAccount = 3;
+
+// Bounds on what one request may put into the model context. Everything
+// else the client sends is either dropped to names/ids (editor scenes,
+// listing) or already bounded (history: chat-store.ts boundHistory; the
+// body as a whole: readJsonObject's 4 MiB). Refusals, not silent cuts, for
+// the two that carry meaning: a prompt or a scene cut in the middle would be
+// answered wrong rather than not at all.
+const maxPromptChars = 20_000;
+const maxSceneContextChars = 300_000;
+const maxSelectionContextChars = 100_000;
+const maxListingDescriptionChars = 4_000;
 
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
@@ -263,11 +287,22 @@ export async function POST(request: NextRequest) {
   if (!prompt) {
     return jsonError("invalid_prompt", 400, { detail: "Prompt is required" });
   }
+  if (prompt.length > maxPromptChars) {
+    return jsonError("prompt_too_long", 400, {
+      detail: `A message can be at most ${maxPromptChars} characters.`,
+      max_chars: maxPromptChars,
+    });
+  }
 
   // The one gate: the AI switch, the key, and the daily cap, in that order
   // (§5.1/§5.3). Every AI surface goes through it, which is what makes
-  // "does the cap apply here?" a question with one answer.
-  const access = await resolveAiAccess(db, accountId, { surface: "scene_chat" });
+  // "does the cap apply here?" a question with one answer. The cap counts
+  // what this account's unfinished turns have reserved, so a burst of turns
+  // cannot each be admitted under a cap the first one will spend.
+  const access = await resolveAiAccess(db, accountId, {
+    inFlightMicros: inFlightSpendMicros(accountId),
+    surface: "scene_chat",
+  });
   if (!access.ok) {
     return aiRefusalResponse(access.refusal);
   }
@@ -288,6 +323,13 @@ export async function POST(request: NextRequest) {
 
   const requestedChatId = stringOrNull(body.chatId) ?? crypto.randomUUID();
   const scenePayload = objectOrNull(body.scene);
+  const sceneContextJson = scenePayload ? JSON.stringify(scenePayload) : "";
+  if (sceneContextJson.length > maxSceneContextChars) {
+    return jsonError("scene_too_large", 400, {
+      detail: `This scene is too large for the AI chat (${sceneContextJson.length} characters; the limit is ${maxSceneContextChars}).`,
+      max_chars: maxSceneContextChars,
+    });
+  }
   const sceneId = stringOrNull(body.sceneId);
   const { block: frameBlock, frameId } = await frameContextBlock(
     db,
@@ -335,6 +377,7 @@ export async function POST(request: NextRequest) {
         role: item.role as "user" | "assistant",
       }))
       .slice(-12);
+    history = boundHistory(history);
   }
 
   const contextParts: string[] = [];
@@ -360,7 +403,7 @@ export async function POST(request: NextRequest) {
     contextParts.push(
       `The user has this scene open in the editor (its id is "${sceneId ?? scenePayload.id}"). ` +
         "update_scene will modify it:\n" +
-        JSON.stringify(scenePayload),
+        sceneContextJson,
     );
   }
   if (editorScenes && editorScenes.length > 1) {
@@ -377,9 +420,11 @@ export async function POST(request: NextRequest) {
   const selectedNodes = Array.isArray(body.selectedNodes) ? body.selectedNodes : [];
   const selectedEdges = Array.isArray(body.selectedEdges) ? body.selectedEdges : [];
   if (selectedNodes.length > 0 || selectedEdges.length > 0) {
+    const selection = JSON.stringify({ edges: selectedEdges, nodes: selectedNodes });
     contextParts.push(
-      "The user has selected these elements in the editor:\n" +
-        JSON.stringify({ edges: selectedEdges, nodes: selectedNodes }),
+      selection.length <= maxSelectionContextChars
+        ? "The user has selected these elements in the editor:\n" + selection
+        : `The user has selected ${selectedNodes.length} node(s) and ${selectedEdges.length} edge(s) in the editor; the selection is too large to include here, so work from the scene JSON above.`,
     );
   }
 
@@ -405,6 +450,9 @@ export async function POST(request: NextRequest) {
         : "editor";
   const scenesDelivered: { tool: string; title?: string; count: number }[] = [];
   const deliveredScenes: unknown[] = [];
+  // Frame changes proposed this turn, persisted with the reply so a chat
+  // reopened later still shows the Install card (unapproved ones included).
+  const proposals: InstallProposalEvent[] = [];
   const roundToolCalls: string[] = [];
   const toolArgErrors: string[] = [];
 
@@ -412,7 +460,7 @@ export async function POST(request: NextRequest) {
   let roundsSeen = 0;
   let usageSeen = { cachedInputTokens: 0, inputTokens: 0, outputTokens: 0, reasoningTokens: 0 };
   // The turn's emit, once it is running; emitScenes forwards through it.
-  let turnEmit: (event: ScenesEvent | ListingEvent) => void = () => {};
+  let turnEmit: (event: ScenesEvent | ListingEvent | InstallProposalEvent) => void = () => {};
   const toolContext: ToolContext = {
     accountId,
     currentListing: draftListing,
@@ -421,6 +469,10 @@ export async function POST(request: NextRequest) {
     db,
     editorScenes,
     emitListing: (event) => {
+      turnEmit(event);
+    },
+    emitProposal: (event) => {
+      proposals.push(event);
       turnEmit(event);
     },
     emitScenes: (event) => {
@@ -441,11 +493,15 @@ export async function POST(request: NextRequest) {
     storeSceneId,
   };
 
+  // Reserved from here until onFinish: the next turn's admission gate counts
+  // it, and the ledger takes over once the metering below has run.
+  reserveTurnSpend(accountId, turnId);
   const turn = startTurn({
     accountId,
     chatId: chat.id,
     id: turnId,
     onFinish: (finished, outcome, failure) => {
+      releaseTurnSpend(finished.id);
       const durationMs = Date.now() - finished.startedAt;
       // Metered whatever the outcome: a turn that errored or was stopped
       // still burned the tokens it burned, and the provider bills for them.
@@ -520,13 +576,22 @@ export async function POST(request: NextRequest) {
                   price: budget.price,
                   usage: splitProviderUsage(usageSeen),
                 }).priceMicros;
-                if (budget.spentMicros + soFar >= budget.capMicros + budget.overdraftMicros) {
+                // What this turn has cost so far replaces its reservation,
+                // and the account's OTHER running turns count against the
+                // line too — they will be metered as surely as this one.
+                updateTurnSpend(turnId, soFar);
+                const othersInFlight = inFlightSpendMicros(accountId, turnId);
+                if (
+                  budget.spentMicros + othersInFlight + soFar >=
+                  budget.capMicros + budget.overdraftMicros
+                ) {
                   // The turn crossed the day's line mid-flight: stop it here
                   // rather than let a long tool loop run the overshoot up.
                   // The tokens already burned are metered in onFinish.
                   logWarn("ai.chat.turn_over_budget", {
                     accountId,
                     chatId: chat.id,
+                    inFlightMicros: othersInFlight.toString(),
                     round: report.round,
                     soFarMicros: soFar.toString(),
                     spentMicros: budget.spentMicros.toString(),
@@ -586,8 +651,13 @@ export async function POST(request: NextRequest) {
         await appendChatMessage(db, chat.id, {
           content,
           payload:
-            scenesDelivered.length > 0
-              ? { delivered: deliveredScenes, scenes: scenesDelivered }
+            scenesDelivered.length > 0 || proposals.length > 0
+              ? {
+                  ...(scenesDelivered.length > 0
+                    ? { delivered: deliveredScenes, scenes: scenesDelivered }
+                    : {}),
+                  ...(proposals.length > 0 ? { proposals } : {}),
+                }
               : null,
           role: "assistant",
           tool,

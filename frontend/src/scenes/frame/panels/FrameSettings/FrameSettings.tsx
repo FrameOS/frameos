@@ -1,6 +1,6 @@
 import { useActions, useValues } from 'kea'
 import { AdvancedSection } from '../../../../components/AdvancedSection'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import equal from 'fast-deep-equal'
@@ -54,9 +54,12 @@ import {
   esp32TimeZoneCloudFrameSettingsMinVersion,
   extendedCloudFrameSettingsMinVersion,
   hardwareCloudFrameSettingsMinVersion,
+  listCloudFrameScenes,
+  setCloudFrameScenes,
   setCloudFrameServiceSettingsEnabled,
   setCloudFrameTelemetryEnabled,
 } from '../../../../utils/cloudFrameApi'
+import type { CloudFrameSceneRow } from '../../../../utils/cloudFrameScenes'
 import { appsLogic } from '../Apps/appsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
 import { Spinner } from '../../../../components/Spinner'
@@ -363,13 +366,63 @@ function FrameAdminServiceSecretsSection(): JSX.Element {
  */
 function CloudServiceSettingsSection(): JSX.Element {
   const { frameId, frame } = useValues(frameLogic)
-  const { loadFrame } = useActions(framesModel)
+  const { loadFrame, hydrateCloudFrameScenes } = useActions(framesModel)
   const { savedSettings } = useValues(settingsLogic)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const groups = frame?.service_setting_groups ?? []
   const enabled = frame?.service_settings_enabled === true
+
+  // Per-scene grants: the server's assignment list, each scene's declared
+  // groups as checkboxes. Loaded on demand (the frame row carries only the
+  // granted union), saved by re-posting the whole list with settings_groups.
+  const [rows, setRows] = useState<CloudFrameSceneRow[] | null>(null)
+  const [rowsError, setRowsError] = useState<string | null>(null)
+  const [draftGrants, setDraftGrants] = useState<Record<string, string[]>>({})
+  const [savingGrants, setSavingGrants] = useState(false)
+  const loadRows = async (): Promise<void> => {
+    try {
+      const listed = await listCloudFrameScenes(frameId)
+      setRows(listed)
+      setDraftGrants(Object.fromEntries(listed.map((row) => [row.scene_id, row.granted_settings_groups ?? []])))
+      setRowsError(null)
+    } catch (e) {
+      setRowsError(e instanceof Error ? e.message : String(e))
+    }
+  }
+  useEffect(() => {
+    void loadRows()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameId, frame?.assigned_checksum])
+  const grantsChanged =
+    rows !== null &&
+    rows.some((row) => !equal([...(row.granted_settings_groups ?? [])].sort(), [...(draftGrants[row.scene_id] ?? [])].sort()))
+  const saveGrants = async (): Promise<void> => {
+    if (!rows) {
+      return
+    }
+    setSavingGrants(true)
+    setError(null)
+    try {
+      await setCloudFrameScenes(
+        frameId,
+        rows.map((row) => ({
+          scene_id: row.scene_id,
+          scene_version: row.scene_version ?? null,
+          settings_groups: draftGrants[row.scene_id] ?? [],
+        })),
+        frame?.active_scene_id
+      )
+      await loadRows()
+      loadFrame(frameId)
+      hydrateCloudFrameScenes(frameId, true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSavingGrants(false)
+    }
+  }
 
   const toggle = async (next: boolean): Promise<void> => {
     setSaving(true)
@@ -405,11 +458,11 @@ function CloudServiceSettingsSection(): JSX.Element {
             {error ? <div className="text-red-300 text-xs">{error}</div> : null}
           </div>
         </Field>
-        <Field name="_noop" label="Requested by this frame's scenes">
+        <Field name="_noop" label="Delivered to this frame">
           <div className="w-full">
             {groups.length === 0 ? (
               <div className="frameos-muted text-sm">
-                None — no scene assigned to this frame declares a service that needs a key.
+                None — no scene on this frame has been granted a service key.
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
@@ -427,6 +480,66 @@ function CloudServiceSettingsSection(): JSX.Element {
                 })}
               </div>
             )}
+          </div>
+        </Field>
+        <Field name="_noop" label="Granted per scene">
+          <div className="w-full space-y-2">
+            <div className="frameos-muted text-xs">
+              A scene only asks for a key; you decide which scenes get which. Untick a service to keep that key
+              away from a scene, even if the scene declares it.
+            </div>
+            {rowsError ? <div className="text-red-300 text-xs">{rowsError}</div> : null}
+            {rows === null && !rowsError ? <Spinner /> : null}
+            {rows && rows.length === 0 ? (
+              <div className="frameos-muted text-sm">No scenes are assigned to this frame.</div>
+            ) : null}
+            {rows?.map((row) => {
+              const declared = row.declared_settings_groups ?? []
+              const granted = draftGrants[row.scene_id] ?? []
+              return (
+                <div key={row.scene_id} className="space-y-1">
+                  <div className="text-sm">{row.name || row.slug || row.scene_id}</div>
+                  {declared.length === 0 ? (
+                    <div className="frameos-muted text-xs pl-3">Needs no service keys.</div>
+                  ) : (
+                    <div className="flex flex-wrap gap-3 pl-3">
+                      {declared.map((group) => (
+                        <label key={group} className="inline-flex items-center gap-1 text-xs cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={granted.includes(group)}
+                            disabled={savingGrants}
+                            onChange={(e) =>
+                              setDraftGrants((current) => ({
+                                ...current,
+                                [row.scene_id]: e.target.checked
+                                  ? [...granted.filter((g) => g !== group), group]
+                                  : granted.filter((g) => g !== group),
+                              }))
+                            }
+                          />
+                          {settingsDetails[group]?.title ?? group}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {rows && rows.length > 0 ? (
+              <div className="flex justify-end">
+                <Button
+                  size="small"
+                  color={grantsChanged ? 'primary' : 'secondary'}
+                  disabled={!grantsChanged || savingGrants}
+                  onClick={() => void saveGrants()}
+                  className="inline-flex items-center gap-2"
+                >
+                  {savingGrants ? <Spinner color="white" /> : null}
+                  Save grants
+                </Button>
+              </div>
+            ) : null}
           </div>
         </Field>
       </div>

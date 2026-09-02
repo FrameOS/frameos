@@ -182,6 +182,35 @@ export async function chatMessages(db: Database, chatId: string) {
   }));
 }
 
+// Bounds on what a chat's history puts back into the model context. A
+// persisted reply can be long (a model that pasted a scene into its answer,
+// or a user who pasted a document); each item is cut and the whole window is
+// bounded, so a chat cannot grow its own per-turn context without limit.
+export const maxHistoryItemChars = 8_000;
+export const maxHistoryTotalChars = 60_000;
+
+export function boundHistory(
+  items: { role: "user" | "assistant"; content: string }[],
+): { role: "user" | "assistant"; content: string }[] {
+  const bounded: { role: "user" | "assistant"; content: string }[] = [];
+  let budget = maxHistoryTotalChars;
+  // Newest first, so what is dropped when the window is full is the oldest.
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]!;
+    if (budget <= 0) {
+      break;
+    }
+    const cut = Math.min(item.content.length, maxHistoryItemChars, budget);
+    const content =
+      cut < item.content.length
+        ? `${item.content.slice(0, cut)}\n…(truncated)`
+        : item.content;
+    budget -= cut;
+    bounded.unshift({ content, role: item.role });
+  }
+  return bounded;
+}
+
 // The model-facing history: recent user/assistant turns as plain text.
 export async function historyForModel(
   db: Database,
@@ -195,13 +224,15 @@ export async function historyForModel(
     .orderBy(desc(aiChatMessages.id))
     .limit(limit);
   rows.reverse();
-  return rows
-    .filter(
-      (row) =>
-        (row.role === "user" || row.role === "assistant") && row.content.trim(),
-    )
-    .map((row) => ({
-      content: row.content,
-      role: row.role as "user" | "assistant",
-    }));
+  return boundHistory(
+    rows
+      .filter(
+        (row) =>
+          (row.role === "user" || row.role === "assistant") && row.content.trim(),
+      )
+      .map((row) => ({
+        content: row.content,
+        role: row.role as "user" | "assistant",
+      })),
+  );
 }

@@ -8,6 +8,7 @@ import {
 import { NextRequest, NextResponse } from "next/server";
 import {
   filterAccountSettings,
+  sealAccountSettingsForWrite,
   storedAccountSettings,
   type FilteredAccountSettings,
 } from "../../../src/lib/account-settings";
@@ -37,6 +38,14 @@ export const runtime = "nodejs";
 // Which groups and fields are storable is the account-settings.ts allowlist.
 // The account settings page (app/account/settings) renders the same merged
 // object server-side and posts here from its form.
+//
+// Secrets are sealed at rest and MASKED on the way out (account-settings.ts):
+// GET answers `••••••••cdef` for a key, and a form that posts that mask back
+// keeps the stored key. `?reveal=1` returns the real values, and only to a
+// browser session — it exists for the wasm preview, which runs the scene in
+// the browser and needs the bytes. An API token never gets them: a leaked
+// token can rotate the keys but cannot read them, and a read-only token can
+// do neither.
 
 // Tell every cloud-managed frame that holds `settings:services` to re-pull.
 // The nudge carries NO payload — the keys ride the device-authed HTTPS pull
@@ -95,8 +104,10 @@ export async function GET(request: NextRequest) {
   if (!db) {
     return response;
   }
+  const reveal =
+    !session.apiToken && request.nextUrl.searchParams.get("reveal") === "1";
   return NextResponse.json(
-    await storedAccountSettings(db, session.accountId),
+    await storedAccountSettings(db, session.accountId, { reveal }),
   );
 }
 
@@ -126,14 +137,17 @@ export async function POST(request: NextRequest) {
   if (filtered.error || !filtered.settings) {
     return jsonError(filtered.error ?? "invalid_settings", 400);
   }
-  const settings: FilteredAccountSettings = filtered.settings;
-
   // A payload with no storable groups at all (e.g. the shared SPA's
   // personal-favourites save, which is backend bookkeeping) is a no-op, not
   // an error: answer with the current settings so callers that reset their
   // form from the response stay consistent.
-  const keys = Object.keys(settings);
+  const keys = Object.keys(filtered.settings);
   if (keys.length > 0) {
+    const settings: FilteredAccountSettings = await sealAccountSettingsForWrite(
+      db,
+      session.accountId,
+      filtered.settings,
+    );
     for (const key of keys) {
       await db
         .insert(accountSettings)

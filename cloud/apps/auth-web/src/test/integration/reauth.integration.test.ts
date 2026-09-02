@@ -162,7 +162,7 @@ async function ageSession(token: string, seconds = recentAuthMaxAgeSeconds + 60)
 }
 
 async function enrollTotp() {
-  const start = await startTotp(request("/api/account/two-factor/totp", { body: {} }));
+  const start = await startTotp(request("/api/account/two-factor/totp", { body: { password } }));
   expect(start.status).toBe(200);
   const started = (await start.json()) as { secret: string };
   const confirm = await confirmTotp(

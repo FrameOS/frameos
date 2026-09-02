@@ -16,6 +16,7 @@ import {
   storeSceneVersions,
   storeScenes,
 } from "@frameos-cloud/db";
+import { isSealedSettingValue, openSettingValue } from "./account-settings";
 import { secondFactorStatus } from "./two-factor";
 
 // GDPR art. 20 (portability) and art. 15 (access) in one file the user can
@@ -358,7 +359,18 @@ export async function buildAccountExport(
 // nothing that could be pasted back into a request.
 export function maskSettingValue(value: unknown): unknown {
   if (typeof value === "string") {
-    return value.length > 8 ? `••••${value.slice(-4)}` : "••••";
+    // Secrets are sealed at rest (account-settings.ts); the hint should be
+    // the tail of the key the owner knows, not of its ciphertext. A value
+    // that will not open is shown as bullets only.
+    let plain = value;
+    if (isSealedSettingValue(value)) {
+      try {
+        plain = openSettingValue(value);
+      } catch {
+        return "••••";
+      }
+    }
+    return plain.length > 8 ? `••••${plain.slice(-4)}` : "••••";
   }
   if (typeof value === "number" || typeof value === "boolean" || value === null) {
     return value;

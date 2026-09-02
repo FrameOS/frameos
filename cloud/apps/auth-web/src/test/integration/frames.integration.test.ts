@@ -188,8 +188,8 @@ async function enrolledFrame() {
   return { accountId, keys, ...payload };
 }
 
-// A frame that is still PENDING: a token's first enrollment is born active,
-// so pending only exists from the second enrollment of a multi-use token on.
+// A frame that is still PENDING: every enrollment of a multi-use token is
+// (an SD image can be copied, so its first redeemer proves nothing).
 async function enrolledPendingFrame() {
   const accountId = await signIn();
   const keys = deviceKeypair();
@@ -200,9 +200,6 @@ async function enrolledPendingFrame() {
   const { claim_token: claimToken } = (await minted.json()) as {
     claim_token: string;
   };
-  // The first card auto-confirms; the frame under test is the second.
-  const first = await enroll(claimToken, deviceKeypair().publicKeyBase64);
-  expect(first.status).toBe(200);
   const response = await enroll(claimToken, keys.publicKeyBase64);
   expect(response.status).toBe(200);
   const payload = (await response.json()) as {
@@ -602,19 +599,27 @@ describe("cloud-managed frame enrollment", () => {
     expect(first.status).toBe(200);
     const second = await enroll(minted.claim_token, deviceKeypair().publicKeyBase64);
     expect(second.status).toBe(200);
-    const firstPayload = (await first.json()) as { frame_id: string };
+    const firstPayload = (await first.json()) as {
+      auto_confirmed?: boolean;
+      frame_id: string;
+      status: string;
+    };
     const secondPayload = (await second.json()) as { frame_id: string };
     expect(firstPayload.frame_id).not.toBe(secondPayload.frame_id);
+    // The FIRST card is pending too: the image can be copied or leaked, so
+    // whoever boots a card first is not thereby the owner. Being born
+    // active used to hand that first redeemer `settings:services` and the
+    // provisioning scenes — the account's service keys, in effect.
+    expect(firstPayload.status).toBe("pending");
+    expect(firstPayload.auto_confirmed).toBeUndefined();
 
     const rows = await db
       .select()
       .from(frames)
       .where(eq(frames.accountId, accountId));
     expect(rows).toHaveLength(2);
-    // The first card off the image auto-confirms (the mint was the owner's
-    // deliberate act); every later card needs the owner's click.
     const byFrameId = new Map(rows.map((row) => [row.id, row.status]));
-    expect(byFrameId.get(firstPayload.frame_id)).toBe("active");
+    expect(byFrameId.get(firstPayload.frame_id)).toBe("pending");
     expect(byFrameId.get(secondPayload.frame_id)).toBe("pending");
     expect(rows[0]?.publicKey).not.toBe(rows[1]?.publicKey);
 
@@ -1685,29 +1690,15 @@ describe("frame management API", () => {
       claim_token: string;
     };
 
-    // The image's first card auto-confirms and takes its scenes right away.
-    const firstCard = await enroll(claimToken, deviceKeypair().publicKeyBase64);
-    expect(firstCard.status).toBe(200);
-    const { frame_id: firstFrameId, status: firstStatus } =
-      (await firstCard.json()) as { frame_id: string; status: string };
-    expect(firstStatus).toBe("active");
-    expect(
-      (
-        await db
-          .select()
-          .from(frameSceneAssignments)
-          .where(eq(frameSceneAssignments.frameId, firstFrameId))
-      ).map((row) => row.sceneId),
-    ).toEqual([scene.id]);
-
     const enrolled = await enroll(claimToken, deviceKeypair().publicKeyBase64);
     expect(enrolled.status).toBe(200);
-    const { frame_id: newFrameId } = (await enrolled.json()) as {
-      frame_id: string;
-    };
+    const { frame_id: newFrameId, status: newStatus } =
+      (await enrolled.json()) as { frame_id: string; status: string };
 
-    // A LATER card is pending, and a board nobody confirmed has been sent
-    // nothing — the intent waits on the frame row until the owner's click.
+    // Every card off a multi-use image is pending — the first one included —
+    // and a board nobody confirmed has been sent nothing: the intent waits
+    // on the frame row until the owner's click.
+    expect(newStatus).toBe("pending");
     expect(
       await db
         .select()

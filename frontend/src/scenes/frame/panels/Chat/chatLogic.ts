@@ -21,7 +21,14 @@ import { socketLogic } from '../../../socketLogic'
 import { editAppLogic } from '../EditApp/editAppLogic'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
 import { isCloudMode } from '../../../../utils/cloudMode'
-import { formatElapsed, streamCloudAiChat, type CloudAiChatEvent } from '../../../../utils/cloudAiChat'
+import {
+  formatElapsed,
+  isCloudAiInstallProposal,
+  streamCloudAiChat,
+  type CloudAiChatEvent,
+  type CloudAiInstallProposal,
+} from '../../../../utils/cloudAiChat'
+import { installCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { renderSceneCheck } from '../../../../utils/wasmSceneRenderCheck'
 import { projectApiPathForProject } from '../../../../utils/projectApi'
 
@@ -43,6 +50,20 @@ export interface ChatLogicProps {
   sceneId?: string | null
 }
 
+export type ChatInstallProposalStatus =
+  | { state: 'pending' }
+  | { state: 'approving' }
+  | { state: 'installed'; queued: boolean }
+  | { state: 'failed'; error: string }
+  | { state: 'dismissed' }
+
+/** A frame install the cloud agent proposed (add_scene_to_frame) and the
+ * user has yet to approve on the card the chat renders for it. */
+export type ChatInstallProposal = {
+  proposal: CloudAiInstallProposal
+  status: ChatInstallProposalStatus
+}
+
 export type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
@@ -52,6 +73,18 @@ export type ChatMessage = {
   isPlaceholder?: boolean
   isStreaming?: boolean
   createdAt?: string
+  proposals?: ChatInstallProposal[]
+}
+
+function proposalsFromPayload(payload: unknown): ChatInstallProposal[] | undefined {
+  const raw = (payload as { proposals?: unknown } | null | undefined)?.proposals
+  if (!Array.isArray(raw)) {
+    return undefined
+  }
+  const proposals = raw
+    .filter(isCloudAiInstallProposal)
+    .map((proposal) => ({ proposal, status: { state: 'pending' as const } }))
+  return proposals.length > 0 ? proposals : undefined
 }
 
 export type ChatView = 'list' | 'chat'
@@ -197,6 +230,15 @@ export interface chatLogicActions {
     chatId: string
     message: ChatMessage
   }
+  approveInstallProposal: (
+    chatId: string,
+    messageId: string,
+    proposalId: string
+  ) => {
+    chatId: string
+    messageId: string
+    proposalId: string
+  }
   backToList: () => {}
   clearChat: (chatId: string) => {
     chatId: string
@@ -209,6 +251,15 @@ export interface chatLogicActions {
   }
   createChatSuccess: (chat: ChatSummary) => {
     chat: ChatSummary
+  }
+  dismissInstallProposal: (
+    chatId: string,
+    messageId: string,
+    proposalId: string
+  ) => {
+    chatId: string
+    messageId: string
+    proposalId: string
   }
   ensureChatForApp: (
     sceneId: string,
@@ -281,6 +332,17 @@ export interface chatLogicActions {
   }
   setInput: (input: string) => {
     input: string
+  }
+  setProposalStatus: (
+    chatId: string,
+    messageId: string,
+    proposalId: string,
+    status: ChatInstallProposalStatus
+  ) => {
+    chatId: string
+    messageId: string
+    proposalId: string
+    status: ChatInstallProposalStatus
   }
   setSubmitting: (isSubmitting: boolean) => {
     isSubmitting: boolean
@@ -426,6 +488,22 @@ export const chatLogic = kea<chatLogicType>([
     setError: (error: string | null) => ({ error }),
     appendMessage: (chatId: string, message: ChatMessage) => ({ chatId, message }),
     updateMessage: (chatId: string, id: string, updates: Partial<ChatMessage>) => ({ chatId, id, updates }),
+    setProposalStatus: (chatId: string, messageId: string, proposalId: string, status: ChatInstallProposalStatus) => ({
+      chatId,
+      messageId,
+      proposalId,
+      status,
+    }),
+    approveInstallProposal: (chatId: string, messageId: string, proposalId: string) => ({
+      chatId,
+      messageId,
+      proposalId,
+    }),
+    dismissInstallProposal: (chatId: string, messageId: string, proposalId: string) => ({
+      chatId,
+      messageId,
+      proposalId,
+    }),
     clearChat: (chatId: string) => ({ chatId }),
     setActiveRequestId: (requestId: string | null) => ({ requestId }),
     setActiveLogMessageId: (messageId: string | null) => ({ messageId }),
@@ -607,6 +685,34 @@ export const chatLogic = kea<chatLogicType>([
           ...state,
           [chatId]: [],
         }),
+        setProposalStatus: (state, { chatId, messageId, proposalId, status }) => ({
+          ...state,
+          [chatId]: (state[chatId] ?? []).map((message: ChatMessage) =>
+            message.id === messageId
+              ? {
+                  ...message,
+                  proposals: (message.proposals ?? []).map((entry) =>
+                    entry.proposal.proposal_id === proposalId ? { ...entry, status } : entry
+                  ),
+                }
+              : message
+          ),
+        }),
+        dismissInstallProposal: (state, { chatId, messageId, proposalId }) => ({
+          ...state,
+          [chatId]: (state[chatId] ?? []).map((message: ChatMessage) =>
+            message.id === messageId
+              ? {
+                  ...message,
+                  proposals: (message.proposals ?? []).map((entry) =>
+                    entry.proposal.proposal_id === proposalId
+                      ? { ...entry, status: { state: 'dismissed' as const } }
+                      : entry
+                  ),
+                }
+              : message
+          ),
+        }),
         loadChatMessagesSuccess: (state, { chatId, messages }) => ({
           ...state,
           [chatId]: messages.map((message) => ({
@@ -615,6 +721,9 @@ export const chatLogic = kea<chatLogicType>([
             content: message.content,
             tool: message.tool ?? undefined,
             createdAt: message.createdAt,
+            // Unapproved installs survive a reload: the card comes back
+            // pending, and Approve still goes through the frame's own route.
+            proposals: proposalsFromPayload(message.payload),
           })),
         }),
       },
@@ -909,6 +1018,32 @@ export const chatLogic = kea<chatLogicType>([
     ],
   }),
   listeners(({ actions, values, props }) => ({
+    approveInstallProposal: async ({ chatId, messageId, proposalId }) => {
+      const message = (values.messagesByChatId[chatId] ?? []).find((entry: ChatMessage) => entry.id === messageId)
+      const card = message?.proposals?.find((entry) => entry.proposal.proposal_id === proposalId)
+      if (!card || card.status.state === 'approving') {
+        return
+      }
+      const { proposal } = card
+      actions.setProposalStatus(chatId, messageId, proposalId, { state: 'approving' })
+      try {
+        await installCloudFrameStoreScene(
+          proposal.frame.id,
+          proposal.scene.id,
+          proposal.scene.version,
+          proposal.declared_settings_groups
+        )
+        actions.setProposalStatus(chatId, messageId, proposalId, {
+          state: 'installed',
+          queued: !proposal.frame.connected,
+        })
+      } catch (error) {
+        actions.setProposalStatus(chatId, messageId, proposalId, {
+          state: 'failed',
+          error: error instanceof Error ? error.message : 'The install was refused',
+        })
+      }
+    },
     loadChats: async () => {
       if (isFrameControlMode()) {
         actions.loadChatsSuccess([], false, 0)
@@ -1244,6 +1379,7 @@ export const chatLogic = kea<chatLogicType>([
           // and generated scenes are applied the moment they validate.
           let streamedContent = ''
           let logContent = ''
+          const proposals: ChatInstallProposal[] = []
           let progressLineIndex: number | null = null
           let finalTool: string | undefined
           let streamError: string | null = null
@@ -1327,6 +1463,22 @@ export const chatLogic = kea<chatLogicType>([
                     logContent,
                     isPlaceholder: false,
                   })
+                  break
+                }
+                case 'proposal': {
+                  // An Install card, not an install: the agent never deploys
+                  // by itself (see add_scene_to_frame in the cloud).
+                  if (!isCloudAiInstallProposal(event)) {
+                    break
+                  }
+                  const index = proposals.findIndex((entry) => entry.proposal.proposal_id === event.proposal_id)
+                  const entry = { proposal: event, status: { state: 'pending' as const } }
+                  if (index === -1) {
+                    proposals.push(entry)
+                  } else {
+                    proposals[index] = entry
+                  }
+                  actions.updateMessage(chatId, assistantMessageId, { proposals: [...proposals], isPlaceholder: false })
                   break
                 }
                 case 'scenes':

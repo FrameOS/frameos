@@ -356,12 +356,14 @@ export async function revokeSessionsForAccount(
 // Personal API tokens are the account's other bearer credential. Anything
 // that evicts every session because the account may be compromised (a
 // password reset, an admin "sign out everywhere") must evict them too, or the
-// attacker keeps a script-shaped foothold that outlives the reset.
+// attacker keeps a script-shaped foothold that outlives the reset. The same
+// goes for enrolling a second factor: a token minted before 2FA was on
+// would otherwise keep bypassing it. Returns how many were live.
 export async function revokeApiTokensForAccount(
   db: ReturnType<typeof createDb>,
   accountId: string,
 ) {
-  await db
+  const revoked = await db
     .update(accountApiTokens)
     .set({ revokedAt: new Date() })
     .where(
@@ -369,7 +371,9 @@ export async function revokeApiTokensForAccount(
         eq(accountApiTokens.accountId, accountId),
         isNull(accountApiTokens.revokedAt),
       ),
-    );
+    )
+    .returning({ id: accountApiTokens.id });
+  return revoked.length;
 }
 
 export async function recordAuditEvent(

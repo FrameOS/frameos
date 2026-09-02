@@ -146,7 +146,7 @@ async function establishSession(accountId: string, email: string) {
 // Enrolls an authenticator through the real routes and returns the secret
 // plus the recovery codes handed out on confirmation.
 async function enrollTotp() {
-  const start = await startTotp(request("/api/account/two-factor/totp", { body: {} }));
+  const start = await startTotp(request("/api/account/two-factor/totp", { body: { password } }));
   expect(start.status).toBe(200);
   const started = (await start.json()) as { otpauth_url: string; secret: string };
   expect(started.secret).toMatch(/^[A-Z2-7]{32}$/);
@@ -175,7 +175,7 @@ async function latestAuditTypes(accountId: string, limit = 5) {
 
 describe("authenticator app enrollment", () => {
   it("needs a session", async () => {
-    const response = await startTotp(request("/api/account/two-factor/totp", { body: {} }));
+    const response = await startTotp(request("/api/account/two-factor/totp", { body: { password } }));
     expect(response.status).toBe(401);
   });
 
@@ -212,7 +212,7 @@ describe("authenticator app enrollment", () => {
   it("rejects a wrong confirmation code and keeps the secret pending", async () => {
     const user = await signUpVerifiedUser();
     await establishSession(user.accountId, user.email);
-    const start = await startTotp(request("/api/account/two-factor/totp", { body: {} }));
+    const start = await startTotp(request("/api/account/two-factor/totp", { body: { password } }));
     expect(start.status).toBe(200);
 
     const confirm = await confirmTotp(
@@ -234,11 +234,46 @@ describe("authenticator app enrollment", () => {
     expect(responseCookies(signIn).has(sessionCookieName)).toBe(true);
   });
 
+  it("needs the account's password to start enrollment, when it has one", async () => {
+    const user = await signUpVerifiedUser();
+    await establishSession(user.accountId, user.email);
+
+    const missing = await startTotp(request("/api/account/two-factor/totp", { body: {} }));
+    expect(missing.status).toBe(403);
+    expect(await missing.json()).toMatchObject({ error: "invalid_password" });
+
+    const wrong = await startTotp(
+      request("/api/account/two-factor/totp", { body: { password: "not it" } }),
+    );
+    expect(wrong.status).toBe(403);
+
+    // Nothing was minted: no pending secret sits on the account.
+    expect(
+      await db.select().from(accountTotp).where(eq(accountTotp.accountId, user.accountId)),
+    ).toHaveLength(0);
+
+    const right = await startTotp(
+      request("/api/account/two-factor/totp", { body: { password } }),
+    );
+    expect(right.status).toBe(200);
+  });
+
+  it("starts enrollment on the session alone when the account has no password", async () => {
+    // A Google-first account: an identity row, no password hash.
+    const [account] = await db
+      .insert(accounts)
+      .values({ displayName: "No Password", primaryEmail: "no-password@example.com" })
+      .returning({ id: accounts.id });
+    await establishSession(account!.id, "no-password@example.com");
+    const start = await startTotp(request("/api/account/two-factor/totp", { body: {} }));
+    expect(start.status).toBe(200);
+  });
+
   it("refuses to restart enrollment once confirmed", async () => {
     const user = await signUpVerifiedUser();
     await establishSession(user.accountId, user.email);
     await enrollTotp();
-    const again = await startTotp(request("/api/account/two-factor/totp", { body: {} }));
+    const again = await startTotp(request("/api/account/two-factor/totp", { body: { password } }));
     expect(again.status).toBe(409);
   });
 });
@@ -515,7 +550,7 @@ describe("passkeys", () => {
     const user = await signUpVerifiedUser();
     await establishSession(user.accountId, user.email);
     const response = await passkeyRegistrationOptions(
-      request("/api/account/two-factor/passkeys/options", { body: {} }),
+      request("/api/account/two-factor/passkeys/options", { body: { password } }),
     );
     expect(response.status).toBe(200);
     const payload = (await response.json()) as {
@@ -525,6 +560,22 @@ describe("passkeys", () => {
     expect(payload.options.user.name).toBe(user.email);
     expect(payload.options.challenge).toBeTruthy();
     expect(responseCookies(response).has(webauthnChallengeCookieName)).toBe(true);
+  });
+
+  it("needs the account's password for registration options, when it has one", async () => {
+    const user = await signUpVerifiedUser();
+    await establishSession(user.accountId, user.email);
+    const missing = await passkeyRegistrationOptions(
+      request("/api/account/two-factor/passkeys/options", { body: {} }),
+    );
+    expect(missing.status).toBe(403);
+    expect(await missing.json()).toMatchObject({ error: "invalid_password" });
+    expect(responseCookies(missing).has(webauthnChallengeCookieName)).toBe(false);
+
+    const wrong = await passkeyRegistrationOptions(
+      request("/api/account/two-factor/passkeys/options", { body: { password: "nope" } }),
+    );
+    expect(wrong.status).toBe(403);
   });
 
   it("rejects a registration without a challenge cookie or with a bogus attestation", async () => {
@@ -539,7 +590,7 @@ describe("passkeys", () => {
     expect(await noChallenge.json()).toMatchObject({ error: "challenge_expired" });
 
     const options = await passkeyRegistrationOptions(
-      request("/api/account/two-factor/passkeys/options", { body: {} }),
+      request("/api/account/two-factor/passkeys/options", { body: { password } }),
     );
     const challenge = responseCookies(options).get(webauthnChallengeCookieName)!;
     const bogus = await registerPasskey(

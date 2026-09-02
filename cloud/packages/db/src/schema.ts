@@ -963,6 +963,14 @@ export const frameSceneAssignments = pgTable(
       .references(() => storeScenes.id, { onDelete: "cascade" }),
     sceneVersion: integer("scene_version"),
     position: integer("position").default(0).notNull(),
+    // Service-settings groups (migration 0048): what the assigned version's
+    // apps DECLARE (a request; computed from the payload at assign time) and
+    // what the owner GRANTED for this scene on this frame (a subset of the
+    // declared, deliverable groups). NULL granted = a legacy row from before
+    // the grant existed, read as "granted = declared" until the owner next
+    // saves the frame's scene list. Group NAMES only, never a value.
+    declaredSettingsGroups: jsonb("declared_settings_groups"),
+    grantedSettingsGroups: jsonb("granted_settings_groups"),
     ...timestamps,
   },
   (table) => ({

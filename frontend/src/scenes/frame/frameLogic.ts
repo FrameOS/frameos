@@ -51,6 +51,8 @@ import {
 } from '../../utils/cloudFrameSettings'
 import { persistAndPushCloudFrameScenes, type CloudScenePersistOptions } from '../../utils/cloudFrameScenesSave'
 import { clearCloudSceneJsonCache } from '../../models/framesModel'
+import { appsModel } from '../../models/appsModel'
+import { collectSecretSettingsFromScenes } from './panels/secretSettings'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
 import { longRunningTasksModel } from '../../models/longRunningTasksModel'
@@ -1705,6 +1707,11 @@ function cloudScenePersistOptions(frameId: FrameId, fallbackFrame: Partial<Frame
   return {
     sceneUnchanged: (stored, form) => sceneEqualForComparison(sanitizeScene(stored, frame), sanitizeScene(form, frame)),
     sources: serverFrame?.cloud_scene_sources ?? null,
+    // A scene built in the workspace is granted the service keys its apps
+    // declare (the owner assembled it); the server narrows to what it can
+    // serve. Adjustable per scene afterwards under Settings → Service settings.
+    settingsGroupsForNewScene: (scenes) =>
+      collectSecretSettingsFromScenes([...scenes], appsModel.findMounted()?.values.apps ?? {}),
   }
 }
 

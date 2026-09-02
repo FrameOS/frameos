@@ -32,10 +32,15 @@ type TotpSetup = { otpauth_url: string; qr_svg: string; secret: string };
 
 // Every action that weakens the account carries a proof: the password when
 // the account has one, otherwise a current authenticator/recovery code. The
-// form asks for it inline, right where the action is.
+// form asks for it inline, right where the action is. Strengthening actions
+// (enrolling an authenticator or a passkey) ask for the password too when
+// the account has one — a second factor added with nothing but a session
+// cookie would then vouch for that cookie's owner for good — and skip the
+// prompt otherwise.
 type ProofRequest = {
   label: string;
   run: (proof: Record<string, string>) => Promise<void>;
+  tone?: "danger" | "primary";
 };
 
 async function postJson(
@@ -126,10 +131,26 @@ export function TwoFactorSettings({
 
   // Runs `action`; on a proof-required failure the UI asks for the proof and
   // retries with it. Proof is collected once per click, never cached.
-  function withProof(label: string, run: ProofRequest["run"]) {
-    setProof({ label, run });
+  function withProof(
+    label: string,
+    run: ProofRequest["run"],
+    tone: ProofRequest["tone"] = "danger",
+  ) {
+    setProof({ label, run, tone });
     setProofValue("");
     setError(undefined);
+  }
+
+  // Strengthening: the password when there is one, straight through when
+  // there is not (the server asks for nothing more in that case).
+  function withPasswordIfAny(label: string, run: ProofRequest["run"]) {
+    if (status.has_password) {
+      withProof(label, run, "primary");
+      return;
+    }
+    void run({}).catch((caught: unknown) => {
+      setError(caught instanceof Error ? caught.message : "Something went wrong.");
+    });
   }
 
   async function submitProof(event: React.FormEvent) {
@@ -170,17 +191,18 @@ export function TwoFactorSettings({
 
   // -- Authenticator app ---------------------------------------------------
 
-  async function startTotp() {
+  function startTotp() {
     reset();
-    setBusy(true);
-    try {
-      const payload = await call("/api/account/two-factor/totp", {});
-      setTotpSetup(payload as TotpSetup);
-      setTotpCode("");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Something went wrong.");
-    }
-    setBusy(false);
+    withPasswordIfAny("Set up an authenticator app", async (proofBody) => {
+      setBusy(true);
+      try {
+        const payload = await call("/api/account/two-factor/totp", proofBody);
+        setTotpSetup(payload as TotpSetup);
+        setTotpCode("");
+      } finally {
+        setBusy(false);
+      }
+    });
   }
 
   async function confirmTotp(event: React.FormEvent) {
@@ -214,13 +236,20 @@ export function TwoFactorSettings({
 
   // -- Passkeys ------------------------------------------------------------
 
-  async function addPasskey() {
+  function addPasskey() {
     reset();
+    withPasswordIfAny("Add a passkey", (proofBody) => registerPasskey(proofBody));
+  }
+
+  // Throws with the message to show; the caller (the proof form, or
+  // withPasswordIfAny) puts it on screen. A wrong password thus keeps the
+  // proof form open with the message in it.
+  async function registerPasskey(proofBody: Record<string, string>) {
     setBusy(true);
     try {
       const optionsPayload = await call(
         "/api/account/two-factor/passkeys/options",
-        {},
+        proofBody,
       );
       const options = optionsPayload.options as Parameters<
         typeof startRegistration
@@ -238,18 +267,17 @@ export function TwoFactorSettings({
       await refresh();
     } catch (caught) {
       if (caught instanceof Error && caught.name === "NotAllowedError") {
-        setError("Passkey prompt was cancelled.");
-      } else if (caught instanceof Error && caught.name === "InvalidStateError") {
-        setError("This passkey is already registered on this account.");
-      } else {
-        setError(
-          caught instanceof Error
-            ? caught.message
-            : "Passkeys are not available on this device or browser.",
-        );
+        throw new Error("Passkey prompt was cancelled.");
       }
+      if (caught instanceof Error && caught.name === "InvalidStateError") {
+        throw new Error("This passkey is already registered on this account.");
+      }
+      throw caught instanceof Error
+        ? caught
+        : new Error("Passkeys are not available on this device or browser.");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   function removePasskey(id: string, name: string) {
@@ -390,7 +418,11 @@ export function TwoFactorSettings({
             />
           </div>
           <div className="button-row">
-            <button className="button button-danger" disabled={busy} type="submit">
+            <button
+              className={`button ${proof.tone === "primary" ? "button-primary" : "button-danger"}`}
+              disabled={busy}
+              type="submit"
+            >
               Continue
             </button>
             <button
@@ -472,7 +504,7 @@ export function TwoFactorSettings({
             <button
               className="button"
               disabled={busy}
-              onClick={() => void startTotp()}
+              onClick={startTotp}
               type="button"
             >
               <Plus aria-hidden size={16} /> Set up
@@ -584,7 +616,7 @@ export function TwoFactorSettings({
           <button
             className="button"
             disabled={busy}
-            onClick={() => void addPasskey()}
+            onClick={addPasskey}
             type="button"
           >
             <Plus aria-hidden size={16} /> Add a passkey
