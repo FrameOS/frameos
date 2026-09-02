@@ -5,14 +5,18 @@ Status: written 2026-08-31, **direction revised 2026-09-01** (§0). Phases 0,
 admin/ops surfaces that make it readable, the account's own view of its
 usage with the switch that turns AI off, the daily cap, and plans with their
 subscription lifecycle. **Phase 3b — the payment provider — is the only
-thing left**, and it is what everything else is waiting on. §9 is the
+thing left, and it is paused on purpose (2026-09-03): no provider until
+there are users to invoice.** Stripe and a merchant-of-record alternative
+get looked at then; the integration is small once needed, and nothing
+below has to change for it. §9 is the
 review of 2026-09-01 — one billing bypass, three accounting bugs and a plan
 ladder that did not do what §0.1 says — and §9.5 is what the fix
-(2026-09-02, migration 0046) did about each. Metering runs in
-**shadow mode**: every turn is measured and priced, and no entry is posted.
-Nothing charges anybody, and self-serve plan purchase is gated off
-(`FRAMEOS_CLOUD_PLANS_SELF_SERVE`) for the same reason — subscribing accrues
-a receivable, and until 3b there is no way to settle one.
+(2026-09-02, migration 0046) did about each. Metering is **live**
+(`ai_metering_mode = live`; every turn is measured, priced and posted to
+the customer's receivable). Nothing is *collected*: no invoice is cut and
+self-serve plan purchase stays gated off (`FRAMEOS_CLOUD_PLANS_SELF_SERVE`)
+because subscribing accrues a receivable and until 3b there is no way to
+settle one.
 
 The goal: real double-entry accounting inside FrameOS Cloud. We meter each
 account's AI spend (gpt-5.6-terra today), add a configurable margin (~30%),
@@ -1199,17 +1203,25 @@ Two things worth knowing before Phase 3 builds on it:
   the shape "shadow mode" actually takes: there is no customer to charge,
   rather than a charge being suppressed.
 
-Still open, and the gate on Phase 3:
+The gate, half run. Metering was flipped to live without waiting for
+the rest (2026-09-03): the meter-vs-PostHog half agrees exactly and
+nobody is invoiced yet, so a wrong meter costs nothing until 3b. What is
+left is a check, not a gate:
 
-- [ ] Run a week in production and compare `ai_usage_records` totals against
-      PostHog `$ai_generation` sums **and against the provider's own
-      invoice** — the second comparison is the one that settles §8.2.
+- [ ] Compare `ai_usage_records` against the provider's own invoice over
+      a real week — the comparison that settles §8.2.
       **Scripted 2026-09-02** as
       `apps/auth-web/scripts/ai-metering-compare.mjs` (three optional
       sides — `DATABASE_URL`, PostHog personal key + project, OpenAI *admin*
       key — compared per UTC day and model, token vocabularies normalised,
       exit 1 above 1% disagreement) so it re-runs on the next model change.
-      First run: see §9.6 — there was no week to compare yet.
+      The OpenAI side reads the organisation usage/costs API
+      (`/v1/organization/usage/completions`, `/v1/organization/costs`),
+      which a normal project API key (`OPENAI_API_KEY`) cannot call: it
+      needs an **organisation admin key** (`OPENAI_ADMIN_KEY`, minted at
+      platform.openai.com → Settings → Organization → Admin keys). Nobody
+      has minted one; it is not needed for anything but this script. Run
+      it once before the first invoice is cut.
 
 ### Phase 3 — postpay billing (first revenue)
 
@@ -1258,9 +1270,11 @@ daily cap, the `ai` block on `GET /api/account/usage`, the account header's
       turns and absorbed surfaces stay out of it), the window arithmetic,
       and the subscription golden file.
 
-**Phase 3b — the provider half.** Blocked on §8.7, and the requirement is
-now stricter: postpay needs a payment method stored and chargeable later,
-not a one-off hosted checkout (§3.2).
+**Phase 3b — the provider half. Paused 2026-09-03 until there are users
+to invoice.** Then: §8.15 (entity), §8.7 (provider — Stripe and one
+merchant-of-record alternative are the candidates), and this list in
+order. The requirement stands: postpay needs a payment method stored and
+chargeable later, not a one-off hosted checkout (§3.2).
 
 - [ ] Choose the provider; SDK + env plumbing; webhook endpoint
       `app/api/webhooks/<provider>/route.ts` (signature check, provider
@@ -1289,8 +1303,9 @@ not a one-off hosted checkout (§3.2).
       `promo_grant` against the receivable (§3.4).
 - [ ] Dunning: retry schedule, the age at which AI switches off for an
       unpaid balance, the emails. Reads the receivable, writes none of it.
-- [ ] Flip `ai_metering_mode` to `live` — after the Phase 2 gate below is
-      satisfied, not before.
+- [x] Flip `ai_metering_mode` to `live` — done (live in production as of
+      2026-09-03); the provider-invoice half of the Phase 2 check is still
+      owed before the first invoice.
 - [ ] Golden-file test: turns → cap refusal → month close → invoice →
       payment → fee → an unpaid month → write-off.
 - [ ] Legal/pricing page copy: that AI is billed monthly in arrears, that
@@ -1459,7 +1474,8 @@ question that will be asked again.
    implementation assumes reasoning bills as output (it is a subset of
    `output_tokens`, recorded separately for analysis and never priced on its
    own), so `ai_model_prices` has no third column. Verify against the
-   provider's actual invoice line items during the shadow period; if it
+   provider's actual invoice line items (the Phase 2 script with an
+   `OPENAI_ADMIN_KEY`) before the first invoice is cut; if it
    turns out to be wrong the fix is a column plus a rule-version bump, not a
    re-model.
 3. **Shared-key tier** — what happens to `FRAMEOS_AI_SHARED_KEY_ACCESS`
@@ -1491,7 +1507,10 @@ question that will be asked again.
    leaves the liability with us (Stripe Tax can compute the amounts, but
    computing is not remitting). Flagged now so the recipes are written with
    a third leg in mind.
-7. **Payment provider** — undecided, and the code no longer assumes one.
+7. **Payment provider** — undecided **and deliberately parked
+   (2026-09-03) until there are users to invoice**; Stripe plus a
+   merchant-of-record alternative are the candidates when the time comes.
+   The code no longer assumes one.
    `asset:psp:main` names the role, `invoices` carries a `provider` column,
    and §3.2's recipes hold for anything that reports a successful payment,
    a fee and a stable payment id. §0 made the *requirement* stricter
@@ -1608,8 +1627,8 @@ question that will be asked again.
       another member state is invoiced net with the reverse-charge
       wording; needs a VAT-number field and a VIES check.
     Until these are answered 3b's invoice has no header, and the recipes
-    in §3.2 have no tax leg. Decide, then write the answers into this
-    item.
+    in §3.2 have no tax leg. Parked with §8.7 (2026-09-03) until there are
+    users to invoice; decide then, and write the answers into this item.
 
 ---
 
@@ -1869,7 +1888,9 @@ right moment to fix it.
       there). It is one query on each side and it has not been run. Write
       it as a script so it can be re-run on the next model change.
 - [ ] **Which legal entity invoices, and from where.** *Written up as
-      §8.15 with the questions in order — the answer is the owner's.* Not in this
+      §8.15 with the questions in order — the answer is the owner's, and
+      parked with the provider choice until there are users to invoice
+      (2026-09-03).* Not in this
       document anywhere, and prior to the provider choice: the entity on
       the invoice, its VAT registration, whether it must number invoices
       sequentially by law (many EU jurisdictions require gapless
@@ -2015,9 +2036,10 @@ Every §9.3 item, with the decision where one had to be made:
    unproven is the provider's invoice: the script's OpenAI side needs an
    *organisation admin* key (`OPENAI_ADMIN_KEY`) that nobody has put in an
    env yet, and §8.2 (reasoning billed as output) is settled only there.
-   **Re-run the script over a real week before flipping metering to live**;
-   the meter-vs-PostHog half is not in doubt any more, the meter-vs-invoice
-   half has not been looked at.
+   The meter-vs-PostHog half is not in doubt any more; the
+   meter-vs-invoice half has not been looked at. Metering was flipped to
+   live anyway (confirmed 2026-09-03) — nothing is invoiced until 3b, so
+   the remaining check moved to "before the first invoice" (Phase 2).
 2. **Invoicing entity** — written up as §8.15 in decision order (entity,
    VAT position, gapless numbering, OSS, reverse charge). Not decided; it
    cannot be from here.
@@ -2056,6 +2078,20 @@ Every §9.3 item, with the decision where one had to be made:
    healthchecks check, timer at 04:20 UTC; the first run passed with no
    violations.
 8. **Numbers** — 3b's `invoices` migration is 0048.
+
+Postscript, 2026-09-03: the job token was rotated on production after
+PR #438 (the nightly route stopped accepting the personal `fc_api_`
+token), and the first run on the new token failed on invariant 10:
+`1 turn(s) on gpt-5.5-2026-04-23 priced from the fallback price`. The
+converter asks for `gpt-5.5`, OpenAI answers with the dated snapshot it
+served, and the meter records that name — correctly, it is what the
+provider's invoice says — while `ai_model_prices` only knew `gpt-5.5`.
+`resolveModelPrice` now tries the base name (`baseModelName`, one
+trailing `-YYYY-MM-DD`) before the fallback, so a snapshot prices at its
+base row and the snapshot in `pricing.model` names that row. The
+2026-09-02 record keeps its `fallback` stamp (the numbers were the same;
+the stamp is the measurement) and ages out of the 24-hour check on its
+own.
 
 Also in this round: `docs/todo.md`'s two stale lines now point here.
 

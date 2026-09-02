@@ -28,10 +28,15 @@ the work that makes the architecture smaller or decided.*
 
 ## 1. Delete the compiler (the dated debt)
 
-**Gate:** no earlier than one release after 2026-08-30, and one full
-release cycle in which `build_kind` shows no source builds outside frames
-that chose `static`. The gate is blind (each backend's
-`last_successful_deploy` is private), so the observable signals are the
+**Gate (restated 2026-09-03): not before October 2026, and possibly
+much later or never.** The source-build path is the deprecated,
+not-recommended way to run scenes, and it keeps working as long as it is
+there; nothing else on this list waits for its deletion, and its security
+findings (`docs/security-todo.md`, "deprecated path") are accepted rather
+than scheduled. Concretely: one full release cycle in which `build_kind`
+shows no source builds outside frames that chose `static`. The gate is
+blind (each backend's `last_successful_deploy` is private), so the
+observable signals are the
 calendar, the cloud's `scene_convert` telemetry, and issues — put the
 deprecation + converter link in **every** release note until this ships,
 so the deletion is not the first anyone hears of it.
