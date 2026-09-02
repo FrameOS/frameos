@@ -31,6 +31,7 @@ import { TemplateDrawer } from './FramesHome'
 import { FrameSceneSidebarCard } from './FrameSceneSidebarCard'
 import { FrameSidebarPreview } from './FrameSidebarPreview'
 import { FrameMetricAlertIndicator } from './FrameMetricAlertIndicator'
+import { FrameBatteryIndicator } from './FrameBatteryIndicator'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { frameLogic } from '../frame/frameLogic'
@@ -215,7 +216,7 @@ function SceneSelector({
           {!inFrameAdminMode ? (
             <div>
               <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2" data-testid="frame-sidebar-selector">
                 <div className="relative min-w-0 flex-1">
                   <select
                     value={frame.id}
@@ -237,6 +238,7 @@ function SceneSelector({
                     containerClassName="absolute right-7 top-1/2 -translate-y-1/2"
                   />
                 </div>
+                <FrameBatteryIndicator frame={frame} className="shrink-0" />
                 <FrameActionsMenu
                   frame={frame}
                   className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"

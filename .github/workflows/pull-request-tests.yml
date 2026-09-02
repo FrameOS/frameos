@@ -354,6 +354,22 @@ jobs:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
+      # The checkout pins head.sha, which leaves HEAD detached, and the
+      # commit step's `pull --rebase` needs a branch with an upstream. This
+      # job only runs for same-repo pull requests (see `if`), so head.ref is
+      # a branch of this repository; it is still only ever read into an
+      # environment variable, never interpolated into the script.
+      - name: Return to the pull request branch
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # No depth limit: the branch may already carry a commit from the
+          # other snapshot job, and the rebase must see head.sha as its
+          # ancestor rather than try to apply it again.
+          git fetch --no-tags origin "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF"
+          git checkout -B "$HEAD_REF"
+          git branch --set-upstream-to "origin/$HEAD_REF"
+
       - name: Download visual snapshot changes
         uses: actions/download-artifact@v4
         with:
@@ -471,6 +487,11 @@ jobs:
         # without it those browser tests skip silently.
         run: pnpm --dir frameos/frontend run build
 
+      - name: Build cloud frontend
+        # visual-cloud-*.spec.ts serve this bundle the same way (see
+        # tests/cloud-workspace-fixture.ts); without it they skip silently.
+        run: pnpm --dir cloud-frontend run build
+
       - name: Run frontend visual regression tests
         shell: bash
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}
@@ -543,6 +564,22 @@ jobs:
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+
+      # The checkout pins head.sha, which leaves HEAD detached, and the
+      # commit step's `pull --rebase` needs a branch with an upstream. This
+      # job only runs for same-repo pull requests (see `if`), so head.ref is
+      # a branch of this repository; it is still only ever read into an
+      # environment variable, never interpolated into the script.
+      - name: Return to the pull request branch
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # No depth limit: the branch may already carry a commit from the
+          # other snapshot job, and the rebase must see head.sha as its
+          # ancestor rather than try to apply it again.
+          git fetch --no-tags origin "refs/heads/$HEAD_REF:refs/remotes/origin/$HEAD_REF"
+          git checkout -B "$HEAD_REF"
+          git branch --set-upstream-to "origin/$HEAD_REF"
 
       - name: Download frontend visual snapshot changes
         uses: actions/download-artifact@v4
