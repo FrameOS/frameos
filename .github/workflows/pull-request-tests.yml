@@ -471,6 +471,11 @@ jobs:
         # without it those browser tests skip silently.
         run: pnpm --dir frameos/frontend run build
 
+      - name: Build cloud frontend
+        # visual-cloud-*.spec.ts serve this bundle the same way (see
+        # tests/cloud-workspace-fixture.ts); without it they skip silently.
+        run: pnpm --dir cloud-frontend run build
+
       - name: Run frontend visual regression tests
         shell: bash
         if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository }}

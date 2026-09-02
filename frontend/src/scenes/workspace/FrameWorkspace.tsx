@@ -341,7 +341,7 @@ function FrameSelector({
           </button>
         ) : null}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2" data-testid="frame-sidebar-selector">
         <div className="relative min-w-0 flex-1">
           <select
             value={frame.id}
