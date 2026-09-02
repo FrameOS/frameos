@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { NextRequest } from "next/server";
-import { checkRateLimit, clientKey, resetRateLimitForTests } from "./rate-limit";
+import {
+  checkRateLimit,
+  claimSingleUse,
+  clientKey,
+  resetRateLimitForTests,
+  singleUseClaimed,
+} from "./rate-limit";
 
 afterEach(() => {
   resetRateLimitForTests();
@@ -29,6 +35,18 @@ describe("rate limit", () => {
   });
 });
 
+describe("single-use claims", () => {
+  it("lets the first claim through and refuses every later one", async () => {
+    expect(await singleUseClaimed("token-1")).toBe(false);
+    expect(await claimSingleUse("token-1", 60_000)).toBe(true);
+    expect(await singleUseClaimed("token-1")).toBe(true);
+    expect(await claimSingleUse("token-1", 60_000)).toBe(false);
+    // Peeking never spends a fresh key.
+    expect(await singleUseClaimed("token-2")).toBe(false);
+    expect(await claimSingleUse("token-2", 60_000)).toBe(true);
+  });
+});
+
 describe("clientKey", () => {
   it("uses the proxy-appended IP, ignoring client-spoofed XFF entries", () => {
     // With one trusted proxy, the real client IP is the last XFF entry; a client
@@ -46,6 +64,27 @@ describe("clientKey", () => {
       "x-forwarded-for": "9.9.9.9, 203.0.113.7, 10.0.0.1",
     });
     expect(clientKey(request)).toBe("203.0.113.7");
+  });
+
+  it("refuses a chain shorter than the trusted proxy count", () => {
+    // Two proxies each append an entry; a one-entry chain means the request
+    // came in around the outer proxy and the entry is the client's own word.
+    process.env.RATE_LIMIT_TRUSTED_PROXY_COUNT = "2";
+    expect(
+      clientKey(requestWithHeaders({ "x-forwarded-for": "203.0.113.7" })),
+    ).toBe("untrusted");
+    expect(
+      clientKey(
+        requestWithHeaders({
+          "x-forwarded-for": "203.0.113.7",
+          "x-real-ip": "203.0.113.7",
+        }),
+      ),
+    ).toBe("untrusted");
+    // Exactly as many entries as proxies is the shortest honest chain.
+    expect(
+      clientKey(requestWithHeaders({ "x-forwarded-for": "203.0.113.7, 10.0.0.1" })),
+    ).toBe("203.0.113.7");
   });
 
   it("falls back to x-real-ip then a constant when no chain is present", () => {

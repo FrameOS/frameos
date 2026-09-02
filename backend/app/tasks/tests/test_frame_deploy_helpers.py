@@ -8,6 +8,7 @@ from app.tasks import frame_deploy_helpers
 from app.tasks.frame_deploy_helpers import (
     RPIOS_SUDO_SECURITY_UPDATE_URL,
     ensure_sudo_available,
+    systemd_unit_user,
     upload_binary,
     upload_directory_tree,
 )
@@ -159,3 +160,14 @@ async def test_ensure_sudo_available_blocks_with_rpios_message_when_sudo_require
     assert "sudo raspi-config" in str(exc.value)
     assert [command for command, _kwargs in deployer.commands] == ["sudo -n true"]
     assert deployer.logs == []
+
+
+@pytest.mark.parametrize("user", ["pi", "frameos", "user.name-1_x", "A1"])
+def test_systemd_unit_user_accepts_plain_account_names(user):
+    assert systemd_unit_user(user) == user
+
+
+@pytest.mark.parametrize("user", [None, "", "pi\nExecStartPre=/bin/sh", "pi user", "-pi", "x" * 33, "pi;rm"])
+def test_systemd_unit_user_refuses_anything_a_unit_file_would_misread(user):
+    with pytest.raises(ValueError):
+        systemd_unit_user(user)

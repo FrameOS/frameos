@@ -9,6 +9,7 @@ import frameos/device_setup
 from frameos/setup import frameosServiceContents, frameosServiceUser
 import frameos/utils/http_client
 import frameos/utils/process
+import frameos/utils/system
 import frameos/version
 
 const
@@ -555,7 +556,7 @@ proc writeFrameConfigForUpgrade(configPath, destination, version: string) =
   if payload.kind != JObject:
     raise newException(ValueError, "Current frame config is not a JSON object: " & configPath)
   payload["frameosVersion"] = %version
-  writeFile(destination, pretty(payload, indent = 4) & "\n")
+  writePrivateFile(destination, pretty(payload, indent = 4) & "\n")
 
 proc serviceUserFromFile(path: string): string =
   try:
@@ -598,6 +599,36 @@ proc copyFirstExistingFile(sources: openArray[string], destination: string) =
       copyFile(source, destination)
       return
 
+const ReleaseExtractSpaceFactor* = 2
+  ## Free bytes an extraction needs, as a multiple of the .tar.gz size: the
+  ## unpacked binaries plus their copies into the release directories.
+
+proc releaseSpaceShortfall*(archiveBytes, availableBytes: int64): int64 =
+  ## How many bytes short `availableBytes` is of unpacking an archive of
+  ## `archiveBytes`; 0 when it fits, and 0 when the free space is unknown
+  ## (-1 from getAvailableDiskSpace — a filesystem statvfs cannot answer for
+  ## is not a reason to refuse an upgrade).
+  if availableBytes < 0 or archiveBytes <= 0:
+    return 0
+  let needed = archiveBytes * ReleaseExtractSpaceFactor
+  if availableBytes >= needed: 0 else: needed - availableBytes
+
+proc ensureFreeSpaceForRelease(archivePath: string, dirs: openArray[string]) =
+  ## Refuse before tar starts: a full SD card mid-extraction leaves a half
+  ## release and, on Buildroot's data partition, a frame that cannot even
+  ## log why. Both the scratch dir and the releases dir are checked because
+  ## on Raspberry Pi OS they are different filesystems (/tmp vs /srv).
+  let archiveBytes = getFileSize(archivePath)
+  for dir in dirs:
+    let available = getAvailableDiskSpace(dir)
+    let shortfall = releaseSpaceShortfall(archiveBytes, available)
+    if shortfall > 0:
+      raise newException(ValueError,
+        "Not enough free disk space in " & dir & " to unpack the release: " &
+        $(archiveBytes * ReleaseExtractSpaceFactor) & " bytes needed (archive " &
+        $archiveBytes & " x" & $ReleaseExtractSpaceFactor & "), " & $available &
+        " available, short by " & $shortfall)
+
 proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
   let timestamp = format(now(), "yyyyMMddHHmmss")
   result.name = "release_upgrade_" & timestamp & "_" & release.version.replace(".", "_")
@@ -639,7 +670,15 @@ proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
     verifyReleaseArchiveSignature(workDir / "frameos.tar.gz", minisig)
     setupLog("FrameOS upgrade: signature OK (key " & OtaSigningKeyIdHex & ")")
 
-    discard runSetupCommand("tar -xzf " & shellQuote(workDir / "frameos.tar.gz") & " -C " & shellQuote(workDir / "extract"))
+    ensureFreeSpaceForRelease(workDir / "frameos.tar.gz",
+      [workDir, frameosInstallDir() / "releases"])
+    # Extraction runs as root: without these two flags GNU tar restores the
+    # archive's uid/gid and mode bits verbatim, so a release built by a CI
+    # user (or a setuid bit in the tarball) would land as-is. Both the
+    # Raspberry Pi OS and the Buildroot images ship GNU tar
+    # (BR2_PACKAGE_TAR=y), which accepts both long options.
+    discard runSetupCommand("tar --no-same-owner --no-same-permissions -xzf " &
+      shellQuote(workDir / "frameos.tar.gz") & " -C " & shellQuote(workDir / "extract"))
 
     let frameosBinary = findFileNamed(workDir / "extract", "frameos")
     var remoteBinary = findFileNamed(workDir / "extract", "frameos_remote")
@@ -668,6 +707,7 @@ proc stageFrameOSRelease*(release: FrameOSReleaseInfo): StagedFrameOSRelease =
     let oldRemoteReleaseDir = realPath(frameosRemoteInstallDir() / "current")
     writeFrameConfigForUpgrade(currentFrameConfigPath(), result.frameosReleaseDir / "frame.json", release.version)
     copyFile(result.frameosReleaseDir / "frame.json", result.remoteReleaseDir / "frame.json")
+    setFilePermissions(result.remoteReleaseDir / "frame.json", {fpUserRead, fpUserWrite})
     copyScenePayloads(result.frameosReleaseDir, oldReleaseDir)
 
     copyAdminSessionSaltForUpgrade(result.frameosReleaseDir)

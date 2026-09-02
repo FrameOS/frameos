@@ -8,10 +8,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticateLinkedClient } from "../../../../src/lib/backend-auth";
 import {
   jsonError,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+
+// Capabilities + a health snapshot; never the frame list itself.
+const maxInventoryBodyBytes = 256 * 1024;
 
 export const runtime = "nodejs";
 
@@ -37,7 +40,11 @@ export async function POST(request: NextRequest) {
     return jsonError("invalid_link_token", 401);
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, maxInventoryBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   const reportedFrameosVersion = optionalString(body.reported_frameos_version);
   const capabilities = jsonRecord(body.capabilities);
   const health = jsonRecord(body.health);

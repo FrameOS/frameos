@@ -4,6 +4,7 @@ import { accountPasskeys } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
+  notifySecurityChange,
   readJsonBody,
   requireWeakeningProof,
 } from "../../../../../../src/lib/account-security";
@@ -123,5 +124,10 @@ export async function DELETE(
       metadata: { method: "passkey" },
     });
   }
+  await notifySecurityChange(
+    context,
+    status.enabled ? "passkey_removed" : "two_factor_disabled",
+    deleted[0]?.name,
+  );
   return NextResponse.json({ ok: true, two_factor_enabled: status.enabled });
 }

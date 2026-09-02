@@ -38,7 +38,7 @@ import {
   validateSceneZip,
 } from "./store";
 import { imageSetForVersion } from "./store-images";
-import type { SceneListing } from "./store-listing";
+import { maxSceneDescriptionChars, type SceneListing } from "./store-listing";
 import type { PublishActor } from "./store-publish";
 import { alignZipCover, writeSceneVersion } from "./store-version-write";
 import {
@@ -153,7 +153,9 @@ async function forkStoreSceneLocked(db: Database, input: ForkInput) {
   if (!name) {
     return jsonError("too_many_copies", 400);
   }
-  const description = input.description?.trim() || source.description;
+  const description =
+    input.description?.trim().slice(0, maxSceneDescriptionChars) ||
+    source.description;
   // The listing the copy starts from: the source's, minus its category —
   // a private copy is not on the shelf the original was filed under.
   const listing: SceneListing = {

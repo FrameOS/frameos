@@ -10,9 +10,10 @@ import { getScenesBaseUrl } from "../../../../../src/lib/env";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 import {
+  defaultJsonBodyBytes,
   jsonError,
   parseOptionalString,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
 import { readBlob } from "../../../../../src/lib/blobs";
@@ -181,7 +182,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return errorResponse;
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, defaultJsonBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   const visibility = parseOptionalString(body.visibility);
   if (visibility === undefined) {
     return jsonError("nothing_to_update", 400);

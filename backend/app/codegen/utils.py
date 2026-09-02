@@ -4,9 +4,11 @@ def sanitize_nim_string(string: str) -> str:
     # Escape backslash FIRST, otherwise a trailing/literal backslash escapes the
     # template's closing quote (e.g. a value ending in '\' produces an
     # unterminated Nim string literal -> compile-time DoS on deploy). Also escape
-    # carriage returns so CRLF in user input can't break out of the literal.
+    # carriage returns so CRLF in user input can't break out of the literal, and
+    # drop NUL, which the Nim lexer treats as end of file.
     return (
-        string.replace('\\', '\\\\')
+        string.replace('\0', '')
+        .replace('\\', '\\\\')
         .replace('"', '\\"')
         .replace('\r', '\\r')
         .replace('\n', '\\n')
@@ -42,7 +44,7 @@ def nim_comment(text) -> str:
     # the value inject code into the generated source.
     if text is None:
         return ""
-    return str(text).replace("\r", " ").replace("\n", " ")
+    return str(text).replace("\0", "").replace("\r", " ").replace("\n", " ")
 
 def atoi(text):
     return int(text) if text.isdigit() else text

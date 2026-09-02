@@ -166,7 +166,7 @@ function templateZip({
         }),
       ),
       [`${name}/scenes.json`]: strToU8(JSON.stringify(scenes)),
-      [`${name}/image.jpg`]: new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 9]),
+      [`${name}/image.jpg`]: new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 9, 0, 0, 0, 0, 0, 0, 0]),
     }),
   );
 }

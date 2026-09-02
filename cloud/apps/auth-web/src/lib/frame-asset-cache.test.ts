@@ -74,6 +74,15 @@ describe("normalizeAssetPath", () => {
     expect(normalizeAssetPath("photos/../secret")).toBeUndefined();
     expect(normalizeAssetPath("  ")).toBeUndefined();
   });
+
+  it("refuses NUL and other control characters anywhere in the path", () => {
+    expect(normalizeAssetPath("photos/cat.jpg\u0000.png")).toBeUndefined();
+    expect(normalizeAssetPath("photos/\ncat.jpg")).toBeUndefined();
+    expect(normalizeAssetPath("photos/cat\u007f.jpg")).toBeUndefined();
+    expect(normalizeAssetPath("photos/\u001b[31mcat.jpg")).toBeUndefined();
+    // Non-ASCII text is fine; only the control range is out.
+    expect(normalizeAssetPath("photos/kass\u00e4.jpg")).toBe("photos/kass\u00e4.jpg");
+  });
 });
 
 // The device's own content_type claim is never stored: a frame (or the scene

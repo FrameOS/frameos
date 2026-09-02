@@ -226,7 +226,7 @@ proc setupSambaMounts*(mountpoints: MountpointsConfig): SetupResult =
     discard runSetupCommand(privilegedCommand("mkdir -p " & shellQuote(mountpoint.target.strip())))
     if mountpointNeedsCredentials(mountpoint):
       let path = credentialFilePath(sambaCredentialsDir, index)
-      writePrivilegedFile(path, mountpointCredentialsContent(mountpoint))
+      writePrivilegedFile(path, mountpointCredentialsContent(mountpoint), private = true)
       discard runSetupCommand(privilegedCommand("chmod 600 " & shellQuote(path)))
 
   let applied = applyFrameosFstabBlock(currentFstab, fstabBlock)

@@ -43,6 +43,7 @@ from app.models.settings import get_settings_dict
 from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.binary_builder import FrameBinaryBuilder, FrameBinaryBuildResult
 from app.tasks.deploy_remote import RemoteDeployer
+from app.tasks.frame_deploy_helpers import systemd_unit_user
 from app.tasks.precompiled_remote import download_precompiled_remote_release
 from app.tasks.precompiled_frameos import (
     download_release_file,
@@ -624,7 +625,7 @@ def render_systemd_service(
     console_output: bool = False,
     environment: dict[str, str] | None = None,
 ) -> str:
-    service = source.read_text(encoding="utf-8").replace("%I", user)
+    service = source.read_text(encoding="utf-8").replace("%I", systemd_unit_user(user))
     service_lines = service.splitlines()
     rendered_lines: list[str] = []
     in_service = False

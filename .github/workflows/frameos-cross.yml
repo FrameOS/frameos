@@ -98,8 +98,17 @@ jobs:
           esac
           nim_slug="${distro}-${version}-${host_arch}"
           echo $nim_slug
+          # The archive digest must be on the committed list or the runner
+          # refuses it: the CDN alone is not a trust anchor (recipe for a new
+          # Nim at the top of .github/nim-prebuilt.sha256).
+          expected="$(grep -E "^[0-9a-f]{64}  ${nim_slug}/nim-${NIM_VERSION}\.tar\.gz$" .github/nim-prebuilt.sha256 | cut -d' ' -f1 || true)"
+          if [ -z "$expected" ]; then
+            echo "::error::no sha256 recorded for ${nim_slug}/nim-${NIM_VERSION}.tar.gz in .github/nim-prebuilt.sha256"
+            exit 1
+          fi
           mkdir -p "$HOME/.nim"
-          curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          curl -fsSL --retry 3 "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          echo "${expected}  /tmp/nim.tar.gz" | sha256sum -c -
           tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
           rm -rf "$HOME/.nim/nim-2.2.4/nim/bin"
           mv $HOME/.nim/nim-2.2.4/nim/* "$HOME/.nim/nim-2.2.4/"
@@ -172,8 +181,17 @@ jobs:
           esac
           nim_slug="${distro}-${version}-${host_arch}"
           echo "$nim_slug"
+          # The archive digest must be on the committed list or the runner
+          # refuses it: the CDN alone is not a trust anchor (recipe for a new
+          # Nim at the top of .github/nim-prebuilt.sha256).
+          expected="$(grep -E "^[0-9a-f]{64}  ${nim_slug}/nim-${NIM_VERSION}\.tar\.gz$" .github/nim-prebuilt.sha256 | cut -d' ' -f1 || true)"
+          if [ -z "$expected" ]; then
+            echo "::error::no sha256 recorded for ${nim_slug}/nim-${NIM_VERSION}.tar.gz in .github/nim-prebuilt.sha256"
+            exit 1
+          fi
           mkdir -p "$HOME/.nim"
-          curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          curl -fsSL --retry 3 "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          echo "${expected}  /tmp/nim.tar.gz" | sha256sum -c -
           tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
           rm -rf "$HOME/.nim/nim-${NIM_VERSION}/nim/bin"
           mv "$HOME/.nim/nim-${NIM_VERSION}/nim/"* "$HOME/.nim/nim-${NIM_VERSION}/"

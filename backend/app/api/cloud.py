@@ -40,6 +40,8 @@ from app.schemas.cloud import (
     CloudStatusResponse,
 )
 from app.utils import cloud_link as cloud
+from app.utils.rate_limit import hit_rate_limit
+from app.utils.request_ip import client_ip_for_request, peer_is_trusted_proxy
 from app.models.user_session import create_user_session, revoke_sessions_for_user
 from app.utils.session_cookie import SESSION_COOKIE_NAME, create_session_cookie_value
 from app.utils.versions import current_frameos_version
@@ -49,6 +51,8 @@ from . import api_open, api_user
 CLOUD_LOGIN_STATE_PREFIX = "cloud_login_state:"
 CLOUD_LOGIN_STATE_TTL_SECONDS = 600
 CLOUD_LOGIN_STATE_COOKIE = "frameos_cloud_login_state"
+CLOUD_LOGIN_START_LIMIT = 30
+CLOUD_LOGIN_START_WINDOW_SECONDS = 15 * 60
 
 
 def _set_login_state_cookie(request: Request, response: Response, state: str) -> None:
@@ -110,16 +114,7 @@ def _peer_is_trusted_proxy(request: Request) -> bool:
     that covers docker and the usual reverse-proxy layouts, while a client out
     on the network can no longer name the origin FrameOS believes it has.
     """
-    configured = [p.strip() for p in app_config.config.FRAMEOS_TRUSTED_PROXIES.split(",") if p.strip()]
-    peer = (request.client.host if request.client else "") or ""
-    if configured:
-        return peer in configured
-    if not peer:
-        return False
-    try:
-        return ipaddress.ip_address(peer).is_loopback or ipaddress.ip_address(peer).is_private
-    except ValueError:
-        return False
+    return peer_is_trusted_proxy(request.client.host if request.client else None)
 
 
 def _peer_is_loopback(request: Request) -> bool:
@@ -848,6 +843,16 @@ async def cloud_login_start(
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    # Unauthenticated, and every call parks a state row in Redis and costs the
+    # provider a signed handoff: bound it per caller like the password login.
+    if await hit_rate_limit(
+        redis,
+        "cloud_login_start",
+        client_ip_for_request(request) or "unknown",
+        limit=CLOUD_LOGIN_START_LIMIT,
+        window_seconds=CLOUD_LOGIN_START_WINDOW_SECONDS,
+    ):
+        raise HTTPException(status_code=HTTPStatus.TOO_MANY_REQUESTS, detail="Too many login attempts")
     link = _connected_link(db)
     if link is None:
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="This install is not linked to FrameOS Cloud")

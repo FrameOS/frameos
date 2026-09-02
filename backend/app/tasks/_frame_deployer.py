@@ -367,15 +367,15 @@ class FrameDeployer:
             return "amd64"
 
     async def restart_service(self, service_name: str) -> None:
-        await self.exec_command(f"sudo systemctl enable {service_name}.service")
-        await self.exec_command(f"sudo systemctl restart {service_name}.service")
-        await self.exec_command(f"sudo systemctl status {service_name}.service")
+        await self.exec_command(f"sudo -n systemctl enable {service_name}.service")
+        await self.exec_command(f"sudo -n systemctl restart {service_name}.service")
+        await self.exec_command(f"sudo -n systemctl status {service_name}.service")
 
     async def stop_service(self, service_name: str) -> None:
-        await self.exec_command(f"sudo systemctl stop {service_name}.service || true")
+        await self.exec_command(f"sudo -n systemctl stop {service_name}.service || true")
 
     async def disable_service(self, service_name: str) -> None:
-        await self.exec_command(f"sudo systemctl disable {service_name}.service", raise_on_error=False)
+        await self.exec_command(f"sudo -n systemctl disable {service_name}.service", raise_on_error=False)
 
     async def make_local_modifications(
         self,

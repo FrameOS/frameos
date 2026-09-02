@@ -18,6 +18,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
+# The digest list is the trust anchor for the compiler, not the CDN: an
+# archive whose sha256 is not on it is refused before extraction. Recipe
+# for a new Nim at the top of that file.
+COPY .github/nim-prebuilt.sha256 /tmp/nim-prebuilt.sha256
+
 RUN set -eux; \
     . /etc/os-release; \
     distro="${ID}"; \
@@ -45,14 +50,18 @@ RUN set -eux; \
       *) echo "Unsupported prebuilt Nim architecture: ${arch}" >&2; exit 1 ;; \
     esac; \
     nim_target="${distro}-${release}-${arch}"; \
+    nim_archive="${nim_target}/nim-${NIM_VERSION}.tar.gz"; \
+    expected="$(grep -E "^[0-9a-f]{64}  ${nim_archive}\$" /tmp/nim-prebuilt.sha256 | cut -d' ' -f1 || true)"; \
+    if [ -z "${expected}" ]; then echo "No sha256 recorded for ${nim_archive} in .github/nim-prebuilt.sha256" >&2; exit 1; fi; \
     mkdir -p /opt/nim /tmp/nim-download; \
     echo "${nim_target}" > /opt/nim/.frameos-prebuilt-target; \
-    curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL}/prebuilt-deps/${nim_target}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz; \
+    curl -fsSL "${FRAMEOS_ARCHIVE_BASE_URL}/prebuilt-deps/${nim_archive}" -o /tmp/nim.tar.gz; \
+    echo "${expected}  /tmp/nim.tar.gz" | sha256sum -c -; \
     tar -xzf /tmp/nim.tar.gz -C /tmp/nim-download; \
     rm -rf "/tmp/nim-download/nim-${NIM_VERSION}/nim/bin"; \
     cp -a "/tmp/nim-download/nim-${NIM_VERSION}/bin" /opt/nim/bin; \
     cp -a "/tmp/nim-download/nim-${NIM_VERSION}/nim/." /opt/nim/; \
-    rm -rf /tmp/nim-download /tmp/nim.tar.gz
+    rm -rf /tmp/nim-download /tmp/nim.tar.gz /tmp/nim-prebuilt.sha256
 
 ENV PATH="/opt/nim/bin:${PATH}"
 

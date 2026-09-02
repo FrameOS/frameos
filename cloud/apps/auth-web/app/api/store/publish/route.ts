@@ -7,7 +7,7 @@ import { decodeBackupContent } from "../../../../src/lib/backups";
 import {
   jsonError,
   parseOptionalString,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import {
@@ -16,11 +16,15 @@ import {
 } from "../../../../src/lib/rate-limit";
 import {
   maxPublishesPerHour,
+  maxSceneZipBytes,
   sceneVisibilities,
   storePublishScope,
 } from "../../../../src/lib/store";
 import { publishStoreScene } from "../../../../src/lib/store-publish";
 import { storeRoute } from "../../../../src/lib/store-cache";
+
+// One base64 scene zip plus its listing fields.
+const maxPublishBodyBytes = Math.ceil((maxSceneZipBytes * 4) / 3) + 64 * 1024;
 
 export const runtime = "nodejs";
 
@@ -61,7 +65,11 @@ async function handlePost(request: NextRequest) {
     return accountLimited;
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, maxPublishBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   const name = parseOptionalString(body.name)?.slice(0, 128);
   if (!name) {
     return jsonError("invalid_name", 400);

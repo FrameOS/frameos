@@ -146,7 +146,7 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     monkeypatch.setenv("HASSIO_RUN_MODE", "ingress")
     monkeypatch.setenv("SUPERVISOR_TOKEN", "token")
 
-    def mock_requests_get(url, headers):
+    def mock_requests_get(url, headers, **kwargs):
         assert url == "http://supervisor/addons/self/info"
         assert headers["Authorization"] == "Bearer token"
         assert headers["Content-Type"] == "application/json"

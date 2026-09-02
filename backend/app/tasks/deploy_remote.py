@@ -25,7 +25,7 @@ from app.utils.remote_exec import (
 )
 from app.ws.remote_ws import number_of_connections_for_frame
 from app.tasks._frame_deployer import FrameDeployer
-from app.tasks.frame_deploy_helpers import sanitize_apt_package_name
+from app.tasks.frame_deploy_helpers import sanitize_apt_package_name, systemd_unit_user
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.precompiled_remote import download_precompiled_remote_release
 from app.utils.build_host import get_build_executor_config
@@ -108,10 +108,10 @@ def delayed_remote_restart_command(suffix: str = "manual") -> str:
         f"{legacy_remote_cleanup_script()}"
     )
     fallback_script = f"nohup sh -c {shlex.quote(restart_script)} >/dev/null 2>&1 &"
-    fallback = f"sudo sh -c {shlex.quote(fallback_script)}"
+    fallback = f"sudo -n sh -c {shlex.quote(fallback_script)}"
     return (
         f"(command -v systemd-run >/dev/null 2>&1 && "
-        f"sudo systemd-run --quiet --unit={shlex.quote(unit)} --collect /bin/sh -lc "
+        f"sudo -n systemd-run --quiet --unit={shlex.quote(unit)} --collect /bin/sh -lc "
         f"{shlex.quote(restart_script)}) || {fallback}"
     )
 
@@ -655,7 +655,7 @@ class RemoteDeployer(FrameDeployer):
     async def _setup_remote_service(self) -> None:
         """Upload and install the systemd service file for the new release."""
         with open(REPO_ROOT / "frameos" / "remote" / "frameos-remote.service", "r", encoding="utf-8") as fh:
-            service_contents = fh.read().replace("%I", self.frame.ssh_user)
+            service_contents = fh.read().replace("%I", systemd_unit_user(self.frame.ssh_user))
 
         # Ship service file with the release
         await upload_file(

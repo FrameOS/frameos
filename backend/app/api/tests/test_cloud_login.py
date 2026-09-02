@@ -109,6 +109,25 @@ async def test_login_start_returns_authorization_url(async_client, db, redis, lo
     assert payload["state"]
 
 
+@pytest.mark.asyncio
+async def test_login_start_is_rate_limited_per_ip(async_client, db, redis, login_handoff, monkeypatch):
+    import importlib
+
+    cloud_module = importlib.import_module("app.api.cloud")
+    monkeypatch.setattr(cloud_module, "CLOUD_LOGIN_START_LIMIT", 2)
+    make_connected_link(db)
+    for _ in range(2):
+        response = await async_client.post("/api/cloud/login/start", json={})
+        assert response.status_code == 200
+    response = await async_client.post("/api/cloud/login/start", json={})
+    assert response.status_code == 429
+    # Another address (forwarded by the loopback test client, a trusted proxy) is not affected.
+    response = await async_client.post(
+        "/api/cloud/login/start", json={}, headers={"X-Forwarded-For": "203.0.113.5"}
+    )
+    assert response.status_code == 200
+
+
 async def _start_and_get_state(async_client, calls, next_path=None, path="/api/cloud/login/start"):
     response = await async_client.post(path, json={"next": next_path} if next_path else {})
     assert response.status_code == 200, response.text

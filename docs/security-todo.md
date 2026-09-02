@@ -78,9 +78,9 @@ Two rules that came out of the review and apply to new code:
   sessions) and refuses tokens, except `billing/nightly`, which the job
   calls with a superadmin token from cron. Give it its own token access
   level (or a dedicated service credential) rather than superadmin.
-- **Passkey / TOTP registration is now gated** (recent auth, no tokens) but
-  does not yet require the password when one exists, and nothing emails the
-  owner on `passkey_added` / `totp_enabled`. Do both.
+- **Passkey / TOTP registration is gated** (recent auth, no tokens, owner
+  emailed on every second-factor change) but does not yet require the
+  password when one exists.
 
 ### Self-hosted backend
 
@@ -122,30 +122,24 @@ Two rules that came out of the review and apply to new code:
   editor's "changed since deploy" diff keeps working. Teach
   `frameLogic.ts` `frameKeyEqual` to compare secrets by presence /
   fingerprint and stop restoring them server-side.
-- **Bodies are buffered before auth**: gzip bodies in `middleware.py`,
-  `POST /api/log` (device key checked after parsing), asset uploads
-  (`file.read()` into a `LargeBinary` with no cap), template zip fetch and
-  in-memory `scenes.json`. Reject on `Content-Length`, stream with caps,
-  cap log line bytes and rate-limit `/api/log` per key.
+- **Bodies buffered before auth, the two left**: the template zip fetch
+  and the in-memory `scenes.json` read (`/api/log`, asset uploads and gzip
+  bodies now check auth / `Content-Length` first and are capped). Stream
+  the template zip with a cap; cap `scenes.json`.
 - **`curl | sudo sh` bootstrap defaults to `http://` and downloads
   `frameos-*.tar.gz` unverified**; the precompiled SD image and Remote
   binary are likewise unverified server-side (the Buildroot base image is
   sha256-checked). Publish and verify checksums; warn on plain HTTP.
-- **Login lockout keys on `(peer IP, email)`**: behind any proxy it is a
-  trivial owner lockout, and across IPs it is no brute-force limit at all.
-  Per-account exponential backoff; derive the IP through the trusted-proxy
-  logic that `api/cloud.py` already has.
 - Smaller: cross-project leak via the first-loaded project's MQTT broker in
   `ha/sync.py`; `replayEnrollment`-style sync pulls `mode` / `agent` /
-  `frame_admin_auth` / `https_proxy.server_key` from the device; email
-  change needs no password and does not revoke sessions; `?token=` JWT in
-  WebSocket query strings (dormant); no Origin check on WebSocket
+  `frame_admin_auth` / `https_proxy.server_key` from the device; `?token=`
+  JWT in WebSocket query strings (dormant); no Origin check on WebSocket
   handshakes (SameSite=Lax is the only defence); `TrustedHostMiddleware`
   absent (DNS rebinding reaches `/api/cloud/setup/*` on a fresh install);
-  `/api/cloud/login/start` has no local rate limit; `sudo` without `-n`
-  can pin a worker slot for 1800 s; predictable unverified precompiled
-  cache under `/tmp`; `X-Forwarded-For` trusted from anyone in
-  `request_ip.py`; a device `bootup` event can rewrite `frame_host`.
+  predictable unverified precompiled cache under `/tmp`; a device `bootup`
+  event may still move `frame_host` on embedded frames when the claimed IP
+  matches the request peer or `embedded.followBootIp` is set (deliberate:
+  ESP32 DHCP follow).
 
 ### Device runtime (Nim) and ESP32
 
@@ -180,12 +174,13 @@ Two rules that came out of the review and apply to new code:
   backend-managed frames too; bound total render wall time including native
   HTTP calls (the 20 s interpreter budget pauses during them).
 - Smaller ESP32: netguard exemptions are by hostname and a provider can
-  point `ws_url` at a LAN address; OTA `downloadUrl` accepted as absolute
-  with the bearer attached; backslash bypasses the dot-directory rule on
-  FatFS writes; device key signs provider-chosen bytes with no domain
-  separation; `strcmp` on credentials; unbounded SD consumption by
-  provider `upload_id`s; console is unauthenticated (physical access,
-  document it).
+  point `ws_url` at a LAN address; `esp_http_client` still auto-follows
+  redirects during the OTA download, so a first-party 302 carries the
+  bearer to its target (the bearer is now attached only for the cloud /
+  `ws_url` origin; `disable_auto_redirect` would break CDN-hosted images —
+  decide); device key signs provider-chosen bytes with no domain
+  separation; unbounded SD consumption by provider `upload_id`s; console
+  is unauthenticated (physical access, document it).
 - **Setup hotspot has a well-known default PSK (`frame1234`) and
   `POST /setup` is unauthenticated while it is up.** Release images bake the
   same PSK with `wifiHotspot: "bootOnly"` for 300 s; the setup form accepts
@@ -211,36 +206,23 @@ Two rules that came out of the review and apply to new code:
   LAN policy on their URL before spawning. Scheduler and scene `dispatch`
   can no longer fire `uploadScenes`, which closed the compromised-cloud
   route into this; the provenance model is still the fix.
-- **Local-presence code is readable without presence**: the six-digit code
-  is drawn into the image that `GET /image` and the cloud `image_get`
-  return. Composite the overlay only on the driver path.
 - **OTA signature binds archive bytes only**: version and target come from
   GitHub metadata, so anyone with release-upload rights (no signing key) can
   attach an older or other-arch signed archive under a new tag. Verify the
   global signature / trusted comment naming version + target.
-- **Interpreter robustness**: no recursion depth guard on producer inputs
-  (self-referencing node → SIGSEGV replayed from `uploaded.json` until the
-  boot guard trips); no cap on scene-requested image / SVG `viewBox`
-  dimensions (`quit(1)` on alloc failure); interpreter time budget excludes
-  native calls (`httpRequest` tarpit up to 600 s wedges the render thread
-  until the 900 s watchdog, forever); 256 MB JS heap per runtime, one per
-  JS app node; self-dispatching event loops starve rendering (Pi) or
-  recurse synchronously (ESP32). Depth counter, `decodeImageWithDisplayBounds`
-  for SVG, wall-clock render deadline, per-scene heap budget, per-render
-  dispatch budget.
-- Smaller: `haSensor.entityId` spliced raw into the HA URL (admin-bearer
-  GET of any path); JS asset API is frame-wide by default (fonts, other
-  scenes' assets, `.frameos/scene_images` writable) — default the `scene`
-  sandbox for store-origin scenes; enrolment `timezone` reaches
-  `/etc/localtime` symlink without `isIanaZone`; TLS key / CIFS credentials /
-  `frame.json` written world-readable (matters once PR #415 lands — copy
-  `link_state.nim`'s create-0600 pattern); Samba mount target unconfined;
-  enrolment log dumps the whole `network` object incl. the hotspot password;
-  `http://` providers accepted device-side; WS dial follows redirects with the
-  bearer and never checks `Sec-WebSocket-Accept`; OTA has no free-disk check
-  and extracts as root without `--no-same-owner`; `exiftool` runs on
-  untrusted downloads (not on Buildroot); rate-limit table clears wholesale
-  when full; spool spill dir never swept at boot.
+- **Interpreter robustness, what is left** (the node depth / self-reference
+  guard and the SVG / canvas dimension cap are in): the interpreter time
+  budget excludes native calls (`httpRequest` tarpit up to 600 s wedges the
+  render thread until the 900 s watchdog, forever); 256 MB JS heap per
+  runtime, one per JS app node; self-dispatching event loops starve
+  rendering (Pi) or recurse synchronously (ESP32). Wall-clock render
+  deadline, per-scene heap budget, per-render dispatch budget.
+- Smaller: JS asset API is frame-wide by default (fonts, other scenes'
+  assets, `.frameos/scene_images` writable) — default the `scene` sandbox
+  for store-origin scenes; Samba mount target unconfined; `http://`
+  providers accepted device-side; `exiftool` runs on untrusted downloads
+  (not on Buildroot); the cloud link-code overlay is still drawn into the
+  stored render (the local-presence code no longer is).
 - **Not reviewed on the device**: the HTTP-server lane (`server/*.nim`,
   routes, admin session mechanics, control-mode whitelist) did not complete;
   the prior second-pass fixes there (login rate limits, constant-time admin
@@ -254,21 +236,16 @@ Two rules that came out of the review and apply to new code:
   (`ccache`, `dl/`, `nimcache`). A poisoned cache entry ends up in every
   release SD image. Run fork PRs on GitHub-hosted runners (or require a
   label), mount the cache read-only for PR VMs or give them a scratch
-  subtree, check out `head.sha` not `head.ref`.
+  subtree. (Fork checkouts now pin `head.sha`.)
 - **The CI deploy key is root on the production box and runs
   `scripts/db-migrate.sh` *from the shipped archive* with the whole env
   file exported**, then self-updates the two root scripts from the archive.
   Run migrations as the service user with only `DATABASE_URL`, keep the
   runner script on the box (or verify a checksum), drop the automatic
   self-update, fix the wrapper's comment. The key is written only after
-  every third-party action in the job. Pin all actions in
-  the deploy job to commit SHAs; move ESP32 firmware signing to a
-  GitHub-hosted job (the key currently lives in a VM on the same host as
-  fork-PR VMs); pin `cryptography` there.
-- **Prebuilt Nim compiler is fetched from `archive.frameos.net` with no
-  integrity check** (Dockerfile, `docker-publish-multi.yml`,
-  `frameos-cross.yml`). Record sha256 per target in the committed manifest
-  and verify before extracting.
+  every third-party action in the job, and the deploy job's actions are
+  pinned to commit SHAs. Move ESP32 firmware signing to a GitHub-hosted
+  job (the key currently lives in a VM on the same host as fork-PR VMs).
 - **Off-site backups are plaintext and contain `/root/.ssh`, `/etc/letsencrypt`
   and every env file** (`pg-backup.sh`); the privacy policy calls them
   encrypted. `rclone crypt` with a passphrase held outside the box; drop
@@ -285,32 +262,22 @@ Two rules that came out of the review and apply to new code:
 - Smaller: `X-Forwarded-For` positional trust is spoofable if the origin is
   reachable around Cloudflare (verify nginx allowlists CF ranges or uses
   `real_ip` + `CF-Connecting-IP`; make `clientIpFromHeaders` refuse chains
-  shorter than the trusted count); `DATABASE_SSL=require` disables cert
-  verification in postgres.js (document `verify-full`); `/healthz` echoes
-  the driver error; integration global-setup drops `public`
-  on any `TEST_DATABASE_URL` (require a `_test` suffix); runtime Docker
-  stage runs as root and
-  compose sets no `SECRET_KEY`; `requirements.txt` has no `--hash` lines;
-  `FramesHome.tsx` renders `origin.href` without a scheme check;
-  `rel="noreferer"` typos; the OpenAI service-account key and R2 keys sit
-  in plaintext `.env*` files on the dev laptop (rotate / scope).
+  shorter than the trusted count — done); runtime Docker stage runs as
+  root and compose sets no `SECRET_KEY` (the key now persists to a file,
+  so compose works; still worth setting); `requirements.txt` has no
+  `--hash` lines; the OpenAI service-account key and R2 keys sit in
+  plaintext `.env*` files on the dev laptop (rotate / scope).
 
 ## Medium / low — worth a pass
 
-Cloud: body size caps before `request.json()` on `device/start`,
-`backends/inventory`, `backends/scopes`, backups, and the scene routes;
-`backends/{grants,inventory,rotate-token,scopes}` check no base scope or
+Cloud: `backends/{grants,inventory,rotate-token,scopes}` check no base scope or
 `client_kind` (a frame-kind link can create `connected_backends` rows;
-`parseScopes` allows `frame:*` for backends); backup `content_type` stored
-verbatim and replayed as a response header (allowlist + `nosniff`);
-`frameos/login/start` `state` / `redirect_to` unbounded; backups are only
+`parseScopes` allows `frame:*` for backends); backups are only
 encrypted client-side (verify the envelope on POST or say so);
 `csrfResponse` skips the Origin check when the bearer merely *looks* like a
 token while the cookie is the credential actually used (harmless without
-CORS, but ignore the bearer when a cookie is present); `ssrf.ts` misses
-192.0.0.0/24, 198.18.0.0/15, 64:ff9b::/96, 2002::/16 and does not pin the
-resolved address (DNS rebinding); WebAuthn challenge and pending-2FA JWTs
-are not single-use; sibling reset tokens survive a successful reset;
+CORS, but ignore the bearer when a cookie is present); `ssrf.ts` does not
+pin the resolved address (DNS rebinding);
 identity-keyed login / reset limits are a cheap lockout; passwordless
 passkey profile picks an arbitrary identity row; scene image redirects are
 cached a year and nothing purges the CDN when a scene goes private or is
@@ -318,19 +285,13 @@ pulled; convert/lint have quadratic paths on anonymous input
 (`uniqueName`, `importSpecifierPattern`, gradient scan) and no parser
 depth cap (a `RangeError` is an unhandled 500); `?ai=` / `?prompt=` links
 auto-submit an AI turn; public scenes are unmetered storage; image-set
-binding accepts any known digest; fork description uncapped; markdown
+binding accepts any known digest; markdown
 images load from any https host; `download_count` inflates on anonymous
-requests; publish-time cover is not sniffed; `frame_commands` keeps base64
+requests; `frame_commands` keeps base64
 chunk bodies after ack; per-IP OTA budgets starve fleets behind one NAT;
-`normalizeAssetPath` passes NUL / control chars; `replayEnrollment` binds by
-account not by frame; MCP `ai_turn_wait` / `ai_turn_cancel` take an
-unconstrained `turn_id` into a URL path; token sessions claim
-`emailVerified: true`; model choice is client-controlled on the shared key;
+`replayEnrollment` binds by
+account not by frame; model choice is client-controlled on the shared key;
 `@posthog/mcp` would capture tool arguments if a token were ever set.
 
-Backend: unquoted frame fields in a few frame-side shell strings
-(`find {assets_path}`, crontab `tee`, `%I` → `ssh_user` in a unit file);
-`scene_module_suffix` collisions; `\r` / NUL gaps in the Nim string
-escapers; no artifact cleanup for SD images and firmware; `js_apps.py`
-subprocesses have no timeout; `system_info` supervisor request has no
-timeout; `history[].role` unvalidated in AI app chat.
+Backend: `scene_module_suffix` collisions; no artifact cleanup for SD
+images and firmware.

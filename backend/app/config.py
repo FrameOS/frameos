@@ -147,7 +147,7 @@ class Config:
                     "Authorization": f"Bearer {self.SUPERVISOR_TOKEN}",
                     "Content-Type": "application/json",
                 }
-                response = requests.get("http://supervisor/addons/self/info", headers=headers)
+                response = requests.get("http://supervisor/addons/self/info", headers=headers, timeout=10)
                 info = response.json()
                 ingress_url = info.get("data", {}).get("ingress_url")
                 self.ingress_path = normalize_ingress_path(ingress_url)

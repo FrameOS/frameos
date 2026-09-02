@@ -146,7 +146,8 @@ if serve_html:
         ):
             return JSONResponse(
                 status_code=exc.status_code,
-                content={"detail": exc.detail or f"Error {exc.status_code}"}
+                content={"detail": exc.detail or f"Error {exc.status_code}"},
+                headers=exc.headers,
             )
         return index_response(request)
 

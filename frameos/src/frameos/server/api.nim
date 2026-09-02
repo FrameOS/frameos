@@ -17,6 +17,7 @@ import frameos/types
 import frameos/utils/image
 import frameos/utils/font
 import frameos/utils/show_if
+import frameos/utils/system
 import frameos/config
 import frameos/version
 from frameos/metrics import defaultProcessMemoryUsage
@@ -158,9 +159,11 @@ proc ensureParentDir(path: string) =
     createDir(dir)
 
 proc writeTextFileAtomically(path: string, body: string) =
+  ## Only frame.json comes through here, and it holds every secret the frame
+  ## has — so the temp file is born 0600 and the rename carries that mode.
   ensureParentDir(path)
   let tempPath = path & ".tmp"
-  writeFile(tempPath, body)
+  writePrivateFile(tempPath, body)
   if fileExists(path):
     removeFile(path)
   moveFile(tempPath, path)

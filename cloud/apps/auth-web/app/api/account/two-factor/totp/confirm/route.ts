@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
+  notifySecurityChange,
   readJsonBody,
 } from "../../../../../../src/lib/account-security";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest) {
     eventType: "account.totp_enabled",
     metadata: { method: "totp" },
   });
+  await notifySecurityChange(context, "totp_enabled");
   return NextResponse.json({
     ok: true,
     ...(recoveryCodes ? { recovery_codes: recoveryCodes } : {}),

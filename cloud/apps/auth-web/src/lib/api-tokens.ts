@@ -1,5 +1,10 @@
-import { and, eq, isNull } from "drizzle-orm";
-import { accountApiTokens, accounts, type createDb } from "@frameos-cloud/db";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import {
+  accountApiTokens,
+  accountIdentities,
+  accounts,
+  type createDb,
+} from "@frameos-cloud/db";
 import { createSecretToken, hashSecret } from "./secrets";
 
 // Personal API tokens: the account, as a bearer. Minted on /account/developer
@@ -71,7 +76,12 @@ export function tokenHint(token: string) {
 }
 
 export type AuthenticatedApiToken = {
-  account: { email: string | null; id: string; name: string | null };
+  account: {
+    email: string | null;
+    emailVerified: boolean;
+    id: string;
+    name: string | null;
+  };
   token: ApiTokenIdentity;
 };
 
@@ -89,6 +99,13 @@ export async function authenticateApiToken(
       access: accountApiTokens.access,
       accountId: accountApiTokens.accountId,
       email: accounts.primaryEmail,
+      // Same question a cookie session answers from its identity row: does
+      // any identity on the account vouch for the address?
+      emailVerified: sql<boolean>`exists (
+        select 1 from ${accountIdentities}
+        where ${accountIdentities.accountId} = ${accounts.id}
+          and ${accountIdentities.emailVerified}
+      )`,
       expiresAt: accountApiTokens.expiresAt,
       id: accountApiTokens.id,
       lastUsedAt: accountApiTokens.lastUsedAt,
@@ -125,7 +142,12 @@ export async function authenticateApiToken(
       .where(eq(accountApiTokens.id, row.id));
   }
   return {
-    account: { email: row.email, id: row.accountId, name: row.accountName },
+    account: {
+      email: row.email,
+      emailVerified: row.emailVerified === true,
+      id: row.accountId,
+      name: row.accountName,
+    },
     token: { access, id: row.id, name: row.name },
   };
 }

@@ -59,9 +59,18 @@ export async function GET() {
     logError("healthz.database_unavailable", { detail: database.detail });
   }
 
+  // The driver's message (host names, the user, sometimes the query) stays
+  // in the log; the unauthenticated probe only learns that the database is
+  // the failing check.
+  const checks = {
+    database: database.ok
+      ? database
+      : { detail: "database_unavailable", latencyMs: database.latencyMs, ok: false },
+  };
+
   return NextResponse.json(
     {
-      checks: { database },
+      checks,
       status: database.ok ? "ok" : "degraded",
       // Optional, and nothing sets it automatically: the deploy writes the
       // SHA to /opt/frameos-cloud/RELEASE as a file, not into the unit's

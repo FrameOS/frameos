@@ -162,6 +162,7 @@ describe("account backup routes", () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("content-disposition")).toContain(
       'attachment; filename="Kitchen_frame.json"',
     );

@@ -50,5 +50,6 @@ suite "set-display":
     check data["width"].getInt == 800
     check data["scenes"].len == 2
     check not fileExists(path & ".set-display-tmp")
+    check getFilePermissions(path) == {fpUserRead, fpUserWrite}
     check runSetDisplay(@["--device=x", "--frame-json=" & dir / "missing.json"]) == 1
     removeDir(dir)

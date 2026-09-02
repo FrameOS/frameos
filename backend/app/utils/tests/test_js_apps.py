@@ -60,3 +60,18 @@ def test_validate_js_source_plain_js_keeps_javascript_meaning():
     # comparison there, and the pass that would read it as a generic call
     # is off.
     assert validate_js_source("app.js", "const f = () => 1, a = 1, b = 2; export const x = f < a > (b)") == []
+
+
+def test_validate_js_source_reports_a_hung_checker(monkeypatch):
+    import subprocess
+
+    from app.utils import js_apps
+
+    def hang(*_args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="js_check", timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(js_apps.subprocess, "run", hang)
+    errors = validate_js_source("app.ts", "export function get() { return 1 }")
+
+    assert errors
+    assert "timed out" in errors[0]["error"].lower()

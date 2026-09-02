@@ -94,6 +94,7 @@ from app.schemas.frames import (
 from app.api.auth import get_current_user_from_request
 from app.config import config
 from app.utils.network import is_safe_host
+from app.utils.upload_limits import MAX_ASSET_UPLOAD_BYTES, read_upload_limited, reject_oversized_content_length
 from app.utils.scene_execution import normalize_scenes_execution
 from app.utils.remote_exec import (
     RemoteTransport,
@@ -2699,13 +2700,15 @@ async def api_frame_assets_sync(
 @api_project.post("/frames/{id:int}/assets/upload_image")
 async def api_frame_assets_upload_image(
     id: int,
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    reject_oversized_content_length(request, MAX_ASSET_UPLOAD_BYTES)
     frame = _project_frame(db, id) or _not_found()
 
-    data = await file.read()
+    data = await read_upload_limited(file, MAX_ASSET_UPLOAD_BYTES)
     if not data:
         _bad_request("Uploaded file is empty")
 
@@ -4156,13 +4159,15 @@ def _reboot_hint_from_log(log: Log) -> dict[str, Any] | None:
     if "rebooting device" in lower:
         return {"kind": "initiated", "reason": line, "source": "backend", "message": line}
 
-    if line in {"sudo reboot", "/sbin/shutdown -r now", "sudo shutdown -r now"} or "systemctl reboot" in lower:
+    if line in {"sudo reboot", "sudo -n reboot", "/sbin/shutdown -r now", "sudo shutdown -r now"} or "systemctl reboot" in lower:
         return {"kind": "initiated", "reason": "Device reboot requested", "source": "backend", "message": line}
 
     if "restarting frameos" in lower or line in {
         "sudo systemctl restart frameos.service",
+        "sudo -n systemctl restart frameos.service",
         "systemctl restart frameos.service",
         "sudo systemctl start frameos.service",
+        "sudo -n systemctl start frameos.service",
     }:
         return {"kind": "initiated", "reason": "FrameOS restart requested", "source": "backend", "message": line}
 

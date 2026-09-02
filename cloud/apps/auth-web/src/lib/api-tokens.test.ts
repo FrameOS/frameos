@@ -87,6 +87,7 @@ describe("api tokens", () => {
     accountId: "acc-1",
     accountName: "Marius",
     email: "me@example.com",
+    emailVerified: true,
     expiresAt: null,
     id: "tok-1",
     lastUsedAt: null,
@@ -99,11 +100,23 @@ describe("api tokens", () => {
     const { db, updates } = fakeDb(baseRow(token));
     const result = await authenticateApiToken(db, token);
     expect(result).toEqual({
-      account: { email: "me@example.com", id: "acc-1", name: "Marius" },
+      account: {
+        email: "me@example.com",
+        emailVerified: true,
+        id: "acc-1",
+        name: "Marius",
+      },
       token: { access: "full", id: "tok-1", name: "laptop" },
     });
     expect(updates).toHaveLength(1);
     expect(updates[0]?.lastUsedAt).toBeInstanceOf(Date);
+  });
+
+  it("reports an unverified account as such instead of vouching for it", async () => {
+    const { token } = mintApiToken("full");
+    const { db } = fakeDb({ ...baseRow(token), emailVerified: false });
+    const result = await authenticateApiToken(db, token);
+    expect(result?.account.emailVerified).toBe(false);
   });
 
   it("throttles the last-used write", async () => {

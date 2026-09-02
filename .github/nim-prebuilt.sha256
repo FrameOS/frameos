@@ -1,0 +1,43 @@
+# sha256 of every prebuilt Nim toolchain archive served from
+# https://archive.frameos.net/prebuilt-deps/<target>/nim-<version>.tar.gz.
+#
+# The CDN is a plain R2 bucket: whoever can write to it (or sit between it and
+# a runner) can hand CI a compiler. Every consumer looks its target up here
+# and refuses to extract an archive whose digest is not on this list:
+#   - Dockerfile, stage `nim-toolchain` (docker-publish-multi.yml,
+#     e2e-docker.yml and any local `docker build`)
+#   - .github/workflows/docker-publish-multi.yml, "Install Nim (prebuilt)"
+#   - .github/workflows/frameos-cross.yml, "Install Nim (prebuilt)" (x2)
+# A target with no line here fails the build; do not make that conditional.
+# tools/prebuilt-deps/manifest.json is NOT the pin: r2_sync.py rewrites it
+# from a fixed schema and mirrors it to the same bucket.
+#
+# Update recipe (after `tools/prebuilt-deps/r2_sync.py upload` of a new Nim):
+#   1. bump the version in the paths below (sed -i 's/nim-2.2.4/nim-X.Y.Z/')
+#   2. from a scratch dir, re-download exactly the paths this file lists and
+#      paste the output over the entries:
+#        grep -v '^#' /path/to/nim-prebuilt.sha256 | awk '{print $2}' |
+#          while read -r p; do mkdir -p "${p%/*}" &&
+#            curl -fsSL "https://archive.frameos.net/prebuilt-deps/$p" -o "$p"; done
+#        sha256sum */nim-*.tar.gz
+#   3. `sha256sum -c` the file against that scratch dir before committing.
+# Targets that ship quickjs only (debian-*-armv6) have no Nim archive and are
+# deliberately absent; ubuntu-*-armhf is accepted by the Dockerfile's case
+# list but has never been published, so it is absent too.
+#
+# Format: `sha256sum -c` lines, keyed by `<target>/nim-<version>.tar.gz`.
+26543a21382bbefdee0e73c7f84fcd710534bc423b879a548ac278628ebcb3f5  debian-bullseye-amd64/nim-2.2.4.tar.gz
+8679a85df6531ac95f99b59fc0be67d8454af798ef87ffa10d3eb2186f92062c  debian-bullseye-arm64/nim-2.2.4.tar.gz
+45d168129537e8be132ed9010ee8e2e0bc357b940636874ed7b61fbbcfe5ee86  debian-bullseye-armhf/nim-2.2.4.tar.gz
+80f921e711e0002e71c212212599f0a1f35e6b6a57960321db9b244e954ab526  debian-bookworm-amd64/nim-2.2.4.tar.gz
+42449e2c0319f576f04e87f00c40e0d5e0a31ffa300b65dccb8f213121f1e2a8  debian-bookworm-arm64/nim-2.2.4.tar.gz
+a6d876473375cc9986978b88f8b47343e09b2e26777111e05d54a87256c7ea0b  debian-bookworm-armhf/nim-2.2.4.tar.gz
+e0e5d8e6b1f7f40d69fd16dfddc109b30caaea2339eeb81fb7032c981fd2fdd0  debian-trixie-amd64/nim-2.2.4.tar.gz
+daddd6b7e111bc117e1b9047bdcd03eae31edbf60ce6fd5e9131820db8ea34dc  debian-trixie-arm64/nim-2.2.4.tar.gz
+18682f011d2cda68be6decdf1e8b3304354d567d110d9298fb628f714ed76638  debian-trixie-armhf/nim-2.2.4.tar.gz
+42d9442c557904c2d104c64e3a7cb537a1bd4af59a11b1a68aeaa69a30251bb0  ubuntu-22.04-amd64/nim-2.2.4.tar.gz
+64a77710af88473e9415228c8be1e0a377243c84ef8c02c06ec58b334e78aa6c  ubuntu-22.04-arm64/nim-2.2.4.tar.gz
+9960c5c77c1252dacf3adfd50dab2debed6db1d2e9019ea32305c1091cb73e29  ubuntu-24.04-amd64/nim-2.2.4.tar.gz
+5b4fb15ec0cbe69576969a21feefcdcc06c8b8a8cdf39a9d749bc16301c89f6a  ubuntu-24.04-arm64/nim-2.2.4.tar.gz
+1db641c9d8b9592025fc8843545477b5269fd0a8ceb718532500946b508278bc  ubuntu-26.04-amd64/nim-2.2.4.tar.gz
+611275fead9f978648bec646569316768b56473a8f06ab70a131b1b16d98de7d  ubuntu-26.04-arm64/nim-2.2.4.tar.gz

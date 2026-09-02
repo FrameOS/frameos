@@ -18,6 +18,8 @@ class UserPasswordUpdate(BaseModel):
 
 class UserEmailUpdate(BaseModel):
     email: str
+    # Same rule as UserPasswordUpdate: required whenever a local password exists.
+    current_password: str | None = None
 
     @field_validator("email")
     @classmethod

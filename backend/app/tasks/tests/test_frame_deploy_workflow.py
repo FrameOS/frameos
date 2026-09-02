@@ -50,7 +50,7 @@ class FakeDeployer:
             return 0
         if command.startswith("grep -q ") or command.startswith("test -f /etc/cron.d/frameos-reboot && grep -Fxq "):
             return 1
-        if command.startswith("command -v raspi-config > /dev/null && sudo raspi-config nonint get_"):
+        if command.startswith("command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_"):
             return 1
         if command.startswith("systemctl is-enabled ") or command.startswith("systemctl is-active "):
             return 1
@@ -1138,8 +1138,8 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
     deployer = FakeDeployer(existing_paths={"/boot/firmware/config.txt"})
     deployer.success_commands.update(
         {
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1"',
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "1"',
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_i2c | grep -q "1"',
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_spi | grep -q "1"',
             "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1",
             "systemctl is-enabled userconfig >/dev/null 2>&1",
         }
@@ -1175,8 +1175,8 @@ async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatc
     )
     workflow.deployer.success_commands.update(
         {
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1"',
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "1"',
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_i2c | grep -q "1"',
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_spi | grep -q "1"',
             "systemctl is-enabled caddy.service >/dev/null 2>&1 || systemctl is-active caddy.service >/dev/null 2>&1",
             "systemctl is-enabled userconfig >/dev/null 2>&1",
         }
@@ -1396,16 +1396,16 @@ async def test_run_post_deploy_cleanup_uses_planned_actions_without_recalculatin
         }
     )
 
-    assert all("sudo ./frameos setup" not in command for command in deployer.commands)
+    assert all("sudo -n ./frameos setup" not in command for command in deployer.commands)
     assert any("/boot/custom.txt" in command for command in deployer.commands)
-    assert "sudo raspi-config nonint do_spi 1" not in deployer.commands
+    assert "sudo -n raspi-config nonint do_spi 1" not in deployer.commands
     assert any("/etc/cron.d/frameos-reboot" in command for command in deployer.commands)
-    assert "sudo systemctl daemon-reload" in deployer.commands
-    assert "sudo systemctl restart frameos.service" in deployer.commands
-    assert "sudo systemctl status frameos.service" in deployer.commands
+    assert "sudo -n systemctl daemon-reload" in deployer.commands
+    assert "sudo -n systemctl restart frameos.service" in deployer.commands
+    assert "sudo -n systemctl status frameos.service" in deployer.commands
     assert deployer.restarted_services == []
     assert all("userconfig" not in command for command in deployer.commands)
-    assert "sudo reboot" not in deployer.commands
+    assert "sudo -n reboot" not in deployer.commands
 
 
 @pytest.mark.asyncio
@@ -1449,11 +1449,11 @@ async def test_run_post_deploy_cleanup_remounts_read_only_root_around_cron_updat
     )
 
     root_check = next(index for index, command in enumerate(deployer.commands) if command.startswith("awk '$2 == \"/\" "))
-    remount_rw = deployer.commands.index("sudo mount -o remount,rw /")
+    remount_rw = deployer.commands.index("sudo -n mount -o remount,rw /")
     cron_update = next(index for index, command in enumerate(deployer.commands) if "/etc/cron.d/frameos-reboot" in command)
-    sync = deployer.commands.index("sudo sync")
-    remount_ro = deployer.commands.index("sudo mount -o remount,ro /")
-    restart = deployer.commands.index("sudo systemctl restart frameos.service")
+    sync = deployer.commands.index("sudo -n sync")
+    remount_ro = deployer.commands.index("sudo -n mount -o remount,ro /")
+    restart = deployer.commands.index("sudo -n systemctl restart frameos.service")
     assert root_check < remount_rw < cron_update < sync < remount_ro < restart
     assert ("stdout", "Root filesystem is read-only; remounting read-write for final cleanup") in deployer.logs
     assert ("stdout", "Restoring root filesystem to read-only after final cleanup") in deployer.logs
@@ -1504,7 +1504,7 @@ async def test_run_post_deploy_cleanup_uses_host_systemd_for_remote_rootfs_write
     assert any("mount -o remount,rw /" in command for command in host_commands)
     assert any("/etc/cron.d/frameos-reboot" in command for command in host_commands)
     assert any("mount -o remount,ro /" in command for command in host_commands)
-    assert not any(command == "sudo mount -o remount,rw /" for command in deployer.commands)
+    assert not any(command == "sudo -n mount -o remount,rw /" for command in deployer.commands)
 
 
 @pytest.mark.asyncio
@@ -1537,11 +1537,11 @@ async def test_run_release_setup_uses_staged_release_and_marks_reboot_when_setup
         post_deploy=post_deploy,
     )
 
-    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
-    assert "cd /srv/frameos/current && sudo ./frameos setup" not in deployer.commands
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup" in deployer.commands
+    assert "cd /srv/frameos/current && sudo -n ./frameos setup" not in deployer.commands
     assert post_deploy["final_action"] == "reboot"
-    assert "sudo systemctl enable frameos.service" not in deployer.commands
-    assert "sudo reboot" not in deployer.commands
+    assert "sudo -n systemctl enable frameos.service" not in deployer.commands
+    assert "sudo -n reboot" not in deployer.commands
     assert deployer.restarted_services == []
 
 
@@ -1577,10 +1577,10 @@ async def test_run_release_setup_remounts_read_only_root_around_setup():
 
     assert post_deploy["final_action"] == "restart_frameos"
     root_check = next(index for index, command in enumerate(deployer.commands) if command.startswith("awk '$2 == \"/\" "))
-    remount_rw = deployer.commands.index("sudo mount -o remount,rw /")
-    setup = deployer.commands.index("cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup")
-    sync = deployer.commands.index("sudo sync")
-    remount_ro = deployer.commands.index("sudo mount -o remount,ro /")
+    remount_rw = deployer.commands.index("sudo -n mount -o remount,rw /")
+    setup = deployer.commands.index("cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup")
+    sync = deployer.commands.index("sudo -n sync")
+    remount_ro = deployer.commands.index("sudo -n mount -o remount,ro /")
     assert root_check < remount_rw < setup < sync < remount_ro
     assert ("stdout", "Root filesystem is read-only; remounting read-write for setup") in deployer.logs
     assert ("stdout", "Restoring root filesystem to read-only after setup") in deployer.logs
@@ -1617,7 +1617,7 @@ async def test_run_release_setup_uses_systemd_run_when_deploying_through_remote(
     assert "FRAMEOS_SETUP_UNDER_REMOTE=1" in setup_command
     assert 'FRAMEOS_SERVICE_USER="$1"' in setup_command
     assert "/srv/frameos/releases/release_build12345678" in setup_command
-    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" not in deployer.commands
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup" not in deployer.commands
 
 
 @pytest.mark.asyncio
@@ -1653,7 +1653,7 @@ async def test_buildroot_current_setup_continues_after_legacy_systemd_service_wr
     setup_requires_reboot = await workflow._run_current_setup()
 
     assert setup_requires_reboot is False
-    assert "cd /srv/frameos/current && sudo ./frameos setup" in deployer.commands
+    assert "cd /srv/frameos/current && sudo -n ./frameos setup" in deployer.commands
     assert any("failed refreshing the Buildroot systemd service file" in message for _kind, message in deployer.logs)
     assert not any("diagnostics:" in command for command in deployer.commands)
 
@@ -1694,7 +1694,7 @@ async def test_buildroot_release_setup_fails_on_systemd_service_write_failure():
             post_deploy={"final_action": "restart_frameos"},
         )
 
-    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup" in deployer.commands
     assert any("FrameOS setup exited with code 1; collecting diagnostics" in message for _kind, message in deployer.logs)
     assert "free -m" in deployer.commands
     assert not any("failed refreshing the Buildroot systemd service file" in message for _kind, message in deployer.logs)
@@ -1723,8 +1723,8 @@ async def test_stop_frameos_for_release_setup_leaves_remote_running():
     stopped = await workflow._stop_frameos_for_release_setup()
 
     assert stopped is True
-    assert "sudo systemctl stop frameos.service" in deployer.commands
-    assert "sudo sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
+    assert "sudo -n systemctl stop frameos.service" in deployer.commands
+    assert "sudo -n sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
     assert all("frameos-remote" not in command and "frameos_agent" not in command for command in deployer.commands)
 
 
@@ -1742,9 +1742,9 @@ async def test_stop_frameos_for_release_setup_treats_missing_service_as_not_runn
     class MissingServiceDeployer(RecordingDeployer):
         async def exec_command(self, command: str, **kwargs) -> int:
             self.commands.append(command)
-            if command == "sudo systemctl stop frameos.service":
+            if command == "sudo -n systemctl stop frameos.service":
                 return 5
-            if command == "sudo sh -c 'killall frameos 2>/dev/null || true'":
+            if command == "sudo -n sh -c 'killall frameos 2>/dev/null || true'":
                 return 0
             return await super().exec_command(command, **kwargs)
 
@@ -1761,8 +1761,8 @@ async def test_stop_frameos_for_release_setup_treats_missing_service_as_not_runn
     stopped = await workflow._stop_frameos_for_release_setup()
 
     assert stopped is False
-    assert "sudo systemctl stop frameos.service" in deployer.commands
-    assert "sudo sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
+    assert "sudo -n systemctl stop frameos.service" in deployer.commands
+    assert "sudo -n sh -c 'killall frameos 2>/dev/null || true'" in deployer.commands
     assert not any(kind == "stderr" for kind, _message in deployer.logs)
     assert any("service was not loaded" in message for _kind, message in deployer.logs)
 
@@ -1799,8 +1799,8 @@ async def test_run_post_deploy_cleanup_reboots_when_setup_requested_it():
         }
     )
 
-    assert "sudo systemctl enable frameos.service" not in deployer.commands
-    assert "sudo reboot" in deployer.commands
+    assert "sudo -n systemctl enable frameos.service" not in deployer.commands
+    assert "sudo -n reboot" in deployer.commands
     assert deployer.restarted_services == []
 
 
@@ -1861,7 +1861,7 @@ async def test_execute_fast_uses_atomic_uploads_before_reload(monkeypatch: pytes
         ("/srv/frameos/current/scenes.json.gz", True),
         ("/srv/frameos/current/all_scenes.json.gz", True),
     ]
-    assert "cd /srv/frameos/current && sudo ./frameos setup" in deployer.commands
+    assert "cd /srv/frameos/current && sudo -n ./frameos setup" in deployer.commands
 
 
 @pytest.mark.asyncio
@@ -2072,7 +2072,7 @@ async def test_execute_fast_skips_setup_for_old_frameos_without_setup_command(mo
 
     await workflow._execute_fast(plan)
 
-    assert not any(command.endswith("&& sudo ./frameos setup") for command in deployer.commands)
+    assert not any(command.endswith("&& sudo -n ./frameos setup") for command in deployer.commands)
     assert not any("grep -aq 'FrameOS setup: starting'" in command for command in deployer.commands)
     assert (
         "stdout",
@@ -2223,9 +2223,9 @@ async def test_execute_full_does_not_activate_release_when_setup_fails(monkeypat
     with pytest.raises(RuntimeError, match="FrameOS setup failed with exit code 1"):
         await workflow._execute_full(plan)
 
-    assert "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup" in deployer.commands
-    assert deployer.commands.index("sudo systemctl stop frameos.service") < deployer.commands.index(
-        "cd /srv/frameos/releases/release_build12345678 && sudo ./frameos setup"
+    assert "cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup" in deployer.commands
+    assert deployer.commands.index("sudo -n systemctl stop frameos.service") < deployer.commands.index(
+        "cd /srv/frameos/releases/release_build12345678 && sudo -n ./frameos setup"
     )
     assert deployer.restarted_services == ["frameos"]
     assert frame.status == "uninitialized"

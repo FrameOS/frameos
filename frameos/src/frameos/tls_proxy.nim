@@ -5,6 +5,7 @@ import osproc
 import strformat
 import frameos/types
 import frameos/utils/process
+import frameos/utils/system
 
 # Guards the process handle and desired-state flags: the monitor thread,
 # the main thread (start/stop on boot/shutdown) and the runner ("reload")
@@ -78,7 +79,8 @@ proc startTlsProxyLocked(frameConfig: FrameConfig, logger: Logger) =
 
   try:
     writeFile(certPath, frameConfig.httpsProxy.serverCert)
-    writeFile(keyPath, frameConfig.httpsProxy.serverKey)
+    # The private key: 0600 from creation, never a world-readable window.
+    writePrivateFile(keyPath, frameConfig.httpsProxy.serverKey)
   except CatchableError as error:
     logger.log(%*{
       "event": "tls:cert_write_error",

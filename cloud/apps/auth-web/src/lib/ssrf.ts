@@ -26,7 +26,7 @@ export function addressIsPrivate(address: string): boolean {
   const plain = address.split("%")[0] ?? address;
   if (isIP(plain) === 4) {
     const octets = plain.split(".").map(Number);
-    const [a = -1, b = -1] = octets;
+    const [a = -1, b = -1, c = -1] = octets;
     return (
       a === 0 || // unspecified
       a === 10 ||
@@ -34,12 +34,18 @@ export function addressIsPrivate(address: string): boolean {
       (a === 100 && b >= 64 && b <= 127) || // CGNAT
       (a === 169 && b === 254) || // link-local
       (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 0 && c === 0) || // IETF protocol assignments (192.0.0.0/24)
       (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) || // benchmarking (198.18.0.0/15)
       a >= 224 // multicast + reserved
     );
   }
   const lower = plain.toLowerCase();
-  // Loopback, unspecified, link-local, unique-local, and v4-mapped forms.
+  // Loopback, unspecified, link-local, unique-local, and the forms that embed
+  // a v4 address (v4-mapped, NAT64 64:ff9b::/96, 6to4 2002::/16): those carry
+  // the v4 target in their low bits, so an internal address would otherwise
+  // slip in dressed as a public-looking v6 literal. All of them are refused
+  // outright rather than decoded — nothing this guard fronts needs them.
   return (
     lower === "::" ||
     lower === "::1" ||
@@ -49,7 +55,9 @@ export function addressIsPrivate(address: string): boolean {
     lower.startsWith("feb") ||
     lower.startsWith("fc") ||
     lower.startsWith("fd") ||
-    lower.startsWith("::ffff:")
+    lower.startsWith("::ffff:") ||
+    lower.startsWith("64:ff9b:") ||
+    lower.startsWith("2002:")
   );
 }
 

@@ -24,7 +24,7 @@ from app.websockets import publish_message
 from app.models.frame import Frame
 from app.utils.frame_secrets import websocket_frame_payload
 from app.models.log import new_log as log
-from app.utils.request_ip import extract_client_ip
+from app.utils.request_ip import client_ip_for_request
 from app.ws.remote_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, send_cmd
 
 router = APIRouter()
@@ -495,10 +495,7 @@ async def ws_remote_endpoint(
         pump_commands(ws, frame.id, server_api_key, shared_secret, redis)
     )
 
-    client_ip = extract_client_ip(
-        ws.headers,
-        ws.client.host if ws.client else None,
-    )
+    client_ip = client_ip_for_request(ws)
 
     # ----- bookkeeping -----------------------------------------------------
     active_sockets.add(ws)

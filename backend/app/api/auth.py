@@ -22,6 +22,8 @@ from app.utils.session_cookie import (
     create_session_cookie_value,
     decode_session_cookie_claims,
 )
+from app.utils.rate_limit import clear_rate_limit, hit_rate_limit, over_rate_limit, rate_limit_key
+from app.utils.request_ip import client_ip_for_request
 
 from . import api_open, api_user
 
@@ -30,6 +32,50 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 7 * 24 * 60  # 7 days
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login", auto_error=False)
+
+# Failed logins lock the *account*, not the (IP, account) pair: behind a proxy
+# every visitor shares one IP (so a pair lock is a trivial owner lockout) and
+# from many IPs a pair lock is no brute-force limit at all. After
+# LOGIN_LOCKOUT_THRESHOLD failures the account waits LOGIN_LOCKOUT_BASE_SECONDS,
+# doubling per further failure up to LOGIN_LOCKOUT_MAX_SECONDS; a successful
+# login clears it. A much looser per-IP failure counter still stops one address
+# from hammering every account.
+LOGIN_LOCKOUT_THRESHOLD = 5
+LOGIN_LOCKOUT_BASE_SECONDS = 30
+LOGIN_LOCKOUT_MAX_SECONDS = 15 * 60
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+LOGIN_IP_LIMIT = 100
+LOGIN_IP_WINDOW_SECONDS = 15 * 60
+
+
+def normalize_login_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def login_lockout_seconds(failures: int) -> int:
+    if failures < LOGIN_LOCKOUT_THRESHOLD:
+        return 0
+    return min(LOGIN_LOCKOUT_BASE_SECONDS * (2 ** (failures - LOGIN_LOCKOUT_THRESHOLD)), LOGIN_LOCKOUT_MAX_SECONDS)
+
+
+async def _login_locked_seconds(redis: Redis, email: str) -> int:
+    ttl = await redis.ttl(rate_limit_key("login_lock", email))
+    return max(int(ttl or 0), 0)
+
+
+async def _record_login_failure(redis: Redis, email: str, ip: str) -> None:
+    await hit_rate_limit(redis, "login_ip", ip, limit=LOGIN_IP_LIMIT, window_seconds=LOGIN_IP_WINDOW_SECONDS)
+    failures_key = rate_limit_key("login_failures", email)
+    failures = int(await redis.incr(failures_key))
+    await redis.expire(failures_key, LOGIN_FAILURE_WINDOW_SECONDS)
+    lock_seconds = login_lockout_seconds(failures)
+    if lock_seconds:
+        await redis.set(rate_limit_key("login_lock", email), str(failures), ex=lock_seconds)
+
+
+async def _clear_login_failures(redis: Redis, email: str) -> None:
+    await clear_rate_limit(redis, "login_failures", email)
+    await clear_rate_limit(redis, "login_lock", email)
 
 
 def _should_use_secure_cookie(request: Request) -> bool:
@@ -223,26 +269,27 @@ async def login(
 
     email = form_data.username
     password = form_data.password
-    ip = request.client.host
-    key = f"login_attempts:{ip}:{email}"
-    if app_config.config.TEST:
-        key += f":{app_config.config.INSTANCE_ID}"
-    attempts = (await redis.get(key)) or '0'
-    if int(attempts) > 10:  # limit to 10 attempts for example
+    account = normalize_login_email(email)
+    ip = client_ip_for_request(request) or "unknown"
+    locked_for = await _login_locked_seconds(redis, account)
+    if locked_for:
+        raise HTTPException(
+            status_code=429, detail="Too many login attempts", headers={"Retry-After": str(locked_for)}
+        )
+    if await over_rate_limit(redis, "login_ip", ip, limit=LOGIN_IP_LIMIT):
         raise HTTPException(status_code=429, detail="Too many login attempts")
 
     user = db.query(User).filter_by(email=email).first()
     # Cloud-created users (first-run cloud signup) have no local password.
     if user is None or not user.password or not check_password_hash(user.password, password):
-        await redis.incr(key)
-        await redis.expire(key, 300)  # expire after 5 minutes
+        await _record_login_failure(redis, account, ip)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     from app.tenancy import ensure_default_project_for_user
 
     ensure_default_project_for_user(db, user)
 
-    await redis.delete(key)
+    await _clear_login_failures(redis, account)
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token, session_value, max_age = issue_credentials(db, user, access_token_expires)
     response.set_cookie(

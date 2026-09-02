@@ -36,6 +36,7 @@
 ## the device returns to standalone — scenes untouched, loud log line emitted.
 
 import base64
+import checksums/sha1
 import json
 import locks
 import options
@@ -817,10 +818,43 @@ proc applySystemTimeZone(timeZone: string) {.gcsafe.} =
   ## zone changes at runtime. Best effort: logged, never fatal.
   {.gcsafe.}:
     try:
+      # The zone is joined onto /usr/share/zoneinfo by setupTimezone; only
+      # an IANA zone name may reach it (the contract validator says the same
+      # for set_settings, but enrollment personalization arrives here too).
+      if not isIanaZone(timeZone.strip()):
+        log(%*{"event": "cloud:timezone:system:invalid", "timeZone": timeZone})
+        return
       discard frameSetup.setupTimezone(timeZone)
       log(%*{"event": "cloud:timezone:system", "timeZone": timeZone})
     except CatchableError as error:
       log(%*{"event": "cloud:timezone:system:error", "timeZone": timeZone, "error": error.msg})
+
+proc redactSecrets*(node: JsonNode): JsonNode =
+  ## A copy of `node` with every value under a secret-looking key replaced,
+  ## recursively: `wifiPassword`, `wifiHotspotPassword`, any `pass`/`psk`/
+  ## `secret`/`token`/`apiKey` key. For log lines that echo a config object —
+  ## the enrollment personalization carries the whole stored `network`
+  ## object, hotspot password included, and the frame log is shipped to the
+  ## cloud.
+  if node == nil:
+    return newJNull()
+  case node.kind
+  of JObject:
+    result = newJObject()
+    for key, value in node.pairs:
+      let lowered = key.toLowerAscii()
+      if lowered.contains("password") or lowered.contains("pass") or
+          lowered.contains("psk") or lowered.contains("secret") or
+          lowered.contains("token") or lowered.contains("apikey"):
+        result[key] = %"[redacted]"
+      else:
+        result[key] = redactSecrets(value)
+  of JArray:
+    result = newJArray()
+    for item in node.items:
+      result.add(redactSecrets(item))
+  else:
+    result = copy(node)
 
 proc applyEnrollmentPersonalization(personalization: JsonNode) {.gcsafe.} =
   {.gcsafe.}:
@@ -834,7 +868,7 @@ proc applyEnrollmentPersonalization(personalization: JsonNode) {.gcsafe.} =
         personalization.delete("wifiCountry")
       if frameApiUpdateChangesConfig(personalization):
         persistFrameApiUpdate(personalization)
-        log(%*{"event": "cloud:enroll:personalization", "applied": personalization})
+        log(%*{"event": "cloud:enroll:personalization", "applied": redactSecrets(personalization)})
         sendEvent("reload", %*{})
       if personalization.hasKey("timezone"):
         applySystemTimeZone(personalization["timezone"].getStr(""))
@@ -1337,6 +1371,18 @@ proc closeClient(handle: DialHandle) =
     except CatchableError:
       discard
 
+proc webSocketAcceptFor*(key: string): string =
+  ## RFC 6455 §4.2.2: the `Sec-WebSocket-Accept` a server must answer for
+  ## `key` — base64(SHA-1(key ++ GUID)). Checking it is what proves the
+  ## peer actually spoke the upgrade rather than any 101 with an "Upgrade"
+  ## header (a proxy, a captive portal, a stale provider) getting handed the
+  ## socket and the frame's link token.
+  let digest = Sha1Digest(secureHash(key & "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+  var raw = newString(digest.len)
+  for i, byte in digest:
+    raw[i] = char(byte)
+  base64.encode(raw)
+
 proc dialManagementSocket(providerUrl, wsPath, accessToken: string,
                           handle: DialHandle): Future[WebSocket] {.async.} =
   ## Opens the management socket with an Authorization header. The `ws`
@@ -1344,6 +1390,11 @@ proc dialManagementSocket(providerUrl, wsPath, accessToken: string,
   ## HTTP upgrade itself (TLS iff the provider URL is https, matching the
   ## cloud-link rules for plain-http development providers) and hands the
   ## upgraded socket to `ws` for framing. Raises CloudHubAuthError on 401.
+  ##
+  ## Redirects are NOT followed: httpclient would re-send the bearer to
+  ## whatever host a 3xx names, so a 3xx is a failed dial with the location
+  ## logged. And the upgrade is accepted only when the reply is a 101 whose
+  ## `Sec-WebSocket-Accept` matches the key sent.
   let uri = parseUri(providerUrl & wsPath)
   # Only build a TLS context for https providers: getDefaultSSL() is eager in
   # newAsyncHttpClient and newContext() is known to crash against the macOS
@@ -1351,30 +1402,43 @@ proc dialManagementSocket(providerUrl, wsPath, accessToken: string,
   var client =
     when defined(ssl):
       if uri.scheme == "https":
-        newAsyncHttpClient(sslContext = std_net.newContext())
+        newAsyncHttpClient(maxRedirects = 0, sslContext = std_net.newContext())
       else:
-        newAsyncHttpClient(sslContext = nil)
+        newAsyncHttpClient(maxRedirects = 0, sslContext = nil)
     else:
-      newAsyncHttpClient()
+      newAsyncHttpClient(maxRedirects = 0)
   handle.client = client
   var secStr = newString(16)
   for i in 0 ..< secStr.len:
     secStr[i] = char rand(255)
+  let secKey = base64.encode(secStr)
   client.headers = newHttpHeaders({
     "Connection": "Upgrade",
     "Upgrade": "websocket",
     "Sec-WebSocket-Version": "13",
-    "Sec-WebSocket-Key": base64.encode(secStr),
+    "Sec-WebSocket-Key": secKey,
     "Authorization": "Bearer " & accessToken,
   })
   let response = await client.get($uri)
   if response.code == Http401 or response.code == Http403:
     client.close()
     raise newException(CloudHubAuthError, "Provider rejected the link token: " & $response.code)
-  if response.headers.getOrDefault("Upgrade").toLowerAscii() != "websocket":
+  if response.code.is3xx:
+    let location = response.headers.getOrDefault("Location")
+    client.close()
+    raise newException(WebSocketFailedUpgradeError,
+      "Provider redirected the management socket (" & $response.code &
+      " to " & location & "); redirects are not followed")
+  if response.code != Http101 or
+      response.headers.getOrDefault("Upgrade").toLowerAscii() != "websocket":
     client.close()
     raise newException(WebSocketFailedUpgradeError,
       "Provider did not upgrade the management socket (" & $response.code & ")")
+  let accept = response.headers.getOrDefault("Sec-WebSocket-Accept").strip()
+  if accept != webSocketAcceptFor(secKey):
+    client.close()
+    raise newException(WebSocketFailedUpgradeError,
+      "Provider answered the upgrade with a wrong Sec-WebSocket-Accept")
   result = WebSocket(tcpSocket: client.getSocket(), readyState: Open, masked: true)
 
 type HubPacket = object

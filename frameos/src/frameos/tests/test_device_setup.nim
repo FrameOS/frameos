@@ -96,6 +96,35 @@ block test_write_privileged_file_falls_back_after_direct_write_failure:
   finally:
     resetSetupCommandRunnerForTest()
 
+block test_write_privileged_file_private_is_owner_only:
+  let path = getTempDir() / ("frameos-test-privileged-private-" & $epochTime().int64 & ".credentials")
+  # Pre-existing and world-readable, as a plain writeFile would have left it.
+  writeFile(path, "username=old\n")
+  setFilePermissions(path, {fpUserRead, fpUserWrite, fpGroupRead, fpOthersRead})
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult = ("", 0))
+  try:
+    writePrivilegedFile(path, "username=u\npassword=p\n", private = true)
+    doAssert readFile(path) == "username=u\npassword=p\n"
+    doAssert getFilePermissions(path) == {fpUserRead, fpUserWrite}
+  finally:
+    resetSetupCommandRunnerForTest()
+    if fileExists(path):
+      removeFile(path)
+
+block test_write_privileged_file_private_fallback_installs_0600:
+  let path = getTempDir() / ("frameos-test-missing-parent-private-" & $epochTime().int64) / "mount-1.credentials"
+  var commands: seq[string] = @[]
+  setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =
+    commands.add(command)
+    ("", 0)
+  )
+  try:
+    writePrivilegedFile(path, "password=p\n", private = true)
+    doAssert commands.len == 1
+    doAssert commands[0].contains("install -m 0600")
+  finally:
+    resetSetupCommandRunnerForTest()
+
 block test_schedule_system_reboot_detaches_and_falls_back:
   # The reboot has to outlive the process asking for it (setup and the upgrade
   # both reboot the device out from under themselves), and `systemctl` is not

@@ -205,7 +205,7 @@ function templateZip({
   if (image) {
     files[`${name}/image.jpg`] = imageBytes
       ? new Uint8Array(imageBytes)
-      : new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 9]);
+      : new Uint8Array([0xff, 0xd8, 0xff, 0xdb, 9, 0, 0, 0, 0, 0, 0, 0]);
   }
   return Buffer.from(zipSync(files));
 }

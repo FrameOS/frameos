@@ -404,9 +404,26 @@ proc evalCacheExpression(scene: InterpretedFrameScene, context: ExecutionContext
     })
     (false, newJNull())
 
+const MaxRunNodeDepth = 64
+  ## Producer inputs are resolved by recursion (an app's field wired from a
+  ## node wired from a node …), and the cycle check below only covers the
+  ## flow edges of ONE runNode call. A node whose input is (transitively) its
+  ## own output recursed until the stack blew — a scene error, not a crash.
+
 proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDataNode = false): Value =
   let self = InterpretedFrameScene(self)
   var currentNodeId: NodeId = nodeId
+
+  if asDataNode and nodeId in self.runNodeStack:
+    raise newException(Exception,
+      "Node " & $nodeId.int & " depends on itself: its input is produced by a node that is " &
+      "still resolving it (cycle through " & $self.runNodeStack.len & " node(s))")
+  if self.runNodeStack.len >= MaxRunNodeDepth:
+    raise newException(Exception,
+      "Node " & $nodeId.int & " is nested deeper than " & $MaxRunNodeDepth &
+      " levels of producers; refusing to resolve it")
+  self.runNodeStack.add(nodeId)
+  defer: self.runNodeStack.setLen(self.runNodeStack.len - 1)
 
   # Safety: cycle detection + hop budget
   var visited = initTable[NodeId, bool]()

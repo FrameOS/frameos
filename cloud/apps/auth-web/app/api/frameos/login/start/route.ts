@@ -11,6 +11,8 @@ import {
 import { getBaseUrl } from "../../../../../src/lib/env";
 import {
   createFrameosLoginRequestToken,
+  maxLoginStateChars,
+  safeFrameosRedirectTo,
   safeFrameosRedirectUri,
 } from "../../../../../src/lib/frameos-login";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
@@ -52,12 +54,14 @@ export async function POST(request: NextRequest) {
   }
 
   const state = typeof body.state === "string" ? body.state.trim() : "";
-  if (!state) {
+  if (!state || state.length > maxLoginStateChars) {
     return jsonError("invalid_state", 400);
   }
   const intent = body.intent === "signup" ? "signup" : "login";
-  const redirectTo =
-    typeof body.redirect_to === "string" ? body.redirect_to : undefined;
+  const redirectTo = safeFrameosRedirectTo(body.redirect_to);
+  if (redirectTo === null) {
+    return jsonError("invalid_redirect_to", 400);
+  }
 
   const loginRequest = await createFrameosLoginRequestToken({
     intent,

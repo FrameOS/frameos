@@ -42,11 +42,14 @@ jobs:
       # whole push. HTTP/1.1 from the same host succeeds every time.
       - name: Use HTTP/1.1 toward github.com
         run: git config --global http.https://github.com/.version HTTP/1.1
+      # head.sha, never head.ref: the ref is a branch name in the fork, and a
+      # branch can be moved between the event and the checkout. The sha is
+      # the commit the run was started for.
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       # The runner image ships python3 (+ `python`), which is all the nim
       # setup scripts need. Node is only needed when the compiled-assets cache
@@ -215,7 +218,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -349,7 +352,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Download visual snapshot changes
         uses: actions/download-artifact@v4
@@ -412,7 +415,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -539,7 +542,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Download frontend visual snapshot changes
         uses: actions/download-artifact@v4

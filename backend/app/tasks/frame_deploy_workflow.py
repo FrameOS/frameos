@@ -805,7 +805,7 @@ class FrameDeployWorkflow:
                 await self._plan_package(
                     "caddy",
                     "FrameOS TLS proxy support",
-                    run_after_install="sudo systemctl disable --now caddy.service",
+                    run_after_install="sudo -n systemctl disable --now caddy.service",
                 )
             )
 
@@ -1278,9 +1278,9 @@ class FrameDeployWorkflow:
                 frame.status = "starting"
                 record_successful_deploy(frame, plan.frame_dict)
                 await update_frame(self.db, self.redis, frame)
-                await self.deployer.exec_command("sudo systemctl enable frameos.service")
+                await self.deployer.exec_command("sudo -n systemctl enable frameos.service")
                 await log(self.db, self.redis, int(frame.id), "stdinfo", f"{icon} Deployed! Rebooting device after setup changes")
-                await self.deployer.exec_command("sudo reboot")
+                await self.deployer.exec_command("sudo -n reboot")
                 return
 
             if plan.fast_deploy.tls_settings_changed:
@@ -1449,7 +1449,7 @@ class FrameDeployWorkflow:
     async def _stop_frameos_for_remote_build_if_needed(self, *, full_plan: FullDeployPlan, cross_compiled: bool) -> None:
         if full_plan.low_memory and not cross_compiled:
             await self.deployer.log("stdout", f"{icon} Low memory device, stopping FrameOS for compilation")
-            await self.deployer.exec_command("sudo systemctl stop frameos.service", raise_on_error=False)
+            await self.deployer.exec_command("sudo -n systemctl stop frameos.service", raise_on_error=False)
 
     async def _install_planned_remote_dependencies(self, *, full_plan: FullDeployPlan, cross_compiled: bool) -> None:
         await self.deployer.log("stdout", f"{icon} Installing dependencies on remote")
@@ -1476,7 +1476,7 @@ class FrameDeployWorkflow:
             )
 
     async def _prepare_release_directory(self, build_id: str) -> None:
-        await self.deployer.exec_command("sudo mkdir -p /srv/frameos && sudo chown $(whoami):$(whoami) /srv/frameos")
+        await self.deployer.exec_command("sudo -n mkdir -p /srv/frameos && sudo -n chown $(whoami):$(whoami) /srv/frameos")
         await self.deployer.exec_command("mkdir -p /srv/frameos/build/ /srv/frameos/logs/")
         await self.deployer.exec_command(f"mkdir -p {self._release_dir(build_id)}")
 
@@ -1617,9 +1617,9 @@ class FrameDeployWorkflow:
     async def _stop_frameos_for_release_setup(self) -> bool:
         await self.deployer.log("stdout", f"{icon} Stopping running FrameOS before device setup")
         statuses = [
-            await self.deployer.exec_command("sudo systemctl stop frameos.service", raise_on_error=False),
+            await self.deployer.exec_command("sudo -n systemctl stop frameos.service", raise_on_error=False),
             await self.deployer.exec_command(
-                "sudo sh -c 'killall frameos 2>/dev/null || true'",
+                "sudo -n sh -c 'killall frameos 2>/dev/null || true'",
                 raise_on_error=False,
             ),
         ]
@@ -1655,7 +1655,7 @@ class FrameDeployWorkflow:
                 self._frameos_setup_command(path),
                 output=setup_output,
                 raise_on_error=False,
-                log_command="sudo ./frameos setup",
+                log_command="sudo -n ./frameos setup",
             )
         finally:
             if root_remounted_rw:
@@ -1685,7 +1685,7 @@ class FrameDeployWorkflow:
     def _frameos_setup_command(self, path: str) -> str:
         quoted_path = shlex.quote(path)
         if not _deploy_uses_remote(self.frame):
-            return f"cd {quoted_path} && sudo ./frameos setup"
+            return f"cd {quoted_path} && sudo -n ./frameos setup"
 
         systemd_inner = shlex.quote(
             'set -eu; export FRAMEOS_SETUP_UNDER_REMOTE=1; export FRAMEOS_SERVICE_USER="$1"; cd "$2"; ./frameos setup'
@@ -1713,15 +1713,15 @@ class FrameDeployWorkflow:
             return False
 
         await self.deployer.log("stdout", f"Root filesystem is read-only; remounting read-write for {context}")
-        await self._exec_host_root_command("mount -o remount,rw /", fallback_command="sudo mount -o remount,rw /")
+        await self._exec_host_root_command("mount -o remount,rw /", fallback_command="sudo -n mount -o remount,rw /")
         return True
 
     async def _remount_root_ro(self, context: str) -> None:
         await self.deployer.log("stdout", f"Restoring root filesystem to read-only after {context}")
-        await self._exec_host_root_command("sync", fallback_command="sudo sync", raise_on_error=False, timeout=30)
+        await self._exec_host_root_command("sync", fallback_command="sudo -n sync", raise_on_error=False, timeout=30)
         status = await self._exec_host_root_command(
             "mount -o remount,ro /",
-            fallback_command="sudo mount -o remount,ro /",
+            fallback_command="sudo -n mount -o remount,ro /",
             raise_on_error=False,
             timeout=30,
         )
@@ -1730,7 +1730,7 @@ class FrameDeployWorkflow:
 
     def _host_root_command(self, command: str, *, fallback_command: str | None = None) -> str:
         if not _deploy_uses_remote(self.frame):
-            return fallback_command or f"sudo sh -lc {shlex.quote(command)}"
+            return fallback_command or f"sudo -n sh -lc {shlex.quote(command)}"
 
         inner = shlex.quote(f"set -eu; {command}")
         return (
@@ -1790,7 +1790,7 @@ class FrameDeployWorkflow:
                 "FrameOS processes",
                 "ps -eo pid,ppid,stat,rss,comm,args | grep -E '[f]rameos|[f]rameos_agent'",
             ),
-            ("kernel messages", "sudo sh -c 'dmesg -T 2>/dev/null || dmesg' | tail -80"),
+            ("kernel messages", "sudo -n sh -c 'dmesg -T 2>/dev/null || dmesg' | tail -80"),
         )
         for label, command in diagnostics:
             await self.deployer.exec_command(
@@ -1853,19 +1853,19 @@ class FrameDeployWorkflow:
 
         if post_deploy.get("final_action") == "reboot":
             await self.deployer.log("stdinfo", f"{icon} Deployed! Rebooting device after boot config changes")
-            await self.deployer.exec_command("sudo reboot")
+            await self.deployer.exec_command("sudo -n reboot")
         else:
-            await self.deployer.exec_command("sudo systemctl daemon-reload")
+            await self.deployer.exec_command("sudo -n systemctl daemon-reload")
             await self.deployer.log("stdinfo", f"{icon} Deployed! Restarting FrameOS")
-            await self.deployer.exec_command("sudo systemctl restart frameos.service")
-            await self.deployer.exec_command("sudo systemctl status frameos.service")
+            await self.deployer.exec_command("sudo -n systemctl restart frameos.service")
+            await self.deployer.exec_command("sudo -n systemctl status frameos.service")
 
     async def _run_post_deploy_cleanup_writes(self, *, post_deploy: dict[str, Any], boot_config: str) -> None:
         if post_deploy.get("low_memory_masks_apt_daily"):
             await self.deployer.exec_command(
-                "sudo systemctl mask apt-daily-upgrade && "
-                "sudo systemctl mask apt-daily && "
-                "sudo systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service"
+                "sudo -n systemctl mask apt-daily-upgrade && "
+                "sudo -n systemctl mask apt-daily && "
+                "sudo -n systemctl disable apt-daily.service apt-daily.timer apt-daily-upgrade.timer apt-daily-upgrade.service"
             )
 
         reboot_schedule = post_deploy.get("reboot_schedule") or {}
@@ -1875,12 +1875,12 @@ class FrameDeployWorkflow:
             crontab = f"{cron_schedule} root {reboot_command}"
             await self._exec_host_root_command(
                 f"printf '%s\\n' {shlex.quote(crontab)} > /etc/cron.d/frameos-reboot",
-                fallback_command=f"echo '{crontab}' | sudo tee /etc/cron.d/frameos-reboot",
+                fallback_command=f"printf '%s\\n' {shlex.quote(crontab)} | sudo -n tee /etc/cron.d/frameos-reboot",
             )
         elif reboot_schedule.get("needs_remove"):
             await self._exec_host_root_command(
                 "rm -f /etc/cron.d/frameos-reboot",
-                fallback_command="sudo rm -f /etc/cron.d/frameos-reboot",
+                fallback_command="sudo -n rm -f /etc/cron.d/frameos-reboot",
             )
 
         for change in post_deploy.get("bootconfig_changes") or []:
@@ -1891,23 +1891,23 @@ class FrameDeployWorkflow:
                 to_remove = str(line)
                 await self._exec_host_root_command(
                     f'grep -q "^{to_remove}" {boot_config} && sed -i "/^{to_remove}/d" {boot_config}',
-                    fallback_command=f'grep -q "^{to_remove}" {boot_config} && sudo sed -i "/^{to_remove}/d" {boot_config}',
+                    fallback_command=f'grep -q "^{to_remove}" {boot_config} && sudo -n sed -i "/^{to_remove}/d" {boot_config}',
                     raise_on_error=False,
                 )
             elif change.get("action") == "add":
                 if (await self.deployer.exec_command(f'grep -q "^{line}" {boot_config}', raise_on_error=False)) != 0:
                     await self._exec_host_root_command(
                         f"printf '%s\\n' {shlex.quote(str(line))} >> {boot_config}",
-                        fallback_command=f'echo "{line}" | sudo tee -a ' + boot_config,
+                        fallback_command=f"printf '%s\\n' {shlex.quote(str(line))} | sudo -n tee -a " + boot_config,
                         log_output=False,
                     )
 
         if post_deploy.get("disable_userconfig"):
-            await self.deployer.exec_command("sudo systemctl disable userconfig || true")
+            await self.deployer.exec_command("sudo -n systemctl disable userconfig || true")
 
         if post_deploy.get("disable_caddy_service"):
             await self.deployer.log("stdout", f"{icon} Disabling system-managed Caddy service (managed by FrameOS tls_proxy)")
-            await self.deployer.exec_command("sudo systemctl disable --now caddy.service", raise_on_error=False)
+            await self.deployer.exec_command("sudo -n systemctl disable --now caddy.service", raise_on_error=False)
 
         setup_json_reset_path = setup_json_reset_file_path(self.frame)
         if setup_json_reset_path:
@@ -1938,14 +1938,14 @@ class FrameDeployWorkflow:
         )
         await self._exec_host_root_command(
             f"install -m 755 {shlex.quote(script_path)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
-            fallback_command=f"sudo install -m 755 {shlex.quote(script_path)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
+            fallback_command=f"sudo -n install -m 755 {shlex.quote(script_path)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
         )
         await self._exec_host_root_command(
             f"install -m 644 {shlex.quote(service_path)} {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)}",
-            fallback_command=f"sudo install -m 644 {shlex.quote(service_path)} {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)}",
+            fallback_command=f"sudo -n install -m 644 {shlex.quote(service_path)} {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)}",
         )
-        await self.deployer.exec_command("sudo systemctl daemon-reload")
-        await self.deployer.exec_command(f"sudo systemctl enable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
+        await self.deployer.exec_command("sudo -n systemctl daemon-reload")
+        await self.deployer.exec_command(f"sudo -n systemctl enable {SETUP_JSON_RESET_SERVICE_NAME}", raise_on_error=False)
 
     async def _remove_setup_json_reset_helper(self) -> None:
         status = await self.deployer.exec_command(
@@ -1964,13 +1964,13 @@ class FrameDeployWorkflow:
         await self.deployer.exec_command(
             f"if systemctl list-unit-files --type=service --no-legend {SETUP_JSON_RESET_SERVICE_NAME} "
             f"| grep -q '^{SETUP_JSON_RESET_SERVICE_NAME}'; then "
-            f"sudo systemctl disable {SETUP_JSON_RESET_SERVICE_NAME}; "
+            f"sudo -n systemctl disable {SETUP_JSON_RESET_SERVICE_NAME}; "
             "fi",
             raise_on_error=False,
         )
         await self._exec_host_root_command(
             f"rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
-            fallback_command=f"sudo rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
+            fallback_command=f"sudo -n rm -f {shlex.quote(SETUP_JSON_RESET_SERVICE_PATH)} {shlex.quote(SETUP_JSON_RESET_SCRIPT_PATH)}",
             raise_on_error=False,
         )
         await self.deployer.exec_command(
@@ -1994,16 +1994,16 @@ class FrameDeployWorkflow:
                 f'grep -q "^dtparam=i2c_vc=on$" {shlex.quote(boot_config)}'
             )
             i2c_needs_runtime_enable = await self._command_succeeds(
-                'command -v raspi-config > /dev/null && sudo raspi-config nonint get_i2c | grep -q "1"'
+                'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_i2c | grep -q "1"'
             )
 
         spi_action = "unchanged"
         if drivers.get("spi") and await self._command_succeeds(
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "1"'
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_spi | grep -q "1"'
         ):
             spi_action = "enable"
         elif drivers.get("noSpi") and await self._command_succeeds(
-            'command -v raspi-config > /dev/null && sudo raspi-config nonint get_spi | grep -q "0"'
+            'command -v raspi-config > /dev/null && sudo -n raspi-config nonint get_spi | grep -q "0"'
         ):
             spi_action = "disable"
 

@@ -27,7 +27,8 @@ bool fos_assets_available(void);
 const char *fos_assets_root(void);
 
 /* Read-path rule: relative, non-empty, no dot-segments ("." / ".."), no
- * empty segments. Dotfiles are readable when named directly (the walk
+ * empty segments, no backslashes (a FatFS separator that would bypass the
+ * segment checks). Dotfiles are readable when named directly (the walk
  * skips them, mirroring the Linux runtime). */
 bool fos_assets_sanitize_path(const char *raw, char *out, size_t out_len);
 

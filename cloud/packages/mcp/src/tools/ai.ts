@@ -287,7 +287,7 @@ export function registerAiTools(server: McpServer, ctx: ToolContext) {
         apply: z.enum(["none", "new_scene", "save_version"]).optional(),
         message: z.string().max(200).optional(),
         scene_id: uuid().optional(),
-        turn_id: z.string(),
+        turn_id: uuid(),
         wait_seconds: z.number().int().min(5).max(maxWaitSeconds).optional(),
       },
     },
@@ -313,7 +313,7 @@ export function registerAiTools(server: McpServer, ctx: ToolContext) {
     "ai_turn_cancel",
     {
       description: "Stop a running AI turn.",
-      inputSchema: { turn_id: z.string() },
+      inputSchema: { turn_id: uuid() },
     },
     async ({ turn_id }) =>
       run(async () => text(await api.json("DELETE", `/api/ai/chat/turns/${turn_id}`))),

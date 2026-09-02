@@ -10,6 +10,9 @@ from pathlib import Path
 
 JS_APP_SOURCE_FILES = ("app.ts", "app.js", "app.tsx", "app.jsx")
 _JS_CHECK_LOCK = threading.Lock()
+# Both run on the backend host with user-supplied input; never let one hang a worker.
+JS_CHECK_BUILD_TIMEOUT_SECONDS = 600
+JS_CHECK_RUN_TIMEOUT_SECONDS = 30
 
 
 def find_js_app_source_key(sources: dict | None) -> str | None:
@@ -102,21 +105,33 @@ def _ensure_js_check(repo_root: Path) -> tuple[Path | None, dict | None]:
         if _js_check_is_current(binary, frameos_root):
             return binary, None
         binary.parent.mkdir(parents=True, exist_ok=True)
-        proc = subprocess.run(
-            [
-                nim,
-                "c",
-                "-d:release",
-                "--hints:off",
-                "--nimCache:build/nimcache/js_check",
-                f"--out:build/{binary.name}",
-                "tools/js_check.nim",
-            ],
-            cwd=frameos_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            proc = subprocess.run(
+                [
+                    nim,
+                    "c",
+                    "-d:release",
+                    "--hints:off",
+                    "--nimCache:build/nimcache/js_check",
+                    f"--out:build/{binary.name}",
+                    "tools/js_check.nim",
+                ],
+                cwd=frameos_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=JS_CHECK_BUILD_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            return None, {
+                "ok": False,
+                "errors": [
+                    {
+                        "text": "Timed out building the FrameOS JavaScript syntax checker",
+                        "location": {"line": 1, "column": 1},
+                    }
+                ],
+            }
         if proc.returncode != 0:
             output = (proc.stderr or proc.stdout).strip() or "Failed to build the FrameOS JavaScript syntax checker"
             return None, {
@@ -140,13 +155,25 @@ def _run_frameos_js_validation(filename: str, source_path: str, source: str) -> 
             ],
         }
 
-    proc = subprocess.run(
-        [str(binary), source_path],
-        cwd=repo_root / "frameos",
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [str(binary), source_path],
+            cwd=repo_root / "frameos",
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=JS_CHECK_RUN_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return False, {
+            "ok": False,
+            "errors": [
+                {
+                    "text": f"Timed out checking {filename}",
+                    "location": {"line": 1, "column": 1},
+                }
+            ],
+        }
     ok, payload = _json_payload_from_process(
         proc,
         json.dumps(

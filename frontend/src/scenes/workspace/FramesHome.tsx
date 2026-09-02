@@ -991,18 +991,21 @@ function resolveSceneControlSelection(
 
 /** "Installed from scenes.frameos.net/s/… · v4": the scene's origin stamp, when it has one. */
 function SceneOriginLine({ origin }: { origin: SceneOrigin }): JSX.Element | null {
-  const label = origin.href
-    ? origin.href.replace(/^https?:\/\//, '')
+  // The stamp comes from the scene zip's own metadata: only an http(s) URL
+  // becomes a link, so a scene cannot plant a javascript: or data: href.
+  const href = /^https?:\/\/[^\s]+$/i.test(origin.href ?? '') ? origin.href : undefined
+  const label = href
+    ? href.replace(/^https?:\/\//, '')
     : origin.templateName || origin.templateId || (origin.storeSceneId ? 'FrameOS Cloud store' : '')
   if (!label) {
     return null
   }
   return (
-    <div className="frameos-muted mb-4 truncate text-xs text-slate-500" title={origin.href}>
+    <div className="frameos-muted mb-4 truncate text-xs text-slate-500" title={href}>
       Installed from{' '}
-      {origin.href ? (
+      {href ? (
         <a
-          href={origin.href}
+          href={href}
           target="_blank"
           rel="noreferrer"
           className="underline decoration-slate-300 underline-offset-2 hover:text-slate-800"

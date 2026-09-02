@@ -526,6 +526,12 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
   if (imageRaw && imageRaw.length > maxPreviewImageBytes) {
     return { ok: false, error: "preview_image_too_large" };
   }
+  // The cover is served back under an image content type (and passed to
+  // moderation as one): only bytes that carry a real image signature get
+  // in, whatever the zip entry is called.
+  if (imageRaw && !detectImageContentType(Buffer.from(imageRaw))) {
+    return { ok: false, error: "preview_image_not_image" };
+  }
   // A provably all-transparent preview is a broken screenshot (captured
   // before the live preview painted); it would render as a blank tile
   // everywhere the store shows it. Reject at the choke point every publish

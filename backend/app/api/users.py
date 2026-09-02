@@ -57,6 +57,15 @@ def api_user_update_email(
 ):
     if data.email == current_user.email:
         return {"email": current_user.email}
+    # The email is the login name, so changing it is as sensitive as changing
+    # the password: a stolen cookie must not be enough. Cloud-created users
+    # have no local password (see the password route) and are already
+    # authenticated here.
+    if current_user.password:
+        if not data.current_password:
+            raise HTTPException(status_code=400, detail="Current password is required.")
+        if not current_user.check_password(data.current_password):
+            raise HTTPException(status_code=400, detail="Current password is incorrect.")
     if db.query(User).filter(User.email == data.email, User.id != current_user.id).first() is not None:
         raise HTTPException(status_code=400, detail="Email already in use.")
 
@@ -70,6 +79,9 @@ def api_user_update_email(
         user_id=current_user.id,
         expires_at=datetime.datetime.utcnow() + access_token_expires,
     )
+    # Every other session (including the bearer token of the browser doing the
+    # changing) ends here; the fresh cookie below is the one credential left.
+    revoke_sessions_for_user(db, current_user.id, keep_session_id=session_id)
     session_value, max_age = create_session_cookie_value(
         email=current_user.email, session_id=session_id, expires_delta=access_token_expires
     )

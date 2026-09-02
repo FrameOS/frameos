@@ -159,7 +159,7 @@ async function storeScene(
       description: "Counts things",
       latestVersion: 1,
       name: options.name,
-      previewImage: Buffer.from([0xff, 0xd8, 0xff, 0xdb, 7]),
+      previewImage: Buffer.from([0xff, 0xd8, 0xff, 0xdb, 7, 0, 0, 0, 0, 0, 0, 0]),
       previewImageType: "image/jpeg",
       slug: `${options.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${sceneCounter}`,
       status: "active",

@@ -229,6 +229,9 @@ function AccountSettingsSection({ onLogout }: { onLogout: () => void }): JSX.Ele
               <Field name="email" className="min-w-[14rem] flex-1">
                 <TextInput type="email" autoComplete="email" autoFocus />
               </Field>
+              <Field name="current_password" className="min-w-[12rem] flex-1">
+                <TextInput type="password" autoComplete="current-password" placeholder="Current password" />
+              </Field>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <Button
                   color="secondary"
@@ -359,8 +362,8 @@ function DockerDaemonStatus(): JSX.Element {
         {systemInfo?.docker?.daemonAvailable
           ? 'Docker daemon is reachable.'
           : systemInfo?.docker?.cliAvailable
-            ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
-            : 'Docker CLI is not installed.'}
+          ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
+          : 'Docker CLI is not installed.'}
       </p>
       <Button size="tiny" color="secondary" onClick={loadSystemInfo}>
         Recheck

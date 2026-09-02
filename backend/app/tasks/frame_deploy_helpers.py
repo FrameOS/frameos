@@ -12,6 +12,17 @@ from typing import Any
 from app.tasks._frame_deployer import FrameDeployer
 from app.utils.remote_exec import upload_file
 
+_SERVICE_USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$")
+
+
+def systemd_unit_user(user: str | None) -> str:
+    """A user name safe to substitute for %I in a unit file. Units have no
+    quoting, so anything outside a plain account name (whitespace, a newline
+    that would start a new directive) is refused rather than escaped."""
+    if not user or not _SERVICE_USER_RE.match(user):
+        raise ValueError(f"Invalid service user name: {user!r}")
+    return user
+
 icon = "🔷"
 
 # quickts: QuickJS plus native TypeScript/JSX (github.com/FrameOS/quickts).
@@ -67,7 +78,7 @@ async def install_if_necessary(
 
     output: list[str] = []
     response = await deployer.exec_command(
-        f"sudo apt-get install -y {shlex.quote(sanitized_pkg)}",
+        f"sudo -n apt-get install -y {shlex.quote(sanitized_pkg)}",
         raise_on_error=False,
         output=output,
     )
@@ -83,7 +94,7 @@ async def install_if_necessary(
         if any(s in combined_output for s in search_strings):
             await deployer.log("stdout", f"{icon} Installing {sanitized_pkg} failed. Trying to update apt.")
             response = await deployer.exec_command(
-                "sudo apt-get update && sudo apt-get install -y " + shlex.quote(sanitized_pkg),
+                "sudo -n apt-get update && sudo -n apt-get install -y " + shlex.quote(sanitized_pkg),
                 raise_on_error=raise_on_error,
             )
             if response != 0:
@@ -266,7 +277,7 @@ async def ensure_quickjs(
 
     await deployer.exec_command(
         "if [ ! -d /srv/frameos/ ]; then "
-        "  sudo mkdir -p /srv/frameos/ && sudo chown $(whoami):$(whoami) /srv/frameos/; "
+        "  sudo -n mkdir -p /srv/frameos/ && sudo -n chown $(whoami):$(whoami) /srv/frameos/; "
         "fi"
     )
 

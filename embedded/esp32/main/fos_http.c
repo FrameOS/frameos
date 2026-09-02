@@ -254,6 +254,19 @@ static esp_err_t read_request_body(httpd_req_t *req, size_t max_len, bool allow_
     return ESP_OK;
 }
 
+bool fos_consttime_eq(const char *a, const char *b)
+{
+    if (!a || !b) return false;
+    size_t la = strlen(a);
+    size_t lb = strlen(b);
+    size_t n = la < lb ? la : lb;
+    unsigned int diff = (la != lb);
+    for (size_t i = 0; i < n; i++) {
+        diff |= (unsigned char)a[i] ^ (unsigned char)b[i];
+    }
+    return diff == 0;
+}
+
 static bool request_auth_header(httpd_req_t *req, char *out, size_t out_len)
 {
     size_t len = httpd_req_get_hdr_value_len(req, "Authorization");
@@ -273,7 +286,7 @@ static bool request_bearer_matches(httpd_req_t *req, const fos_config_t *config)
     if (!request_auth_header(req, auth, sizeof(auth))) return false;
     const char *prefix = "Bearer ";
     size_t prefix_len = strlen(prefix);
-    return strncmp(auth, prefix, prefix_len) == 0 && strcmp(auth + prefix_len, config->api_key) == 0;
+    return strncmp(auth, prefix, prefix_len) == 0 && fos_consttime_eq(auth + prefix_len, config->api_key);
 }
 
 static bool request_basic_matches(httpd_req_t *req, const fos_config_t *config)
@@ -299,7 +312,7 @@ static bool request_basic_matches(httpd_req_t *req, const fos_config_t *config)
 
     const char *prefix = "Basic ";
     size_t prefix_len = strlen(prefix);
-    return strncmp(auth, prefix, prefix_len) == 0 && strcmp(auth + prefix_len, (const char *)encoded) == 0;
+    return strncmp(auth, prefix, prefix_len) == 0 && fos_consttime_eq(auth + prefix_len, (const char *)encoded);
 }
 
 static const char *http_method_name(int method)

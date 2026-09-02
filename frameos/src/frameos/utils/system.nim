@@ -1,3 +1,19 @@
+import std/os
+
+proc writePrivateFile*(path: string, content: string) =
+  ## `writeFile` for a file nobody but the service user may read: created
+  ## (or truncated) and chmod'd 0600 BEFORE the content is written, so there
+  ## is no window where the bytes sit at whatever the umask allowed. The
+  ## order matters — the previous `writeFile` then `chmod` left the secret
+  ## world-readable in between, and a file that already existed keeps its
+  ## old mode across a plain overwrite. Same pattern as cloud/link_state.nim.
+  let handle = open(path, fmWrite)
+  try:
+    setFilePermissions(path, {fpUserRead, fpUserWrite})
+    handle.write(content)
+  finally:
+    handle.close()
+
 proc blocksToBytes*(blocks, blockSize: int64): int64 =
   ## Block counts times a block size, in 64-bit arithmetic, always.
   ##

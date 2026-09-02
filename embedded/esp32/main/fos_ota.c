@@ -1,6 +1,8 @@
 #include "fos_ota.h"
 
+#include <ctype.h>
 #include <string.h>
+#include <strings.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -655,6 +657,45 @@ static void cloud_ota_log_progress(size_t written, size_t expected)
     cloud_ota_log("progress", detail);
 }
 
+/* "scheme://host[:port]" of an http(s)/ws(s) URL, lowercased, with ws
+ * mapped onto http so a wss:// ws_url compares equal to the https:// origin
+ * it serves. False for any other shape, including userinfo ("a@b"). */
+static bool url_origin(const char *url, char *out, size_t out_len)
+{
+    const char *scheme;
+    const char *rest;
+    if (!url) return false;
+    if (strncasecmp(url, "https://", 8) == 0) { scheme = "https://"; rest = url + 8; }
+    else if (strncasecmp(url, "http://", 7) == 0) { scheme = "http://"; rest = url + 7; }
+    else if (strncasecmp(url, "wss://", 6) == 0) { scheme = "https://"; rest = url + 6; }
+    else if (strncasecmp(url, "ws://", 5) == 0) { scheme = "http://"; rest = url + 5; }
+    else return false;
+    size_t host_len = strcspn(rest, "/?#");
+    if (host_len == 0 || memchr(rest, '@', host_len)) return false;
+    int n = snprintf(out, out_len, "%s%.*s", scheme, (int)host_len, rest);
+    if (n <= 0 || (size_t)n >= out_len) return false;
+    for (char *p = out; *p; p++) *p = (char)tolower((unsigned char)*p);
+    return true;
+}
+
+/* The manifest's downloadUrl may be absolute (a CDN, GitHub). The frame's
+ * bearer is the cloud's credential: it goes only to the cloud's own origin
+ * (cloud_url, or the enrollment ws_url host), never wherever a manifest
+ * points. */
+static bool download_url_is_cloud_origin(const char *download_url, const char *base_url)
+{
+    char have[FOS_URL_LEN];
+    char want[FOS_URL_LEN];
+    if (!url_origin(download_url, have, sizeof(have))) return false;
+    if (url_origin(base_url, want, sizeof(want)) && strcmp(want, have) == 0) return true;
+    const char *ws_url = fos_cloud_ws_url();
+    if (ws_url && ws_url[0] && url_origin(ws_url, want, sizeof(want)) &&
+        strcmp(want, have) == 0) {
+        return true;
+    }
+    return false;
+}
+
 static esp_err_t cloud_ota_download_verify(const char *download_url,
                                            const char *auth_header,
                                            const uint8_t sig[64],
@@ -689,7 +730,9 @@ static esp_err_t cloud_ota_download_verify(const char *download_url,
         cloud_ota_log("error", "no-memory");
         return ESP_ERR_NO_MEM;
     }
-    esp_http_client_set_header(client, "Authorization", auth_header);
+    if (auth_header != NULL) {
+        esp_http_client_set_header(client, "Authorization", auth_header);
+    }
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
@@ -915,10 +958,27 @@ static esp_err_t cloud_ota_run(void)
     size_t expected = cJSON_IsNumber(size_item) ? (size_t)size_item->valuedouble : 0;
     char offered[32];
     strlcpy(offered, version->valuestring, sizeof(offered));
-    cloud_ota_log("downloading", version->valuestring);
     cJSON_Delete(root);
 
-    err = cloud_ota_download_verify(download_url, auth, sig, expected);
+    /* Same transport rule as cloud_url itself: https anywhere, plain http
+     * only to localhost / .local / private-network hosts (development). A
+     * manifest cannot send the image fetch over cleartext to the internet. */
+    const char *transport_why = NULL;
+    if (!fos_cloud_url_transport_ok(download_url, &transport_why)) {
+        ESP_LOGW(TAG, "cloud ota: refusing downloadUrl: %s",
+                 transport_why ? transport_why : "bad transport");
+        cloud_ota_log("error", "download-url-transport");
+        cloud_ota_note_failure(offered);
+        return ESP_FAIL;
+    }
+    /* The bearer goes to the cloud's own origin only. */
+    const bool first_party = download_url_is_cloud_origin(download_url, base_url);
+    if (!first_party) {
+        ESP_LOGI(TAG, "cloud ota: downloadUrl is off-origin; fetching without credentials");
+    }
+    cloud_ota_log("downloading", offered);
+
+    err = cloud_ota_download_verify(download_url, first_party ? auth : NULL, sig, expected);
     if (err == ESP_OK) {
         s_cloud_ota_failures = 0;
         cloud_ota_log("verified", "rebooting");

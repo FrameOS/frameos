@@ -400,6 +400,7 @@ type
     cacheExprs*: Table[NodeId, JsonNode]
     imageFusionPlans*: Table[NodeId, ImageFusionPlan] # consumer node -> planned image edge
     imageBoundsPlans*: Table[NodeId, ImageBoundsPlan] # consumer node -> bounded unfused edge
+    runNodeStack*: seq[NodeId] # nodes currently inside runNode, outermost first (recursion guard)
 
   # Context passed around during execution of a node/event in a scene
   ExecutionContext* = ref object

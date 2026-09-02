@@ -348,6 +348,17 @@ describe("sign-in with a second factor", () => {
     );
     expect(again.status).toBe(401);
 
+    // The pending cookie itself is spent: a second, still-valid recovery
+    // code presented with it mints nothing — and is not consumed either.
+    const spent = await secondFactorCode(
+      request("/api/auth/second-factor/code", {
+        body: { code: recoveryCodes[1]!.toUpperCase() },
+        cookies: { [pendingSignInCookieName]: pending },
+      }),
+    );
+    expect(spent.status).toBe(401);
+    expect(await spent.json()).toMatchObject({ error: "sign_in_expired" });
+
     const unused = await db
       .select({ id: accountRecoveryCodes.id })
       .from(accountRecoveryCodes)
@@ -550,6 +561,17 @@ describe("passkeys", () => {
     expect(
       await db.select().from(accountPasskeys).where(eq(accountPasskeys.accountId, user.accountId)),
     ).toHaveLength(0);
+
+    // The challenge cookie is single-use: reading it once spent it, so the
+    // same cookie presented again is treated as expired.
+    const replayed = await registerPasskey(
+      request("/api/account/two-factor/passkeys", {
+        body: { name: "Key", response: { id: "x" } },
+        cookies: { [webauthnChallengeCookieName]: challenge },
+      }),
+    );
+    expect(replayed.status).toBe(400);
+    expect(await replayed.json()).toMatchObject({ error: "challenge_expired" });
   });
 
   it("offers passwordless options anonymously and refuses an unknown credential", async () => {

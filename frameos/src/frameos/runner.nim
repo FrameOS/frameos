@@ -197,14 +197,6 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     if self.frameConfig.controlCode.enabled:
       render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
       render_imageApp.App(self.controlCodeRender).run(context)
-    # The local-presence code, if one is pending. Drawn last so no scene can
-    # paint over it: the whole point is that it is readable from in front of
-    # the frame, by someone the admin API cannot see.
-    let presenceCode = activeLocalAccessCode()
-    if presenceCode.len > 0:
-      render_textApp.App(self.localAccessRender).appConfig.text =
-        "Local network access\n" & presenceCode
-      render_textApp.App(self.localAccessRender).run(context)
     # A pending FrameOS Cloud link code (cloud/device_flow.nim): the user code
     # plus a QR of the claim URL, drawn over the scene for the same reason as
     # the presence code — reading it off the panel is the ownership proof.
@@ -236,6 +228,22 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     else:
       outImage = image
     setLastImage(outImage)
+    # The local-presence code, if one is pending. Drawn AFTER the render is
+    # stored (setLastImage copies), so it reaches the panel only: the whole
+    # point is that it is readable from in front of the frame, by someone the
+    # admin API cannot see — and `GET /image` / the cloud's `image_get` are
+    # exactly what that someone-else could see. Drawn last so no scene can
+    # paint over it.
+    let presenceCode = activeLocalAccessCode()
+    if presenceCode.len > 0:
+      let sceneImage = context.image
+      context.image = outImage
+      try:
+        render_textApp.App(self.localAccessRender).appConfig.text =
+          "Local network access\n" & presenceCode
+        render_textApp.App(self.localAccessRender).run(context)
+      finally:
+        context.image = sceneImage
     case self.frameConfig.flip:
     of "horizontal":
       outImage.flipHorizontal()

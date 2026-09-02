@@ -132,3 +132,20 @@ async def test_api_frame_assets_upload_image_skips_existing(async_client, db, re
     assert response.status_code == 200
     assert response.json()["uploaded"] is False
     upload_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_assets_upload_image_rejects_files_over_the_cap(async_client, db, redis, monkeypatch):
+    from app.api import frames as frames_module
+
+    frame = await new_frame(db, redis, "UploadCapFrame", "localhost", "localhost")
+    monkeypatch.setattr(frames_module, "MAX_ASSET_UPLOAD_BYTES", 10)
+
+    with patch("app.api.frames.upload_file", new=AsyncMock()) as upload_file:
+        response = await async_client.post(
+            f"/api/frames/{frame.id}/assets/upload_image",
+            files={"file": ("big.png", b"x" * 11, "image/png")},
+        )
+
+    assert response.status_code == 413
+    upload_file.assert_not_awaited()

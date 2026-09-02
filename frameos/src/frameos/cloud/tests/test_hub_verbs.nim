@@ -921,3 +921,32 @@ suite "interpreted scene payload validation":
        "nodes": [{"id": "1", "type": "app",
                   "data": {"sources": {"app.ts": "y", "app.nim": "x"}}}]}
     ]).ok
+
+suite "cloud hub helpers":
+  test "Sec-WebSocket-Accept is computed per RFC 6455":
+    # The worked example from RFC 6455 §1.3.
+    check webSocketAcceptFor("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+    check webSocketAcceptFor("x") != webSocketAcceptFor("y")
+
+  test "secret-looking keys are redacted before a config object is logged":
+    let redacted = redactSecrets(%*{
+      "name": "Kitchen",
+      "timezone": "Europe/Brussels",
+      "network": {
+        "wifiHotspot": "bootOnly",
+        "wifiHotspotSsid": "FrameOS-Setup",
+        "wifiHotspotPassword": "hunter2",
+        "wifiPassword": "hunter3",
+        "psk": "hunter4",
+        "nested": [{"passphrase": "hunter5", "ssid": "Home"}],
+      },
+    })
+    check redacted["name"].getStr() == "Kitchen"
+    check redacted["network"]["wifiHotspot"].getStr() == "bootOnly"
+    check redacted["network"]["wifiHotspotSsid"].getStr() == "FrameOS-Setup"
+    check redacted["network"]["wifiHotspotPassword"].getStr() == "[redacted]"
+    check redacted["network"]["wifiPassword"].getStr() == "[redacted]"
+    check redacted["network"]["psk"].getStr() == "[redacted]"
+    check redacted["network"]["nested"][0]["passphrase"].getStr() == "[redacted]"
+    check redacted["network"]["nested"][0]["ssid"].getStr() == "Home"
+    check not ($redacted).contains("hunter")

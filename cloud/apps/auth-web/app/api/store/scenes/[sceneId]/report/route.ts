@@ -6,7 +6,7 @@ import { csrfResponse } from "../../../../../../src/lib/csrf";
 import {
   jsonError,
   parseOptionalString,
-  readJsonObject,
+  readBoundedJsonObject,
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
 import { notifyDiscord } from "../../../../../../src/lib/discord";
@@ -24,6 +24,9 @@ import {
   maxReportsPerDay,
 } from "../../../../../../src/lib/store";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
+
+// A reason string.
+const maxReportBodyBytes = 16 * 1024;
 
 export const runtime = "nodejs";
 
@@ -93,7 +96,11 @@ async function handlePost(request: NextRequest, context: RouteContext) {
     return jsonError("scene_not_found", 404);
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, maxReportBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   const reason = parseOptionalString(body.reason)?.slice(
     0,
     maxReportReasonLength,

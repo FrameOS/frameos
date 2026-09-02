@@ -300,6 +300,18 @@ suite "upgrade status reporting":
     check upgradeStatusMtime() > 0.0
 
 
+suite "staging refuses to unpack onto a full disk":
+  test "the shortfall is the archive times the extraction factor":
+    check releaseSpaceShortfall(10_000_000, 30_000_000) == 0
+    check releaseSpaceShortfall(10_000_000, 20_000_000) == 0
+    check releaseSpaceShortfall(10_000_000, 19_999_999) == 1
+    check releaseSpaceShortfall(10_000_000, 0) == 20_000_000
+    # Unknown free space (statvfs unavailable) is not a reason to refuse.
+    check releaseSpaceShortfall(10_000_000, -1) == 0
+    check releaseSpaceShortfall(0, 0) == 0
+    # 32-bit devices: a 60 MB archive against a 3 GB card must not overflow.
+    check releaseSpaceShortfall(60_000_000, 3_000_000_000'i64) == 0
+
 suite "staging verifies the signature before anything runs":
   # The crypto itself is covered above (wrong key, tampered bytes, malformed
   # sigs) and the transport in test_http_client — but neither pins the WIRING:

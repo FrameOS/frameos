@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
 import {
   allowedDeviceScopes,
@@ -5,6 +6,8 @@ import {
   deviceScopeDescriptions,
   parseClientKind,
   parseScopes,
+  readBoundedJsonObject,
+  readJsonObject,
   safeLocalOrigin,
 } from "./device-flow";
 
@@ -110,5 +113,56 @@ describe("parseScopes", () => {
     }
     expect(allowedDeviceScopes.has("frame:link")).toBe(true);
     expect(allowedDeviceScopes.has("remote:access")).toBe(true);
+  });
+});
+
+describe("readBoundedJsonObject", () => {
+  function jsonRequest(body: string, headers: Record<string, string> = {}) {
+    return new NextRequest("http://localhost/api/test", {
+      body,
+      headers: { "content-type": "application/json", ...headers },
+      method: "POST",
+    });
+  }
+
+  it("parses an object within the cap", async () => {
+    const result = await readBoundedJsonObject(jsonRequest('{"a":1}'), 1024);
+    expect(result.body).toEqual({ a: 1 });
+    expect(result.response).toBeUndefined();
+  });
+
+  it("refuses a declared content-length over the cap before reading", async () => {
+    const result = await readBoundedJsonObject(
+      jsonRequest('{"a":1}', { "content-length": "4096" }),
+      1024,
+    );
+    expect(result.body).toBeUndefined();
+    expect(result.response?.status).toBe(413);
+    expect(await result.response?.json()).toEqual({
+      error: "payload_too_large",
+      max_bytes: 1024,
+    });
+  });
+
+  it("measures the body it actually read, not just the declared length", async () => {
+    const big = JSON.stringify({ filler: "x".repeat(2048) });
+    const result = await readBoundedJsonObject(jsonRequest(big), 1024);
+    expect(result.response?.status).toBe(413);
+    // Multibyte characters count in bytes: 700 three-byte characters is
+    // 2100 bytes even though the string is 700 long.
+    const wide = JSON.stringify({ filler: "\u20ac".repeat(700) });
+    expect((await readBoundedJsonObject(jsonRequest(wide), 1024)).response?.status).toBe(413);
+  });
+
+  it("reads malformed, array and scalar bodies as an empty object", async () => {
+    expect((await readBoundedJsonObject(jsonRequest("{not json"), 1024)).body).toEqual({});
+    expect((await readBoundedJsonObject(jsonRequest("[1,2]"), 1024)).body).toEqual({});
+    expect((await readBoundedJsonObject(jsonRequest("42"), 1024)).body).toEqual({});
+  });
+
+  it("readJsonObject keeps the lenient shape and the bound", async () => {
+    expect(await readJsonObject(jsonRequest('{"a":1}'), 1024)).toEqual({ a: 1 });
+    const big = JSON.stringify({ filler: "x".repeat(2048) });
+    expect(await readJsonObject(jsonRequest(big), 1024)).toEqual({});
   });
 });

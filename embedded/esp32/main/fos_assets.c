@@ -31,6 +31,11 @@ const char *fos_assets_root(void)
 bool fos_assets_sanitize_path(const char *raw, char *out, size_t out_len)
 {
     if (!raw) return false;
+    /* FatFS treats '\\' as a separator too, so "photos\\..\\.cache" would
+     * walk past every check below that only looks for '/'. Refuse the byte
+     * outright rather than normalise it: no client of the assets API ever
+     * legitimately sends one. */
+    if (strchr(raw, '\\')) return false;
     while (raw[0] == '/' || (raw[0] == '.' && raw[1] == '/')) {
         raw += (raw[0] == '/') ? 1 : 2;
     }

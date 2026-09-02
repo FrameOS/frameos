@@ -6,6 +6,7 @@ import QRCode from "qrcode";
 import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
+  notifySecurityChange,
   readJsonBody,
   requireWeakeningProof,
 } from "../../../../../src/lib/account-security";
@@ -74,5 +75,9 @@ export async function DELETE(request: NextRequest) {
       : "account.two_factor_disabled",
     metadata: { method: "totp" },
   });
+  await notifySecurityChange(
+    context,
+    status.enabled ? "totp_disabled" : "two_factor_disabled",
+  );
   return NextResponse.json({ ok: true, two_factor_enabled: status.enabled });
 }

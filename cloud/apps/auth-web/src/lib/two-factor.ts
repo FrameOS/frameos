@@ -8,7 +8,7 @@
 // code — exchanges it for the real session. Nothing about the pending token
 // grants access on its own; it only proves the first factor passed.
 
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import {
@@ -465,6 +465,15 @@ export type PendingSignIn = {
   returnTo?: string | undefined;
 };
 
+// A pending sign-in as read back from its cookie: the claims plus the token's
+// own id, which the finishing route spends (claimSingleUse) so the cookie
+// mints exactly one session however many times it is presented.
+export type PendingSignInToken = PendingSignIn & { tokenId: string };
+
+export function pendingSignInClaimKey(tokenId: string) {
+  return `pending-sign-in:${tokenId}`;
+}
+
 function pendingKey() {
   return derivedSigningKey("pending-sign-in");
 }
@@ -472,12 +481,15 @@ function pendingKey() {
 export async function createPendingSignInToken(pending: PendingSignIn) {
   return new SignJWT({ pending })
     .setProtectedHeader({ alg: "HS256" })
+    .setJti(randomUUID())
     .setIssuedAt()
     .setExpirationTime(`${pendingSignInMaxAgeSeconds}s`)
     .sign(pendingKey());
 }
 
-export async function readPendingSignInToken(token: string | undefined) {
+export async function readPendingSignInToken(
+  token: string | undefined,
+): Promise<PendingSignInToken | undefined> {
   if (!token) {
     return undefined;
   }
@@ -487,11 +499,12 @@ export async function readPendingSignInToken(token: string | undefined) {
     if (
       !pending ||
       typeof pending !== "object" ||
-      typeof pending.profile?.accountId !== "string"
+      typeof pending.profile?.accountId !== "string" ||
+      typeof verified.payload.jti !== "string"
     ) {
       return undefined;
     }
-    return pending;
+    return { ...pending, tokenId: verified.payload.jti };
   } catch {
     return undefined;
   }

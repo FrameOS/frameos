@@ -5,6 +5,7 @@ import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
+  notifySecurityChange,
   readJsonBody,
 } from "../../../../../src/lib/account-security";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
@@ -90,6 +91,7 @@ export async function POST(request: NextRequest) {
     metadata: { method: "passkey", name },
     target: { passkeyId },
   });
+  await notifySecurityChange(context, "passkey_added", name);
   const result = NextResponse.json({
     ok: true,
     passkey: { id: passkeyId, name },

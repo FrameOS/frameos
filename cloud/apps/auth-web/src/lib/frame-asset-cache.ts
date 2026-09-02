@@ -36,12 +36,28 @@ export function normalizeAssetPath(raw: string): string | undefined {
   if (
     path.length === 0 ||
     path.length > maxAssetPathChars ||
-    path.split("/").includes("..")
+    path.split("/").includes("..") ||
+    // NUL and the other control characters have no place in a path: they
+    // end C strings early on the device side and smuggle newlines into logs.
+    hasControlCharacter(path)
   ) {
     return undefined;
   }
   return path;
 }
+
+// Anything below space plus DEL. Spelled out rather than as a regex class
+// because eslint's no-control-regex refuses the character range.
+function hasControlCharacter(value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code < 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
 
 export async function cachedAssetFile(
   db: FramesDatabase,

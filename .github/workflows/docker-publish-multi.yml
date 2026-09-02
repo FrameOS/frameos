@@ -204,8 +204,17 @@ jobs:
           esac
           nim_slug="${distro}-${version}-${host_arch}"
           echo "$nim_slug"
+          # The archive digest must be on the committed list or the runner
+          # refuses it: the CDN alone is not a trust anchor (recipe for a new
+          # Nim at the top of .github/nim-prebuilt.sha256).
+          expected="$(grep -E "^[0-9a-f]{64}  ${nim_slug}/nim-${NIM_VERSION}\.tar\.gz$" .github/nim-prebuilt.sha256 | cut -d' ' -f1 || true)"
+          if [ -z "$expected" ]; then
+            echo "::error::no sha256 recorded for ${nim_slug}/nim-${NIM_VERSION}.tar.gz in .github/nim-prebuilt.sha256"
+            exit 1
+          fi
           mkdir -p "$HOME/.nim"
-          curl -L "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          curl -fsSL --retry 3 "https://archive.frameos.net/prebuilt-deps/${nim_slug}/nim-${NIM_VERSION}.tar.gz" -o /tmp/nim.tar.gz
+          echo "${expected}  /tmp/nim.tar.gz" | sha256sum -c -
           tar -xzf /tmp/nim.tar.gz -C "$HOME/.nim"
           rm -rf "$HOME/.nim/nim-${NIM_VERSION}/nim/bin"
           mv "$HOME/.nim/nim-${NIM_VERSION}/nim/"* "$HOME/.nim/nim-${NIM_VERSION}/"
@@ -471,8 +480,11 @@ jobs:
           fi
           # Ubuntu 24.04 pip is PEP 668 "externally managed"; the fallback
           # keeps this working if the runner image ever stops being.
-          python3 -m pip install --quiet --break-system-packages cryptography \
-            || python3 -m pip install --quiet cryptography
+          # Pinned to the version backend/requirements.txt carries: this step
+          # holds the firmware signing key, and an unpinned `pip install` is
+          # whatever PyPI serves that minute.
+          python3 -m pip install --quiet --break-system-packages cryptography==50.0.0 \
+            || python3 -m pip install --quiet cryptography==50.0.0
           keyfile=$(mktemp)
           # The secret is the small text file sign_firmware.py keygen wrote:
           # a comment line + base64(ED + keyid8 + seed32).
@@ -765,7 +777,9 @@ jobs:
             echo "::error::no release archives found to sign"
             exit 1
           fi
-          python3 -m pip install --quiet --break-system-packages cryptography             || python3 -m pip install --quiet cryptography
+          # Same pin as "Sign ESP32 firmware", for the same reason.
+          python3 -m pip install --quiet --break-system-packages cryptography==50.0.0 \
+            || python3 -m pip install --quiet cryptography==50.0.0
           keyfile=$(mktemp)
           printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
           status=0

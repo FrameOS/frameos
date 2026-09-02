@@ -170,7 +170,7 @@ async function readApiTokenSession(): Promise<SessionProfile | undefined> {
       accountId: authenticated.account.id,
       apiToken: authenticated.token,
       email: authenticated.account.email ?? undefined,
-      emailVerified: true,
+      emailVerified: authenticated.account.emailVerified,
       name: authenticated.account.name ?? undefined,
       providerIssuer: apiTokenProviderIssuer,
       providerSubject: `api-token:${authenticated.token.id}`,

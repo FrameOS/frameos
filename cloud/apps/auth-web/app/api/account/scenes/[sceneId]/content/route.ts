@@ -6,7 +6,11 @@ import {
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../../../src/lib/blobs";
-import { jsonError, readJsonObject } from "../../../../../../src/lib/device-flow";
+import {
+  defaultJsonBodyBytes,
+  jsonError,
+  readBoundedJsonObject,
+} from "../../../../../../src/lib/device-flow";
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import { identityRateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import {
@@ -86,7 +90,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return accountLimited;
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, defaultJsonBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   if (body.scenes !== undefined && (!Array.isArray(body.scenes) || body.scenes.length === 0)) {
     return jsonError("invalid_scenes", 400);
   }

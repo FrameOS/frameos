@@ -2,7 +2,10 @@ import { and, eq } from "drizzle-orm";
 import { clientBackups } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
-import { backupDownloadFileName } from "../../../../../src/lib/backups";
+import {
+  backupDownloadFileName,
+  normalizeBackupContentType,
+} from "../../../../../src/lib/backups";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
   jsonError,
@@ -72,7 +75,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
       "cache-control": "no-store",
       "content-disposition": `attachment; filename="${backupDownloadFileName(backup)}"`,
       "content-length": String(backup.content.length),
-      "content-type": backup.contentType ?? "application/octet-stream",
+      "content-type": normalizeBackupContentType(backup.contentType),
+      // Belt and braces with the allowlist above: even a legacy row that
+      // stored something else is served as a download, never rendered.
+      "x-content-type-options": "nosniff",
     },
   });
 }

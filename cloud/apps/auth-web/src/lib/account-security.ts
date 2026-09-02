@@ -16,6 +16,8 @@ import { csrfResponse } from "./csrf";
 import { verifyPasswordWithDummyFallback } from "./passwords";
 import { identityRateLimitResponse, rateLimitResponse } from "./rate-limit";
 import { requireRecentAuth } from "./recent-auth";
+import { sendSecurityNotificationEmail, type SecurityNotification } from "./email";
+import { reportError } from "./log";
 import { readSession } from "./session";
 import { secondFactorStatus, verifySecondFactorCode } from "./two-factor";
 
@@ -180,4 +182,27 @@ export async function twoFactorStatusPayload(
     totp_enabled: status.totpEnabled,
     totp_pending: status.totpPending,
   };
+}
+
+// Tells the owner a second factor changed. A stolen session that quietly
+// adds a passkey is the scenario; the mail is the owner's chance to notice.
+// Never fails the change itself: the credential is already written, and a
+// mail outage is not a reason to report the enrollment as failed.
+export async function notifySecurityChange(
+  context: AccountSessionContext,
+  what: SecurityNotification["what"],
+  detail?: string | undefined,
+) {
+  try {
+    await sendSecurityNotificationEmail(context.email, {
+      detail,
+      what,
+      when: new Date(),
+    });
+  } catch (error) {
+    reportError("email.security_notification_send_failed", error, {
+      accountId: context.accountId,
+      what,
+    });
+  }
 }

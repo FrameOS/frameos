@@ -224,4 +224,21 @@ suite "spool ownership":
     check fileExists(path)
     removeFile(path)
 
+suite "spool scratch sweep":
+  test "boot sweep removes leftover spill files but keeps directories":
+    let dir = ScratchDir / "sweep"
+    createDir(dir / "keep-me")
+    writeFile(dir / "1-body.tmp", "stale")
+    writeFile(dir / "2-image.tmp", "stale")
+    check sweepSpoolScratchDir(dir) >= 2
+    check not fileExists(dir / "1-body.tmp")
+    check not fileExists(dir / "2-image.tmp")
+    check dirExists(dir / "keep-me")
+    # A fresh spill after the sweep lands in the same, now clean, directory.
+    let path = newSpillFilePath("body.tmp", dir)
+    check path.startsWith(dir)
+
+  test "sweeping an unusable directory is a no-op":
+    check sweepSpoolScratchDir("/nonexistent/frameos-spool-test") >= 0
+
 removeDir(ScratchDir)

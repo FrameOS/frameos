@@ -26,8 +26,21 @@ cleanup, or sync jobs need separate execution.
   flag of every frame on boot, so a second hub marks live frames offline. It
   is deliberately not blue/green — it restarts in place and frames reconnect.
 - **Database TLS.** `postgres.js` defaults to no TLS. If Postgres is not on
-  the same host, set `DATABASE_SSL=require` (or `sslmode=require` in
-  `DATABASE_URL`).
+  the same host, encrypt the connection — and know what each mode buys:
+  - `DATABASE_SSL=require` (or `sslmode=require` in `DATABASE_URL`) encrypts
+    the connection but **does not verify the server certificate**
+    (`postgres.js` sets `rejectUnauthorized: false` for `require`, `allow`
+    and `prefer`). It stops passive sniffing, not an active man in the
+    middle. Only acceptable on a private network you control end to end.
+  - `sslmode=verify-full` in `DATABASE_URL` verifies the certificate chain
+    against the system trust store **and** that it matches the host name.
+    Use it whenever the database is reached over a network you do not own
+    (managed Postgres, a separate VPS). The server certificate must be
+    signed by a CA the Node process trusts (a public CA, or one added via
+    `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` in the env file). Leave
+    `DATABASE_SSL` unset when you do this: the variable takes precedence
+    over the URL, and the code only understands `require`/`true` — a
+    `DATABASE_SSL=verify-full` is silently ignored, which means no TLS.
 - **Periodic cleanup.** Schedule `pnpm db:cleanup` (e.g. daily cron) to prune
   finished device authorization requests, expired login codes, and expired or
   revoked sessions. These tables grow without bound otherwise.

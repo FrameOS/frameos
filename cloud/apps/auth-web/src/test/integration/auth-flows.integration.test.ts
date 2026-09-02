@@ -490,6 +490,64 @@ describe("password reset", () => {
     expect(newPassword.status).toBe(200);
   });
 
+  it("retires the account's other outstanding reset links on a successful reset", async () => {
+    const { accountId } = await signUpUser();
+    const first = createSecretToken("frpr", 32);
+    const second = createSecretToken("frpr", 32);
+    await db.insert(passwordResetTokens).values([
+      {
+        accountId,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        tokenHash: hashSecret(first),
+      },
+      {
+        accountId,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        tokenHash: hashSecret(second),
+      },
+    ]);
+    // Another account's live link is not the reset's business.
+    const bystander = await signUpUser();
+    const bystanderToken = createSecretToken("frpr", 32);
+    await db.insert(passwordResetTokens).values({
+      accountId: bystander.accountId,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      tokenHash: hashSecret(bystanderToken),
+    });
+
+    const confirm = await resetConfirm(
+      postJson("/api/auth/reset/confirm", {
+        password: "a brand new password",
+        token: first,
+      }),
+    );
+    expect(confirm.status).toBe(200);
+
+    const sibling = await resetConfirm(
+      postJson("/api/auth/reset/confirm", {
+        password: "an attacker's password",
+        token: second,
+      }),
+    );
+    expect(sibling.status).toBe(400);
+    expect(await readJson(sibling)).toMatchObject({ error: "invalid_token" });
+
+    const rows = await db
+      .select({ usedAt: passwordResetTokens.usedAt })
+      .from(passwordResetTokens)
+      .where(eq(passwordResetTokens.accountId, accountId));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.usedAt !== null)).toBe(true);
+
+    const other = await resetConfirm(
+      postJson("/api/auth/reset/confirm", {
+        password: "the bystander's new password",
+        token: bystanderToken,
+      }),
+    );
+    expect(other.status).toBe(200);
+  });
+
   it("rejects expired tokens", async () => {
     const { accountId } = await signUpUser();
     const rawToken = createSecretToken("frpr", 32);

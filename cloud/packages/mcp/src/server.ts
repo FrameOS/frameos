@@ -3,7 +3,7 @@ import { instrument } from "@posthog/mcp";
 import { PostHog } from "posthog-node";
 import { z } from "zod";
 import { FrameosCloudClient, type FetchLike } from "./client";
-import { explainError, type ToolContext } from "./result";
+import { explainError, isUuid, type ToolContext } from "./result";
 import { registerAccountTools } from "./tools/account";
 import { registerAiTools } from "./tools/ai";
 import { registerFrameTools } from "./tools/frames";
@@ -128,6 +128,9 @@ function registerResources(server: McpServer, ctx: ToolContext) {
     }),
     { description: "One frame's full detail.", mimeType: "application/json", title: "Frame" },
     async (uri, { frameId }) => {
+      if (!isUuid(String(frameId))) {
+        throw new Error("Expected a frame id (uuid) in the resource URI");
+      }
       const payload = await ctx.client.json("GET", `/api/frames/${String(frameId)}`);
       return {
         contents: [
@@ -179,6 +182,9 @@ function registerResources(server: McpServer, ctx: ToolContext) {
       title: "Scene content",
     },
     async (uri, { sceneId }) => {
+      if (!isUuid(String(sceneId))) {
+        throw new Error("Expected a scene id (uuid) in the resource URI");
+      }
       const payload = await ctx.client.json(
         "GET",
         `/api/store/scenes/${String(sceneId)}/scenes.json`,

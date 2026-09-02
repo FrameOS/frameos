@@ -1,7 +1,7 @@
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { decodeBackupContent } from "../../../../../../src/lib/backups";
-import { jsonError, readJsonObject } from "../../../../../../src/lib/device-flow";
+import { jsonError, readBoundedJsonObject } from "../../../../../../src/lib/device-flow";
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import {
   detectImageContentType,
@@ -14,6 +14,9 @@ import {
   accountLimits,
   privateSceneBytesForAccount,
 } from "../../../../../../src/lib/usage";
+
+// One base64 image plus a little JSON around it.
+const maxImageBodyBytes = Math.ceil((maxPreviewImageBytes * 4) / 3) + 64 * 1024;
 
 export const runtime = "nodejs";
 
@@ -38,7 +41,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return jsonError("scene_pulled", 403);
   }
 
-  const body = await readJsonObject(request);
+  const parsed = await readBoundedJsonObject(request, maxImageBodyBytes);
+  if (parsed.response) {
+    return parsed.response;
+  }
+  const body = parsed.body;
   const content = decodeBackupContent(body.content_base64);
   if (!content || content.length === 0) {
     return jsonError("invalid_content", 400);

@@ -86,14 +86,18 @@ proc serveSilent() {.thread.} =
       withLock stubLock:
         connections += 1
     try:
+      var secKey = ""
       while true: # request line + headers
         let line = client.recvLine(timeout = 5000)
         if line == "\r\n" or line.len == 0:
           break
-      # The client checks the Upgrade header and nothing else, so no
-      # Sec-WebSocket-Accept computation is needed here.
+        if line.toLowerAscii().startsWith("sec-websocket-key:"):
+          secKey = line.split(":", 1)[1].strip()
+      # The client refuses any 101 whose Sec-WebSocket-Accept does not answer
+      # the key it sent (RFC 6455 §4.2.2), so the stub has to compute it.
       client.send("HTTP/1.1 101 Switching Protocols\r\n" &
-                  "Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+                  "Upgrade: websocket\r\nConnection: Upgrade\r\n" &
+                  "Sec-WebSocket-Accept: " & webSocketAcceptFor(secKey) & "\r\n\r\n")
       discard readFrame(client) # hello
       # A 32-byte nonce, base64 as the wire contract says.
       client.send(textFrame($(%*{"type": "challenge",

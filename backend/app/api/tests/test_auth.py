@@ -44,30 +44,98 @@ async def test_login_unknown_email(async_client):
 @pytest.mark.asyncio
 async def test_login_too_many_attempts(no_auth_client, redis, db):
     """
-    Test that after too many failed login attempts, we get 429 Too Many Requests.
-    The code sets the limit to 10 attempts.
+    Five failures lock the account with exponential backoff; the lock is on the
+    account, not the (ip, account) pair.
     """
+    from app.api.auth import LOGIN_LOCKOUT_THRESHOLD, login_lockout_seconds
+    from app.utils.rate_limit import rate_limit_key
+
     user = User(email="toomany@example.com")
     user.set_password("testpassword")
     db.add(user)
     db.commit()
 
     login_data = {"username": "toomany@example.com", "password": "wrongpassword"}
-    # Make 11 attempts
-    for i in range(11):
+    for i in range(LOGIN_LOCKOUT_THRESHOLD):
         resp = await no_auth_client.post("/api/login", data=login_data)
-        if i <= 10:
-            # first 10 attempts => 401
-            assert resp.status_code == HTTP_401_UNAUTHORIZED, f"Expected 401 on attempt {i+1}, got {resp.status_code}"
-        else:
-            # 11th attempt => 429
-            assert resp.status_code == HTTP_429_TOO_MANY_REQUESTS, f"Expected 429 on attempt 11, got {resp.status_code}"
-            assert resp.json()["detail"] == "Too many login attempts"
+        assert resp.status_code == HTTP_401_UNAUTHORIZED, f"Expected 401 on attempt {i+1}, got {resp.status_code}"
 
-    # Even more attempts => still 429
     resp = await no_auth_client.post("/api/login", data=login_data)
     assert resp.status_code == HTTP_429_TOO_MANY_REQUESTS
     assert resp.json()["detail"] == "Too many login attempts"
+    assert 0 < int(resp.headers["Retry-After"]) <= login_lockout_seconds(LOGIN_LOCKOUT_THRESHOLD)
+
+    # The right password is refused too while the lock holds ...
+    resp = await no_auth_client.post(
+        "/api/login", data={"username": "toomany@example.com", "password": "testpassword"}
+    )
+    assert resp.status_code == HTTP_429_TOO_MANY_REQUESTS
+    # ... from any address: the lock keys on the account.
+    resp = await no_auth_client.post(
+        "/api/login", data=login_data, headers={"X-Forwarded-For": "203.0.113.7"}
+    )
+    assert resp.status_code == HTTP_429_TOO_MANY_REQUESTS
+    # A different account is not affected by this one's failures.
+    resp = await no_auth_client.post("/api/login", data={"username": "other@example.com", "password": "x"})
+    assert resp.status_code == HTTP_401_UNAUTHORIZED
+
+    # Once the lock expires a successful login resets the counter.
+    await redis.delete(rate_limit_key("login_lock", "toomany@example.com"))
+    resp = await no_auth_client.post(
+        "/api/login", data={"username": "toomany@example.com", "password": "testpassword"}
+    )
+    assert resp.status_code == HTTP_200_OK
+    resp = await no_auth_client.post("/api/login", data=login_data)
+    assert resp.status_code == HTTP_401_UNAUTHORIZED
+
+
+def test_login_lockout_backoff_doubles_up_to_the_cap():
+    from app.api.auth import (
+        LOGIN_LOCKOUT_BASE_SECONDS,
+        LOGIN_LOCKOUT_MAX_SECONDS,
+        LOGIN_LOCKOUT_THRESHOLD,
+        login_lockout_seconds,
+    )
+
+    assert login_lockout_seconds(LOGIN_LOCKOUT_THRESHOLD - 1) == 0
+    assert login_lockout_seconds(LOGIN_LOCKOUT_THRESHOLD) == LOGIN_LOCKOUT_BASE_SECONDS
+    assert login_lockout_seconds(LOGIN_LOCKOUT_THRESHOLD + 1) == 2 * LOGIN_LOCKOUT_BASE_SECONDS
+    assert login_lockout_seconds(LOGIN_LOCKOUT_THRESHOLD + 40) == LOGIN_LOCKOUT_MAX_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_login_lockout_is_case_insensitive_on_the_account(no_auth_client, redis, db):
+    from app.api.auth import LOGIN_LOCKOUT_THRESHOLD
+
+    user = User(email="mixed@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    for _ in range(LOGIN_LOCKOUT_THRESHOLD):
+        await no_auth_client.post("/api/login", data={"username": "Mixed@Example.com", "password": "nope"})
+    resp = await no_auth_client.post("/api/login", data={"username": "mixed@example.com", "password": "testpassword"})
+    assert resp.status_code == HTTP_429_TOO_MANY_REQUESTS
+
+
+@pytest.mark.asyncio
+async def test_login_per_ip_failure_limit(no_auth_client, redis, db, monkeypatch):
+    from app.api import auth as auth_module
+
+    monkeypatch.setattr(auth_module, "LOGIN_IP_LIMIT", 3)
+    for i in range(3):
+        resp = await no_auth_client.post("/api/login", data={"username": f"user{i}@example.com", "password": "x"})
+        assert resp.status_code == HTTP_401_UNAUTHORIZED
+    resp = await no_auth_client.post("/api/login", data={"username": "user9@example.com", "password": "x"})
+    assert resp.status_code == HTTP_429_TOO_MANY_REQUESTS
+    # The test client connects from loopback, a trusted proxy, so a forwarded
+    # address counts as a different caller.
+    resp = await no_auth_client.post(
+        "/api/login",
+        data={"username": "user9@example.com", "password": "x"},
+        headers={"X-Forwarded-For": "203.0.113.9"},
+    )
+    assert resp.status_code == HTTP_401_UNAUTHORIZED
 
 
 @pytest.mark.asyncio

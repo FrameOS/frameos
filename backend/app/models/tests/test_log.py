@@ -133,10 +133,17 @@ async def test_process_log_bootup_updates_ip_frame_host(mock_pub, db, redis):
     db.add(frame)
     db.commit()
 
-    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.204"})
+    # A claimed address the request did not come from is ignored ...
+    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.204"}, ip="10.8.0.7")
+    assert db.get(Frame, frame.id).frame_host == "10.8.0.100"
 
-    updated = db.get(Frame, frame.id)
-    assert updated.frame_host == "10.8.0.204"
+    # ... the one it did come from is followed.
+    await process_log(db, redis, frame, {"event": "bootup", "ip": "10.8.0.204"}, ip="10.8.0.204")
+    assert db.get(Frame, frame.id).frame_host == "10.8.0.204"
+
+    # Without a claimed address the observed peer is used.
+    await process_log(db, redis, frame, {"event": "bootup"}, ip="10.8.0.205")
+    assert db.get(Frame, frame.id).frame_host == "10.8.0.205"
 
 
 @pytest.mark.asyncio

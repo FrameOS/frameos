@@ -1295,11 +1295,14 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     if data.startsWith("data:"):
       return decodeDataUrl(data)
     if data.startsWith("<svg") or data.startsWith("<?xml") or data.contains("<svg"):
-      let image = decodeSvgWithFallback(data, defaultImageWidth(owner, context, %*{}), defaultImageHeight(owner, context, %*{}))
+      let (svgWidth, svgHeight) = boundedRequestedDimensions(
+        defaultImageWidth(owner, context, %*{}), defaultImageHeight(owner, context, %*{}))
+      let image = decodeSvgWithFallback(data, svgWidth, svgHeight)
       if image.isSome:
         return image.get()
-      # SVG has no dimensions probe; keep the unbounded fallback for it.
-      return decodeImageWithFallback(data)
+      # Bounded by the SVG's declared size (decodeImageWithDisplayBounds
+      # parses it), never rasterized at whatever viewBox it asks for.
+      return decodeImageWithDisplayBounds(data)
     return decodeImageWithDisplayBounds(data)
 
   if spec.kind == JObject and spec{"type"}.getStr() == "image":
@@ -1320,8 +1323,9 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
   of "image":
     if spec.hasKey("svg"):
       when defined(memProbe): memProbe("    svg decode src=" & $spec["svg"].getStr().len & "B BEFORE")
-      let svgWidth = defaultImageWidth(owner, context, spec)
-      let svgHeight = defaultImageHeight(owner, context, spec)
+      # The spec's width/height are scene-requested: bounded like a decode.
+      let (svgWidth, svgHeight) = boundedRequestedDimensions(
+        defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
       # The same `intoTarget` handshake as the plain-canvas branch below: an
       # SVG panel is the common shape for a JS render app, and rasterizing it
       # into the target the planner offered is what keeps a full-size second
@@ -1359,12 +1363,10 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       return decodeDataUrl(spec["dataUrl"].getStr())
     if spec.hasKey("base64"):
       var decoded = spec["base64"].getStr().decode()
-      # SVG has no dimensions probe; everything else decodes bounded.
-      if decoded.len > 5 and (decoded.startsWith("<?xml") or decoded.startsWith("<svg")):
-        return decodeImageWithFallback(decoded)
+      # decodeImageWithDisplayBounds bounds an SVG by its declared size too.
       return decodeImageWithDisplayBounds(decoded)
-    let width = max(1, defaultImageWidth(owner, context, spec))
-    let height = max(1, defaultImageHeight(owner, context, spec))
+    let (width, height) = boundedRequestedDimensions(
+      defaultImageWidth(owner, context, spec), defaultImageHeight(owner, context, spec))
     # The consumer's half of `intoTarget`, for a JS app that asked for a plain
     # canvas: when the planner offered this node a target of exactly the size
     # we were about to allocate, draw into that instead. The JS drawing calls

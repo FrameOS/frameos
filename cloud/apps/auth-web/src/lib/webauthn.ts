@@ -11,8 +11,10 @@
 // Challenges are stateless: the options call mints a short-lived signed JWT
 // (httpOnly cookie) carrying the challenge and, for the second-factor and
 // registration cases, the account it was issued for; the verify call must
-// present the same cookie. Nothing is stored server-side until a credential is
-// actually registered.
+// present the same cookie. Each token is read once — its id is claimed in the
+// rate-limit store the moment a verify route reads it, so a captured cookie
+// cannot be replayed against a second assertion. Nothing else is stored
+// server-side until a credential is actually registered.
 
 import {
   generateAuthenticationOptions,
@@ -23,11 +25,13 @@ import {
   type AuthenticatorTransportFuture,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import { accountPasskeys, type createDb } from "@frameos-cloud/db";
 import { getAppOrigins, getCloudBaseUrl } from "./env";
 import { derivedSigningKey } from "./keys";
+import { claimSingleUse } from "./rate-limit";
 
 export const webauthnChallengeCookieName = "frameos_webauthn_challenge";
 export const webauthnChallengeMaxAgeSeconds = 5 * 60;
@@ -78,6 +82,7 @@ function challengeKey() {
 export async function createChallengeToken(claims: ChallengeClaims) {
   return new SignJWT({ webauthn: claims })
     .setProtectedHeader({ alg: "HS256" })
+    .setJti(randomUUID())
     .setIssuedAt()
     .setExpirationTime(`${webauthnChallengeMaxAgeSeconds}s`)
     .sign(challengeKey());
@@ -97,7 +102,19 @@ export async function readChallengeToken(
       !claims ||
       typeof claims !== "object" ||
       claims.purpose !== purpose ||
-      typeof claims.challenge !== "string"
+      typeof claims.challenge !== "string" ||
+      typeof verified.payload.jti !== "string"
+    ) {
+      return undefined;
+    }
+    // Single use: the first verify call to read this token spends it, whether
+    // or not the assertion then checks out — a ceremony that fails asks for
+    // fresh options anyway.
+    if (
+      !(await claimSingleUse(
+        `webauthn-challenge:${verified.payload.jti}`,
+        webauthnChallengeMaxAgeSeconds * 1000,
+      ))
     ) {
       return undefined;
     }

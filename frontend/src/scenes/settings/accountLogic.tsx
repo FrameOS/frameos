@@ -19,6 +19,9 @@ export interface AccountPasswordForm {
 
 export interface AccountEmailForm {
   email: string
+  // The email is the login name, so the backend wants the current password
+  // (when the account has one) before it changes hands.
+  current_password: string
 }
 
 const defaultPasswordForm: AccountPasswordForm = {
@@ -29,6 +32,7 @@ const defaultPasswordForm: AccountPasswordForm = {
 
 const defaultEmailForm: AccountEmailForm = {
   email: '',
+  current_password: '',
 }
 
 async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -261,11 +265,19 @@ export const accountLogic = kea<accountLogicType>([
         const response = await apiFetch('/api/user/email', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({
+            email,
+            ...(form.current_password ? { current_password: form.current_password } : {}),
+          }),
         })
 
         if (!response.ok) {
-          actions.setAccountEmailManualErrors({ email: await responseErrorMessage(response, 'Failed to update email') })
+          const message = await responseErrorMessage(response, 'Failed to update email')
+          if (/current password/i.test(message)) {
+            actions.setAccountEmailManualErrors({ current_password: message })
+          } else {
+            actions.setAccountEmailManualErrors({ email: message })
+          }
           return
         }
 
