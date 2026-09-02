@@ -304,37 +304,11 @@ jobs:
             echo "proceed=true" >>"$GITHUB_OUTPUT"
           fi
 
-      # Production is allowed to run a branch — some frame-facing work can
-      # only be exercised against the real cloud — and an automatic deploy
-      # must not silently take that away while someone is using it. Deploying
-      # main by hand when you are done re-arms this.
-      - name: Stand down if production is running a branch
-        id: live
-        if: steps.freshness.outputs.proceed == 'true'
-        env:
-          DEPLOY_HOST: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_HOST }}
-        run: |
-          set -euo pipefail
-          live_ref="$(ssh -i ~/.ssh/frameos-cloud-deploy -o BatchMode=yes \
-            "$DEPLOY_HOST" frameos-cloud-update --release-ref)"
-          echo "production is running: $live_ref"
-          if [ "$live_ref" = "main" ]; then
-            echo "proceed=true" >>"$GITHUB_OUTPUT"
-          else
-            {
-              echo "### Auto-deploy on hold"
-              echo
-              echo "Production is running \`$live_ref\`, not \`main\`, so this merge was **not** deployed."
-              echo "Run \`pnpm deploy:prod\` from cloud/ when you are done with that ref to resume."
-            } | tee -a "$GITHUB_STEP_SUMMARY"
-            echo "proceed=false" >>"$GITHUB_OUTPUT"
-          fi
-
       - uses: pnpm/action-setup@v4
-        if: steps.live.outputs.proceed == 'true'
+        if: steps.freshness.outputs.proceed == 'true'
 
       - uses: actions/setup-node@v4
-        if: steps.live.outputs.proceed == 'true'
+        if: steps.freshness.outputs.proceed == 'true'
         with:
           node-version: 24
           cache: pnpm
@@ -342,7 +316,7 @@ jobs:
 
       # Same cache as verify, for the same reason (nim-lang.org is unreliable).
       - name: Cache Nim toolchain
-        if: steps.live.outputs.proceed == 'true'
+        if: steps.freshness.outputs.proceed == 'true'
         id: cache_nim_toolchain
         uses: actions/cache@v4
         with:
@@ -352,17 +326,17 @@ jobs:
           key: ${{ runner.os }}-nim-toolchain-2.2.4
 
       - uses: jiro4989/setup-nim-action@v1
-        if: steps.live.outputs.proceed == 'true' && steps.cache_nim_toolchain.outputs.cache-hit != 'true'
+        if: steps.freshness.outputs.proceed == 'true' && steps.cache_nim_toolchain.outputs.cache-hit != 'true'
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Add cached Nim to PATH
-        if: steps.live.outputs.proceed == 'true' && steps.cache_nim_toolchain.outputs.cache-hit == 'true'
+        if: steps.freshness.outputs.proceed == 'true' && steps.cache_nim_toolchain.outputs.cache-hit == 'true'
         run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
 
       - uses: mymindstorm/setup-emsdk@v14
-        if: steps.live.outputs.proceed == 'true'
+        if: steps.freshness.outputs.proceed == 'true'
         with:
           version: 6.0.2
 
@@ -370,21 +344,21 @@ jobs:
       # replay rather than a second full build of the frontend and the wasm
       # runtime.
       - uses: actions/cache@v4
-        if: steps.live.outputs.proceed == 'true'
+        if: steps.freshness.outputs.proceed == 'true'
         with:
           path: .turbo
           key: turbo-cloud-${{ runner.os }}-${{ github.sha }}
           restore-keys: turbo-cloud-${{ runner.os }}-
 
       - name: Install dependencies
-        if: steps.live.outputs.proceed == 'true'
+        if: steps.freshness.outputs.proceed == 'true'
         run: pnpm install --frozen-lockfile
 
       # build:runtime is not part of the `build` task graph, so the deploy has
       # to ask for it explicitly or the editor would ship whatever wasm
       # happened to be lying around.
       - name: Build the wasm runtime
-        if: steps.live.outputs.proceed == 'true'
+        if: steps.freshness.outputs.proceed == 'true'
         run: |
           (cd frameos && nimble install -d -y)
           pnpm exec turbo run build:runtime --filter=frameos-wasm
@@ -418,6 +392,37 @@ jobs:
           # Absolute: deploy.sh passes this to `ssh -i "$ssh_key"` quoted, and
           # a literal ~ inside quotes is a path that does not exist.
           echo "FRAMEOS_CLOUD_DEPLOY_SSH_KEY=$HOME/.ssh/frameos-cloud-deploy" >>"$GITHUB_ENV"
+
+
+      # Production is allowed to run a branch — some frame-facing work can
+      # only be exercised against the real cloud — and an automatic deploy
+      # must not silently take that away while someone is using it. Deploying
+      # main by hand when you are done re-arms this.
+      # Runs here, after Configure SSH, because it is the first thing that
+      # needs the key; the wasm build above is wasted when it stands down,
+      # which is the cheaper side of "the key is on disk only after every
+      # third-party action in the job".
+      - name: Stand down if production is running a branch
+        id: live
+        if: steps.freshness.outputs.proceed == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.FRAMEOS_CLOUD_DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          live_ref="$(ssh -i ~/.ssh/frameos-cloud-deploy -o BatchMode=yes \
+            "$DEPLOY_HOST" frameos-cloud-update --release-ref)"
+          echo "production is running: $live_ref"
+          if [ "$live_ref" = "main" ]; then
+            echo "proceed=true" >>"$GITHUB_OUTPUT"
+          else
+            {
+              echo "### Auto-deploy on hold"
+              echo
+              echo "Production is running \`$live_ref\`, not \`main\`, so this merge was **not** deployed."
+              echo "Run \`pnpm deploy:prod\` from cloud/ when you are done with that ref to resume."
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "proceed=false" >>"$GITHUB_OUTPUT"
+          fi
 
       # The same script a human runs. `-- main` rather than the bare form so
       # the server records the ref as "main": that is what the branch check
