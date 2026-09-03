@@ -150,7 +150,9 @@ jobs:
       # Lint, typecheck, test, and build the cloud workspace; turbo builds
       # the frontend, editor, and wasm packages it depends on. auth-web's
       # prebuild downloads and verifies the release's wasm runtime.
-      - run: pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*'
+      # cloud-frontend (the frames SPA wrapper auth-web serves) is built by
+      # esbuild, which checks no types, so its typecheck task rides along.
+      - run: pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend
 
       # Backend-linking flow against the Postgres service container.
       - run: pnpm --filter @frameos-cloud/auth-web test:integration

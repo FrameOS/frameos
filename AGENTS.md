@@ -11,14 +11,14 @@
 ## Cloud tests before you push (`verify` is the gate)
 
 - The cloud CI job named **`verify`** (`.github/workflows/cloud-ci.yml`) runs
-  `turbo run lint typecheck test build --filter='@frameos-cloud/*'` and then
+  `turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend` and then
   TWO integration suites against a real Postgres: `@frameos-cloud/auth-web`
   and `@frameos-cloud/frame-hub`. Run the same three locally from `cloud/`
   before pushing — a green `pnpm test` alone proves little, because the
   integration suites are where the interesting failures live:
 
   ```
-  pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*'
+  pnpm exec turbo run lint typecheck test build --filter='@frameos-cloud/*' --filter=@frameos/cloud-frontend
   pnpm --filter @frameos-cloud/auth-web test:integration
   pnpm --filter @frameos-cloud/frame-hub test:integration
   ```

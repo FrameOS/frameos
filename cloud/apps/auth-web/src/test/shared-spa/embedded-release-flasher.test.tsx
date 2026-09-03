@@ -260,6 +260,49 @@ describe("provisionOverUsb", () => {
     expect(usbSetMock.mock.calls[0][3]).toMatchObject({ port, keepOpen: true });
   });
 
+  it("carries on past keys a board's older firmware does not know, and says so", async () => {
+    const port = stubSerial() as unknown as SerialPort;
+    const messages: string[] = [];
+    // 2026.9.2 firmware: `set hostname` is refused, the console reports a
+    // bare set failure, and the rest of the plan must still land.
+    usbSetMock.mockImplementation((_frameId: unknown, key: string) =>
+      key === "hostname" ? Promise.reject(new Error("ESP_FAIL set failed (see console output)")) : Promise.resolve(),
+    );
+    const withHostname = plan();
+    withHostname.settings.splice(2, 0, { key: "hostname", secret: false, value: "kitchen" });
+
+    const result = await provisionOverUsb(1 as unknown as FrameType["id"], withHostname, port, (message) =>
+      messages.push(message),
+    );
+
+    expect(result.skipped).toEqual(["hostname"]);
+    expect(usbSetMock.mock.calls.map((call) => call[1])).toEqual([
+      "hardware",
+      "panel",
+      "hostname",
+      "backend",
+      "api_key",
+      "frame_id",
+    ]);
+    expect(messages.some((message) => /does not know hostname yet/.test(message))).toBe(true);
+    usbSetMock.mockImplementation(() => Promise.resolve());
+  });
+
+  it("still fails on a key every firmware knows", async () => {
+    const port = stubSerial() as unknown as SerialPort;
+    usbSetMock.mockImplementation((_frameId: unknown, key: string) =>
+      key === "backend" ? Promise.reject(new Error("ESP_FAIL set failed (see console output)")) : Promise.resolve(),
+    );
+
+    await expect(provisionOverUsb(1 as unknown as FrameType["id"], plan(), port, () => {})).rejects.toThrow(
+      /set failed/,
+    );
+    // Nothing after the refused key was sent: a half-provisioned board must
+    // not reboot into Wi-Fi as something that is not quite this frame.
+    expect(usbSetMock.mock.calls.map((call) => call[1])).toEqual(["hardware", "panel", "backend"]);
+    usbSetMock.mockImplementation(() => Promise.resolve());
+  });
+
   it("keeps a secret's value out of the status messages", async () => {
     const port = stubSerial() as unknown as SerialPort;
     const messages: string[] = [];

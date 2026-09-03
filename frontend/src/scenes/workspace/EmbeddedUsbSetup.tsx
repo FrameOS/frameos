@@ -27,7 +27,7 @@ import {
 } from '../../models/embeddedUsbLogsModel'
 import type { FrameType } from '../../types'
 import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
-import { fetchProvisioningPlan, provisionOverUsb } from './EmbeddedReleaseFlasher'
+import { fetchProvisioningPlan, provisionOverUsb, skippedSettingsNotice } from './EmbeddedReleaseFlasher'
 import { EmbeddedUsbConnectionButton } from './embeddedFlashShared'
 import { isEsp32CloudFrame, workspaceMode } from './workspaceSurfaces'
 
@@ -186,10 +186,12 @@ export function EmbeddedUsbSetup({
         setError(`This frame cannot be provisioned yet: ${plan.blockers.join(' ')}`)
         return
       }
-      await provisionOverUsb(frame.id, plan, null, setMessage)
-      setMessage(`Sent ${plan.settings.length} settings to the board; restarting it to apply them.`)
+      const { skipped } = await provisionOverUsb(frame.id, plan, null, setMessage)
+      const sent = plan.settings.length - skipped.length
+      setMessage(`Sent ${sent} settings to the board; restarting it to apply them.`)
       await usbRestart(frame.id)
-      setMessage(`Sent ${plan.settings.length} settings to the board. It rebooted and is applying them.`)
+      const notice = skippedSettingsNotice(skipped)
+      setMessage(`Sent ${sent} settings to the board. It rebooted and is applying them.${notice ? ` ${notice}` : ''}`)
       await refreshStatus()
     } catch (settingsError) {
       setError(`Applying the frame's settings failed: ${errorDetail(settingsError)}`)
