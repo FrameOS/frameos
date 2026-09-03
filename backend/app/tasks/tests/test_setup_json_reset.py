@@ -67,6 +67,7 @@ class Sandbox:
         frameos.write_text(
             "#!/bin/sh\n"
             f'printf \'%s\\n\' "$@" >> {argv_log}\n'
+            f'printf \'%s\\n\' "$PWD" >> {argv_log.with_name("frameos-cwd.log")}\n'
             f'[ "$1" = set-display ] && exit {set_display_exit_status}\n'
             f"exit {exit_status}\n",
             encoding="utf-8",
@@ -324,6 +325,9 @@ def test_cloud_config_display_keys_patch_frame_json_and_run_driver_setup(tmp_pat
     argv = argv_log.read_text(encoding="utf-8")
     assert "driver-setup" in argv
     assert "--reboot-if-required" in argv
+    # From the release directory: the binary reads ./frame.json from its cwd.
+    cwd_log = argv_log.with_name("frameos-cwd.log").read_text(encoding="utf-8").splitlines()
+    assert str(sandbox.srv / "frameos" / "current") in cwd_log
     # Enrollment still happened and the secrets are gone from /boot.
     assert sandbox.pending_file.exists()
     assert not (sandbox.boot / "frameos-cloud.txt").exists()

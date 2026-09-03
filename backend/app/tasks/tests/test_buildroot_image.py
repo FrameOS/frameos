@@ -1280,6 +1280,19 @@ async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path
     ) in captured["root_patch_script"]
     assert "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" in captured["root_patch_script"]
     assert "c91cd2804cf7463aab913e7247c176049f16bbd6" in captured["root_patch_script"]
+    # The resolver and network.service drop-ins were staged but never written
+    # into the cached base's root partition: a Zero W card composed on
+    # 2026-09-03 booted validating DNSSEC and only got the drop-in from its
+    # first OTA's `frameos setup`.
+    assert "mkdir /etc/systemd/resolved.conf.d" in captured["root_patch_script"]
+    assert (
+        "write $service_root/etc/systemd/resolved.conf.d/10-frameos.conf /etc/systemd/resolved.conf.d/10-frameos.conf"
+    ) in captured["root_patch_script"]
+    assert "mkdir /etc/systemd/system/network.service.d" in captured["root_patch_script"]
+    assert (
+        "write $service_root/etc/systemd/system/network.service.d/10-frameos.conf "
+        "/etc/systemd/system/network.service.d/10-frameos.conf"
+    ) in captured["root_patch_script"]
     boot_root = temp_dir / "overlay" / "boot"
     assert (boot_root / "frameos-setup.json").is_file()
     assert (boot_root / "frameos-hostname").read_text(encoding="utf-8") == "kitchen-frame\n"
@@ -1665,6 +1678,19 @@ async def test_cached_base_composer_uses_container_visible_srcpaths(tmp_path, mo
     assert "write $service_root/etc/hostname /etc/hostname" in captured["root_patch_script"]
     assert "brcmfmac43436-sdio.raspberrypi,model-zero-2-w.bin" in captured["root_patch_script"]
     assert "c91cd2804cf7463aab913e7247c176049f16bbd6" in captured["root_patch_script"]
+    # The resolver and network.service drop-ins were staged but never written
+    # into the cached base's root partition: a Zero W card composed on
+    # 2026-09-03 booted validating DNSSEC and only got the drop-in from its
+    # first OTA's `frameos setup`.
+    assert "mkdir /etc/systemd/resolved.conf.d" in captured["root_patch_script"]
+    assert (
+        "write $service_root/etc/systemd/resolved.conf.d/10-frameos.conf /etc/systemd/resolved.conf.d/10-frameos.conf"
+    ) in captured["root_patch_script"]
+    assert "mkdir /etc/systemd/system/network.service.d" in captured["root_patch_script"]
+    assert (
+        "write $service_root/etc/systemd/system/network.service.d/10-frameos.conf "
+        "/etc/systemd/system/network.service.d/10-frameos.conf"
+    ) in captured["root_patch_script"]
     patch_mounts = captured["patch"]["mounts"]
     assert patch_mounts[0].source == output_image.resolve()
     assert patch_mounts[0].target == "/image/output.img"

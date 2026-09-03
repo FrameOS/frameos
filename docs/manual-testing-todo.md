@@ -72,20 +72,37 @@ hardware-settings batch) and the battery ADC rounds of #426.
   2026-08-30):** set Europe/Brussels from the cloud settings panel → weather
   scene hours match local time (a code node's `format()` too), schedule
   entries fire in local time, `config` on the console shows it.
-- [ ] **First-boot cloud enrollment on a router that strips DNSSEC (#384,
-  #420):** 2026-08-20 a Pi 5 card booted, joined WiFi, then every lookup
-  failed with `systemd-resolved: DNSSEC validation failed ... no-signature`;
-  the 30 s network check expired, the setup hotspot took over and the frame
-  never enrolled. #384 added the `DNSSEC=no` drop-in, a 90 s window and
-  `frameos set-display` for the cloud-chosen display — but the drop-in was
-  only staged by the full base-image build, so SD cards composed from a
-  cached base kept validating (a Pi Zero W hit it again on 2026-08-30).
-  #420 stages it on both build paths and `frameos setup` retrofits it on
-  every deploy/OTA. The diagnosis is confirmed on the affected frame (the
-  drop-in applied by hand healed it); the fixed image is hardware-unverified.
-  Re-flash from `main`, boot behind the GL-BE3600, confirm: enrolled within
-  ~1 min, no hotspot, `frame.json` carries the chosen device, postboot log
-  shows `Applied display device`.
+- [~] **First-boot cloud enrollment on a router that strips DNSSEC (#384,
+  #420):** half verified 2026-09-04 on the Zero W `Cloud-W`
+  (`raspberry-pi-32`, 2026.9.2 card composed 2026-09-03 from the 2026.8.33
+  cached base): network check passed on attempt 7 (23 s of 30 s, all
+  station-repair retries), enrolled 2 s later, personalization applied
+  (name, Europe/Brussels, hostname `cloud-w`, `Applied display device
+  'framebuffer'`), no hotspot. **But the card did not ship the resolver
+  drop-in**: `/etc/systemd/resolved.conf.d/10-frameos.conf` only appeared at
+  00:40 from the first OTA's `frameos setup`, and the first-boot journal has
+  42 `DNSSEC validation failed … signature-expired` lines (the Zero W's clock
+  was still at 2025-06 — the router-strips-RRSIG case reads `no-signature`).
+  Cause: `_patch_root_partition` staged both drop-ins but its debugfs write
+  list never included them, so only fresh base builds (rootfs overlay) had
+  them. Fixed on main 2026-09-04 (the compose path now writes the resolver
+  and `network.service` drop-ins; `test_buildroot_image.py` pins it). Still
+  to verify on a card composed after that fix: drop-in present at first boot
+  (`ls -la --time-style=full-iso /etc/systemd/resolved.conf.d`), zero
+  `DNSSEC` lines in `journalctl -b`. The other Zero W (2026-08-30) also
+  recovered on its own later, consistent with `allow-downgrade` eventually
+  coping — the drop-in is belt and braces, not the only thing between a
+  frame and the cloud.
+- [ ] **First-boot driver setup actually runs (fixed on main 2026-09-04):**
+  the same Zero W boot logged `Running driver setup for device 'framebuffer'`
+  → `FrameOS fatal: cannot open: ./frame.json` → `Warning: driver setup
+  failed; run it again from the setup portal` (`frameos-setup-reset.sh`
+  ran the binary from `/`, and it reads `./frame.json`). Harmless for a
+  framebuffer, but an SPI panel on a fresh cloud card got its overlays only
+  from the portal's driver setup. Verify on a card composed after the fix:
+  the first-boot journal shows `FrameOS setup: driver setup: complete`
+  (and, for an SPI panel, `dtoverlay`/`dtparam` lines in `/boot/config.txt`
+  on the very first boot).
 - [ ] **Panel link code (#379):** boot an unclaimed frame in cloud mode with
   no claim code → the panel renders the link code + QR → complete the claim
   from an account, and confirm the code retires once connected.

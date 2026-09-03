@@ -695,16 +695,20 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
 
   # After the shred on purpose: driver setup edits /boot/config.txt and may
   # schedule a reboot, and a reboot must not replay personalization. The
-  # binary loads its driver .so from the release dir, hence the exports.
+  # binary loads its driver .so from the release dir, hence the exports —
+  # and it reads ./frame.json from its working directory, hence the cd
+  # (without it every first boot logged "cannot open: ./frame.json" and an
+  # SPI panel only got its overlays from the portal's driver setup).
   if [ "$cloud_display_applied" -eq 1 ]; then
     echo "Running driver setup for device '$cloud_device'"
     export FRAMEOS_HOME="$SRV_DIR"/frameos/current
+    export FRAMEOS_CONFIG="$SRV_DIR"/frameos/current/frame.json
     export LD_LIBRARY_PATH="$SRV_DIR/frameos/current/drivers:$SRV_DIR/frameos/current/scenes:/usr/lib:/usr/local/lib"
     if [ "$(id -u)" = "0" ]; then
-      "$SRV_DIR"/frameos/current/frameos driver-setup --reboot-if-required || \\
+      (cd "$SRV_DIR"/frameos/current && ./frameos driver-setup --reboot-if-required) || \\
         echo "Warning: driver setup failed; run it again from the setup portal"
     elif command -v sudo >/dev/null 2>&1; then
-      sudo -E "$SRV_DIR"/frameos/current/frameos driver-setup --reboot-if-required || \\
+      (cd "$SRV_DIR"/frameos/current && sudo -E ./frameos driver-setup --reboot-if-required) || \\
         echo "Warning: driver setup failed; run it again from the setup portal"
     else
       echo "Warning: driver setup requires root, but sudo is not available"

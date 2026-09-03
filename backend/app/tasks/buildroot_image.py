@@ -3056,6 +3056,12 @@ rm /etc/udev/rules.d/{BUILDROOT_DEVICE_UDEV_RULES_NAME}
 write $service_root/etc/udev/rules.d/{BUILDROOT_DEVICE_UDEV_RULES_NAME} /etc/udev/rules.d/{BUILDROOT_DEVICE_UDEV_RULES_NAME}
 rm /etc/hostname
 write $service_root/etc/hostname /etc/hostname
+mkdir /etc/systemd/resolved.conf.d
+rm {BUILDROOT_RESOLVED_DROPIN_PATH}
+write $service_root{BUILDROOT_RESOLVED_DROPIN_PATH} {BUILDROOT_RESOLVED_DROPIN_PATH}
+mkdir /etc/systemd/system/network.service.d
+rm {BUILDROOT_NETWORK_SERVICE_DROPIN_PATH}
+write $service_root{BUILDROOT_NETWORK_SERVICE_DROPIN_PATH} {BUILDROOT_NETWORK_SERVICE_DROPIN_PATH}
 mkdir /usr
 mkdir /usr/local
 mkdir /usr/local/bin
