@@ -151,6 +151,18 @@ hardware-settings batch) and the battery ADC rounds of #426.
   queued mid-sleep survives the 15-minute nap instead of expiring.
 - [ ] **Scheduled reboot on ESP32 (#376):** same schedule-entry test as the
   Pi, on a board.
+- [ ] **WPA2 provisioning AP (#443):** erase Wi-Fi on a board → the portal
+  screen shows "Wi-Fi: FrameOS-XXXX" and a "Password:" line; a phone joins
+  with it (WPA2, no PMF prompt) and reaches the portal; `config` over USB
+  prints the same `ap_psk`; `set ap_psk ""` mints a new one at the next
+  portal start. Then confirm the backend's frame sync shows no "changed on
+  frame" for Wi-Fi password / admin password / API key after a deploy (the
+  device now answers `""` for them).
+- [ ] **Layout-matched release image (#442, needs a release after it):**
+  on the XTEINK X4 (16 MB C3), "Flash latest release" picks
+  `esp32-c3-16mb`, the "4MB layout / no OTA" warnings are gone, the board
+  boots and later takes an OTA; on a 13.3E6 (32 MB S3) the same with
+  `esp32-s3-32mb`.
 - [ ] **Dual console — reTerminal E1002 over its CH340:** the cloud flasher
   on the "USB Single Serial" port must flash, see `frameos>` and provision
   (this board has no USB-Serial/JTAG port at all). Then on a XIAO ESP32-S3
@@ -175,6 +187,13 @@ hardware-settings batch) and the battery ADC rounds of #426.
 - [x] **The release run is a test (#381):** `docker-publish-multi` has run
   twice since #381 (2026-08-20, both success) — `epyc-32` and the Depot
   esp32-ci path are validated.
+- [ ] **First release after #442 + #444:** the six per-layout ESP32 builds
+  (`build-esp32-layout-firmware`) and the wasm bundle
+  (`build-wasm-runtime`) build, sign and attach; the npm publish downloads
+  the bundle instead of compiling; cloud-ci's `workflow_run` deploy then
+  installs `frameos-<version>-wasm.tar.gz` and the preview shows
+  "runtime <version>". Until that release, cloud-ci fails at prebuild by
+  design — cut it right after merging #444.
 
 ## Not on the list, deliberately
 
